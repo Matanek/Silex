@@ -148,6 +148,12 @@ Defaults form one trailing suffix in the declaration. A named call may omit any
 defaulted parameter while supplying a later one, such as
 `greet(repetitions:2)`. Each omitted expression is evaluated at the call site.
 
+For a generic callable, a default is checked against the concrete types when a
+call actually omits that argument. A specialization may therefore supply an
+explicit argument even when the declared default does not match that concrete
+type. This lets a generic collection offer convenient defaults for common keys
+while accepting an explicit callback for application-defined keys.
+
 ## Overloads
 
 ```sx

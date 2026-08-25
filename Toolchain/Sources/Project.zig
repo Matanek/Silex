@@ -1717,6 +1717,22 @@ pub const Compiler = struct {
                             target.declaration,
                         ) };
                         return;
+                    } else {
+                        const qualified = try std.fmt.allocPrint(
+                            self.allocator,
+                            "{s}.{s}",
+                            .{ prefix, access.name },
+                        );
+                        if (try self.targetForCall(module, qualified)) |candidate| {
+                            if (try self.functionTarget(candidate)) |target| {
+                                expression.value = .{ .identifier = try canonicalName(
+                                    self.allocator,
+                                    try self.functionModule(target),
+                                    target.declaration,
+                                ) };
+                                return;
+                            }
+                        }
                     }
                 }
                 try self.rewriteExpression(module, access.base, type_map);

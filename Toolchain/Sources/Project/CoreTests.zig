@@ -352,6 +352,65 @@ test "compose public parameter defaults in their declaring module" {
     try std.testing.expectEqualStrings("amount", compilation.interfaces[1].structures[0].methods[0].parameter_names[0]);
 }
 
+test "defer generic callback defaults until an omitted argument needs them" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Library");
+    try temporary.dir.createDirPath(std.testing.io, "Support");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Library.Box
+        \\struct Key { let value:int }
+        \\func read_key(value:@Key) int { return value.value }
+        \\func answer() int {
+        \\    let custom = Box.Holder<Key>(Key(value:35), read_key)
+        \\    let defaulted = Box.Holder<int>(7)
+        \\    return custom.read() + defaulted.read()
+        \\}
+        \\func main() {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Box.sx",
+        .data =
+        \\use Support.Callbacks
+        \\public struct Holder<T> {
+        \\    let value:T
+        \\    let callback:func(@T) int
+        \\    init(value:T, callback:func(@T) int = Callbacks.read_int) {
+        \\        self.value = value
+        \\        self.callback = callback
+        \\    }
+        \\    func read() int { return self.callback(self.value) }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Support/Callbacks.sx",
+        .data = "public func read_int(value:@int) int { return value }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    var answer_id: ?usize = null;
+    for (compilation.ir.functions, 0..) |function, id| {
+        if (std.mem.eql(u8, function.name, "Main.answer")) answer_id = id;
+    }
+    const answer = try @import("../Interpreter.zig").invoke(
+        allocator,
+        compilation.ir,
+        answer_id orelse return error.TestUnexpectedResult,
+        &.{},
+    );
+    try std.testing.expectEqual(@as(i64, 42), answer.integer);
+}
+
 test "do not propagate private module access through a dependency" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -338,10 +338,16 @@ pub const Analyzer = struct {
     }
 
     fn validateParameterDefaults(self: *Analyzer) AnalyzeError!void {
-        for (self.program.functions) |function| try self.validateDefaults(function.parameters);
+        for (self.program.functions) |function| {
+            if (function.specialization_file == null) try self.validateDefaults(function.parameters);
+        }
         for (self.program.structures) |structure| {
-            for (structure.constructors) |constructor| try self.validateDefaults(constructor.parameters);
-            for (structure.methods) |method| try self.validateDefaults(method.parameters);
+            for (structure.constructors) |constructor| {
+                if (constructor.specialization_file == null) try self.validateDefaults(constructor.parameters);
+            }
+            for (structure.methods) |method| {
+                if (method.specialization_file == null) try self.validateDefaults(method.parameters);
+            }
         }
     }
 
