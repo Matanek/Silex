@@ -453,6 +453,8 @@ fn lowerInstruction(
                 .reference = if (access.reference) |reference| layout.values[reference].start else null,
                 .index = layout.values[access.index].start,
                 .element_width = element_width,
+                .element_stride = try collectionElementStride(program, collection.element, element_width),
+                .ownership = access.ownership,
                 .count = @intCast(collection.length orelse 0),
                 .dynamic = collection.length == null,
                 .view = collection.view,

@@ -248,6 +248,43 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 try self.emit(builder, .{ .structure_init = .{ .result = replacement, .structure = step.structure, .fields = fields } });
             },
             .collection => |step| {
+                if (index != 0 and Collections.collectionForType(self.structures, step.type).?.length == null) switch (steps.items[index - 1]) {
+                    .field => |owner| if (self.structures[owner.structure].is_class) {
+                        const owner_local: Ir.LocalId = @intCast(builder.local_types.items.len);
+                        try builder.local_types.append(self.allocator, .structure(owner.structure));
+                        try self.emit(builder, .{ .local_store = .{
+                            .local = owner_local,
+                            .operand = owner.base,
+                        } });
+                        const owner_reference = try self.newValue(builder, .address);
+                        try self.emit(builder, .{ .local_address = .{
+                            .result = owner_reference,
+                            .local = owner_local,
+                        } });
+                        const field_reference = try self.newValue(builder, .address);
+                        try self.emit(builder, .{ .reference_field = .{
+                            .result = field_reference,
+                            .reference = owner_reference,
+                            .structure = owner.structure,
+                            .field = owner.field,
+                        } });
+                        const element_reference = try self.newValue(builder, .address);
+                        try self.emit(builder, .{ .collection_reference = .{
+                            .result = element_reference,
+                            .collection = step.base,
+                            .reference = field_reference,
+                            .index = step.index,
+                            .ownership = .edge,
+                            .position = step.position,
+                        } });
+                        try self.emit(builder, .{ .reference_store = .{
+                            .reference = element_reference,
+                            .operand = replacement,
+                        } });
+                        return;
+                    },
+                    else => {},
+                };
                 const result = try self.newValue(builder, step.type);
                 try self.emit(builder, .{ .collection_replace = .{
                     .result = result,

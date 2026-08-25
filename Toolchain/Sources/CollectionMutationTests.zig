@@ -107,7 +107,7 @@ test "preserve edge ownership while replacing a class-owned list" {
     try std.testing.expect(std.mem.indexOf(u8, text, ", edge") != null);
 }
 
-test "publish indexed mutations of class-owned lists through helper parameters" {
+test "mutate class-owned list elements through helper parameters" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -140,8 +140,8 @@ test "publish indexed mutations of class-owned lists through helper parameters" 
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("200\n", result.stdout);
     const text = try Ir.writeText(allocator, compilation.ir);
-    try std.testing.expect(std.mem.indexOf(u8, text, "collection.replace") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "class.store") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "collection.reference") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "reference.store") != null);
 }
 
 test "mutate fields of collection elements in place" {

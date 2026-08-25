@@ -343,6 +343,8 @@ pub const Instruction = union(enum) {
         reference: ?Slot,
         index: Slot,
         element_width: u12,
+        element_stride: u12 = 0,
+        ownership: Ir.Ownership = .root,
         count: u32,
         dynamic: bool = false,
         view: bool = false,

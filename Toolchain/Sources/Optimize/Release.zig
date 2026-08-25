@@ -653,6 +653,7 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .collection = canonical(aliases, value.collection),
             .reference = rewriteOptional(value.reference, aliases),
             .index = canonical(aliases, value.index),
+            .ownership = value.ownership,
             .position = value.position,
         } },
         .collection_replace => |value| .{ .collection_replace = .{
@@ -1457,7 +1458,12 @@ test "release preserves helper mutations of class-owned list elements" {
         \\    translate(store, 1, 0.0025871352)
         \\}
         \\func answer() float { var store = Store(); resolve(store); return store.values[1] }
-        \\func main() { print(answer()) }
+        \\func main() {
+        \\    var store = Store()
+        \\    let snapshot = store.values
+        \\    resolve(store)
+        \\    print(snapshot[1], " ", store.values[1])
+        \\}
     );
     const reference = try Interpreter.runCapture(allocator, compilation.ir);
     const optimized = try optimize(allocator, compilation.ir);
@@ -1471,7 +1477,7 @@ test "release preserves helper mutations of class-owned list elements" {
     const debug_native = try Runner.invoke(allocator, debug_machine, function, &.{});
     const machine = try Lower.lowerWithMode(allocator, optimized, .release);
     const native = try Runner.invoke(allocator, machine, function, &.{});
-    try std.testing.expectEqualStrings("0.19986214\n", reference.stdout);
+    try std.testing.expectEqualStrings("0.197275 0.19986214\n", reference.stdout);
     try std.testing.expectEqualStrings(reference.stdout, release.stdout);
     try std.testing.expectEqual(
         @as(u32, @bitCast(@as(f32, 0.19986214))),

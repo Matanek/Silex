@@ -147,6 +147,16 @@ class ProtocolCycleNode : CycleLink {
     drop { print("x64 cycle drop") }
 }
 
+class X64FloatStore {
+    var values:float[]
+
+    init() { self.values = [0.0, 0.197275] }
+}
+
+func update_x64_store(store:X64FloatStore) {
+    store.values[1] += 0.0025871352
+}
+
 func dynamic_total() int {
     var value:Total = Offset(value:6)
     return value.total(1, 2, 3, 4, 5, 6, 7, 8)
@@ -302,6 +312,14 @@ test "preserve paired float32 arithmetic on x64" {
     ) == 20.0)
 }
 
+test "mutate a class-owned x64 list without changing its snapshot" {
+    var store = X64FloatStore()
+    let snapshot = store.values
+    update_x64_store(store)
+    assert(snapshot[1] == 0.197275)
+    assert(store.values[1] == 0.19986214)
+}
+
 test "preserve embedded byte contents on x64" {
     verify_embedded_bytes()
 }
@@ -453,6 +471,13 @@ func main() {
         X64FloatPair(x:1.0, y:2.0),
         X64FloatPair(x:3.0, y:4.0)
     ) == 20.0)
+    {
+        var store = X64FloatStore()
+        let snapshot = store.values
+        update_x64_store(store)
+        assert(snapshot[1] == 0.197275)
+        assert(store.values[1] == 0.19986214)
+    }
     verify_collections()
     verify_resource_aggregate_list()
     verify_deep_copy()

@@ -1,4 +1,5 @@
 const std = @import("std");
+const Ir = @import("../Ir.zig");
 const Machine = @import("Machine.zig");
 const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
@@ -508,7 +509,17 @@ pub fn emitView(
     value: Machine.Instruction.CollectionView,
 ) Error!void {
     if (value.reference != null and value.dynamic and !value.source_view) {
-        try detachDynamicRoot(allocator, words, epilogue, sites, platform, value.reference.?, value.element_width);
+        try detachDynamicRoot(
+            allocator,
+            words,
+            epilogue,
+            sites,
+            platform,
+            value.reference.?,
+            value.element_width,
+            value.element_stride,
+            .root,
+        );
     }
     if (value.reference) |reference| {
         try words.append(allocator, A64.loadStack(.x10, reference));
@@ -558,15 +569,26 @@ fn detachDynamicRoot(
     platform: Allocation.Platform,
     reference: Machine.Slot,
     element_width: u12,
+    element_stride: u12,
+    ownership: Ir.Ownership,
 ) Error!void {
     try words.append(allocator, A64.loadStack(.x10, reference));
     try words.append(allocator, A64.load64(.x14, .x10, 0));
     try words.append(allocator, A64.load64(.x13, .x14, 0));
+    try words.append(allocator, A64.load64(.x11, .x14, root_count_offset));
+    try words.append(allocator, A64.load64(.x5, .x14, edge_count_offset));
+    try words.append(allocator, A64.addRegisters(.x11, .x11, .x5));
+    try immediate(allocator, words, .x5, 1);
+    try words.append(allocator, A64.compareRegisters(.x11, .x5));
+    const unique = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.equal));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
     try words.append(allocator, A64.store64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.store64(.x14, .zero_or_sp, 8));
     try words.append(allocator, A64.store64(.x13, .zero_or_sp, 16));
-    try immediate(allocator, words, .x11, @as(u64, element_width) * Machine.slot_size);
+    const stride = elementStride(element_width, element_stride);
+    const compact_float32 = stride == @as(u64, element_width) * 4;
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x1, .x13, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, header_size, true));
     try allocateWithSize(allocator, words, sites, platform);
@@ -578,18 +600,21 @@ fn detachDynamicRoot(
     try words.append(allocator, A64.load64(.x13, .zero_or_sp, 16));
     try words.append(allocator, A64.store64(.x13, .x15, 0));
     try immediate(allocator, words, .x11, 1);
-    try words.append(allocator, A64.store64(.x11, .x15, root_count_offset));
-    try immediate(allocator, words, .x11, @as(u64, element_width) * Machine.slot_size);
+    try words.append(allocator, A64.store64(.x11, .x15, switch (ownership) {
+        .root => root_count_offset,
+        .edge => edge_count_offset,
+    }));
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x11, .x13, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x11, .x11, header_size, true));
     try words.append(allocator, A64.store64(.x11, .x15, byte_count_offset));
     try words.append(allocator, A64.addSubtractImmediate(.x10, .x14, header_size, true));
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
-    try copyElements(allocator, words, .x13, element_width);
+    try copyStoredElements(allocator, words, .x13, element_width, compact_float32);
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.store64(.x15, .x10, 0));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 8));
-    try emitDropPointer(allocator, words, sites, platform, .root);
+    try emitDropPointer(allocator, words, sites, platform, ownership);
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
     const complete = words.items.len;
     try words.append(allocator, A64.branch());
@@ -598,6 +623,7 @@ fn detachDynamicRoot(
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
     try fail(allocator, words, epilogue);
     try Fixups.patch26(words.items, complete, words.items.len);
+    try Fixups.patch19(words.items, unique, words.items.len);
 }
 
 fn normalizeBound(allocator: Allocator, words: *std.ArrayList(u32), register: A64.Register) Error!void {
@@ -1045,15 +1071,32 @@ pub fn emitReference(
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(Fixups.Data),
     epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     program: Machine.Program,
     value: Machine.Instruction.CollectionReference,
 ) Error!void {
+    if (value.reference != null and !value.view) {
+        try detachDynamicRoot(
+            allocator,
+            words,
+            epilogue,
+            sites,
+            platform,
+            value.reference.?,
+            value.element_width,
+            value.element_stride,
+            value.ownership,
+        );
+    }
     const bounds = if (value.view)
         try boundsView(allocator, words, value.collection, value.index)
+    else if (value.reference) |reference|
+        try boundsDynamicReference(allocator, words, reference, value.index)
     else
         try boundsDynamic(allocator, words, value.collection.start, value.index);
     if (!value.view) try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
-    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, elementStride(value.element_width, value.element_stride));
     try words.append(allocator, A64.multiply(.x9, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
     try words.append(allocator, A64.storeStack(.x10, value.result));
@@ -1202,6 +1245,13 @@ fn boundsView(allocator: Allocator, words: *std.ArrayList(u32), collection: Mach
 
 fn boundsDynamic(allocator: Allocator, words: *std.ArrayList(u32), collection: Machine.Slot, index: Machine.Slot) Error!Bounds {
     try words.append(allocator, A64.loadStack(.x10, collection));
+    try words.append(allocator, A64.load64(.x13, .x10, 0));
+    return boundsWithLoadedCollection(allocator, words, index);
+}
+
+fn boundsDynamicReference(allocator: Allocator, words: *std.ArrayList(u32), reference: Machine.Slot, index: Machine.Slot) Error!Bounds {
+    try words.append(allocator, A64.loadStack(.x10, reference));
+    try words.append(allocator, A64.load64(.x10, .x10, 0));
     try words.append(allocator, A64.load64(.x13, .x10, 0));
     return boundsWithLoadedCollection(allocator, words, index);
 }

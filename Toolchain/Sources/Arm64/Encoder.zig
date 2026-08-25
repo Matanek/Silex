@@ -1167,7 +1167,16 @@ fn encodeFunction(
             else
                 try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access),
             .collection_reference => |access| if (access.dynamic)
-                try ListRuntime.emitReference(allocator, words, data_fixups, &fixups.epilogue, program, access)
+                try ListRuntime.emitReference(
+                    allocator,
+                    words,
+                    data_fixups,
+                    &fixups.epilogue,
+                    external_call_sites,
+                    @enumFromInt(@intFromEnum(platform)),
+                    program,
+                    access,
+                )
             else
                 try encodeCollectionReference(allocator, words, data_fixups, &fixups, program, access),
             .collection_replace => |replacement| if (replacement.dynamic)

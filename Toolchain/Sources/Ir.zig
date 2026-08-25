@@ -293,6 +293,7 @@ pub const Instruction = union(enum) {
         collection: ValueId,
         reference: ?ValueId,
         index: ValueId,
+        ownership: Ownership = .root,
         position: Source.Position,
     };
 

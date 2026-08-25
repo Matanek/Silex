@@ -555,7 +555,14 @@ fn encodeFunction(
                     try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
                 }
             },
-            .collection_reference => |value| try emitCollectionReference(allocator, bytes, &epilogue_fixups, value),
+            .collection_reference => |value| try emitCollectionReference(
+                allocator,
+                bytes,
+                windows_import_sites,
+                platform,
+                &epilogue_fixups,
+                value,
+            ),
             .collection_replace => |value| if (value.view)
                 try emitViewReplace(allocator, bytes, &epilogue_fixups, value)
             else if (value.dynamic)
@@ -1801,14 +1808,88 @@ fn emitDynamicCollectionLoad(
     }
 }
 
-fn emitCollectionReference(
+fn emitDetachDynamicReference(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
     epilogue: *std.ArrayList(EpilogueFixup),
     value: Machine.Instruction.CollectionReference,
 ) Error!void {
+    const reference = value.reference orelse return error.InvalidMachineProgram;
+    const stride = if (value.element_stride != 0)
+        value.element_stride
+    else
+        @as(u32, value.element_width) * Machine.slot_size;
+    const compact_float32 = stride == @as(u32, value.element_width) * 4;
+
+    try emitLoadStack(allocator, bytes, .r15, reference);
+    try emitLoadMemory(allocator, bytes, .r14, .r15, 0);
+    try emitLoadMemory(allocator, bytes, .rax, .r14, root_count_offset);
+    try emitLoadMemory(allocator, bytes, .r11, .r14, edge_count_offset);
+    try emitRegisterBinary(allocator, bytes, 0x01, .rax, .r11);
+    try emitImmediate(allocator, bytes, .rcx, 1);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
+    const unique = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    try emitLoadMemory(allocator, bytes, .r12, .r14, 0);
+    try emitMoveRegister(allocator, bytes, .rsi, .r12);
+    try emitImmediate(allocator, bytes, .rcx, stride);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xf1 });
+    try emitAddImmediateRegister(allocator, bytes, .rsi, list_header_size);
+    try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
+    try emitMoveRegister(allocator, bytes, .r13, .rax);
+    try emitListHeader(allocator, bytes, .r13, .r12, .rsi, value.ownership);
+
+    try emitMoveRegister(allocator, bytes, .rbx, .r14);
+    try emitAddImmediateRegister(allocator, bytes, .rbx, list_header_size);
+    try emitMoveRegister(allocator, bytes, .r10, .r13);
+    try emitAddImmediateRegister(allocator, bytes, .r10, list_header_size);
+    try emitMoveRegister(allocator, bytes, .rsi, .r12);
+    try emitImmediate(allocator, bytes, .rcx, value.element_width);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xf1, 0x48, 0x85, 0xf6, 0x0f, 0x84 });
+    const copied = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    const copy_loop = bytes.items.len;
+    if (compact_float32) {
+        try emitLoadMemory32(allocator, bytes, .rax, .rbx, 0);
+        try emitStoreMemory32(allocator, bytes, .r10, 0, .rax);
+    } else {
+        try emitLoadMemory(allocator, bytes, .rax, .rbx, 0);
+        try emitStoreMemory(allocator, bytes, .r10, 0, .rax);
+    }
+    const unit_size: u32 = if (compact_float32) 4 else Machine.slot_size;
+    try emitAddImmediateRegister(allocator, bytes, .rbx, unit_size);
+    try emitAddImmediateRegister(allocator, bytes, .r10, unit_size);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xee, 1, 0x0f, 0x85 });
+    const copy_repeat = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, copy_repeat, copy_loop);
+    try patchRelative(bytes.items, copied, bytes.items.len);
+
+    try emitStoreMemory(allocator, bytes, .r15, 0, .r13);
+    try emitResourceDropPointer(allocator, bytes, import_sites, platform, .r14, value.ownership);
+    try patchRelative(bytes.items, unique, bytes.items.len);
+}
+
+fn emitCollectionReference(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    epilogue: *std.ArrayList(EpilogueFixup),
+    value: Machine.Instruction.CollectionReference,
+) Error!void {
+    if (value.dynamic and !value.view and value.reference != null) {
+        try emitDetachDynamicReference(allocator, bytes, import_sites, platform, epilogue, value);
+    }
     if (value.dynamic) {
-        try emitLoadStack(allocator, bytes, .rbx, value.collection.start);
+        if (!value.view and value.reference != null) {
+            try emitLoadStack(allocator, bytes, .rbx, value.reference.?);
+            try emitLoadMemory(allocator, bytes, .rbx, .rbx, 0);
+        } else try emitLoadStack(allocator, bytes, .rbx, value.collection.start);
         if (value.view) {
             try emitLoadStack(allocator, bytes, .rcx, @intCast(@as(usize, value.collection.start) + 1));
         } else {
@@ -1827,7 +1908,7 @@ fn emitCollectionReference(
     try emitRuntimeFailure(allocator, bytes, epilogue);
     try patchRelative(bytes.items, in_bounds, bytes.items.len);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
-    try appendInt(allocator, bytes, u32, @as(u32, value.element_width) * Machine.slot_size);
+    try appendInt(allocator, bytes, u32, if (value.element_stride != 0) value.element_stride else @as(u32, value.element_width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xd8 });
     try emitStoreStack(allocator, bytes, .rax, value.result);
 }
@@ -2990,8 +3071,28 @@ fn emitLoadMemory(allocator: Allocator, bytes: *std.ArrayList(u8), destination: 
     try appendInt(allocator, bytes, i32, displacement);
 }
 
+fn emitLoadMemory32(allocator: Allocator, bytes: *std.ArrayList(u8), destination: Register, base: Register, displacement: i32) Allocator.Error!void {
+    const rex: u8 = 0x40 | (@as(u8, @intFromBool(@intFromEnum(destination) >= 8)) << 2) | @intFromBool(@intFromEnum(base) >= 8);
+    const base_bits: u8 = @as(u8, @intFromEnum(base) & 7);
+    try bytes.append(allocator, rex);
+    try bytes.append(allocator, 0x8b);
+    try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(destination) & 7) << 3) | base_bits);
+    if (base_bits == 4) try bytes.append(allocator, 0x24);
+    try appendInt(allocator, bytes, i32, displacement);
+}
+
 fn emitStoreMemory(allocator: Allocator, bytes: *std.ArrayList(u8), base: Register, displacement: i32, source: Register) Allocator.Error!void {
     const rex: u8 = 0x48 | (@as(u8, @intFromBool(@intFromEnum(source) >= 8)) << 2) | @intFromBool(@intFromEnum(base) >= 8);
+    const base_bits: u8 = @as(u8, @intFromEnum(base) & 7);
+    try bytes.append(allocator, rex);
+    try bytes.append(allocator, 0x89);
+    try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(source) & 7) << 3) | base_bits);
+    if (base_bits == 4) try bytes.append(allocator, 0x24);
+    try appendInt(allocator, bytes, i32, displacement);
+}
+
+fn emitStoreMemory32(allocator: Allocator, bytes: *std.ArrayList(u8), base: Register, displacement: i32, source: Register) Allocator.Error!void {
+    const rex: u8 = 0x40 | (@as(u8, @intFromBool(@intFromEnum(source) >= 8)) << 2) | @intFromBool(@intFromEnum(base) >= 8);
     const base_bits: u8 = @as(u8, @intFromEnum(base) & 7);
     try bytes.append(allocator, rex);
     try bytes.append(allocator, 0x89);
