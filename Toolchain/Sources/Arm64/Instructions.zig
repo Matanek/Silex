@@ -255,6 +255,10 @@ pub fn storeReleaseExclusive64(status: Register, source: Register, base: Registe
     return 0xc800fc00 | (registerBits(status) << 16) | (registerBits(base) << 5) | registerBits(source);
 }
 
+pub fn clearExclusive() u32 {
+    return 0xd5033f5f;
+}
+
 pub fn storeRelease64(source: Register, base: Register) u32 {
     return 0xc89ffc00 | (registerBits(base) << 5) | registerBits(source);
 }
@@ -525,6 +529,10 @@ test "encode paired scalar float slot loads" {
 test "encode zero vector immediate for scalar float registers" {
     try std.testing.expectEqual(@as(u32, 0x2f00e400), floatZero(.x0));
     try std.testing.expectEqual(@as(u32, 0x2f00e413), floatZero(.x19));
+}
+
+test "encode clear exclusive" {
+    try std.testing.expectEqual(@as(u32, 0xd5033f5f), clearExclusive());
 }
 
 test "encode compact 32-bit collection accesses" {

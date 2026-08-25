@@ -572,6 +572,7 @@ fn detachDynamicRoot(
     element_stride: u12,
     ownership: Ir.Ownership,
 ) Error!void {
+    const restart = words.items.len;
     try words.append(allocator, A64.loadStack(.x10, reference));
     try words.append(allocator, A64.load64(.x14, .x10, 0));
     try words.append(allocator, A64.load64(.x13, .x14, 0));
@@ -612,12 +613,30 @@ fn detachDynamicRoot(
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
     try copyStoredElements(allocator, words, .x13, element_width, compact_float32);
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 0));
-    try words.append(allocator, A64.store64(.x15, .x10, 0));
+    try words.append(allocator, A64.load64(.x14, .zero_or_sp, 8));
+    const publish_retry = words.items.len;
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x10));
+    try words.append(allocator, A64.compareRegisters(.x9, .x14));
+    const publish_lost = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.not_equal));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x15, .x10));
+    const publish_conflicted = words.items.len;
+    try words.append(allocator, A64.compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, publish_conflicted, publish_retry);
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 8));
     try emitDropPointer(allocator, words, sites, platform, ownership);
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
     const complete = words.items.len;
     try words.append(allocator, A64.branch());
+    const retry_after_loss = words.items.len;
+    try Fixups.patch19(words.items, publish_lost, retry_after_loss);
+    try words.append(allocator, A64.clearExclusive());
+    try words.append(allocator, A64.moveRegister(.x10, .x15));
+    try emitDropPointer(allocator, words, sites, platform, ownership);
+    try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
+    const retry_detach = words.items.len;
+    try words.append(allocator, A64.branch());
+    try Fixups.patch26(words.items, retry_detach, restart);
     const failure = words.items.len;
     try Fixups.patch19(words.items, mmap_failed, failure);
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));

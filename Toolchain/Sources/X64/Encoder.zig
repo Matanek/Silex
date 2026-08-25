@@ -1823,6 +1823,7 @@ fn emitDetachDynamicReference(
         @as(u32, value.element_width) * Machine.slot_size;
     const compact_float32 = stride == @as(u32, value.element_width) * 4;
 
+    const restart = bytes.items.len;
     try emitLoadStack(allocator, bytes, .r15, reference);
     try emitLoadMemory(allocator, bytes, .r14, .r15, 0);
     try emitLoadMemory(allocator, bytes, .rax, .r14, root_count_offset);
@@ -1869,8 +1870,24 @@ fn emitDetachDynamicReference(
     try patchRelative(bytes.items, copy_repeat, copy_loop);
     try patchRelative(bytes.items, copied, bytes.items.len);
 
-    try emitStoreMemory(allocator, bytes, .r15, 0, .r13);
+    try emitMoveRegister(allocator, bytes, .rax, .r14);
+    try emitAtomicCompareExchangeMemory(allocator, bytes, .r15, 0, .r13);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const publish_lost = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
     try emitResourceDropPointer(allocator, bytes, import_sites, platform, .r14, value.ownership);
+    try bytes.append(allocator, 0xe9);
+    const complete = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    try patchRelative(bytes.items, publish_lost, bytes.items.len);
+    try emitResourceDropPointer(allocator, bytes, import_sites, platform, .r13, value.ownership);
+    try bytes.append(allocator, 0xe9);
+    const retry_detach = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, retry_detach, restart);
+
+    try patchRelative(bytes.items, complete, bytes.items.len);
     try patchRelative(bytes.items, unique, bytes.items.len);
 }
 
@@ -3097,6 +3114,21 @@ fn emitStoreMemory32(allocator: Allocator, bytes: *std.ArrayList(u8), base: Regi
     try bytes.append(allocator, rex);
     try bytes.append(allocator, 0x89);
     try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(source) & 7) << 3) | base_bits);
+    if (base_bits == 4) try bytes.append(allocator, 0x24);
+    try appendInt(allocator, bytes, i32, displacement);
+}
+
+fn emitAtomicCompareExchangeMemory(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    base: Register,
+    displacement: i32,
+    replacement: Register,
+) Allocator.Error!void {
+    const rex: u8 = 0x48 | (@as(u8, @intFromBool(@intFromEnum(replacement) >= 8)) << 2) | @intFromBool(@intFromEnum(base) >= 8);
+    const base_bits: u8 = @as(u8, @intFromEnum(base) & 7);
+    try bytes.appendSlice(allocator, &.{ 0xf0, rex, 0x0f, 0xb1 });
+    try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(replacement) & 7) << 3) | base_bits);
     if (base_bits == 4) try bytes.append(allocator, 0x24);
     try appendInt(allocator, bytes, i32, displacement);
 }
