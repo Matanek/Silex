@@ -3,9 +3,6 @@ const Ast = @import("../Ast.zig");
 
 pub fn parse(parser: anytype) !*Ast.Expression {
     const position = parser.current.position;
-    if (parser.match_depth != 0) return parser.fail("nested match expressions are not available");
-    parser.match_depth += 1;
-    defer parser.match_depth -= 1;
     try parser.advance();
     const subject = try parser.parseExpression(false);
     try parser.expect(.left_brace, "expected '{' after match subject");

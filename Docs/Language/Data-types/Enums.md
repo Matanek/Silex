@@ -93,6 +93,10 @@ match connection {
 
 Block and expression branches cannot be mixed.
 
+A branch may contain another `match`, including an expression match whose
+result becomes the value of its enclosing branch. Each nested match keeps its
+own payload bindings and exhaustiveness rules.
+
 ## Attach raw values
 
 ```sx

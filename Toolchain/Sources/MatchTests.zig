@@ -213,10 +213,38 @@ test "diagnose invalid exhaustive match patterns" {
         "func main() { let value = match 1 { left => 1 } }",
         "match requires an enum subject, found 'int'",
     );
-    try expectCompileError(
-        "enum Choice { left; right } func main() { let value = match Choice.left() { left => match Choice.right() { left => 1; right => 2 }; right => 2 } }",
-        "nested match expressions are not available",
+}
+
+test "evaluate nested expression and imperative matches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Outer { value(int); empty }
+        \\enum Inner { left; right }
+        \\func main() {
+        \\    let value = match Outer.value(7) {
+        \\        value(number) => match Inner.right {
+        \\            left => 0
+        \\            right => number
+        \\        }
+        \\        empty => -1
+        \\    }
+        \\    print(value)
+        \\    match Outer.value(3) {
+        \\        value(number) => {
+        \\            match Inner.left {
+        \\                left => { print(number) }
+        \\                right => { print(0) }
+        \\            }
+        \\        }
+        \\        empty => { print(-1) }
+        \\    }
+        \\}
     );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("7\n3\n", result.stdout);
 }
 
 test "keep match bindings scoped to their branch" {

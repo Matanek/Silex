@@ -43,7 +43,6 @@ pub const Parser = struct {
     tuple_literal_count: usize = 0,
     type_parameters: []const Ast.TypeParameter = &.{},
     nominal_prefix: ?[]const u8 = null,
-    match_depth: usize = 0,
     pub const TestLocalFunction = struct {
         source: []const u8,
         generated: []const u8,

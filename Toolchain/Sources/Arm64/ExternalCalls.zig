@@ -67,7 +67,10 @@ pub fn emit(
         if (external.signature.result == .float32 or external.signature.result == .float64) {
             try words.append(allocator, Instructions.moveFloatToGeneral(.x9, .x0, external.signature.result == .float64));
             try storeValue(allocator, words, function, .x9, result);
-        } else try storeValue(allocator, words, function, .x0, result);
+        } else {
+            if (external.signature.result == .uint8) try words.append(allocator, Instructions.zeroExtendRegister(.x0, .x0, 8));
+            try storeValue(allocator, words, function, .x0, result);
+        }
     }
 }
 
@@ -121,7 +124,10 @@ pub fn emitIndirect(
         if (call.signature.result == .float32 or call.signature.result == .float64) {
             try words.append(allocator, Instructions.moveFloatToGeneral(.x9, .x0, call.signature.result == .float64));
             try storeValue(allocator, words, function, .x9, result);
-        } else try storeValue(allocator, words, function, .x0, result);
+        } else {
+            if (call.signature.result == .uint8) try words.append(allocator, Instructions.zeroExtendRegister(.x0, .x0, 8));
+            try storeValue(allocator, words, function, .x0, result);
+        }
     }
 }
 

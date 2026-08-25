@@ -92,6 +92,34 @@ test "compose a C.function declaration into a deterministic boundary call" {
     try std.testing.expect(std.mem.indexOf(u8, text, "_write") == null);
 }
 
+test "preserve exact uint8 C ABI results" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let add_protocol = C.function<func(C.Pointer<uint8>, C.Pointer<uint8>) uint8>(library:MacOS.web_kit, name:"class_addProtocol")
+        \\func main() { let added:uint8 = add_protocol(C.pointer("class"), C.pointer("protocol")) }
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    compiler.target = .macos_arm64;
+    const compilation = try compiler.compile(input);
+    try std.testing.expectEqual(Ir.Type.address, compilation.boundaries[0].parameters[0]);
+    try std.testing.expectEqual(Ir.Type.address, compilation.boundaries[0].parameters[1]);
+    try std.testing.expectEqual(Ir.Type.uint8, compilation.boundaries[0].return_type);
+    const machine = try Lower.lowerBoundaries(allocator, compilation.ir, compilation.boundaries);
+    try std.testing.expectEqual(.read_address, machine.external_functions[0].signature.arguments[0]);
+    try std.testing.expectEqual(.read_address, machine.external_functions[0].signature.arguments[1]);
+    try std.testing.expectEqual(.uint8, machine.external_functions[0].signature.result.?);
+}
+
 test "compose the typed macOS WebKit Objective-C system surface" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

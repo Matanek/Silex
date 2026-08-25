@@ -729,7 +729,8 @@ fn macOSWebKitFunctionAvailable(
         return std.mem.eql(Types.Type, parameters, &.{ .address, .address, .uint }) and return_type == .address;
     }
     if (std.mem.eql(u8, name, "class_addProtocol")) {
-        return std.mem.eql(Types.Type, parameters, &.{ .address, .address }) and return_type == .int32;
+        return std.mem.eql(Types.Type, parameters, &.{ .address, .address }) and
+            (return_type == .uint8 or return_type == .int32);
     }
     if (std.mem.eql(u8, name, "class_addMethod")) {
         return std.mem.eql(Types.Type, parameters, &.{ .address, .address, .address, .address }) and return_type == .int32;
@@ -799,6 +800,7 @@ fn customProviderAvailable(self: anytype, external: Ast.ExternalFunction) !bool 
 fn externalType(self: anytype, value: Ast.ExternalType, position: anytype) !Types.Type {
     return switch (value) {
         .void => .void,
+        .uint8 => .uint8,
         .int32 => .int32,
         .int64 => .int,
         .uint32 => .uint32,
@@ -1068,7 +1070,7 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
 
 fn cCallType(type_value: Types.Type, allow_void: bool) bool {
     return (allow_void and type_value == .void) or type_value == .address or
-        type_value == .int32 or type_value == .uint32 or type_value == .int or type_value == .uint or
+        type_value == .uint8 or type_value == .int32 or type_value == .uint32 or type_value == .int or type_value == .uint or
         type_value == .float32 or type_value == .float64;
 }
 

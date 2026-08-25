@@ -65,6 +65,10 @@ fn parseType(self: anytype) !Ast.ExternalType {
         try self.advance();
         return .void;
     }
+    if (self.current.tag == .keyword_uint8) {
+        try self.advance();
+        return .uint8;
+    }
     if (self.current.tag == .keyword_int32) {
         try self.advance();
         return .int32;

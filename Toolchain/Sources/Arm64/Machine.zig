@@ -593,7 +593,7 @@ pub const Program = struct {
     mutex_unlock_function: ?usize = null,
 };
 
-pub const AbiValue = enum { int32, read_address, uint64, int64, float32, float64 };
+pub const AbiValue = enum { uint8, int32, read_address, uint64, int64, float32, float64 };
 
 pub const ExternalFunction = struct {
     provider: []const u8,
@@ -1689,7 +1689,8 @@ fn supportedMacOSWebKitExternal(function: ExternalFunction) bool {
     }
     if (std.mem.eql(u8, function.source_name, "class_addProtocol")) {
         const arguments = [_]AbiValue{ .read_address, .read_address };
-        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and
+            (function.signature.result == .uint8 or function.signature.result == .int32);
     }
     if (std.mem.eql(u8, function.source_name, "class_addMethod")) {
         const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .read_address };

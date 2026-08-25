@@ -152,6 +152,7 @@ fn programUsesMutex(program: Ir.Program) bool {
 
 fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
     return switch (type_value) {
+        .uint8 => .uint8,
         .int32, .uint32 => .int32,
         .address => .read_address,
         .uint => .uint64,

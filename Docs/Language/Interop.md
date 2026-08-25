@@ -63,7 +63,9 @@ terminator is not included in `C.byte_count(text)`.
 The raw result follows the C library contract. A binding is responsible for
 partial writes, system errors, and conversion to its public Silex error type.
 A system function with no result uses `void`; calling it as an instruction does
-not allocate a hidden Silex value.
+not allocate a hidden Silex value. Exact-width unsigned byte parameters and
+results use `uint8`; this matters for C APIs whose result type is an 8-bit
+`Boolean`, because declaring it as `uint32` does not match the platform ABI.
 
 Platform bindings that let the system fill a scalar use a mutable pointer that
 is likewise valid only as a direct foreign argument:

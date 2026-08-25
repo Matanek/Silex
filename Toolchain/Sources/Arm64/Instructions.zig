@@ -317,6 +317,12 @@ pub fn signExtendRegister(destination: Register, source: Register, width: u7) u3
     return 0x93400000 | (immr << 16) | (imms << 10) | (registerBits(source) << 5) | registerBits(destination);
 }
 
+pub fn zeroExtendRegister(destination: Register, source: Register, width: u7) u32 {
+    const immr: u32 = 0;
+    const imms: u32 = width - 1;
+    return 0xd3400000 | (immr << 16) | (imms << 10) | (registerBits(source) << 5) | registerBits(destination);
+}
+
 pub fn moveGeneralToFloat(destination: Register, source: Register, double: bool) u32 {
     const base: u32 = if (double) 0x9e670000 else 0x1e270000;
     return base | (registerBits(source) << 5) | registerBits(destination);
@@ -540,6 +546,11 @@ test "encode compact 32-bit collection accesses" {
     try std.testing.expectEqual(@as(u32, 0xb9000dc5), store32Offset(.x5, .x14, 12));
     try std.testing.expectEqual(@as(u32, 0xfc410453), loadVector64PostIndex(.x19, .x2, 16));
     try std.testing.expectEqual(@as(u32, 0xfc5f8055), loadVector64Unscaled(.x21, .x2, -8));
+}
+
+test "encode byte zero extension" {
+    try std.testing.expectEqual(@as(u32, 0xd3401c00), zeroExtendRegister(.x0, .x0, 8));
+    try std.testing.expectEqual(@as(u32, 0xd3401d49), zeroExtendRegister(.x9, .x10, 8));
 }
 
 test "encode direct float32 stack accesses" {

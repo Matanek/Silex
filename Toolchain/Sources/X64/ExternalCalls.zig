@@ -460,6 +460,8 @@ pub fn emitIndirect(
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0 });
             } else if (kind == .float64) {
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
+            } else if (kind == .uint8) {
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
             }
         }
         try emitStoreStack(allocator, bytes, .rax, result);
@@ -599,6 +601,8 @@ fn emitBoundaryCall(
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0 });
             } else if (kind == .float64) {
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
+            } else if (kind == .uint8) {
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
             }
         }
         try emitStoreStack(allocator, bytes, .rax, result);
