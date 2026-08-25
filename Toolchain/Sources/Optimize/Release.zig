@@ -307,12 +307,9 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
 
 fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function {
     if (!DenseBlocks.isEligible(function)) return function;
-    const copy_definitions = try allocator.alloc(usize, function.value_types.len);
-    @memset(copy_definitions, 0);
-    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
-        .copy => |copy| copy_definitions[copy.result] += 1,
-        else => {},
-    };
+    const definitions = try allocator.alloc(usize, function.value_types.len);
+    @memset(definitions, 0);
+    for (function.blocks) |block| for (block.instructions) |instruction| countDefinitions(instruction, definitions);
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     const constants = try allocator.alloc(Constant, function.value_types.len);
     @memset(constants, .unknown);
@@ -328,7 +325,7 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
             const instruction = try rewriteInstruction(allocator, original, aliases);
             switch (instruction) {
                 .copy => |copy| {
-                    if (copy_definitions[copy.result] == 1 and
+                    if (definitions[copy.result] == 1 and
                         function.value_types[copy.result] == function.value_types[copy.operand])
                     {
                         aliases[copy.result] = canonical(aliases, copy.operand);
@@ -409,6 +406,46 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
     var result = function;
     result.blocks = blocks;
     return result;
+}
+
+fn countDefinitions(instruction: Ir.Instruction, definitions: []usize) void {
+    switch (instruction) {
+        .class_retain,
+        .class_drop,
+        .list_retain,
+        .list_drop,
+        .string_retain,
+        .string_drop,
+        .global_store,
+        .local_store,
+        .address_store,
+        .reference_store,
+        .print,
+        .assert,
+        .mutex_lock,
+        .mutex_unlock,
+        => {},
+        .list_edit => |edit| {
+            definitions[edit.result] += 1;
+            if (edit.removed) |removed| definitions[removed] += 1;
+        },
+        .call => |call| if (call.result) |result| {
+            definitions[result] += 1;
+        },
+        .indirect_call => |call| if (call.result) |result| {
+            definitions[result] += 1;
+        },
+        .boundary_call => |call| if (call.result) |result| {
+            definitions[result] += 1;
+        },
+        .boundary_indirect_call => |call| if (call.result) |result| {
+            definitions[result] += 1;
+        },
+        .dynamic_call => |call| if (call.result) |result| {
+            definitions[result] += 1;
+        },
+        inline else => |value| definitions[value.result] += 1,
+    }
 }
 
 fn matchingFieldLoad(loads: []const Ir.Instruction.FieldLoad, candidate: Ir.Instruction.FieldLoad) ?Ir.ValueId {
@@ -1389,6 +1426,61 @@ test "release preserves floating branches and loops" {
     const machine = try Lower.lowerWithMode(allocator, optimized, .release);
     const native = try Runner.invoke(allocator, machine, 0, &.{0});
     try std.testing.expectEqual(@as(i64, 0), native.value);
+}
+
+test "release preserves helper mutations of class-owned list elements" {
+    const Frontend = @import("../Frontend.zig");
+    const Interpreter = @import("../Interpreter.zig");
+    const Lower = @import("../Arm64/Lower.zig");
+    const Runner = @import("../Arm64/Runner.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Store {
+        \\    var active:bool[]
+        \\    var weights:float[]
+        \\    var values:float[]
+        \\    init() {
+        \\        self.active = [false, true]
+        \\        self.weights = [0.0, 1.0]
+        \\        self.values = [0.0, 0.197275]
+        \\    }
+        \\}
+        \\func translate(store:Store, index:int, offset:float) {
+        \\    if !store.active[index] || store.weights[index] <= 0.0 { return }
+        \\    store.values[index] += offset
+        \\}
+        \\func resolve(store:Store) {
+        \\    translate(store, 0, 0.0)
+        \\    translate(store, 1, 0.0025871352)
+        \\}
+        \\func answer() float { var store = Store(); resolve(store); return store.values[1] }
+        \\func main() { print(answer()) }
+    );
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const optimized = try optimize(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    var answer: ?usize = null;
+    for (optimized.functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, "answer")) answer = index;
+    }
+    const function = answer orelse return error.TestUnexpectedResult;
+    const debug_machine = try Lower.lowerWithMode(allocator, optimized, .debug);
+    const debug_native = try Runner.invoke(allocator, debug_machine, function, &.{});
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    const native = try Runner.invoke(allocator, machine, function, &.{});
+    try std.testing.expectEqualStrings("0.19986214\n", reference.stdout);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqual(
+        @as(u32, @bitCast(@as(f32, 0.19986214))),
+        @as(u32, @truncate(@as(u64, @bitCast(debug_native.value)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, @bitCast(@as(f32, 0.19986214))),
+        @as(u32, @truncate(@as(u64, @bitCast(native.value)))),
+    );
 }
 
 test "release removes calls to proven constant functions" {

@@ -107,6 +107,43 @@ test "preserve edge ownership while replacing a class-owned list" {
     try std.testing.expect(std.mem.indexOf(u8, text, ", edge") != null);
 }
 
+test "publish indexed mutations of class-owned lists through helper parameters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Store {
+        \\    var active:bool[]
+        \\    var weights:int[]
+        \\    var values:int[]
+        \\    init() {
+        \\        self.active = [false, true]
+        \\        self.weights = [0, 1]
+        \\        self.values = [100, 197]
+        \\    }
+        \\}
+        \\func translate(store:Store, index:int, offset:int) {
+        \\    if !store.active[index] || store.weights[index] <= 0 { return }
+        \\    store.values[index] += offset
+        \\}
+        \\func resolve(store:Store) {
+        \\    translate(store, 0, 0)
+        \\    translate(store, 1, 3)
+        \\}
+        \\func main() {
+        \\    var store = Store()
+        \\    resolve(store)
+        \\    print(store.values[1])
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("200\n", result.stdout);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "collection.replace") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "class.store") != null);
+}
+
 test "mutate fields of collection elements in place" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
