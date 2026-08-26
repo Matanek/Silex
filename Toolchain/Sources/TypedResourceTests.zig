@@ -474,6 +474,89 @@ test "query iteration does not allocate a component filter list" {
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, function_text, "list.drop"));
 }
 
+test "ECS queries cannot escape their injected system function" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/ECS");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/@Module.sx",
+        .data =
+        \\public use GFX.ECS.Entity.Entity
+        \\public use GFX.ECS.World.World
+        \\public use GFX.ECS.Query.Query
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/Entity.sx",
+        .data = "public struct Entity { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/World.sx",
+        .data =
+        \\use GFX.ECS.Entity.Entity
+        \\public class World {
+        \\    package func query_archetype_count() int { return 0 }
+        \\    package func query_entity_count(archetype:int) int { return 0 }
+        \\    package func query_entity(archetype:int, row:int) Entity { return Entity(value:0) }
+        \\    package func query_range_start(base:int, count:int, range_start:int) int { return 0 }
+        \\    package func query_range_end(base:int, count:int, range_end:int) int { return 0 }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/Query.sx",
+        .data =
+        \\use GFX.ECS.World.World
+        \\public class Query<Pattern> {
+        \\    package var world:World
+        \\    package let range_start:int
+        \\    package let range_end:int
+        \\    package init(world:World) { self.world = world; self.range_start = 0; self.range_end = -1 }
+        \\    package init(world:World, range_start:int, range_end:int) { self.world = world; self.range_start = range_start; self.range_end = range_end }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.ECS
+        \\func consume(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {}
+        \\func simulate(query:ECS.Query<(ECS.Entity, ECS.Entity)>) { consume(query) }
+        \\func main() { var application = Application(); application.add_system(0, simulate) }
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(try inputPath(allocator, temporary)));
+    try std.testing.expectEqualStrings(
+        "ECS.Query is a system-owned capability and cannot be passed to another function; iterate it directly in the system function",
+        compiler.diagnostic.?.message,
+    );
+    try std.testing.expectEqual(@as(usize, 4), compiler.diagnostic.?.position.line);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.ECS
+        \\func observe(query:@ECS.Query<(ECS.Entity, ECS.Entity)>) {}
+        \\func simulate(query:ECS.Query<(ECS.Entity, ECS.Entity)>) { observe(query) }
+        \\func main() { var application = Application(); application.add_system(0, simulate) }
+        ,
+    });
+    var borrowed_compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, borrowed_compiler.compile(try inputPath(allocator, temporary)));
+    try std.testing.expectEqualStrings(
+        "ECS.Query is a system-owned capability and cannot be passed to another function; iterate it directly in the system function",
+        borrowed_compiler.diagnostic.?.message,
+    );
+}
+
 test "system callbacks keep their declaring module identity" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

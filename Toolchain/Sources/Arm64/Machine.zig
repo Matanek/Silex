@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
 const MathBoundary = @import("../Math/Boundary.zig");
+const Source = @import("../Source.zig");
 const Types = @import("../Types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -558,6 +559,7 @@ pub const Instruction = union(enum) {
 
 pub const Function = struct {
     name: []const u8,
+    source_position: ?Source.Position = null,
     parameter_count: u12,
     parameters: []const Span = &.{},
     capture_parameters: []const Span = &.{},
@@ -580,10 +582,13 @@ pub const Function = struct {
     /// scalar affinity rather than a NEON/SSE register shape.
     float_lane_groups: []const FloatLaneGroup = &.{},
     instructions: []const Instruction,
+    instruction_positions: []const ?Source.Position = &.{},
 };
 
 pub const Program = struct {
     functions: []const Function,
+    files: []const []const u8 = &.{"<source>"},
+    debug: bool = false,
     external_functions: []const ExternalFunction = &.{},
     globals: []const Global = &.{},
     strings: []const []const u8 = &.{},

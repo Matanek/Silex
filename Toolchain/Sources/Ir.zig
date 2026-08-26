@@ -515,11 +515,14 @@ pub const Terminator = union(enum) {
 
 pub const Block = struct {
     instructions: []const Instruction,
+    instruction_positions: []const ?Source.Position = &.{},
     terminator: Terminator,
+    terminator_position: ?Source.Position = null,
 };
 
 pub const Function = struct {
     name: []const u8,
+    source_position: ?Source.Position = null,
     capture_types: []const Type = &.{},
     parameter_types: []const Type,
     return_type: Type,

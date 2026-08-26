@@ -71,7 +71,10 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
             .ARM64_RELOC_PAGE21,
         ));
     }
-    const first_undefined = encoded.address_sites.len + 1;
+    const debug_symbol_count = if (program.debug) encoded.debug_locations.len else 0;
+    const first_defined = encoded.address_sites.len;
+    const defined_function_count = program.functions.len + 1 + debug_symbol_count;
+    const first_undefined = first_defined + defined_function_count;
     for (encoded.external_call_sites) |site| try relocations.append(allocator, relocation(
         site.instruction_offset,
         @intCast(first_undefined + site.function),
@@ -82,7 +85,7 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
 
     const relocation_offset = std.mem.alignForward(usize, content_offset + encoded.code.len, 8);
     const symbol_offset = relocation_offset + relocations.items.len * @sizeOf(macho.relocation_info);
-    const symbol_count = encoded.address_sites.len + 1 + program.external_functions.len;
+    const symbol_count = first_undefined + program.external_functions.len;
     const string_offset = symbol_offset + symbol_count * @sizeOf(macho.nlist_64);
 
     var string_table: std.ArrayList(u8) = .empty;
@@ -96,6 +99,24 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
     }
     const main_name: u32 = @intCast(string_table.items.len);
     try string_table.appendSlice(allocator, "_main\x00");
+    const function_names = try allocator.alloc(u32, program.functions.len);
+    defer allocator.free(function_names);
+    for (program.functions, 0..) |_, index| {
+        function_names[index] = @intCast(string_table.items.len);
+        try string_table.print(allocator, "_silex_function_{d}\x00", .{index});
+    }
+    const debug_names = try allocator.alloc(u32, debug_symbol_count);
+    defer allocator.free(debug_names);
+    for (encoded.debug_locations, 0..) |location, index| {
+        debug_names[index] = @intCast(string_table.items.len);
+        const function = functionForOffset(program, encoded.*, location.instruction_offset);
+        const path = if (location.position.file < program.files.len) program.files[location.position.file] else "<source>";
+        try string_table.print(
+            allocator,
+            "_silex${s}${s}:{d}:{d}\x00",
+            .{ function, path, location.position.line, location.position.column },
+        );
+    }
     const external_names = try allocator.alloc(u32, program.external_functions.len);
     defer allocator.free(external_names);
     for (program.external_functions, 0..) |function, index| {
@@ -184,8 +205,8 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
     var dysymtab: macho.dysymtab_command = .{
         .ilocalsym = 0,
         .nlocalsym = @intCast(encoded.address_sites.len),
-        .iextdefsym = @intCast(encoded.address_sites.len),
-        .nextdefsym = 1,
+        .iextdefsym = @intCast(first_defined),
+        .nextdefsym = @intCast(defined_function_count),
         .iundefsym = @intCast(first_undefined),
         .nundefsym = @intCast(program.external_functions.len),
     };
@@ -213,6 +234,26 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
         .n_value = encoded.entry_offset.?,
     };
     try appendStruct(allocator, &bytes, &main_symbol);
+    for (encoded.function_offsets, 0..) |offset, index| {
+        var symbol: macho.nlist_64 = .{
+            .n_strx = function_names[index],
+            .n_type = .{ .bits = .{ .ext = true, .type = .sect, .pext = false, .is_stab = 0 } },
+            .n_sect = 1,
+            .n_desc = @bitCast(@as(u16, 0)),
+            .n_value = offset,
+        };
+        try appendStruct(allocator, &bytes, &symbol);
+    }
+    for (encoded.debug_locations, 0..) |location, index| {
+        var symbol: macho.nlist_64 = .{
+            .n_strx = debug_names[index],
+            .n_type = .{ .bits = .{ .ext = true, .type = .sect, .pext = false, .is_stab = 0 } },
+            .n_sect = 1,
+            .n_desc = @bitCast(@as(u16, 0)),
+            .n_value = location.instruction_offset,
+        };
+        try appendStruct(allocator, &bytes, &symbol);
+    }
     for (external_names) |external_name| {
         var symbol: macho.nlist_64 = .{
             .n_strx = external_name,
@@ -225,6 +266,15 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
     }
     try bytes.appendSlice(allocator, string_table.items);
     return bytes.toOwnedSlice(allocator);
+}
+
+fn functionForOffset(program: Machine.Program, encoded: Encoder.Image, offset: u32) []const u8 {
+    var result: []const u8 = "<generated>";
+    for (encoded.function_offsets, 0..) |start, index| {
+        if (start > offset) break;
+        result = program.functions[index].name;
+    }
+    return result;
 }
 
 fn relocation(
@@ -295,6 +345,7 @@ test "emit builds an ARM64 relocatable Mach-O object" {
     const text_section = std.mem.bytesAsValue(macho.section_64, bytes[section_offset..][0..@sizeOf(macho.section_64)]);
     try std.testing.expectEqual(@as(u32, 4), text_section.@"align");
     try std.testing.expectEqual(@as(u32, 0), text_section.offset % 16);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "_silex$main$<source>:1:") != null);
 
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

@@ -137,8 +137,8 @@ test "embed arbitrary bytes compactly and track the source as a cache dependency
             &.{},
             false,
         );
-        try std.testing.expectEqual(@as(u8, 0), exitCode(native.term));
-        try std.testing.expectEqualStrings(interpreted.stdout, native.stdout);
+        try std.testing.expectEqual(@as(u8, 0), exitCode(native.result.term));
+        try std.testing.expectEqualStrings(interpreted.stdout, native.result.stdout);
     }
 }
 

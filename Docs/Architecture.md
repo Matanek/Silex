@@ -65,6 +65,12 @@ open Silex document
 - IR functions and values use structured numeric identities. Source names
   remain available for diagnostics and readable IR, but calls do not rely on
   linker symbols.
+- A specialized `GFX.ECS.Query<Pattern>` is a compiler-derived, system-owned
+  capability. The generated system adapter constructs it for exactly one
+  callback invocation; source may iterate it directly but cannot pass, store,
+  return or encapsulate it. This prevents its opaque native ownership edge from
+  escaping and makes an invalid transfer a source diagnostic instead of a
+  double release.
 - Portable functions are control-flow graphs of explicit blocks. Every block
   ends in a branch, jump, return, or fatal terminator; target-dependent
   fallthrough semantics never enter the frontend.
@@ -249,9 +255,11 @@ open Silex document
   spans. Aggregate arguments use internal addresses and aggregate returns use
   an internal hidden destination; neither convention, nor the flattened layout,
   is observable or stable outside the backend.
-- Without a package-native provider, the compiler writes the Mach-O headers,
-  load commands, `__text`, entry wrapper, and ad-hoc SHA-256 code signature
-  itself. It invokes neither an assembler, linker, nor `codesign` on that path.
+- Without a package-native provider, Release writes the Mach-O headers, load
+  commands, `__text`, entry wrapper, and ad-hoc SHA-256 code signature itself.
+  Debug emits the same machine code through the relocatable-object path so the
+  bootstrap linker can preserve its Silex source symbols. Neither path invokes
+  an assembler or `codesign`.
 - For a referenced package-private provider, the compiler writes a relocatable
   object for the selected target: ARM64 Mach-O, x64 ELF, or x64/ARM64 COFF. It
   then invokes the bootstrap linker with only the resolved package archives,
@@ -303,7 +311,11 @@ open Silex document
   symbolic name and meaning, source, mode, retained executable, no-cache Debug
   reproduction and host debugger command. It identifies native fault owners as
   generated code, embedded runtime or package boundary candidates without
-  selecting one before diagnosis.
+  selecting one before diagnosis. On `macos-arm64`, every Debug image also
+  exports address-ordered source symbols carrying the Silex function, physical
+  `.sx` path, line and column; LLDB therefore resolves native crash frames back
+  to source even though Release keeps those symbols out of the performance
+  image.
 - `silex interpret <source.sx> [-n|--nocache] [--emit-ir]` explicitly selects
   the reference interpreter. It is intended for semantic validation and cannot
   execute most platform boundaries. `silex compile <source.sx>
@@ -387,10 +399,13 @@ open Silex document
 - String concatenation currently retains its native storage until process exit;
   reclamation and a general allocation model remain future internal work.
 - No public system API or general native allocation API exists yet.
-- The native backend has no debugging information, general dynamic-library
-  model, public source-level external declarations, or ABI stability guarantee
-  yet. Besides the closed system contracts, `macos-arm64` supports typed C ABI
-  calls owned privately by a package that declares its static provider.
+- Debug `macos-arm64` images expose function, physical `.sx` path, line and
+  column source symbols to LLDB. Source-variable inspection and Debug symbols
+  for the structurally emitted non-host targets are not implemented yet. The
+  backend also has no general dynamic-library model, public source-level
+  external declarations, or ABI stability guarantee. Besides the closed
+  system contracts, `macos-arm64` supports typed C ABI calls owned privately by
+  a package that declares its static provider.
 - Native executable emission and native tests currently require an Apple
   Silicon macOS host.
 - Interfaces, IR and package graphs are in-memory structures and have no stable

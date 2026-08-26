@@ -171,10 +171,13 @@ pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Struc
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, index| blocks[index] = .{
         .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .instruction_positions = try block.instruction_positions.toOwnedSlice(self.allocator),
         .terminator = block.terminator orelse return error.InvalidSource,
+        .terminator_position = block.terminator_position,
     };
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.$drop", .{declaration.name}),
+        .source_position = drop.position,
         .parameter_types = try self.allocator.dupe(Ast.Type, &.{structure_type}),
         .return_type = .void,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
@@ -201,10 +204,13 @@ pub fn analyzeClassFields(self: anytype, structure_index: usize, declaration: As
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, block_index| blocks[block_index] = .{
         .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .instruction_positions = try block.instruction_positions.toOwnedSlice(self.allocator),
         .terminator = block.terminator orelse return error.InvalidSource,
+        .terminator_position = block.terminator_position,
     };
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.$fields", .{declaration.name}),
+        .source_position = declaration.name_position,
         .parameter_types = try self.allocator.dupe(Ast.Type, &.{structure_type}),
         .return_type = .void,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),

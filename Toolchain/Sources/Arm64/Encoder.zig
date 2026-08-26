@@ -89,6 +89,7 @@ pub const Platform = enum { darwin, windows };
 pub const Image = struct {
     code: []u8,
     function_offsets: []const u32,
+    debug_locations: []const DebugLocation = &.{},
     entry_offset: ?u32,
     data_offset: ?u32 = null,
     external_call_sites: []const ExternalCalls.Site = &.{},
@@ -97,9 +98,15 @@ pub const Image = struct {
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
         allocator.free(self.function_offsets);
+        allocator.free(self.debug_locations);
         allocator.free(self.external_call_sites);
         allocator.free(self.address_sites);
     }
+};
+
+pub const DebugLocation = struct {
+    instruction_offset: u32,
+    position: @import("../Source.zig").Position,
 };
 
 pub const AddressSite = struct {
@@ -147,10 +154,11 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     var external_call_sites: std.ArrayList(ExternalCalls.Site) = .empty;
     var function_addresses: std.ArrayList(FunctionAddressFixup) = .empty;
     var address_sites: std.ArrayList(AddressSite) = .empty;
+    var debug_locations: std.ArrayList(DebugLocation) = .empty;
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
-        try encodeFunction(allocator, &words, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &external_call_sites, platform, program, function);
+        try encodeFunction(allocator, &words, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &external_call_sites, &debug_locations, platform, program, function);
     }
 
     const entry_offset: ?u32 = switch (entry) {
@@ -364,6 +372,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     return .{
         .code = code,
         .function_offsets = offsets,
+        .debug_locations = try debug_locations.toOwnedSlice(allocator),
         .entry_offset = entry_offset,
         .data_offset = data_offset,
         .external_call_sites = try external_call_sites.toOwnedSlice(allocator),
@@ -576,6 +585,7 @@ fn encodeFunction(
     cycle_calls: *std.ArrayList(CycleFixup),
     data_fixups: *std.ArrayList(DataFixup),
     external_call_sites: *std.ArrayList(ExternalCalls.Site),
+    debug_locations: *std.ArrayList(DebugLocation),
     platform: Platform,
     program: Machine.Program,
     function: Machine.Function,
@@ -1672,6 +1682,20 @@ fn encodeFunction(
     for (fixups.epilogue.items) |fixup| try patchLocal(words.items, fixup, epilogue_label);
     try patch26(words.items, overflow_to_epilogue, epilogue_label);
     try patch26(words.items, division_to_epilogue, epilogue_label);
+    var previous_debug_position: ?@import("../Source.zig").Position = null;
+    if (program.debug) for (function.instruction_positions, 0..) |maybe_position, instruction_index| {
+        const position = maybe_position orelse continue;
+        if (instruction_index >= instruction_offsets.len) break;
+        if (previous_debug_position) |previous| {
+            if (previous.file == position.file and previous.line == position.line and previous.column == position.column) continue;
+        }
+        previous_debug_position = position;
+        const instruction_offset = std.math.mul(usize, instruction_offsets[instruction_index], @sizeOf(u32)) catch return error.InvalidMachineProgram;
+        try debug_locations.append(allocator, .{
+            .instruction_offset = @intCast(instruction_offset),
+            .position = position,
+        });
+    };
 }
 
 fn resolveEncodedTarget(function: Machine.Function, initial: usize) usize {

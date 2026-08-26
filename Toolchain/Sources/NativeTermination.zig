@@ -20,6 +20,7 @@ pub fn programDiagnostic(
     const info = signalInfo(signal);
     const mode_name = if (mode == .debug) "Debug" else "Release";
     const debugger = debuggerCommand();
+    const symbols = sourceSymbols(mode);
     const fault = if (info.native_fault)
         "silex: native fault: generated code, the embedded runtime, or a package boundary may be responsible\n"
     else
@@ -31,6 +32,7 @@ pub fn programDiagnostic(
             "silex: native mode: {s}\n" ++
             "silex: retained executable: {s}\n" ++
             "{s}" ++
+            "{s}" ++
             "silex: reproduce in Debug: silex run \"{s}\" --debug --nocache\n" ++
             "silex: inspect this executable: {s} \"{s}\"\n",
         .{
@@ -40,6 +42,7 @@ pub fn programDiagnostic(
             source_path,
             mode_name,
             executable_path,
+            symbols,
             fault,
             source_path,
             debugger,
@@ -53,6 +56,7 @@ pub fn testDiagnostic(
     signal: u32,
     label: []const u8,
     source_path: []const u8,
+    executable_path: []const u8,
 ) ![]const u8 {
     const info = signalInfo(signal);
     const fault = if (info.native_fault)
@@ -63,10 +67,33 @@ pub fn testDiagnostic(
         allocator,
         "silex: native test '{s}' terminated by {s} (signal {d}): {s}\n" ++
             "silex: source: {s}\n" ++
+            "silex: retained executable: {s}\n" ++
             "{s}" ++
-            "silex: reproduce without cached native code: silex test \"{s}\" --nocache\n",
-        .{ label, info.name, signal, info.detail, source_path, fault, source_path },
+            "{s}" ++
+            "silex: reproduce without cached native code: silex test \"{s}\" --nocache\n" ++
+            "silex: inspect this executable: {s} \"{s}\"\n",
+        .{
+            label,
+            info.name,
+            signal,
+            info.detail,
+            source_path,
+            executable_path,
+            sourceSymbols(.debug),
+            fault,
+            source_path,
+            debuggerCommand(),
+            executable_path,
+        },
     );
+}
+
+fn sourceSymbols(mode: Cli.Mode) []const u8 {
+    if (mode != .debug) return "silex: source symbols: rebuild in Debug to expose Silex function, file, line and column\n";
+    return switch (builtin.os.tag) {
+        .driverkit, .ios, .maccatalyst, .macos, .tvos, .visionos, .watchos => "silex: source symbols: Silex function, file, line and column are embedded for LLDB\n",
+        else => "silex: source symbols: Debug provenance is preserved, but target debugger symbols are not connected yet\n",
+    };
 }
 
 pub fn stoppedDescription(allocator: Allocator, signal: u32) ![]const u8 {
@@ -142,12 +169,14 @@ test "describe a segmentation fault with actionable native context" {
     try std.testing.expect(std.mem.indexOf(u8, text, "SIGSEGV (signal 11): invalid memory access") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "source: Examples/Crash.sx") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "retained executable: /workspace/.silex/run/Crash-macos-arm64-debug") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "function, file, line and column are embedded for LLDB") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "--debug --nocache") != null);
 }
 
 test "keep an unknown signal explicit without calling it a native fault" {
-    const text = try testDiagnostic(std.testing.allocator, 127, "unknown", "Unknown.sx");
+    const text = try testDiagnostic(std.testing.allocator, 127, "unknown", "Unknown.sx", "/tmp/unknown-test");
     defer std.testing.allocator.free(text);
     try std.testing.expect(std.mem.indexOf(u8, text, "operating-system signal (signal 127)") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "native fault") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "retained executable: /tmp/unknown-test") != null);
 }

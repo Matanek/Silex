@@ -49,6 +49,14 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
 }
 
 pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import("../Source.zig").Position, action: []const u8) !void {
+    if (isQueryType(self, value.type)) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "ECS.Query is a system-owned capability and cannot be {s}; iterate it directly in the system function",
+            .{action},
+        );
+        return self.fail(position, message);
+    }
     const root = value.borrowed_root orelse return;
     // Reading a value through @T or &T already materializes its ordinary
     // value representation. That copy is safe to store when it cannot carry
@@ -63,6 +71,7 @@ pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import(".
 }
 
 pub fn validateReadArguments(self: anytype, parameters: []const Ast.Parameter, arguments: []const *Ast.Expression) !void {
+    try rejectQueryArguments(self, parameters, arguments);
     for (parameters[0..arguments.len], arguments, 0..) |parameter, argument, index| {
         if (parameter.mode == .value) continue;
         const root = rootName(argument) orelse continue;
@@ -100,6 +109,13 @@ pub fn validateReadArguments(self: anytype, parameters: []const Ast.Parameter, a
 }
 
 pub fn validateMappedReadArguments(self: anytype, parameters: []const Ast.Parameter, arguments: []const ?*Ast.Expression) !void {
+    for (parameters, arguments) |parameter, maybe_argument| {
+        const argument = maybe_argument orelse continue;
+        if (isQueryType(self, parameter.type)) return self.fail(
+            argument.position,
+            "ECS.Query is a system-owned capability and cannot be passed to another function; iterate it directly in the system function",
+        );
+    }
     for (parameters, arguments, 0..) |parameter, maybe_argument, index| {
         const argument = maybe_argument orelse continue;
         if (parameter.mode == .value) continue;
@@ -138,6 +154,20 @@ pub fn validateMappedReadArguments(self: anytype, parameters: []const Ast.Parame
             }
         }
     }
+}
+
+fn rejectQueryArguments(self: anytype, parameters: []const Ast.Parameter, arguments: []const *Ast.Expression) !void {
+    for (parameters[0..arguments.len], arguments) |parameter, argument| {
+        if (isQueryType(self, parameter.type)) return self.fail(
+            argument.position,
+            "ECS.Query is a system-owned capability and cannot be passed to another function; iterate it directly in the system function",
+        );
+    }
+}
+
+fn isQueryType(self: anytype, type_value: Ast.Type) bool {
+    const structure_index = type_value.structureIndex() orelse return false;
+    return structure_index < self.program.structures.len and self.program.structures[structure_index].query_pattern != null;
 }
 
 pub fn ensureRootUnborrowed(self: anytype, builder: anytype, root: []const u8, position: @import("../Source.zig").Position) !void {

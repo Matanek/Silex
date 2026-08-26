@@ -813,7 +813,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
             else
                 case_name;
             const succeeded = if (native_program) |machine| succeeded: {
-                const result = NativeTestRunner.execute(
+                const execution = NativeTestRunner.execute(
                     source_allocator,
                     init.io,
                     target,
@@ -830,9 +830,9 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                     try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
                     continue;
                 };
-                try Io.File.stdout().writeStreamingAll(init.io, result.stdout);
-                try Io.File.stderr().writeStreamingAll(init.io, result.stderr);
-                break :succeeded switch (result.term) {
+                try Io.File.stdout().writeStreamingAll(init.io, execution.result.stdout);
+                try Io.File.stderr().writeStreamingAll(init.io, execution.result.stderr);
+                break :succeeded switch (execution.result.term) {
                     .exited => |code| exited: {
                         if (code != 0) {
                             std.debug.print("silex: native test '{s}' exited with code {d}\n", .{ label, code });
@@ -845,6 +845,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                             @intFromEnum(signal),
                             label,
                             source_path,
+                            execution.executable,
                         );
                         std.debug.print("{s}", .{diagnostic});
                         break :signaled false;
@@ -1215,14 +1216,14 @@ fn compileNativeOptions(
     }
     progress.stage(.emit);
     if (target.eql(.macos_arm64) and
-        (boundary_providers.len != 0 or MacOSLink.requiresSystemLink(machine.external_functions)))
+        (options.mode == .debug or boundary_providers.len != 0 or MacOSLink.requiresSystemLink(machine.external_functions)))
     {
         const object = MachOObject.emit(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
             return 1;
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
-        defer Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
+        defer if (options.mode == .release) Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
         if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         {
             const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
@@ -1581,6 +1582,7 @@ fn linkedObjectPath(
     options: Cli.CompileOptions,
     providers: []const Packages.BoundaryProvider,
 ) ![]const u8 {
+    if (options.mode == .debug) return std.fmt.allocPrint(allocator, "{s}.silex.o", .{options.output_path});
     var dependencies: std.ArrayList([]const u8) = .empty;
     try dependencies.appendSlice(allocator, &.{ options.source_path, options.output_path, @tagName(options.mode) });
     for (providers) |provider| if (provider.archive) |archive| try dependencies.append(allocator, archive);

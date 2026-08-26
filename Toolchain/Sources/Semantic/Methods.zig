@@ -237,10 +237,13 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, block_index| blocks[block_index] = .{
         .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .instruction_positions = try block.instruction_positions.toOwnedSlice(self.allocator),
         .terminator = block.terminator orelse return error.InvalidSource,
+        .terminator_position = block.terminator_position,
     };
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#{d}", .{ structure.name, method.name, method_index }),
+        .source_position = method.name_position,
         .parameter_types = parameter_types,
         .return_type = methodIrReturnType(self, structure_index, flat, method),
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
@@ -285,10 +288,13 @@ fn analyzeStatic(self: anytype, structure_index: usize, method_index: usize, met
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, block_index| blocks[block_index] = .{
         .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .instruction_positions = try block.instruction_positions.toOwnedSlice(self.allocator),
         .terminator = block.terminator orelse return error.InvalidSource,
+        .terminator_position = block.terminator_position,
     };
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#static{d}", .{ self.program.structures[structure_index].name, method.name, method_index }),
+        .source_position = method.name_position,
         .parameter_types = parameter_types,
         .return_type = method.return_type,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),

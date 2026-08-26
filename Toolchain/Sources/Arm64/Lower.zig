@@ -130,6 +130,8 @@ fn lowerInternal(
     }
     const result: Machine.Program = .{
         .functions = try functions.toOwnedSlice(allocator),
+        .files = program.files,
+        .debug = mode == .debug,
         .external_functions = external_functions,
         .globals = globals,
         .strings = try strings.toOwnedSlice(allocator),
@@ -210,6 +212,7 @@ fn lowerFunction(
     const float_lane_groups = try lowerSlpGroups(allocator, layout, slp);
 
     var instructions: std.ArrayList(Machine.Instruction) = .empty;
+    var instruction_positions: std.ArrayList(?@import("../Source.zig").Position) = .empty;
     const starts = try allocator.alloc(usize, function.blocks.len);
     var next_instruction: usize = 0;
     for (function.blocks, 0..) |block, block_id| {
@@ -217,13 +220,16 @@ fn lowerFunction(
         next_instruction += block.instructions.len + 1;
     }
     for (function.blocks) |block| {
-        for (block.instructions) |instruction| {
+        for (block.instructions, 0..) |instruction, instruction_index| {
             try instructions.append(allocator, try lowerInstruction(allocator, program, strings, function, layout, instruction));
+            try instruction_positions.append(allocator, if (instruction_index < block.instruction_positions.len) block.instruction_positions[instruction_index] else function.source_position);
         }
         try instructions.append(allocator, try lowerTerminator(allocator, program, strings, layout, block.terminator, starts));
+        try instruction_positions.append(allocator, block.terminator_position orelse function.source_position);
     }
     return .{
         .name = function.name,
+        .source_position = function.source_position,
         .parameter_count = parameter_count,
         .parameters = layout.parameters,
         .capture_parameters = layout.capture_parameters,
@@ -236,6 +242,7 @@ fn lowerFunction(
         .frame_size = try Machine.frameSize(layout.slot_count),
         .float_lane_groups = float_lane_groups,
         .instructions = try instructions.toOwnedSlice(allocator),
+        .instruction_positions = try instruction_positions.toOwnedSlice(allocator),
     };
 }
 
@@ -1407,6 +1414,10 @@ test "lower answer and nested calls to deterministic machine slots" {
     try std.testing.expectEqual(@as(Machine.FunctionId, 0), program.functions[1].instructions[2].call.function);
     try std.testing.expectEqual(@as(Machine.Slot, 2), program.functions[1].instructions[2].call.result.?.start);
     try std.testing.expectEqual(@as(Machine.FunctionId, 1), program.functions[2].instructions[0].call.function);
+    try std.testing.expect(program.debug);
+    try std.testing.expectEqual(@as(usize, 1), program.functions[0].source_position.?.line);
+    try std.testing.expectEqual(@as(usize, 1), program.functions[0].instruction_positions[0].?.line);
+    try std.testing.expectEqual(@as(usize, 3), program.functions[2].instruction_positions[0].?.line);
 }
 
 test "lower internal stack arguments before encoding" {

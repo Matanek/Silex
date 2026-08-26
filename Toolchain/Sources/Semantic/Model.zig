@@ -40,7 +40,9 @@ pub const TypedValue = struct {
 
 pub const BlockBuilder = struct {
     instructions: std.ArrayList(Ir.Instruction) = .empty,
+    instruction_positions: std.ArrayList(?@import("../Source.zig").Position) = .empty,
     terminator: ?Ir.Terminator = null,
+    terminator_position: ?@import("../Source.zig").Position = null,
 };
 
 pub const LoopContext = struct {
@@ -62,4 +64,5 @@ pub const FunctionBuilder = struct {
     bindings: std.ArrayList(Binding) = .empty,
     loops: std.ArrayList(LoopContext) = .empty,
     mutex_depth: usize = 0,
+    current_position: ?@import("../Source.zig").Position = null,
 };

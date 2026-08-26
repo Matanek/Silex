@@ -345,12 +345,15 @@ fn finishFunction(self: anytype, function: Ast.Function, builder: anytype) !Ir.F
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, index| blocks[index] = .{
         .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .instruction_positions = try block.instruction_positions.toOwnedSlice(self.allocator),
         .terminator = block.terminator orelse return error.InvalidSource,
+        .terminator_position = block.terminator_position,
     };
     const parameter_types = try self.allocator.alloc(Ast.Type, function.parameters.len);
     for (function.parameters, 0..) |parameter, index| parameter_types[index] = parameter.type;
     return .{
         .name = function.name,
+        .source_position = function.name_position,
         .parameter_types = parameter_types,
         .return_type = .void,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),

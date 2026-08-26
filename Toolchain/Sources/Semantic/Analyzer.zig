@@ -400,7 +400,10 @@ pub const Analyzer = struct {
         const previous_function_context = self.function_context;
         self.function_context = function;
         defer self.function_context = previous_function_context;
-        var builder: FunctionBuilder = .{ .return_type = function.return_type };
+        var builder: FunctionBuilder = .{
+            .return_type = function.return_type,
+            .current_position = function.position,
+        };
         try builder.blocks.append(self.allocator, .{});
         const captures = if (function.is_anonymous)
             self.anonymous_captures[function_id] orelse &.{}
@@ -443,12 +446,15 @@ pub const Analyzer = struct {
         for (builder.blocks.items) |*block| {
             try blocks.append(self.allocator, .{
                 .instructions = try block.instructions.toOwnedSlice(self.allocator),
+                .instruction_positions = try block.instruction_positions.toOwnedSlice(self.allocator),
                 .terminator = block.terminator orelse return error.InvalidSource,
+                .terminator_position = block.terminator_position,
             });
         }
         const owned_blocks = try blocks.toOwnedSlice(self.allocator);
         return .{
             .name = function.name,
+            .source_position = function.name_position,
             .capture_types = capture_types,
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
             .return_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type),
@@ -500,6 +506,7 @@ pub const Analyzer = struct {
 
     pub fn analyzeStatements(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statements: []const Ast.Statement) AnalyzeError!bool {
         for (statements) |statement| {
+            builder.current_position = statement.position();
             if (try self.analyzeStatement(builder, function, statement)) return true;
         }
         return false;
@@ -1761,11 +1768,13 @@ pub const Analyzer = struct {
 
     pub fn emit(self: *Analyzer, builder: *FunctionBuilder, instruction: Ir.Instruction) Allocator.Error!void {
         try builder.blocks.items[builder.current_block].instructions.append(self.allocator, instruction);
+        try builder.blocks.items[builder.current_block].instruction_positions.append(self.allocator, builder.current_position);
     }
 
     pub fn terminate(_: *Analyzer, builder: *FunctionBuilder, terminator: Ir.Terminator) void {
         std.debug.assert(builder.blocks.items[builder.current_block].terminator == null);
         builder.blocks.items[builder.current_block].terminator = terminator;
+        builder.blocks.items[builder.current_block].terminator_position = builder.current_position;
     }
 
     pub fn newBlock(self: *Analyzer, builder: *FunctionBuilder) Allocator.Error!Ir.BlockId {

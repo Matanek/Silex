@@ -161,10 +161,13 @@ pub fn analyze(
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, block_index| blocks[block_index] = .{
         .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .instruction_positions = try block.instruction_positions.toOwnedSlice(self.allocator),
         .terminator = block.terminator orelse return error.InvalidSource,
+        .terminator_position = block.terminator_position,
     };
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.init#{d}", .{ declaration.name, constructor_index }),
+        .source_position = constructor.position,
         .parameter_types = parameter_types,
         .return_type = structure_type,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),

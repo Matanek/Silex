@@ -43,10 +43,12 @@ Other hosts retain reference-interpreter execution until their native test
 runner is connected.
 
 A native test terminated by a signal reports the symbolic signal name, its
-meaning, the exact test and source, and a no-cache reproduction command. A
-memory, instruction or arithmetic fault is explicitly classified as a native
-failure that may belong to generated code, the embedded runtime or a package
-boundary; following test blocks still execute.
+meaning, the exact test and source, the retained failing executable, a no-cache
+reproduction command and the host debugger command. On `macos-arm64`, Debug
+images carry Silex function, `.sx` path, line and column source symbols for
+LLDB. A memory, instruction or arithmetic fault is explicitly classified as a
+native failure that may belong to generated code, the embedded runtime or a
+package boundary; following test blocks still execute.
 
 Test blocks are declarations at the root of a source file. They cannot be
 nested in a function, type, extension, or another test. The description is

@@ -4,17 +4,22 @@ const CompilationCache = @import("CompilationCache.zig");
 const Ir = @import("Ir.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Machine = @import("Arm64/Machine.zig");
-const MachO = @import("MacOS/MachO.zig");
 const MachOObject = @import("MacOS/Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const NativeLink = @import("NativeLink.zig");
 const Packages = @import("Packages.zig");
+const Project = @import("Project.zig");
 const TargetModule = @import("Target.zig");
 const X64Encoder = @import("X64/Encoder.zig");
 const X64Object = @import("X64/Object.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+
+pub const Execution = struct {
+    result: std.process.RunResult,
+    executable: []const u8,
+};
 
 pub fn lower(
     allocator: Allocator,
@@ -40,7 +45,7 @@ pub fn execute(
     files: []const []const u8,
     providers: []const Packages.BoundaryProvider,
     cache: bool,
-) !std.process.RunResult {
+) !Execution {
     const function_text = try std.fmt.allocPrint(allocator, "{d}", .{function});
     const reusable = cache and providers.len == 0 and !MacOSLink.requiresSystemLink(program.external_functions);
     const digest = if (reusable)
@@ -54,9 +59,16 @@ pub fn execute(
     else
         CompilationCache.artifactKey("native-test", &.{ source_path, function_text });
     const executable = try artifactPath(allocator, source_path, digest, target);
-    if (reusable and exists(io, executable)) return run(allocator, io, executable);
-    defer if (!reusable) Io.Dir.cwd().deleteFile(io, executable) catch {};
-    return executeAt(allocator, io, target, linker_path, program, function, executable, providers);
+    if (reusable and exists(io, executable)) return .{
+        .result = try run(allocator, io, executable),
+        .executable = executable,
+    };
+    const result = try executeAt(allocator, io, target, linker_path, program, function, executable, providers);
+    if (!reusable) switch (result.term) {
+        .exited => Io.Dir.cwd().deleteFile(io, executable) catch {},
+        else => {},
+    };
+    return .{ .result = result, .executable = executable };
 }
 
 fn executeAt(
@@ -70,7 +82,7 @@ fn executeAt(
     providers: []const Packages.BoundaryProvider,
 ) !std.process.RunResult {
     try Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(executable).?);
-    if (target.eql(.macos_arm64) and (providers.len != 0 or MacOSLink.requiresSystemLink(program.external_functions))) {
+    if (target.eql(.macos_arm64)) {
         const object = try MachOObject.emitFunction(allocator, program, function);
         const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
         defer Io.Dir.cwd().deleteFile(io, object_path) catch {};
@@ -102,15 +114,7 @@ fn executeAt(
         try NativeLink.executable(allocator, io, linker_path, target, object_path, executable, providers);
         return run(allocator, io, executable);
     }
-    if (!target.eql(.macos_arm64)) return error.UnsupportedTarget;
-    const bytes = try MachO.emitFunction(allocator, program, function);
-    {
-        const file = try Io.Dir.cwd().createFile(io, executable, .{ .permissions = .executable_file });
-        defer file.close(io);
-        try file.writeStreamingAll(io, bytes);
-        try file.setPermissions(io, .executable_file);
-    }
-    return run(allocator, io, executable);
+    return error.UnsupportedTarget;
 }
 
 fn run(allocator: Allocator, io: Io, executable: []const u8) !std.process.RunResult {
@@ -166,6 +170,43 @@ test "execute native test entries independently and preserve failures" {
     const continued = try executeAt(allocator, std.testing.io, .macos_arm64, "zig", machine, entries.items[1], continued_executable, &.{});
     try std.testing.expectEqual(@as(u8, 0), exitCode(continued.term));
     try std.testing.expectEqualStrings("continued\n", continued.stdout);
+}
+
+test "retain a signaled native test executable for source debugging" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Crash.sx",
+        .data = "use Interop.C\ntest \"crash\" { C.call<func() void>(0 as uint) }",
+    });
+    const source_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Crash.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compileTests(source_path);
+    const machine = try lower(allocator, std.testing.io, compilation.ir, &.{}, false);
+    const execution = try execute(
+        allocator,
+        std.testing.io,
+        .macos_arm64,
+        "zig",
+        machine,
+        compilation.tests[0].function,
+        source_path,
+        compilation.files,
+        &.{},
+        false,
+    );
+    defer Io.Dir.cwd().deleteFile(std.testing.io, execution.executable) catch {};
+    switch (execution.result.term) {
+        .signal => |signal| try std.testing.expectEqual(@as(u32, 11), @intFromEnum(signal)),
+        else => return error.TestUnexpectedResult,
+    }
+    try std.testing.expect(exists(std.testing.io, execution.executable));
 }
 
 test "execute a native test through a macOS system boundary" {
