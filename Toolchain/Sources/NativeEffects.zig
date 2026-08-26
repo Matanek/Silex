@@ -805,6 +805,42 @@ test "native collection mutations match the reference" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native repeated unique list replacements preserve copy on write and drops" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct File { let id:int; drop { print("drop ", self.id) } }
+        \\func main() {
+        \\    var values:int[] = []
+        \\    var fill = 0
+        \\    while fill < 256 { values.append(fill); fill++ }
+        \\    let snapshot = values
+        \\    values[0] = 1_000
+        \\    var index = 0
+        \\    while index < 10_000 {
+        \\        values[index % values.count()] = index
+        \\        index++
+        \\    }
+        \\    print(snapshot[0], " ", values[15], " ", values.count())
+        \\    if true {
+        \\        var files:File[] = [File(id:1)]
+        \\        files[0] = File(id:2)
+        \\        print(files[0].id)
+        \\    }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(source);
+    compilation.ir.files = &.{"Main.sx"};
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native field list iteration retains storage until replacement" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -1176,6 +1176,32 @@ pub fn emitReplace(
         try Fixups.patch26(words.items, complete, words.items.len);
         return;
     }
+
+    // Preserve value semantics for shared lists, but mutate unique storage in
+    // place. Indexed writes are commonly used to fill scratch buffers; copying
+    // the complete list for every element turns those linear passes into O(n²).
+    try words.append(allocator, A64.load64(.x11, .x10, root_count_offset));
+    try words.append(allocator, A64.load64(.x5, .x10, edge_count_offset));
+    try words.append(allocator, A64.addRegisters(.x11, .x11, .x5));
+    try immediate(allocator, words, .x5, 1);
+    try words.append(allocator, A64.compareRegisters(.x11, .x5));
+    const shared = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.not_equal));
+    try words.append(allocator, A64.addSubtractImmediate(.x14, .x10, header_size, true));
+    try immediate(allocator, words, .x11, stride);
+    try words.append(allocator, A64.multiply(.x5, .x9, .x11));
+    try words.append(allocator, A64.addRegisters(.x14, .x14, .x5));
+    for (0..value.replacement.width) |leaf| {
+        try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.replacement.start) + leaf)));
+        if (compact_float32) {
+            try words.append(allocator, A64.store32Offset(.x12, .x14, @intCast(leaf * 4)));
+        } else try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
+    }
+    try words.append(allocator, A64.storeStack(.x10, value.result.start));
+    const reused = words.items.len;
+    try words.append(allocator, A64.branch());
+    try Fixups.patch19(words.items, shared, words.items.len);
+
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
     try words.append(allocator, A64.store64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.store64(.x13, .zero_or_sp, 8));
@@ -1237,6 +1263,7 @@ pub fn emitReplace(
     try words.append(allocator, A64.storeStack(.x15, value.result.start));
     try emitDropSlot(allocator, words, sites, platform, value.collection.start, value.ownership);
     const complete = words.items.len;
+    try Fixups.patch26(words.items, reused, complete);
     try words.append(allocator, A64.branch());
 
     const scratch_failure = words.items.len;

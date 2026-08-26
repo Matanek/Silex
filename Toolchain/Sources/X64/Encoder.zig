@@ -1973,6 +1973,33 @@ fn emitDynamicReplace(
     try emitRuntimeFailure(allocator, bytes, epilogue);
     try patchRelative(bytes.items, in_bounds, bytes.items.len);
 
+    // A unique list can be updated directly. Shared storage still takes the
+    // allocation path below so aliases keep copy-on-write value semantics.
+    try emitLoadMemory(allocator, bytes, .rax, .rbx, root_count_offset);
+    try emitLoadMemory(allocator, bytes, .r11, .rbx, edge_count_offset);
+    try emitRegisterBinary(allocator, bytes, 0x01, .rax, .r11);
+    try emitImmediate(allocator, bytes, .rcx, 1);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const shared = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    try emitMoveRegister(allocator, bytes, .r14, .rbx);
+    try emitAddImmediateRegister(allocator, bytes, .r14, list_header_size);
+    try emitMoveRegister(allocator, bytes, .rax, .r13);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
+    try appendInt(allocator, bytes, u32, @as(u32, value.replacement.width) * Machine.slot_size);
+    try emitRegisterBinary(allocator, bytes, 0x01, .r14, .rax);
+    for (0..value.replacement.width) |leaf| {
+        try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, value.replacement.start) + leaf));
+        try emitStoreMemory(allocator, bytes, .r14, @intCast(leaf * Machine.slot_size), .rax);
+    }
+    try emitStoreStack(allocator, bytes, .rbx, value.result.start);
+    try bytes.append(allocator, 0xe9);
+    const reused = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, shared, bytes.items.len);
+
     try emitMoveRegister(allocator, bytes, .rsi, .r12);
     try emitImmediate(allocator, bytes, .rcx, @as(u64, value.replacement.width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xf1 });
@@ -2009,6 +2036,7 @@ fn emitDynamicReplace(
     }
     try emitStoreStack(allocator, bytes, .r15, value.result.start);
     try emitListDropSlot(allocator, bytes, import_sites, platform, value.collection.start, value.ownership);
+    try patchRelative(bytes.items, reused, bytes.items.len);
 }
 
 fn emitFixedReplace(
