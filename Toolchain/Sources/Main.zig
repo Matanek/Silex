@@ -21,6 +21,7 @@ const X64RegisterAllocation = @import("X64/RegisterAllocation.zig");
 const PE = @import("Windows/PE.zig");
 const WindowsImports = @import("Windows/Imports.zig");
 const NativeLink = @import("NativeLink.zig");
+const NativeTermination = @import("NativeTermination.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
 const ProjectPaths = @import("Project/Paths.zig");
@@ -839,11 +840,21 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                         break :exited code == 0;
                     },
                     .signal => |signal| signaled: {
-                        std.debug.print("silex: native test '{s}' terminated by signal {d}\n", .{ label, @intFromEnum(signal) });
+                        const diagnostic = try NativeTermination.testDiagnostic(
+                            source_allocator,
+                            @intFromEnum(signal),
+                            label,
+                            source_path,
+                        );
+                        std.debug.print("{s}", .{diagnostic});
                         break :signaled false;
                     },
                     .stopped => |signal| stopped: {
-                        std.debug.print("silex: native test '{s}' stopped by signal {d}\n", .{ label, @intFromEnum(signal) });
+                        const description = try NativeTermination.stoppedDescription(
+                            source_allocator,
+                            @intFromEnum(signal),
+                        );
+                        std.debug.print("silex: native test '{s}' stopped by {s}\n", .{ label, description });
                         break :stopped false;
                     },
                     .unknown => |status| unknown: {
@@ -961,7 +972,7 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
     var progress = CliProgress.Build.init(init.io);
     progress.source(.run, options.source_path);
     progress.finish();
-    return executeNative(init, allocator, output_path, options.source_path);
+    return executeNative(init, allocator, output_path, options.source_path, options.mode);
 }
 
 fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -1637,6 +1648,7 @@ fn executeNative(
     allocator: std.mem.Allocator,
     executable_path: []const u8,
     source_path: []const u8,
+    mode: Cli.Mode,
 ) !u8 {
     const current_directory = try std.process.currentPathAlloc(init.io, allocator);
     const absolute_executable = try std.fs.path.resolve(allocator, &.{ current_directory, executable_path });
@@ -1656,11 +1668,19 @@ fn executeNative(
     return switch (try child.wait(init.io)) {
         .exited => |code| code,
         .signal => |signal| terminated: {
-            std.debug.print("silex: program terminated by signal {d}\n", .{@intFromEnum(signal)});
+            const diagnostic = try NativeTermination.programDiagnostic(
+                allocator,
+                @intFromEnum(signal),
+                source_path,
+                absolute_executable,
+                mode,
+            );
+            std.debug.print("{s}", .{diagnostic});
             break :terminated 1;
         },
         .stopped => |signal| stopped: {
-            std.debug.print("silex: program stopped by signal {d}\n", .{@intFromEnum(signal)});
+            const description = try NativeTermination.stoppedDescription(allocator, @intFromEnum(signal));
+            std.debug.print("silex: program stopped by {s}\n", .{description});
             break :stopped 1;
         },
         .unknown => |status| unknown: {

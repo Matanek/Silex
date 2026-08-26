@@ -299,7 +299,11 @@ open Silex document
   waits for the program and returns its exit code. Release is the default and
   applies semantics-preserving optimization; `--debug` disables those
   optimizations for backend diagnosis without weakening language safety in
-  Release.
+  Release. When the child terminates through a signal, the CLI reports its
+  symbolic name and meaning, source, mode, retained executable, no-cache Debug
+  reproduction and host debugger command. It identifies native fault owners as
+  generated code, embedded runtime or package boundary candidates without
+  selecting one before diagnosis.
 - `silex interpret <source.sx> [-n|--nocache] [--emit-ir]` explicitly selects
   the reference interpreter. It is intended for semantic validation and cannot
   execute most platform boundaries. `silex compile <source.sx>

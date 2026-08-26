@@ -70,9 +70,9 @@ Silex toolchain, not package dependencies. The user does not need a system Zig
 installation.
 
 `run` builds a private native executable under `.silex/run/`, executes it with
-the current terminal streams and returns its exit code. Debug is the default;
-pass `--release` to select the optimized pipeline. Add `--emit-ir` to inspect
-the portable typed IR before native lowering:
+the current terminal streams and returns its exit code. Release is the default;
+pass `--debug` to disable optimization while diagnosing the native backend. Add
+`--emit-ir` to inspect the portable typed IR before native lowering:
 
 In an interactive terminal, `compile` and `run` announce the active work:
 source and shader analysis, target preparation, executable construction,
@@ -80,6 +80,13 @@ platform linkage, output publication, and application launch. Redirected and
 CI executions remain quiet on success so their machine-readable output does
 not change. On an ANSI-capable terminal, successful progress is erased when
 the build finishes; failed progress remains visible above its diagnostic.
+
+If the native process terminates through an operating-system signal, `run`
+names and explains the signal, reports the source and build mode, and preserves
+the exact executable path. Native faults such as `SIGSEGV` additionally print
+a no-cache Debug reproduction command and the host debugger command for that
+artifact. The fault may belong to generated code, the embedded runtime, or a
+package boundary; the diagnostic does not guess which layer is responsible.
 
 ```sh
 zig build run -- run /path/to/Main.sx --emit-ir
@@ -104,8 +111,8 @@ zig build run -- compile /path/to/Main.sx -d -o /path/to/program
 /path/to/program
 ```
 
-Debug is the default and favors compilation speed and direct diagnostics.
-Release selects the optimized native pipeline. Every frequent option has a
+Release is the default and selects the optimized native pipeline. Debug favors
+compilation speed and direct backend diagnosis. Every frequent option has a
 short and a descriptive form:
 
 ```sh

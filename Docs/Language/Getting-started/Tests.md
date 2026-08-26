@@ -42,6 +42,12 @@ dependencies remain unchanged; `--nocache` forces their regeneration.
 Other hosts retain reference-interpreter execution until their native test
 runner is connected.
 
+A native test terminated by a signal reports the symbolic signal name, its
+meaning, the exact test and source, and a no-cache reproduction command. A
+memory, instruction or arithmetic fault is explicitly classified as a native
+failure that may belong to generated code, the embedded runtime or a package
+boundary; following test blocks still execute.
+
 Test blocks are declarations at the root of a source file. They cannot be
 nested in a function, type, extension, or another test. The description is
 optional. An anonymous block is reported by its source line:
