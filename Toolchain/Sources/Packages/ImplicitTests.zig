@@ -127,3 +127,62 @@ test "workspace links override user links without leaking into another workspace
     try std.testing.expectEqualStrings(user_checkout, graph_b.packages[1].root);
     try std.testing.expectEqual(Packages.Origin.user_link, graph_b.packages[1].origin);
 }
+
+test "ignore an unavailable implicit link in a loose project" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox");
+    try temporary.dir.createDirPath(std.testing.io, "Home/.silex/links");
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const missing = try std.fs.path.join(allocator, &.{ base, "Missing" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Home/.silex/links/Unused.json",
+        .data = try std.json.Stringify.valueAlloc(allocator, .{ .path = missing }, .{}),
+    });
+
+    const sandbox = try std.fs.path.join(allocator, &.{ base, "Sandbox" });
+    const packages_root = try std.fs.path.join(allocator, &.{ base, "Home", ".silex", "packages" });
+    var resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
+    const graph = try resolver.resolve(sandbox);
+
+    try std.testing.expectEqual(@as(usize, 1), graph.packages.len);
+    try std.testing.expectEqual(@as(?[]const u8, null), resolver.diagnostic);
+}
+
+test "reject an unavailable link requested by a manifest dependency" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "App");
+    try temporary.dir.createDirPath(std.testing.io, "Home/.silex/links");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "App/Package.json",
+        .data = "{\"name\":\"App\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"dependencies\":{\"Unused\":\"^1.0.0\"}}",
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const missing = try std.fs.path.join(allocator, &.{ base, "Missing" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Home/.silex/links/Unused.json",
+        .data = try std.json.Stringify.valueAlloc(allocator, .{ .path = missing }, .{}),
+    });
+
+    const app = try std.fs.path.join(allocator, &.{ base, "App" });
+    const packages_root = try std.fs.path.join(allocator, &.{ base, "Home", ".silex", "packages" });
+    var resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
+    try std.testing.expectEqualStrings(
+        try std.fmt.allocPrint(
+            allocator,
+            "linked package 'Unused' is unavailable at '{s}'; remove or refresh the link in its scope",
+            .{missing},
+        ),
+        resolver.diagnostic.?,
+    );
+}

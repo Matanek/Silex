@@ -330,6 +330,12 @@ compatible with the running toolchain, Silex selects the newest one. As soon
 as a program gains a manifest, its declared direct dependencies replace this
 implicit environment.
 
+The implicit environment ignores links whose checkout is unavailable or no
+longer compatible, because a loose program may not reference them at all. A
+dependency declared by a manifest remains strict: if its selected link is
+unavailable or incompatible, Silex reports that link instead of silently
+falling back to another package.
+
 ## Install a package
 
 Install a package from a local checkout:

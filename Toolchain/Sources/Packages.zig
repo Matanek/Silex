@@ -523,7 +523,7 @@ pub const Resolver = struct {
             if (self.rootDependsOn(name)) continue;
             const index = if (self.find(name)) |existing|
                 existing
-            else if (try self.linkedNamedAt(links_root, name, origin)) |selected|
+            else if (try self.implicitLinkedNamedAt(links_root, name, origin)) |selected|
                 try self.resolveSelected(selected.root, selected.manifest, name, selected.version, selected.origin)
             else
                 continue;
@@ -663,6 +663,16 @@ pub const Resolver = struct {
         const version = try self.validateSelected(manifest, name, link.path, origin == .user_link);
         try self.validateToolchain(manifest);
         return .{ .root = link.path, .manifest = manifest, .version = version, .origin = origin };
+    }
+
+    fn implicitLinkedNamedAt(self: *Resolver, links_root: []const u8, name: []const u8, origin: Origin) !?Selected {
+        return self.linkedNamedAt(links_root, name, origin) catch |err| switch (err) {
+            error.InvalidPackageGraph => {
+                self.diagnostic = null;
+                return null;
+            },
+            else => |other| return other,
+        };
     }
 
     fn bestGlobal(self: *Resolver, request: ManifestDependency, available: *?Version) !?Selected {
