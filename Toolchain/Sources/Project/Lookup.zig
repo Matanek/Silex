@@ -18,6 +18,11 @@ pub fn findAccessibleModule(self: anytype, name: []const u8, owner: usize) ?usiz
     return module;
 }
 
+pub fn findOwnedModule(self: anytype, name: []const u8, owner: usize) ?usize {
+    const module = findModule(self, name) orelse return null;
+    return if (self.index.providers[module].owner == owner) module else null;
+}
+
 pub fn isAccessibleNamespace(self: anytype, name: []const u8, owner: usize) bool {
     for (self.index.providers) |provider| {
         if (!self.packages.canAccess(owner, provider.owner, provider.name)) continue;
@@ -27,9 +32,40 @@ pub fn isAccessibleNamespace(self: anytype, name: []const u8, owner: usize) bool
     return false;
 }
 
+pub fn isOwnedNamespace(self: anytype, name: []const u8, owner: usize) bool {
+    for (self.index.providers) |provider| {
+        if (provider.owner != owner) continue;
+        if (std.mem.eql(u8, provider.name, name)) return true;
+        if (provider.name.len > name.len and std.mem.startsWith(u8, provider.name, name) and provider.name[name.len] == '.') return true;
+    }
+    return false;
+}
+
 pub fn findProviderPath(self: anytype, path: []const u8) ?usize {
     for (self.index.providers, 0..) |provider, index| {
         if (samePath(provider.path, path, builtin.os.tag == .windows)) return index;
+    }
+    return null;
+}
+
+pub fn findProviderPathCanonical(self: anytype, path: []const u8) ?usize {
+    return findProviderPathCanonicalIn(self, self.index, path);
+}
+
+fn findProviderPathCanonicalIn(self: anytype, index: Modules.Index, path: []const u8) ?usize {
+    if (findProviderPath(.{ .index = index }, path)) |provider| return provider;
+    const canonical_path = std.Io.Dir.cwd().realPathFileAlloc(
+        self.io,
+        path,
+        self.allocator,
+    ) catch return null;
+    for (index.providers, 0..) |provider, provider_index| {
+        const canonical_provider = std.Io.Dir.cwd().realPathFileAlloc(
+            self.io,
+            provider.path,
+            self.allocator,
+        ) catch continue;
+        if (samePath(canonical_provider, canonical_path, builtin.os.tag == .windows)) return provider_index;
     }
     return null;
 }
@@ -117,7 +153,7 @@ pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
         },
         else => |other| return other,
     };
-    if (findProviderPath(.{ .index = discovered }, input_path) != null) return discovered;
+    if (findProviderPathCanonicalIn(self, discovered, input_path) != null) return discovered;
 
     const package = self.packages.packages[0];
     const relative_path = try relativeInputPath(self.allocator, package.root, input_path);
@@ -126,10 +162,19 @@ pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
         try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, relative_name })
     else
         relative_name;
+    const relative_directory = try Modules.moduleDirectoryName(self.allocator, relative_path);
+    const local_prefix = if (package.name) |name|
+        if (relative_directory.len == 0)
+            try self.allocator.dupe(u8, name)
+        else
+            try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, relative_directory })
+    else
+        relative_directory;
     if (discovered.find(module_name) != null) return error.DuplicateModule;
     const entry_provider = [_]Modules.Provider{.{
         .name = module_name,
         .path = try self.allocator.dupe(u8, input_path),
+        .local_prefix = local_prefix,
         .file = 0,
         .owner = 0,
         .origin = .entry,

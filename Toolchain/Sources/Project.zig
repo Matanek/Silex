@@ -175,7 +175,7 @@ pub const Compiler = struct {
         for (self.index.providers, 0..) |provider, file| files[file] = provider.path;
         self.files = files;
 
-        self.entry_module = Lookup.findProviderPath(self, input_path) orelse return self.fail(
+        self.entry_module = Lookup.findProviderPathCanonical(self, input_path) orelse return self.fail(
             .{ .offset = 0, .line = 1, .column = 1 },
             "entry source is not a discovered module",
         );
@@ -310,42 +310,15 @@ pub const Compiler = struct {
             };
         }
         const owner = self.index.providers[source_module].owner;
-        if (Lookup.findAccessibleModule(self, use.path, owner)) |module| {
-            return .{
-                .alias = use.alias orelse lastSegment(use.path),
-                .path = use.path,
-                .module = module,
-                .declaration = if (use.is_public) lastSegment(use.path) else null,
-                .is_public = use.is_public,
-                .position = use.position,
-            };
-        }
-
-        if (Lookup.isAccessibleNamespace(self, use.path, owner)) {
-            return .{
-                .alias = use.alias orelse lastSegment(use.path),
-                .path = use.path,
-                .module = null,
-                .declaration = null,
-                .is_public = use.is_public,
-                .position = use.position,
-            };
-        }
-
-        var separator = std.mem.lastIndexOfScalar(u8, use.path, '.');
-        while (separator) |at| {
-            const prefix = use.path[0..at];
-            if (Lookup.findAccessibleModule(self, prefix, owner)) |module| {
-                return .{
-                    .alias = use.alias orelse lastSegment(use.path),
-                    .path = prefix,
-                    .module = module,
-                    .declaration = use.path[at + 1 ..],
-                    .is_public = use.is_public,
-                    .position = use.position,
-                };
-            }
-            separator = std.mem.lastIndexOfScalar(u8, prefix, '.');
+        if (self.bindingForUsePath(owner, use, use.path, false)) |binding| return binding;
+        const local_prefix = self.index.providers[source_module].local_prefix;
+        if (local_prefix.len != 0) {
+            const contextual_path = try std.fmt.allocPrint(
+                self.allocator,
+                "{s}.{s}",
+                .{ local_prefix, use.path },
+            );
+            if (self.bindingForUsePath(owner, use, contextual_path, true)) |binding| return binding;
         }
 
         if (use.alias != null) {
@@ -377,6 +350,59 @@ pub const Compiler = struct {
         else
             try std.fmt.allocPrint(self.allocator, "unknown module or declaration '{s}'", .{use.path});
         return self.fail(use.position, message);
+    }
+
+    fn bindingForUsePath(
+        self: *Compiler,
+        owner: usize,
+        use: Ast.Use,
+        path: []const u8,
+        owned_only: bool,
+    ) ?Binding {
+        const direct = if (owned_only)
+            Lookup.findOwnedModule(self, path, owner)
+        else
+            Lookup.findAccessibleModule(self, path, owner);
+        if (direct) |module| return .{
+            .alias = use.alias orelse lastSegment(use.path),
+            .path = path,
+            .module = module,
+            .declaration = if (use.is_public) lastSegment(path) else null,
+            .is_public = use.is_public,
+            .position = use.position,
+        };
+
+        const namespace = if (owned_only)
+            Lookup.isOwnedNamespace(self, path, owner)
+        else
+            Lookup.isAccessibleNamespace(self, path, owner);
+        if (namespace) return .{
+            .alias = use.alias orelse lastSegment(use.path),
+            .path = path,
+            .module = null,
+            .declaration = null,
+            .is_public = use.is_public,
+            .position = use.position,
+        };
+
+        var separator = std.mem.lastIndexOfScalar(u8, path, '.');
+        while (separator) |at| {
+            const prefix = path[0..at];
+            const module = if (owned_only)
+                Lookup.findOwnedModule(self, prefix, owner)
+            else
+                Lookup.findAccessibleModule(self, prefix, owner);
+            if (module) |target| return .{
+                .alias = use.alias orelse lastSegment(use.path),
+                .path = prefix,
+                .module = target,
+                .declaration = path[at + 1 ..],
+                .is_public = use.is_public,
+                .position = use.position,
+            };
+            separator = std.mem.lastIndexOfScalar(u8, prefix, '.');
+        }
+        return null;
     }
 
     fn genericAliasDependency(self: *Compiler, source_module: usize, type_value: Ast.Type) ?usize {

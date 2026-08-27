@@ -321,6 +321,23 @@ installed recursively. Without `--dev`, installation and consumption use only
 `dependencies`. A missing development dependency is diagnosed with the exact
 `silex install <package> --dev` command needed to prepare the checkout.
 
+For an explicit source entry, Silex searches its directory and then every
+parent directory for the nearest `Package.json`. The result does not depend on
+whether the command names the source from above or is launched from the
+source's own directory. These two invocations therefore use the same manifest,
+dependency graph and canonical module names:
+
+```sh
+silex run Sources/Demo/Main.sx
+cd Sources/Demo
+silex run Main.sx
+```
+
+Application modules remain addressable by their canonical path relative to the
+manifest, such as `Sources.Demo.Interpolation`. A `use` may additionally name a
+module relative to the importing source's directory, as described in
+[Import modules](Modules.md).
+
 A loose program without `Package.json` needs no manifest merely to try Silex
 or run a short script. Its implicit development environment exposes compatible
 packages through workspace links, user links, then installed versions. Its

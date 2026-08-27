@@ -14,6 +14,30 @@ use Math.Vec3
 use Math.Operations.add as add
 ```
 
+An application module may also be imported relative to the directory of the
+source file that contains the `use`. Given this project:
+
+```text
+Package.json
+Sources/Demo/Main.sx
+Sources/Demo/Interpolation.sx
+```
+
+both imports below select the single canonical module
+`Sources.Demo.Interpolation`:
+
+```sx
+use Interpolation.interpolate
+use Sources.Demo.Interpolation.interpolate as rooted_interpolate
+```
+
+The first form keeps a multi-file application readable inside its own folder.
+The second remains available from the path relative to `Package.json`.
+Canonical accessible paths are resolved first; only an unresolved `use` is
+then interpreted relative to its source file, and only within the same package.
+This contextual spelling is an import convenience, not a second module
+identity. Fully qualified expressions continue to use canonical module paths.
+
 The final module segment becomes the local name. `as` chooses another name:
 
 ```sx

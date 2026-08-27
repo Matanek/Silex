@@ -11,19 +11,55 @@ pub fn findRootWithin(
     input_path: []const u8,
     boundary: ?[]const u8,
 ) anyerror![]const u8 {
-    var directory = std.fs.path.dirname(input_path) orelse ".";
-    const fallback = looseRoot(input_path);
+    const current_directory = try std.process.currentPathAlloc(io, allocator);
+    return findRootFrom(allocator, io, input_path, boundary, current_directory);
+}
+
+fn findRootFrom(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    input_path: []const u8,
+    boundary: ?[]const u8,
+    current_directory: []const u8,
+) anyerror![]const u8 {
+    const absolute_input = try std.fs.path.resolve(allocator, &.{ current_directory, input_path });
+    const absolute_boundary = if (boundary) |limit|
+        try std.fs.path.resolve(allocator, &.{ current_directory, limit })
+    else
+        null;
+    var directory = std.fs.path.dirname(absolute_input) orelse current_directory;
+    const fallback = looseRoot(absolute_input);
     while (true) {
         const manifest = try std.fs.path.join(allocator, &.{ directory, "Package.json" });
-        if (fileExists(io, manifest)) return directory;
-        if (boundary) |limit| {
-            if (samePath(directory, limit)) return fallback;
-            if (!pathInside(directory, limit)) return fallback;
+        if (fileExists(io, manifest)) return displayRoot(allocator, input_path, current_directory, directory);
+        if (absolute_boundary) |limit| {
+            if (samePath(directory, limit)) return displayRoot(allocator, input_path, current_directory, fallback);
+            if (!pathInside(directory, limit)) return displayRoot(allocator, input_path, current_directory, fallback);
         }
-        const next = parentDirectory(directory) orelse return fallback;
-        if (std.mem.eql(u8, next, directory)) return fallback;
+        const next = parentDirectory(directory) orelse
+            return displayRoot(allocator, input_path, current_directory, fallback);
+        if (std.mem.eql(u8, next, directory)) {
+            return displayRoot(allocator, input_path, current_directory, fallback);
+        }
         directory = next;
     }
+}
+
+fn displayRoot(
+    allocator: std.mem.Allocator,
+    input_path: []const u8,
+    current_directory: []const u8,
+    root: []const u8,
+) ![]const u8 {
+    if (std.fs.path.isAbsolute(input_path)) return root;
+    const relative = try std.fs.path.relative(
+        allocator,
+        current_directory,
+        null,
+        current_directory,
+        root,
+    );
+    return if (relative.len == 0) "." else relative;
 }
 
 fn parentDirectory(directory: []const u8) ?[]const u8 {
@@ -78,6 +114,34 @@ test "use a principal module's parent as the loose project root" {
 }
 
 test "continue a relative manifest search through the current directory" {
-    try std.testing.expectEqualStrings(".", parentDirectory("Tests").?);
-    try std.testing.expect(parentDirectory(".") == null);
+    try std.testing.expectEqualStrings("/", parentDirectory("/Tests").?);
+}
+
+test "find a parent manifest from an entry-directory invocation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources/Demo");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Demo/Main.sx",
+        .data = "func main() {}",
+    });
+    const workspace = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const application = try std.fs.path.join(allocator, &.{ workspace, "Application" });
+    const entry_directory = try std.fs.path.join(allocator, &.{ application, "Sources", "Demo" });
+
+    try std.testing.expectEqualStrings("../..", try findRootFrom(
+        allocator,
+        std.testing.io,
+        "Main.sx",
+        null,
+        entry_directory,
+    ));
 }

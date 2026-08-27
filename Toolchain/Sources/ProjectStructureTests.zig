@@ -1,6 +1,63 @@
 const std = @import("std");
 const Project = @import("Project.zig");
 
+test "resolve entry-local and manifest-relative module paths once" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources/Demo");
+    try temporary.dir.createDirPath(std.testing.io, "Application/Library/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Library/Module/Value.sx",
+        .data = "public func number() int { return 12 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Demo/Helper.sx",
+        .data = "public func answer() int { return 10 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Demo/Main.sx",
+        .data =
+        \\use Helper.answer as local_answer
+        \\use Sources.Demo.Helper.answer as rooted_answer
+        \\use Library.Value.number
+        \\func main() { print(local_answer() + rooted_answer() + number()) }
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Application",
+        "Sources",
+        "Demo",
+        "Main.sx",
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("32\n", result.stdout);
+    try std.testing.expect(compilation.packages.explicit);
+
+    var helper_count: usize = 0;
+    for (compilation.ir.functions) |function| {
+        if (std.mem.eql(u8, function.name, "Sources.Demo.Helper.answer")) helper_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), helper_count);
+}
+
 test "compose principal secondary qualified and aliased public structures" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

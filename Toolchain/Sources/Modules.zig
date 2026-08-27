@@ -18,6 +18,7 @@ pub const Origin = enum {
 pub const Provider = struct {
     name: []const u8,
     path: []const u8,
+    local_prefix: []const u8 = "",
     file: usize,
     owner: usize = 0,
     merge_owner: ?usize = null,
@@ -142,6 +143,7 @@ pub fn discoverOwnedExcludingAs(
         if (insideAny(full_path, excluded_roots)) continue;
 
         const relative_name = try relativeModuleName(allocator, relative_path);
+        const relative_directory = try moduleDirectoryName(allocator, relative_path);
         const module_name = if (prefix) |name|
             if (relative_name.len == 0)
                 try allocator.dupe(u8, name)
@@ -151,9 +153,17 @@ pub fn discoverOwnedExcludingAs(
             relative_name
         else
             return error.InvalidModulePath;
+        const local_prefix = if (prefix) |name|
+            if (relative_directory.len == 0)
+                try allocator.dupe(u8, name)
+            else
+                try std.fmt.allocPrint(allocator, "{s}.{s}", .{ name, relative_directory })
+        else
+            relative_directory;
         try providers.append(allocator, .{
             .name = module_name,
             .path = full_path,
+            .local_prefix = local_prefix,
             .file = 0,
             .owner = owner,
             .origin = origin,
@@ -245,6 +255,17 @@ pub fn moduleName(allocator: Allocator, relative_path: []const u8) Error![]const
     const name = try relativeModuleName(allocator, relative_path);
     if (name.len == 0) return error.InvalidModulePath;
     return name;
+}
+
+pub fn moduleDirectoryName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
+    const directory = std.fs.path.dirname(relative_path) orelse return allocator.dupe(u8, "");
+    if (directory.len == 0 or std.mem.eql(u8, directory, ".")) return allocator.dupe(u8, "");
+    const result = try allocator.dupe(u8, directory);
+    for (result) |*character| {
+        if (character.* == '/' or character.* == '\\') character.* = '.';
+    }
+    if (!validName(result)) return error.InvalidModulePath;
+    return result;
 }
 
 fn relativeModuleName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
