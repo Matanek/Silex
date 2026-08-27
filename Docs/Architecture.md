@@ -162,6 +162,11 @@ open Silex document
   derives canonical local, workspace-link, user-link, and installed locations
   from package identities, builds a single-version dependency graph, and
   enforces direct visibility.
+- Each manifest selects one physical source directory with `sources`, defaulting
+  to `Module`. The resolver removes that directory from canonical module names
+  and applies the same leaf below the portable, active platform, and exact
+  target roots. A loose invocation without `Package.json` keeps its entry-owned
+  implicit source root.
 - An exact namespace extension may carry a `suite` installation permission.
   The registry expands only a package explicitly requested by registered name
   with `--suite`, and selects independently released members whose parent

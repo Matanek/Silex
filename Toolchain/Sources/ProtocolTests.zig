@@ -213,7 +213,7 @@ test "public protocol contract does not republish a package implementation" {
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",
@@ -247,7 +247,7 @@ test "generic protocol calls use the contract without republishing a consumer im
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",

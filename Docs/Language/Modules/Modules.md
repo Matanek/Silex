@@ -18,24 +18,24 @@ Two contextual roots make imports owned by the current package explicit. Given
 this application:
 
 ```text
-Package.json
+Package.json                         (`"sources": "Sources"`)
 Sources/Demo/Main.sx
 Sources/Demo/Interpolation.sx
 ```
 
 all three imports below select the single canonical module
-`Sources.Demo.Interpolation`:
+`Demo.Interpolation`:
 
 ```sx
-use Sources.Demo.Interpolation.interpolate as canonical_interpolate
-use Package.Sources.Demo.Interpolation.interpolate as package_interpolate
+use Demo.Interpolation.interpolate as canonical_interpolate
+use Package.Demo.Interpolation.interpolate as package_interpolate
 use Module.Interpolation.interpolate as module_interpolate
 ```
 
 `Package.` starts at the current package namespace. In an unnamed application,
-that is the path relative to `Package.json`. Without a manifest, it is the
-implicit source root selected from the entry `.sx`; that root remains stable
-for every module loaded by the run.
+that is the logical path relative to the manifest's `sources` directory.
+Without a manifest, it is the implicit source root selected from the entry
+`.sx`; that root remains stable for every module loaded by the run.
 `Module.` starts at the physical directory namespace of the source file that
 contains the `use`. Neither root can cross into a dependency. A path without
 either root keeps its historical meaning: it is already canonical and may name

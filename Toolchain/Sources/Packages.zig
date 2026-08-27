@@ -288,6 +288,7 @@ pub const Graph = struct {
 pub const ManifestInfo = struct {
     name: []const u8,
     version: Version,
+    sources: []const u8,
     description: ?[]const u8,
     authors: []const []const u8,
     silex_requirement: SilexRequirement,
@@ -310,6 +311,7 @@ pub const Result = struct {
 const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
+    sources: ?[]const u8 = null,
     description: ?[]const u8 = null,
     authors: ?std.json.Value = null,
     extensions: ?std.json.Value = null,
@@ -325,6 +327,7 @@ const RawManifest = struct {
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
+    sources: []const u8,
     description: ?[]const u8,
     authors: []const []const u8,
     extensions: []const ExtensionPolicy,
@@ -377,8 +380,10 @@ pub const Resolver = struct {
             try self.validateRootIdentity(manifest, project_root);
         }
         self.workspace_links_root = try self.findWorkspaceLinksRoot(project_root);
-        const named_root = root_manifest != null and root_manifest.?.name != null;
-        const roots = try self.moduleRoots(project_root, named_root);
+        const roots = try self.moduleRoots(
+            project_root,
+            if (root_manifest) |manifest| manifest.sources else null,
+        );
         try self.builders.append(self.allocator, .{
             .package = .{
                 .name = if (root_manifest) |manifest| manifest.name else null,
@@ -435,6 +440,7 @@ pub const Resolver = struct {
         return .{
             .name = name,
             .version = version,
+            .sources = manifest.sources,
             .description = manifest.description,
             .authors = manifest.authors,
             .silex_requirement = requirement,
@@ -865,7 +871,7 @@ pub const Resolver = struct {
     ) anyerror!usize {
         if (self.find(name)) |existing| return existing;
         try self.validateToolchain(manifest);
-        const roots = try self.moduleRoots(root, true);
+        const roots = try self.moduleRoots(root, manifest.sources);
         const index = self.builders.items.len;
         try self.builders.append(self.allocator, .{
             .package = .{
@@ -892,31 +898,33 @@ pub const Resolver = struct {
         inactive: []const []const u8,
     };
 
-    fn moduleRoots(self: *Resolver, root: []const u8, named: bool) !ModuleRoots {
-        if (!named) return .{
+    fn moduleRoots(self: *Resolver, root: []const u8, sources: ?[]const u8) !ModuleRoots {
+        const source_directory = sources orelse return .{
             .active = try self.allocator.dupe(ModuleRoot, &.{.{ .path = root, .origin = .portable }}),
             .inactive = &.{},
         };
 
         var active: std.ArrayList(ModuleRoot) = .empty;
         try active.append(self.allocator, .{
-            .path = try std.fs.path.join(self.allocator, &.{ root, "Module" }),
+            .path = try sourceRootPath(self.allocator, root, source_directory),
             .origin = .portable,
         });
-        const platform = try std.fs.path.join(self.allocator, &.{ root, "Platform", self.target.platform.directoryName(), "Module" });
+        const platform_root = try std.fs.path.join(self.allocator, &.{ root, "Platform", self.target.platform.directoryName() });
+        const platform = try sourceRootPath(self.allocator, platform_root, source_directory);
         if (try exists(self.io, platform)) try active.append(self.allocator, .{ .path = platform, .origin = .platform });
-        const selected = try std.fs.path.join(self.allocator, &.{ root, "Target", self.target.name(), "Module" });
+        const target_root = try std.fs.path.join(self.allocator, &.{ root, "Target", self.target.name() });
+        const selected = try sourceRootPath(self.allocator, target_root, source_directory);
         if (try exists(self.io, selected)) try active.append(self.allocator, .{ .path = selected, .origin = .target });
         return .{
             .active = try active.toOwnedSlice(self.allocator),
-            .inactive = try self.inactiveModuleNames(root),
+            .inactive = try self.inactiveModuleNames(root, source_directory),
         };
     }
 
-    fn inactiveModuleNames(self: *Resolver, root: []const u8) ![]const []const u8 {
+    fn inactiveModuleNames(self: *Resolver, root: []const u8, sources: []const u8) ![]const []const u8 {
         var names: std.ArrayList([]const u8) = .empty;
-        try self.appendInactiveRootModules(root, "Platform", self.target.platform.directoryName(), &names);
-        try self.appendInactiveRootModules(root, "Target", self.target.name(), &names);
+        try self.appendInactiveRootModules(root, "Platform", self.target.platform.directoryName(), sources, &names);
+        try self.appendInactiveRootModules(root, "Target", self.target.name(), sources, &names);
         std.mem.sort([]const u8, names.items, {}, stringLessThan);
         var unique: std.ArrayList([]const u8) = .empty;
         for (names.items) |name| {
@@ -932,6 +940,7 @@ pub const Resolver = struct {
         root: []const u8,
         category: []const u8,
         selected: []const u8,
+        sources: []const u8,
         names: *std.ArrayList([]const u8),
     ) !void {
         const category_path = try std.fs.path.join(self.allocator, &.{ root, category });
@@ -940,7 +949,8 @@ pub const Resolver = struct {
         var entries = directory.iterateAssumeFirstIteration();
         while (entries.next(self.io) catch null) |entry| {
             if (entry.kind != .directory or std.mem.eql(u8, entry.name, selected)) continue;
-            const module_root = try std.fs.path.join(self.allocator, &.{ category_path, entry.name, "Module" });
+            const variant_root = try std.fs.path.join(self.allocator, &.{ category_path, entry.name });
+            const module_root = try sourceRootPath(self.allocator, variant_root, sources);
             const discovered = Modules.discoverOwned(self.allocator, self.io, module_root, null, 0) catch continue;
             for (discovered.providers) |provider| try names.append(self.allocator, provider.name);
         }
@@ -1121,6 +1131,10 @@ pub const Resolver = struct {
             if (!Modules.validName(name)) return self.fail("invalid package identity");
             if (reservedContextualRoot(name)) return self.fail("Package and Module are reserved package-name roots");
         }
+        const sources = raw.sources orelse "Module";
+        if (!validSourceDirectory(sources)) {
+            return self.fail("sources must be '.' or a normalized relative directory inside the package");
+        }
 
         const description = if (raw.description) |description| description: {
             if (!validMetadataLine(description)) {
@@ -1258,6 +1272,7 @@ pub const Resolver = struct {
         return .{
             .name = raw.name,
             .version = version,
+            .sources = sources,
             .description = description,
             .authors = try authors.toOwnedSlice(self.allocator),
             .extensions = try extensions.toOwnedSlice(self.allocator),
@@ -1616,6 +1631,16 @@ fn validRelativePath(path: []const u8) bool {
     return true;
 }
 
+fn validSourceDirectory(path: []const u8) bool {
+    if (std.mem.indexOfScalar(u8, path, ':') != null) return false;
+    return std.mem.eql(u8, path, ".") or validRelativePath(path);
+}
+
+fn sourceRootPath(allocator: Allocator, root: []const u8, sources: []const u8) ![]const u8 {
+    if (std.mem.eql(u8, sources, ".")) return allocator.dupe(u8, root);
+    return std.fs.path.join(allocator, &.{ root, sources });
+}
+
 fn validLibraryName(name: []const u8) bool {
     if (name.len == 0) return false;
     for (name) |character| if (!std.ascii.isAlphanumeric(character) and character != '_' and character != '-' and character != '.' and character != '+') return false;
@@ -1783,6 +1808,97 @@ test "inspect optional package description and authors" {
     const legacy = try resolver.inspectPackage(base);
     try std.testing.expectEqual(@as(?[]const u8, null), legacy.description);
     try std.testing.expectEqual(@as(usize, 0), legacy.authors.len);
+}
+
+test "select a manifest source directory for portable platform and target modules" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources");
+    try temporary.dir.createDirPath(std.testing.io, "Application/Platform/MacOS/Sources");
+    try temporary.dir.createDirPath(std.testing.io, "Application/Target/macos-arm64/Sources");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{\"sources\":\"Sources\"}",
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Application" });
+    var resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    const graph = try resolver.resolve(root);
+    try std.testing.expect(graph.explicit);
+    try std.testing.expectEqual(@as(usize, 3), graph.packages[0].module_roots.len);
+    try std.testing.expectEqualStrings(
+        try std.fs.path.join(allocator, &.{ root, "Sources" }),
+        graph.packages[0].module_roots[0].path,
+    );
+    try std.testing.expectEqualStrings(
+        try std.fs.path.join(allocator, &.{ root, "Platform", "MacOS", "Sources" }),
+        graph.packages[0].module_roots[1].path,
+    );
+    try std.testing.expectEqualStrings(
+        try std.fs.path.join(allocator, &.{ root, "Target", "macos-arm64", "Sources" }),
+        graph.packages[0].module_roots[2].path,
+    );
+}
+
+test "default manifest sources to Module and accept an explicit package root" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Default/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Default/Package.json", .data = "{}" });
+    const default_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Default" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const default_graph = try resolver.resolve(default_root);
+    try std.testing.expectEqualStrings(
+        try std.fs.path.join(allocator, &.{ default_root, "Module" }),
+        default_graph.packages[0].module_roots[0].path,
+    );
+
+    try temporary.dir.createDirPath(std.testing.io, "Root");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Root/Package.json", .data = "{\"sources\":\".\"}" });
+    const explicit_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Root" });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    const explicit_graph = try resolver.resolve(explicit_root);
+    try std.testing.expectEqualStrings(explicit_root, explicit_graph.packages[0].module_roots[0].path);
+}
+
+test "reject source directories that escape or ambiguously spell the package root" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Application");
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Application" });
+
+    for ([_][]const u8{
+        "",
+        "/Sources",
+        "C:/Sources",
+        "../Sources",
+        "Sources/../Other",
+        "Sources/",
+        "Sources\\Nested",
+        "./Sources",
+        "Sources//Nested",
+    }) |sources| {
+        try temporary.dir.writeFile(std.testing.io, .{
+            .sub_path = "Application/Package.json",
+            .data = try std.json.Stringify.valueAlloc(allocator, .{ .sources = sources }, .{}),
+        });
+        var resolver = Resolver.init(allocator, std.testing.io, null);
+        try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
+        try std.testing.expectEqualStrings(
+            "sources must be '.' or a normalized relative directory inside the package",
+            resolver.diagnostic.?,
+        );
+    }
 }
 
 test "parse exact and caret stable versions" {

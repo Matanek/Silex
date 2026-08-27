@@ -153,7 +153,7 @@ test "server completes and navigates package declarations for friend packages" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -211,7 +211,7 @@ test "server completes additive parent and extension module declarations" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -272,7 +272,7 @@ test "server completes and navigates authorized umbrella contributions" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -485,7 +485,7 @@ test "server completes the value of a reexported cascade field from its declared
     try temporary.dir.createDirPath(std.testing.io, "STD/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Animator\":\"=1.0.0\",\"GFX\":\"=1.0.0\",\"STD\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Animator\":\"=1.0.0\",\"GFX\":\"=1.0.0\",\"STD\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Animator/Package.json",

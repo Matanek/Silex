@@ -1095,7 +1095,7 @@ test "packages authorize direct namespace extensions hierarchically" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.UI/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -1138,7 +1138,7 @@ test "packages authorize direct namespace extensions hierarchically" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.UI.Controls/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\",\"GFX.UI.Controls\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\",\"GFX.UI.Controls\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -1184,7 +1184,7 @@ test "parent packages own exact extension modules and may merge them additively"
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -1271,7 +1271,7 @@ test "enforce public package interfaces and direct dependency visibility" {
     try temporary.dir.createDirPath(std.testing.io, "B/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"A\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"A\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "A/Package.json",
@@ -1341,7 +1341,7 @@ test "let exact and wildcard friend packages use package declarations" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -1440,7 +1440,7 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",

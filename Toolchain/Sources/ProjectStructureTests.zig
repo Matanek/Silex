@@ -1,7 +1,7 @@
 const std = @import("std");
 const Project = @import("Project.zig");
 
-test "resolve canonical package and module anchored paths once across a namespace collision" {
+test "resolve a custom source root through canonical package and module paths" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -12,7 +12,7 @@ test "resolve canonical package and module anchored paths once across a namespac
     try temporary.dir.createDirPath(std.testing.io, "DependencySources/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Package.json",
-        .data = "{\"dependencies\":{\"Sources\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\"Sources\",\"dependencies\":{\"Sources\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "DependencySources/Package.json",
@@ -42,13 +42,14 @@ test "resolve canonical package and module anchored paths once across a namespac
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Sources/Demo/Main.sx",
         .data =
+        \\use Demo.Helper.answer as canonical_answer
         \\use Module.Helper.answer as local_answer
-        \\use Package.Sources.Demo.Helper.answer as package_answer
+        \\use Package.Demo.Helper.answer as package_answer
         \\use Sources.Consumer.total
         \\func main() {
         \\    let module_value:Module.Helper.Value = Module.Helper.value()
-        \\    let package_value:Package.Sources.Demo.Helper.Value = Package.Sources.Demo.Helper.value()
-        \\    print(local_answer() + package_answer() + total() + module_value.number + package_value.number)
+        \\    let package_value:Package.Demo.Helper.Value = Package.Demo.Helper.value()
+        \\    print(canonical_answer() + local_answer() + package_answer() + total() + module_value.number + package_value.number)
         \\}
         ,
     });
@@ -65,12 +66,12 @@ test "resolve canonical package and module anchored paths once across a namespac
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
     const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
-    try std.testing.expectEqualStrings("76\n", result.stdout);
+    try std.testing.expectEqualStrings("86\n", result.stdout);
     try std.testing.expect(compilation.packages.explicit);
 
     var helper_count: usize = 0;
     for (compilation.ir.functions) |function| {
-        if (std.mem.eql(u8, function.name, "Sources.Demo.Helper.answer")) helper_count += 1;
+        if (std.mem.eql(u8, function.name, "Demo.Helper.answer")) helper_count += 1;
     }
     try std.testing.expectEqual(@as(usize, 1), helper_count);
 
@@ -91,7 +92,7 @@ test "require an explicit Module anchor for source relative imports" {
     try temporary.dir.createDirPath(std.testing.io, "Application/Sources/Demo");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Package.json",
-        .data = "{}",
+        .data = "{\"sources\":\"Sources\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Sources/Demo/Helper.sx",
@@ -366,7 +367,7 @@ test "compare package and module signature exposure scopes" {
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",
@@ -473,7 +474,7 @@ test "compose a public structure from a direct local package dependency" {
     try temporary.dir.createDirPath(std.testing.io, "Vectors/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Vectors\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Vectors\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Vectors/Package.json",
@@ -508,7 +509,7 @@ test "use a package child namespace without a principal module" {
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Geometry");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -544,7 +545,7 @@ test "implicit module visibility spans files owned by a principal module" {
     try temporary.dir.createDirPath(std.testing.io, "Library/Module/Feature");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",
@@ -603,7 +604,7 @@ test "enforce representative GFX package and module member boundaries" {
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Canvas");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",

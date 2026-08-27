@@ -92,7 +92,7 @@ test "reflect public values through a package alias without changing their canon
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",

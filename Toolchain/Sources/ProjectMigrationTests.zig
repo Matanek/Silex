@@ -88,7 +88,7 @@ test "compose public reexports through a package facade" {
     try temporary.dir.createDirPath(std.testing.io, "Geometry/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Geometry\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Geometry\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Geometry/Package.json",
@@ -408,7 +408,7 @@ test "reject local functions and structures from sibling files and packages" {
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",
@@ -437,7 +437,7 @@ test "share package declarations across modules without exporting them" {
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",
@@ -504,7 +504,7 @@ test "share package declarations across modules without exporting them" {
     try temporary.dir.createDirPath(std.testing.io, "Library.Tools/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\",\"Library.Tools\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\",\"Library.Tools\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library.Tools/Package.json",
@@ -536,7 +536,7 @@ test "consume public class members inherited without redundant modifiers" {
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",

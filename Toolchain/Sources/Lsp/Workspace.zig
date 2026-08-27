@@ -2443,7 +2443,7 @@ test "complete explicit package and module anchored paths beside a colliding pac
     try temporary.dir.createDirPath(std.testing.io, "DependencySources/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Package.json",
-        .data = "{\"dependencies\":{\"Sources\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\"Sources\",\"dependencies\":{\"Sources\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "DependencySources/Package.json",
@@ -2493,16 +2493,32 @@ test "complete explicit package and module anchored paths beside a colliding pac
     )).?;
     try std.testing.expect(hasLabel(module_type_items, "Visuals"));
 
-    const package_source = "use Package.S";
-    const package_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, package_source, package_source.len)).?;
-    try std.testing.expect(hasLabel(package_items, "Sources"));
+    const package_root_source = "use Package.";
+    const package_root_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        package_root_source,
+        package_root_source.len,
+    )).?;
+    try std.testing.expect(hasLabel(package_root_items, "FallingBodies"));
+    try std.testing.expect(!hasLabel(package_root_items, "Sources"));
+    try std.testing.expect(!hasLabel(package_root_items, "Model"));
+    try std.testing.expect(!hasLabel(package_root_items, "Visuals"));
 
-    const local_source = "use Package.Sources.FallingBodies.";
+    const package_source = "use Package.F";
+    const package_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, package_source, package_source.len)).?;
+    try std.testing.expect(hasLabel(package_items, "FallingBodies"));
+
+    const local_source = "use Package.FallingBodies.";
     const local_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, local_source, local_source.len)).?;
     try std.testing.expect(hasLabel(local_items, "Model"));
     try std.testing.expect(hasLabel(local_items, "Visuals"));
 
-    const package_type_source = "func draw(value:Package.Sources.FallingBodies.V";
+    const package_type_source = "func draw(value:Package.FallingBodies.V";
     const package_type_items = (try itemsAt(
         allocator,
         std.testing.io,
@@ -3442,7 +3458,7 @@ test "complete a module facade together with its child namespace" {
     try temporary.dir.createDirPath(std.testing.io, "STD/Platform/MacOS/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"STD\":\"=0.1.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"STD\":\"=0.1.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "STD/Package.json",
@@ -3569,7 +3585,7 @@ test "respect closed package namespaces during completion" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.UI/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -3877,7 +3893,7 @@ test "complete representative GFX members at their package and module boundaries
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Canvas");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",

@@ -93,7 +93,7 @@ test "compose a module facade with its child namespace" {
     try temporary.dir.createDirPath(std.testing.io, "STD/Module/Math");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"STD\":\"=0.1.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"STD\":\"=0.1.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "STD/Package.json",

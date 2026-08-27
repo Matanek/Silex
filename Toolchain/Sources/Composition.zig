@@ -15,7 +15,7 @@ test "compose a package diamond once into deterministic portable IR" {
     try temporary.dir.createDirPath(std.testing.io, "Common/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"A\":\"=1.0.0\",\"B\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"A\":\"=1.0.0\",\"B\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -152,7 +152,7 @@ test "load qualified package modules without use through principal module files"
     try temporary.dir.createDirPath(std.testing.io, "Math/Module/Geometry");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"Math\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Math\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",

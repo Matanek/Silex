@@ -1,6 +1,6 @@
 # Use source packages
 
-A source package keeps its modules under `Module/`:
+A manifest uses `Module/` as its source directory by default:
 
 ```text
 Math/
@@ -10,13 +10,28 @@ Math/
     Vec3.sx
 ```
 
+Choose another physical directory without adding it to logical module names:
+
+```json
+{
+  "sources": "Sources"
+}
+```
+
+With that manifest, `Sources/Geometry/Vec3.sx` provides `Geometry.Vec3` in an
+unnamed application or `Math.Geometry.Vec3` in a package named `Math`.
+`sources` is relative to `Package.json`; use `"."` to select the package root.
+Absolute paths, backslashes, empty paths, `.` or `..` segments, repeated
+separators and trailing separators are rejected. One manifest selects exactly
+one source directory, without globs or arrays.
+
 `Module/@module.sx` is the optional principal module of a named package. The
 capitalized spelling `Module/@Module.sx` is also accepted with exactly the same
 meaning. For a package named `Math`, either spelling provides `Math`; a nested
 `Module/Geometry/@module.sx` provides `Math.Geometry`.
 
-A named package may also provide modules selected for the current platform and
-exact compilation target:
+A package may also provide modules selected for the current platform and exact
+compilation target:
 
 ```text
 Platform/MacOS/Module/
@@ -33,6 +48,10 @@ For `macos-arm64`, the compiler indexes `Module/`,
 segments never appear in module names. For example,
 `Platform/MacOS/Module/System/Write.sx` provides
 `PackageName.System.Write`.
+
+A custom `sources` value replaces the final `Module` directory in all three
+roots. With `"sources": "Sources"`, the active roots become `Sources/`,
+`Platform/MacOS/Sources/` and `Target/macos-arm64/Sources/`.
 
 The platform root contains code shared by its architectures. Use the exact
 target root only when source genuinely depends on the architecture or ABI.
@@ -334,9 +353,10 @@ silex run Main.sx
 ```
 
 Application modules remain addressable by their canonical path relative to the
-manifest, such as `Sources.Demo.Interpolation`. `Package.Sources.Demo` anchors
-that path explicitly at the manifest, while `Module.Interpolation` anchors it
-at the importing source's directory, as described in
+selected source directory. With `"sources": "Sources"`, the physical source
+`Sources/Demo/Interpolation.sx` is `Demo.Interpolation`;
+`Package.Demo.Interpolation` anchors that path explicitly at the package, while
+`Module.Interpolation` anchors it at the importing source's directory, as described in
 [Import modules](Modules.md).
 
 `Package` and `Module` are reserved as contextual roots. A package identity
