@@ -896,6 +896,42 @@ test "native list append and clear reuse bounded storage" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native list clear releases class elements immediately" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Counter { var drops:int; func record() { self.drops++ } }
+        \\class Token { var counter:Counter; drop { self.counter.record() } }
+        \\struct Entry { var token:Token }
+        \\class Queue {
+        \\    var values:Entry[]
+        \\    var counter:Counter
+        \\    init(counter:Counter) { self.values = []; self.counter = counter }
+        \\    func cycle() {
+        \\        self.values.append(Entry(token:Token(counter:self.counter)))
+        \\        self.values.clear()
+        \\    }
+        \\}
+        \\func main() {
+        \\    var counter = Counter(drops:0)
+        \\    var queue = Queue(counter)
+        \\    for index in 0...128 { queue.cycle() }
+        \\    print(counter.drops)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(source);
+    compilation.ir.files = &.{"Main.sx"};
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+    try std.testing.expectEqualStrings("128\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native copied slices match the reference" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

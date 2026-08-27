@@ -293,6 +293,7 @@ pub const Instruction = union(enum) {
     pub const ClassDrop = struct {
         operand: Slot,
         ownership: Ir.Ownership = .root,
+        skip_cycle: bool = false,
         static_type: usize,
         plans: []const Plan,
 

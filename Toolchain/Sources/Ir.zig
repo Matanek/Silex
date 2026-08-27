@@ -193,6 +193,7 @@ pub const Instruction = union(enum) {
     pub const ClassDrop = struct {
         operand: ValueId,
         ownership: Ownership = .root,
+        skip_cycle: bool = false,
         static_type: usize,
         plans: []const Plan,
 
@@ -765,6 +766,7 @@ fn writeInstruction(
             try output.appendSlice(allocator, "class.drop ");
             try appendValueChecked(output, allocator, function, drop.operand);
             if (drop.ownership == .edge) try output.appendSlice(allocator, " edge");
+            if (drop.skip_cycle) try output.appendSlice(allocator, " transferred");
             for (drop.plans) |plan| {
                 if (plan.structure >= program.structures.len) return error.InvalidProgram;
                 try output.appendSlice(allocator, ", ");

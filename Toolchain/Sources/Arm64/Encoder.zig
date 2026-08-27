@@ -1074,7 +1074,11 @@ fn encodeFunction(
                     try Fixups.patch19(words.items, no_context, words.items.len);
                 }
                 const done = words.items.len;
-                try Fixups.patch19(words.items, skip_finalization.cycle_candidate, cycle_prepare);
+                try Fixups.patch19(
+                    words.items,
+                    skip_finalization.cycle_candidate,
+                    if (drop.skip_cycle) done else cycle_prepare,
+                );
                 try Fixups.patch19(words.items, skip_finalization.rooted, done);
                 try Fixups.patch19(words.items, skip_finalization.already_dropped, done);
                 if (cycle_unavailable) |at| try Fixups.patch19(words.items, at, done);

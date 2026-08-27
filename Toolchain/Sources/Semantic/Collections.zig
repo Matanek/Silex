@@ -153,13 +153,28 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try requireArity(self, call, 2);
         const index = try requireIndex(self, builder, call.arguments[0]);
         const replacement = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
-        if (Resources.requiresRetain(self, collection.element)) try Resources.retainValueOwned(self, builder, collection.element, replacement.value, ownership);
+        if (Resources.requiresRetain(self, collection.element)) {
+            if (!replacement.transferred) {
+                try Resources.retainValueOwned(self, builder, collection.element, replacement.value, ownership);
+            } else if (ownership == .edge) {
+                try Resources.retainValueOwned(self, builder, collection.element, replacement.value, .edge);
+                try Resources.releaseTransferredRoot(self, builder, collection.element, replacement.value);
+            }
+        }
         const previous = try self.newValue(builder, collection.element);
         try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = source.value, .index = index.value, .position = call.name_position } });
         const updated = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = source.value, .index = index.value, .replacement = replacement.value, .ownership = ownership, .position = call.name_position } });
         try storeBinding(self, builder, binding, updated);
-        return .{ .type = collection.element, .value = previous };
+        if (ownership == .edge and Resources.requiresRetain(self, collection.element)) {
+            try Resources.retainValue(self, builder, collection.element, previous);
+            try Resources.emitDropOwned(self, builder, collection.element, previous, .edge);
+        }
+        return .{
+            .type = collection.element,
+            .value = previous,
+            .transferred = Resources.ownsValue(self, collection.element),
+        };
     }
     if (std.mem.eql(u8, call.name, "swap")) {
         try requireArity(self, call, 2);
@@ -265,9 +280,25 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             kind = .take_last;
         }
     }
-    if (argument) |value| if (Resources.requiresRetain(self, argument_type.?) and !argument_transferred) {
-        try Resources.retainValueOwned(self, builder, argument_type.?, value, ownership);
-    };
+    if (argument) |value| {
+        if (kind == .append_sequence) {
+            if (Resources.requiresRetain(self, collection.element)) {
+                if (!argument_transferred) {
+                    try Resources.emitCollectionElementsRetainOwned(self, builder, argument_type.?, value, ownership);
+                } else if (ownership == .edge) {
+                    try Resources.emitCollectionElementsRetainOwned(self, builder, argument_type.?, value, .edge);
+                    try Resources.releaseCollectionElementsTransferredRoot(self, builder, argument_type.?, value);
+                }
+            }
+        } else if (Resources.requiresRetain(self, argument_type.?)) {
+            if (!argument_transferred) {
+                try Resources.retainValueOwned(self, builder, argument_type.?, value, ownership);
+            } else if (ownership == .edge) {
+                try Resources.retainValueOwned(self, builder, argument_type.?, value, .edge);
+                try Resources.releaseTransferredRoot(self, builder, argument_type.?, value);
+            }
+        }
+    }
     const updated = try self.newValue(builder, binding.type);
     try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .ownership = ownership, .kind = kind, .index = index, .argument = argument, .argument_transferred = argument_transferred, .removed = removed, .position = call.name_position } });
     try storeBinding(self, builder, binding, updated);

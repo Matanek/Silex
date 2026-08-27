@@ -370,7 +370,13 @@ fn lowerInstruction(
                     .functions = functions,
                 };
             }
-            break :finalize .{ .class_drop = .{ .operand = layout.values[drop.operand].start, .ownership = drop.ownership, .static_type = drop.static_type, .plans = plans } };
+            break :finalize .{ .class_drop = .{
+                .operand = layout.values[drop.operand].start,
+                .ownership = drop.ownership,
+                .skip_cycle = drop.skip_cycle,
+                .static_type = drop.static_type,
+                .plans = plans,
+            } };
         },
         .global_load => |load| .{ .global_load = .{ .result = layout.values[load.result], .global = load.global } },
         .global_store => |store| .{ .global_store = .{ .operand = layout.values[store.operand], .global = store.global } },

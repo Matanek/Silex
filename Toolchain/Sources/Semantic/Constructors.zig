@@ -638,15 +638,16 @@ fn analyzeSelfAssignment(
         );
         return self.fail(assignment.value.?.position, message);
     }
-    if (Resources.requiresRetain(self, field.type)) try Resources.retainValueOwned(
-        self,
-        builder,
-        field.type,
-        value.value,
-        if (self.structures[fieldOwnerIndex(self, structure.name)].is_class) .edge else .root,
-    );
-    if (value.transferred and self.structures[fieldOwnerIndex(self, structure.name)].is_class) {
-        try Resources.releaseTransferredRoot(self, builder, field.type, value.value);
+    const class_owned_field = self.structures[fieldOwnerIndex(self, structure.name)].is_class;
+    if (Resources.requiresRetain(self, field.type)) {
+        if (class_owned_field) {
+            try Resources.retainValueOwned(self, builder, field.type, value.value, .edge);
+            if (value.transferred) {
+                try Resources.releaseTransferredRoot(self, builder, field.type, value.value);
+            }
+        } else if (!value.transferred) {
+            try Resources.retainValueOwned(self, builder, field.type, value.value, .root);
+        }
     }
 
     const structure_index = fieldOwnerIndex(self, structure.name);

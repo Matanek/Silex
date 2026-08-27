@@ -1,0 +1,44 @@
+class DropCounter {
+    var count:int
+
+    init() { self.count = 0 }
+}
+
+class Token {
+    var counter:DropCounter
+
+    init(counter:DropCounter) { self.counter = counter }
+
+    drop { self.counter.count++ }
+}
+
+struct Payload {
+    var tokens:Token[]
+
+    private init(tokens:Token[]) { self.tokens = move tokens }
+
+    static func make(tokens:Token[]) Payload {
+        return Payload(tokens)
+    }
+}
+
+class Owner {
+    var retained:Payload? = null
+
+    func fill(counter:DropCounter) {
+        self.retained = Payload.make([Token(counter)])
+    }
+
+    func clear() { self.retained = null }
+}
+
+test "constructor parameters transfer into resource-bearing structure fields" {
+    var counter = DropCounter()
+    {
+        var owner = Owner()
+        owner.fill(counter)
+        owner.clear()
+        assert(counter.count == 1)
+    }
+    assert(counter.count == 1)
+}

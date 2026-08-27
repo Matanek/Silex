@@ -320,6 +320,7 @@ fn emitDropOwnedInner(self: anytype, builder: anytype, type_value: Ast.Type, val
         try self.emit(builder, .{ .class_drop = .{
             .operand = value,
             .ownership = ownership,
+            .skip_cycle = ownership == .root and !invoke_value_drop,
             .static_type = type_index,
             .plans = try classDropPlans(self, type_index),
         } });
@@ -638,6 +639,24 @@ fn emitCollectionDropInner(self: anytype, builder: anytype, collection_type: Ast
 
 fn emitCollectionRetain(self: anytype, builder: anytype, collection: Ast.Collection, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
     if (collection.length == null) try self.emit(builder, .{ .list_retain = .{ .operand = value, .ownership = ownership } });
+    return emitCollectionElementsRetainOwnedInner(self, builder, collection, value, ownership);
+}
+
+pub fn emitCollectionElementsRetainOwned(self: anytype, builder: anytype, collection_type: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
+    const type_index = collection_type.structureIndex() orelse return;
+    if (type_index >= self.structures.len) return;
+    const collection = self.structures[type_index].collection orelse return;
+    return emitCollectionElementsRetainOwnedInner(self, builder, collection, value, ownership);
+}
+
+pub fn releaseCollectionElementsTransferredRoot(self: anytype, builder: anytype, collection_type: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
+    const type_index = collection_type.structureIndex() orelse return;
+    if (type_index >= self.structures.len) return;
+    const collection = self.structures[type_index].collection orelse return;
+    return emitCollectionDropInner(self, builder, collection_type, collection, value, false, .root, false);
+}
+
+fn emitCollectionElementsRetainOwnedInner(self: anytype, builder: anytype, collection: Ast.Collection, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
     if (!requiresRetain(self, collection.element)) return;
     const index_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);

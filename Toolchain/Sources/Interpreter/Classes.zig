@@ -23,7 +23,7 @@ pub fn retain(heap: []Entry, instance: *Value.Structure, ownership: Ir.Ownership
     }
 }
 
-pub fn release(allocator: std.mem.Allocator, heap: []Entry, instance: *Value.Structure, ownership: Ir.Ownership) !bool {
+pub fn release(allocator: std.mem.Allocator, heap: []Entry, instance: *Value.Structure, ownership: Ir.Ownership, collect_cycle: bool) !bool {
     const entry = find(heap, instance) orelse return error.InvalidProgram;
     if (entry.dropped) return false;
     switch (ownership) {
@@ -35,7 +35,7 @@ pub fn release(allocator: std.mem.Allocator, heap: []Entry, instance: *Value.Str
         },
     }
     if (entry.roots != 0 or entry.edges != 0) {
-        if (ownership == .root and entry.roots == 0 and try collectCycle(allocator, heap, entry)) return true;
+        if (collect_cycle and ownership == .root and entry.roots == 0 and try collectCycle(allocator, heap, entry)) return true;
         return false;
     }
     entry.dropped = true;

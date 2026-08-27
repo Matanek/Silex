@@ -360,7 +360,13 @@ fn executeInstruction(
             const should_finalize = finalize: {
                 const guard = session.snapshot_gate.mutation();
                 defer guard.release();
-                break :finalize try Classes.release(allocator, session.classes.items, class.instance, drop.ownership);
+                break :finalize try Classes.release(
+                    allocator,
+                    session.classes.items,
+                    class.instance,
+                    drop.ownership,
+                    !drop.skip_cycle,
+                );
             };
             if (should_finalize) {
                 const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;

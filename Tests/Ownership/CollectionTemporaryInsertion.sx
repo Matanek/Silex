@@ -20,6 +20,31 @@ func make_holder(counter:DropCounter) Holder {
     return Holder(token:Token(counter))
 }
 
+class HolderQueue {
+    var values:Holder[]
+
+    init() { self.values = [] }
+
+    func append_and_clear(counter:DropCounter) {
+        self.values.append(make_holder(counter))
+        self.values.prepend(make_holder(counter))
+        self.values.insert(1, make_holder(counter))
+        self.values.clear()
+    }
+
+    func append_batch_and_clear(counter:DropCounter) {
+        var batch:Holder[] = [make_holder(counter), make_holder(counter)]
+        self.values.append(move batch)
+        self.values.clear()
+    }
+
+    func replace_and_clear(counter:DropCounter) {
+        self.values.append(make_holder(counter))
+        self.values.replace(0, make_holder(counter))
+        self.values.clear()
+    }
+}
+
 test "collection insertion transfers resource-bearing temporaries" {
     var counter = DropCounter()
     {
@@ -29,4 +54,26 @@ test "collection insertion transfers resource-bearing temporaries" {
         values.insert(1, make_holder(counter))
     }
     assert(counter.count == 3)
+}
+
+test "class field insertion converts transferred roots to owned edges" {
+    var counter = DropCounter()
+    var queue = HolderQueue()
+    queue.append_and_clear(counter)
+    assert(counter.count == 3)
+    queue.append_batch_and_clear(counter)
+    assert(counter.count == 5)
+}
+
+test "ignored replacements release removed resource values" {
+    var counter = DropCounter()
+    var values:Holder[] = [make_holder(counter)]
+    values.replace(0, make_holder(counter))
+    assert(counter.count == 1)
+    values.clear()
+    assert(counter.count == 2)
+
+    var queue = HolderQueue()
+    queue.replace_and_clear(counter)
+    assert(counter.count == 4)
 }

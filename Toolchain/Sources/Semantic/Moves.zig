@@ -22,10 +22,11 @@ pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Mo
     }
     if (builder.bindings.items[index].borrowed_root != null) return self.fail(unary.operator_position, "a borrowed alias cannot be consumed with 'move'");
     try Borrowing.ensureRootUnborrowed(self, builder, name, unary.operator_position);
-    const value = try self.analyzeExpression(builder, unary.operand);
+    var value = try self.analyzeExpression(builder, unary.operand);
     builder.bindings.items[index].available = false;
     builder.bindings.items[index].refined_type = null;
     builder.bindings.items[index].refined_value = null;
+    value.transferred = true;
     return value;
 }
 

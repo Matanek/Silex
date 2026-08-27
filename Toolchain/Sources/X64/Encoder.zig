@@ -1195,7 +1195,6 @@ fn emitClassDrop(
     try bytes.appendNTimes(allocator, 0, 4);
 
     const cycle_prepare = bytes.items.len;
-    try patchRelative(bytes.items, cycle_candidate, cycle_prepare);
     try emitLoadStack(allocator, bytes, .r10, value.operand);
     try emitLoadMemory(allocator, bytes, .rax, .r10, class_state_offset);
     try emitRegisterBinary(allocator, bytes, 0x85, .rax, .rax);
@@ -1275,6 +1274,7 @@ fn emitClassDrop(
     for (finalized.items) |site| try patchRelative(bytes.items, site, finalization_complete);
     try patchRelative(bytes.items, already_released, done);
     try patchRelative(bytes.items, rooted, done);
+    try patchRelative(bytes.items, cycle_candidate, if (value.skip_cycle) done else cycle_prepare);
     try patchRelative(bytes.items, already_claimed, done);
     try patchRelative(bytes.items, cycle_claimed, done);
     try patchRelative(bytes.items, cycle_unavailable, done);
