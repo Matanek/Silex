@@ -119,30 +119,30 @@ test "require an explicit Module anchor for source relative imports" {
     );
 }
 
-test "anchor Package at the entry source directory without a manifest" {
+test "anchor Package at the loose project root for a principal entry" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
 
-    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Demo/Feature");
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Test/Feature");
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Sandbox/Demo/@Module.sx",
-        .data = "use Package.Feature.Worker.run\nfunc main() { print(run()) }",
+        .sub_path = "Sandbox/Test/@Module.sx",
+        .data = "use Package.Test.Feature.Worker.run\nfunc main() { print(run()) }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Sandbox/Demo/Shared.sx",
+        .sub_path = "Sandbox/Test/Shared.sx",
         .data = "public func answer() int { return 40 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Sandbox/Demo/Feature/Helper.sx",
+        .sub_path = "Sandbox/Test/Feature/Helper.sx",
         .data = "public func extra() int { return 2 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Sandbox/Demo/Feature/Worker.sx",
+        .sub_path = "Sandbox/Test/Feature/Worker.sx",
         .data =
-        \\use Package.Shared.answer
+        \\use Package.Test.Shared.answer
         \\use Module.Helper.extra
         \\public func run() int { return answer() + extra() }
         ,
@@ -153,7 +153,7 @@ test "anchor Package at the entry source directory without a manifest" {
         "tmp",
         &temporary.sub_path,
         "Sandbox",
-        "Demo",
+        "Test",
         "@Module.sx",
     });
     var compiler = Project.Compiler.init(allocator, std.testing.io);

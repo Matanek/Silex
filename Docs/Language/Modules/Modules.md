@@ -33,9 +33,9 @@ use Module.Interpolation.interpolate as module_interpolate
 ```
 
 `Package.` starts at the current package namespace. In an unnamed application,
-that is the path relative to `Package.json`. Without a manifest, the package
-root is the directory containing the entry `.sx` passed to `silex run` or
-`silex compile`; that root remains stable for every module loaded by the run.
+that is the path relative to `Package.json`. Without a manifest, it is the
+implicit source root selected from the entry `.sx`; that root remains stable
+for every module loaded by the run.
 `Module.` starts at the physical directory namespace of the source file that
 contains the `use`. Neither root can cross into a dependency. A path without
 either root keeps its historical meaning: it is already canonical and may name
@@ -133,7 +133,9 @@ change their module names.
 Without a `Package.json`, compiling or editing a principal module directly
 uses the parent of its folder as the implicit project root. This preserves the
 folder's module identity while keeping quick experiments and scripts free of
-project configuration.
+project configuration. For `Sandbox/Test/@Module.sx`, `Package.` therefore
+lists direct children of `Sandbox`, while `Package.Test.` reaches children such
+as `Display` inside `Test`.
 
 The file follows ordinary declaration and visibility rules. It may define a
 module facade with explicit public reexports, private helpers and ordinary

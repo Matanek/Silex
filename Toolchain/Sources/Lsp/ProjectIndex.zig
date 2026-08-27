@@ -16,7 +16,6 @@ pub const IndexedProject = struct {
     index: Modules.Index,
     current_owner: usize,
     current_path: []const u8,
-    package_context_prefix: []const u8,
 };
 
 pub const LoadedProgram = struct {
@@ -140,22 +139,15 @@ pub fn index(
         try graph.moduleMerges(allocator),
     );
     var current_owner: usize = 0;
-    var current_provider: ?Modules.Provider = null;
     for (module_index.providers) |provider| if (samePath(provider.path, document_path)) {
         current_owner = provider.owner;
-        current_provider = provider;
         break;
     };
-    const package_context_prefix = if (!graph.explicit and graph.packages[0].name == null)
-        if (current_provider) |provider| provider.local_prefix else ""
-    else
-        "";
     return .{
         .graph = graph,
         .index = module_index,
         .current_owner = current_owner,
         .current_path = document_path,
-        .package_context_prefix = package_context_prefix,
     };
 }
 
@@ -200,9 +192,7 @@ pub fn canonicalUsePath(
     const module_prefix = "Module.";
     if (std.mem.startsWith(u8, path, package_prefix)) {
         const relative = path[package_prefix.len..];
-        const package_name = project.graph.packages[source_provider.owner].name orelse
-            if (source_provider.owner == 0) project.package_context_prefix else "";
-        if (package_name.len == 0) return relative;
+        const package_name = project.graph.packages[source_provider.owner].name orelse return relative;
         return std.fmt.allocPrint(allocator, "{s}.{s}", .{ package_name, relative });
     }
     if (std.mem.startsWith(u8, path, module_prefix)) {

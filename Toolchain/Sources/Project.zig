@@ -87,7 +87,6 @@ pub const Compiler = struct {
     catalog_contributions: []const CatalogContribution = &.{},
     files: []const []const u8 = &.{},
     entry_module: usize = 0,
-    package_context_prefix: []const u8 = "",
     diagnostic: ?Source.Diagnostic = null,
     generic_type_maps: []const []const Ast.Type = &.{},
     function_type_maps: []const []const Ast.Type = &.{},
@@ -180,11 +179,6 @@ pub const Compiler = struct {
             .{ .offset = 0, .line = 1, .column = 1 },
             "entry source is not a discovered module",
         );
-        self.package_context_prefix = if (!self.packages.explicit and
-            self.packages.packages[0].name == null)
-            self.index.providers[self.entry_module].local_prefix
-        else
-            "";
         try self.loadModule(self.entry_module, null);
         try self.validateTypeAliases();
         try self.validateReexports();
@@ -359,9 +353,7 @@ pub const Compiler = struct {
         const provider = self.index.providers[source_module];
         if (std.mem.startsWith(u8, path, package_prefix)) {
             const relative = path[package_prefix.len..];
-            const package_name = self.packages.packages[provider.owner].name orelse
-                if (provider.owner == 0) self.package_context_prefix else "";
-            if (package_name.len == 0) return relative;
+            const package_name = self.packages.packages[provider.owner].name orelse return relative;
             const canonical: []const u8 = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ package_name, relative });
             return canonical;
         }

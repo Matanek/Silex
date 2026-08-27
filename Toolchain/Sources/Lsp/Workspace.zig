@@ -1146,8 +1146,7 @@ fn resolveUseQualifier(
     const provider = source_provider orelse return .{ .path = qualifier };
     if (std.mem.eql(u8, qualifier, "Package")) {
         return .{
-            .path = project.graph.packages[provider.owner].name orelse
-                if (provider.owner == 0) project.package_context_prefix else "",
+            .path = project.graph.packages[provider.owner].name orelse "",
             .owner_only = true,
         };
     }
@@ -2388,34 +2387,49 @@ test "complete loose local modules from the document directory with a wider work
     try std.testing.expect(hasLabel(qualified_items, "Vec3"));
 }
 
-test "complete Package from a loose principal entry directory" {
+test "complete Package at the loose principal package root" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Demo");
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Test");
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Sandbox/Demo/@Module.sx",
-        .data = "func main() {}",
+        .sub_path = "Sandbox/Test/@Module.sx",
+        .data = "public class Test {}\nfunc main() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Sandbox/Demo/Shared.sx",
-        .data = "public func answer() int { return 42 }",
+        .sub_path = "Sandbox/Test/Display.sx",
+        .data = "public class Display {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Sandbox/Outside.sx",
         .data = "public func ignore() {}",
     });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Sandbox" });
-    const entry_path = try std.fs.path.join(allocator, &.{ root, "Demo", "@Module.sx" });
+    const entry_path = try std.fs.path.join(allocator, &.{ root, "Test", "@Module.sx" });
     const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{entry_path});
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
 
-    const source = "use Package.S";
+    const source = "use Package.";
     const items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, source, source.len)).?;
-    try std.testing.expect(hasLabel(items, "Shared"));
-    try std.testing.expect(!hasLabel(items, "Outside"));
+    try std.testing.expect(hasLabel(items, "Test"));
+    try std.testing.expect(hasLabel(items, "Outside"));
+    try std.testing.expect(!hasLabel(items, "Display"));
+
+    const nested_source = "use Package.Test.";
+    const nested_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        nested_source,
+        nested_source.len,
+    )).?;
+    try std.testing.expect(hasLabel(nested_items, "Display"));
+    try std.testing.expect(!hasLabel(nested_items, "Outside"));
 }
 
 test "complete explicit package and module anchored paths beside a colliding package" {

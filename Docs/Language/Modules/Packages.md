@@ -345,15 +345,16 @@ reject those identities before dependency or module resolution, so the two
 roots remain unambiguous in every project.
 
 A loose program without `Package.json` needs no manifest merely to try Silex
-or run a short script. The directory containing the entry `.sx` is its package
-root, so `Package.Helper` addresses `Helper.sx` there even when a loaded module
-uses it from a nested directory. Its implicit development environment exposes
-compatible packages through workspace links, user links, then installed
-versions. Its location and the directory from which `silex run` is launched
-never make a nearby `Packages/` directory visible. When several installed
-versions are compatible with the running toolchain, Silex selects the newest
-one. As soon as a program gains a manifest, its declared direct dependencies
-replace this implicit environment.
+or run a short script. Its inferred source root is also the root of `Package.`.
+For an ordinary entry this is its containing directory. A principal
+`Folder/@Module.sx` keeps `Folder` as its module identity, so its inferred
+source and package root is the parent of `Folder`. Its implicit development
+environment exposes compatible packages through workspace links, user links,
+then installed versions. Its location and the directory from which
+`silex run` is launched never make a nearby `Packages/` directory visible.
+When several installed versions are compatible with the running toolchain,
+Silex selects the newest one. As soon as a program gains a manifest, its
+declared direct dependencies replace this implicit environment.
 
 The implicit environment ignores links whose checkout is unavailable or no
 longer compatible, because a loose program may not reference them at all. A
