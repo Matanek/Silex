@@ -85,7 +85,7 @@ pub fn definitionAtForTarget(
     )) |receiver_type|
         try std.fmt.allocPrint(allocator, "{s}.{s}", .{ receiver_type, member })
     else
-        try resolveImportedPath(allocator, program, request.path);
+        try resolveImportedPath(allocator, project, program, request.path);
     return definitionForPath(allocator, io, documents, project, resolved_path, encoding, 0);
 }
 
@@ -121,7 +121,8 @@ fn definitionForPath(
             const alias = use.alias orelse lastSegment(use.path);
             if (!std.mem.eql(u8, alias, target.declaration)) continue;
             if (!use.is_public and provider.owner != project.current_owner) return null;
-            return definitionForPath(allocator, io, documents, project, use.path, encoding, depth + 1);
+            const use_path = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
+            return definitionForPath(allocator, io, documents, project, use_path, encoding, depth + 1);
         }
     }
     const catalog_uses = try ProjectIndex.catalogUses(allocator, io, documents, project, canonical_provider);
@@ -285,16 +286,23 @@ fn samePath(left: []const u8, right: []const u8) bool {
     return std.mem.eql(u8, std.mem.trimEnd(u8, left, "/"), std.mem.trimEnd(u8, right, "/"));
 }
 
-fn resolveImportedPath(allocator: Allocator, program: Ast.Program, path: []const u8) ![]const u8 {
+fn resolveImportedPath(
+    allocator: Allocator,
+    project: ProjectIndex.IndexedProject,
+    program: Ast.Program,
+    path: []const u8,
+) ![]const u8 {
     const separator = std.mem.indexOfScalar(u8, path, '.') orelse path.len;
     const root = path[0..separator];
     for (program.uses) |use| {
         const alias = use.alias orelse lastSegment(use.path);
         if (!std.mem.eql(u8, alias, root)) continue;
+        const source_provider = ProjectIndex.currentProvider(project) orelse return path;
+        const use_path = try ProjectIndex.canonicalUsePath(allocator, project, source_provider, use.path);
         return if (separator == path.len)
-            use.path
+            use_path
         else
-            std.fmt.allocPrint(allocator, "{s}{s}", .{ use.path, path[separator..] });
+            std.fmt.allocPrint(allocator, "{s}{s}", .{ use_path, path[separator..] });
     }
     return path;
 }

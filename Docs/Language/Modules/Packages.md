@@ -334,18 +334,26 @@ silex run Main.sx
 ```
 
 Application modules remain addressable by their canonical path relative to the
-manifest, such as `Sources.Demo.Interpolation`. A `use` may additionally name a
-module relative to the importing source's directory, as described in
+manifest, such as `Sources.Demo.Interpolation`. `Package.Sources.Demo` anchors
+that path explicitly at the manifest, while `Module.Interpolation` anchors it
+at the importing source's directory, as described in
 [Import modules](Modules.md).
 
+`Package` and `Module` are reserved as contextual roots. A package identity
+cannot be exactly either name or begin with `Package.` or `Module.`. Manifests
+reject those identities before dependency or module resolution, so the two
+roots remain unambiguous in every project.
+
 A loose program without `Package.json` needs no manifest merely to try Silex
-or run a short script. Its implicit development environment exposes compatible
-packages through workspace links, user links, then installed versions. Its
-location and the directory from which `silex run` is launched never make a
-nearby `Packages/` directory visible. When several installed versions are
-compatible with the running toolchain, Silex selects the newest one. As soon
-as a program gains a manifest, its declared direct dependencies replace this
-implicit environment.
+or run a short script. The directory containing the entry `.sx` is its package
+root, so `Package.Helper` addresses `Helper.sx` there even when a loaded module
+uses it from a nested directory. Its implicit development environment exposes
+compatible packages through workspace links, user links, then installed
+versions. Its location and the directory from which `silex run` is launched
+never make a nearby `Packages/` directory visible. When several installed
+versions are compatible with the running toolchain, Silex selects the newest
+one. As soon as a program gains a manifest, its declared direct dependencies
+replace this implicit environment.
 
 The implicit environment ignores links whose checkout is unavailable or no
 longer compatible, because a loose program may not reference them at all. A

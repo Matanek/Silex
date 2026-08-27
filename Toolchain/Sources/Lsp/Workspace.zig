@@ -429,6 +429,7 @@ pub fn scopeItemsAtForTargetExpected(
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
     const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
+    const current_provider = ProjectIndex.currentProvider(project);
 
     var ranked: std.ArrayList(RankedItem) = .empty;
     if (aggregate) |context| {
@@ -440,7 +441,11 @@ pub fn scopeItemsAtForTargetExpected(
             break;
         };
         if (findUseByAlias(program, context.type_name)) |use| {
-            if (declarationTarget(project.index, use.path)) |target| {
+            const use_path = if (current_provider) |provider|
+                try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path)
+            else
+                use.path;
+            if (declarationTarget(project.index, use_path)) |target| {
                 const provider = project.index.providers[target.provider];
                 if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) {
                     if (try loadProgram(allocator, io, documents, provider)) |loaded| {
@@ -526,6 +531,10 @@ pub fn scopeItemsAtForTargetExpected(
     );
     for (program.uses) |use| {
         const label = use.alias orelse lastSegment(use.path);
+        const use_path = if (current_provider) |provider|
+            try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path)
+        else
+            use.path;
         if (!matchesPrefix(label, prefix)) continue;
         if (expected_type) |expected| {
             if (!std.mem.eql(u8, expected, label) and
@@ -539,7 +548,7 @@ pub fn scopeItemsAtForTargetExpected(
             }, 18, false);
             continue;
         }
-        if (declarationTarget(project.index, use.path)) |target| {
+        if (declarationTarget(project.index, use_path)) |target| {
             const provider = project.index.providers[target.provider];
             if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
             const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
@@ -620,8 +629,8 @@ pub fn scopeItemsAtForTargetExpected(
             };
             if (matched) continue;
         }
-        if (findProvider(project.index, use.path) != null or project.index.isNamespace(use.path)) {
-            if (!try modulePathVisible(allocator, io, documents, project, use.path)) continue;
+        if (findProvider(project.index, use_path) != null or project.index.isNamespace(use_path)) {
+            if (!try modulePathVisible(allocator, io, documents, project, use_path)) continue;
             try appendRanked(allocator, &ranked, .{
                 .label = label,
                 .kind = CompletionKind.module,
@@ -688,19 +697,23 @@ fn queryAt(
     );
     if (current_program) |program| {
         if (findUseByAlias(program, receiver)) |use| {
-            if (findProvider(project.index, use.path) == null and
-                !project.index.isNamespace(use.path) and
-                declarationTarget(project.index, use.path) != null)
+            const use_path = if (ProjectIndex.currentProvider(project)) |provider|
+                try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path)
+            else
+                use.path;
+            if (findProvider(project.index, use_path) == null and
+                !project.index.isNamespace(use_path) and
+                declarationTarget(project.index, use_path) != null)
             {
                 return .{ .imported_member = .{
-                    .type_path = use.path,
+                    .type_path = use_path,
                     .prefix = prefix,
                     .cursor = cursor,
                     .static_receiver = true,
                 } };
             }
             return .{ .qualifier = .{
-                .path = use.path,
+                .path = use_path,
                 .prefix = prefix,
                 .cursor = cursor,
                 .type_only = qualified_type,
@@ -714,6 +727,30 @@ fn queryAt(
                 .prefix = prefix,
                 .cursor = cursor,
                 .type_only = qualified_type,
+            } };
+        }
+        const anchored = try resolveUseQualifier(
+            allocator,
+            project,
+            ProjectIndex.currentProvider(project),
+            receiver,
+        );
+        if (anchored.owner_only) {
+            if ((findProvider(project.index, anchored.path) != null or project.index.isNamespace(anchored.path)) and
+                try modulePathVisible(allocator, io, documents, project, anchored.path))
+            {
+                return .{ .qualifier = .{
+                    .path = receiver,
+                    .prefix = prefix,
+                    .cursor = cursor,
+                    .type_only = qualified_type,
+                } };
+            }
+            if (declarationTarget(project.index, anchored.path)) |_| return .{ .imported_member = .{
+                .type_path = anchored.path,
+                .prefix = prefix,
+                .cursor = cursor,
+                .static_receiver = true,
             } };
         }
         if ((findProvider(project.index, receiver) != null or project.index.isNamespace(receiver)) and
@@ -873,15 +910,18 @@ fn appendPathItems(
     ranked: *std.ArrayList(RankedItem),
 ) !void {
     const type_priority: u8 = 5;
-    const child_prefix = if (query.qualifier.len == 0)
+    const source_provider = ProjectIndex.currentProvider(project);
+    const resolved_qualifier = try resolveUseQualifier(allocator, project, source_provider, query.qualifier);
+    const canonical_qualifier = resolved_qualifier.path;
+    const child_prefix = if (canonical_qualifier.len == 0)
         ""
     else
-        try std.fmt.allocPrint(allocator, "{s}.", .{query.qualifier});
-    const contextual_provider = contextualProvider(project, query.qualifier);
+        try std.fmt.allocPrint(allocator, "{s}.", .{canonical_qualifier});
+    const contextual_provider = contextualProvider(project, canonical_qualifier);
     const exact_provider = if (contextual_provider) |provider_index|
         project.index.providers[provider_index]
     else
-        findProvider(project.index, query.qualifier);
+        findProvider(project.index, canonical_qualifier);
     const exact_loaded = if (exact_provider) |provider|
         if (project.graph.canAccess(project.current_owner, provider.owner, provider.name))
             try loadProgram(allocator, io, documents, provider)
@@ -895,8 +935,22 @@ fn appendPathItems(
         false;
     const child_priority: u8 = if (call_source != null and exact_provider != null) 30 else 0;
 
+    if (query.qualifier.len == 0) {
+        if (matchesPrefix("Package", query.prefix)) try appendRanked(allocator, ranked, .{
+            .label = "Package",
+            .kind = CompletionKind.module,
+            .detail = "Silex current package root",
+        }, 0, false);
+        if (source_provider != null and matchesPrefix("Module", query.prefix)) try appendRanked(allocator, ranked, .{
+            .label = "Module",
+            .kind = CompletionKind.module,
+            .detail = "Silex current source module root",
+        }, 0, false);
+    }
+
     for (project.index.providers) |provider| {
         if (samePath(provider.path, project.current_path)) continue;
+        if (resolved_qualifier.owner_only and (source_provider == null or provider.owner != source_provider.?.owner)) continue;
         if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
         if (!std.mem.startsWith(u8, provider.name, child_prefix)) continue;
         const remainder = provider.name[child_prefix.len..];
@@ -904,10 +958,10 @@ fn appendPathItems(
         const end = std.mem.indexOfScalar(u8, remainder, '.') orelse remainder.len;
         const child = remainder[0..end];
         if (!matchesPrefix(child, query.prefix)) continue;
-        const child_path = if (query.qualifier.len == 0)
+        const child_path = if (canonical_qualifier.len == 0)
             child
         else
-            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ query.qualifier, child });
+            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ canonical_qualifier, child });
         if (!try modulePathVisible(allocator, io, documents, project, child_path)) continue;
         if ((query.type_only or call_source != null) and end == remainder.len and
             (exact_loaded == null or !hasPublicDeclaration(exact_loaded.?.program, child)) and
@@ -934,7 +988,8 @@ fn appendPathItems(
     for (project.index.providers, 0..) |provider, provider_index| {
         if (contextual_provider != null) {
             if (provider_index != contextual_provider.?) continue;
-        } else if (!std.mem.eql(u8, provider.name, query.qualifier)) continue;
+        } else if (!std.mem.eql(u8, provider.name, canonical_qualifier)) continue;
+        if (resolved_qualifier.owner_only and (source_provider == null or provider.owner != source_provider.?.owner)) continue;
         if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
         for (loaded.program.structures) |structure| {
@@ -1075,6 +1130,40 @@ fn appendPathItems(
             );
         }
     };
+}
+
+const ResolvedUseQualifier = struct {
+    path: []const u8,
+    owner_only: bool = false,
+};
+
+fn resolveUseQualifier(
+    allocator: Allocator,
+    project: IndexedProject,
+    source_provider: ?Modules.Provider,
+    qualifier: []const u8,
+) !ResolvedUseQualifier {
+    const provider = source_provider orelse return .{ .path = qualifier };
+    if (std.mem.eql(u8, qualifier, "Package")) {
+        return .{
+            .path = project.graph.packages[provider.owner].name orelse
+                if (provider.owner == 0) project.package_context_prefix else "",
+            .owner_only = true,
+        };
+    }
+    if (std.mem.startsWith(u8, qualifier, "Package.")) return .{
+        .path = try ProjectIndex.canonicalUsePath(allocator, project, provider, qualifier),
+        .owner_only = true,
+    };
+    if (std.mem.eql(u8, qualifier, "Module")) return .{
+        .path = provider.local_prefix,
+        .owner_only = true,
+    };
+    if (std.mem.startsWith(u8, qualifier, "Module.")) return .{
+        .path = try ProjectIndex.canonicalUsePath(allocator, project, provider, qualifier),
+        .owner_only = true,
+    };
+    return .{ .path = qualifier };
 }
 
 fn catalogAliasAvailable(
@@ -2276,8 +2365,8 @@ test "complete loose local modules from the document directory with a wider work
         prefixed_source,
         prefixed_source.len,
     )).?;
-    try std.testing.expectEqual(@as(usize, 1), prefixed_items.len);
-    try std.testing.expectEqualStrings("Math", prefixed_items[0].label);
+    try std.testing.expect(hasLabel(prefixed_items, "Math"));
+    try std.testing.expect(hasLabel(prefixed_items, "Module"));
 
     const qualified_source =
         \\use Math
@@ -2297,6 +2386,129 @@ test "complete loose local modules from the document directory with a wider work
         qualified_cursor,
     )).?;
     try std.testing.expect(hasLabel(qualified_items, "Vec3"));
+}
+
+test "complete Package from a loose principal entry directory" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Demo");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Demo/@Module.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Demo/Shared.sx",
+        .data = "public func answer() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Outside.sx",
+        .data = "public func ignore() {}",
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Sandbox" });
+    const entry_path = try std.fs.path.join(allocator, &.{ root, "Demo", "@Module.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{entry_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    const source = "use Package.S";
+    const items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, source, source.len)).?;
+    try std.testing.expect(hasLabel(items, "Shared"));
+    try std.testing.expect(!hasLabel(items, "Outside"));
+}
+
+test "complete explicit package and module anchored paths beside a colliding package" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources/FallingBodies");
+    try temporary.dir.createDirPath(std.testing.io, "DependencySources/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{\"dependencies\":{\"Sources\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Package.json",
+        .data = "{\"name\":\"Sources\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Module/Global.sx",
+        .data = "public func value() int { return 1 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/FallingBodies/Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/FallingBodies/Model.sx",
+        .data = "public struct Model {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/FallingBodies/Visuals.sx",
+        .data = "public struct Visuals {}",
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Application" });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Sources", "FallingBodies", "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    const root_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, "use M", "use M".len)).?;
+    try std.testing.expect(hasLabel(root_items, "Module"));
+    try std.testing.expect(!hasLabel(root_items, "Model"));
+
+    const module_source = "use Module.V";
+    const module_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, module_source, module_source.len)).?;
+    try std.testing.expectEqual(@as(usize, 1), module_items.len);
+    try std.testing.expectEqualStrings("Visuals", module_items[0].label);
+
+    const module_type_source = "func draw(value:Module.V";
+    const module_type_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        module_type_source,
+        module_type_source.len,
+    )).?;
+    try std.testing.expect(hasLabel(module_type_items, "Visuals"));
+
+    const package_source = "use Package.S";
+    const package_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, package_source, package_source.len)).?;
+    try std.testing.expect(hasLabel(package_items, "Sources"));
+
+    const local_source = "use Package.Sources.FallingBodies.";
+    const local_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, local_source, local_source.len)).?;
+    try std.testing.expect(hasLabel(local_items, "Model"));
+    try std.testing.expect(hasLabel(local_items, "Visuals"));
+
+    const package_type_source = "func draw(value:Package.Sources.FallingBodies.V";
+    const package_type_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        package_type_source,
+        package_type_source.len,
+    )).?;
+    try std.testing.expect(hasLabel(package_type_items, "Visuals"));
+
+    const member_source = "func main() {\n    let visuals = Module.Visuals.\n}";
+    const member_cursor = std.mem.indexOf(u8, member_source, "Module.Visuals.").? + "Module.Visuals.".len;
+    const member_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, member_source, member_cursor)).?;
+    try std.testing.expect(hasLabel(member_items, "Visuals"));
+
+    const global_source = "use Sources.";
+    const global_items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, global_source, global_source.len)).?;
+    try std.testing.expect(hasLabel(global_items, "Global"));
 }
 
 test "complete public package APIs module aliases members and overlays" {

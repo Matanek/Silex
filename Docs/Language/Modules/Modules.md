@@ -14,8 +14,8 @@ use Math.Vec3
 use Math.Operations.add as add
 ```
 
-An application module may also be imported relative to the directory of the
-source file that contains the `use`. Given this project:
+Two contextual roots make imports owned by the current package explicit. Given
+this application:
 
 ```text
 Package.json
@@ -23,20 +23,44 @@ Sources/Demo/Main.sx
 Sources/Demo/Interpolation.sx
 ```
 
-both imports below select the single canonical module
+all three imports below select the single canonical module
 `Sources.Demo.Interpolation`:
 
 ```sx
-use Interpolation.interpolate
-use Sources.Demo.Interpolation.interpolate as rooted_interpolate
+use Sources.Demo.Interpolation.interpolate as canonical_interpolate
+use Package.Sources.Demo.Interpolation.interpolate as package_interpolate
+use Module.Interpolation.interpolate as module_interpolate
 ```
 
-The first form keeps a multi-file application readable inside its own folder.
-The second remains available from the path relative to `Package.json`.
-Canonical accessible paths are resolved first; only an unresolved `use` is
-then interpreted relative to its source file, and only within the same package.
-This contextual spelling is an import convenience, not a second module
-identity. Fully qualified expressions continue to use canonical module paths.
+`Package.` starts at the current package namespace. In an unnamed application,
+that is the path relative to `Package.json`. Without a manifest, the package
+root is the directory containing the entry `.sx` passed to `silex run` or
+`silex compile`; that root remains stable for every module loaded by the run.
+`Module.` starts at the physical directory namespace of the source file that
+contains the `use`. Neither root can cross into a dependency. A path without
+either root keeps its historical meaning: it is already canonical and may name
+the current package or a directly accessible dependency.
+
+Inside a named package, `Package.` omits that package's own name. For example,
+these imports written inside STD all select the canonical module `STD.UUID`:
+
+```sx
+use STD.UUID
+use Package.UUID
+use Module.UUID // when UUID.sx is beside the importing source
+```
+
+Module paths never contain the physical `.sx` extension. The contextual roots
+are valid everywhere a qualified module path is valid, including imports,
+types and expressions:
+
+```sx
+let first:Module.UUID.Value = Module.UUID.create()
+let second:Package.UUID.Value = Package.UUID.create()
+```
+
+They are not additional module identities, so reaching one provider through
+several spellings still compiles it once.
 
 The final module segment becomes the local name. `as` chooses another name:
 

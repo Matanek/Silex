@@ -1117,7 +1117,10 @@ pub const Resolver = struct {
             Version.parse(text) catch return self.fail("invalid package version")
         else
             null;
-        if (raw.name) |name| if (!Modules.validName(name)) return self.fail("invalid package identity");
+        if (raw.name) |name| {
+            if (!Modules.validName(name)) return self.fail("invalid package identity");
+            if (reservedContextualRoot(name)) return self.fail("Package and Module are reserved package-name roots");
+        }
 
         const description = if (raw.description) |description| description: {
             if (!validMetadataLine(description)) {
@@ -1285,6 +1288,7 @@ pub const Resolver = struct {
             while (iterator.next()) |entry| {
                 const name = entry.key_ptr.*;
                 if (!Modules.validName(name)) return self.fail("invalid dependency identity");
+                if (reservedContextualRoot(name)) return self.fail("Package and Module are reserved package-name roots");
                 const text = switch (entry.value_ptr.*) {
                     .string => |text| text,
                     else => return self.fail("a dependency value must be a version constraint string"),
@@ -1689,6 +1693,12 @@ fn dependencyLessThan(_: void, left: ManifestDependency, right: ManifestDependen
     return std.mem.lessThan(u8, left.name, right.name);
 }
 
+fn reservedContextualRoot(name: []const u8) bool {
+    const separator = std.mem.indexOfScalar(u8, name, '.') orelse name.len;
+    const root = name[0..separator];
+    return std.mem.eql(u8, root, "Package") or std.mem.eql(u8, root, "Module");
+}
+
 fn writeTestArm64Archive(directory: Io.Dir, io: Io, path: []const u8) !void {
     var archive = [_]u8{' '} ** (8 + 60 + 20);
     @memcpy(archive[0..8], "!<arch>\n");
@@ -1845,6 +1855,29 @@ test "reject a dependency duplicated across runtime and development scopes" {
         "a package cannot appear in both dependencies and devDependencies",
         resolver.diagnostic.?,
     );
+}
+
+test "reserve Package and Module package name roots for contextual module paths" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    for ([_][]const u8{ "Package", "Package.Tools", "Module", "Module.Tools" }) |name| {
+        const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, name });
+        try temporary.dir.createDirPath(std.testing.io, try std.fmt.allocPrint(allocator, "{s}/Module", .{name}));
+        try temporary.dir.writeFile(std.testing.io, .{
+            .sub_path = try std.fmt.allocPrint(allocator, "{s}/Package.json", .{name}),
+            .data = try std.fmt.allocPrint(allocator, "{{\"name\":\"{s}\",\"version\":\"1.0.0\"}}", .{name}),
+        });
+        var resolver = Resolver.init(allocator, std.testing.io, null);
+        try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
+        try std.testing.expectEqualStrings(
+            "Package and Module are reserved package-name roots",
+            resolver.diagnostic.?,
+        );
+    }
 }
 
 test "validate extension permissions and reject wildcard suite and merge members" {

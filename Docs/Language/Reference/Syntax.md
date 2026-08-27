@@ -18,7 +18,7 @@ constraints.
 | Compiler-provided class contract | `intrinsic class Name { ... }` |
 | Protocol | `protocol Name { ... }` |
 | Extension | `extend Name { ... }` |
-| Umbrella contribution | `contribute Package.Catalog { public use Package.Child.Type }` |
+| Umbrella contribution | `contribute GFX.Catalog { public use GFX.Child.Type }` |
 | Enum variant | `caseName(Type)` inside `enum` |
 | Empty enum value | `Enum.caseName` |
 | Enum value with payload | `Enum.caseName(value)` |
@@ -28,7 +28,11 @@ constraints.
 | Forced optional extraction | `optional!` |
 | Optional fallback | `optional ?? fallback` |
 | Constructor | `init(value:type) { ... }` |
-| Import | `use Module.Path` |
+| Canonical import | `use STD.UUID` |
+| Current-package import | `use Package.UUID` |
+| Current-directory import | `use Module.UUID` |
+| Current-package qualified path | `Package.UUID.Value` |
+| Current-directory qualified path | `Module.UUID.Value` |
 | C function binding | `let name = C.function<func(...) Return>(...)` |
 | C function-address call | `C.call<func(...) Return>(address, ...)` |
 | Alias | `use Existing.Type as LocalName` |

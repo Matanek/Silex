@@ -710,7 +710,7 @@ test "type contexts expose modules as paths without leaking module values" {
     try Support.expectNoDuplicates(return_context_items);
 
     const root_items = try Support.serverCompletion(&server, allocator, uri, "func test() M<|>");
-    try Support.expectExactLabels(&.{"Math"}, root_items);
+    try Support.expectExactLabels(&.{ "Math", "Module" }, root_items);
     try Support.expectAbsent("make_vector", root_items);
 
     const qualified_items = try Support.serverCompletion(

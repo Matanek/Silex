@@ -87,6 +87,7 @@ pub const Compiler = struct {
     catalog_contributions: []const CatalogContribution = &.{},
     files: []const []const u8 = &.{},
     entry_module: usize = 0,
+    package_context_prefix: []const u8 = "",
     diagnostic: ?Source.Diagnostic = null,
     generic_type_maps: []const []const Ast.Type = &.{},
     function_type_maps: []const []const Ast.Type = &.{},
@@ -179,6 +180,11 @@ pub const Compiler = struct {
             .{ .offset = 0, .line = 1, .column = 1 },
             "entry source is not a discovered module",
         );
+        self.package_context_prefix = if (!self.packages.explicit and
+            self.packages.packages[0].name == null)
+            self.index.providers[self.entry_module].local_prefix
+        else
+            "";
         try self.loadModule(self.entry_module, null);
         try self.validateTypeAliases();
         try self.validateReexports();
@@ -310,15 +316,10 @@ pub const Compiler = struct {
             };
         }
         const owner = self.index.providers[source_module].owner;
-        if (self.bindingForUsePath(owner, use, use.path, false)) |binding| return binding;
-        const local_prefix = self.index.providers[source_module].local_prefix;
-        if (local_prefix.len != 0) {
-            const contextual_path = try std.fmt.allocPrint(
-                self.allocator,
-                "{s}.{s}",
-                .{ local_prefix, use.path },
-            );
+        if (try self.contextualModulePath(source_module, use.path)) |contextual_path| {
             if (self.bindingForUsePath(owner, use, contextual_path, true)) |binding| return binding;
+        } else {
+            if (self.bindingForUsePath(owner, use, use.path, false)) |binding| return binding;
         }
 
         if (use.alias != null) {
@@ -350,6 +351,27 @@ pub const Compiler = struct {
         else
             try std.fmt.allocPrint(self.allocator, "unknown module or declaration '{s}'", .{use.path});
         return self.fail(use.position, message);
+    }
+
+    fn contextualModulePath(self: *Compiler, source_module: usize, path: []const u8) !?[]const u8 {
+        const package_prefix = "Package.";
+        const module_prefix = "Module.";
+        const provider = self.index.providers[source_module];
+        if (std.mem.startsWith(u8, path, package_prefix)) {
+            const relative = path[package_prefix.len..];
+            const package_name = self.packages.packages[provider.owner].name orelse
+                if (provider.owner == 0) self.package_context_prefix else "";
+            if (package_name.len == 0) return relative;
+            const canonical: []const u8 = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ package_name, relative });
+            return canonical;
+        }
+        if (std.mem.startsWith(u8, path, module_prefix)) {
+            const relative = path[module_prefix.len..];
+            if (provider.local_prefix.len == 0) return relative;
+            const canonical: []const u8 = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ provider.local_prefix, relative });
+            return canonical;
+        }
+        return null;
     }
 
     fn bindingForUsePath(
@@ -627,18 +649,19 @@ pub const Compiler = struct {
     const CallTarget = Reexports.Target;
 
     pub fn targetForCall(self: *Compiler, module: usize, call_name: []const u8) Error!?CallTarget {
-        const separator = std.mem.indexOfScalar(u8, call_name, '.');
+        const canonical_name = try self.contextualModulePath(module, call_name) orelse call_name;
+        const separator = std.mem.indexOfScalar(u8, canonical_name, '.');
         if (separator == null) {
             for (self.units[module].bindings) |binding| {
-                if (binding.declaration != null and std.mem.eql(u8, binding.alias, call_name)) {
+                if (binding.declaration != null and std.mem.eql(u8, binding.alias, canonical_name)) {
                     return .{ .module = binding.module.?, .declaration = binding.declaration.? };
                 }
             }
             return null;
         }
 
-        const head = call_name[0..separator.?];
-        const tail = call_name[separator.? + 1 ..];
+        const head = canonical_name[0..separator.?];
+        const tail = canonical_name[separator.? + 1 ..];
         for (self.units[module].bindings) |binding| {
             if (!std.mem.eql(u8, binding.alias, head) or binding.declaration != null) continue;
             if (binding.module) |target_module| {
@@ -656,7 +679,7 @@ pub const Compiler = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{canonical});
             return self.fail(expressionPosition(module), message);
         }
-        if (self.longestModulePrefix(call_name, self.index.providers[module].owner)) |target| return target;
+        if (self.longestModulePrefix(canonical_name, self.index.providers[module].owner)) |target| return target;
         return null;
     }
 

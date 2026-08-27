@@ -1,7 +1,7 @@
 const std = @import("std");
 const Project = @import("Project.zig");
 
-test "resolve entry-local and manifest-relative module paths once" {
+test "resolve canonical package and module anchored paths once across a namespace collision" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -9,30 +9,47 @@ test "resolve entry-local and manifest-relative module paths once" {
     defer temporary.cleanup();
 
     try temporary.dir.createDirPath(std.testing.io, "Application/Sources/Demo");
-    try temporary.dir.createDirPath(std.testing.io, "Application/Library/Module");
+    try temporary.dir.createDirPath(std.testing.io, "DependencySources/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Package.json",
-        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+        .data = "{\"dependencies\":{\"Sources\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Application/Library/Package.json",
-        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+        .sub_path = "DependencySources/Package.json",
+        .data = "{\"name\":\"Sources\",\"version\":\"1.0.0\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Application/Library/Module/Value.sx",
+        .sub_path = "DependencySources/Module/UUID.sx",
         .data = "public func number() int { return 12 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Module/Consumer.sx",
+        .data =
+        \\use Sources.UUID.number as canonical_number
+        \\use Package.UUID.number as package_number
+        \\use Module.UUID.number as module_number
+        \\public func total() int { return canonical_number() + package_number() + module_number() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Sources/Demo/Helper.sx",
-        .data = "public func answer() int { return 10 }",
+        .data =
+        \\public struct Value { public let number:int }
+        \\public func answer() int { return 10 }
+        \\public func value() Value { return Value(number:10) }
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Sources/Demo/Main.sx",
         .data =
-        \\use Helper.answer as local_answer
-        \\use Sources.Demo.Helper.answer as rooted_answer
-        \\use Library.Value.number
-        \\func main() { print(local_answer() + rooted_answer() + number()) }
+        \\use Module.Helper.answer as local_answer
+        \\use Package.Sources.Demo.Helper.answer as package_answer
+        \\use Sources.Consumer.total
+        \\func main() {
+        \\    let module_value:Module.Helper.Value = Module.Helper.value()
+        \\    let package_value:Package.Sources.Demo.Helper.Value = Package.Sources.Demo.Helper.value()
+        \\    print(local_answer() + package_answer() + total() + module_value.number + package_value.number)
+        \\}
         ,
     });
 
@@ -48,7 +65,7 @@ test "resolve entry-local and manifest-relative module paths once" {
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
     const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
-    try std.testing.expectEqualStrings("32\n", result.stdout);
+    try std.testing.expectEqualStrings("76\n", result.stdout);
     try std.testing.expect(compilation.packages.explicit);
 
     var helper_count: usize = 0;
@@ -56,6 +73,94 @@ test "resolve entry-local and manifest-relative module paths once" {
         if (std.mem.eql(u8, function.name, "Sources.Demo.Helper.answer")) helper_count += 1;
     }
     try std.testing.expectEqual(@as(usize, 1), helper_count);
+
+    var uuid_count: usize = 0;
+    for (compilation.ir.functions) |function| {
+        if (std.mem.eql(u8, function.name, "Sources.UUID.number")) uuid_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), uuid_count);
+}
+
+test "require an explicit Module anchor for source relative imports" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources/Demo");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Demo/Helper.sx",
+        .data = "public func answer() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Demo/Main.sx",
+        .data = "use Helper.answer\nfunc main() { print(answer()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Application",
+        "Sources",
+        "Demo",
+        "Main.sx",
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "unknown module or declaration 'Helper.answer'",
+        compiler.diagnostic.?.message,
+    );
+}
+
+test "anchor Package at the entry source directory without a manifest" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Demo/Feature");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Demo/@Module.sx",
+        .data = "use Package.Feature.Worker.run\nfunc main() { print(run()) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Demo/Shared.sx",
+        .data = "public func answer() int { return 40 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Demo/Feature/Helper.sx",
+        .data = "public func extra() int { return 2 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Demo/Feature/Worker.sx",
+        .data =
+        \\use Package.Shared.answer
+        \\use Module.Helper.extra
+        \\public func run() int { return answer() + extra() }
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Sandbox",
+        "Demo",
+        "@Module.sx",
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    try std.testing.expect(!compilation.packages.explicit);
 }
 
 test "compose principal secondary qualified and aliased public structures" {
