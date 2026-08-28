@@ -556,32 +556,18 @@ pub fn scopeItemsAtForTargetExpected(
             for (loaded.program.structures) |structure| {
                 if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
                 if (structure.is_local or (!structure.is_public and !providerInCurrentModule(project, provider))) continue;
-                if (type_only or structure.is_protocol or structure.is_static) {
-                    try appendRanked(allocator, &ranked, .{
-                        .label = label,
-                        .kind = nominalCompletionKind(structure),
-                        .detail = try nominalCompletionDetail(allocator, structure),
-                    }, 18, false);
-                } else if (structure.constructors.len == 0) {
-                    try appendRanked(allocator, &ranked, .{
-                        .label = label,
-                        .kind = nominalCompletionKind(structure),
-                        .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
-                    }, 30, false);
-                } else for (structure.constructors) |constructor| {
-                    if (!Completion.callAcceptsParameters(source, cursor, loaded.program, constructor.parameters)) continue;
-                    try appendRanked(allocator, &ranked, .{
-                        .label = label,
-                        .kind = nominalCompletionKind(structure),
-                        .detail = try Completion.constructorSignature(
-                            allocator,
-                            loaded.source,
-                            loaded.program,
-                            structure.name,
-                            constructor,
-                        ),
-                    }, 30, true);
-                }
+                try appendNominalItems(
+                    allocator,
+                    loaded,
+                    structure,
+                    label,
+                    source,
+                    cursor,
+                    &ranked,
+                    18,
+                    30,
+                    type_only,
+                );
                 matched = true;
             }
             if (!type_only) for (loaded.program.functions) |function| {
@@ -1002,43 +988,18 @@ fn appendPathItems(
                 if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
             } else if (!module_context and contextual_provider == null and !structure.is_public) continue;
             if (!matchesPrefix(structure.name, query.prefix)) continue;
-            if (query.type_only or call_source == null) {
-                try appendRanked(allocator, ranked, .{
-                    .label = structure.name,
-                    .kind = nominalCompletionKind(structure),
-                    .detail = try nominalCompletionDetail(allocator, structure),
-                }, type_priority, false);
-            } else if (structure.is_protocol or structure.is_static) {
-                try appendRanked(allocator, ranked, .{
-                    .label = structure.name,
-                    .kind = nominalCompletionKind(structure),
-                    .detail = try nominalCompletionDetail(allocator, structure),
-                }, type_priority, false);
-            } else if (structure.constructors.len == 0) {
-                try appendRanked(allocator, ranked, .{
-                    .label = structure.name,
-                    .kind = nominalCompletionKind(structure),
-                    .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
-                }, type_priority, false);
-            } else for (structure.constructors) |constructor| {
-                if (!Completion.callAcceptsParameters(
-                    call_source.?,
-                    call_cursor,
-                    loaded.program,
-                    constructor.parameters,
-                )) continue;
-                try appendRanked(allocator, ranked, .{
-                    .label = structure.name,
-                    .kind = nominalCompletionKind(structure),
-                    .detail = try Completion.constructorSignature(
-                        allocator,
-                        loaded.source,
-                        loaded.program,
-                        structure.name,
-                        constructor,
-                    ),
-                }, type_priority, true);
-            }
+            try appendNominalItems(
+                allocator,
+                loaded,
+                structure,
+                structure.name,
+                call_source,
+                call_cursor,
+                ranked,
+                type_priority,
+                type_priority + 1,
+                query.type_only,
+            );
         }
         for (loaded.program.enums) |enumeration| {
             if (enumeration.is_local or !matchesPrefix(enumeration.name, query.prefix)) continue;
@@ -1264,7 +1225,11 @@ fn nominalCompletionKind(structure: Ast.Structure) u8 {
     return CompletionKind.structure;
 }
 
-fn nominalCompletionDetail(allocator: Allocator, structure: Ast.Structure) ![]const u8 {
+fn nominalCompletionDetail(
+    allocator: Allocator,
+    structure: Ast.Structure,
+    name: []const u8,
+) ![]const u8 {
     const declaration = if (structure.is_protocol)
         "protocol"
     else if (structure.is_static and structure.is_class)
@@ -1275,7 +1240,50 @@ fn nominalCompletionDetail(allocator: Allocator, structure: Ast.Structure) ![]co
         "class"
     else
         "struct";
-    return std.fmt.allocPrint(allocator, "{s} {s}", .{ declaration, structure.name });
+    return std.fmt.allocPrint(allocator, "{s} {s}", .{ declaration, name });
+}
+
+fn appendNominalItems(
+    allocator: Allocator,
+    loaded: LoadedProgram,
+    structure: Ast.Structure,
+    label: []const u8,
+    call_source: ?[]const u8,
+    call_cursor: usize,
+    ranked: *std.ArrayList(RankedItem),
+    type_priority: u8,
+    constructor_priority: u8,
+    type_only: bool,
+) !void {
+    try appendRanked(allocator, ranked, .{
+        .label = label,
+        .kind = nominalCompletionKind(structure),
+        .detail = try nominalCompletionDetail(allocator, structure, label),
+    }, type_priority, false);
+    if (type_only or call_source == null or structure.is_protocol or structure.is_static) return;
+
+    if (structure.constructors.len == 0) {
+        try appendRanked(allocator, ranked, .{
+            .label = label,
+            .kind = nominalCompletionKind(structure),
+            .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ label, label }),
+        }, constructor_priority, true);
+        return;
+    }
+    for (structure.constructors) |constructor| {
+        if (!Completion.callAcceptsParameters(call_source.?, call_cursor, loaded.program, constructor.parameters)) continue;
+        try appendRanked(allocator, ranked, .{
+            .label = label,
+            .kind = nominalCompletionKind(structure),
+            .detail = try Completion.constructorSignature(
+                allocator,
+                loaded.source,
+                loaded.program,
+                label,
+                constructor,
+            ),
+        }, constructor_priority, true);
+    }
 }
 
 fn appendPrincipalType(
@@ -1293,32 +1301,18 @@ fn appendPrincipalType(
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return false;
     for (loaded.program.structures) |structure| {
         if (!structure.is_public or !std.mem.eql(u8, structure.name, name)) continue;
-        if (type_only or structure.is_protocol or structure.is_static) {
-            try appendRanked(allocator, ranked, .{
-                .label = name,
-                .kind = nominalCompletionKind(structure),
-                .detail = try nominalCompletionDetail(allocator, structure),
-            }, priority, false);
-        } else if (structure.constructors.len == 0) {
-            try appendRanked(allocator, ranked, .{
-                .label = name,
-                .kind = nominalCompletionKind(structure),
-                .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ name, name }),
-            }, priority, false);
-        } else for (structure.constructors) |constructor| {
-            if (!Completion.callAcceptsParameters(call_source.?, call_cursor, loaded.program, constructor.parameters)) continue;
-            try appendRanked(allocator, ranked, .{
-                .label = name,
-                .kind = nominalCompletionKind(structure),
-                .detail = try Completion.constructorSignature(
-                    allocator,
-                    loaded.source,
-                    loaded.program,
-                    name,
-                    constructor,
-                ),
-            }, priority, true);
-        }
+        try appendNominalItems(
+            allocator,
+            loaded,
+            structure,
+            name,
+            call_source,
+            call_cursor,
+            ranked,
+            priority,
+            priority + 1,
+            type_only,
+        );
         return true;
     }
     for (loaded.program.enums) |enumeration| {
@@ -1354,32 +1348,18 @@ fn appendReexportTarget(
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
     for (loaded.program.structures) |structure| {
         if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
-        if (type_only or call_source == null or structure.is_protocol or structure.is_static) {
-            try appendRanked(allocator, ranked, .{
-                .label = label,
-                .kind = nominalCompletionKind(structure),
-                .detail = try nominalCompletionDetail(allocator, structure),
-            }, 5, false);
-        } else if (structure.constructors.len == 0) {
-            try appendRanked(allocator, ranked, .{
-                .label = label,
-                .kind = nominalCompletionKind(structure),
-                .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ label, label }),
-            }, 5, false);
-        } else for (structure.constructors) |constructor| {
-            if (!Completion.callAcceptsParameters(call_source.?, call_cursor, loaded.program, constructor.parameters)) continue;
-            try appendRanked(allocator, ranked, .{
-                .label = label,
-                .kind = nominalCompletionKind(structure),
-                .detail = try Completion.constructorSignature(
-                    allocator,
-                    loaded.source,
-                    loaded.program,
-                    label,
-                    constructor,
-                ),
-            }, 5, true);
-        }
+        try appendNominalItems(
+            allocator,
+            loaded,
+            structure,
+            label,
+            call_source,
+            call_cursor,
+            ranked,
+            5,
+            6,
+            type_only,
+        );
         return;
     }
     for (loaded.program.enums) |enumeration| {
@@ -2710,8 +2690,10 @@ test "complete public package APIs module aliases members and overlays" {
         constructor_source,
         constructor_name_cursor,
     )).?;
-    try std.testing.expectEqual(@as(usize, 1), labelCount(constructor_items, "Vector"));
-    try std.testing.expectEqualStrings("Vector(value:int) Vector", constructor_items[0].detail);
+    try std.testing.expectEqual(@as(usize, 2), labelCount(constructor_items, "Vector"));
+    const vector_type_index = labelIndex(constructor_items, "Vector").?;
+    try std.testing.expectEqualStrings("struct Vector", constructor_items[vector_type_index].detail);
+    try std.testing.expectEqualStrings("Vector(value:int) Vector", constructor_items[vector_type_index + 1].detail);
 
     const member_source =
         \\use Math.Operations
@@ -2989,6 +2971,26 @@ test "complete imported application members in a cascade" {
         \\}
         ,
     });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Canvas.sx",
+        .data =
+        \\public class Canvas {
+        \\    init() {}
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Window/Plugin.sx",
+        .data =
+        \\public class Plugin {
+        \\    init(settings:int = 0) {}
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public use GFX.Window.Plugin as Window",
+    });
 
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
@@ -3150,7 +3152,9 @@ test "complete imported application members in a cascade" {
         optional_constructor_source,
         optional_constructor_cursor,
     )).?;
-    try std.testing.expectEqual(@as(usize, 2), labelCount(optional_constructor_items, "Window"));
+    try std.testing.expectEqual(@as(usize, 3), labelCount(optional_constructor_items, "Window"));
+    const window_type_index = labelIndex(optional_constructor_items, "Window").?;
+    try std.testing.expectEqualStrings("class Window", optional_constructor_items[window_type_index].detail);
     var saw_empty_constructor = false;
     var saw_explicit_constructor = false;
     for (optional_constructor_items) |item| {
@@ -3161,6 +3165,51 @@ test "complete imported application members in a cascade" {
     }
     try std.testing.expect(saw_empty_constructor);
     try std.testing.expect(saw_explicit_constructor);
+
+    const imported_nominal_source =
+        \\use GFX.Canvas
+        \\func main() { let canvas_type = Can }
+    ;
+    const imported_nominal_cursor = std.mem.indexOf(u8, imported_nominal_source, "Can }").? + "Can".len;
+    const imported_nominal_items = try scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        imported_nominal_source,
+        imported_nominal_cursor,
+    );
+    try std.testing.expectEqual(@as(usize, 2), labelCount(imported_nominal_items, "Canvas"));
+    const canvas_type_index = labelIndex(imported_nominal_items, "Canvas").?;
+    try std.testing.expectEqualStrings("class Canvas", imported_nominal_items[canvas_type_index].detail);
+    try std.testing.expectEqualStrings("Canvas() Canvas", imported_nominal_items[canvas_type_index + 1].detail);
+
+    const reexported_nominal_source =
+        \\use GFX.Plugins
+        \\func main() { let plugin = Plugins.Window(Plugins.Wind) }
+    ;
+    const reexported_nominal_cursor = std.mem.indexOf(u8, reexported_nominal_source, "Plugins.Wind)").? +
+        "Plugins.Wind".len;
+    const reexported_nominal_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        reexported_nominal_source,
+        reexported_nominal_cursor,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 3), labelCount(reexported_nominal_items, "Window"));
+    const reexported_type_index = labelIndex(reexported_nominal_items, "Window").?;
+    try std.testing.expectEqualStrings("class Window", reexported_nominal_items[reexported_type_index].detail);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        reexported_nominal_items[reexported_type_index + 1].detail,
+        "Window(",
+    ) != null);
 
     const reexported_enum_source =
         \\use GFX

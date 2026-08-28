@@ -285,9 +285,15 @@ test "complete extensions declared by an on-demand package child module" {
         constructor_source,
         constructor_cursor,
     )).?;
-    const vec3 = itemWithLabel(constructors, "Vec3").?;
-    try std.testing.expectEqualStrings("Vec3()", vec3.insertText.?);
-    try std.testing.expect(vec3.insertTextFormat == null);
+    var vec3_constructor: ?Types.CompletionItem = null;
+    for (constructors) |item| {
+        if (!completionNameMatches(item, "Vec3") or item.insertText == null or
+            !std.mem.eql(u8, item.insertText.?, "Vec3()")) continue;
+        vec3_constructor = item;
+        break;
+    }
+    try std.testing.expect(vec3_constructor != null);
+    try std.testing.expect(vec3_constructor.?.insertTextFormat == null);
 }
 
 test "insert calls and place the cursor inside parameterized functions and methods" {

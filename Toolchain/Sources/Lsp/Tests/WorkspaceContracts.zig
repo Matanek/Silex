@@ -894,7 +894,7 @@ test "every type mode completes reexported umbrella types at the trigger point" 
         try Support.expectItem(.{
             .label = "InputState",
             .kind = 7,
-            .detail = "class State",
+            .detail = "class InputState",
             .insert_text = "InputState",
             .insert_text_format = null,
         }, items);
