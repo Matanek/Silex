@@ -1156,6 +1156,26 @@ fn catalogAliasAvailable(
     return true;
 }
 
+fn catalogTargetPath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    catalog_provider: Modules.Provider,
+    alias: []const u8,
+) !?[]const u8 {
+    if (!try catalogAliasAvailable(allocator, io, documents, project, catalog_provider, alias, &.{})) return null;
+    var target: ?[]const u8 = null;
+    const catalog_uses = try ProjectIndex.catalogUses(allocator, io, documents, project, catalog_provider);
+    for (catalog_uses) |catalog_use| {
+        const candidate_alias = catalog_use.use.alias orelse continue;
+        if (!std.mem.eql(u8, candidate_alias, alias)) continue;
+        if (target != null) return null;
+        target = catalog_use.use.path;
+    }
+    return target;
+}
+
 fn contextualProvider(project: IndexedProject, qualifier: []const u8) ?usize {
     const origin: Modules.Origin = if (std.mem.eql(u8, qualifier, "Platform"))
         .platform
@@ -1578,6 +1598,27 @@ fn appendImportedMembersDepth(
             !std.mem.eql(u8, exported.alias.?, target.declaration)) continue;
         var resolved = query;
         resolved.type_path = exported.path;
+        return appendImportedMembersDepth(
+            allocator,
+            io,
+            documents,
+            project,
+            current_source,
+            resolved,
+            ranked,
+            depth + 1,
+        );
+    }
+    if (try catalogTargetPath(
+        allocator,
+        io,
+        documents,
+        project,
+        provider,
+        target.declaration,
+    )) |catalog_path| {
+        var resolved = query;
+        resolved.type_path = catalog_path;
         return appendImportedMembersDepth(
             allocator,
             io,
@@ -2131,6 +2172,16 @@ fn importedPathIsNominal(
     for (loaded.program.uses) |use| {
         if (!use.is_public or use.alias == null or !std.mem.eql(u8, use.alias.?, target.declaration)) continue;
         return importedPathIsNominal(allocator, io, documents, project, use.path, depth + 1);
+    }
+    if (try catalogTargetPath(
+        allocator,
+        io,
+        documents,
+        project,
+        provider,
+        target.declaration,
+    )) |catalog_path| {
+        return importedPathIsNominal(allocator, io, documents, project, catalog_path, depth + 1);
     }
     return false;
 }

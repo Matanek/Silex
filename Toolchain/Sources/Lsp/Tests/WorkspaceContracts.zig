@@ -317,11 +317,15 @@ test "server completes and navigates authorized umbrella contributions" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Plugins\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Plugins\",\"GFX.Resources\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Plugins.sx",
         .data = "public struct Core {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Resources.sx",
+        .data = "public struct CoreResource {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Physics/Package.json",
@@ -333,11 +337,24 @@ test "server completes and navigates authorized umbrella contributions" {
         \\contribute GFX.Plugins {
         \\    public use GFX.Physics.Plugin as Physics
         \\}
+        \\contribute GFX.Resources {
+        \\    public use GFX.Physics.World as World
+        \\}
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Physics/Module/Plugin.sx",
         .data = "public struct Plugin {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/World.sx",
+        .data =
+        \\public class World {
+        \\    func spawn() int { return 0 }
+        \\    func is_alive() bool { return true }
+        \\    private func hidden() {}
+        \\}
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
 
@@ -360,6 +377,12 @@ test "server completes and navigates authorized umbrella contributions" {
     try Support.expectPresent("Core", items);
     try Support.expectPresent("Physics", items);
     try Support.expectNoDuplicates(items);
+
+    const world_members = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Resources
+        \\func circle(world:&Resources.World) { world.<|> }
+    );
+    try Support.expectExactLabels(&.{ "is_alive", "spawn" }, world_members);
 
     const definition = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use GFX.Plugins
