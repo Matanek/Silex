@@ -1,0 +1,12 @@
+# Alternate line comments are accepted.
+test "line and nested block comments are ignored" {
+    /* outer block
+        /* nested block */
+    */
+    let value = 40 /* inline block */ + 2 // Canonical line comments remain the project style.
+    assert(value == 42)
+}
+
+test "comment markers remain string content" {
+    assert("# // /* text */" == "# // /* text */")
+}

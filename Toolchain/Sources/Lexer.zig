@@ -163,7 +163,7 @@ pub const Lexer = struct {
                 .interpolation => {},
             }
         }
-        self.skipIgnored();
+        try self.skipIgnored();
 
         if (self.index == self.source.len) {
             return self.token(.end, self.index, self.currentPosition());
@@ -620,18 +620,60 @@ pub const Lexer = struct {
         return self.token(single_tag, start, position);
     }
 
-    fn skipIgnored(self: *Lexer) void {
+    fn skipIgnored(self: *Lexer) Source.Error!void {
         while (self.index < self.source.len) {
             switch (self.source[self.index]) {
                 ' ', '\t', '\r' => self.advance(),
                 '\n' => self.newline(),
+                '#' => self.skipLineComment(),
                 '/' => {
-                    if (self.index + 1 >= self.source.len or self.source[self.index + 1] != '/') return;
-                    while (self.index < self.source.len and self.source[self.index] != '\n') self.advance();
+                    if (self.index + 1 >= self.source.len) return;
+                    switch (self.source[self.index + 1]) {
+                        '/' => self.skipLineComment(),
+                        '*' => try self.skipBlockComment(),
+                        else => return,
+                    }
                 },
                 else => return,
             }
         }
+    }
+
+    fn skipLineComment(self: *Lexer) void {
+        while (self.index < self.source.len and self.source[self.index] != '\n') self.advance();
+    }
+
+    fn skipBlockComment(self: *Lexer) Source.Error!void {
+        const position = self.currentPosition();
+        self.advance();
+        self.advance();
+        var depth: usize = 1;
+
+        while (self.index < self.source.len) {
+            if (self.index + 1 < self.source.len) {
+                if (self.source[self.index] == '/' and self.source[self.index + 1] == '*') {
+                    self.advance();
+                    self.advance();
+                    depth += 1;
+                    continue;
+                }
+                if (self.source[self.index] == '*' and self.source[self.index + 1] == '/') {
+                    self.advance();
+                    self.advance();
+                    depth -= 1;
+                    if (depth == 0) return;
+                    continue;
+                }
+            }
+
+            if (self.source[self.index] == '\n') {
+                self.newline();
+            } else {
+                self.advance();
+            }
+        }
+
+        return self.fail(position, "unterminated block comment");
     }
 
     fn advance(self: *Lexer) void {
@@ -875,11 +917,44 @@ test "recognize read reference prefix and released borrow identifier" {
     try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
 }
 
-test "skip line comments" {
+test "skip canonical line comments" {
     var lexer = Lexer.init("// comment\n42");
     const token = try lexer.next();
     try std.testing.expectEqual(TokenTag.integer, token.tag);
     try std.testing.expectEqual(@as(usize, 2), token.position.line);
+}
+
+test "skip hash line comments" {
+    var lexer = Lexer.init("# comment\n42 # trailing comment");
+    const token = try lexer.next();
+    try std.testing.expectEqual(TokenTag.integer, token.tag);
+    try std.testing.expectEqual(@as(usize, 2), token.position.line);
+    try std.testing.expectEqual(TokenTag.end, (try lexer.next()).tag);
+}
+
+test "skip nested block comments" {
+    var lexer = Lexer.init("/* outer\n/* inner */\nouter */42");
+    const token = try lexer.next();
+    try std.testing.expectEqual(TokenTag.integer, token.tag);
+    try std.testing.expectEqual(@as(usize, 3), token.position.line);
+    try std.testing.expectEqual(@as(usize, 9), token.position.column);
+}
+
+test "diagnose unterminated block comments at their opening" {
+    var lexer = Lexer.initFile("\n  /* outer\n  /* inner */", 7);
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("unterminated block comment", lexer.diagnostic.?.message);
+    try std.testing.expectEqual(@as(usize, 3), lexer.diagnostic.?.position.offset);
+    try std.testing.expectEqual(@as(usize, 2), lexer.diagnostic.?.position.line);
+    try std.testing.expectEqual(@as(usize, 3), lexer.diagnostic.?.position.column);
+    try std.testing.expectEqual(@as(usize, 7), lexer.diagnostic.?.position.file);
+}
+
+test "keep comment markers inside strings" {
+    var lexer = Lexer.init("\"# // /* text */\"");
+    const token = try lexer.next();
+    try std.testing.expectEqual(TokenTag.string, token.tag);
+    try std.testing.expectEqualStrings("# // /* text */", token.lexeme);
 }
 
 test "preserve source offset bounds and file identity" {

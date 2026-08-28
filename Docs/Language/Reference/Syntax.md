@@ -7,6 +7,9 @@ constraints.
 | --- | --- |
 | Immutable variable | `let name:type = value` |
 | Mutable variable | `var name:type = value` |
+| Canonical line comment | `// comment` |
+| Alternate line comment | `# comment` |
+| Block comment | `/* comment */` |
 | String | `"text"` |
 | Block string | `"` followed by indented lines and a closing `"` on its own line |
 | String interpolation | `"value: $(expression)"` |
@@ -71,6 +74,19 @@ name, in a `match` branch, and after `.` or `?.`: `Easing.in`.
 
 The type suffixes `?`, `[]`, and `[N]` apply from left to right, so `Type?[]`
 and `Type[]?` are distinct types.
+
+## Comments
+
+Use `//` for ordinary line comments. Silex also accepts `#` when a hash-style
+line comment is more convenient. Both forms continue to the end of the line
+and may follow source code.
+
+Use `/*` and `*/` to comment a region spanning part of a line or several
+lines. Block comments may be nested, so an outer block can safely contain an
+existing block comment. Comment markers inside strings remain string content.
+A line break inside a block comment keeps its ordinary statement-termination
+effect. The compiler reports an unterminated block comment at its opening
+`/*`.
 
 ## Statements
 
