@@ -320,9 +320,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::notice::WEBSITE_DISPATCH_TOKEN is not configured; the daily website build will synchronize the release"
+            echo "::warning::WEBSITE_DISPATCH_TOKEN is not configured; run the Silex Website deployment manually"
             exit 0
           fi
-          gh api --method POST repos/Matanek/Silex-Website/dispatches \
+          if ! gh api --method POST repos/Matanek/Silex-Website/dispatches \
             -f event_type=silex-released \
-            -f "client_payload[version]=$RELEASE_VERSION"
+            -f "client_payload[version]=$RELEASE_VERSION"; then
+            echo "::warning::The Silex release is published, but the website dispatch was rejected; run the website deployment manually"
+          fi
