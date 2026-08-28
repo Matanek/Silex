@@ -880,18 +880,26 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
     };
 
     if (tokens[tokens.len - 1].tag == .dot or tokens[tokens.len - 1].tag == .question_dot or
-        tokens[tokens.len - 1].tag == .dot_dot) return .{
-        .kind = .member,
-        .prefix = prefix,
-        .prefix_start = prefix_start,
-        .receiver = if (tokens[tokens.len - 1].tag == .dot_dot)
-            cascadeReceiver(source, tokens[tokens.len - 1].start)
+        tokens[tokens.len - 1].tag == .dot_dot)
+    {
+        const separator = tokens[tokens.len - 1];
+        const partial_cascade = if (separator.tag == .dot)
+            partialCascadeReceiver(source, separator.start)
         else
-            memberReceiver(source, tokens[tokens.len - 1].start),
-        .in_loop = scope.in_loop,
-        .cascade = tokens[tokens.len - 1].tag == .dot_dot,
-        .system_callback = insideSystemRegistration(tokens),
-    };
+            null;
+        return .{
+            .kind = .member,
+            .prefix = prefix,
+            .prefix_start = prefix_start,
+            .receiver = if (separator.tag == .dot_dot)
+                cascadeReceiver(source, separator.start)
+            else
+                partial_cascade orelse memberReceiver(source, separator.start),
+            .in_loop = scope.in_loop,
+            .cascade = separator.tag == .dot_dot or partial_cascade != null,
+            .system_callback = insideSystemRegistration(tokens),
+        };
+    }
 
     const nominal_relation = isNominalRelationPosition(line_tokens);
     if (isTypePosition(tokens, line_tokens, scope.pending_callable, nominal_relation) or
@@ -3045,8 +3053,19 @@ pub fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
 
 pub fn cascadeReceiver(source: []const u8, dot_dot: usize) ?[]const u8 {
     if (dot_dot + 1 >= source.len or source[dot_dot] != '.' or source[dot_dot + 1] != '.') return null;
-    const cascade_start = cascadeRecoveryStart(source, dot_dot);
-    const base_end = if (cascade_start < dot_dot) cascade_start else dot_dot;
+    return cascadeReceiverAt(source, dot_dot);
+}
+
+pub fn partialCascadeReceiver(source: []const u8, dot: usize) ?[]const u8 {
+    if (dot >= source.len or source[dot] != '.') return null;
+    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..dot], '\n')) |newline| newline + 1 else 0;
+    if (std.mem.trim(u8, source[line_start..dot], " \t\r").len != 0) return null;
+    return cascadeReceiverAt(source, dot);
+}
+
+fn cascadeReceiverAt(source: []const u8, dot: usize) ?[]const u8 {
+    const cascade_start = cascadeRecoveryStart(source, dot);
+    const base_end = if (cascade_start < dot) cascade_start else dot;
     var end = base_end;
     while (end != 0 and (source[end - 1] == ' ' or source[end - 1] == '\t' or source[end - 1] == '\r' or
         source[end - 1] == '\n')) end -= 1;
@@ -3064,9 +3083,15 @@ pub fn recoverCascadeForParsing(
     cursor: usize,
 ) !?[]const u8 {
     const prefix_start = identifierPrefixStart(source, cursor);
-    if (prefix_start < 2 or source[prefix_start - 2] != '.' or source[prefix_start - 1] != '.') return null;
-    const start = cascadeRecoveryStart(source, prefix_start - 2);
-    const end = if (start == prefix_start - 2)
+    const dot = if (prefix_start >= 2 and source[prefix_start - 2] == '.' and source[prefix_start - 1] == '.')
+        prefix_start - 2
+    else if (prefix_start >= 1 and source[prefix_start - 1] == '.' and
+        partialCascadeReceiver(source, prefix_start - 1) != null)
+        prefix_start - 1
+    else
+        return null;
+    const start = cascadeRecoveryStart(source, dot);
+    const end = if (start == dot)
         cursor
     else if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
         newline
@@ -3482,6 +3507,23 @@ test "complete members of the original receiver in a cascade" {
     try std.testing.expect(contains(items, "install"));
     try std.testing.expect(contains(items, "run"));
     try std.testing.expect(!contains(items, "if"));
+
+    const partial_source =
+        \\class Application {
+        \\    func install() Application { return self }
+        \\    func run() int { return 0 }
+        \\}
+        \\func main() {
+        \\    var app = Application()
+        \\        .
+        \\}
+    ;
+    const partial_cursor = std.mem.indexOf(u8, partial_source, ".\n").? + 1;
+    const partial_items = try itemsAt(arena.allocator(), partial_source, partial_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 2), partial_items.len);
+    try std.testing.expect(contains(partial_items, "install"));
+    try std.testing.expect(contains(partial_items, "run"));
+    try std.testing.expect(!contains(partial_items, "if"));
 
     const continued_source =
         \\class Application {

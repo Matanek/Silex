@@ -683,10 +683,14 @@ fn queryAt(
 
     if (prefix_start == 0 or source[prefix_start - 1] != '.') return null;
     const cascade = prefix_start >= 2 and source[prefix_start - 2] == '.';
+    const partial_cascade = if (!cascade)
+        Completion.partialCascadeReceiver(source, prefix_start - 1)
+    else
+        null;
     const receiver = (if (cascade)
         Completion.cascadeReceiver(source, prefix_start - 2)
     else
-        Completion.memberReceiver(source, prefix_start - 1)) orelse return null;
+        partial_cascade orelse Completion.memberReceiver(source, prefix_start - 1)) orelse return null;
     const qualified_type = try Completion.isQualifiedTypePositionAt(allocator, source, prefix_start);
     const current_program = try parseCurrentAtCompletion(
         allocator,
@@ -1831,17 +1835,28 @@ fn importedConstructorCallTypePath(
     call: Completion.DirectCall,
 ) !?[]const u8 {
     const use = findUseByAlias(current, call.name) orelse return null;
-    const target = declarationTarget(project.index, use.path) orelse return null;
+    return importedConstructorTypePath(allocator, io, documents, project, use.path, call.arity);
+}
+
+fn importedConstructorTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    type_path: []const u8,
+    arity: usize,
+) !?[]const u8 {
+    const target = declarationTarget(project.index, type_path) orelse return null;
     const provider = project.index.providers[target.provider];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
     for (loaded.program.structures) |structure| {
         if (!structure.is_public or structure.is_protocol or structure.is_static or
             !std.mem.eql(u8, structure.name, target.declaration)) continue;
-        if (structure.constructors.len == 0) return if (call.arity == 0) use.path else null;
+        if (structure.constructors.len == 0) return if (arity == 0) type_path else null;
         for (structure.constructors) |constructor| {
             if (!importedMemberVisible(project, provider, constructor)) continue;
-            if (parametersAcceptArity(constructor.parameters, call.arity)) return use.path;
+            if (parametersAcceptArity(constructor.parameters, arity)) return type_path;
         }
         return null;
     }
@@ -1941,6 +1956,10 @@ fn importedQualifiedCallReturnTypePath(
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
     const owner_path = try importedTypePath(allocator, current, project, call.owner) orelse return null;
+    const qualified_type = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ owner_path, call.name });
+    if (try importedConstructorTypePath(allocator, io, documents, project, qualified_type, call.arity)) |type_path| {
+        return type_path;
+    }
     const target = declarationTarget(project.index, owner_path) orelse return null;
     const provider = project.index.providers[target.provider];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
@@ -1971,18 +1990,8 @@ fn importedQualifiedCallReturnTypePath(
     if (return_name == null) for (loaded.program.uses) |exported| {
         if (!exported.is_public or exported.alias == null or
             !std.mem.eql(u8, exported.alias.?, call.name)) continue;
-        const exported_target = declarationTarget(project.index, exported.path) orelse continue;
-        const exported_provider = project.index.providers[exported_target.provider];
-        if (!project.graph.canAccess(project.current_owner, exported_provider.owner, exported_provider.name)) continue;
-        const exported_program = try loadProgram(allocator, io, documents, exported_provider) orelse continue;
-        for (exported_program.program.structures) |structure| {
-            if (!structure.is_public or structure.is_protocol or structure.is_static or
-                !std.mem.eql(u8, structure.name, exported_target.declaration)) continue;
-            if (structure.constructors.len == 0) return if (call.arity == 0) exported.path else null;
-            for (structure.constructors) |constructor| {
-                if (!importedMemberVisible(project, exported_provider, constructor)) continue;
-                if (parametersAcceptArity(constructor.parameters, call.arity)) return exported.path;
-            }
+        if (try importedConstructorTypePath(allocator, io, documents, project, exported.path, call.arity)) |type_path| {
+            return type_path;
         }
     };
     const name = return_name orelse return null;
@@ -2968,7 +2977,6 @@ test "complete imported application members in a cascade" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/@Module.sx",
         .data =
-        \\public use GFX.Application
         \\public use GFX.Application.Schedule
         ,
     });
@@ -3014,6 +3022,60 @@ test "complete imported application members in a cascade" {
     try std.testing.expect(!hasLabel(items, "if"));
     try std.testing.expect(!hasLabel(items, "__silex_add_system"));
     try std.testing.expect(!hasLabel(items, "__silex_run_query"));
+
+    const qualified_cascade_sources = [_][]const u8{
+        \\use GFX
+        \\func main() {
+        \\    GFX.Application()
+        \\        ..
+        \\}
+        ,
+        \\func main() {
+        \\    GFX.Application()
+        \\        ..
+        \\}
+        ,
+    };
+    for (qualified_cascade_sources) |qualified_cascade_source| {
+        const qualified_cascade_cursor = std.mem.indexOf(u8, qualified_cascade_source, "..\n").? + "..".len;
+        const qualified_cascade_items = (try itemsAt(
+            allocator,
+            std.testing.io,
+            null,
+            root_uri,
+            uri,
+            &.{},
+            qualified_cascade_source,
+            qualified_cascade_cursor,
+        )).?;
+        try std.testing.expect(hasLabel(qualified_cascade_items, "install"));
+        try std.testing.expect(hasLabel(qualified_cascade_items, "run"));
+        try std.testing.expect(!hasLabel(qualified_cascade_items, "GFX"));
+        try std.testing.expect(!hasLabel(qualified_cascade_items, "if"));
+    }
+
+    const partial_qualified_cascade_source =
+        \\use GFX
+        \\func main() {
+        \\    GFX.Application()
+        \\        .
+        \\}
+    ;
+    const partial_qualified_cascade_cursor = std.mem.indexOf(u8, partial_qualified_cascade_source, ".\n").? + 1;
+    const partial_qualified_cascade_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        partial_qualified_cascade_source,
+        partial_qualified_cascade_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(partial_qualified_cascade_items, "install"));
+    try std.testing.expect(hasLabel(partial_qualified_cascade_items, "run"));
+    try std.testing.expect(!hasLabel(partial_qualified_cascade_items, "GFX"));
+    try std.testing.expect(!hasLabel(partial_qualified_cascade_items, "if"));
 
     const resources_source =
         \\use GFX
