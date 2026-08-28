@@ -175,7 +175,8 @@ API rather than embedding this compiler-owned list.
 
 ```text
 Docs/
-  README.md      compiler architecture and implementation contracts
+  README.md      compiler architecture index
+  *.md           implementation contracts organized by subsystem
 Toolchain/      autonomous Zig bootstrap project
   Runtime/      target runtime sources bundled at build time
   Sources/      compiler implementation
