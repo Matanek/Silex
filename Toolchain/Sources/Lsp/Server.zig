@@ -172,6 +172,7 @@ pub const Server = struct {
                 null;
             const completing_try_error = Completion.isTryErrorBindingPositionAt(allocator, source, cursor) catch false;
             const completing_try_alternative = Completion.isTryAlternativePositionAt(allocator, source, cursor) catch false;
+            const completing_member = Completion.isMemberCompletionAt(allocator, source, cursor) catch false;
             const local_parameters = try Completion.parameterItemsAt(allocator, source, cursor);
             const imported_parameters = if (self.workspace_root_uri != null)
                 Workspace.parameterItemsAtForTarget(
@@ -214,7 +215,10 @@ pub const Server = struct {
                     cursor,
                 ) catch null;
                 if (project_items) |items| {
-                    const merged = try mergeCompletionItems(allocator, parameters, items);
+                    const merged = if (completing_member)
+                        items
+                    else
+                        try mergeCompletionItems(allocator, parameters, items);
                     const contextual = if (function_value_expected)
                         try Completion.insertFunctionReferences(allocator, merged)
                     else
@@ -229,7 +233,7 @@ pub const Server = struct {
                 trigger_kind,
                 assignment_expected_type,
             );
-            if (needs_workspace) {
+            if (needs_workspace and !completing_member) {
                 const imported = Workspace.scopeItemsAtForTargetExpected(
                     allocator,
                     self.io,
@@ -250,7 +254,10 @@ pub const Server = struct {
                     merged;
                 return try self.reply(allocator, id, .{ .isIncomplete = false, .items = contextual });
             }
-            const merged = try mergeCompletionItems(allocator, parameters, items);
+            const merged = if (completing_member)
+                items
+            else
+                try mergeCompletionItems(allocator, parameters, items);
             const contextual = if (function_value_expected)
                 try Completion.insertFunctionReferences(allocator, merged)
             else
@@ -812,6 +819,67 @@ test "member completion never leaks the global language catalogue" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"x\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"true\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"float\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
+}
+
+test "local static member completion stays exclusive in a workspace" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public class Application {
+        \\    func add_plugin(plugin:int) Application { return self }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "",
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const source =
+        \\use Api.Application
+        \\static struct Const {
+        \\    let background_color:int = 0
+        \\}
+        \\struct Settings { var clear:int }
+        \\func main() {
+        \\    Application()
+        \\        ..add_plugin(Settings()
+        \\            ..clear = Const.
+        \\        )
+        \\}
+    ;
+
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    server.workspace_root_uri = try std.testing.allocator.dupe(u8, root_uri);
+    try server.setDocument(.{ .uri = main_uri, .text = source, .version = 1 });
+
+    const cursor = std.mem.indexOf(u8, source, "Const.\n").? + "Const.".len;
+    const position = Protocol.positionAtByteOffset(source, cursor, .utf16).?;
+    const request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 4,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = main_uri },
+            .position = position,
+            .context = .{ .triggerKind = 2, .triggerCharacter = "." },
+        },
+    }, .{});
+    const response = (try server.handleBody(allocator, request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"background_color\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Application\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Api\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"int\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
 }
 

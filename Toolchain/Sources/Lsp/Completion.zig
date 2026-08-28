@@ -89,6 +89,11 @@ pub fn itemsAt(
     return itemsAtWithExpectedType(allocator, source, cursor, trigger_kind, null);
 }
 
+pub fn isMemberCompletionAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
+    if (cursor > source.len or !cursorAllowsCode(source, cursor)) return false;
+    return (try classifyContext(allocator, source, cursor)).kind == .member;
+}
+
 pub fn itemsAtWithExpectedType(
     allocator: Allocator,
     source: []const u8,
