@@ -51,6 +51,7 @@ const ImportedMemberQuery = struct {
     cursor: usize,
     static_receiver: bool = false,
     inside_extension: bool = false,
+    type_only: bool = false,
 };
 
 const IndexedProject = ProjectIndex.IndexedProject;
@@ -111,7 +112,7 @@ pub fn itemsAtForTarget(
                 .prefix = qualified.prefix,
                 .type_only = qualified.type_only,
             }, source, qualified.cursor, &ranked);
-            if (!qualified.type_only) try appendImportedMembers(
+            try appendImportedMembers(
                 allocator,
                 io,
                 documents,
@@ -122,6 +123,7 @@ pub fn itemsAtForTarget(
                     .prefix = qualified.prefix,
                     .cursor = qualified.cursor,
                     .static_receiver = true,
+                    .type_only = qualified.type_only,
                 },
                 &ranked,
             );
@@ -700,6 +702,7 @@ fn queryAt(
                     .prefix = prefix,
                     .cursor = cursor,
                     .static_receiver = true,
+                    .type_only = qualified_type,
                 } };
             }
             return .{ .qualifier = .{
@@ -741,6 +744,7 @@ fn queryAt(
                 .prefix = prefix,
                 .cursor = cursor,
                 .static_receiver = true,
+                .type_only = qualified_type,
             } };
         }
         if ((findProvider(project.index, receiver) != null or project.index.isNamespace(receiver)) and
@@ -801,6 +805,7 @@ fn queryAt(
                 .prefix = prefix,
                 .cursor = cursor,
                 .static_receiver = true,
+                .type_only = qualified_type,
             } };
         }
         if (Completion.resolveReceiverType(allocator, source, program, cursor, receiver)) |local_type| {
@@ -871,6 +876,7 @@ fn queryAt(
                 .prefix = prefix,
                 .cursor = cursor,
                 .static_receiver = true,
+                .type_only = qualified_type,
             } };
         }
     }
@@ -1459,6 +1465,26 @@ fn appendImportedMembersDepth(
         if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
         if (!structure.is_public) return;
         if (query.static_receiver) {
+            for (loaded.program.structures) |nested| {
+                const enclosing = nested.enclosing orelse continue;
+                if (!std.mem.eql(u8, enclosing, structure.name) or
+                    !importedMemberVisible(project, provider, nested)) continue;
+                const label = lastSegment(nested.name);
+                if (!std.mem.startsWith(u8, label, query.prefix)) continue;
+                try appendNominalItems(
+                    allocator,
+                    loaded,
+                    nested,
+                    label,
+                    current_source,
+                    query.cursor,
+                    ranked,
+                    0,
+                    1,
+                    query.type_only,
+                );
+            }
+            if (query.type_only) return;
             for (structure.static_fields) |field| {
                 if (!importedMemberVisible(project, provider, field)) continue;
                 if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
@@ -1536,7 +1562,7 @@ fn appendImportedMembersDepth(
     }
     for (loaded.program.enums) |enumeration| {
         if (!std.mem.eql(u8, enumeration.name, target.declaration)) continue;
-        if (!enumeration.is_public or !query.static_receiver) return;
+        if (!enumeration.is_public or !query.static_receiver or query.type_only) return;
         for (enumeration.variants) |variant| {
             if (!std.mem.startsWith(u8, variant.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
@@ -2983,6 +3009,10 @@ test "complete imported application members in a cascade" {
         .sub_path = "GFX/Module/Window/Plugin.sx",
         .data =
         \\public class Plugin {
+        \\    struct Settings {
+        \\        init() {}
+        \\    }
+        \\    private struct Internals {}
         \\    init(settings:int = 0) {}
         \\}
         ,
@@ -3210,6 +3240,50 @@ test "complete imported application members in a cascade" {
         reexported_nominal_items[reexported_type_index + 1].detail,
         "Window(",
     ) != null);
+
+    const nested_reexport_source =
+        \\use GFX.Plugins
+        \\func main() { let plugin = Plugins.Window(Plugins.Window.Set) }
+    ;
+    const nested_reexport_cursor = std.mem.indexOf(u8, nested_reexport_source, "Plugins.Window.Set)").? +
+        "Plugins.Window.Set".len;
+    const nested_reexport_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        nested_reexport_source,
+        nested_reexport_cursor,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 2), labelCount(nested_reexport_items, "Settings"));
+    const settings_type_index = labelIndex(nested_reexport_items, "Settings").?;
+    try std.testing.expectEqualStrings("struct Settings", nested_reexport_items[settings_type_index].detail);
+    try std.testing.expectEqualStrings("Settings() Settings", nested_reexport_items[settings_type_index + 1].detail);
+    try std.testing.expect(!hasLabel(nested_reexport_items, "Internals"));
+
+    const nested_reexport_type_source =
+        \\use GFX.Plugins
+        \\func configure(settings:Plugins.Window.Set) {}
+    ;
+    const nested_reexport_type_cursor = std.mem.indexOf(u8, nested_reexport_type_source, "Plugins.Window.Set)").? +
+        "Plugins.Window.Set".len;
+    const nested_reexport_type_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        nested_reexport_type_source,
+        nested_reexport_type_cursor,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 1), labelCount(nested_reexport_type_items, "Settings"));
+    try std.testing.expectEqualStrings(
+        "struct Settings",
+        nested_reexport_type_items[labelIndex(nested_reexport_type_items, "Settings").?].detail,
+    );
 
     const reexported_enum_source =
         \\use GFX
