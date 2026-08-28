@@ -12,9 +12,11 @@ func main() {
 }
 ```
 
-Read the [language guide](Docs/Language/README.md) to find the source form for
-each implemented feature. Read [compiler architecture](Docs/Architecture.md)
-for the current compilation path and its limits.
+Read the
+[public language documentation](https://github.com/Matanek/Silex-Documentation/blob/main/EN/Language/README.md)
+to learn the implemented source forms. Compiler contributors can consult the
+[compiler architecture](Docs/README.md) for the current compilation path
+and its limits.
 
 ## Install
 
@@ -33,8 +35,10 @@ irm https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1 | iex
 silex --version
 ```
 
-See the [installation guide](Docs/Installation.md) for checksum verification,
-custom destinations, source builds, and removal.
+See the
+[installation guide](https://github.com/Matanek/Silex-Documentation/blob/main/EN/Tools/Installation.md)
+for checksum verification and custom destinations. Source builds are covered
+below in this repository.
 
 Update an installed compiler to the latest verified release with:
 
@@ -171,8 +175,7 @@ API rather than embedding this compiler-owned list.
 
 ```text
 Docs/
-  Language/     concise language guide by topic
-  Architecture.md
+  README.md      compiler architecture and implementation contracts
 Toolchain/      autonomous Zig bootstrap project
   Runtime/      target runtime sources bundled at build time
   Sources/      compiler implementation
