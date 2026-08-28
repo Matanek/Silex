@@ -113,7 +113,23 @@ Its directory name and manifest identity match:
 
 `description` is an optional non-empty single line without surrounding
 whitespace. Keep it short enough to identify the package in search results and
-catalogs without replacing the README.
+catalogs without replacing the README. A package with localized metadata can
+instead provide an object keyed by language tag:
+
+```json
+{
+  "description": {
+    "en": "Vectors, matrices, and numeric helpers for Silex programs.",
+    "fr": "Vecteurs, matrices et outils numériques pour les programmes Silex."
+  }
+}
+```
+
+Every localized value follows the same single-line rule. Language keys are
+case-insensitive tags and must be unique ignoring case. The object must contain
+`en`, which is the fallback when an exact requested language or its primary
+language is unavailable. A plain string remains valid and applies to every
+language.
 
 `authors` is an optional non-empty array of unique, non-empty names. Its order
 is preserved. The field records attribution only: it grants no namespace,

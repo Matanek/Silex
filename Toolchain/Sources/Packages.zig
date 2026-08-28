@@ -289,13 +289,50 @@ pub const ManifestInfo = struct {
     name: []const u8,
     version: Version,
     sources: []const u8,
-    description: ?[]const u8,
+    description: ?ManifestDescription,
     authors: []const []const u8,
     silex_requirement: SilexRequirement,
     extensions: []const ExtensionPolicy,
     catalogs: []const []const u8,
     dependencies: []const ManifestDependency,
     dev_dependencies: []const ManifestDependency,
+};
+
+pub const ManifestDescription = union(enum) {
+    plain: []const u8,
+    localized: []const Translation,
+
+    pub const Translation = struct {
+        language: []const u8,
+        text: []const u8,
+    };
+
+    pub fn resolve(self: ManifestDescription, language: []const u8) []const u8 {
+        return switch (self) {
+            .plain => |text| text,
+            .localized => |translations| resolve: {
+                for (translations) |translation| {
+                    if (std.ascii.eqlIgnoreCase(translation.language, language)) {
+                        break :resolve translation.text;
+                    }
+                }
+                if (std.mem.indexOfScalar(u8, language, '-')) |separator| {
+                    const primary = language[0..separator];
+                    for (translations) |translation| {
+                        if (std.ascii.eqlIgnoreCase(translation.language, primary)) {
+                            break :resolve translation.text;
+                        }
+                    }
+                }
+                for (translations) |translation| {
+                    if (std.ascii.eqlIgnoreCase(translation.language, "en")) {
+                        break :resolve translation.text;
+                    }
+                }
+                unreachable;
+            },
+        };
+    }
 };
 
 pub const ManifestDependency = struct {
@@ -312,7 +349,7 @@ const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
     sources: ?[]const u8 = null,
-    description: ?[]const u8 = null,
+    description: ?std.json.Value = null,
     authors: ?std.json.Value = null,
     extensions: ?std.json.Value = null,
     friends: ?std.json.Value = null,
@@ -328,7 +365,7 @@ const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
     sources: []const u8,
-    description: ?[]const u8,
+    description: ?ManifestDescription,
     authors: []const []const u8,
     extensions: []const ExtensionPolicy,
     catalogs: []const []const u8,
@@ -1136,12 +1173,10 @@ pub const Resolver = struct {
             return self.fail("sources must be '.' or a normalized relative directory inside the package");
         }
 
-        const description = if (raw.description) |description| description: {
-            if (!validMetadataLine(description)) {
-                return self.fail("description must be a non-empty single-line string without surrounding whitespace");
-            }
-            break :description description;
-        } else null;
+        const description = if (raw.description) |description|
+            try self.parseDescription(description)
+        else
+            null;
 
         var authors: std.ArrayList([]const u8) = .empty;
         if (raw.authors) |value| {
@@ -1281,6 +1316,51 @@ pub const Resolver = struct {
             .dependencies = dependencies,
             .dev_dependencies = dev_dependencies,
             .boundary_providers = &.{},
+        };
+    }
+
+    fn parseDescription(self: *Resolver, value: std.json.Value) !ManifestDescription {
+        return switch (value) {
+            .string => |text| description: {
+                if (!validMetadataLine(text)) {
+                    return self.fail("description must be a non-empty single-line string without surrounding whitespace");
+                }
+                break :description .{ .plain = text };
+            },
+            .object => |object| description: {
+                if (object.count() == 0) {
+                    return self.fail("localized description must contain at least the 'en' translation");
+                }
+                var translations: std.ArrayList(ManifestDescription.Translation) = .empty;
+                var iterator = object.iterator();
+                var has_english = false;
+                while (iterator.next()) |entry| {
+                    const language = entry.key_ptr.*;
+                    if (!validLanguageTag(language)) {
+                        return self.fail("description language keys must be valid language tags");
+                    }
+                    for (translations.items) |translation| {
+                        if (std.ascii.eqlIgnoreCase(translation.language, language)) {
+                            return self.fail("description language keys must be unique ignoring case");
+                        }
+                    }
+                    const text = switch (entry.value_ptr.*) {
+                        .string => |text| text,
+                        else => return self.fail("each localized description must be a string"),
+                    };
+                    if (!validMetadataLine(text)) {
+                        return self.fail("each localized description must be a non-empty single-line string without surrounding whitespace");
+                    }
+                    has_english = has_english or std.ascii.eqlIgnoreCase(language, "en");
+                    try translations.append(self.allocator, .{ .language = language, .text = text });
+                }
+                if (!has_english) {
+                    return self.fail("localized description must contain at least the 'en' translation");
+                }
+                std.mem.sort(ManifestDescription.Translation, translations.items, {}, translationLessThan);
+                break :description .{ .localized = try translations.toOwnedSlice(self.allocator) };
+            },
+            else => self.fail("description must be a string or an object of localized descriptions"),
         };
     }
 
@@ -1565,6 +1645,31 @@ fn validMetadataLine(text: []const u8) bool {
         std.mem.indexOfAny(u8, text, "\r\n") == null;
 }
 
+fn validLanguageTag(text: []const u8) bool {
+    if (text.len < 2 or text.len > 35) return false;
+    var parts = std.mem.splitScalar(u8, text, '-');
+    const primary = parts.first();
+    if (primary.len < 2 or primary.len > 8) return false;
+    for (primary) |character| {
+        if (!std.ascii.isAlphabetic(character)) return false;
+    }
+    while (parts.next()) |part| {
+        if (part.len == 0 or part.len > 8) return false;
+        for (part) |character| {
+            if (!std.ascii.isAlphanumeric(character)) return false;
+        }
+    }
+    return true;
+}
+
+fn translationLessThan(
+    _: void,
+    left: ManifestDescription.Translation,
+    right: ManifestDescription.Translation,
+) bool {
+    return std.ascii.orderIgnoreCase(left.language, right.language) == .lt;
+}
+
 pub fn validExtensionGrant(package_name: []const u8, grant: []const u8) bool {
     if (grant.len <= package_name.len + 1 or !std.mem.startsWith(u8, grant, package_name) or
         grant[package_name.len] != '.') return false;
@@ -1776,10 +1881,30 @@ test "inspect optional package description and authors" {
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Metadata" });
     var resolver = Resolver.init(allocator, std.testing.io, null);
     const manifest = try resolver.inspectPackage(base);
-    try std.testing.expectEqualStrings("Package metadata fixture.", manifest.description.?);
+    try std.testing.expectEqualStrings("Package metadata fixture.", manifest.description.?.resolve("fr"));
     try std.testing.expectEqual(@as(usize, 2), manifest.authors.len);
     try std.testing.expectEqualStrings("Matanek", manifest.authors[0]);
     try std.testing.expectEqualStrings("Silex contributors", manifest.authors[1]);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Metadata/Package.json",
+        .data =
+        \\{
+        \\  "name": "Metadata",
+        \\  "version": "1.0.0",
+        \\  "description": {
+        \\    "fr": "Description localisée.",
+        \\    "en": "Localized description."
+        \\  },
+        \\  "requires": { "silex": ">=0.0.0" }
+        \\}
+        ,
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    const localized = try resolver.inspectPackage(base);
+    try std.testing.expectEqualStrings("Description localisée.", localized.description.?.resolve("fr"));
+    try std.testing.expectEqualStrings("Description localisée.", localized.description.?.resolve("fr-CA"));
+    try std.testing.expectEqualStrings("Localized description.", localized.description.?.resolve("de"));
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Metadata/Package.json",
@@ -1791,6 +1916,25 @@ test "inspect optional package description and authors" {
         "description must be a non-empty single-line string without surrounding whitespace",
         resolver.diagnostic.?,
     );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Metadata/Package.json",
+        .data = "{\"name\":\"Metadata\",\"version\":\"1.0.0\",\"description\":{\"fr\":\"Description.\"},\"requires\":{\"silex\":\">=0.0.0\"}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.inspectPackage(base));
+    try std.testing.expectEqualStrings(
+        "localized description must contain at least the 'en' translation",
+        resolver.diagnostic.?,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Metadata/Package.json",
+        .data = "{\"name\":\"Metadata\",\"version\":\"1.0.0\",\"description\":{\"en\":42},\"requires\":{\"silex\":\">=0.0.0\"}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.inspectPackage(base));
+    try std.testing.expectEqualStrings("each localized description must be a string", resolver.diagnostic.?);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Metadata/Package.json",
@@ -1806,7 +1950,7 @@ test "inspect optional package description and authors" {
     });
     resolver = Resolver.init(allocator, std.testing.io, null);
     const legacy = try resolver.inspectPackage(base);
-    try std.testing.expectEqual(@as(?[]const u8, null), legacy.description);
+    try std.testing.expectEqual(@as(?ManifestDescription, null), legacy.description);
     try std.testing.expectEqual(@as(usize, 0), legacy.authors.len);
 }
 

@@ -3,7 +3,7 @@
 The public package registry is hosted at
 [`https://registry.silex-lang.org/v1/index.json`](https://registry.silex-lang.org/v1/index.json).
 It assigns each package name to one canonical Git repository. Versions,
-descriptions, authors, compatibility, dependencies, namespace extension
+plain or localized descriptions, authors, compatibility, dependencies, namespace extension
 permissions, and package contents remain owned by tagged commits in that
 repository.
 
