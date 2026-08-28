@@ -109,37 +109,48 @@ This principal-type rule also applies to fully qualified paths. If
 `STD.Math.Vec3` contains a public `Vec3`, `STD.Math.Vec3()` constructs it
 directly.
 
-## Give a folder a principal module file
+## Split one module across source atoms
 
-An optional `@module.sx` or `@Module.sx` contributes directly to the logical
-module represented by its folder. Both spellings have the same meaning; their
-name is structural and never appears in source paths:
+A source file whose name starts with `@` contributes directly to the logical
+module represented by its folder. The filename organizes that module
+physically; it never creates a module, namespace or import path. `@Module.sx`
+is the conventional atom for a module's main declarations or facade, but it
+has no distinct semantics:
 
 ```text
-GFX/Module/@module.sx                 -> GFX
-GFX/Module/GPU/@module.sx             -> GFX.GPU
-GFX/Module/GPU/@Module.sx             -> GFX.GPU (equivalent spelling)
+GFX/Module/@Module.sx                 -> GFX
+GFX/Module/GPU/@Module.sx             -> GFX.GPU
+GFX/Module/GPU/@Device.sx             -> GFX.GPU (another atom)
 GFX/Module/GPU/Device.sx              -> GFX.GPU.Device
 Sandbox/MonModule/@Module.sx           -> MonModule (loose project)
 ```
 
-The principal module also owns the implementation modules below its folder for
+Importing or qualifying `GFX.GPU` composes both `@Module.sx` and `@Device.sx`.
+Neither `GFX.GPU.@Module` nor `GFX.GPU.@Device` is a source path, and language
+servers do not offer those physical names as modules. A public `Device`
+declaration inside either atom is an ordinary member of `GFX.GPU`.
+
+The atomized module also owns the implementation modules below its folder for
 visibility purposes. Consequently, an unqualified declaration in
 `GFX/Module/GPU/Device.sx` is available to the other files under `GFX.GPU`,
 while remaining unavailable to `GFX.Scene` and to package consumers. The child
 paths remain distinct import paths; this ownership does not merge files or
 change their module names.
 
-Without a `Package.json`, compiling or editing a principal module directly
-uses the parent of its folder as the implicit project root. This preserves the
-folder's module identity while keeping quick experiments and scripts free of
-project configuration. For `Sandbox/Test/@Module.sx`, `Package.` therefore
-lists direct children of `Sandbox`, while `Package.Test.` reaches children such
-as `Display` inside `Test`.
+Atoms do not merge lexical scopes. Each one keeps its own `use` declarations
+and `local` declarations, while ordinary module-visible declarations are
+available across atoms. Diagnostics, tests, definition navigation and asset
+paths retain the exact physical source file.
 
-The file follows ordinary declaration and visibility rules. It may define a
-module facade with explicit public reexports, private helpers and ordinary
-`use` declarations. Importing or qualifying its logical module loads it:
+Without a `Package.json`, compiling or editing an atom directly uses the
+parent of its folder as the implicit project root. This preserves the folder's
+module identity while keeping quick experiments and scripts free of project
+configuration. For `Sandbox/Test/@Module.sx`, `Package.` therefore lists direct
+children of `Sandbox`, while `Package.Test.` reaches children such as `Display`
+inside `Test`.
+
+Every atom follows ordinary declaration and visibility rules. Importing or
+qualifying its logical module loads all of its atoms:
 
 ```sx
 use GFX
@@ -148,13 +159,13 @@ use GFX.GPU
 let device = GPU.Device()
 ```
 
-A flat module file and a principal file cannot provide the same logical module
-inside one source root. For example, `GPU.sx` and `GPU/@module.sx` together are
-rejected as duplicate providers. Likewise, a folder cannot contain both
-`@module.sx` and `@Module.sx`: they are two spellings of the same provider.
-Portable, platform and exact-target roots may still contribute their
-corresponding principal-module fragments to one logical module under the
-existing composition rules.
+A flat module file and source atoms cannot provide the same logical module
+inside one source root. For example, `GPU.sx` and `GPU/@Device.sx` together are
+rejected as duplicate representations. A folder may contain any number of
+distinct `@Name.sx` atoms; duplicate declarations are rejected instead of
+being ordered or overridden. Portable, platform and exact-target roots may
+still contribute their corresponding fragments to one logical module under
+the existing composition rules.
 
 ## Compose package-local module fragments
 
@@ -246,8 +257,9 @@ tree.
 ## Contribute to a package umbrella
 
 A qualified child package can add its own public declarations to an umbrella
-catalog explicitly opened by its parent. Contributions belong in the portable
-principal module `Module/@Module.sx` of the child package:
+catalog explicitly opened by its parent. Contributions belong in a portable
+atom of the child package's principal module. The conventional location is
+`Module/@Module.sx`:
 
 ```sx
 contribute GFX.Components {

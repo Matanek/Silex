@@ -71,8 +71,7 @@ fn parentDirectory(directory: []const u8) ?[]const u8 {
 fn looseRoot(input_path: []const u8) []const u8 {
     const directory = std.fs.path.dirname(input_path) orelse ".";
     const basename = std.fs.path.basename(input_path);
-    if (!std.mem.eql(u8, basename, Modules.principal_file) and
-        !std.mem.eql(u8, basename, Modules.principal_file_capitalized)) return directory;
+    if (!Modules.isFragmentFile(basename)) return directory;
     return std.fs.path.dirname(directory) orelse directory;
 }
 
@@ -90,7 +89,7 @@ fn fileExists(io: std.Io, path: []const u8) bool {
     return true;
 }
 
-test "use a principal module's parent as the loose project root" {
+test "use the conventional module atom's parent as the loose project root" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -111,6 +110,26 @@ test "use a principal module's parent as the loose project root" {
         sandbox,
         try findRootWithin(allocator, std.testing.io, input, workspace),
     );
+}
+
+test "use an atomized module's parent as the loose project root" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Math/@Vec3.sx",
+        .data = "func main() {}",
+    });
+    const workspace = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const sandbox = try std.fs.path.join(allocator, &.{ workspace, "Sandbox" });
+    const input = try std.fs.path.join(allocator, &.{ sandbox, "Math", "@Vec3.sx" });
+
+    try std.testing.expectEqualStrings(sandbox, try findRoot(allocator, std.testing.io, input));
+    try std.testing.expectEqualStrings(sandbox, try findRootWithin(allocator, std.testing.io, input, workspace));
 }
 
 test "continue a relative manifest search through the current directory" {

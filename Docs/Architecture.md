@@ -167,6 +167,11 @@ open Silex document
   and applies the same leaf below the portable, active platform, and exact
   target roots. A loose invocation without `Package.json` keeps its entry-owned
   implicit source root.
+- A valid `@Name.sx` basename is an invisible physical atom of the logical
+  module represented by its directory. All atoms of that module are composed
+  before semantic lowering while retaining file-local imports, declarations
+  and provenance. Their basenames never enter module paths or LSP module
+  results; `@Module.sx` is a convention with no distinct compiler privilege.
 - An exact namespace extension may carry a `suite` installation permission.
   The registry expands only a package explicitly requested by registered name
   with `--suite`, and selects independently released members whose parent

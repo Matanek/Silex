@@ -146,6 +146,47 @@ test "server navigates imported package declarations to their exact sources" {
     try std.testing.expectEqual(@as(usize, 15), method.range.end.character);
 }
 
+test "server navigates declarations composed from invisible module atoms" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Math/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Package.json",
+        .data = "{\"name\":\"Math\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/@Module.sx",
+        .data = "public func answer() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/@Vec3.sx",
+        .data = "public struct Vec3 { public let value:int }",
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const atom_uri = try std.fmt.allocPrint(allocator, "file://{s}/Math/Module/%40Vec3.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const vector = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Math
+        \\func main() { let value = Math.Ve<|>c3(value:42) }
+    )).?;
+    try std.testing.expectEqualStrings(atom_uri, vector.uri);
+    try std.testing.expectEqual(@as(usize, 0), vector.range.start.line);
+}
+
 test "server completes and navigates package declarations for friend packages" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

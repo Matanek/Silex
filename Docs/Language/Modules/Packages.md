@@ -6,7 +6,8 @@ A manifest uses `Module/` as its source directory by default:
 Math/
   Package.json
   Module/
-    @module.sx
+    @Module.sx
+    @Operations.sx
     Vec3.sx
 ```
 
@@ -25,10 +26,13 @@ Absolute paths, backslashes, empty paths, `.` or `..` segments, repeated
 separators and trailing separators are rejected. One manifest selects exactly
 one source directory, without globs or arrays.
 
-`Module/@module.sx` is the optional principal module of a named package. The
-capitalized spelling `Module/@Module.sx` is also accepted with exactly the same
-meaning. For a package named `Math`, either spelling provides `Math`; a nested
-`Module/Geometry/@module.sx` provides `Math.Geometry`.
+Every valid `Module/@Name.sx` file is an invisible source atom of a named
+package's principal module. For a package named `Math`, both `@Module.sx` and
+`@Operations.sx` contribute directly to `Math`; their physical names cannot be
+imported. `@Module.sx` is only the conventional name for the main atom. A
+nested `Module/Geometry/@Module.sx` provides `Math.Geometry`, while the ordinary
+file `Module/Geometry/Point.sx` provides the child module
+`Math.Geometry.Point`.
 
 A package may also provide modules selected for the current platform and exact
 compilation target:
@@ -235,10 +239,11 @@ catalogs:
 ```
 
 An active immediate child such as `GFX.Physics` may then declare `contribute`
-blocks in its portable principal module. The target must be an existing module
-owned by its immediate parent and listed exactly in `catalogs`. The child can
-reexport only declarations that it owns. Every contributed name is checked
-against the umbrella's declarations, child namespaces and other contributions;
+blocks in any atom of its portable principal module. The target must be an
+existing module owned by its immediate parent and listed exactly in `catalogs`.
+The child can reexport only declarations that it owns. Every contributed name
+is checked against the umbrella's declarations, child namespaces and other
+contributions;
 any collision rejects the composition.
 
 Extension authorization, `friend`, `suite`, `merge`, and `catalogs` express
@@ -366,8 +371,8 @@ roots remain unambiguous in every project.
 
 A loose program without `Package.json` needs no manifest merely to try Silex
 or run a short script. Its inferred source root is also the root of `Package.`.
-For an ordinary entry this is its containing directory. A principal
-`Folder/@Module.sx` keeps `Folder` as its module identity, so its inferred
+For an ordinary entry this is its containing directory. Any source atom such
+as `Folder/@Types.sx` keeps `Folder` as its module identity, so its inferred
 source and package root is the parent of `Folder`. Its implicit development
 environment exposes compatible packages through workspace links, user links,
 then installed versions. Its location and the directory from which

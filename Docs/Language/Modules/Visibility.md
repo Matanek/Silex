@@ -1,11 +1,11 @@
 # Expose or hide declarations
 
 A declaration at module level is `module` by default. It is available from
-every file owned by the same principal module, including child implementation
-modules and the selected portable, `Platform`, and `Target` fragments. For
-example, declarations in `STD.Regex.Engine` and `STD.Regex.Syntax` share the
-`STD.Regex` module boundary when `STD.Regex` has a principal `@module.sx` or
-`@Module.sx` file:
+every file owned by the same atomized module, including its `@Name.sx` atoms,
+child implementation modules and the selected portable, `Platform`, and
+`Target` fragments. For example, declarations in `STD.Regex.Engine` and
+`STD.Regex.Syntax` share the `STD.Regex` module boundary when its folder
+contains a source atom such as `@Module.sx`:
 
 ```sx
 func helper() {}
@@ -43,10 +43,11 @@ class Helper {}
 Packages sharing a namespace prefix do not share `package` visibility unless
 the package owning the declaration gives the child extension `friend: true`. A
 `local` declaration never crosses its exact source-file boundary. Files owned
-by a principal module share `module` declarations without merging lexical
-scopes or import paths. Platform and target declarations still use their
-contextual qualifications. Without a principal module, two sibling module
-paths remain distinct visibility boundaries.
+by an atomized module share `module` declarations without merging lexical
+scopes or import paths. The physical `@Name` labels never enter source paths.
+Platform and target declarations still use their contextual qualifications.
+Without a source atom, two sibling module paths remain distinct visibility
+boundaries.
 
 `private` and `protected` are relative to a type, so the compiler rejects them
 at module level. `private` is available to the declaring nested-type family;

@@ -231,6 +231,68 @@ test "compose principal secondary qualified and aliased public structures" {
     try std.testing.expect(found_interface);
 }
 
+test "compose invisible source atoms into one logical module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Math/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Math\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Package.json",
+        .data = "{\"name\":\"Math\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/@Module.sx",
+        .data = "public func answer() int { return atom_value() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/@Vec3.sx",
+        .data =
+        \\func atom_value() int { return 42 }
+        \\public struct Vec3 { public let value:int }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Geometry.sx",
+        .data = "public func dimensions() int { return 3 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Math
+        \\use Math.Geometry
+        \\func main() {
+        \\    let vector = Math.Vec3(value:Math.answer())
+        \\    print(vector.value + Geometry.dimensions())
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = compiler.compile(input) catch |err| {
+        std.debug.print("atomized module compilation failed: {s}\n", .{compiler.diagnostic.?.message});
+        return err;
+    };
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("45\n", result.stdout);
+
+    var math_atoms: usize = 0;
+    for (compiler.index.providers) |provider| {
+        if (std.mem.eql(u8, provider.name, "Math")) math_atoms += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), math_atoms);
+    try std.testing.expect(compiler.index.find("Math.@Module") == null);
+    try std.testing.expect(compiler.index.find("Math.@Vec3") == null);
+    try std.testing.expect(compiler.index.find("Math.Geometry") != null);
+}
+
 test "resolve a principal structure through its parent namespace" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

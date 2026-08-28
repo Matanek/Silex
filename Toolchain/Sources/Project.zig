@@ -259,8 +259,7 @@ pub const Compiler = struct {
         var roots: std.ArrayList([]const u8) = .empty;
         for (self.index.providers) |provider| {
             const basename = std.fs.path.basename(provider.path);
-            if (!std.mem.eql(u8, basename, Modules.principal_file) and
-                !std.mem.eql(u8, basename, Modules.principal_file_capitalized)) continue;
+            if (!Modules.isFragmentFile(basename)) continue;
             var found = false;
             for (roots.items) |root| if (std.mem.eql(u8, root, provider.name)) {
                 found = true;
@@ -1685,13 +1684,16 @@ pub const Compiler = struct {
                 } else if (call.receiver == null and std.mem.indexOfScalar(u8, call.name, '.') == null) {
                     if (!Lookup.findLocalFunction(self.units[module].program.?, call.name)) {
                         if (Fragments.otherFunctionTarget(self.index, self.units, module, call.name)) |target| {
+                            const source_origin = self.index.providers[module].origin;
                             const origin = self.index.providers[target.module].origin;
-                            const message = try std.fmt.allocPrint(
-                                self.allocator,
-                                "function '{s}' from the {s} fragment must be accessed as '{s}.{s}'",
-                                .{ call.name, Fragments.label(origin), Fragments.label(origin), call.name },
-                            );
-                            return self.fail(call.name_position, message);
+                            if (origin != source_origin) {
+                                const message = try std.fmt.allocPrint(
+                                    self.allocator,
+                                    "function '{s}' from the {s} fragment must be accessed as '{s}.{s}'",
+                                    .{ call.name, Fragments.label(origin), Fragments.label(origin), call.name },
+                                );
+                                return self.fail(call.name_position, message);
+                            }
                         }
                     }
                     if (findStructure(self.units[module].program.?, call.name) != null) {

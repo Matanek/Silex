@@ -1,4 +1,5 @@
 const std = @import("std");
+const Modules = @import("Modules.zig");
 
 pub fn same(roots: []const []const u8, left_value: []const u8, right_value: []const u8) bool {
     const left = logical(left_value);
@@ -31,7 +32,7 @@ fn providerScope(providers: anytype, module: []const u8) []const u8 {
     var result: ?[]const u8 = null;
     for (providers) |provider| {
         const basename = std.fs.path.basename(provider.path);
-        if (!std.mem.eql(u8, basename, "@module.sx") and !std.mem.eql(u8, basename, "@Module.sx")) continue;
+        if (!Modules.isFragmentFile(basename)) continue;
         const root = logical(provider.name);
         if (root.len >= module.len or !std.mem.startsWith(u8, module, root) or module[root.len] != '.') continue;
         if (result == null or root.len > result.?.len) result = root;

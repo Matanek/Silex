@@ -37,9 +37,6 @@ pub const Collision = struct {
     right_owner: usize,
 };
 
-pub const principal_file = "@module.sx";
-pub const principal_file_capitalized = "@Module.sx";
-
 pub const Index = struct {
     providers: []const Provider,
 
@@ -173,7 +170,11 @@ pub fn discoverOwnedExcludingAs(
     std.mem.sort(Provider, providers.items, {}, lessThan);
     for (providers.items, 0..) |*provider, index| {
         provider.file = index;
-        if (index != 0 and std.mem.eql(u8, providers.items[index - 1].name, provider.name)) {
+        if (index != 0 and
+            std.mem.eql(u8, providers.items[index - 1].name, provider.name) and
+            (!isFragmentFile(std.fs.path.basename(providers.items[index - 1].path)) or
+                !isFragmentFile(std.fs.path.basename(provider.path))))
+        {
             return error.DuplicateModule;
         }
     }
@@ -270,7 +271,9 @@ pub fn moduleDirectoryName(allocator: Allocator, relative_path: []const u8) Erro
 
 fn relativeModuleName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
     if (!std.mem.endsWith(u8, relative_path, ".sx")) return error.InvalidModulePath;
-    const stem = if (isPrincipalFile(std.fs.path.basename(relative_path)))
+    const basename = std.fs.path.basename(relative_path);
+    if (basename[0] == '@' and !isFragmentFile(basename)) return error.InvalidModulePath;
+    const stem = if (isFragmentFile(basename))
         std.fs.path.dirname(relative_path) orelse ""
     else
         relative_path[0 .. relative_path.len - ".sx".len];
@@ -284,9 +287,9 @@ fn relativeModuleName(allocator: Allocator, relative_path: []const u8) Error![]c
     return result;
 }
 
-fn isPrincipalFile(basename: []const u8) bool {
-    return std.mem.eql(u8, basename, principal_file) or
-        std.mem.eql(u8, basename, principal_file_capitalized);
+pub fn isFragmentFile(basename: []const u8) bool {
+    if (basename.len <= "@.sx".len or basename[0] != '@' or !std.mem.endsWith(u8, basename, ".sx")) return false;
+    return validName(basename[1 .. basename.len - ".sx".len]);
 }
 
 pub fn validName(name: []const u8) bool {
@@ -331,12 +334,15 @@ test "derive canonical module names from nested and dotted paths" {
     try std.testing.expectEqualStrings("Math.Integer.Checked", try moduleName(allocator, "Math/Integer.Checked.sx"));
     try std.testing.expectEqualStrings("Math.Integer", try moduleName(allocator, "Math/Integer/@module.sx"));
     try std.testing.expectEqualStrings("Math.Integer", try moduleName(allocator, "Math/Integer/@Module.sx"));
+    try std.testing.expectEqualStrings("Math.Integer", try moduleName(allocator, "Math/Integer/@Checked.sx"));
     try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "@module.sx"));
     try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "@Module.sx"));
+    try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "Math/@.sx"));
+    try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "Math/@invalid-name.sx"));
     try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "Math/2D.sx"));
 }
 
-test "discover capitalized principal module files" {
+test "discover the conventional capitalized module atom" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -352,7 +358,7 @@ test "discover capitalized principal module files" {
     try std.testing.expect(index.find("GFX.GPU.@Module") == null);
 }
 
-test "discover package and nested principal modules" {
+test "discover package and nested module atoms" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -371,7 +377,30 @@ test "discover package and nested principal modules" {
     try std.testing.expect(index.find("GFX.GPU.@module") == null);
 }
 
-test "reject flat and principal files for the same module" {
+test "discover several invisible atoms of one module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Math");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Math/@Module.sx", .data = "public func answer() int { return 42 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Math/@Vec3.sx", .data = "public struct Vec3 {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Math/Geometry.sx", .data = "public struct Point {}" });
+    const root_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const index = try discover(allocator, std.testing.io, root_path);
+
+    try std.testing.expectEqual(@as(usize, 3), index.providers.len);
+    try std.testing.expectEqualStrings("Math", index.providers[0].name);
+    try std.testing.expectEqualStrings("Math", index.providers[1].name);
+    try std.testing.expectEqualStrings("Math.Geometry", index.providers[2].name);
+    try std.testing.expect(index.find("Math") != null);
+    try std.testing.expect(index.find("Math.@Module") == null);
+    try std.testing.expect(index.find("Math.@Vec3") == null);
+}
+
+test "reject flat and atomized representations of the same module" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
