@@ -139,8 +139,10 @@ change their module names.
 
 Atoms do not merge lexical scopes. Each one keeps its own `use` declarations
 and `local` declarations, while ordinary module-visible declarations are
-available across atoms. Diagnostics, tests, definition navigation and asset
-paths retain the exact physical source file.
+available across atoms. A function, type or enum declared in one atom can
+therefore be named directly from another, and importing the logical module
+activates extensions supplied by all of its atoms. Diagnostics, tests,
+definition navigation and asset paths retain the exact physical source file.
 
 Without a `Package.json`, compiling or editing an atom directly uses the
 parent of its folder as the implicit project root. This preserves the folder's

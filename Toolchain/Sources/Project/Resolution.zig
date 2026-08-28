@@ -17,7 +17,7 @@ pub fn structureCandidate(self: anytype, module: usize, name: []const u8) !?Targ
         if (Names.findStructure(self.units[target.module].program.?, target.declaration) != null) return target;
         return null;
     };
-    if (Names.findStructure(self.units[module].program.?, name) != null) return .{ .module = module, .declaration = name };
+    if (Fragments.structureTarget(self.index, self.units, module, name)) |target| return target;
     if (std.mem.indexOfScalar(u8, name, '.') != null) return self.targetForCall(module, name);
     for (self.units[module].bindings) |binding| {
         if (!std.mem.eql(u8, binding.alias, name)) continue;
@@ -46,7 +46,7 @@ pub fn enumCandidate(self: anytype, module: usize, name: []const u8) !?Target {
         if (Names.findEnum(self.units[target.module].program.?, target.declaration) != null) return target;
         return null;
     };
-    if (Names.findEnum(self.units[module].program.?, name) != null) return .{ .module = module, .declaration = name };
+    if (Fragments.enumTarget(self.index, self.units, module, name)) |target| return target;
     if (std.mem.indexOfScalar(u8, name, '.') != null) return self.targetForCall(module, name);
     for (self.units[module].bindings) |binding| {
         if (!std.mem.eql(u8, binding.alias, name)) continue;

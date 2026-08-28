@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Fragments = @import("Fragments.zig");
 const GenericTypes = @import("GenericTypes.zig");
 
 pub fn compose(
@@ -50,20 +51,20 @@ fn visibleFiles(self: anytype, provider: usize) ![]const usize {
         }
         const visited = try self.allocator.alloc(bool, self.units.len);
         @memset(visited, false);
-        if (dependsOn(self.units, consumer, provider, visited)) try result.append(self.allocator, self.index.providers[consumer].file);
+        if (dependsOn(self, consumer, provider, visited)) try result.append(self.allocator, self.index.providers[consumer].file);
     }
     return result.toOwnedSlice(self.allocator);
 }
 
-fn dependsOn(units: anytype, source: usize, target: usize, visited: []bool) bool {
-    if (source == target) return true;
+fn dependsOn(self: anytype, source: usize, target: usize, visited: []bool) bool {
+    if (Fragments.same(self.index, source, target)) return true;
     if (visited[source]) return false;
     visited[source] = true;
-    for (units[source].bindings) |binding| if (binding.module) |dependency| {
-        if (dependsOn(units, dependency, target, visited)) return true;
+    for (self.units[source].bindings) |binding| if (binding.module) |dependency| {
+        if (dependsOn(self, dependency, target, visited)) return true;
     };
-    for (units[source].activated_modules) |dependency| {
-        if (dependsOn(units, dependency, target, visited)) return true;
+    for (self.units[source].activated_modules) |dependency| {
+        if (dependsOn(self, dependency, target, visited)) return true;
     }
     return false;
 }

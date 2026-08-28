@@ -249,13 +249,19 @@ test "compose invisible source atoms into one logical module" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Module/@Module.sx",
-        .data = "public func answer() int { return atom_value() }",
+        .data =
+        \\public func answer() int { return atom_value() }
+        \\public func vector() Vec3 { return Vec3(value:answer()) }
+        \\public func state() State { return State.ready }
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Module/@Vec3.sx",
         .data =
         \\func atom_value() int { return 42 }
         \\public struct Vec3 { public let value:int }
+        \\extend Vec3 { static func zero() Vec3 { return Vec3(value:0) } }
+        \\public enum State { ready }
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -266,10 +272,13 @@ test "compose invisible source atoms into one logical module" {
         .sub_path = "Main.sx",
         .data =
         \\use Math
+        \\use Math.Vec3 as Vector
         \\use Math.Geometry
         \\func main() {
-        \\    let vector = Math.Vec3(value:Math.answer())
-        \\    print(vector.value + Geometry.dimensions())
+        \\    let vector = Math.vector()
+        \\    let direct = Vector(value:0)
+        \\    if Math.state() != Math.State.ready { panic("wrong atom state") }
+        \\    print(vector.value + direct.value + Math.Vec3.zero().value + Geometry.dimensions())
         \\}
         ,
     });
