@@ -179,8 +179,10 @@ pub const Graph = struct {
 
     pub fn canAccess(self: Graph, owner: usize, provider: usize, module_name: []const u8) bool {
         if (owner == provider) return true;
+        for (self.packages[owner].dependencies) |dependency| {
+            if (dependency.package == provider and belongsTo(module_name, dependency.name)) return true;
+        }
         const direct = self.directDependencyForModule(owner, module_name) orelse return false;
-        if (direct.package == provider) return true;
         if (!std.mem.eql(u8, direct.name, module_name) or provider >= self.packages.len) return false;
         const child_name = self.packages[direct.package].name orelse return false;
         if (!std.mem.eql(u8, child_name, direct.name)) return false;

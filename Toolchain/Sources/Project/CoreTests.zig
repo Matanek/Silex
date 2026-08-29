@@ -1029,6 +1029,99 @@ test "compile an explicit package test entry outside public module roots" {
     try std.testing.expect(compiler.index.find("Toolkit.Tests.Unloaded") == null);
 }
 
+test "compile an explicit package suite entry after composing a merged extension" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Application");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Application/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Scene2D/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Scene2D/Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data =
+        \\{"name":"GFX","version":"1.0.0","extensions":{"GFX.Application":{"merge":true,"suite":true},"GFX.Scene2D":{"suite":true}}}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application/@Module.sx",
+        .data =
+        \\public protocol Plugin {
+        \\    func id() str
+        \\    func build(application:&Application)
+        \\}
+        \\public class Application {
+        \\    func add_plugin<P:Plugin>(plugin:P) {
+        \\        assert(plugin.id() == "time")
+        \\        plugin.build(self)
+        \\    }
+        \\    func mark_ready() {}
+        \\}
+        \\public func core_value() int { return 20 }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application/Time.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.Application.Plugin as PluginProtocol
+        \\public struct Time:PluginProtocol {
+        \\    func id() str { return "time" }
+        \\    func build(application:&Application) { application.mark_ready() }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Package.json",
+        .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@Scene.sx",
+        .data = "public func scene_value() int { return 22 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Scene2D/Package.json",
+        .data = "{\"name\":\"GFX.Scene2D\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Application\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Scene2D/Module/Domain.sx",
+        .data = "public func value() int { return 1 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Scene2D/Tests/Domain.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.Application.Time as TimePlugin
+        \\test "consume merged application" {
+        \\    var host = Application()
+        \\    host.add_plugin(TimePlugin())
+        \\    assert(Application.core_value() + Application.scene_value() == 42)
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(
+        allocator,
+        &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX.Scene2D", "Tests", "Domain.sx" },
+    );
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compileTests(input);
+    try std.testing.expectEqual(@as(usize, 1), compilation.tests.len);
+    try std.testing.expect(compiler.index.find("GFX.Scene2D.Tests.Domain") != null);
+    const result = try @import("../Interpreter.zig").runFunctionCaptureWithBoundaries(
+        allocator,
+        null,
+        compilation.ir,
+        compilation.tests[0].function,
+        compilation.boundaries,
+    );
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    _ = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+}
+
 test "qualified packages share namespaces without sharing ownership" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
