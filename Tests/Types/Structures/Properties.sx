@@ -1,0 +1,103 @@
+struct Rectangle {
+    let width:int
+    let height:int
+
+    let area:int {
+        get { return self.width * self.height }
+    }
+}
+
+class Data {
+    static let instance:Data {
+        get {
+            if Data.instance == null {
+                Data.instance = Data()
+            }
+            return Data.instance
+        }
+    }
+
+    private init() {}
+}
+
+struct Thermometer {
+    var raw:int
+
+    var celsius:int {
+        get { return self.raw }
+        set(value) { self.raw = value }
+    }
+}
+
+protocol Named {
+    name:str { get }
+}
+
+protocol Renamable {
+    name:str { get set }
+}
+
+struct StoredPerson : Renamable {
+    var name:str
+}
+
+struct ComputedPerson : Named {
+    let first:str
+    let last:str
+
+    let name:str {
+        get { return self.first + " " + self.last }
+    }
+}
+
+class PositionReference {
+    var x:int
+}
+
+struct PlayerReference {
+    var stored:PositionReference
+
+    let position:PositionReference {
+        get { return self.stored }
+    }
+}
+
+test "computed property reads through its getter" {
+    let rectangle = Rectangle(width:6, height:7)
+    assert(rectangle.area == 42, "computed getter")
+    let metadata = reflect(rectangle)
+    assert(metadata.fields.count() == 2, "stored fields stay fields")
+    assert(metadata.properties.count() == 1, "computed property metadata")
+    assert(metadata.properties[0] == "area", "property name metadata")
+    assert(metadata.methods.count() == 0, "accessors stay hidden from methods")
+}
+
+test "static let property initializes its own backing storage once" {
+    var first = Data.instance
+    var second = Data.instance
+    assert(first == second, "singleton identity")
+}
+
+test "exact property assignment invokes its setter" {
+    var thermometer = Thermometer(raw:0)
+    thermometer.celsius = 21
+    assert(thermometer.raw == 21, "computed setter")
+    assert(thermometer.celsius == 21, "getter after setter")
+    thermometer.celsius += 4
+    assert(thermometer.celsius == 25, "compound getter then setter")
+}
+
+test "stored fields and accessors satisfy protocol property requirements" {
+    var renamable:Renamable = StoredPerson(name:"Ada")
+    renamable.name = "Grace"
+    assert(renamable.name == "Grace", "stored var satisfies get set")
+
+    var named:Named = ComputedPerson(first:"Ada", last:"Lovelace")
+    assert(named.name == "Ada Lovelace", "computed property satisfies get")
+}
+
+test "nested mutation follows class identity without invoking a setter" {
+    var player = PlayerReference(stored:PositionReference(x:1))
+    player.position.x = 10
+    assert(player.stored.x == 10, "class identity returned by getter")
+}

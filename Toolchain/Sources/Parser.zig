@@ -603,6 +603,7 @@ pub const Parser = struct {
                 std.mem.reverse(Ast.AssignmentTarget.Field, fields.items);
                 std.mem.reverse(Ast.AssignmentTarget.Index, indices.items);
                 return .{
+                    .source = expression,
                     .name_position = current.position,
                     .name = name,
                     .fields = try fields.toOwnedSlice(self.allocator),
@@ -614,6 +615,7 @@ pub const Parser = struct {
                 std.mem.reverse(Ast.AssignmentTarget.Field, fields.items);
                 std.mem.reverse(Ast.AssignmentTarget.Index, indices.items);
                 return .{
+                    .source = expression,
                     .name_position = current.position,
                     .name = reference.name,
                     .type_arguments = reference.type_arguments,

@@ -238,6 +238,43 @@ fn parseType(
         };
         try self.expect(.colon, "expected ':' after field name");
         const field_type = try self.parseType();
+        if (self.current.tag == .left_brace) {
+            const property = try parsePropertyAccessors(
+                self,
+                name,
+                field_name,
+                field_name_position,
+                field_type,
+                mutable,
+                member_static,
+                member_public,
+                member_internal,
+                member_local,
+                member_private,
+                member_protected,
+                &methods,
+            );
+            const parsed_field = Ast.StructureField{
+                .is_static = member_static,
+                .is_public = member_public,
+                .is_internal = member_internal,
+                .is_local = member_local,
+                .is_private = member_private,
+                .is_protected = member_protected,
+                .visibility_explicit = member_visibility,
+                .position = field_position,
+                .name_position = field_name_position,
+                .name = field_name,
+                // The optional layer is private backing storage. Externally,
+                // the property still has exactly `field_type`.
+                .mutable = true,
+                .type = .optional(field_type),
+                .default = null,
+                .property = property,
+            };
+            if (member_static) try static_fields.append(self.allocator, parsed_field) else try fields.append(self.allocator, parsed_field);
+            continue;
+        }
         var default: ?*Ast.Expression = null;
         if (self.current.tag == .equal) {
             try self.advance();
@@ -284,6 +321,99 @@ fn parseType(
         .constructors = try constructors.toOwnedSlice(self.allocator),
         .methods = try methods.toOwnedSlice(self.allocator),
         .drop = drop,
+    };
+}
+
+fn parsePropertyAccessors(
+    self: anytype,
+    owner_name: []const u8,
+    property_name: []const u8,
+    property_position: @import("../Source.zig").Position,
+    property_type: Ast.Type,
+    writable: bool,
+    is_static: bool,
+    is_public: bool,
+    is_internal: bool,
+    is_local: bool,
+    is_private: bool,
+    is_protected: bool,
+    methods: *std.ArrayList(Ast.Function),
+) !Ast.StructureField.Property {
+    try self.expect(.left_brace, "expected '{' before property accessors");
+    var getter_method: ?usize = null;
+    var setter_method: ?usize = null;
+    while (self.current.tag != .right_brace and self.current.tag != .end) {
+        if (self.current.tag != .identifier) return self.fail("expected 'get' or 'set' in property declaration");
+        const accessor_position = self.current.position;
+        const accessor_name = self.current.lexeme;
+        if (std.mem.eql(u8, accessor_name, "get")) {
+            if (getter_method != null) return self.failAt(accessor_position, "property already declares a getter");
+            try self.advance();
+            if (self.current.tag == .left_parenthesis) return self.fail("a getter has no parameters");
+            const generated_name = try std.fmt.allocPrint(self.allocator, "$get.{s}", .{property_name});
+            getter_method = methods.items.len;
+            const body = try self.parseBlock();
+            const statements = if (is_static) synchronized: {
+                const wrapped = try self.allocator.alloc(Ast.Statement, 1);
+                wrapped[0] = .{ .mutex_statement = .{ .position = accessor_position, .statements = body } };
+                break :synchronized wrapped;
+            } else body;
+            try methods.append(self.allocator, .{
+                .is_static = is_static,
+                .is_public = is_public,
+                .is_internal = is_internal,
+                .is_local = is_local,
+                .is_private = is_private,
+                .is_protected = is_protected,
+                .position = accessor_position,
+                .name_position = accessor_position,
+                .name = generated_name,
+                .parameters = &.{},
+                .return_type = property_type,
+                .accessor = .{ .owner = owner_name, .property = property_name, .kind = .get },
+                .statements = statements,
+            });
+            continue;
+        }
+        if (std.mem.eql(u8, accessor_name, "set")) {
+            if (!writable) return self.failAt(accessor_position, "a 'let' property cannot declare a setter");
+            if (setter_method != null) return self.failAt(accessor_position, "property already declares a setter");
+            try self.advance();
+            try self.expect(.left_parenthesis, "expected '(' after 'set'");
+            if (self.current.tag != .identifier) return self.fail("expected setter value name");
+            const value_position = self.current.position;
+            const value_name = self.current.lexeme;
+            try self.advance();
+            try self.expect(.right_parenthesis, "expected ')' after setter value name");
+            const parameters = try self.allocator.alloc(Ast.Parameter, 1);
+            parameters[0] = .{ .position = value_position, .name = value_name, .type = property_type };
+            const generated_name = try std.fmt.allocPrint(self.allocator, "$set.{s}", .{property_name});
+            setter_method = methods.items.len;
+            try methods.append(self.allocator, .{
+                .is_static = is_static,
+                .is_public = is_public,
+                .is_internal = is_internal,
+                .is_local = is_local,
+                .is_private = is_private,
+                .is_protected = is_protected,
+                .position = accessor_position,
+                .name_position = accessor_position,
+                .name = generated_name,
+                .parameters = parameters,
+                .return_type = .void,
+                .accessor = .{ .owner = owner_name, .property = property_name, .kind = .set },
+                .statements = try self.parseBlock(),
+            });
+            continue;
+        }
+        return self.failAt(accessor_position, "expected 'get' or 'set' in property declaration");
+    }
+    try self.expect(.right_brace, "expected '}' after property accessors");
+    if (getter_method == null) return self.failAt(property_position, "a property must declare a getter");
+    return .{
+        .value_type = property_type,
+        .getter_method = getter_method.?,
+        .setter_method = setter_method,
     };
 }
 

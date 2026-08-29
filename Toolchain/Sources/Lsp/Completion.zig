@@ -14,6 +14,7 @@ const CompletionKind = struct {
     const method: u8 = 2;
     const function: u8 = 3;
     const field: u8 = 5;
+    const property: u8 = 10;
     const variable: u8 = 6;
     const class: u8 = 7;
     const interface: u8 = 8;
@@ -275,7 +276,7 @@ pub fn itemsAtWithExpectedType(
                 if (!std.mem.eql(u8, structure.name, aggregate.type_name) or structure.constructors.len != 0) continue;
                 native_initializer = true;
                 for (structure.fields) |field| {
-                    if (field.is_local or field.is_private or field.is_protected or
+                    if (field.property != null or field.is_local or field.is_private or field.is_protected or
                         suppliedAggregateField(aggregate, field.name)) continue;
                     try appendCandidate(allocator, &candidates, context, .{
                         .label = field.name,
@@ -1376,11 +1377,11 @@ fn appendMembers(
         }
         for (structure.static_fields) |field| try appendCandidate(allocator, candidates, context, .{
             .label = field.name,
-            .kind = CompletionKind.field,
-            .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{ field.name, typeName(program, field.type) }),
+            .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
+            .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{ field.name, typeName(program, if (field.property) |property| property.value_type else field.type) }),
         }, memberFieldPriority, false);
         for (structure.methods) |method| {
-            if ((!method.is_static and !context.system_callback) or
+            if (method.accessor != null or (!method.is_static and !context.system_callback) or
                 !callAcceptsParameters(source, cursor, program, method.parameters)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = method.name,
@@ -1392,10 +1393,18 @@ fn appendMembers(
     }
     for (structure.fields) |field| try appendCandidate(allocator, candidates, context, .{
         .label = field.name,
-        .kind = CompletionKind.field,
-        .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ field.name, typeName(program, field.type) }),
+        .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
+        .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ field.name, typeName(program, if (field.property) |property| property.value_type else field.type) }),
     }, memberFieldPriority, false);
     for (structure.methods) |method| {
+        if (method.accessor) |accessor| {
+            if (structure.is_protocol and accessor.kind == .get) try appendCandidate(allocator, candidates, context, .{
+                .label = accessor.property,
+                .kind = CompletionKind.property,
+                .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ accessor.property, typeName(program, method.return_type) }),
+            }, memberFieldPriority, false);
+            continue;
+        }
         if (!callAcceptsParameters(source, cursor, program, method.parameters)) continue;
         try appendCandidate(allocator, candidates, context, .{
             .label = method.name,
@@ -1928,6 +1937,7 @@ fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?
     }
     for (program.structures) |structure| {
         for (structure.methods) |method| {
+            if (method.accessor) |accessor| if (accessor.synthetic) continue;
             if (bodyContainsCursor(source, method.position.offset, cursor) and
                 (result == null or method.position.offset > result.?.position)) result = .{
                 .position = method.position.offset,
@@ -2250,8 +2260,15 @@ fn inferForElementType(
                 break;
             };
         } else for (owner.fields) |field| if (std.mem.eql(u8, field.name, name)) {
-            next = field.type;
+            next = if (field.property) |property| property.value_type else field.type;
             break;
+        };
+        if (next == null and !call and owner.is_protocol) for (owner.methods) |method| {
+            const accessor = method.accessor orelse continue;
+            if (accessor.kind == .get and std.mem.eql(u8, accessor.property, name)) {
+                next = method.return_type;
+                break;
+            }
         };
         current = next orelse return null;
         index += 2;
@@ -2514,8 +2531,15 @@ pub fn resolveReceiverType(
         const owner = findStructure(program, current_type orelse return null) orelse return null;
         var next: ?[]const u8 = null;
         for (owner.fields) |field| if (std.mem.eql(u8, field.name, field_name)) {
-            next = memberTypeName(program, field.type);
+            next = memberTypeName(program, if (field.property) |property| property.value_type else field.type);
             break;
+        };
+        if (next == null and owner.is_protocol) for (owner.methods) |method| {
+            const accessor = method.accessor orelse continue;
+            if (accessor.kind == .get and std.mem.eql(u8, accessor.property, field_name)) {
+                next = memberTypeName(program, method.return_type);
+                break;
+            }
         };
         current_type = next orelse return null;
     }

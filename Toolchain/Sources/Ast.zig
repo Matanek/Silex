@@ -250,6 +250,7 @@ pub const AssignmentStatement = struct {
 };
 
 pub const AssignmentTarget = struct {
+    source: ?*Expression = null,
     name_position: Source.Position,
     name: []const u8,
     type_arguments: []const Type = &.{},
@@ -443,6 +444,17 @@ pub const StructureField = struct {
     access_mode: Parameter.Mode = .value,
     type: Type,
     default: ?*Expression,
+    /// Source-level computed property metadata. The field remains the private
+    /// backing slot used only while analyzing its own accessors; ordinary
+    /// member access is lowered through the generated methods.
+    property: ?Property = null,
+
+    pub const Property = struct {
+        value_type: Type,
+        getter_method: usize,
+        setter_method: ?usize = null,
+        requirement: bool = false,
+    };
 };
 
 pub const Constructor = struct {
@@ -573,7 +585,17 @@ pub const Function = struct {
     intrinsic: ?FunctionIntrinsic = null,
     /// True for a signature-only member of an intrinsic class.
     is_intrinsic_declaration: bool = false,
+    accessor: ?Accessor = null,
     statements: []const Statement,
+
+    pub const Accessor = struct {
+        owner: []const u8,
+        property: []const u8,
+        kind: Kind,
+        synthetic: bool = false,
+
+        pub const Kind = enum { get, set };
+    };
 };
 
 pub const FunctionIntrinsic = union(enum) {

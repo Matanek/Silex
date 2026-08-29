@@ -52,14 +52,24 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool) 
             member_private = requested == .keyword_private;
             try self.advance();
         }
-        if (self.current.tag != .keyword_func) return self.fail("a protocol can declare only instance method requirements");
-        var requirement = try parseRequirement(self);
-        requirement.is_public = member_public;
-        requirement.is_internal = member_internal;
-        requirement.is_local = member_local;
-        requirement.is_private = member_private;
-        requirement.visibility_explicit = explicit;
-        try requirements.append(self.allocator, requirement);
+        if (self.current.tag == .keyword_func) {
+            var requirement = try parseRequirement(self);
+            requirement.is_public = member_public;
+            requirement.is_internal = member_internal;
+            requirement.is_local = member_local;
+            requirement.is_private = member_private;
+            requirement.visibility_explicit = explicit;
+            try requirements.append(self.allocator, requirement);
+        } else try parsePropertyRequirement(
+            self,
+            name,
+            member_public,
+            member_internal,
+            member_local,
+            member_private,
+            explicit,
+            &requirements,
+        );
     }
     try self.expect(.right_brace, "expected '}' after protocol requirements");
     return .{
@@ -73,6 +83,72 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool) 
         .fields = &.{},
         .methods = try requirements.toOwnedSlice(self.allocator),
     };
+}
+
+fn parsePropertyRequirement(
+    self: anytype,
+    owner_name: []const u8,
+    is_public: bool,
+    is_internal: bool,
+    is_local: bool,
+    is_private: bool,
+    visibility_explicit: bool,
+    requirements: *std.ArrayList(Ast.Function),
+) !void {
+    if (self.current.tag != .identifier) return self.fail("a protocol can declare only method or property requirements");
+    const name = self.current.lexeme;
+    const position = self.current.position;
+    try self.advance();
+    try self.expect(.colon, "expected ':' after protocol property name");
+    const type_value = try self.parseType();
+    try self.expect(.left_brace, "expected '{' before protocol property accessors");
+    var has_get = false;
+    var has_set = false;
+    while (self.current.tag != .right_brace and self.current.tag != .end) {
+        if (self.current.tag != .identifier) return self.fail("expected 'get' or 'set' in protocol property requirement");
+        if (std.mem.eql(u8, self.current.lexeme, "get")) {
+            if (has_get) return self.failAt(self.current.position, "protocol property already requires get");
+            has_get = true;
+        } else if (std.mem.eql(u8, self.current.lexeme, "set")) {
+            if (has_set) return self.failAt(self.current.position, "protocol property already requires set");
+            has_set = true;
+        } else return self.fail("expected 'get' or 'set' in protocol property requirement");
+        try self.advance();
+        if (self.current.tag == .semicolon) try self.advance();
+    }
+    try self.expect(.right_brace, "expected '}' after protocol property requirement");
+    if (!has_get) return self.failAt(position, "a protocol property must require get");
+    try requirements.append(self.allocator, .{
+        .is_public = is_public,
+        .is_internal = is_internal,
+        .is_local = is_local,
+        .is_private = is_private,
+        .visibility_explicit = visibility_explicit,
+        .position = position,
+        .name_position = position,
+        .name = try std.fmt.allocPrint(self.allocator, "$get.{s}", .{name}),
+        .parameters = &.{},
+        .return_type = type_value,
+        .accessor = .{ .owner = owner_name, .property = name, .kind = .get },
+        .statements = &.{},
+    });
+    if (!has_set) return;
+    const parameters = try self.allocator.alloc(Ast.Parameter, 1);
+    parameters[0] = .{ .position = position, .name = "value", .type = type_value };
+    try requirements.append(self.allocator, .{
+        .is_public = is_public,
+        .is_internal = is_internal,
+        .is_local = is_local,
+        .is_private = is_private,
+        .visibility_explicit = visibility_explicit,
+        .position = position,
+        .name_position = position,
+        .name = try std.fmt.allocPrint(self.allocator, "$set.{s}", .{name}),
+        .parameters = parameters,
+        .return_type = .void,
+        .accessor = .{ .owner = owner_name, .property = name, .kind = .set },
+        .statements = &.{},
+    });
 }
 
 fn parseRequirement(self: anytype) !Ast.Function {

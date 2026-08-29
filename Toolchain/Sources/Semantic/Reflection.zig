@@ -45,16 +45,21 @@ pub fn analyze(self: anytype, builder: anytype, call: Ast.Expression.Call) !Mode
     } else if (reflectedStructure(self, operand.type)) |reflected| {
         try appendString(self, builder, &fields, &values, "name", type_name);
         var field_names: std.ArrayList([]const u8) = .empty;
+        var property_names: std.ArrayList([]const u8) = .empty;
         for (reflected.declaration.fields) |field| {
             if (field.is_static or !Visibility.memberVisible(self, reflected.index, field, call.name_position)) continue;
-            try field_names.append(self.allocator, field.name);
+            if (field.property != null)
+                try property_names.append(self.allocator, field.name)
+            else
+                try field_names.append(self.allocator, field.name);
         }
         var method_names: std.ArrayList([]const u8) = .empty;
         for (reflected.declaration.methods) |method| {
-            if (method.is_static or !Visibility.memberVisible(self, reflected.index, method, call.name_position)) continue;
+            if (method.is_static or method.accessor != null or !Visibility.memberVisible(self, reflected.index, method, call.name_position)) continue;
             try method_names.append(self.allocator, method.name);
         }
         try appendNames(self, builder, &fields, &values, "fields", field_names.items);
+        try appendNames(self, builder, &fields, &values, "properties", property_names.items);
         try appendNames(self, builder, &fields, &values, "methods", method_names.items);
     } else {
         if (try declarationName(self, builder, expression, operand.type, call)) |name| {

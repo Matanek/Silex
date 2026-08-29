@@ -12,12 +12,14 @@ const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
 const StaticMembers = @import("StaticMembers.zig");
+const Methods = @import("Methods.zig");
 const Model = @import("Model.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
     collection: struct { base: Ir.ValueId, type: Ast.Type, index: Ir.ValueId, position: @import("../Source.zig").Position },
     optional: struct { base: Ir.ValueId, type: Ast.Type },
+    property_class: struct { type: Ast.Type },
 };
 
 const Replacement = struct {
@@ -32,6 +34,16 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     if (StaticMembers.ownerIndex(self, target.name)) |structure_index| if (target.fields.len == 1 and target.indices.len == 0 and target.indexed_fields.len == 0) {
         if (StaticMembers.find(self, structure_index, target.fields[0].name)) |field| {
             if (!Visibility.memberVisible(self, field.owner, field.declaration, target.fields[0].name_position)) return self.fail(target.fields[0].name_position, "static field is unavailable here");
+            if (field.declaration.property) |property| if (!insideOwnAccessor(self, self.program.structures[field.owner].name, field.declaration.name)) {
+                if (property.setter_method == null) return self.fail(target.fields[0].name_position, "cannot assign to read-only property");
+                _ = try StaticMembers.analyzeCall(self, builder, field.owner, .{
+                    .name = try std.fmt.allocPrint(self.allocator, "$set.{s}", .{field.declaration.name}),
+                    .name_position = target.fields[0].name_position,
+                    .compiler_generated = true,
+                    .arguments = &.{try propertyReplacementExpression(self, assignment)},
+                });
+                return;
+            };
             if (!field.declaration.mutable) return self.fail(target.fields[0].name_position, "cannot assign to immutable static field");
             const current = if (assignment.operator == .assign) null else current: {
                 const value = try self.newValue(builder, field.declaration.type);
@@ -52,6 +64,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             return;
         }
     };
+    if (try analyzeDirectPropertyAssignment(self, builder, assignment)) return;
     const binding = Support.findBinding(builder.bindings.items, target.name) orelse {
         const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{target.name});
         return self.fail(target.name_position, message);
@@ -193,7 +206,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     try refreshPathBases(self, builder, binding, steps.items);
     const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
         .field => |step| self.structures[step.structure].is_class,
-        .collection, .optional => false,
+        .collection, .optional, .property_class => false,
     } else false;
     if (Resources.requiresRetain(self, current_type)) {
         if (class_owned_field) {
@@ -300,6 +313,14 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 try self.emit(builder, .{ .optional_some = .{ .result = result, .operand = replacement } });
                 replacement = result;
             },
+            .property_class => |step| {
+                try Resources.emitDrop(self, builder, step.type, replacement);
+                if (safe_merge) |merge| {
+                    self.terminate(builder, .{ .jump = merge });
+                    builder.current_block = merge;
+                }
+                return;
+            },
         }
     }
     if (binding.local != null or binding.reference != null) {
@@ -309,6 +330,125 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         self.terminate(builder, .{ .jump = merge });
         builder.current_block = merge;
     }
+}
+
+fn analyzeDirectPropertyAssignment(self: anytype, builder: anytype, assignment: Ast.AssignmentStatement) !bool {
+    const target = assignment.target;
+    if (target.fields.len == 0 or target.indices.len != 0 or target.indexed_fields.len != 0) return false;
+    const binding = Support.findBinding(builder.bindings.items, target.name) orelse return false;
+    var current_type = binding.type;
+    for (target.fields[0 .. target.fields.len - 1]) |path_field| {
+        const resolved = findInstanceField(self, current_type, path_field.name) orelse return false;
+        current_type = if (resolved.field.property) |property| property.value_type else resolved.ir_type;
+    }
+    const resolved = findInstanceField(self, current_type, target.fields[target.fields.len - 1].name) orelse return false;
+    const field = resolved.field;
+    const owner = resolved.owner;
+    const property = field.property orelse return false;
+    const final_target = target.fields[target.fields.len - 1];
+    if (insideOwnAccessor(self, self.program.structures[owner].name, field.name)) return false;
+    if (!Visibility.memberVisible(self, owner, field, final_target.name_position)) {
+        return self.fail(final_target.name_position, "property is unavailable here");
+    }
+    if (property.setter_method == null) return self.fail(final_target.name_position, "cannot assign to read-only property");
+    const source = target.source orelse return error.InvalidSource;
+    const receiver = switch (source.value) {
+        .field_access => |access| access.base,
+        else => return error.InvalidSource,
+    };
+    _ = try Methods.analyzeCall(self, builder, .{
+        .name = try std.fmt.allocPrint(self.allocator, "$set.{s}", .{field.name}),
+        .name_position = final_target.name_position,
+        .receiver = receiver,
+        .compiler_generated = true,
+        .arguments = &.{try propertyReplacementExpression(self, assignment)},
+    });
+    return true;
+}
+
+const ResolvedField = struct {
+    field: Ast.StructureField,
+    owner: usize,
+    ir_type: Ast.Type,
+};
+
+fn findInstanceField(self: anytype, type_value: Ast.Type, name: []const u8) ?ResolvedField {
+    const structure_index = type_value.structureIndex() orelse return null;
+    if (structure_index >= self.structures.len) return null;
+    const structure = self.structures[structure_index];
+    if (structure.is_protocol) {
+        const declaration = Inheritance.findDeclaration(self, structure_index) orelse return null;
+        var getter: ?struct { method: Ast.Function, index: usize } = null;
+        var setter: ?usize = null;
+        for (declaration.methods, 0..) |method, method_index| {
+            const accessor = method.accessor orelse continue;
+            if (!std.mem.eql(u8, accessor.property, name)) continue;
+            if (accessor.kind == .get) getter = .{ .method = method, .index = method_index } else setter = method_index;
+        }
+        const found = getter orelse return null;
+        return .{
+            .field = .{
+                .is_public = found.method.is_public,
+                .is_internal = found.method.is_internal,
+                .is_local = found.method.is_local,
+                .is_private = found.method.is_private,
+                .is_protected = found.method.is_protected,
+                .position = found.method.position,
+                .name_position = found.method.name_position,
+                .name = name,
+                .mutable = setter != null,
+                .type = found.method.return_type,
+                .default = null,
+                .property = .{
+                    .value_type = found.method.return_type,
+                    .getter_method = found.index,
+                    .setter_method = setter,
+                    .requirement = true,
+                },
+            },
+            .owner = structure_index,
+            .ir_type = found.method.return_type,
+        };
+    }
+    for (structure.fields, 0..) |field, field_index| {
+        if (!std.mem.eql(u8, field.name, name)) continue;
+        const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return null;
+        return .{ .field = inherited.declaration, .owner = inherited.owner, .ir_type = field.type };
+    }
+    return null;
+}
+
+fn propertyReplacementExpression(self: anytype, assignment: Ast.AssignmentStatement) !*Ast.Expression {
+    if (assignment.operator == .assign) return assignment.value.?;
+    const right = assignment.value orelse one: {
+        const expression = try self.allocator.create(Ast.Expression);
+        expression.* = .{ .position = assignment.position, .value = .{ .integer = "1" } };
+        break :one expression;
+    };
+    const expression = try self.allocator.create(Ast.Expression);
+    expression.* = .{
+        .position = assignment.position,
+        .value = .{ .binary = .{
+            .left = assignment.target.source orelse return error.InvalidSource,
+            .operator = switch (assignment.operator) {
+                .add, .increment => .add,
+                .subtract, .decrement => .subtract,
+                .multiply => .multiply,
+                .divide => .divide,
+                .remainder => .remainder,
+                .assign => unreachable,
+            },
+            .operator_position = assignment.position,
+            .right = right,
+        } },
+    };
+    return expression;
+}
+
+fn insideOwnAccessor(self: anytype, owner: []const u8, property: []const u8) bool {
+    const function = self.function_context orelse return false;
+    const accessor = function.accessor orelse return false;
+    return std.mem.eql(u8, accessor.owner, owner) and std.mem.eql(u8, accessor.property, property);
 }
 
 fn enterSafeAssignmentPath(
@@ -373,6 +513,7 @@ fn refreshPathBases(self: anytype, builder: anytype, binding: anytype, steps: []
             try self.emit(builder, .{ .optional_unwrap = .{ .result = value, .operand = current } });
             current = value;
         },
+        .property_class => return,
     };
 }
 
@@ -460,6 +601,31 @@ fn analyzeFieldStep(
             try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
         return self.fail(target_field.name_position, message);
     }
+    if (source_field.property) |property| if (!insideOwnAccessor(self, self.program.structures[inherited.owner].name, source_field.name)) {
+        const value_index = property.value_type.structureIndex() orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot mutate a member of value returned by property '{s}'", .{source_field.name});
+            return self.fail(target_field.name_position, message);
+        };
+        if (value_index >= self.structures.len or !self.structures[value_index].is_class) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "cannot mutate a member of value returned by property '{s}'; assign a new property value instead",
+                .{source_field.name},
+            );
+            return self.fail(target_field.name_position, message);
+        }
+        const result = try self.newValue(builder, property.value_type);
+        try self.emit(builder, .{ .call = .{
+            .result = result,
+            .function = methodFunctionId(self.program, inherited.owner, property.getter_method),
+            .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_value.*}),
+        } });
+        try steps.append(self.allocator, .{ .property_class = .{ .type = property.value_type } });
+        current_type.* = property.value_type;
+        current_value.* = result;
+        mutable_path.* = true;
+        return;
+    };
     if (!field.mutable) {
         const message = try std.fmt.allocPrint(
             self.allocator,
@@ -481,6 +647,15 @@ fn analyzeFieldStep(
     } });
     current_type.* = field.type;
     current_value.* = field_value;
+}
+
+fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
+    var result = program.functions.len;
+    for (program.structures) |structure| result += structure.constructors.len;
+    for (program.structures[0..structure_index]) |structure| if (!structure.is_protocol) {
+        result += structure.methods.len;
+    };
+    return result + method_index;
 }
 
 fn loadBinding(self: anytype, builder: anytype, binding: anytype) !Ir.ValueId {

@@ -60,6 +60,11 @@ pub fn definitionAtForTarget(
                 for (structure.fields) |field| if (std.mem.eql(u8, field.name, member_name)) {
                     return location(allocator, document_path, source, field.name_position, field.name.len, encoding);
                 };
+                for (structure.methods) |method| if (method.accessor) |accessor| {
+                    if (std.mem.eql(u8, accessor.property, member_name)) {
+                        return location(allocator, document_path, source, method.name_position, accessor.property.len, encoding);
+                    }
+                };
                 break;
             }
         }
@@ -171,6 +176,13 @@ fn declarationPosition(
             memberVisible(graph, field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
             .position = field.name_position,
             .name = field.name,
+        };
+        for (structure.methods) |method| if (method.accessor) |accessor| {
+            if (std.mem.eql(u8, accessor.property, requested_member) and
+                memberVisible(graph, method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner, current_module, current_path)) return .{
+                .position = method.name_position,
+                .name = accessor.property,
+            };
         };
         for (structure.methods) |method| if (std.mem.eql(u8, method.name, requested_member) and
             memberVisible(graph, method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner, current_module, current_path)) return .{

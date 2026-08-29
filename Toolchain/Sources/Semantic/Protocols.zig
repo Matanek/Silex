@@ -2,6 +2,116 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Inheritance = @import("Inheritance.zig");
 
+pub fn materializeFieldWitnesses(allocator: std.mem.Allocator, source: Ast.Program) !Ast.Program {
+    const structures = try allocator.alloc(Ast.Structure, source.structures.len);
+    @memcpy(structures, source.structures);
+    for (structures) |*structure| {
+        if (structure.is_protocol) continue;
+        var methods: std.ArrayList(Ast.Function) = .empty;
+        try methods.appendSlice(allocator, structure.methods);
+        var protocols: std.ArrayList(Ast.Structure) = .empty;
+        if (structure.base) |base| if (protocolDeclaration(source, base)) |protocol| try protocols.append(allocator, protocol);
+        for (structure.conformances) |conformance| if (protocolDeclaration(source, conformance)) |protocol| {
+            try protocols.append(allocator, protocol);
+        };
+        for (structure.extension_conformances) |conformance| if (protocolDeclaration(source, conformance.protocol)) |protocol| {
+            try protocols.append(allocator, protocol);
+        };
+        for (protocols.items) |protocol| for (protocol.methods) |requirement| {
+            const accessor = requirement.accessor orelse continue;
+            var implemented = false;
+            for (methods.items) |method| if (Inheritance.sameSignature(method, requirement)) {
+                implemented = true;
+                break;
+            };
+            if (implemented) continue;
+            const field = findStoredField(source, structure.*, accessor.property) orelse continue;
+            if (accessor.kind == .get) {
+                if (field.type != requirement.return_type) continue;
+                try methods.append(allocator, try storedGetter(allocator, structure.name, field, requirement));
+            } else {
+                if (!field.mutable or requirement.parameters.len != 1 or field.type != requirement.parameters[0].type) continue;
+                try methods.append(allocator, try storedSetter(allocator, structure.name, field, requirement));
+            }
+        };
+        structure.methods = try methods.toOwnedSlice(allocator);
+    }
+    var result = source;
+    result.structures = structures;
+    return result;
+}
+
+fn protocolDeclaration(program: Ast.Program, type_value: Ast.Type) ?Ast.Structure {
+    const index = type_value.structureIndex() orelse return null;
+    if (index >= program.type_names.len) return null;
+    for (program.structures) |structure| if (structure.is_protocol and std.mem.eql(u8, structure.name, program.type_names[index])) return structure;
+    return null;
+}
+
+fn findStoredField(program: Ast.Program, structure: Ast.Structure, name: []const u8) ?Ast.StructureField {
+    for (structure.fields) |field| if (field.property == null and std.mem.eql(u8, field.name, name)) return field;
+    if (structure.base) |base| {
+        const index = base.structureIndex() orelse return null;
+        if (index >= program.type_names.len) return null;
+        for (program.structures) |candidate| if (std.mem.eql(u8, candidate.name, program.type_names[index])) {
+            return findStoredField(program, candidate, name);
+        };
+    }
+    return null;
+}
+
+fn storedGetter(allocator: std.mem.Allocator, owner: []const u8, field: Ast.StructureField, requirement: Ast.Function) !Ast.Function {
+    const self_expression = try allocator.create(Ast.Expression);
+    self_expression.* = .{ .position = field.name_position, .value = .{ .identifier = "self" } };
+    const field_expression = try allocator.create(Ast.Expression);
+    field_expression.* = .{ .position = field.name_position, .value = .{ .field_access = .{
+        .base = self_expression,
+        .name = field.name,
+        .name_position = field.name_position,
+    } } };
+    const statements = try allocator.alloc(Ast.Statement, 1);
+    statements[0] = .{ .return_statement = .{ .position = field.name_position, .value = field_expression } };
+    var method = requirement;
+    method.position = field.position;
+    method.name_position = field.name_position;
+    method.accessor = .{ .owner = owner, .property = field.name, .kind = .get, .synthetic = true };
+    method.statements = statements;
+    return method;
+}
+
+fn storedSetter(allocator: std.mem.Allocator, owner: []const u8, field: Ast.StructureField, requirement: Ast.Function) !Ast.Function {
+    const self_expression = try allocator.create(Ast.Expression);
+    self_expression.* = .{ .position = field.name_position, .value = .{ .identifier = "self" } };
+    const field_expression = try allocator.create(Ast.Expression);
+    field_expression.* = .{ .position = field.name_position, .value = .{ .field_access = .{
+        .base = self_expression,
+        .name = field.name,
+        .name_position = field.name_position,
+    } } };
+    const value_expression = try allocator.create(Ast.Expression);
+    value_expression.* = .{ .position = field.name_position, .value = .{ .identifier = requirement.parameters[0].name } };
+    const assignment_fields = try allocator.alloc(Ast.AssignmentTarget.Field, 1);
+    assignment_fields[0] = .{ .name_position = field.name_position, .name = field.name };
+    const statements = try allocator.alloc(Ast.Statement, 1);
+    statements[0] = .{ .assignment_statement = .{
+        .position = field.name_position,
+        .target = .{
+            .source = field_expression,
+            .name_position = field.name_position,
+            .name = "self",
+            .fields = assignment_fields,
+        },
+        .operator = .assign,
+        .value = value_expression,
+    } };
+    var method = requirement;
+    method.position = field.position;
+    method.name_position = field.name_position;
+    method.accessor = .{ .owner = owner, .property = field.name, .kind = .set, .synthetic = true };
+    method.statements = statements;
+    return method;
+}
+
 pub fn validate(self: anytype) !void {
     for (self.program.structures, 0..) |declaration, structure_index| {
         if (declaration.is_protocol) continue;

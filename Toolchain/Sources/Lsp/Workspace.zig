@@ -18,6 +18,7 @@ const CompletionKind = struct {
     const method: u8 = 2;
     const function: u8 = 3;
     const field: u8 = 5;
+    const property: u8 = 10;
     const class: u8 = 7;
     const interface: u8 = 8;
     const module: u8 = 9;
@@ -456,7 +457,7 @@ pub fn scopeItemsAtForTargetExpected(
                                 structure.constructors.len != 0) continue;
                             native_initializer = true;
                             for (structure.fields) |field| {
-                                if (!importedMemberVisible(project, provider, field) or
+                                if (field.property != null or !importedMemberVisible(project, provider, field) or
                                     Completion.suppliedAggregateField(context, field.name) or
                                     !matchesPrefix(field.name, prefix)) continue;
                                 try appendRanked(allocator, &ranked, .{
@@ -1519,15 +1520,15 @@ fn appendImportedMembersDepth(
                 if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
                 try appendRanked(allocator, ranked, .{
                     .label = field.name,
-                    .kind = CompletionKind.field,
+                    .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
                     .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{
                         field.name,
-                        Completion.typeName(loaded.program, field.type),
+                        Completion.typeName(loaded.program, if (field.property) |property| property.value_type else field.type),
                     }),
                 }, Completion.memberFieldPriority, false);
             }
             for (structure.methods) |method| {
-                if (!method.is_static or !importedMemberVisible(project, provider, method)) continue;
+                if (method.accessor != null or !method.is_static or !importedMemberVisible(project, provider, method)) continue;
                 if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
                 if (!Completion.callAcceptsParameters(
                     current_source,
@@ -1548,14 +1549,24 @@ fn appendImportedMembersDepth(
             if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = field.name,
-                .kind = CompletionKind.field,
+                .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
                 .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
                     field.name,
-                    Completion.typeName(loaded.program, field.type),
+                    Completion.typeName(loaded.program, if (field.property) |property| property.value_type else field.type),
                 }),
             }, Completion.memberFieldPriority, false);
         }
         for (structure.methods) |method| {
+            if (method.accessor) |accessor| {
+                if (structure.is_protocol and accessor.kind == .get and importedMemberVisible(project, provider, method) and std.mem.startsWith(u8, accessor.property, query.prefix)) {
+                    try appendRanked(allocator, ranked, .{
+                        .label = accessor.property,
+                        .kind = CompletionKind.property,
+                        .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ accessor.property, Completion.typeName(loaded.program, method.return_type) }),
+                    }, Completion.memberFieldPriority, false);
+                }
+                continue;
+            }
             if (method.is_static or !importedMemberVisible(project, provider, method)) continue;
             if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
             if (!Completion.callAcceptsParameters(
@@ -1874,9 +1885,14 @@ fn importedFieldTypePath(
         if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
         for (structure.fields) |field| {
             if (!std.mem.eql(u8, field.name, field_name)) continue;
-            const local_type = Completion.typeName(loaded.program, field.type);
+            const local_type = Completion.typeName(loaded.program, if (field.property) |property| property.value_type else field.type);
             return importedTypePath(allocator, loaded.program, project, local_type);
         }
+        if (structure.is_protocol) for (structure.methods) |method| {
+            const accessor = method.accessor orelse continue;
+            if (accessor.kind != .get or !std.mem.eql(u8, accessor.property, field_name)) continue;
+            return importedTypePath(allocator, loaded.program, project, Completion.typeName(loaded.program, method.return_type));
+        };
         return null;
     }
     return null;
@@ -2642,12 +2658,16 @@ test "complete public package APIs module aliases members and overlays" {
         \\    local var hidden_value:int
         \\    package var package_value:int
         \\    var value:int
+        \\    let doubled:int { get { return self.value * 2 } }
         \\    init(value:int) { self.value = value }
         \\    local func hidden_method() int { return self.hidden_value }
         \\    package func package_method() int { return self.package_value }
         \\    func to_str() str { return "vector" }
         \\}
-        \\public protocol Operation { func execute() }
+        \\public protocol Operation {
+        \\    label:str { get }
+        \\    func execute()
+        \\}
         \\public class BuildHandle<T> {
         \\    func complete() T { panic("unused") }
         \\    func complete(callback:func(T)) {}
@@ -2805,6 +2825,52 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(!hasLabel(member_items, "hidden_method"));
     try std.testing.expect(!hasLabel(member_items, "package_value"));
     try std.testing.expect(!hasLabel(member_items, "package_method"));
+    const property_source =
+        \\use Math.Operations
+        \\func main() {
+        \\    let pos = Operations.Vector(1)
+        \\    pos.
+        \\}
+    ;
+    const property_cursor = std.mem.indexOf(u8, property_source, "pos.").? + "pos.".len;
+    const property_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        property_source,
+        property_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(property_items, "doubled"));
+    const property_item = property_items[labelIndex(property_items, "doubled").?];
+    try std.testing.expectEqual(CompletionKind.property, property_item.kind);
+    try std.testing.expectEqualStrings("doubled:int", property_item.detail);
+    try std.testing.expect(!hasLabel(property_items, "$get.doubled"));
+
+    const protocol_member_source =
+        \\use Math.Operations.Operation
+        \\func inspect(operation:Operation) {
+        \\    operation.
+        \\}
+    ;
+    const protocol_member_cursor = std.mem.indexOf(u8, protocol_member_source, "operation.").? + "operation.".len;
+    const protocol_member_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        protocol_member_source,
+        protocol_member_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(protocol_member_items, "label"));
+    const requirement_item = protocol_member_items[labelIndex(protocol_member_items, "label").?];
+    try std.testing.expectEqual(CompletionKind.property, requirement_item.kind);
+    try std.testing.expectEqualStrings("label:str", requirement_item.detail);
+    try std.testing.expect(!hasLabel(protocol_member_items, "$get.label"));
 
     const cascade_source =
         \\use Math.Operations
@@ -3475,6 +3541,7 @@ test "complete remaining fields of an imported aggregate inside a cascade" {
         \\    let borderless:bool = false
         \\    let high_pixel_density:bool = true
         \\    let hidden:bool = false
+        \\    let pixel_count:int { get { return self.width * self.height } }
         \\}
         ,
     });
@@ -3512,6 +3579,7 @@ test "complete remaining fields of an imported aggregate inside a cascade" {
     try std.testing.expect(!hasLabel(items, "height"));
     try std.testing.expect(hasLabel(items, "fullscreen"));
     try std.testing.expect(!hasLabel(items, "hidden"));
+    try std.testing.expect(!hasLabel(items, "pixel_count"));
 
     const first_source =
         \\use GFX.Window.Settings as WindowSettings

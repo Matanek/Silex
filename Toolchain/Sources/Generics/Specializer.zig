@@ -230,10 +230,12 @@ pub const Specializer = struct {
             if (structure.query_pattern) |pattern| structure.query_pattern = Remap.concreteType(pattern, map);
             for (@constCast(structure.fields)) |*field| {
                 field.type = Remap.concreteType(field.type, map);
+                if (field.property != null) field.property.?.value_type = Remap.concreteType(field.property.?.value_type, map);
                 if (field.default) |value| Remap.expressionTypes(value, map);
             }
             for (@constCast(structure.static_fields)) |*field| {
                 field.type = Remap.concreteType(field.type, map);
+                if (field.property != null) field.property.?.value_type = Remap.concreteType(field.property.?.value_type, map);
                 if (field.default) |value| Remap.expressionTypes(value, map);
             }
             for (@constCast(structure.constructors)) |*constructor| {
@@ -318,6 +320,9 @@ pub const Specializer = struct {
         for (structure.fields, 0..) |field, field_index| {
             fields[field_index] = field;
             fields[field_index].type = try self.rewriteType(field.type, arguments, field.name_position);
+            if (field.property) |property| {
+                fields[field_index].property.?.value_type = try self.rewriteType(property.value_type, arguments, field.name_position);
+            }
             if (field.default) |value| {
                 var locals: std.ArrayList(Binding) = .empty;
                 fields[field_index].default = try self.rewriteExpression(value, arguments, &locals);
@@ -328,6 +333,9 @@ pub const Specializer = struct {
         for (structure.static_fields, 0..) |field, field_index| {
             static_fields[field_index] = field;
             static_fields[field_index].type = try self.rewriteType(field.type, arguments, field.name_position);
+            if (field.property) |property| {
+                static_fields[field_index].property.?.value_type = try self.rewriteType(property.value_type, arguments, field.name_position);
+            }
             if (field.default) |value| {
                 var locals: std.ArrayList(Binding) = .empty;
                 static_fields[field_index].default = try self.rewriteExpression(value, arguments, &locals);
@@ -371,6 +379,7 @@ pub const Specializer = struct {
             try locals.append(self.allocator, .{ .name = "self", .type = self_type });
             method.parameters = try self.rewriteParameters(method.parameters, arguments, &locals);
             method.return_type = try self.rewriteType(method.return_type, arguments, method.name_position);
+            if (method.accessor != null) method.accessor.?.owner = structure.name;
             method.statements = try self.rewriteStatements(method.statements, arguments, &locals);
             @constCast(self.structures.items[structure_index].methods)[method_index] = method;
         }
@@ -419,6 +428,7 @@ pub const Specializer = struct {
             },
             .assignment_statement => |assignment| value: {
                 var copy = assignment;
+                if (copy.target.source) |source| copy.target.source = try self.rewriteExpression(source, arguments, locals);
                 if (copy.value) |expression| copy.value = try self.rewriteExpression(expression, arguments, locals);
                 for (@constCast(copy.target.indices)) |*target_index| target_index.value = try self.rewriteExpression(target_index.value, arguments, locals);
                 if (copy.target.type_arguments.len != 0) {

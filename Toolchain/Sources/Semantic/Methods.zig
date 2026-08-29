@@ -67,6 +67,18 @@ pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]co
     return mutating;
 }
 
+pub fn validateAccessors(self: anytype) !void {
+    var flat: usize = 0;
+    for (self.program.structures) |structure| {
+        for (structure.methods) |method| {
+            if (method.accessor) |accessor| if (accessor.kind == .get and !method.is_static and self.method_mutability[flat]) {
+                return self.fail(method.name_position, "a getter cannot mutate self; use an explicit method for observable mutation");
+            };
+            flat += 1;
+        }
+    }
+}
+
 fn inheritedOverrideMutates(
     program: Ast.Program,
     structure_index: usize,
@@ -259,6 +271,9 @@ fn analyzeStatic(self: anytype, structure_index: usize, method_index: usize, met
     const previous_extension_context = self.extension_context;
     self.extension_context = method.extension != null;
     defer self.extension_context = previous_extension_context;
+    const previous_function_context = self.function_context;
+    self.function_context = method;
+    defer self.function_context = previous_function_context;
     var builder: Model.FunctionBuilder = .{};
     try builder.blocks.append(self.allocator, .{});
     const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len);
@@ -352,7 +367,7 @@ fn analyzeSafeCall(self: anytype, builder: anytype, call: Ast.Expression.Call, o
     return result;
 }
 
-fn analyzeCallWithReceiver(
+pub fn analyzeCallWithReceiver(
     self: anytype,
     builder: anytype,
     call: Ast.Expression.Call,

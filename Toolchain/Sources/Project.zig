@@ -956,6 +956,9 @@ pub const Compiler = struct {
                 for (structure.fields, 0..) |field, index| {
                     fields[index] = field;
                     fields[index].type = FunctionTypes.remap(field.type, type_map, generic_map, function_map);
+                    if (field.property) |property| {
+                        fields[index].property.?.value_type = FunctionTypes.remap(property.value_type, type_map, generic_map, function_map);
+                    }
                     if (field.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed_structure.fields = fields;
@@ -963,6 +966,9 @@ pub const Compiler = struct {
                 for (structure.static_fields, 0..) |field, index| {
                     static_fields[index] = field;
                     static_fields[index].type = FunctionTypes.remap(field.type, type_map, generic_map, function_map);
+                    if (field.property) |property| {
+                        static_fields[index].property.?.value_type = FunctionTypes.remap(property.value_type, type_map, generic_map, function_map);
+                    }
                     if (field.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed_structure.static_fields = static_fields;
@@ -993,6 +999,7 @@ pub const Compiler = struct {
                     }
                     methods[method_index].parameters = parameters;
                     methods[method_index].return_type = FunctionTypes.remap(method.return_type, type_map, generic_map, function_map);
+                    if (method.accessor != null) methods[method_index].accessor.?.owner = composed_name;
                     methods[method_index].statements = try self.rewriteStatements(module, method.statements, type_map);
                 }
                 composed_structure.methods = methods;

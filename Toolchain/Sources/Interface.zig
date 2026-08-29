@@ -64,6 +64,13 @@ pub const StructureField = struct {
     mutable: bool,
 };
 
+pub const Property = struct {
+    is_static: bool = false,
+    name: []const u8,
+    type: Types.Type,
+    writable: bool,
+};
+
 pub const Constructor = struct {
     parameter_types: []const Types.Type,
     parameter_names: []const []const u8 = &.{},
@@ -91,6 +98,7 @@ pub const Structure = struct {
     is_protocol: bool = false,
     base: ?Types.Type = null,
     fields: []const StructureField,
+    properties: []const Property = &.{},
     constructors: []const Constructor,
     methods: []const Method,
     position: Source.Position,
@@ -161,8 +169,17 @@ pub fn buildMappedGenerics(
         if (structure.is_test) continue;
         if (!structure.is_public or !publicOwners(program, structure)) continue;
         var fields: std.ArrayList(StructureField) = .empty;
+        var properties: std.ArrayList(Property) = .empty;
         for (structure.fields) |field| {
             if (!field.is_public or field.is_local) continue;
+            if (field.property) |property| {
+                try properties.append(allocator, .{
+                    .name = field.name,
+                    .type = mappedType(property.value_type, type_map, generic_map),
+                    .writable = property.setter_method != null,
+                });
+                continue;
+            }
             try fields.append(allocator, .{
                 .name = field.name,
                 .type = mappedType(field.type, type_map, generic_map),
@@ -171,6 +188,15 @@ pub fn buildMappedGenerics(
         }
         for (structure.static_fields) |field| {
             if (!field.is_public or field.is_local) continue;
+            if (field.property) |property| {
+                try properties.append(allocator, .{
+                    .is_static = true,
+                    .name = field.name,
+                    .type = mappedType(property.value_type, type_map, generic_map),
+                    .writable = property.setter_method != null,
+                });
+                continue;
+            }
             try fields.append(allocator, .{
                 .is_static = true,
                 .name = field.name,
@@ -193,9 +219,26 @@ pub fn buildMappedGenerics(
                 .required_parameters = requiredParameterCount(constructor.parameters),
             });
         }
+        if (structure.is_protocol) for (structure.methods) |method| {
+            const accessor = method.accessor orelse continue;
+            if (accessor.kind != .get or !method.is_public or method.is_local) continue;
+            var writable = false;
+            for (structure.methods) |candidate| if (candidate.accessor) |candidate_accessor| {
+                if (candidate_accessor.kind == .set and std.mem.eql(u8, candidate_accessor.property, accessor.property)) {
+                    writable = true;
+                    break;
+                }
+            };
+            try properties.append(allocator, .{
+                .name = accessor.property,
+                .type = mappedType(method.return_type, type_map, generic_map),
+                .writable = writable,
+            });
+        };
         var methods: std.ArrayList(Method) = .empty;
         for (structure.methods) |method| {
             if (!method.is_public or method.is_local) continue;
+            if (method.accessor != null) continue;
             const parameters = try allocator.alloc(Types.Type, method.parameters.len);
             const parameter_names = try allocator.alloc([]const u8, method.parameters.len);
             for (method.parameters, 0..) |parameter, parameter_index| {
@@ -235,6 +278,7 @@ pub fn buildMappedGenerics(
             .is_protocol = structure.is_protocol,
             .base = if (structure.base) |base| mappedType(base, type_map, generic_map) else null,
             .fields = try fields.toOwnedSlice(allocator),
+            .properties = try properties.toOwnedSlice(allocator),
             .constructors = try constructors.toOwnedSlice(allocator),
             .methods = try methods.toOwnedSlice(allocator),
             .position = structure.position,
@@ -397,13 +441,33 @@ test "build stable typed identities from public declarations only" {
 test "build public nominal structure contracts without layout" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const fields = [_]Ast.StructureField{.{
-        .position = .{ .offset = 0, .line = 2, .column = 5 },
-        .name_position = .{ .offset = 11, .line = 2, .column = 12 },
-        .name = "x",
-        .mutable = true,
-        .type = .int,
-        .default = null,
+    const fields = [_]Ast.StructureField{
+        .{
+            .position = .{ .offset = 0, .line = 2, .column = 5 },
+            .name_position = .{ .offset = 11, .line = 2, .column = 12 },
+            .name = "x",
+            .mutable = true,
+            .type = .int,
+            .default = null,
+        },
+        .{
+            .position = .{ .offset = 20, .line = 3, .column = 5 },
+            .name_position = .{ .offset = 24, .line = 3, .column = 9 },
+            .name = "length",
+            .mutable = true,
+            .type = .optional(.int),
+            .default = null,
+            .property = .{ .value_type = .int, .getter_method = 0 },
+        },
+    };
+    const methods = [_]Ast.Function{.{
+        .position = .{ .offset = 30, .line = 4, .column = 9 },
+        .name_position = .{ .offset = 30, .line = 4, .column = 9 },
+        .name = "$get.length",
+        .parameters = &.{},
+        .return_type = .int,
+        .accessor = .{ .owner = "Vec2", .property = "length", .kind = .get },
+        .statements = &.{},
     }};
     const structures = [_]Ast.Structure{.{
         .is_public = true,
@@ -411,6 +475,7 @@ test "build public nominal structure contracts without layout" {
         .name_position = .{ .offset = 14, .line = 1, .column = 15 },
         .name = "Vec2",
         .fields = &fields,
+        .methods = &methods,
     }};
     const interface = try build(arena.allocator(), .project, "Geometry.Vec2", .{
         .type_names = &.{"Vec2"},
@@ -423,5 +488,11 @@ test "build public nominal structure contracts without layout" {
         .module = "Geometry.Vec2",
         .name = "Vec2",
     }));
+    try std.testing.expectEqual(@as(usize, 1), interface.structures[0].fields.len);
     try std.testing.expectEqual(Types.Type.int, interface.structures[0].fields[0].type);
+    try std.testing.expectEqual(@as(usize, 1), interface.structures[0].properties.len);
+    try std.testing.expectEqualStrings("length", interface.structures[0].properties[0].name);
+    try std.testing.expectEqual(Types.Type.int, interface.structures[0].properties[0].type);
+    try std.testing.expect(!interface.structures[0].properties[0].writable);
+    try std.testing.expectEqual(@as(usize, 0), interface.structures[0].methods.len);
 }

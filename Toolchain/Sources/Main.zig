@@ -1888,6 +1888,7 @@ test {
     _ = @import("ViewTests.zig");
     _ = @import("ClassTests.zig");
     _ = @import("ProtocolTests.zig");
+    _ = @import("PropertyTests.zig");
     _ = @import("ExtensionTests.zig");
     _ = @import("Packages.zig");
     _ = @import("Packages/ImplicitTests.zig");

@@ -13,6 +13,7 @@ pub fn statementTypes(statements: []const Ast.Statement, map: []const ?Ast.Type)
             if (declaration.initializer) |initializer| expressionTypes(initializer, map);
         },
         .assignment_statement => |assignment| {
+            if (assignment.target.source) |source| expressionTypes(source, map);
             for (@constCast(assignment.target.type_arguments)) |*argument| argument.* = concreteType(argument.*, map);
             if (assignment.value) |value| expressionTypes(value, map);
             for (assignment.target.indices) |target_index| expressionTypes(target_index.value, map);

@@ -98,6 +98,15 @@ pub fn analyzeLoad(self: anytype, builder: anytype, structure_index: usize, name
         const message = try std.fmt.allocPrint(self.allocator, "static field '{s}' is {s} and unavailable here", .{ name, Visibility.name(field.declaration) });
         return self.fail(position, message);
     }
+    if (field.declaration.property != null and !insideOwnAccessor(self, self.program.structures[field.owner].name, field.declaration.name)) {
+        const getter_name = try std.fmt.allocPrint(self.allocator, "$get.{s}", .{field.declaration.name});
+        return analyzeCall(self, builder, field.owner, .{
+            .name = getter_name,
+            .name_position = position,
+            .compiler_generated = true,
+            .arguments = &.{},
+        });
+    }
     if (!field.declaration.mutable and (field.declaration.type.isNumeric() or field.declaration.type == .bool)) {
         const result = try self.newValue(builder, field.declaration.type);
         const bits = self.globals[field.global].bits;
@@ -115,6 +124,12 @@ pub fn analyzeLoad(self: anytype, builder: anytype, structure_index: usize, name
     const result = try self.newValue(builder, field.declaration.type);
     try self.emit(builder, .{ .global_load = .{ .result = result, .global = field.global } });
     return .{ .type = field.declaration.type, .value = result };
+}
+
+fn insideOwnAccessor(self: anytype, owner: []const u8, property: []const u8) bool {
+    const function = self.function_context orelse return false;
+    const accessor = function.accessor orelse return false;
+    return std.mem.eql(u8, accessor.owner, owner) and std.mem.eql(u8, accessor.property, property);
 }
 
 pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call: Ast.Expression.Call) !?Model.TypedValue {

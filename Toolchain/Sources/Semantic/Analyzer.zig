@@ -94,7 +94,8 @@ pub const Analyzer = struct {
     pub fn analyzeUnit(self: *Analyzer, program: Ast.Program) AnalyzeError!Ir.Program {
         return self.analyzeProgram(program, false);
     }
-    fn analyzeProgram(self: *Analyzer, program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
+    fn analyzeProgram(self: *Analyzer, source_program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
+        const program = try Protocols.materializeFieldWitnesses(self.allocator, source_program);
         self.program = program;
         self.diagnostic = null;
         self.bound_methods.clearRetainingCapacity();
@@ -106,6 +107,7 @@ pub const Analyzer = struct {
         self.external_functions = try Interop.prepare(self);
         self.enums = try Enums.prepare(self);
         self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
+        try Methods.validateAccessors(self);
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
         try Inheritance.validateOverrides(self);
         try Protocols.validate(self);
@@ -1117,6 +1119,21 @@ pub const Analyzer = struct {
             );
             return self.fail(access.name_position, message);
         }
+        if (structure.is_protocol) {
+            for (declaration.methods) |requirement| {
+                const accessor = requirement.accessor orelse continue;
+                if (accessor.kind != .get or !std.mem.eql(u8, accessor.property, access.name)) continue;
+                return (try Methods.analyzeCallWithReceiver(self, builder, .{
+                    .name = requirement.name,
+                    .name_position = access.name_position,
+                    .receiver = access.base,
+                    .compiler_generated = true,
+                    .arguments = &.{},
+                }, base, null)) orelse error.InvalidSource;
+            }
+            const message = try std.fmt.allocPrint(self.allocator, "protocol '{s}' has no property named '{s}'", .{ structure.name, access.name });
+            return self.fail(access.name_position, message);
+        }
         for (structure.fields, 0..) |field, field_index| {
             if (!std.mem.eql(u8, field.name, access.name)) continue;
             const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return error.InvalidSource;
@@ -1127,6 +1144,16 @@ pub const Analyzer = struct {
                 else
                     try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
                 return self.fail(access.name_position, message);
+            }
+            if (source_field.property != null and !insideOwnAccessor(self, self.program.structures[inherited.owner].name, source_field.name)) {
+                const getter_name = try std.fmt.allocPrint(self.allocator, "$get.{s}", .{source_field.name});
+                return (try Methods.analyzeCallWithReceiver(self, builder, .{
+                    .name = getter_name,
+                    .name_position = access.name_position,
+                    .receiver = access.base,
+                    .compiler_generated = true,
+                    .arguments = &.{},
+                }, base, null)) orelse error.InvalidSource;
             }
             const result = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
@@ -1148,6 +1175,12 @@ pub const Analyzer = struct {
             .{ structure.name, access.name },
         );
         return self.fail(access.name_position, message);
+    }
+
+    fn insideOwnAccessor(self: *Analyzer, owner: []const u8, property: []const u8) bool {
+        const function = self.function_context orelse return false;
+        const accessor = function.accessor orelse return false;
+        return std.mem.eql(u8, accessor.owner, owner) and std.mem.eql(u8, accessor.property, property);
     }
 
     fn analyzeStructureInitializer(
@@ -1184,7 +1217,7 @@ pub const Analyzer = struct {
                 }
             }
             var known = false;
-            for (declaration.fields) |source_field| if (std.mem.eql(u8, source_field.name, argument.name)) {
+            for (declaration.fields) |source_field| if (source_field.property == null and std.mem.eql(u8, source_field.name, argument.name)) {
                 if (!Visibility.memberVisible(self, structure_index, source_field, argument.position)) {
                     const message = if (source_field.is_local)
                         try std.fmt.allocPrint(self.allocator, "field '{s}' is local to its source file", .{source_field.name})

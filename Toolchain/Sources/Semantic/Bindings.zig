@@ -131,6 +131,11 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             expression,
             Optionals.expectedContext(function.return_type, expression),
         );
+        if (function.accessor) |accessor| if (accessor.kind == .get and
+            value.type == Ast.Type.optional(function.return_type) and returnsOwnBacking(expression, accessor))
+        {
+            value = try Optionals.unwrap(self, builder, value);
+        };
         if (value.lexical_captures) return self.fail(expression.position, "capturing function value cannot be returned from its lexical scope");
         if (value.type != function.return_type and self.canImplicitlyConvert(value.type, function.return_type)) {
             value = try self.coerce(builder, value, function.return_type, expression.position);
@@ -178,4 +183,14 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
     try Resources.emitActiveDrops(self, builder, 0);
     try Resources.emitMutexUnlocks(self, builder, 0);
     self.terminate(builder, .return_void);
+}
+
+fn returnsOwnBacking(expression: *const Ast.Expression, accessor: Ast.Function.Accessor) bool {
+    return switch (expression.value) {
+        .field_access => |access| std.mem.eql(u8, access.name, accessor.property) and switch (access.base.value) {
+            .identifier => |name| std.mem.eql(u8, name, "self") or std.mem.eql(u8, name, accessor.owner),
+            else => false,
+        },
+        else => false,
+    };
 }
