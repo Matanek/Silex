@@ -132,6 +132,44 @@ fn inputPath(allocator: std.mem.Allocator, temporary: anytype) ![]const u8 {
     return std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX", "Smokes", "Main.sx" });
 }
 
+test "package consumers execute Resources self-return in test compilation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.createDirPath(std.testing.io, "Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\"Tests\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Tests/Scope.sx",
+        .data =
+        \\use GFX.Application.Resources
+        \\test "scope resources" {
+        \\    var parent = Resources()
+        \\    var child = parent.scope()
+        \\    assert(!child.has<int>())
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Tests", "Scope.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compileTests(input);
+    const result = try Interpreter.runFunctionCaptureWithBoundaries(
+        allocator,
+        null,
+        compilation.ir,
+        compilation.tests[0].function,
+        compilation.boundaries,
+    );
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
 test "typed resources require the exact compiler-provided intrinsic contract" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

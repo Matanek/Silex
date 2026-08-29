@@ -143,6 +143,7 @@ fn isTypedStoreName(name: []const u8) bool {
 
 fn installStorage(self: anytype, structure_index: usize) !void {
     const position = self.structures.items[structure_index].position;
+    const structure_type = nominalStructureType(self, structure_index) orelse return error.InvalidSource;
     const order_type = try ensureOrderType(self, position);
     const application_resources = std.mem.eql(u8, self.structures.items[structure_index].name, canonical_name);
     const fields = try self.allocator.alloc(Ast.StructureField, if (application_resources) 2 else 1);
@@ -161,7 +162,7 @@ fn installStorage(self: anytype, structure_index: usize) !void {
             .name_position = position,
             .name = parent_field_name,
             .mutable = true,
-            .type = .optional(.structure(structure_index)),
+            .type = .optional(structure_type),
             .default = null_parent,
         };
         order_index = 1;
@@ -213,6 +214,34 @@ fn installStorage(self: anytype, structure_index: usize) !void {
     const statements = try self.allocator.alloc(Ast.Statement, 1);
     statements[0] = .{ .expression_statement = call };
     self.structures.items[structure_index].drop = .{ .position = position, .statements = statements };
+}
+
+fn nominalStructureType(self: anytype, structure_index: usize) ?Ast.Type {
+    if (structure_index >= self.structures.items.len) return null;
+    return self.typeForName(self.structures.items[structure_index].name);
+}
+
+test "resource storage keeps nominal identity when structure and type indices differ" {
+    const Mock = struct {
+        structures: struct { items: []const Ast.Structure },
+        type_names: []const []const u8,
+
+        pub fn typeForName(self: *@This(), name: []const u8) ?Ast.Type {
+            for (self.type_names, 0..) |candidate, index| {
+                if (std.mem.eql(u8, candidate, name)) return .structure(index);
+            }
+            return null;
+        }
+    };
+    const structures = [_]Ast.Structure{
+        .{ .position = .{ .offset = 0, .line = 1, .column = 1 }, .name_position = .{ .offset = 0, .line = 1, .column = 1 }, .name = "Other", .fields = &.{} },
+        .{ .position = .{ .offset = 0, .line = 1, .column = 1 }, .name_position = .{ .offset = 0, .line = 1, .column = 1 }, .name = canonical_name, .fields = &.{} },
+    };
+    var mock: Mock = .{
+        .structures = .{ .items = &structures },
+        .type_names = &.{ canonical_name, "Result" },
+    };
+    try std.testing.expectEqual(Ast.Type.structure(0), nominalStructureType(&mock, 1).?);
 }
 
 fn ensureOrderType(self: anytype, position: Source.Position) !Ast.Type {
