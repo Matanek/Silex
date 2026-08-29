@@ -98,6 +98,25 @@ pub fn unwrap(self: anytype, builder: anytype, source: Model.TypedValue) !Model.
     };
 }
 
+pub fn unwrapOrPanic(
+    self: anytype,
+    builder: anytype,
+    source: Model.TypedValue,
+    position: Source.Position,
+    message: []const u8,
+) !Model.TypedValue {
+    if (source.type.optionalChild() == null) return error.InvalidSource;
+    const presence = try emitPresence(self, builder, source);
+    const present = try self.newBlock(builder);
+    const absent = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{ .condition = presence.value, .then_block = present, .else_block = absent } });
+    builder.current_block = absent;
+    const diagnostic = try self.emitString(builder, message);
+    self.terminate(builder, .{ .panic = .{ .message = diagnostic.value, .position = position } });
+    builder.current_block = present;
+    return unwrap(self, builder, source);
+}
+
 pub fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
     var current = target;
     var cost: u8 = 0;

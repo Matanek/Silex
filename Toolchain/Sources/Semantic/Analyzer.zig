@@ -736,28 +736,11 @@ pub const Analyzer = struct {
 
     fn analyzeForcedOptional(self: *Analyzer, builder: *FunctionBuilder, unary: Ast.Expression.Unary) AnalyzeError!TypedValue {
         const operand = try self.analyzeExpression(builder, unary.operand);
-        const child = operand.type.optionalChild() orelse {
+        if (operand.type.optionalChild() == null) {
             const message = try std.fmt.allocPrint(self.allocator, "postfix '!' expects an optional value, found '{s}'", .{self.typeName(operand.type)});
             return self.fail(unary.operator_position, message);
-        };
-        const presence = try Optionals.emitPresence(self, builder, operand);
-        const present = try self.newBlock(builder);
-        const absent = try self.newBlock(builder);
-        self.terminate(builder, .{ .branch = .{ .condition = presence.value, .then_block = present, .else_block = absent } });
-        builder.current_block = absent;
-        const message = try self.emitString(builder, "forced optional extraction failed");
-        self.terminate(builder, .{ .panic = .{ .message = message.value, .position = unary.operator_position } });
-        builder.current_block = present;
-        const result = try Optionals.unwrap(self, builder, operand);
-        return .{
-            .type = child,
-            .value = result.value,
-            .transferred = result.transferred,
-            .borrowed_root = result.borrowed_root,
-            .borrowed_mode = result.borrowed_mode,
-            .lexical_captures = result.lexical_captures,
-            .lexical_borrows = result.lexical_borrows,
-        };
+        }
+        return Optionals.unwrapOrPanic(self, builder, operand, unary.operator_position, "forced optional extraction failed");
     }
 
     fn analyzeBinary(

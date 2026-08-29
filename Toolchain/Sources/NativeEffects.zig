@@ -272,6 +272,32 @@ test "native forced optional extraction agrees with reference values and failure
     try std.testing.expectEqualStrings("Main.sx:3:16: runtime error: forced optional extraction failed\n", absent.stderr);
 }
 
+test "native uninitialized property storage exits with a runtime diagnostic" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Box {
+        \\    let value:int {
+        \\        get {
+        \\            return self.value
+        \\        }
+        \\    }
+        \\}
+        \\func main() { print(Box().value) }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(source);
+    compilation.ir.files = &.{"Main.sx"};
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(@as(u8, 1), reference.exit_code);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+    try std.testing.expect(std.mem.indexOf(u8, native.stderr, "property 'value' returned before its storage was initialized") != null);
+}
+
 test "native bound methods agree with the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

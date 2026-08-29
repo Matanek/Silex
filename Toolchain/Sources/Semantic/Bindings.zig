@@ -134,7 +134,12 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
         if (function.accessor) |accessor| if (accessor.kind == .get and
             value.type == Ast.Type.optional(function.return_type) and returnsOwnBacking(expression, accessor))
         {
-            value = try Optionals.unwrap(self, builder, value);
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "property '{s}' returned before its storage was initialized",
+                .{accessor.property},
+            );
+            value = try Optionals.unwrapOrPanic(self, builder, value, expression.position, message);
         };
         if (value.lexical_captures) return self.fail(expression.position, "capturing function value cannot be returned from its lexical scope");
         if (value.type != function.return_type and self.canImplicitlyConvert(value.type, function.return_type)) {
