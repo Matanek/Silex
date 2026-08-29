@@ -6,6 +6,7 @@ const Lower = @import("Arm64/Lower.zig");
 
 const resources_source =
     \\public intrinsic class Resources {
+    \\    func scope() Resources
     \\    func insert<T>(value:T)
     \\    module func retain_class<T>(value:T)
     \\    func has<T>() bool
@@ -17,6 +18,89 @@ const resources_source =
     \\    func clear()
     \\}
 ;
+
+test "scoped typed resources shadow and fall back without mutating their parent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\struct Shared { var value:int }
+        \\struct Local { let value:int }
+        \\func main() {
+        \\    var application = Application()
+        \\    var parent = application.resources()
+        \\    parent.insert(Shared(value:1))
+        \\    var child = parent.scope()
+        \\    assert(child.has<Shared>())
+        \\    if true { var inherited:&Shared = child.get_mut<Shared>(); inherited.value = 2 }
+        \\    child.insert(Shared(value:3))
+        \\    child.insert(Local(value:4))
+        \\    if true { let local_state:@Shared = child.get<Shared>(); print(local_state.value) }
+        \\    let removed = child.remove<Shared>()
+        \\    assert(removed != null)
+        \\    assert(child.try_get<Shared>() != null)
+        \\    child.clear()
+        \\    assert(!child.has<Local>())
+        \\    if true { let inherited:@Shared = child.get<Shared>(); print(inherited.value) }
+        \\}
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("3\n2\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
+test "compatible non-Application hosts specialize typed systems with their own resources" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.Application.Resources
+        \\struct Counter { var value:int }
+        \\class Scene {
+        \\    private var store:Resources
+        \\    init(parent:Resources) { self.store = parent.scope() }
+        \\    func resources() Resources { return self.store }
+        \\    func add_system(schedule:int, callback:func(Scene)) { callback(self) }
+        \\    func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+        \\    module func __silex_add_system(schedule:int, callback:func(Scene, int), after:bool, reads:str[], writes:str[], flags:uint) Scene { callback(self, 0); return self }
+        \\    drop { self.store.clear() }
+        \\}
+        \\func increment(counter:&Counter) { counter.value++ }
+        \\func main() {
+        \\    var application = Application()
+        \\    var scene = Scene(application.resources())
+        \\    var resources = scene.resources()
+        \\    resources.insert(Counter(value:41))
+        \\    scene.add_system(0, increment)
+        \\    print(resources.get<Counter>().value)
+        \\}
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
 
 const application_declaration =
     \\public class Application {
@@ -428,6 +512,7 @@ test "query iteration does not allocate a component filter list" {
         .data =
         \\use GFX.ECS.Entity.Entity
         \\public class World {
+        \\    package func query_count(required:int[]) int { return 0 }
         \\    package func query_archetype_count() int { return 0 }
         \\    package func query_entity_count(archetype:int) int { return 0 }
         \\    package func query_entity(archetype:int, row:int) Entity { return Entity(value:0) }
@@ -453,13 +538,32 @@ test "query iteration does not allocate a component filter list" {
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
         \\use GFX.Application
+        \\use GFX.Application.Resources
         \\use GFX.ECS
+        \\class Scene {
+        \\    private var store:Resources
+        \\    init(parent:Resources) { self.store = parent.scope() }
+        \\    func resources() Resources { return self.store }
+        \\    func add_system<System>(schedule:int, callback:System) Scene { panic("unspecialized system") }
+        \\    module func __silex_add_system(schedule:int, callback:func(Scene, int), after:bool, reads:str[], writes:str[], flags:uint) Scene { callback(self, 0); return self }
+        \\    module func __silex_run_query(count:int, system_order:int, commands_address:uint, callback:func(Scene, int, int, int, uint)) { callback(self, system_order, 0, count, commands_address) }
+        \\    drop { self.store.clear() }
+        \\}
         \\func inspect(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {
         \\    for (first, second) in query {
         \\        if first.value == second.value { return }
         \\    }
         \\}
-        \\func main() { var application = Application(); application.add_system(0, inspect) }
+        \\func parallel_inspect(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {
+        \\    for (first, second) in query {}
+        \\}
+        \\func main() {
+        \\    var application = Application()
+        \\    application.add_system(0, inspect)
+        \\    var scene = Scene(application.resources())
+        \\    scene.resources().insert(ECS.World())
+        \\    scene.add_system(0, parallel_inspect)
+        \\}
         ,
     });
 
@@ -472,6 +576,7 @@ test "query iteration does not allocate a component filter list" {
     const function_text = tail[0 .. finish + 3];
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, function_text, "list.init"));
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, function_text, "list.drop"));
+    _ = try Lower.lower(allocator, compilation.ir);
 }
 
 test "ECS queries cannot escape their injected system function" {
@@ -625,7 +730,7 @@ test "injected systems reject invalid signatures and mutable conflicts" {
         .{ .system = "func invalid(value:int) {}", .expected = "must use '@int' or '&int'" },
         .{ .system = "func invalid() int { return 1 }", .expected = "must return 'void'" },
         .{ .system = "func invalid(first:&State, second:@State) {}", .expected = "conflicting mutable access" },
-        .{ .system = "func invalid(application:Application, state:@State) {}", .expected = "Application must be the sole" },
+        .{ .system = "func invalid(application:Application, state:@State) {}", .expected = "system host must be the sole" },
     };
     for (cases) |case| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

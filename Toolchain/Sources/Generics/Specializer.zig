@@ -255,6 +255,7 @@ pub const Specializer = struct {
             function.return_type = Remap.concreteType(function.return_type, map);
             if (function.intrinsic) |*intrinsic| switch (intrinsic.*) {
                 .system_adapter => |*adapter| {
+                    adapter.host_type = Remap.concreteType(adapter.host_type, map);
                     if (adapter.receiver) |*receiver| {
                         receiver.type = Remap.concreteType(receiver.type, map);
                         receiver.source_type = Remap.concreteType(receiver.source_type, map);

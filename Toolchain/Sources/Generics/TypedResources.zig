@@ -5,6 +5,7 @@ const Source = @import("../Source.zig");
 pub const canonical_name = "GFX.Application.Resources";
 pub const component_pools_name = "GFX.ECS.ComponentStore.ComponentPools";
 pub const order_field_name = "__resource_order";
+pub const parent_field_name = "__resource_parent";
 pub const slot_prefix = "__resource_slot_";
 
 pub fn validateDeclarations(self: anytype) !void {
@@ -40,7 +41,9 @@ pub fn intrinsicForSpecialization(
     arguments: []const Ast.Type,
     position: Source.Position,
 ) !?Ast.FunctionIntrinsic {
-    if (!isResources(self, structure_type) or arguments.len != 1) return null;
+    if (!isResources(self, structure_type)) return null;
+    if (arguments.len == 0 and std.mem.eql(u8, method_name, "scope")) return .resource_scope;
+    if (arguments.len != 1) return null;
     if (std.mem.eql(u8, method_name, "retain_class")) {
         const resource = self.structureForType(arguments[0]) orelse return .resource_discard;
         if (!resource.is_class) return .resource_discard;
@@ -61,6 +64,7 @@ pub fn markConcreteMethods(self: anytype, structure_index: usize) !void {
     if (!isTypedStoreName(self.structures.items[structure_index].name)) return;
     const structure = &self.structures.items[structure_index];
     for (@constCast(structure.methods)) |*method| {
+        if (std.mem.eql(u8, method.name, "scope")) method.intrinsic = .resource_scope;
         if (std.mem.eql(u8, method.name, "clear")) method.intrinsic = .resource_clear;
     }
 }
@@ -74,7 +78,7 @@ pub fn prepareConcreteStorage(self: anytype) !void {
 
 fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
     const application_resources = std.mem.eql(u8, structure.name, canonical_name);
-    const expected_methods: usize = if (application_resources) 9 else 8;
+    const expected_methods: usize = if (application_resources) 10 else 8;
     if (!structure.is_class or
         (application_resources and !structure.is_public) or
         structure.type_parameters.len != 0 or structure.methods.len != expected_methods)
@@ -93,7 +97,10 @@ fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
             return invalidContract(self, structure.name, method.name_position);
         }
         const generic = Ast.Type.genericParameter(0);
-        const valid = if (std.mem.eql(u8, method.name, "insert") or retain_class)
+        const valid = if (application_resources and std.mem.eql(u8, method.name, "scope"))
+            method.type_parameters.len == 0 and method.parameters.len == 0 and
+                method.return_type == (self.typeForName(canonical_name) orelse return error.InvalidSource) and method.return_mode == .value
+        else if (std.mem.eql(u8, method.name, "insert") or retain_class)
             method.type_parameters.len == 1 and method.parameters.len == 1 and method.parameters[0].type == generic and
                 method.parameters[0].mode == .value and method.return_type == .void and method.return_mode == .value
         else if (std.mem.eql(u8, method.name, "has"))
@@ -137,13 +144,29 @@ fn isTypedStoreName(name: []const u8) bool {
 fn installStorage(self: anytype, structure_index: usize) !void {
     const position = self.structures.items[structure_index].position;
     const order_type = try ensureOrderType(self, position);
-    const fields = try self.allocator.alloc(Ast.StructureField, 1);
+    const application_resources = std.mem.eql(u8, self.structures.items[structure_index].name, canonical_name);
+    const fields = try self.allocator.alloc(Ast.StructureField, if (application_resources) 2 else 1);
     const empty_order = try self.allocator.create(Ast.Expression);
     empty_order.* = .{ .position = position, .value = .{ .sequence_literal = .{
         .values = &.{},
         .inferred_type = order_type,
     } } };
-    fields[0] = .{
+    var order_index: usize = 0;
+    if (application_resources) {
+        const null_parent = try self.allocator.create(Ast.Expression);
+        null_parent.* = .{ .position = position, .value = .null_value };
+        fields[0] = .{
+            .is_private = true,
+            .position = position,
+            .name_position = position,
+            .name = parent_field_name,
+            .mutable = true,
+            .type = .optional(.structure(structure_index)),
+            .default = null_parent,
+        };
+        order_index = 1;
+    }
+    fields[order_index] = .{
         .is_public = false,
         .is_private = true,
         .position = position,

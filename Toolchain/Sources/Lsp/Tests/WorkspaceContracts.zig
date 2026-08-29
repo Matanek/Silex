@@ -252,7 +252,7 @@ test "server completes additive parent and extension module declarations" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -281,6 +281,22 @@ test "server completes additive parent and extension module declarations" {
     const core_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX/Module/Physics.sx", .{root});
     const extension_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Physics/Module/%40Module.sx", .{root});
 
+    {
+        var parent_server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer parent_server.deinit();
+        try Support.initializeServer(&parent_server, allocator, root_uri);
+        const parent_items = try Support.serverCompletion(&parent_server, allocator, main_uri,
+            \\use GFX.Physics
+            \\func main() { Physics.<|> }
+        );
+        try Support.expectPresent("CorePhysics", parent_items);
+        try Support.expectAbsent("ExtensionPhysics", parent_items);
+    }
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX.Physics\":\"=1.0.0\"}}",
+    });
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     try Support.initializeServer(&server, allocator, root_uri);
