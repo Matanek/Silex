@@ -1260,6 +1260,82 @@ test "parent packages own exact extension modules and may merge them additively"
     );
 }
 
+test "public package lists preserve collection behavior in consumers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Parent/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\"Tests\",\"dependencies\":{\"Parent\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Package.json",
+        .data = "{\"name\":\"Parent\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/@Module.sx",
+        .data =
+        \\public use Parent.Item.Item
+        \\public use Parent.Store.Store
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/Item.sx",
+        .data = "public struct Item { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/Store.sx",
+        .data =
+        \\use Parent.Item.Item
+        \\public class Store {
+        \\    func items() Item[] { return [Item(value:2), Item(value:3)] }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Tests/PublicList.sx",
+        .data =
+        \\use Parent
+        \\func total() int {
+        \\    var store = Parent.Store()
+        \\    assert(store.items().count() == 2)
+        \\    let values = store.items()
+        \\    assert(values.count() == 2)
+        \\    assert(values[0].value == 2)
+        \\    var result = 0
+        \\    for value in values { result += value.value }
+        \\    return result
+        \\}
+        \\func main() { print(total()) }
+        \\test "consume public list" { assert(total() == 5) }
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Tests", "PublicList.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("5\n", result.stdout);
+    _ = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+
+    compiler = Compiler.init(allocator, std.testing.io);
+    const suite = try compiler.compileTests(input);
+    const test_result = try @import("../Interpreter.zig").runFunctionCaptureWithBoundaries(
+        allocator,
+        null,
+        suite.ir,
+        suite.tests[0].function,
+        suite.boundaries,
+    );
+    try std.testing.expectEqual(@as(u8, 0), test_result.exit_code);
+    _ = try @import("../Arm64/Lower.zig").lower(allocator, suite.ir);
+}
+
 test "merged extension atoms ignore synthetic internal types but preserve public collisions" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

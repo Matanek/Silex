@@ -385,6 +385,7 @@ pub fn analyzeCallWithReceiver(
     if (resolved_receiver.type == .str and std.mem.eql(u8, call.name, "count") and call.arguments.len == 0 and call.named_arguments.len == 0) {
         return try self.emitStringCount(builder, receiver.value);
     }
+    if (try Collections.analyzeCallWithValue(self, builder, call, resolved_receiver)) |value| return value;
     const receiver_structure_index = resolved_receiver.type.structureIndex() orelse {
         if (std.mem.eql(u8, call.name, "count")) return self.fail(call.name_position, "count() expects 'str'");
         const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no methods", .{self.typeName(receiver.type)});
