@@ -2659,6 +2659,7 @@ test "complete public package APIs module aliases members and overlays" {
         \\    package var package_value:int
         \\    var value:int
         \\    let doubled:int { get { return self.value * 2 } }
+        \\    var normalized:int = 0 { get { return self.normalized } }
         \\    init(value:int) { self.value = value }
         \\    local func hidden_method() int { return self.hidden_value }
         \\    package func package_method() int { return self.package_value }
@@ -2848,6 +2849,8 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expectEqual(CompletionKind.property, property_item.kind);
     try std.testing.expectEqualStrings("doubled:int", property_item.detail);
     try std.testing.expect(!hasLabel(property_items, "$get.doubled"));
+    try std.testing.expect(hasLabel(property_items, "normalized"));
+    try std.testing.expect(!hasLabel(property_items, "$set.normalized"));
 
     const protocol_member_source =
         \\use Math.Operations.Operation

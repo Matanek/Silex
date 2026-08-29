@@ -29,6 +29,23 @@ struct Thermometer {
     }
 }
 
+struct Graph {
+    var name:str = "" {
+        get {
+            if self.name == "" { return "Tata" }
+            return self.name
+        }
+    }
+}
+
+class InitializationToken {}
+
+struct InitializedProperty {
+    let token:InitializationToken = InitializationToken() {
+        get { return self.token }
+    }
+}
+
 protocol Named {
     name:str { get }
 }
@@ -47,6 +64,12 @@ struct ComputedPerson : Named {
 
     let name:str {
         get { return self.first + " " + self.last }
+    }
+}
+
+struct DefaultedPerson : Renamable {
+    var name:str = "Ada" {
+        get { return self.name }
     }
 }
 
@@ -87,6 +110,18 @@ test "exact property assignment invokes its setter" {
     assert(thermometer.celsius == 25, "compound getter then setter")
 }
 
+test "property initializer and implicit setter share one backing value" {
+    var graph = Graph()
+    assert(graph.name == "Tata", "initialized backing reaches custom getter")
+    graph.name = "toto"
+    assert(graph.name == "toto", "var property synthesizes its default setter")
+
+    var initialized = InitializedProperty()
+    var first = initialized.token
+    var second = initialized.token
+    assert(first == second, "property initializer runs once per construction")
+}
+
 test "stored fields and accessors satisfy protocol property requirements" {
     var renamable:Renamable = StoredPerson(name:"Ada")
     renamable.name = "Grace"
@@ -94,6 +129,10 @@ test "stored fields and accessors satisfy protocol property requirements" {
 
     var named:Named = ComputedPerson(first:"Ada", last:"Lovelace")
     assert(named.name == "Ada Lovelace", "computed property satisfies get")
+
+    var defaulted:Renamable = DefaultedPerson()
+    defaulted.name = "Grace"
+    assert(defaulted.name == "Grace", "implicit setter satisfies get set")
 }
 
 test "nested mutation follows class identity without invoking a setter" {

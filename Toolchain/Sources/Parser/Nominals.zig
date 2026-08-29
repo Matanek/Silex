@@ -238,6 +238,11 @@ fn parseType(
         };
         try self.expect(.colon, "expected ':' after field name");
         const field_type = try self.parseType();
+        var default: ?*Ast.Expression = null;
+        if (self.current.tag == .equal) {
+            try self.advance();
+            default = try self.parseExpression(false);
+        }
         if (self.current.tag == .left_brace) {
             const property = try parsePropertyAccessors(
                 self,
@@ -269,16 +274,11 @@ fn parseType(
                 // the property still has exactly `field_type`.
                 .mutable = true,
                 .type = .optional(field_type),
-                .default = null,
+                .default = default,
                 .property = property,
             };
             if (member_static) try static_fields.append(self.allocator, parsed_field) else try fields.append(self.allocator, parsed_field);
             continue;
-        }
-        var default: ?*Ast.Expression = null;
-        if (self.current.tag == .equal) {
-            try self.advance();
-            default = try self.parseExpression(false);
         }
         try self.expectStatementTerminator();
         const parsed_field = Ast.StructureField{
@@ -410,10 +410,83 @@ fn parsePropertyAccessors(
     }
     try self.expect(.right_brace, "expected '}' after property accessors");
     if (getter_method == null) return self.failAt(property_position, "a property must declare a getter");
+    if (writable and setter_method == null) {
+        setter_method = methods.items.len;
+        try methods.append(self.allocator, try defaultPropertySetter(
+            self,
+            owner_name,
+            property_name,
+            property_position,
+            property_type,
+            is_static,
+            is_public,
+            is_internal,
+            is_local,
+            is_private,
+            is_protected,
+        ));
+    }
     return .{
         .value_type = property_type,
         .getter_method = getter_method.?,
         .setter_method = setter_method,
+    };
+}
+
+fn defaultPropertySetter(
+    self: anytype,
+    owner_name: []const u8,
+    property_name: []const u8,
+    property_position: @import("../Source.zig").Position,
+    property_type: Ast.Type,
+    is_static: bool,
+    is_public: bool,
+    is_internal: bool,
+    is_local: bool,
+    is_private: bool,
+    is_protected: bool,
+) !Ast.Function {
+    const receiver_name = if (is_static) owner_name else "self";
+    const receiver = try self.allocator.create(Ast.Expression);
+    receiver.* = .{ .position = property_position, .value = .{ .identifier = receiver_name } };
+    const field = try self.allocator.create(Ast.Expression);
+    field.* = .{ .position = property_position, .value = .{ .field_access = .{
+        .base = receiver,
+        .name = property_name,
+        .name_position = property_position,
+    } } };
+    const value = try self.allocator.create(Ast.Expression);
+    value.* = .{ .position = property_position, .value = .{ .identifier = "value" } };
+    const target_fields = try self.allocator.alloc(Ast.AssignmentTarget.Field, 1);
+    target_fields[0] = .{ .name_position = property_position, .name = property_name };
+    const statements = try self.allocator.alloc(Ast.Statement, 1);
+    statements[0] = .{ .assignment_statement = .{
+        .position = property_position,
+        .target = .{
+            .source = field,
+            .name_position = property_position,
+            .name = receiver_name,
+            .fields = target_fields,
+        },
+        .operator = .assign,
+        .value = value,
+    } };
+    const parameters = try self.allocator.alloc(Ast.Parameter, 1);
+    parameters[0] = .{ .position = property_position, .name = "value", .type = property_type };
+    return .{
+        .is_static = is_static,
+        .is_public = is_public,
+        .is_internal = is_internal,
+        .is_local = is_local,
+        .is_private = is_private,
+        .is_protected = is_protected,
+        .position = property_position,
+        .name_position = property_position,
+        .name = try std.fmt.allocPrint(self.allocator, "$set.{s}", .{property_name}),
+        .parameters = parameters,
+        .return_type = .void,
+        .accessor = .{ .owner = owner_name, .property = property_name, .kind = .set, .synthetic = true },
+        .statements = statements,
     };
 }
 

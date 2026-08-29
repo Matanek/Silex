@@ -991,10 +991,13 @@ test "native optional equality and refinement match the reference interpreter" {
         \\func main() {
         \\    let absent:int?
         \\    let present:int? = 7
+        \\    let text:str? = "Silex"
         \\    let first:Position? = Position(x:42)
         \\    let second:Position? = Position(x:42)
         \\    print(absent == null)
         \\    print(present != null)
+        \\    print(text == "Silex")
+        \\    print("Silex" == text)
         \\    print(first == second)
         \\    inspect(Position(x:42))
         \\    inspect(null)

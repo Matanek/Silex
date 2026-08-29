@@ -789,6 +789,13 @@ pub const Analyzer = struct {
                 right = try self.analyzeExpressionExpected(builder, binary.right, right_hint);
             }
         }
+        if (equality and left.type != right.type) {
+            if (Optionals.canConvert(right.type, left.type)) {
+                right = try self.coerce(builder, right, left.type, binary.right.position);
+            } else if (Optionals.canConvert(left.type, right.type)) {
+                left = try self.coerce(builder, left, right.type, binary.left.position);
+            }
+        }
         if (binary.operator == .add and left.type == .str and right.type == .str) {
             const result = try self.newValue(builder, .str);
             try self.emit(builder, .{ .string_concat = .{

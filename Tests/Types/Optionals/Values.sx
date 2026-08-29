@@ -13,6 +13,9 @@ test "optional intrinsic promotion comparison and binding" {
     let present:int? = 7
     if missing != null || present == null { panic("optional states") }
 
+    let text:str? = "Silex"
+    if text != "Silex" || "Silex" != text { panic("optional payload comparison") }
+
     if value = optional_value(true) {
         if value != 42 { panic("optional payload binding") }
     } else { panic("present optional did not bind") }
