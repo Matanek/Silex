@@ -1226,6 +1226,14 @@ fn hasVisibleApi(graph: @import("../Packages.zig").Graph, current_owner: usize, 
     return false;
 }
 
+fn isDeclaredCatalog(project: IndexedProject, provider: Modules.Provider) bool {
+    if (provider.origin != .portable) return false;
+    for (project.graph.packages[provider.owner].catalogs) |catalog| {
+        if (std.mem.eql(u8, catalog, provider.name)) return true;
+    }
+    return false;
+}
+
 fn modulePathVisible(
     allocator: Allocator,
     io: Io,
@@ -1239,6 +1247,7 @@ fn modulePathVisible(
                 provider.name[path.len] == '.');
         if (!matches or !project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
         if (provider.owner == project.current_owner) return true;
+        if (isDeclaredCatalog(project, provider)) return true;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
         if (hasVisibleApi(project.graph, project.current_owner, provider.owner, loaded.program)) return true;
     }

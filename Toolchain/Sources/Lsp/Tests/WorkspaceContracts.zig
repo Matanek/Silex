@@ -317,7 +317,11 @@ test "server completes and navigates authorized umbrella contributions" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Plugins\",\"GFX.Resources\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Components\",\"GFX.Plugins\",\"GFX.Resources\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Components.sx",
+        .data = "// Extension-owned entity values are contributed to this catalog.",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Plugins.sx",
@@ -337,6 +341,9 @@ test "server completes and navigates authorized umbrella contributions" {
         \\contribute GFX.Plugins {
         \\    public use GFX.Physics.Plugin as Physics
         \\}
+        \\contribute GFX.Components {
+        \\    public use GFX.Physics.Body as RigidBody
+        \\}
         \\contribute GFX.Resources {
         \\    public use GFX.Physics.World as World
         \\}
@@ -345,6 +352,10 @@ test "server completes and navigates authorized umbrella contributions" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Physics/Module/Plugin.sx",
         .data = "public struct Plugin {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/Body.sx",
+        .data = "public struct Body {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Physics/Module/World.sx",
@@ -369,6 +380,9 @@ test "server completes and navigates authorized umbrella contributions" {
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     try Support.initializeServer(&server, allocator, root_uri);
+
+    const catalogs = try Support.serverCompletion(&server, allocator, main_uri, "use GFX.C<|>");
+    try Support.expectExactLabels(&.{"Components"}, catalogs);
 
     const items = try Support.serverCompletion(&server, allocator, main_uri,
         \\use GFX.Plugins
