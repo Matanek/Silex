@@ -83,6 +83,7 @@ pub const Instruction = union(enum) {
     string_drop: ListResource,
     global_load: GlobalLoad,
     global_store: GlobalStore,
+    storage_init: StorageInit,
     structure_init: StructureInit,
     protocol_init: ProtocolInit,
     protocol_test: ProtocolTest,
@@ -210,6 +211,12 @@ pub const Instruction = union(enum) {
 
     pub const GlobalLoad = struct { result: ValueId, global: usize };
     pub const GlobalStore = struct { global: usize, operand: ValueId };
+
+    /// Creates compiler-owned storage for a source field that is not yet
+    /// semantically initialized. Source expressions can never observe this
+    /// value; constructor definite-initialization checks guarantee that it is
+    /// replaced before `self` escapes or returns.
+    pub const StorageInit = struct { result: ValueId };
 
     pub const StructureInit = struct {
         result: ValueId,
@@ -809,6 +816,10 @@ fn writeInstruction(
             try output.appendSlice(allocator, program.globals[store.global].name);
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, store.operand);
+        },
+        .storage_init => |initialization| {
+            try appendResult(output, allocator, program, function, initialization.result);
+            try output.appendSlice(allocator, "storage.init");
         },
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or

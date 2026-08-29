@@ -12,25 +12,9 @@ const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
+const Enums = @import("Enums.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
-
-pub fn restrictedFieldDefault(self: anytype, expression: *const Ast.Expression) bool {
-    return switch (expression.value) {
-        .integer, .floating, .boolean, .null_value, .string => true,
-        .unary => |unary| unary.operator == .negate and switch (unary.operand.value) {
-            .integer, .floating => true,
-            else => false,
-        },
-        .call => |call| call.arguments.len == 0 and self.structureIndex(call.name) != null and blk: {
-            for (call.named_arguments) |argument| {
-                if (!restrictedFieldDefault(self, argument.value)) break :blk false;
-            }
-            break :blk true;
-        },
-        else => false,
-    };
-}
 
 pub fn analyze(
     self: anytype,
@@ -93,23 +77,34 @@ pub fn analyze(
         }
     }
     for (declaration.fields, 0..) |field, field_index| {
-        var value = if (field.default) |expression|
-            try self.analyzeExpressionExpected(
+        var value: Model.TypedValue = if (field.default) |expression| initialized_value: {
+            const analyzed = try self.analyzeExpressionExpected(
                 &builder,
                 expression,
                 Optionals.expectedContext(field.type, expression),
-            )
-        else
-            try self.emitIntrinsic(&builder, field.type, constructor.position);
+            );
+            try Borrowing.requireOwned(self, analyzed, expression.position, "stored");
+            initialized[field_index] = true;
+            break :initialized_value analyzed;
+        } else if (field.mutable and intrinsicAvailable(self, field.type)) intrinsic: {
+            initialized[field_index] = true;
+            break :intrinsic try self.emitIntrinsic(&builder, field.type, constructor.position);
+        } else storage: {
+            const result = try self.newValue(&builder, field.type);
+            try self.emit(&builder, .{ .storage_init = .{ .result = result } });
+            initialized[field_index] = false;
+            break :storage Model.TypedValue{ .type = field.type, .value = result };
+        };
         if (value.type != field.type and self.canImplicitlyConvert(value.type, field.type)) {
             value = try self.coerce(&builder, value, field.type, constructor.position);
         }
         try initial_fields.append(self.allocator, value.value);
         try initial_transfers.append(self.allocator, value.transferred);
-        initialized[field_index] = field.mutable or field.default != null;
     }
     if (self.structures[nominal_index].is_class) {
-        for (self.structures[nominal_index].fields, initial_fields.items, initial_transfers.items) |field, field_value, transferred| {
+        const inherited_count = initial_fields.items.len - declaration.fields.len;
+        for (self.structures[nominal_index].fields, initial_fields.items, initial_transfers.items, 0..) |field, field_value, transferred, field_index| {
+            if (field_index >= inherited_count and !initialized[field_index - inherited_count]) continue;
             if (Resources.requiresRetain(self, field.type)) {
                 try Resources.retainValueOwned(self, &builder, field.type, field_value, .edge);
                 if (transferred) try Resources.releaseTransferredRoot(self, &builder, field.type, field_value);
@@ -657,17 +652,14 @@ fn analyzeSelfAssignment(
     const inherited_count = if (self.structures[structure_index].base) |parent| self.structures[parent].fields.len else 0;
     const flattened_target = inherited_count + field_index;
     const drops_previous = Resources.needsDrop(self, field.type) or Resources.containsClass(self, field.type);
-    const previous = if (drops_previous) previous: {
+    const previous = if (initialized[field_index] and drops_previous) previous: {
         const loaded = try self.newValue(builder, field.type);
         try self.emit(builder, .{ .field_load = .{ .result = loaded, .base = base, .field = flattened_target } });
         break :previous loaded;
     } else null;
     if (previous != null and !self.structures[structure_index].is_class) {
         const previous_ownership: Ir.Ownership = if (self.structures[structure_index].is_class) .edge else .root;
-        if (initialized[field_index])
-            try Resources.emitDropOwned(self, builder, field.type, previous.?, previous_ownership)
-        else
-            try Resources.emitStorageDropOwned(self, builder, field.type, previous.?, previous_ownership);
+        try Resources.emitDropOwned(self, builder, field.type, previous.?, previous_ownership);
     }
     if (self.structures[structure_index].is_class) {
         const replacement = try self.newValue(builder, structure_type);
@@ -678,10 +670,7 @@ fn analyzeSelfAssignment(
             .replacement = value.value,
         } });
         if (previous) |previous_value| {
-            if (initialized[field_index])
-                try Resources.emitDropOwned(self, builder, field.type, previous_value, .edge)
-            else
-                try Resources.emitStorageDropOwned(self, builder, field.type, previous_value, .edge);
+            try Resources.emitDropOwned(self, builder, field.type, previous_value, .edge);
         }
         try self.emit(builder, .{ .local_store = .{ .local = self_local, .operand = replacement } });
         initialized[field_index] = true;
@@ -780,5 +769,46 @@ fn validateExpressionReads(self: anytype, structure: Ast.Structure, expression: 
 
 fn allInitialized(initialized: []const bool) bool {
     for (initialized) |value| if (!value) return false;
+    return true;
+}
+
+fn intrinsicAvailable(self: anytype, type_value: Ast.Type) bool {
+    return intrinsicAvailableAt(self, type_value, 0);
+}
+
+fn intrinsicAvailableAt(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (type_value.optionalChild() != null or type_value.functionIndex() != null) return true;
+    if (Enums.findByType(self, type_value)) |enum_index| {
+        for (self.program.enums[enum_index].variants) |variant| {
+            if (variant.associated_types.len == 0) return true;
+        }
+        return false;
+    }
+    if (type_value == .int8 or type_value == .int16 or type_value == .int32 or type_value == .int or
+        type_value == .uint8 or type_value == .uint16 or type_value == .uint32 or type_value == .uint or
+        type_value == .bool or type_value == .float32 or type_value == .float64 or type_value == .str)
+    {
+        return true;
+    }
+    const structure_index = type_value.structureIndex() orelse return false;
+    if (structure_index >= self.structures.len) return false;
+    if (depth > self.structures.len) return false;
+    const structure = self.structures[structure_index];
+    if (structure.is_protocol) return false;
+    if (structure.collection) |collection| {
+        if (collection.length == null) return !collection.view;
+        return intrinsicAvailableAt(self, collection.element, depth + 1);
+    }
+    const declaration = self.findAstStructure(structure.name) orelse return false;
+    if (declaration.constructors.len != 0) {
+        var matches: usize = 0;
+        for (declaration.constructors) |constructor| {
+            if (Support.acceptsArity(constructor.parameters, 0)) matches += 1;
+        }
+        return matches == 1;
+    }
+    for (declaration.fields) |field| {
+        if (field.default == null and !intrinsicAvailableAt(self, field.type, depth + 1)) return false;
+    }
     return true;
 }

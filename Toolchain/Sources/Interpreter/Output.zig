@@ -17,7 +17,7 @@ pub fn appendValueText(output: *std.ArrayList(u8), allocator: std.mem.Allocator,
             try appendValueText(output, allocator, payload.*)
         else
             try output.appendSlice(allocator, "null"),
-        .reference, .function, .structure, .class, .protocol, .view, .enumeration, .void => return error.InvalidProgram,
+        .reference, .function, .structure, .class, .protocol, .view, .enumeration, .storage, .void => return error.InvalidProgram,
     }
 }
 

@@ -177,9 +177,31 @@ test "enforce structure fields nominal identity defaults and representation cycl
         "struct Left { var right:Right } struct Right { var left:Left } func main() {}",
         "structure 'Left' has a recursive value representation",
     );
+}
+
+test "lower ordinary field initializer expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\struct State { var number:int; func advance() { self.number += 1 } }
+        \\struct Value { var state:State = State()..advance(); var number:int = observed() }
+        \\class Holder { var state:State = Holder.initial_state()..advance(); private static func initial_state() State { return State() } }
+        \\func observed() int { return 1 }
+        \\func main() { let value = Value(); print(value.state.number); print(value.number) }
+    );
+    var analyzer = Analyzer.init(allocator);
+    _ = try analyzer.analyze(try parser.parse());
+}
+
+test "require constructors to initialize non-intrinsic fields" {
     try expectSemanticError(
-        "struct Value { var number:int = observed() } func observed() int { return 1 } func main() {}",
-        "field default must be a fundamental literal or structure aggregate",
+        "struct Value { let number:int; init(number:int) { self.number = number } } class Owner { var value:Value; init() {} } func main() {}",
+        "field 'value' is not initialized on every constructor path",
+    );
+    try expectSemanticError(
+        "class Left { var right:Right } class Right { var left:Left } class Owner { var left:Left; init() {} } func main() {}",
+        "field 'left' is not initialized on every constructor path",
     );
 }
 

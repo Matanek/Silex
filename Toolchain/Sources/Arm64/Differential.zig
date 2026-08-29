@@ -37,6 +37,7 @@ fn compare(
             .optional => return error.UnsupportedType,
             .reference => return error.UnsupportedType,
             .function => return error.UnsupportedType,
+            .storage => return error.UnsupportedType,
             .void => return error.TestUnexpectedResult,
         };
     }
@@ -78,6 +79,7 @@ fn compare(
         .optional => return error.UnsupportedType,
         .reference => return error.UnsupportedType,
         .function => return error.UnsupportedType,
+        .storage => return error.UnsupportedType,
         .void => try std.testing.expectEqual(@as(i64, 0), native.value),
     }
 }

@@ -90,6 +90,7 @@ pub const Instruction = union(enum) {
     reference_store: ReferenceStore,
     reference_offset: ReferenceOffset,
     reference_indirect_offset: ReferenceOffset,
+    storage_init: Span,
     aggregate_init: AggregateInit,
     protocol_init: ProtocolInit,
     protocol_test: ProtocolTest,
@@ -744,6 +745,7 @@ pub fn validate(program: Program) Error!void {
                     try requireSlot(function, value.result);
                     try requireSlot(function, value.reference);
                 },
+                .storage_init => |value| try requireSpan(function, value),
                 .aggregate_init => |value| {
                     try requireSpan(function, value.result);
                     var width: usize = 0;

@@ -149,6 +149,26 @@ test "field parameter and generic annotations expose the complete type catalogue
     try Support.expectNoDuplicates(generic_items);
 }
 
+test "field initializer expressions complete compatible values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const items = try Support.complete(allocator,
+        \\struct Value {}
+        \\struct Other {}
+        \\func make_value() Value { return Value() }
+        \\struct Container {
+        \\    var value:Value = ma<|>
+        \\}
+    );
+
+    try Support.expectPresent("make_value", items);
+    try Support.expectAbsent("Other", items);
+    try Support.expectAbsent("if", items);
+    try Support.expectAbsent("return", items);
+    try Support.expectNoDuplicates(items);
+}
+
 test "completion is deterministic for incomplete source" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

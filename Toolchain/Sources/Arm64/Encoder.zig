@@ -968,6 +968,12 @@ fn encodeFunction(
                 }
                 try words.append(allocator, storeStack(.x9, offset.result));
             },
+            .storage_init => |storage| for (0..storage.width) |leaf| {
+                try words.append(allocator, storeStack(
+                    .zero_or_sp,
+                    @intCast(@as(usize, storage.start) + leaf),
+                ));
+            },
             .aggregate_init => |initialization| {
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {

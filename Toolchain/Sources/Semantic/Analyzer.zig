@@ -109,6 +109,7 @@ pub const Analyzer = struct {
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
         try Inheritance.validateOverrides(self);
         try Protocols.validate(self);
+        try Declarations.validateFieldDefaults(self);
         try self.validateDeclarations(require_entry);
         try self.validateParameterDefaults();
         const source_functions = try self.allocator.alloc(?Ir.Function, program.functions.len);
@@ -965,7 +966,7 @@ pub const Analyzer = struct {
         return .{ .type = .bool, .value = result };
     }
 
-    fn findAstStructure(self: *Analyzer, name: []const u8) ?Ast.Structure {
+    pub fn findAstStructure(self: *Analyzer, name: []const u8) ?Ast.Structure {
         for (self.program.structures) |structure| {
             if (std.mem.eql(u8, structure.name, name)) return structure;
         }

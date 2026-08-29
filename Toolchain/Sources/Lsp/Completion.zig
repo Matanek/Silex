@@ -932,6 +932,13 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .in_loop = scope.in_loop,
     };
 
+    if (scope.in_structure and fieldInitializerIsExpression(line_tokens)) return .{
+        .kind = .expression,
+        .prefix = prefix,
+        .prefix_start = prefix_start,
+        .allow_conversion = expressionCanConvert(line_tokens),
+    };
+
     if (scope.in_callable) {
         const expression = lineIsExpression(line_tokens);
         return .{
@@ -1225,6 +1232,16 @@ fn lineIsExpression(tokens: []const Token) bool {
         .identifier, .keyword_self, .integer, .floating, .keyword_true, .keyword_false, .string, .string_start => true,
         else => false,
     };
+}
+
+fn fieldInitializerIsExpression(tokens: []const Token) bool {
+    var field = false;
+    for (tokens) |token| switch (token.tag) {
+        .keyword_let, .keyword_var => field = true,
+        .equal => if (field) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn expressionCanConvert(tokens: []const Token) bool {

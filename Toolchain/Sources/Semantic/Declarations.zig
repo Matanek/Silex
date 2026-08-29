@@ -3,8 +3,8 @@ const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 const Enums = @import("Enums.zig");
+const Borrowing = @import("Borrowing.zig");
 const Resources = @import("Resources.zig");
-const Constructors = @import("Constructors.zig");
 const Optionals = @import("Optionals.zig");
 const Numeric = @import("../Numeric.zig");
 const Visibility = @import("Visibility.zig");
@@ -78,20 +78,32 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
     @memset(states, .unseen);
     for (structures, 0..) |structure, index| if (!structure.is_protocol) try validateStructureCycle(self, index, states);
 
-    for (self.program.structures) |structure| for (structure.fields) |field| if (field.default) |default| {
-        if (!Constructors.restrictedFieldDefault(self, default)) return self.fail(default.position, "field default must be a fundamental literal or structure aggregate");
-        var builder: Model.FunctionBuilder = .{};
-        try builder.blocks.append(self.allocator, .{});
-        var value = try self.analyzeExpressionExpected(&builder, default, Optionals.expectedContext(field.type, default));
-        if (value.type != field.type and self.canImplicitlyConvert(value.type, field.type)) {
-            value = try self.coerce(&builder, value, field.type, default.position);
-        }
-        if (value.type != field.type) {
-            const message = try std.fmt.allocPrint(self.allocator, "default for field '{s}' expects '{s}', found '{s}'", .{ field.name, self.typeName(field.type), self.typeName(value.type) });
-            return self.fail(default.position, message);
-        }
-    };
     return structures;
+}
+
+pub fn validateFieldDefaults(self: anytype) !void {
+    for (self.program.structures) |structure| {
+        const previous_owner_context = self.owner_context;
+        self.owner_context = structure.owner;
+        defer self.owner_context = previous_owner_context;
+        const previous_member_context = self.member_context;
+        self.member_context = self.structureIndex(structure.name) orelse return error.InvalidSource;
+        defer self.member_context = previous_member_context;
+
+        for (structure.fields) |field| if (field.default) |default| {
+            var builder: Model.FunctionBuilder = .{};
+            try builder.blocks.append(self.allocator, .{});
+            var value = try self.analyzeExpressionExpected(&builder, default, Optionals.expectedContext(field.type, default));
+            if (value.type != field.type and self.canImplicitlyConvert(value.type, field.type)) {
+                value = try self.coerce(&builder, value, field.type, default.position);
+            }
+            if (value.type != field.type) {
+                const message = try std.fmt.allocPrint(self.allocator, "default for field '{s}' expects '{s}', found '{s}'", .{ field.name, self.typeName(field.type), self.typeName(value.type) });
+                return self.fail(default.position, message);
+            }
+            try Borrowing.requireOwned(self, value, default.position, "stored");
+        };
+    }
 }
 
 fn isAccessPattern(program: Ast.Program, type_value: Ast.Type) bool {

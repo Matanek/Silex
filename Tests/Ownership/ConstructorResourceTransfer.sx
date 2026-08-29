@@ -42,3 +42,26 @@ test "constructor parameters transfer into resource-bearing structure fields" {
     }
     assert(counter.count == 1)
 }
+
+struct RequiredToken {
+    var token:Token
+
+    init(token:Token) { self.token = token }
+}
+
+class RequiredOwner {
+    var payload:RequiredToken
+
+    init(counter:DropCounter) {
+        self.payload = RequiredToken(Token(counter))
+    }
+}
+
+test "constructor initialization retains only assigned class fields" {
+    var counter = DropCounter()
+    {
+        var owner = RequiredOwner(counter)
+        assert(owner.payload.token.counter == counter)
+    }
+    assert(counter.count == 1)
+}

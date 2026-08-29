@@ -511,6 +511,15 @@ fn encodeFunction(
                 try appendInt(allocator, bytes, u32, offset.byte_offset);
                 try emitStoreStack(allocator, bytes, .rax, offset.result);
             },
+            .storage_init => |storage| {
+                try bytes.appendSlice(allocator, &.{ 0x31, 0xc0 });
+                for (0..storage.width) |leaf| try emitStoreStack(
+                    allocator,
+                    bytes,
+                    .rax,
+                    @intCast(@as(usize, storage.start) + leaf),
+                );
+            },
             .aggregate_init => |initialization| {
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {

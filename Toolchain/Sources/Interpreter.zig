@@ -389,6 +389,12 @@ fn executeInstruction(
             defer guard.release();
             try Globals.store(allocator, program, session.globals, store_value, try load(values, store_value.operand));
         },
+        .storage_init => |initialization| try store(
+            function,
+            values,
+            initialization.result,
+            .{ .storage = function.value_types[initialization.result] },
+        ),
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or
                 initialization.fields.len != program.structures[initialization.structure].fields.len)

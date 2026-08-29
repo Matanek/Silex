@@ -380,6 +380,7 @@ fn lowerInstruction(
         },
         .global_load => |load| .{ .global_load = .{ .result = layout.values[load.result], .global = load.global } },
         .global_store => |store| .{ .global_store = .{ .operand = layout.values[store.operand], .global = store.global } },
+        .storage_init => |initialization| .{ .storage_init = layout.values[initialization.result] },
         .structure_init => |initialization| aggregate: {
             const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
             for (initialization.fields, 0..) |field, index| fields[index] = layout.values[field];

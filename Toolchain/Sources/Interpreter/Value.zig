@@ -21,6 +21,7 @@ pub const Value = union(enum) {
     optional: Optional,
     reference: Reference,
     function: Function,
+    storage: Ir.Type,
 
     pub const Function = struct {
         type: Ir.Type,
@@ -96,6 +97,7 @@ pub const Value = union(enum) {
             .optional => |value| value.type,
             .reference => .address,
             .function => |value| value.type,
+            .storage => |type_value| type_value,
         };
     }
 };
@@ -173,6 +175,6 @@ pub fn equal(left: Value, right: Value) Error!bool {
             break :enum_value true;
         },
         .function => |function| function.id == right.function.id and function.captures.len == right.function.captures.len,
-        .view, .reference, .void => error.InvalidProgram,
+        .view, .reference, .storage, .void => error.InvalidProgram,
     };
 }

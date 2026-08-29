@@ -345,6 +345,7 @@ fn instructionDefines(instruction: Machine.Instruction, slot: usize) bool {
         .constant_float64 => |value| value.result == slot,
         .copy => |value| value.result == slot,
         .copy_range => |value| spanContains(value.result, slot),
+        .storage_init => |value| spanContains(value, slot),
         .aggregate_init => |value| spanContains(value.result, slot),
         .unary => |value| value.result == slot,
         .binary => |value| value.result == slot,

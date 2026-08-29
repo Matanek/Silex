@@ -223,63 +223,6 @@ pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir
     return emitDropOwned(self, builder, type_value, value, .root);
 }
 
-/// Releases the compiler-provided storage placeholder of a field that is not
-/// semantically initialized yet. User `drop` hooks must not observe this
-/// placeholder, but resources recursively allocated by intrinsic values still
-/// have to be returned to the system.
-pub fn emitStorageDropOwned(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
-    if (type_value.optionalChild()) |child| {
-        const absent = try self.newValue(builder, type_value);
-        try self.emit(builder, .{ .optional_null = .{ .result = absent } });
-        const present = try self.newValue(builder, .bool);
-        try self.emit(builder, .{ .binary = .{ .result = present, .operator = .not_equal, .left = value, .right = absent } });
-        const drop_block = try self.newBlock(builder);
-        const merge_block = try self.newBlock(builder);
-        self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = drop_block, .else_block = merge_block } });
-        builder.current_block = drop_block;
-        const payload = try self.newValue(builder, child);
-        try self.emit(builder, .{ .optional_unwrap = .{ .result = payload, .operand = value } });
-        try emitStorageDropOwned(self, builder, child, payload, ownership);
-        self.terminate(builder, .{ .jump = merge_block });
-        builder.current_block = merge_block;
-        return;
-    }
-    const type_index = type_value.structureIndex() orelse return;
-    if (type_index >= self.structures.len) return;
-    if (self.structures[type_index].is_protocol or self.structures[type_index].is_class) {
-        return emitDropOwned(self, builder, type_value, value, ownership);
-    }
-    if (enumIndex(self, type_index) != null) return;
-    if (self.structures[type_index].collection) |collection| {
-        if (collection.view) return;
-        if (collection.length == null) {
-            try self.emit(builder, .{ .list_drop = .{ .operand = value, .ownership = ownership } });
-            return;
-        }
-        const width = collection.length.?;
-        for (0..width) |index| {
-            if (!needsDrop(self, collection.element) and !containsClass(self, collection.element)) break;
-            const element = try self.newValue(builder, collection.element);
-            const element_index = try self.newValue(builder, .int);
-            try self.emit(builder, .{ .constant_int = .{ .result = element_index, .bits = index } });
-            try self.emit(builder, .{ .collection_load = .{
-                .result = element,
-                .collection = value,
-                .index = element_index,
-                .position = .{ .offset = 0, .line = 1, .column = 1 },
-            } });
-            try emitStorageDropOwned(self, builder, collection.element, element, ownership);
-        }
-        return;
-    }
-    for (self.structures[type_index].fields, 0..) |field, field_index| {
-        if (!needsDrop(self, field.type) and !containsClass(self, field.type)) continue;
-        const field_value = try self.newValue(builder, field.type);
-        try self.emit(builder, .{ .field_load = .{ .result = field_value, .base = value, .field = field_index } });
-        try emitStorageDropOwned(self, builder, field.type, field_value, ownership);
-    }
-}
-
 pub fn emitDropOwned(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
     return emitDropOwnedInner(self, builder, type_value, value, ownership, true);
 }
