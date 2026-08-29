@@ -1,4 +1,5 @@
 const std = @import("std");
+const Ast = @import("../Ast.zig");
 const CompilationCache = @import("../CompilationCache.zig");
 const LexerModule = @import("../Lexer.zig");
 const Result = @import("../Intrinsics/Result.zig");
@@ -120,7 +121,7 @@ fn validateMergedDeclarations(self: anytype, module: usize) !void {
                 }
             }
             for (right_program.structures) |structure| {
-                if (Reexports.structureExported(right_program, structure) and hasPublicName(left_program, structure.name)) {
+                if (publicStructureDeclaration(right_program, structure) and hasPublicName(left_program, structure.name)) {
                     return mergedDeclarationCollision(self, right, structure.name, structure.name_position, left_provider.owner);
                 }
             }
@@ -146,11 +147,11 @@ fn validateMergedDeclarations(self: anytype, module: usize) !void {
     }
 }
 
-fn hasPublicName(program: @import("../Ast.zig").Program, name: []const u8) bool {
+fn hasPublicName(program: Ast.Program, name: []const u8) bool {
     if (std.mem.eql(u8, name, Result.name)) return false;
     for (program.functions) |function| if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
     for (program.structures) |structure| {
-        if (Reexports.structureExported(program, structure) and std.mem.eql(u8, structure.name, name)) return true;
+        if (publicStructureDeclaration(program, structure) and std.mem.eql(u8, structure.name, name)) return true;
     }
     for (program.enums) |enumeration| if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
     for (program.uses) |use| {
@@ -159,6 +160,11 @@ fn hasPublicName(program: @import("../Ast.zig").Program, name: []const u8) bool 
         if (std.mem.eql(u8, alias, name)) return true;
     }
     return false;
+}
+
+fn publicStructureDeclaration(program: Ast.Program, structure: Ast.Structure) bool {
+    if (structure.collection != null or structure.is_tuple) return false;
+    return Reexports.structureExported(program, structure);
 }
 
 fn mergedDeclarationCollision(

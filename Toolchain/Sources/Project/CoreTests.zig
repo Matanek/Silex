@@ -1260,6 +1260,93 @@ test "parent packages own exact extension modules and may merge them additively"
     );
 }
 
+test "merged extension atoms ignore synthetic internal types but preserve public collisions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Application/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX.Application\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Application\":{\"merge\":true}}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data =
+        \\public enum Schedule { update }
+        \\public intrinsic class Resources {
+        \\    func scope() Resources
+        \\    func insert<T>(value:T)
+        \\    module func retain_class<T>(value:T)
+        \\    func has<T>() bool
+        \\    func get<T>() @T
+        \\    func get_mut<T>() &T
+        \\    func try_get<T>() @T?
+        \\    func try_get_mut<T>() &T?
+        \\    func remove<T>() T?
+        \\    func clear()
+        \\}
+        \\class RegisteredSystem {
+        \\    let reads:str[]
+        \\    let writes:str[]
+        \\    init(reads:str[], writes:str[]) { self.reads = reads; self.writes = writes }
+        \\}
+        \\public class Application {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Package.json",
+        .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@Scene.sx",
+        .data =
+        \\class SceneSystem {
+        \\    let reads:str[]
+        \\    let writes:str[]
+        \\    init(reads:str[], writes:str[]) { self.reads = reads; self.writes = writes }
+        \\}
+        \\public class Scene {
+        \\    var resources:Resources
+        \\    init(resources:Resources) { self.resources = resources }
+        \\    func add_system(schedule:Schedule) { var system = SceneSystem([], []) }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Application
+        \\func main() {}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    _ = try compiler.compile(input);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@Scene.sx",
+        .data =
+        \\public intrinsic class Resources {}
+        \\public class Scene {}
+        ,
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "public declaration 'Resources' from extension package 'GFX.Application' collides with package 'GFX' in merged module 'GFX.Application'",
+        compiler.diagnostic.?.message,
+    );
+}
+
 test "enforce public package interfaces and direct dependency visibility" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
