@@ -1056,7 +1056,9 @@ test "compile an explicit package suite entry after composing a merged extension
         \\public class Application {
         \\    func add_plugin<P:Plugin>(plugin:P) {
         \\        assert(plugin.id() == "time")
-        \\        plugin.build(self)
+        \\        var candidate = plugin
+        \\        var host = self
+        \\        candidate.build(host)
         \\    }
         \\    func mark_ready() {}
         \\}
