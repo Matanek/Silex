@@ -612,19 +612,35 @@ test "query iteration does not allocate a component filter list" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/ECS/Entity.sx",
-        .data = "public struct Entity { let value:int }",
+        .data = "public struct Entity { let index:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/ComponentPool.sx",
+        .data =
+        \\use GFX.ECS.Entity.Entity
+        \\public struct ComponentPool<T> {
+        \\    private var sparse:int[]
+        \\    private var values:T[]
+        \\    init() { self.sparse = []; self.values = [] }
+        \\    func get_known(entity:Entity) @self:T { return @self.values[self.sparse[entity.index] - 1] }
+        \\}
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/ECS/World.sx",
         .data =
         \\use GFX.ECS.Entity.Entity
+        \\use GFX.ECS.ComponentPool.ComponentPool
         \\public class World {
         \\    package func query_count(required:int[]) int { return 0 }
         \\    package func query_archetype_count() int { return 0 }
         \\    package func query_entity_count(archetype:int) int { return 0 }
-        \\    package func query_entity(archetype:int, row:int) Entity { return Entity(value:0) }
+        \\    package func query_entity(archetype:int, row:int) Entity { return Entity(index:0) }
         \\    package func query_range_start(base:int, count:int, range_start:int) int { return 0 }
         \\    package func query_range_end(base:int, count:int, range_end:int) int { return 0 }
+        \\    module func query_component_id<T>() int { return 0 }
+        \\    package func query_archetype_has<T>(archetype:int) bool { return false }
+        \\    module func query_pool<T>() ComponentPool<T> { return ComponentPool<T>() }
         \\}
         ,
     });
@@ -656,9 +672,15 @@ test "query iteration does not allocate a component filter list" {
         \\    module func __silex_run_query(count:int, system_order:int, commands_address:uint, callback:func(Scene, int, int, int, uint)) { callback(self, system_order, 0, count, commands_address) }
         \\    drop { self.store.clear() }
         \\}
+        \\struct Position { let x:int }
         \\func inspect(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {
         \\    for (first, second) in query {
-        \\        if first.value == second.value { return }
+        \\        if first.index == second.index { return }
+        \\    }
+        \\}
+        \\func inspect_components(query:ECS.Query<(ECS.Entity, @Position)>) {
+        \\    for (entity, position) in query {
+        \\        if entity.index == position.x { return }
         \\    }
         \\}
         \\func parallel_inspect(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {
@@ -667,6 +689,7 @@ test "query iteration does not allocate a component filter list" {
         \\func main() {
         \\    var application = Application()
         \\    application.add_system(0, inspect)
+        \\    application.add_system(0, inspect_components)
         \\    var scene = Scene(application.resources())
         \\    scene.resources().insert(ECS.World())
         \\    scene.add_system(0, parallel_inspect)
@@ -683,6 +706,12 @@ test "query iteration does not allocate a component filter list" {
     const function_text = tail[0 .. finish + 3];
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, function_text, "list.init"));
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, function_text, "list.drop"));
+    const component_start = std.mem.indexOf(u8, text, "func @GFX.Smokes.Main.inspect_components(") orelse return error.TestUnexpectedResult;
+    const component_tail = text[component_start..];
+    const component_finish = std.mem.indexOf(u8, component_tail, "\n}\n") orelse return error.TestUnexpectedResult;
+    const component_text = component_tail[0 .. component_finish + 3];
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, component_text, ".get_known#"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, component_text, "collection.load"));
     _ = try Lower.lower(allocator, compilation.ir);
 }
 
