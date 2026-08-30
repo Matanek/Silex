@@ -15,11 +15,21 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     call.named_arguments = &.{};
     const receiver_type = self.inferExpressionType(call.receiver.?, locals) orelse return false;
     _ = self.structureForType(receiver_type) orelse return false;
-    const host_type = receiver_type;
+    var host_type = receiver_type;
+    var delegated_host = false;
     const resources_type = self.typeForName(resources_name) orelse return false;
     const host_source = self.sourceStructureForType(host_type) orelse return false;
     _ = sourceMethod(host_source, "resources") orelse return false;
     _ = sourceMethod(host_source, "__silex_add_system") orelse return false;
+    if (sourceMethod(host_source, "__silex_system_host")) |selector| {
+        if (selector.type_parameters.len != 0 or selector.parameters.len != 0 or
+            selector.return_type == .void or selector.return_mode != .value)
+        {
+            return self.fail(selector.name_position, "__silex_system_host must return one value and accept no parameters");
+        }
+        host_type = try self.rewriteType(selector.return_type, &.{}, selector.name_position);
+        delegated_host = host_type != receiver_type;
+    }
 
     const callback = call.arguments[1];
     const target_name = try systemTargetName(self.allocator, callback) orelse null;
@@ -213,7 +223,9 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     else
         "";
     try self.functions.append(self.allocator, .{
-        .is_local = true,
+        .is_local = !delegated_host,
+        .is_internal = delegated_host,
+        .owner = call.owner,
         .specialization_file = callback.position.file,
         .position = callback.position,
         .name_position = callback.position,
@@ -235,7 +247,9 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         .statements = &.{},
     });
     if (parallel_dependency) |dependency| try self.functions.append(self.allocator, .{
-        .is_local = true,
+        .is_local = !delegated_host,
+        .is_internal = delegated_host,
+        .owner = call.owner,
         .specialization_file = callback.position.file,
         .position = callback.position,
         .name_position = callback.position,

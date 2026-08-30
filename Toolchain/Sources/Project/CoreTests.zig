@@ -1081,8 +1081,8 @@ test "compile an explicit package suite entry after composing a merged extension
         .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Application/Module/@Scene.sx",
-        .data = "public func scene_value() int { return 22 }",
+        .sub_path = "GFX.Application/Module/@Bundle.sx",
+        .data = "public func bundle_value() int { return 22 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Scene2D/Package.json",
@@ -1100,7 +1100,7 @@ test "compile an explicit package suite entry after composing a merged extension
         \\test "consume merged application" {
         \\    var host = Application()
         \\    host.add_plugin(TimePlugin())
-        \\    assert(Application.core_value() + Application.scene_value() == 42)
+        \\    assert(Application.core_value() + Application.bundle_value() == 42)
         \\}
         ,
     });
@@ -1478,17 +1478,17 @@ test "merged extension atoms ignore synthetic internal types but preserve public
         .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Application/Module/@Scene.sx",
+        .sub_path = "GFX.Application/Module/@Bundle.sx",
         .data =
-        \\class SceneSystem {
+        \\class BundleSystem {
         \\    let reads:str[]
         \\    let writes:str[]
         \\    init(reads:str[], writes:str[]) { self.reads = reads; self.writes = writes }
         \\}
-        \\public class Scene {
+        \\public class Bundle {
         \\    var resources:Resources
         \\    init(resources:Resources) { resources.invalidate(); self.resources = resources }
-        \\    func add_system(schedule:Schedule) { var system = SceneSystem([], []) }
+        \\    func add_system(schedule:Schedule) { var system = BundleSystem([], []) }
         \\}
         ,
     });
@@ -1527,10 +1527,10 @@ test "merged extension atoms ignore synthetic internal types but preserve public
     });
 
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Application/Module/@Scene.sx",
+        .sub_path = "GFX.Application/Module/@Bundle.sx",
         .data =
         \\public intrinsic class Resources {}
-        \\public class Scene {}
+        \\public class Bundle {}
         ,
     });
     compiler = Compiler.init(allocator, std.testing.io);
@@ -1877,17 +1877,17 @@ test "compose a merged child-owned declaration into an authorized umbrella catal
         .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Application/Module/@SceneManager.sx",
+        .sub_path = "GFX.Application/Module/@BundleManager.sx",
         .data =
-        \\public struct SceneManager { let value:int }
+        \\public struct BundleManager { let value:int }
         \\contribute GFX.Plugins {
-        \\    public use GFX.Application.SceneManager as SceneManager
+        \\    public use GFX.Application.BundleManager as BundleManager
         \\}
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
-        .data = "use GFX.Plugins\nfunc main() { print(Plugins.SceneManager(value:42).value) }",
+        .data = "use GFX.Plugins\nfunc main() { print(Plugins.BundleManager(value:42).value) }",
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });

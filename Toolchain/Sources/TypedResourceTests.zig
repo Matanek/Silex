@@ -170,6 +170,50 @@ test "compatible non-Application hosts specialize typed systems with their own r
     _ = try Lower.lower(allocator, compilation.ir);
 }
 
+test "typed system hosts can delegate execution to an Application context" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.Application.Resources
+        \\struct Counter { var value:int }
+        \\class Bundle {
+        \\    private var context:Application
+        \\    init(context:Application) { self.context = context }
+        \\    func resources() Resources { return self.context.resources() }
+        \\    func add_system<System>(schedule:int, callback:System) Bundle { panic("unspecialized system") }
+        \\    module func __silex_system_host() Application { return self.context }
+        \\    module func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) Bundle {
+        \\        self.context.__silex_add_system(schedule, callback, after, reads, writes, flags)
+        \\        return self
+        \\    }
+        \\}
+        \\func increment(counter:&Counter) { counter.value++ }
+        \\func main() {
+        \\    var application = Application()
+        \\    var resources = application.resources()
+        \\    resources.insert(Counter(value:41))
+        \\    var bundle = Bundle(application)
+        \\    bundle.add_system(0, increment)
+        \\    print(resources.get<Counter>().value)
+        \\}
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
 const application_declaration =
     \\public class Application {
     \\    private var store:Resources

@@ -459,11 +459,11 @@ test "server completes and navigates a merged child catalog contribution" {
         .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Application/Module/@SceneManager.sx",
+        .sub_path = "GFX.Application/Module/@BundleManager.sx",
         .data =
-        \\public struct SceneManager {}
+        \\public struct BundleManager {}
         \\contribute GFX.Plugins {
-        \\    public use GFX.Application.SceneManager as SceneManager
+        \\    public use GFX.Application.BundleManager as BundleManager
         \\}
         ,
     });
@@ -475,7 +475,7 @@ test "server completes and navigates a merged child catalog contribution" {
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
     const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
-    const manager_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Application/Module/%40SceneManager.sx", .{root});
+    const manager_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Application/Module/%40BundleManager.sx", .{root});
 
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
@@ -485,13 +485,13 @@ test "server completes and navigates a merged child catalog contribution" {
         \\use GFX.Plugins
         \\func main() { Plugins.<|> }
     );
-    try Support.expectPresent("SceneManager", items);
+    try Support.expectPresent("BundleManager", items);
     try Support.expectPresent("Core", items);
     try Support.expectNoDuplicates(items);
 
     const definition = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use GFX.Plugins
-        \\func main() { Plugins.SceneMan<|>ager() }
+        \\func main() { Plugins.BundleMan<|>ager() }
     )).?;
     try std.testing.expectEqualStrings(manager_uri, definition.uri);
     try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);

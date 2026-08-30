@@ -467,7 +467,7 @@ test "preserve merge ownership when appending an entry provider" {
     }} };
     const extension: Index = .{ .providers = &.{.{
         .name = "GFX.Application",
-        .path = "GFX.Application/Module/@Scene.sx",
+        .path = "GFX.Application/Module/@Bundle.sx",
         .file = 0,
         .owner = 2,
     }} };
