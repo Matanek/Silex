@@ -6,10 +6,13 @@ pub const canonical_name = "GFX.Application.Resources";
 pub const component_pools_name = "GFX.ECS.ComponentStore.ComponentPools";
 pub const order_field_name = "__resource_order";
 pub const parent_field_name = "__resource_parent";
+pub const invalid_field_name = "__resource_invalid";
 pub const slot_prefix = "__resource_slot_";
+const intrinsic_prefix = "__silex_resource_";
+pub const invalid_message = "Resources store has been invalidated";
 
 pub fn validateDeclarations(self: anytype) !void {
-    for (self.source.structures) |structure| {
+    for (self.source.structures, 0..) |structure, structure_index| {
         if (!structure.is_intrinsic) {
             if (isTypedStoreName(structure.name)) {
                 const message = try std.fmt.allocPrint(self.allocator, "'{s}' must be declared as an intrinsic class", .{structure.name});
@@ -26,6 +29,7 @@ pub fn validateDeclarations(self: anytype) !void {
             return self.fail(structure.name_position, message);
         }
         try validateStoreContract(self, structure);
+        if (std.mem.eql(u8, structure.name, canonical_name)) try installDropHelper(self, structure_index);
     }
 }
 
@@ -65,7 +69,8 @@ pub fn markConcreteMethods(self: anytype, structure_index: usize) !void {
     const structure = &self.structures.items[structure_index];
     for (@constCast(structure.methods)) |*method| {
         if (std.mem.eql(u8, method.name, "scope")) method.intrinsic = .resource_scope;
-        if (std.mem.eql(u8, method.name, "clear")) method.intrinsic = .resource_clear;
+        if (std.mem.eql(u8, method.name, "clear") or std.mem.eql(u8, method.name, "invalidate") or
+            std.mem.eql(u8, method.name, intrinsic_prefix ++ "clear")) method.intrinsic = .resource_clear;
     }
 }
 
@@ -78,7 +83,7 @@ pub fn prepareConcreteStorage(self: anytype) !void {
 
 fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
     const application_resources = std.mem.eql(u8, structure.name, canonical_name);
-    const expected_methods: usize = if (application_resources) 10 else 8;
+    const expected_methods: usize = if (application_resources) 11 else 8;
     if (!structure.is_class or
         (application_resources and !structure.is_public) or
         structure.type_parameters.len != 0 or structure.methods.len != expected_methods)
@@ -87,7 +92,8 @@ fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
     }
     for (structure.methods) |method| {
         const retain_class = application_resources and std.mem.eql(u8, method.name, "retain_class");
-        const visibility_matches = if (retain_class)
+        const invalidate = application_resources and std.mem.eql(u8, method.name, "invalidate");
+        const visibility_matches = if (retain_class or invalidate)
             !method.is_public and !method.is_internal and !method.is_local and !method.is_private and !method.is_protected
         else if (application_resources)
             method.is_public
@@ -116,6 +122,8 @@ fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
         else if (std.mem.eql(u8, method.name, "remove"))
             genericQuery(method, .optional(generic), .value)
         else if (std.mem.eql(u8, method.name, "clear"))
+            method.type_parameters.len == 0 and method.parameters.len == 0 and method.return_type == .void and method.return_mode == .value
+        else if (application_resources and std.mem.eql(u8, method.name, "invalidate"))
             method.type_parameters.len == 0 and method.parameters.len == 0 and method.return_type == .void and method.return_mode == .value
         else
             false;
@@ -146,7 +154,7 @@ fn installStorage(self: anytype, structure_index: usize) !void {
     const structure_type = nominalStructureType(self, structure_index) orelse return error.InvalidSource;
     const order_type = try ensureOrderType(self, position);
     const application_resources = std.mem.eql(u8, self.structures.items[structure_index].name, canonical_name);
-    const fields = try self.allocator.alloc(Ast.StructureField, if (application_resources) 2 else 1);
+    const fields = try self.allocator.alloc(Ast.StructureField, if (application_resources) 3 else 1);
     const empty_order = try self.allocator.create(Ast.Expression);
     empty_order.* = .{ .position = position, .value = .{ .sequence_literal = .{
         .values = &.{},
@@ -165,7 +173,18 @@ fn installStorage(self: anytype, structure_index: usize) !void {
             .type = .optional(structure_type),
             .default = null_parent,
         };
-        order_index = 1;
+        const null_invalid = try self.allocator.create(Ast.Expression);
+        null_invalid.* = .{ .position = position, .value = .null_value };
+        fields[1] = .{
+            .is_private = true,
+            .position = position,
+            .name_position = position,
+            .name = invalid_field_name,
+            .mutable = true,
+            .type = .optional(.bool),
+            .default = null_invalid,
+        };
+        order_index = 2;
     }
     fields[order_index] = .{
         .is_public = false,
@@ -206,14 +225,32 @@ fn installStorage(self: anytype, structure_index: usize) !void {
     receiver.* = .{ .position = position, .value = .{ .identifier = "self" } };
     const call = try self.allocator.create(Ast.Expression);
     call.* = .{ .position = position, .value = .{ .call = .{
-        .name = "clear",
+        .name = if (application_resources) intrinsic_prefix ++ "clear" else "clear",
         .name_position = position,
         .receiver = receiver,
+        .compiler_generated = application_resources,
         .arguments = &.{},
     } } };
     const statements = try self.allocator.alloc(Ast.Statement, 1);
     statements[0] = .{ .expression_statement = call };
     self.structures.items[structure_index].drop = .{ .position = position, .statements = statements };
+}
+
+fn installDropHelper(self: anytype, structure_index: usize) !void {
+    const structure = &@constCast(self.source.structures)[structure_index];
+    const methods = try self.allocator.alloc(Ast.Function, structure.methods.len + 1);
+    @memcpy(methods[0..structure.methods.len], structure.methods);
+    const clear = for (structure.methods) |method| {
+        if (std.mem.eql(u8, method.name, "clear")) break method;
+    } else return error.InvalidSource;
+    var helper = clear;
+    helper.name = intrinsic_prefix ++ "clear";
+    helper.is_public = false;
+    helper.is_private = true;
+    helper.visibility_explicit = true;
+    helper.is_intrinsic_declaration = true;
+    methods[structure.methods.len] = helper;
+    structure.methods = methods;
 }
 
 fn nominalStructureType(self: anytype, structure_index: usize) ?Ast.Type {

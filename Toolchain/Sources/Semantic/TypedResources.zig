@@ -22,6 +22,12 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         try builder.value_types.append(self.allocator, parameter.type);
     }
 
+    const internal_clear = std.mem.eql(u8, method.name, "__silex_resource_clear");
+    if (std.mem.eql(u8, self.program.structures[structure_index].name, GenericResources.canonical_name) and !internal_clear) {
+        const receiver = if (borrowed_mutable) try loadReceiver(self, &builder, structure_index, 0) else 0;
+        try emitValidGuard(self, &builder, structure_index, receiver, method.name_position);
+    }
+
     switch (intrinsic) {
         .resource_scope => try emitScope(self, &builder, structure_index),
         .resource_insert => |field| try emitInsert(self, &builder, structure_index, field, method),
@@ -32,7 +38,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         .resource_try_get => |field| try emitTryGet(self, &builder, structure_index, field, false),
         .resource_try_get_mut => |field| try emitTryGet(self, &builder, structure_index, field, true),
         .resource_remove => |field| try emitRemove(self, &builder, structure_index, field, flat),
-        .resource_clear => try emitClear(self, &builder, structure_index),
+        .resource_clear => try emitClear(self, &builder, structure_index, std.mem.eql(u8, method.name, "invalidate")),
         .component_get_mut => return error.InvalidSource,
         .world_component_get_mut => return error.InvalidSource,
         .system_adapter => return error.InvalidSource,
@@ -218,7 +224,7 @@ fn emitRemove(self: anytype, builder: anytype, structure: usize, field: usize, f
     self.terminate(builder, .{ .return_value = returned });
 }
 
-fn emitClear(self: anytype, builder: anytype, structure: usize) !void {
+fn emitClear(self: anytype, builder: anytype, structure: usize, invalidate: bool) !void {
     const order_field = orderField(self, structure) orelse return error.InvalidSource;
     const order_type = self.structures[structure].fields[order_field].type;
     const order = try loadField(self, builder, structure, order_field, order_type, 0);
@@ -315,7 +321,48 @@ fn emitClear(self: anytype, builder: anytype, structure: usize) !void {
         .field = order_field,
         .replacement = empty_order,
     } });
-    self.terminate(builder, .{ .return_value = 0 });
+    if (invalidate) {
+        const parent_field = parentField(self, structure) orelse return error.InvalidSource;
+        const parent_type = self.structures[structure].fields[parent_field].type;
+        const null_parent = try self.newValue(builder, parent_type);
+        try self.emit(builder, .{ .optional_null = .{ .result = null_parent } });
+        const detached = try self.newValue(builder, .structure(structure));
+        try self.emit(builder, .{ .field_store = .{ .result = detached, .base = order_result, .field = parent_field, .replacement = null_parent } });
+        const invalid_field = namedField(self, structure, GenericResources.invalid_field_name) orelse return error.InvalidSource;
+        const truth = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .constant_bool = .{ .result = truth, .value = true } });
+        const marked_type = self.structures[structure].fields[invalid_field].type;
+        const marked = try self.newValue(builder, marked_type);
+        try self.emit(builder, .{ .optional_some = .{ .result = marked, .operand = truth } });
+        const result = try self.newValue(builder, .structure(structure));
+        try self.emit(builder, .{ .field_store = .{ .result = result, .base = detached, .field = invalid_field, .replacement = marked } });
+        self.terminate(builder, .{ .return_value = result });
+    } else self.terminate(builder, .{ .return_value = order_result });
+}
+
+fn emitValidGuard(self: anytype, builder: anytype, structure: usize, receiver: Ir.ValueId, position: @import("../Source.zig").Position) !void {
+    const invalid_field = namedField(self, structure, GenericResources.invalid_field_name) orelse return error.InvalidSource;
+    const invalid_type = self.structures[structure].fields[invalid_field].type;
+    const invalid = try loadField(self, builder, structure, invalid_field, invalid_type, receiver);
+    const absent = try self.newValue(builder, invalid_type);
+    try self.emit(builder, .{ .optional_null = .{ .result = absent } });
+    const valid = try self.newValue(builder, .bool);
+    try self.emit(builder, .{ .binary = .{ .result = valid, .operator = .equal, .left = invalid, .right = absent } });
+    const proceed = try self.newBlock(builder);
+    const rejected = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{ .condition = valid, .then_block = proceed, .else_block = rejected } });
+    builder.current_block = rejected;
+    const message = try self.newValue(builder, .str);
+    try self.emit(builder, .{ .constant_str = .{ .result = message, .value = GenericResources.invalid_message } });
+    self.terminate(builder, .{ .panic = .{ .message = message, .position = position } });
+    builder.current_block = proceed;
+}
+
+fn namedField(self: anytype, structure: usize, name: []const u8) ?usize {
+    for (self.structures[structure].fields, 0..) |field, index| {
+        if (std.mem.eql(u8, field.name, name)) return index;
+    }
+    return null;
 }
 
 fn loadField(self: anytype, builder: anytype, structure: usize, field: usize, type_value: Ast.Type, receiver: Ir.ValueId) !Ir.ValueId {

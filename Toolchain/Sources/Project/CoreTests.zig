@@ -1463,6 +1463,7 @@ test "merged extension atoms ignore synthetic internal types but preserve public
         \\    func try_get_mut<T>() &T?
         \\    func remove<T>() T?
         \\    func clear()
+        \\    module func invalidate()
         \\}
         \\class RegisteredSystem {
         \\    let reads:str[]

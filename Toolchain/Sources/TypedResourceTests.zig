@@ -16,6 +16,7 @@ const resources_source =
     \\    func try_get_mut<T>() &T?
     \\    func remove<T>() T?
     \\    func clear()
+    \\    module func invalidate()
     \\}
 ;
 
@@ -58,6 +59,73 @@ test "scoped typed resources shadow and fall back without mutating their parent"
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
     try std.testing.expectEqualStrings("3\n2\n", result.stdout);
     _ = try Lower.lower(allocator, compilation.ir);
+}
+
+test "invalidated resource aliases refuse every operation and lower to native code" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const operations = [_][]const u8{
+        "escaped.insert(7)",
+        "assert(escaped.has<int>())",
+        "let value:@int = escaped.get<int>()",
+        "var value:&int = escaped.get_mut<int>()",
+        "let value = escaped.try_get<int>()",
+        "var value:&int? = escaped.try_get_mut<int>()",
+        "let value = escaped.remove<int>()",
+        "escaped.clear()",
+        "var nested = escaped.scope()",
+    };
+    for (operations) |operation| {
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try prepare(&temporary);
+        const source = try std.fmt.allocPrint(allocator,
+            \\use GFX.Application
+            \\func main() {{
+            \\    var application = Application()
+            \\    var parent = application.resources()
+            \\    parent.insert(42)
+            \\    var child = parent.scope()
+            \\    var escaped = child
+            \\    child.insert("local")
+            \\    Application.invalidate_resources(child)
+            \\    {s}
+            \\}}
+        , .{operation});
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Smokes/Main.sx", .data = source });
+
+        var compiler = Project.Compiler.init(allocator, std.testing.io);
+        const compilation = try compiler.compile(try inputPath(allocator, temporary));
+        const interpreted = try Interpreter.runCapture(allocator, compilation.ir);
+        try std.testing.expect(interpreted.exit_code != 0);
+        try std.testing.expect(std.mem.indexOf(u8, interpreted.stderr, "Resources store has been invalidated") != null);
+
+        _ = try Lower.lower(allocator, compilation.ir);
+    }
+}
+
+test "resource destruction helper is not source-accessible" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\func main() {
+        \\    var application = Application()
+        \\    var resources = application.resources()
+        \\    resources.__silex_resource_clear()
+        \\}
+        ,
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(try inputPath(allocator, temporary)));
+    try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "private") != null);
 }
 
 test "compatible non-Application hosts specialize typed systems with their own resources" {
@@ -112,6 +180,7 @@ const application_declaration =
     \\    func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
     \\    func add_after_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
     \\    package func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) { callback(self, 0) }
+    \\    static func invalidate_resources(resources:Resources) { resources.invalidate() }
     \\    drop { self.store.clear() }
     \\}
 ;
