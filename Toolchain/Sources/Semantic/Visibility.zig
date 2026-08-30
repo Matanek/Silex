@@ -69,8 +69,9 @@ fn sameModule(self: anytype, structure_index: usize) bool {
     const target_root = root(self, structure_index);
     const target = declarationAt(self, target_root) orelse return false;
     const accessor = self.owner_context orelse return false;
-    if (accessor != target.owner) return false;
     const target_module = declarationModule(self.module_scope_roots, target.name) orelse return false;
+    if (accessor != target.owner and
+        (self.packages == null or !self.packages.?.canAccessMergedModule(accessor, target.owner, target_module))) return false;
     if (self.module_context) |context| return ModuleScopes.same(self.module_scope_roots, context, target_module);
     const context = self.member_context orelse return false;
     const context_declaration = declarationAt(self, root(self, context)) orelse return false;

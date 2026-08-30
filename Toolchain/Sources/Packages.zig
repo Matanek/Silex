@@ -198,6 +198,15 @@ pub const Graph = struct {
         return policy.friend;
     }
 
+    pub fn canAccessMergedModule(self: Graph, accessor: usize, provider: usize, module_name: []const u8) bool {
+        if (accessor == provider) return true;
+        if (accessor >= self.packages.len or provider >= self.packages.len) return false;
+        const child_name = self.packages[accessor].name orelse return false;
+        if (!std.mem.eql(u8, child_name, module_name)) return false;
+        const policy = extensionPolicy(self.packages[provider].extensions, child_name) orelse return false;
+        return policy.merge and std.mem.eql(u8, policy.name, child_name);
+    }
+
     pub fn canContributeToCatalog(self: Graph, contributor: usize, catalog_owner: usize, catalog: []const u8) bool {
         if (contributor >= self.packages.len or catalog_owner >= self.packages.len or contributor == catalog_owner) return false;
         const contributor_name = self.packages[contributor].name orelse return false;

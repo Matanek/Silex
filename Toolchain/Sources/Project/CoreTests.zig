@@ -1487,7 +1487,7 @@ test "merged extension atoms ignore synthetic internal types but preserve public
         \\}
         \\public class Scene {
         \\    var resources:Resources
-        \\    init(resources:Resources) { self.resources = resources }
+        \\    init(resources:Resources) { resources.invalidate(); self.resources = resources }
         \\    func add_system(schedule:Schedule) { var system = SceneSystem([], []) }
         \\}
         ,
@@ -1503,6 +1503,28 @@ test "merged extension atoms ignore synthetic internal types but preserve public
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Compiler.init(allocator, std.testing.io);
     _ = try compiler.compile(input);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Application.Resources
+        \\func main() { var resources = Resources(); resources.invalidate() }
+        ,
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "method 'invalidate' is module-visible and unavailable outside its module",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Application
+        \\func main() {}
+        ,
+    });
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Application/Module/@Scene.sx",

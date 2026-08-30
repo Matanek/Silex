@@ -50,9 +50,11 @@ pub fn functionVisible(packages: ?Packages.Graph, module_scope_roots: []const []
     else
         call.owner == function.owner;
     if (call.name_position.file == function.position.file) return true;
-    if (call.owner != function.owner) return false;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
-    return ModuleScopes.same(module_scope_roots, call.module, function.name[0..separator]);
+    const declaration_module = function.name[0..separator];
+    if (call.owner != function.owner and
+        (packages == null or !packages.?.canAccessMergedModule(call.owner, function.owner, declaration_module))) return false;
+    return ModuleScopes.same(module_scope_roots, call.module, declaration_module);
 }
 
 pub fn memberVisible(position: @import("../Source.zig").Position, declaration_position: @import("../Source.zig").Position, is_local: bool) bool {
