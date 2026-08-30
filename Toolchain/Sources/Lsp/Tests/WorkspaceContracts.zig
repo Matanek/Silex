@@ -433,6 +433,70 @@ test "server completes and navigates authorized umbrella contributions" {
     try Support.expectNoDuplicates(colliding);
 }
 
+test "server completes and navigates a merged child catalog contribution" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Application/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Application\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Application\":{\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data = "public struct Application {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public struct Core {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Package.json",
+        .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@SceneManager.sx",
+        .data =
+        \\public struct SceneManager {}
+        \\contribute GFX.Plugins {
+        \\    public use GFX.Application.SceneManager as SceneManager
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const manager_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Application/Module/%40SceneManager.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const items = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Plugins
+        \\func main() { Plugins.<|> }
+    );
+    try Support.expectPresent("SceneManager", items);
+    try Support.expectPresent("Core", items);
+    try Support.expectNoDuplicates(items);
+
+    const definition = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use GFX.Plugins
+        \\func main() { Plugins.SceneMan<|>ager() }
+    )).?;
+    try std.testing.expectEqualStrings(manager_uri, definition.uri);
+    try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
+}
+
 test "server navigates package extensions call chains fields and cascades" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

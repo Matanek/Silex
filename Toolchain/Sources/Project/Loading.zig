@@ -249,13 +249,14 @@ fn bind(self: anytype, module: usize) !void {
         if (contribution.target != module) continue;
         const binding = try self.resolveUse(contribution.contributor, contribution.use);
         const dependency = binding.module orelse return invalidContributionSource(self, contribution);
-        if (binding.declaration == null or
-            self.index.providers[dependency].owner != self.index.providers[contribution.contributor].owner)
-        {
-            return invalidContributionSource(self, contribution);
-        }
+        const declaration = binding.declaration orelse return invalidContributionSource(self, contribution);
         try self.loadModule(dependency, module);
-        if (!directPublicDeclaration(self, dependency, binding.declaration.?)) {
+        if (!directPublicDeclarationOwnedBy(
+            self,
+            dependency,
+            declaration,
+            self.index.providers[contribution.contributor].owner,
+        )) {
             return invalidContributionSource(self, contribution);
         }
         try requireAvailableContributionAlias(self, module, program, bindings.items, contribution, binding.alias);
@@ -274,9 +275,10 @@ fn invalidContributionSource(self: anytype, contribution: Reexports.CatalogContr
     return self.fail(contribution.use.position, message);
 }
 
-fn directPublicDeclaration(self: anytype, module: usize, name: []const u8) bool {
+fn directPublicDeclarationOwnedBy(self: anytype, module: usize, name: []const u8, owner: usize) bool {
     for (self.units, 0..) |unit, fragment| {
         if (!Fragments.same(self.index, module, fragment)) continue;
+        if (self.index.providers[fragment].owner != owner) continue;
         const program = unit.program orelse continue;
         for (program.functions) |function| {
             if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
