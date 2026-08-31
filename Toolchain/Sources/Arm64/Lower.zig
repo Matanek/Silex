@@ -6,20 +6,16 @@ const MainBoundary = @import("../MainBoundary.zig");
 const Machine = @import("Machine.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
 const Slp = @import("../Optimize/Slp.zig");
+const StackLayout = @import("StackLayout.zig");
+const TypeLayout = @import("TypeLayout.zig");
 
 const Allocator = std.mem.Allocator;
 
-const Layout = struct {
-    values: []const Machine.Span,
-    locals: []const Machine.Span,
-    parameters: []const Machine.Span,
-    capture_parameters: []const Machine.Span,
-    environments: []const ?Machine.Span,
-    return_width: u12,
-    return_aggregate: bool,
-    hidden_return_slot: ?Machine.Slot,
-    slot_count: Machine.Slot,
-};
+const Layout = StackLayout.Layout;
+const enumByType = TypeLayout.enumByType;
+const irConforms = TypeLayout.irConforms;
+const isAggregate = TypeLayout.isAggregate;
+const leafCount = TypeLayout.leafCount;
 
 pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Program {
     return lowerWithMode(allocator, program, .debug);
@@ -207,7 +203,7 @@ fn lowerFunction(
     function: Ir.Function,
 ) Machine.Error!Machine.Function {
     const parameter_count = try Machine.checkedArgumentCount(function.parameter_types.len);
-    const layout = try buildLayout(allocator, program, function);
+    const layout = try StackLayout.build(allocator, program, function);
     const slp = try Slp.analyze(allocator, function);
     const float_lane_groups = try lowerSlpGroups(allocator, layout, slp);
 
@@ -240,6 +236,7 @@ fn lowerFunction(
         .hidden_return_slot = layout.hidden_return_slot,
         .slot_count = layout.slot_count,
         .frame_size = try Machine.frameSize(layout.slot_count),
+        .reuses_slots = layout.reuses_slots,
         .float_lane_groups = float_lane_groups,
         .instructions = try instructions.toOwnedSlice(allocator),
         .instruction_positions = try instruction_positions.toOwnedSlice(allocator),
@@ -888,109 +885,6 @@ fn requiresDeepCopy(program: Ir.Program, type_value: Ir.Type) Machine.Error!bool
     return false;
 }
 
-fn buildLayout(allocator: Allocator, program: Ir.Program, function: Ir.Function) Machine.Error!Layout {
-    const values = try allocator.alloc(Machine.Span, function.value_types.len);
-    const locals = try allocator.alloc(Machine.Span, function.local_types.len);
-    var next: usize = 0;
-    for (function.value_types, 0..) |type_value, index| {
-        values[index] = try allocateSpan(program, type_value, &next);
-    }
-    for (function.local_types, 0..) |type_value, index| {
-        locals[index] = try allocateSpan(program, type_value, &next);
-    }
-    const environments = try allocator.alloc(?Machine.Span, function.value_types.len);
-    @memset(environments, null);
-    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
-        .function_reference => |reference| if (reference.captures.len != 0) {
-            const start = try Machine.checkedSlot(next);
-            next += reference.captures.len;
-            if (next > Machine.max_slots) return error.FrameTooLarge;
-            environments[reference.result] = .{
-                .start = start,
-                .width = @intCast(reference.captures.len),
-                .aggregate = true,
-            };
-        },
-        else => {},
-    };
-    const return_aggregate = isAggregate(program, function.return_type);
-    const return_width: u12 = if (function.return_type == .void)
-        0
-    else
-        @intCast(try leafCount(program, function.return_type));
-    const hidden_return_slot: ?Machine.Slot = if (return_aggregate) hidden: {
-        const slot = try Machine.checkedSlot(next);
-        next += 1;
-        break :hidden slot;
-    } else null;
-    const capture_parameters = try allocator.alloc(Machine.Span, function.capture_types.len);
-    @memcpy(capture_parameters, values[0..function.capture_types.len]);
-    const parameters = try allocator.alloc(Machine.Span, function.parameter_types.len);
-    @memcpy(parameters, values[function.capture_types.len .. function.capture_types.len + function.parameter_types.len]);
-    return .{
-        .values = values,
-        .locals = locals,
-        .parameters = parameters,
-        .capture_parameters = capture_parameters,
-        .environments = environments,
-        .return_width = return_width,
-        .return_aggregate = return_aggregate,
-        .hidden_return_slot = hidden_return_slot,
-        .slot_count = try Machine.checkedSlot(next),
-    };
-}
-
-fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.Error!Machine.Span {
-    if (type_value == .void) return error.UnsupportedType;
-    const width = try leafCount(program, type_value);
-    const result: Machine.Span = .{
-        .start = try Machine.checkedSlot(next.*),
-        .width = @intCast(width),
-        .aggregate = isAggregate(program, type_value),
-    };
-    next.* += width;
-    if (next.* > Machine.max_slots) return error.FrameTooLarge;
-    return result;
-}
-
-fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
-    if (type_value.functionIndex() != null) return 2;
-    if (type_value.optionalChild()) |child| return 1 + try leafCount(program, child);
-    if (enumByType(program, type_value)) |enumeration| {
-        if (enumeration.raw_type != null) return 2;
-        var maximum: usize = 0;
-        for (enumeration.variants) |variant| {
-            var width: usize = 0;
-            for (variant.associated_types) |associated| width += try leafCount(program, associated);
-            maximum = @max(maximum, width);
-        }
-        return 1 + maximum;
-    }
-    const structure_index = type_value.structureIndex() orelse return 1;
-    if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
-    if (program.structures[structure_index].is_protocol) {
-        var maximum: usize = 0;
-        for (program.structures, 0..) |structure, candidate| {
-            if (structure.is_protocol or !irConforms(program, candidate, structure_index)) continue;
-            maximum = @max(maximum, try leafCount(program, .structure(candidate)));
-        }
-        return 1 + maximum;
-    }
-    if (program.structures[structure_index].is_class) return 1;
-    if (program.structures[structure_index].collection) |collection| if (collection.length == null) return if (collection.view) 2 else 1;
-    var result: usize = 0;
-    for (program.structures[structure_index].fields) |field| result += try leafCount(program, field.type);
-    return result;
-}
-
-fn irConforms(program: Ir.Program, structure_index: usize, protocol_index: usize) bool {
-    var current: ?usize = structure_index;
-    while (current) |candidate| : (current = program.structures[candidate].base) {
-        for (program.structures[candidate].conformances) |conformance| if (conformance == protocol_index) return true;
-    }
-    return false;
-}
-
 fn fieldOffset(program: Ir.Program, structure_index: usize, field_index: usize) Machine.Error!usize {
     if (structure_index >= program.structures.len or field_index >= program.structures[structure_index].fields.len) {
         return error.InvalidMachineProgram;
@@ -1285,12 +1179,6 @@ fn appendFlattenedTypes(
     }
 }
 
-fn enumByType(program: Ir.Program, type_value: Ir.Type) ?Ir.Enum {
-    const index = type_value.structureIndex() orelse return null;
-    for (program.enums) |enumeration| if (enumeration.type_index == index) return enumeration;
-    return null;
-}
-
 fn collectionForType(program: Ir.Program, type_value: Ir.Type) ?@import("../Types.zig").Collection {
     const index = type_value.structureIndex() orelse return null;
     if (index >= program.structures.len) return null;
@@ -1331,16 +1219,6 @@ fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []con
     var result: std.ArrayList(Ir.Type) = .empty;
     for (types) |type_value| try appendFlattenedTypes(allocator, program, type_value, &result);
     return result.toOwnedSlice(allocator);
-}
-
-fn isAggregate(program: Ir.Program, type_value: Ir.Type) bool {
-    if (type_value.functionIndex() != null) return true;
-    if (type_value.optionalChild() != null) return true;
-    const index = type_value.structureIndex() orelse return false;
-    if (index >= program.structures.len) return true;
-    if (program.structures[index].is_class) return false;
-    const collection = program.structures[index].collection orelse return true;
-    return collection.length != null or collection.view;
 }
 
 fn internString(

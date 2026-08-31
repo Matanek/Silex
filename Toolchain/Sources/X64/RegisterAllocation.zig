@@ -64,7 +64,7 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Erro
 }
 
 fn compatible(function: Machine.Function) bool {
-    if (function.hidden_return_slot != null or function.capture_parameters.len != 0 or
+    if (function.reuses_slots or function.hidden_return_slot != null or function.capture_parameters.len != 0 or
         function.float_register_slots.len != 0 or function.float_lane_slots.len != 0)
     {
         return false;

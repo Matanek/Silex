@@ -1847,6 +1847,7 @@ test {
     _ = @import("MacOS/MachO.zig");
     _ = @import("Linux/Elf.zig");
     _ = @import("X64/Encoder.zig");
+    _ = @import("X64/StackLayoutTests.zig");
     _ = @import("Windows/PE.zig");
     _ = @import("Optimize/Release.zig");
     _ = @import("Optimize/Slp.zig");
