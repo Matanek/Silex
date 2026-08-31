@@ -21,9 +21,14 @@ backend is implemented.
 
 ## Emit macOS ARM64 programs
 
-The macOS ARM64 backend uses an internal
-register-and-stack ABI, places every IR value in a deterministic stack slot,
-and reports checked arithmetic failures through an internal status register.
+The macOS ARM64 backend uses an internal register-and-stack ABI and reports
+checked arithmetic failures through an internal status register. Ordinary
+functions give every IR value a deterministic stack home. When that cumulative
+layout would exceed the machine slot namespace, CFG-wide liveness lets values
+whose lifetimes do not overlap reuse physical homes; address-derived storage,
+locals, closure environments, and the hidden aggregate return destination stay
+pinned. A recycled function remains stack-resident so register allocation never
+confuses a physical home with one virtual value identity.
 The first eight scalar arguments use target registers and additional scalar
 or aggregate arguments use aligned outgoing stack slots; source arity is not
 capped by the register count.

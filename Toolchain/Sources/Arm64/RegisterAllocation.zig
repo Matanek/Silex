@@ -1470,6 +1470,7 @@ fn propagateFloat(left: Machine.Slot, right: Machine.Slot, result: []bool, chang
 }
 
 fn isCompatibleFunction(function: Machine.Function) bool {
+    if (function.reuses_slots) return false;
     var has_unchecked_collection_load = false;
     for (function.instructions) |instruction| switch (instruction) {
         .collection_load => |load| has_unchecked_collection_load = has_unchecked_collection_load or !load.checked,

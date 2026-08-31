@@ -42,3 +42,11 @@ transfers are bypassed after allocation, and the ARM64 collection cursor
 recognizes induction updates separated by independent SSA copies. Fully
 resident leaf functions allocate no value frame. Debug retains the direct
 stack-resident lowering.
+
+The native layout normally keeps unique deterministic homes. If their
+cumulative count would exceed the shared machine limit, ARM64 and X64 instead
+color physical stack spans from portable-IR liveness. Simultaneously live
+values and incompatible scalar or aggregate residence classes never overlap;
+storage reached through a derived reference remains pinned. These exceptional
+large functions deliberately skip register coloring until virtual value
+identities and physical stack homes become separate machine-IR concepts.

@@ -572,6 +572,10 @@ pub const Function = struct {
     hidden_return_slot: ?Slot = null,
     slot_count: Slot,
     frame_size: u32,
+    /// Several virtual IR values may use the same physical stack home when
+    /// their live ranges do not overlap. Register allocation remains disabled
+    /// until it owns an independent virtual identity map for those values.
+    reuses_slots: bool = false,
     /// Release-only residence map indexed by virtual slot. Null keeps the
     /// value in its deterministic stack slot.
     register_slots: []const ?u5 = &.{},
