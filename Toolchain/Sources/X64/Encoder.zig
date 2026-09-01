@@ -151,7 +151,13 @@ fn encode(
 
     const entry_offset: u32 = @intCast(bytes.items.len);
     switch (platform) {
-        .darwin, .linux => {
+        .darwin => {
+            try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
+            try appendCall(allocator, &bytes, &calls, main_id);
+            try emitMoveRegister(allocator, &bytes, .rax, .rdx);
+            try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
+        },
+        .linux => {
             if (linked) try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
             try appendCall(allocator, &bytes, &calls, main_id);
             if (linked) {
@@ -159,7 +165,7 @@ fn encode(
                 try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
             } else {
                 try emitMoveRegister(allocator, &bytes, .rdi, .rdx);
-                try emitImmediate(allocator, &bytes, .rax, if (platform == .darwin) 0x2000001 else 60);
+                try emitImmediate(allocator, &bytes, .rax, 60);
                 try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
             }
         },
@@ -3337,7 +3343,7 @@ fn unsupported(reason: []const u8) error{UnsupportedInstruction} {
     return error.UnsupportedInstruction;
 }
 
-test "encode a no-op Silex main for the Linux X64 process contract" {
+test "encode a no-op Silex main for the X64 process and Mach-O entry contracts" {
     const instructions = [_]Machine.Instruction{.return_void};
     const functions = [_]Machine.Function{.{
         .name = "main",
@@ -3351,6 +3357,13 @@ test "encode a no-op Silex main for the Linux X64 process contract" {
     defer image.deinit(std.testing.allocator);
     try std.testing.expect(image.entry_offset > 0);
     try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x0f, 0x05 }) != null);
+
+    const darwin = try encodeDarwin(std.testing.allocator, .{ .functions = &functions });
+    defer darwin.deinit(std.testing.allocator);
+    const darwin_entry = darwin.code[darwin.entry_offset..][0..27];
+    try std.testing.expectEqualSlices(u8, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 }, darwin_entry[0..9]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 }, darwin_entry[17..27]);
+    try std.testing.expect(std.mem.indexOf(u8, darwin_entry, &.{ 0x0f, 0x05 }) == null);
 
     const windows = try encodeWindows(std.testing.allocator, .{ .functions = &functions });
     defer windows.deinit(std.testing.allocator);
