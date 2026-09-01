@@ -71,7 +71,33 @@ jobs:
             --release -o "$RUNNER_TEMP/macos-x64-boundary"
           test "$("$RUNNER_TEMP/macos-x64-boundary")" = "macos x64 boundary ready"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
-          test "$("$silex" run "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" --release)" = "silex distribution ready"
+          run_distribution() {
+            executable="$1"
+            stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
+            set +e
+            output=$("$executable" 2>"$stderr")
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              cat "$stderr"
+              lldb --batch -o 'run' \
+                -k 'thread backtrace all' \
+                -k 'register read' \
+                -k 'image lookup -a $pc' \
+                -k 'disassemble -p' \
+                -- "$executable" || true
+              return "$status"
+            fi
+            test "$output" = "silex distribution ready"
+          }
+          distribution="$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx"
+          "$silex" compile "$distribution" \
+            -o "$RUNNER_TEMP/distribution-smoke-debug"
+          run_distribution "$RUNNER_TEMP/distribution-smoke-debug"
+          "$silex" compile "$distribution" \
+            --release -o "$RUNNER_TEMP/distribution-smoke-release"
+          run_distribution "$RUNNER_TEMP/distribution-smoke-release"
+          test "$("$silex" run "$distribution" --release)" = "silex distribution ready"
           "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \
             --release -o "$RUNNER_TEMP/native-portability"
           file "$RUNNER_TEMP/native-portability" | grep -F 'x86_64'
@@ -79,13 +105,6 @@ jobs:
           printf '%s\n' "$portability_output"
           cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')
           test "$cycle_drops" -eq 6
-          distribution="$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx"
-          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" \
-            -o "$RUNNER_TEMP/distribution-smoke-debug"
-          test "$("$RUNNER_TEMP/distribution-smoke-debug")" = "silex distribution ready"
-          "$silex" compile "$distribution" \
-            --release -o "$RUNNER_TEMP/distribution-smoke-release"
-          test "$("$RUNNER_TEMP/distribution-smoke-release")" = "silex distribution ready"
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
