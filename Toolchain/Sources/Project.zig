@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Ast = @import("Ast.zig");
 const Boundary = @import("Boundary.zig");
+const CompilationTrace = @import("CompilationTrace.zig");
 const Interface = @import("Interface.zig");
 const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
 const Result = @import("Intrinsics/Result.zig");
@@ -48,7 +49,17 @@ pub const Compilation = struct {
     packages: Packages.Graph,
     files: []const []const u8,
     cache_files: []const []const u8,
+    metrics: Metrics,
     tests: []const TestCase = &.{},
+};
+pub const Metrics = struct {
+    packages: usize,
+    discovered_modules: usize,
+    loaded_modules: usize,
+    parsed_modules: usize,
+    source_bytes_read: usize,
+    ast_functions: usize,
+    portable_functions: usize,
 };
 pub const TestCase = struct {
     name: ?[]const u8,
@@ -94,6 +105,9 @@ pub const Compiler = struct {
     include_tests: bool = false,
     target: TargetModule.Target,
     shadercross_path: ?[]const u8 = null,
+    trace: ?*CompilationTrace.Reporter = null,
+    parsed_modules: usize = 0,
+    source_bytes_read: usize = 0,
 
     pub fn init(allocator: Allocator, io: Io) Compiler {
         return .{ .allocator = allocator, .io = io, .target = TargetModule.Target.host() orelse .macos_arm64 };
@@ -140,63 +154,90 @@ pub const Compiler = struct {
 
     fn compileConfigured(self: *Compiler, input_path: []const u8) Error!Compilation {
         self.diagnostic = null;
+        self.parsed_modules = 0;
+        self.source_bytes_read = 0;
         if (!std.mem.endsWith(u8, input_path, ".sx")) {
             return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, "input must be a .sx source file");
         }
 
-        const root_path = try Paths.findRoot(self.allocator, self.io, input_path);
-        if (builtin.is_test) try PackageTestFixtures.prepareWorkspaceLinks(self.allocator, self.io, root_path);
-        var package_resolver = Packages.Resolver.initForTarget(self.allocator, self.io, self.global_packages_root, self.target);
-        package_resolver.enableDevelopmentDependencies();
-        self.packages = package_resolver.resolve(root_path) catch |err| switch (err) {
-            error.InvalidPackageGraph => return self.fail(
-                .{ .offset = 0, .line = 1, .column = 1 },
-                package_resolver.diagnostic orelse "invalid package graph",
-            ),
-            else => |other| return other,
-        };
-        self.index = Lookup.discoverProviders(self, input_path) catch |err| switch (err) {
-            error.DuplicateModule => return self.fail(
-                .{ .offset = 0, .line = 1, .column = 1 },
-                "multiple source files provide the same module",
-            ),
-            error.InvalidModulePath => return self.fail(
-                .{ .offset = 0, .line = 1, .column = 1 },
-                "a source path does not form a valid module name",
-            ),
-            else => |other| return other,
-        };
-        self.module_scope_roots = try self.collectModuleScopeRoots();
-        self.units = try self.allocator.alloc(Unit, self.index.providers.len);
-        @memset(self.units, .{});
-        try Fragments.install(self.allocator, self.index, self.units);
-        try Loading.discoverCatalogContributions(self);
-        const files = try self.allocator.alloc([]const u8, self.index.providers.len);
-        for (self.index.providers, 0..) |provider, file| files[file] = provider.path;
-        self.files = files;
+        {
+            var span = self.traceSpan(.package_resolution);
+            defer span.finish();
+            const root_path = try Paths.findRoot(self.allocator, self.io, input_path);
+            if (builtin.is_test) try PackageTestFixtures.prepareWorkspaceLinks(self.allocator, self.io, root_path);
+            var package_resolver = Packages.Resolver.initForTarget(self.allocator, self.io, self.global_packages_root, self.target);
+            package_resolver.enableDevelopmentDependencies();
+            self.packages = package_resolver.resolve(root_path) catch |err| switch (err) {
+                error.InvalidPackageGraph => return self.fail(
+                    .{ .offset = 0, .line = 1, .column = 1 },
+                    package_resolver.diagnostic orelse "invalid package graph",
+                ),
+                else => |other| return other,
+            };
+        }
+        {
+            var span = self.traceSpan(.module_discovery);
+            defer span.finish();
+            self.index = Lookup.discoverProviders(self, input_path) catch |err| switch (err) {
+                error.DuplicateModule => return self.fail(
+                    .{ .offset = 0, .line = 1, .column = 1 },
+                    "multiple source files provide the same module",
+                ),
+                error.InvalidModulePath => return self.fail(
+                    .{ .offset = 0, .line = 1, .column = 1 },
+                    "a source path does not form a valid module name",
+                ),
+                else => |other| return other,
+            };
+            self.module_scope_roots = try self.collectModuleScopeRoots();
+            self.units = try self.allocator.alloc(Unit, self.index.providers.len);
+            @memset(self.units, .{});
+            try Fragments.install(self.allocator, self.index, self.units);
+            try Loading.discoverCatalogContributions(self);
+            const files = try self.allocator.alloc([]const u8, self.index.providers.len);
+            for (self.index.providers, 0..) |provider, file| files[file] = provider.path;
+            self.files = files;
+        }
 
-        self.entry_module = Lookup.findProviderPathCanonical(self, input_path) orelse return self.fail(
-            .{ .offset = 0, .line = 1, .column = 1 },
-            "entry source is not a discovered module",
-        );
-        try self.loadModule(self.entry_module, null);
-        try self.validateTypeAliases();
-        try self.validateReexports();
+        {
+            var span = self.traceSpan(.module_loading);
+            defer span.finish();
+            self.entry_module = Lookup.findProviderPathCanonical(self, input_path) orelse return self.fail(
+                .{ .offset = 0, .line = 1, .column = 1 },
+                "entry source is not a discovered module",
+            );
+            try self.loadModule(self.entry_module, null);
+            try self.validateTypeAliases();
+            try self.validateReexports();
+        }
 
-        var composition = try self.composeAst();
-        var extensions = Extensions.Merger.init(self.allocator);
-        composition.program = extensions.merge(composition.program, true, true) catch |err| {
-            self.diagnostic = extensions.diagnostic;
-            return err;
+        const composition = composition: {
+            var span = self.traceSpan(.composition);
+            defer span.finish();
+            var result = try self.composeAst();
+            var extensions = Extensions.Merger.init(self.allocator);
+            result.program = extensions.merge(result.program, true, true) catch |err| {
+                self.diagnostic = extensions.diagnostic;
+                return err;
+            };
+            break :composition result;
         };
-        var specializer = GenericSpecializer.init(self.allocator);
-        specializer.module_scope_roots = self.module_scope_roots;
-        specializer.packages = self.packages;
-        const ast = specializer.specialize(composition.program) catch |err| {
-            self.diagnostic = specializer.diagnostic;
-            return err;
+        const ast = specialized: {
+            var span = self.traceSpan(.specialization);
+            defer span.finish();
+            var specializer = GenericSpecializer.init(self.allocator);
+            specializer.module_scope_roots = self.module_scope_roots;
+            specializer.packages = self.packages;
+            break :specialized specializer.specialize(composition.program) catch |err| {
+                self.diagnostic = specializer.diagnostic;
+                return err;
+            };
         };
-        const interfaces = try self.buildInterfaces(composition.type_maps);
+        const interfaces = interfaces: {
+            var span = self.traceSpan(.interface_building);
+            defer span.finish();
+            break :interfaces try self.buildInterfaces(composition.type_maps);
+        };
         var analyzer = Semantic.Analyzer.init(self.allocator);
         analyzer.target = self.target;
         analyzer.packages = self.packages;
@@ -204,9 +245,13 @@ pub const Compiler = struct {
         analyzer.source_files = self.files;
         analyzer.module_scope_roots = self.module_scope_roots;
         analyzer.shadercross_path = self.shadercross_path;
-        var ir = (if (self.include_tests) analyzer.analyzeUnit(ast) else analyzer.analyze(ast)) catch |err| {
-            self.diagnostic = analyzer.diagnostic;
-            return err;
+        var ir = analyzed: {
+            var span = self.traceSpan(.semantic_analysis);
+            defer span.finish();
+            break :analyzed (if (self.include_tests) analyzer.analyzeUnit(ast) else analyzer.analyze(ast)) catch |err| {
+                self.diagnostic = analyzer.diagnostic;
+                return err;
+            };
         };
         if (analyzer.shader_files.items.len != 0 or analyzer.embedded_files.items.len != 0) {
             const all_files = try self.allocator.alloc(
@@ -243,6 +288,11 @@ pub const Compiler = struct {
             });
         }
 
+        var loaded_modules: usize = 0;
+        for (self.units) |unit| if (unit.state == .loaded) {
+            loaded_modules += 1;
+        };
+
         return .{
             .ast = ast,
             .ir = ir,
@@ -251,8 +301,22 @@ pub const Compiler = struct {
             .packages = self.packages,
             .files = self.files,
             .cache_files = try dependency_files.toOwnedSlice(self.allocator),
+            .metrics = .{
+                .packages = self.packages.packages.len,
+                .discovered_modules = self.index.providers.len,
+                .loaded_modules = loaded_modules,
+                .parsed_modules = self.parsed_modules,
+                .source_bytes_read = self.source_bytes_read,
+                .ast_functions = ast.functions.len,
+                .portable_functions = ir.functions.len,
+            },
             .tests = try tests.toOwnedSlice(self.allocator),
         };
+    }
+
+    fn traceSpan(self: *Compiler, phase: CompilationTrace.Phase) CompilationTrace.Span {
+        const trace = self.trace orelse return .{};
+        return trace.span(phase);
     }
 
     fn collectModuleScopeRoots(self: *Compiler) Allocator.Error![]const []const u8 {

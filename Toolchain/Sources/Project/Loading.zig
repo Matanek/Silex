@@ -18,12 +18,14 @@ pub fn discoverCatalogContributions(self: anytype) !void {
         if (!std.mem.eql(u8, provider.name, package_name)) continue;
 
         const source = try std.Io.Dir.cwd().readFileAlloc(self.io, provider.path, self.allocator, .limited(1024 * 1024));
+        self.source_bytes_read += source.len;
         if (!containsContribution(source)) continue;
         var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
         const parsed = parser.parse() catch |err| {
             self.diagnostic = parser.diagnostic;
             return err;
         };
+        self.parsed_modules += 1;
         const program = try Result.install(self.allocator, parsed);
         self.units[module].program = program;
         for (program.catalog_contributions) |contribution| {
@@ -191,6 +193,7 @@ fn parse(self: anytype, fragment: usize) !void {
     const provider = self.index.providers[fragment];
     if (self.units[fragment].program == null) {
         const source = try std.Io.Dir.cwd().readFileAlloc(self.io, provider.path, self.allocator, .limited(1024 * 1024));
+        self.source_bytes_read += source.len;
         const cached = if (self.cache_modules) CompilationCache.loadAst(self.allocator, self.io, provider.path, source) else null;
         self.units[fragment].program = cached orelse parsed: {
             var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
@@ -199,6 +202,7 @@ fn parse(self: anytype, fragment: usize) !void {
                 return err;
             };
             const installed = try Result.install(self.allocator, parsed_program);
+            self.parsed_modules += 1;
             if (self.cache_modules) CompilationCache.storeAst(self.allocator, self.io, provider.path, source, installed);
             break :parsed installed;
         };

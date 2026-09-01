@@ -47,3 +47,24 @@ platform linkage, output publication, and launch. The progress channel is
 disabled when standard error is not a terminal, preserving quiet successful
 execution for scripts and CI. An ANSI-capable terminal clears successful
 progress when the operation completes but retains it when compilation fails.
+
+## Trace compiler phases for benchmarks
+
+Compiler benchmarks can set the private `SILEX_COMPILATION_TRACE` environment
+variable to an output JSON path. `run` and `compile` then write one structured
+report for their native compilation stage. Normal invocations do not allocate a
+trace payload, create a report, or print timing data.
+
+The report identifies the command, source, target, mode, compiler version,
+cache result, success state, total elapsed time, phase durations, and structural
+metrics. Frontend subphases cover package resolution, module discovery and
+loading, composition, specialization, interface construction, and semantic
+analysis. Native phases cover cache validation, optimization, lowering,
+register allocation, emission, linking, output, and cache publication.
+
+`frontend_total` contains its frontend subphases, so phase values are not all
+additive. Every duration uses a monotonic clock. The compiler report deliberately
+does not claim process CPU or peak RSS; the owning benchmark records those from
+the process boundary and preserves every raw sample. The JSON schema is private
+toolchain data and may evolve with the compiler rather than becoming a public
+CLI or IR contract.
