@@ -29,6 +29,18 @@ const rolling_history_reserve: u64 = 320 * 1024 * 1024;
 // entry points initialize this once, before any cache key is computed.
 var active_compiler_identity: ?[Blake3.digest_length]u8 = null;
 var active_session_started_at: ?i96 = null;
+var active_statistics: Statistics = .{};
+
+pub const Statistics = struct {
+    entry_hits: usize = 0,
+    entry_misses: usize = 0,
+    bytes_read: usize = 0,
+    bytes_written: usize = 0,
+};
+
+pub fn statistics() Statistics {
+    return active_statistics;
+}
 
 pub const NativeState = struct {
     files: []const []const u8,
@@ -43,6 +55,7 @@ const RetainedFile = struct {
 };
 
 pub fn maintain(allocator: Allocator, io: Io) void {
+    active_statistics = .{};
     active_session_started_at = Io.Clock.real.now(io).nanoseconds;
     const identity = ensureCompilerIdentity(io) catch {
         // If the running executable cannot be identified, preserving old
@@ -296,14 +309,35 @@ pub fn storeNativeState(
 }
 
 pub fn loadAst(allocator: Allocator, io: Io, path: []const u8, source: []const u8) ?Ast.Program {
+    return loadAstAt(allocator, io, ".silex/cache/v4", path, source);
+}
+
+pub fn loadAstAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    path: []const u8,
+    source: []const u8,
+) ?Ast.Program {
     const digest = contentIdentity("module-ast", path, source);
-    const payload = load(allocator, io, digest, "ast-json") orelse return null;
+    const payload = loadAt(allocator, io, directory, digest, "ast-json") orelse return null;
     return std.json.parseFromSliceLeaky(Ast.Program, allocator, payload, .{}) catch null;
 }
 
 pub fn storeAst(allocator: Allocator, io: Io, path: []const u8, source: []const u8, program: Ast.Program) void {
+    storeAstAt(allocator, io, ".silex/cache/v4", path, source, program);
+}
+
+pub fn storeAstAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    path: []const u8,
+    source: []const u8,
+    program: Ast.Program,
+) void {
     const payload = std.json.Stringify.valueAlloc(allocator, program, .{}) catch return;
-    store(allocator, io, contentIdentity("module-ast", path, source), "ast-json", payload);
+    storeAt(allocator, io, directory, contentIdentity("module-ast", path, source), "ast-json", payload);
 }
 
 fn contentIdentity(namespace: []const u8, path: []const u8, source: []const u8) [Blake3.digest_length]u8 {
@@ -517,13 +551,31 @@ fn hashAncestorManifests(allocator: Allocator, io: Io, hasher: *Blake3, source_p
 }
 
 pub fn load(allocator: Allocator, io: Io, digest: [Blake3.digest_length]u8, kind: []const u8) ?[]const u8 {
-    const path = entryPath(allocator, digest, kind) catch return null;
-    const bytes = Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(128 * 1024 * 1024)) catch return null;
-    if (bytes.len < digest.len or !std.mem.eql(u8, bytes[0..digest.len], &digest)) return null;
+    return loadAt(allocator, io, ".silex/cache/v4", digest, kind);
+}
+
+fn loadAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    digest: [Blake3.digest_length]u8,
+    kind: []const u8,
+) ?[]const u8 {
+    const path = entryPathAt(allocator, directory, digest, kind) catch return null;
+    const bytes = Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(128 * 1024 * 1024)) catch {
+        active_statistics.entry_misses += 1;
+        return null;
+    };
+    active_statistics.bytes_read += bytes.len;
+    if (bytes.len < digest.len or !std.mem.eql(u8, bytes[0..digest.len], &digest)) {
+        active_statistics.entry_misses += 1;
+        return null;
+    }
     if (Io.Dir.cwd().openFile(io, path, .{})) |file| {
         defer file.close(io);
         file.setTimestampsNow(io) catch {};
     } else |_| {}
+    active_statistics.entry_hits += 1;
     return bytes[digest.len..];
 }
 
@@ -534,19 +586,39 @@ pub fn store(
     kind: []const u8,
     payload: []const u8,
 ) void {
-    const directory = ".silex/cache/v4";
+    storeAt(allocator, io, ".silex/cache/v4", digest, kind, payload);
+}
+
+fn storeAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    digest: [Blake3.digest_length]u8,
+    kind: []const u8,
+    payload: []const u8,
+) void {
     Io.Dir.cwd().createDirPath(io, directory) catch return;
-    const path = entryPath(allocator, digest, kind) catch return;
+    const path = entryPathAt(allocator, directory, digest, kind) catch return;
     var atomic = Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true, .replace = true }) catch return;
     defer atomic.deinit(io);
     atomic.file.writeStreamingAll(io, &digest) catch return;
     atomic.file.writeStreamingAll(io, payload) catch return;
     atomic.replace(io) catch return;
+    active_statistics.bytes_written += digest.len + payload.len;
 }
 
 fn entryPath(allocator: Allocator, digest: [Blake3.digest_length]u8, kind: []const u8) ![]const u8 {
+    return entryPathAt(allocator, ".silex/cache/v4", digest, kind);
+}
+
+fn entryPathAt(
+    allocator: Allocator,
+    directory: []const u8,
+    digest: [Blake3.digest_length]u8,
+    kind: []const u8,
+) ![]const u8 {
     const hex = std.fmt.bytesToHex(digest, .lower);
-    return std.fmt.allocPrint(allocator, ".silex/cache/v4/{s}.{s}", .{ hex, kind });
+    return std.fmt.allocPrint(allocator, "{s}/{s}.{s}", .{ directory, hex, kind });
 }
 
 fn lessThan(_: void, left: []const u8, right: []const u8) bool {
@@ -699,27 +771,45 @@ test "rolling retention bounds one global history across cache classes" {
     try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/shaders/group/output"));
 }
 
-test "compact native state retains linked boundary providers" {
+test "compact native state serialization retains linked boundary providers" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}\n" });
-    const source_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    const files = &.{source_path};
+    const files = &.{"Main.sx"};
     const providers = &.{Packages.BoundaryProvider{
         .name = "SDL3",
         .archive = "Boundary/macos-arm64/libSDL3.a",
         .frameworks = &.{"Metal"},
         .libraries = &.{},
     }};
-    storeNativeState(allocator, std.testing.io, source_path, "macos-arm64", files, providers);
-    const loaded = loadNativeState(allocator, std.testing.io, source_path, "macos-arm64").?;
+    const state = NativeState{ .files = files, .providers = providers };
+    const payload = try std.json.Stringify.valueAlloc(allocator, state, .{});
+    const loaded = try std.json.parseFromSliceLeaky(NativeState, allocator, payload, .{});
 
     try std.testing.expectEqual(@as(usize, 1), loaded.providers.len);
     try std.testing.expectEqualStrings("SDL3", loaded.providers[0].name);
     try std.testing.expectEqualStrings("Metal", loaded.providers[0].frameworks[0]);
+}
+
+test "a corrupt cache entry is a measured safe miss" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const directory = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "cache" });
+    const digest: [Blake3.digest_length]u8 = @splat(0x44);
+    storeAt(allocator, std.testing.io, directory, digest, "test", "complete");
+    const path = try entryPathAt(allocator, directory, digest, "test");
+    try Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "truncated" });
+    const before = statistics();
+
+    try std.testing.expect(loadAt(allocator, std.testing.io, directory, digest, "test") == null);
+
+    const after = statistics();
+    try std.testing.expectEqual(before.entry_misses + 1, after.entry_misses);
 }
 
 test "output parent accepts an existing symbolic link to a directory" {

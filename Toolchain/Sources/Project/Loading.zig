@@ -299,7 +299,13 @@ fn parse(self: anytype, fragment: usize) !void {
             self.units[fragment].source = loaded;
             break :source loaded;
         };
-        const cached = if (self.cache_modules) CompilationCache.loadAst(self.allocator, self.io, provider.path, source) else null;
+        const cached = if (self.cache_modules) CompilationCache.loadAstAt(
+            self.allocator,
+            self.io,
+            self.module_cache_directory,
+            provider.path,
+            source,
+        ) else null;
         self.units[fragment].program = cached orelse parsed: {
             var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
             const parsed_program = parser.parse() catch |err| {
@@ -308,7 +314,14 @@ fn parse(self: anytype, fragment: usize) !void {
             };
             const installed = try Result.install(self.allocator, parsed_program);
             self.parsed_modules += 1;
-            if (self.cache_modules) CompilationCache.storeAst(self.allocator, self.io, provider.path, source, installed);
+            if (self.cache_modules) CompilationCache.storeAstAt(
+                self.allocator,
+                self.io,
+                self.module_cache_directory,
+                provider.path,
+                source,
+                installed,
+            );
             break :parsed installed;
         };
     }

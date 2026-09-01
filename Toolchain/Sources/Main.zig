@@ -1131,6 +1131,13 @@ fn compileNativeOptions(
         .compiler_version = build_options.version,
     });
     defer trace.write(allocator);
+    defer if (options.cache) {
+        const statistics = CompilationCache.statistics();
+        trace.metrics.cache_entry_hits = statistics.entry_hits;
+        trace.metrics.cache_entry_misses = statistics.entry_misses;
+        trace.metrics.cache_bytes_read = statistics.bytes_read;
+        trace.metrics.cache_bytes_written = statistics.bytes_written;
+    };
     var progress = CliProgress.Build.init(init.io);
     progress.source(.analyze, options.source_path);
     const executable_kind = if (target.eql(.macos_arm64)) "macho" else if (target.eql(.linux_x64)) "elf" else "pe";

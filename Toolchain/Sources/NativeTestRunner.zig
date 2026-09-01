@@ -91,7 +91,14 @@ pub fn execute(
     };
     const result = try executeAt(allocator, io, target, linker_path, program, function, executable, providers);
     if (!reusable) switch (result.term) {
-        .exited => Io.Dir.cwd().deleteFile(io, executable) catch {},
+        .exited => {
+            Io.Dir.cwd().deleteFile(io, executable) catch {};
+            // `--nocache` must not leave an empty local cache hierarchy behind.
+            // These removals succeed only when no concurrent or pre-existing
+            // entry uses the directories.
+            Io.Dir.cwd().deleteDir(io, ".silex/test") catch {};
+            Io.Dir.cwd().deleteDir(io, ".silex") catch {};
+        },
         else => {},
     };
     return .{ .result = result, .executable = executable };

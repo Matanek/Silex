@@ -103,6 +103,7 @@ pub const Compiler = struct {
     generic_type_maps: []const []const Ast.Type = &.{},
     function_type_maps: []const []const Ast.Type = &.{},
     cache_modules: bool = false,
+    module_cache_directory: []const u8 = ".silex/cache/v4",
     include_tests: bool = false,
     target: TargetModule.Target,
     shadercross_path: ?[]const u8 = null,

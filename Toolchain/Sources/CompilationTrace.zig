@@ -55,6 +55,10 @@ pub const Metrics = struct {
     dependency_files: usize = 0,
     machine_functions: usize = 0,
     output_bytes: usize = 0,
+    cache_entry_hits: usize = 0,
+    cache_entry_misses: usize = 0,
+    cache_bytes_read: usize = 0,
+    cache_bytes_written: usize = 0,
 };
 
 pub const Metadata = struct {
