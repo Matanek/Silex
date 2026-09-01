@@ -61,11 +61,25 @@ pub fn activate(self: anytype, module: usize) !void {
 
 pub fn activateType(self: anytype, module: usize, type_value: Ast.Type) !void {
     if (type_value.optionalChild()) |child| return self.activateType(module, child);
-    const index = type_value.structureIndex() orelse return;
     const program = self.units[module].program.?;
+    if (type_value.genericInstantiationIndex()) |generic_index| {
+        if (generic_index >= program.generic_types.len) return;
+        const generic = program.generic_types[generic_index];
+        try self.activateType(module, generic.base);
+        for (generic.arguments) |argument| try self.activateType(module, argument);
+        return;
+    }
+    if (type_value.functionIndex()) |function_index| {
+        if (function_index >= program.function_types.len) return;
+        const function = program.function_types[function_index];
+        for (function.parameters) |parameter| try self.activateType(module, parameter.type);
+        try self.activateType(module, function.return_type);
+        return;
+    }
+    const index = type_value.structureIndex() orelse return;
     if (index >= program.type_names.len) return;
     const target = try self.nominalCandidate(module, program.type_names[index]) orelse return;
-    if (target.module != module) try self.loadModule(target.module, module);
+    if (target.module != module) try self.activateDeclaration(module, target);
 }
 
 pub fn activateStatement(self: anytype, module: usize, statement: Ast.Statement) !void {
@@ -123,9 +137,9 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
                     }
                 };
                 if (try self.targetForCall(module, name)) |target| {
-                    try self.loadModule(target.module, module);
+                    try self.activateDeclaration(module, target);
                 } else if (try self.nominalCandidate(module, name)) |target| {
-                    if (target.module != module) try self.loadModule(target.module, module);
+                    if (target.module != module) try self.activateDeclaration(module, target);
                 } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
             } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
             for (call.arguments) |argument| try self.activateExpression(module, argument);
@@ -144,7 +158,7 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
         .field_access => |access| {
             if (try expressionName(self.allocator, expression)) |name| {
                 if (try self.targetForCall(module, name)) |target| {
-                    try self.loadModule(target.module, module);
+                    try self.activateDeclaration(module, target);
                 } else try self.activateExpression(module, access.base);
             } else try self.activateExpression(module, access.base);
         },

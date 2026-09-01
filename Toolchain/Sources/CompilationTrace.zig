@@ -45,6 +45,7 @@ pub const Metrics = struct {
     discovered_modules: usize = 0,
     loaded_modules: usize = 0,
     parsed_modules: usize = 0,
+    indexed_declarations: usize = 0,
     source_bytes_read: usize = 0,
     ast_functions: usize = 0,
     portable_functions: usize = 0,

@@ -23,10 +23,18 @@ pub const CatalogContribution = struct {
 
 pub const Unit = struct {
     state: State = .fresh,
+    source: ?[]const u8 = null,
+    public_surface_indexed: bool = false,
+    public_declarations: []const PublicDeclaration = &.{},
     program: ?Ast.Program = null,
     bindings: []const Binding = &.{},
     activated_modules: []const usize = &.{},
     fragments: []const usize = &.{},
+};
+
+pub const PublicDeclaration = struct {
+    name: []const u8,
+    kind: DeclarationKind,
 };
 
 pub const DeclarationKind = enum { function, structure, enumeration };

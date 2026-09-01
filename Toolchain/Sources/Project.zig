@@ -57,6 +57,7 @@ pub const Metrics = struct {
     discovered_modules: usize,
     loaded_modules: usize,
     parsed_modules: usize,
+    indexed_declarations: usize,
     source_bytes_read: usize,
     ast_functions: usize,
     portable_functions: usize,
@@ -107,6 +108,7 @@ pub const Compiler = struct {
     shadercross_path: ?[]const u8 = null,
     trace: ?*CompilationTrace.Reporter = null,
     parsed_modules: usize = 0,
+    indexed_declarations: usize = 0,
     source_bytes_read: usize = 0,
 
     pub fn init(allocator: Allocator, io: Io) Compiler {
@@ -155,6 +157,7 @@ pub const Compiler = struct {
     fn compileConfigured(self: *Compiler, input_path: []const u8) Error!Compilation {
         self.diagnostic = null;
         self.parsed_modules = 0;
+        self.indexed_declarations = 0;
         self.source_bytes_read = 0;
         if (!std.mem.endsWith(u8, input_path, ".sx")) {
             return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, "input must be a .sx source file");
@@ -306,6 +309,7 @@ pub const Compiler = struct {
                 .discovered_modules = self.index.providers.len,
                 .loaded_modules = loaded_modules,
                 .parsed_modules = self.parsed_modules,
+                .indexed_declarations = self.indexed_declarations,
                 .source_bytes_read = self.source_bytes_read,
                 .ast_functions = ast.functions.len,
                 .portable_functions = ir.functions.len,
@@ -520,6 +524,13 @@ pub const Compiler = struct {
             if (unit.state != .loaded) continue;
             for (unit.bindings) |binding| {
                 if (!binding.is_public) continue;
+                if (binding.module) |target_module| {
+                    if (self.units[target_module].state != .loaded and binding.declaration != null) {
+                        const declarations = try Loading.indexPublicDeclarations(self, target_module, binding.declaration.?);
+                        if (declarations.isUnambiguous()) continue;
+                        try self.loadModule(target_module, module);
+                    }
+                }
                 if (binding.type_alias != null or binding.type_name != null) {
                     const target = try self.resolveTypeAlias(module, binding.alias, binding.position, false) orelse {
                         return self.fail(binding.position, "public type alias target is unknown");
@@ -687,6 +698,33 @@ pub const Compiler = struct {
 
     pub fn activateQualifiedReferences(self: *Compiler, module: usize) Error!void {
         return Activation.activate(self, module);
+    }
+
+    pub fn activateDeclaration(self: *Compiler, source_module: usize, initial: CallTarget) Error!void {
+        var target = initial;
+        var depth: usize = 0;
+        while (depth <= self.units.len) : (depth += 1) {
+            try self.loadModule(target.module, source_module);
+
+            const own_fragment = [_]usize{target.module};
+            const fragments = if (self.units[target.module].fragments.len == 0)
+                own_fragment[0..]
+            else
+                self.units[target.module].fragments;
+            var next: ?CallTarget = null;
+            for (fragments) |fragment| {
+                for (self.units[fragment].bindings) |binding| {
+                    if (!binding.is_public or !std.mem.eql(u8, binding.alias, target.declaration)) continue;
+                    const dependency = binding.module orelse return;
+                    const declaration = binding.declaration orelse return;
+                    next = .{ .module = dependency, .declaration = declaration };
+                    break;
+                }
+                if (next != null) break;
+            }
+            target = next orelse return;
+        }
+        return self.fail(expressionPosition(source_module), "public use cycle exceeds the module graph");
     }
 
     pub fn activateType(self: *Compiler, module: usize, type_value: Ast.Type) Error!void {

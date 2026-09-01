@@ -1759,6 +1759,20 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
     try std.testing.expectEqualStrings("42\n", result.stdout);
 
     try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Plugins\nfunc main() { print(Plugins.Core(value:42).value) }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    const lazy_compilation = try compiler.compile(input);
+    const lazy_result = try @import("../Interpreter.zig").runCapture(allocator, lazy_compilation.ir);
+    try std.testing.expectEqualStrings("42\n", lazy_result.stdout);
+    try std.testing.expect(lazy_compilation.metrics.parsed_modules < compilation.metrics.parsed_modules);
+    try std.testing.expect(lazy_compilation.metrics.indexed_declarations != 0);
+    for (lazy_compilation.cache_files) |path| {
+        try std.testing.expect(!std.mem.endsWith(u8, path, "GFX.Physics/Module/Plugin.sx"));
+    }
+
+    try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
         .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}}}",
     });

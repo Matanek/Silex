@@ -1198,6 +1198,7 @@ fn compileNativeOptions(
         trace.metrics.discovered_modules = compilation.metrics.discovered_modules;
         trace.metrics.loaded_modules = compilation.metrics.loaded_modules;
         trace.metrics.parsed_modules = compilation.metrics.parsed_modules;
+        trace.metrics.indexed_declarations = compilation.metrics.indexed_declarations;
         trace.metrics.source_bytes_read = compilation.metrics.source_bytes_read;
         trace.metrics.ast_functions = compilation.metrics.ast_functions;
         trace.metrics.portable_functions = compilation.metrics.portable_functions;
