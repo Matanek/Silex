@@ -183,7 +183,11 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             try calls.append(allocator, .{ .at = words.items.len, .function = function });
             try words.append(allocator, branchLink());
             try emitSnapshotRelease(allocator, &words, &snapshot_data_fixups);
-            try words.append(allocator, moveRegister(.x1, .x8));
+            // Linux native test executables expose this thunk as C `main`,
+            // whose process status is returned in X0. The in-memory Darwin
+            // runner instead preserves the tested function result in X0 and
+            // reads the Silex runtime status from X1.
+            try words.append(allocator, moveRegister(if (platform == .linux) .x0 else .x1, .x8));
             try words.append(allocator, restoreFrame());
             try words.append(allocator, returnInstruction());
             break :entry offset;
@@ -4293,8 +4297,15 @@ test "resolve calls and append a native test entry" {
     const delta: i32 = -@as(i32, @intCast(call_word));
     const expected = @as(u32, 0x94000000) | (@as(u32, @bitCast(delta)) & 0x03ffffff);
     const encoded_call = std.mem.readInt(u32, image.code[call_word * 4 ..][0..4], .little);
+    const status_word_offset = image.entry_offset.? + 13 * @sizeOf(u32);
+    const status_word = std.mem.readInt(u32, image.code[status_word_offset..][0..4], .little);
+    const linux_image = try encodeLinux(arena.allocator(), .{ .functions = &functions }, .{ .test_function = 0 });
+    const linux_status_word_offset = linux_image.entry_offset.? + 13 * @sizeOf(u32);
+    const linux_status_word = std.mem.readInt(u32, linux_image.code[linux_status_word_offset..][0..4], .little);
     try std.testing.expectEqual(@as(u32, 0xa9bf7bfd), entry_word);
     try std.testing.expectEqual(expected, encoded_call);
+    try std.testing.expectEqual(moveRegister(.x1, .x8), status_word);
+    try std.testing.expectEqual(moveRegister(.x0, .x8), linux_status_word);
 }
 
 test "recognize a comparison-only while header at its back edge" {
