@@ -1,6 +1,7 @@
 const std = @import("std");
 const Encoder = @import("Encoder.zig");
 const Instructions = @import("Instructions.zig");
+const LinuxObject = @import("../Linux/Object.zig");
 const Machine = @import("Machine.zig");
 
 const Allocator = std.mem.Allocator;
@@ -12,6 +13,64 @@ const image_file_machine_arm64: u16 = 0xaa64;
 const image_rel_arm64_branch26: u16 = 0x0003;
 const image_rel_arm64_pagebase_rel21: u16 = 0x0004;
 const image_rel_arm64_pageoffset_12a: u16 = 0x0006;
+
+pub fn emitLinux(allocator: Allocator, program: Machine.Program) Error![]u8 {
+    var image = try Encoder.encodeLinux(allocator, program, .{ .executable_main = try findMain(program) });
+    defer image.deinit(allocator);
+    return emitLinuxImage(allocator, program, &image);
+}
+
+pub fn emitLinuxFunction(allocator: Allocator, program: Machine.Program, function: Machine.FunctionId) Error![]u8 {
+    var image = try Encoder.encodeLinux(allocator, program, .{ .test_function = function });
+    defer image.deinit(allocator);
+    return emitLinuxImage(allocator, program, &image);
+}
+
+fn emitLinuxImage(allocator: Allocator, program: Machine.Program, image: *Encoder.Image) Error![]u8 {
+    const entry_offset = image.entry_offset orelse return error.InvalidImage;
+    var relocations: std.ArrayList(LinuxObject.Relocation) = .empty;
+    defer relocations.deinit(allocator);
+
+    for (image.external_call_sites) |site| {
+        if (site.windows_symbol != null or site.function >= program.external_functions.len or
+            @as(usize, site.instruction_offset) + 12 > image.code.len) return error.InvalidImage;
+        std.mem.writeInt(u32, image.code[site.instruction_offset..][0..4], Instructions.branchLink(), .little);
+        std.mem.writeInt(u32, image.code[site.instruction_offset + 4 ..][0..4], no_operation, .little);
+        std.mem.writeInt(u32, image.code[site.instruction_offset + 8 ..][0..4], no_operation, .little);
+        try relocations.append(allocator, .{
+            .offset = site.instruction_offset,
+            .kind = .arm64_call26,
+            .target = .{ .external = program.external_functions[site.function].source_name },
+        });
+    }
+    for (image.address_sites) |site| {
+        if (@as(usize, site.instruction_offset) + 8 > image.code.len or site.target_offset >= image.code.len) {
+            return error.InvalidImage;
+        }
+        var page = std.mem.readInt(u32, image.code[site.instruction_offset..][0..4], .little);
+        page &= 0x9f00001f;
+        std.mem.writeInt(u32, image.code[site.instruction_offset..][0..4], page, .little);
+        var offset = std.mem.readInt(u32, image.code[site.instruction_offset + 4 ..][0..4], .little);
+        if ((offset & 0xffc00000) != 0x91000000) return error.InvalidImage;
+        offset &= ~@as(u32, 0x003ffc00);
+        std.mem.writeInt(u32, image.code[site.instruction_offset + 4 ..][0..4], offset, .little);
+        try relocations.appendSlice(allocator, &.{
+            .{
+                .offset = site.instruction_offset,
+                .kind = .arm64_page21,
+                .target = .text,
+                .addend = site.target_offset,
+            },
+            .{
+                .offset = site.instruction_offset + 4,
+                .kind = .arm64_pageoff12_add,
+                .target = .text,
+                .addend = site.target_offset,
+            },
+        });
+    }
+    return LinuxObject.emit(allocator, .arm64, image.code, entry_offset, relocations.items);
+}
 
 pub fn emitWindows(allocator: Allocator, program: Machine.Program) Error![]u8 {
     var image = try Encoder.encodeWindows(allocator, program, .{ .executable_main = try findMain(program) });
@@ -163,7 +222,7 @@ fn appendInt(allocator: Allocator, bytes: *std.ArrayList(u8), comptime T: type, 
     try bytes.appendSlice(allocator, &storage);
 }
 
-test "emit builds an ARM64 COFF object" {
+test "emit builds ARM64 ELF and COFF objects" {
     const Frontend = @import("../Frontend.zig");
     const Lower = @import("Lower.zig");
 
@@ -173,6 +232,12 @@ test "emit builds an ARM64 COFF object" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile("func main() {}");
     const machine = try Lower.lower(allocator, compilation.ir);
+
+    const elf = try emitLinux(allocator, machine);
+    try std.testing.expectEqualStrings("\x7fELF", elf[0..4]);
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, elf[16..18], .little));
+    try std.testing.expectEqual(@as(u16, 183), std.mem.readInt(u16, elf[18..20], .little));
+
     const bytes = try emitWindows(allocator, machine);
 
     try std.testing.expectEqual(image_file_machine_arm64, std.mem.readInt(u16, bytes[0..2], .little));

@@ -3,14 +3,12 @@ const Machine = @import("Machine.zig");
 const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
+const Allocation = @import("Allocation.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 
 const Allocator = std.mem.Allocator;
 pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
-const macos_mmap = 197;
-const protection_read_write = 3;
-const map_private_anonymous = 0x1002;
-pub const Platform = enum { darwin, windows };
+pub const Platform = Allocation.Platform;
 
 pub fn emitInit(
     allocator: Allocator,
@@ -24,7 +22,7 @@ pub fn emitInit(
     for (value.fields) |field| width += field.width;
     try immediate(allocator, words, .x1, (width + 4) * Machine.slot_size);
     switch (platform) {
-        .darwin => try allocate(allocator, words),
+        .darwin, .linux => try Allocation.emit(allocator, words, external_sites, platform),
         .windows => {
             try immediate(allocator, words, .x0, 0);
             try immediate(allocator, words, .x1, (width + 4) * Machine.slot_size);
@@ -42,7 +40,7 @@ pub fn emitInit(
     }
     const failed = words.items.len;
     try words.append(allocator, switch (platform) {
-        .darwin => A64.conditionalBranch(.carry_set),
+        .darwin, .linux => Allocation.failureBranch(platform),
         .windows => A64.compareBranchZero(.x0),
     });
     try words.append(allocator, A64.moveRegister(.x15, .x0));
@@ -84,16 +82,6 @@ pub fn emitStore(allocator: Allocator, words: *std.ArrayList(u32), value: Machin
         try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, value.replacement.start) + leaf)));
         try words.append(allocator, A64.store64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
     }
-}
-
-fn allocate(allocator: Allocator, words: *std.ArrayList(u32)) Error!void {
-    try words.append(allocator, A64.moveWideZero32(.x0, 0));
-    try words.append(allocator, A64.moveWideZero32(.x2, protection_read_write));
-    try words.append(allocator, A64.moveWideZero32(.x3, map_private_anonymous));
-    try immediate(allocator, words, .x4, std.math.maxInt(u64));
-    try words.append(allocator, A64.moveWideZero32(.x5, 0));
-    try words.append(allocator, A64.moveWideZero32(.x16, macos_mmap));
-    try words.append(allocator, A64.serviceCall());
 }
 
 fn fail(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local)) Error!void {

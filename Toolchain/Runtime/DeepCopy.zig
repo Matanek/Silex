@@ -446,7 +446,7 @@ fn clear(destination: [*]u64, count: usize) void {
 }
 
 fn systemAllocate(byte_count: usize) callconv(.c) ?[*]u64 {
-    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) {
+    if (comptime builtin.cpu.arch != .aarch64 or (builtin.os.tag != .macos and builtin.os.tag != .linux)) {
         return null;
     }
     if (builtin.is_test) {
@@ -456,31 +456,53 @@ fn systemAllocate(byte_count: usize) callconv(.c) ?[*]u64 {
         }
     }
     var result: usize = 0;
-    asm volatile ("svc #0x80"
-        : [result] "={x0}" (result),
-        : [address] "{x0}" (@as(usize, 0)),
-          [size] "{x1}" (byte_count),
-          [protection] "{x2}" (@as(usize, 3)),
-          [flags] "{x3}" (@as(usize, 0x1002)),
-          [descriptor] "{x4}" (~@as(usize, 0)),
-          [offset] "{x5}" (@as(usize, 0)),
-          [number] "{x16}" (@as(usize, 197)),
-        : .{ .memory = true });
+    if (comptime builtin.os.tag == .macos) {
+        asm volatile ("svc #0x80"
+            : [result] "={x0}" (result),
+            : [address] "{x0}" (@as(usize, 0)),
+              [size] "{x1}" (byte_count),
+              [protection] "{x2}" (@as(usize, 3)),
+              [flags] "{x3}" (@as(usize, 0x1002)),
+              [descriptor] "{x4}" (~@as(usize, 0)),
+              [offset] "{x5}" (@as(usize, 0)),
+              [number] "{x16}" (@as(usize, 197)),
+            : .{ .memory = true });
+    } else {
+        asm volatile ("svc #0"
+            : [result] "={x0}" (result),
+            : [address] "{x0}" (@as(usize, 0)),
+              [size] "{x1}" (byte_count),
+              [protection] "{x2}" (@as(usize, 3)),
+              [flags] "{x3}" (@as(usize, 0x22)),
+              [descriptor] "{x4}" (~@as(usize, 0)),
+              [offset] "{x5}" (@as(usize, 0)),
+              [number] "{x8}" (@as(usize, 222)),
+            : .{ .memory = true });
+    }
     if (@as(isize, @bitCast(result)) < 0) return null;
     if (builtin.is_test) TestState.live_allocations += 1;
     return @ptrFromInt(result);
 }
 
 fn systemRelease(address: [*]u8, byte_count: usize) callconv(.c) void {
-    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) {
+    if (comptime builtin.cpu.arch != .aarch64 or (builtin.os.tag != .macos and builtin.os.tag != .linux)) {
         return;
     }
-    _ = asm volatile ("svc #0x80"
-        : [result] "={x0}" (-> usize),
-        : [address] "{x0}" (@intFromPtr(address)),
-          [size] "{x1}" (byte_count),
-          [number] "{x16}" (@as(usize, 73)),
-        : .{ .memory = true });
+    if (comptime builtin.os.tag == .macos) {
+        _ = asm volatile ("svc #0x80"
+            : [result] "={x0}" (-> usize),
+            : [address] "{x0}" (@intFromPtr(address)),
+              [size] "{x1}" (byte_count),
+              [number] "{x16}" (@as(usize, 73)),
+            : .{ .memory = true });
+    } else {
+        _ = asm volatile ("svc #0"
+            : [result] "={x0}" (-> usize),
+            : [address] "{x0}" (@intFromPtr(address)),
+              [size] "{x1}" (byte_count),
+              [number] "{x8}" (@as(usize, 215)),
+            : .{ .memory = true });
+    }
     if (builtin.is_test) TestState.live_allocations -= 1;
 }
 

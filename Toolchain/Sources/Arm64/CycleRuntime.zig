@@ -1,6 +1,8 @@
 const std = @import("std");
 
 pub const object_bytes = @import("cycle_runtime_object").object_bytes;
+pub const linux_object_bytes = @import("cycle_runtime_linux_arm64_object").object_bytes;
+const ElfRuntime = @import("ElfRuntime.zig");
 
 const mach_header_size = 32;
 const segment_command_64 = 0x19;
@@ -75,9 +77,24 @@ pub fn payload() Error!Payload {
     };
 }
 
-fn read32(offset: usize) u32 { return std.mem.readInt(u32, object_bytes[offset..][0..4], .little); }
-fn read64(offset: usize) u64 { return std.mem.readInt(u64, object_bytes[offset..][0..8], .little); }
+pub fn linuxPayload(allocator: std.mem.Allocator) ElfRuntime.Error!ElfRuntime.Payload {
+    return ElfRuntime.payload(allocator, linux_object_bytes);
+}
+
+fn read32(offset: usize) u32 {
+    return std.mem.readInt(u32, object_bytes[offset..][0..4], .little);
+}
+fn read64(offset: usize) u64 {
+    return std.mem.readInt(u64, object_bytes[offset..][0..8], .little);
+}
 fn name(offset: usize) []const u8 {
     const bytes = object_bytes[offset..][0..16];
     return bytes[0 .. std.mem.indexOfScalar(u8, bytes, 0) orelse bytes.len];
+}
+
+test "bundled Linux ARM64 cycle runtime is an AArch64 ELF image" {
+    var runtime = try linuxPayload(std.testing.allocator);
+    defer runtime.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("\x7fELF", linux_object_bytes[0..4]);
+    try std.testing.expect(runtime.entry_offset < runtime.bytes.len);
 }

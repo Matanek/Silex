@@ -27,6 +27,10 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .aarch64,
         .os_tag = .macos,
     });
+    const runtime_linux_arm64_target = b.resolveTargetQuery(.{
+        .cpu_arch = .aarch64,
+        .os_tag = .linux,
+    });
     const float_runtime_module = b.createModule(.{
         .root_source_file = b.path("Runtime/FloatFormat.zig"),
         .target = runtime_target,
@@ -46,6 +50,26 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-float-runtime.macho\");\n",
     );
     module.addAnonymousImport("float_runtime_object", .{ .root_source_file = runtime_module });
+    const float_runtime_linux_arm64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/FloatFormat.zig"),
+        .target = runtime_linux_arm64_target,
+        .optimize = .ReleaseSmall,
+        .pic = true,
+        .strip = true,
+        .unwind_tables = .none,
+    });
+    const float_runtime_linux_arm64 = b.addExecutable(.{
+        .name = "silex-float-runtime-linux-arm64",
+        .root_module = float_runtime_linux_arm64_module,
+    });
+    float_runtime_linux_arm64.entry = .{ .symbol_name = "silex_format_float" };
+    const float_runtime_linux_arm64_files = b.addWriteFiles();
+    _ = float_runtime_linux_arm64_files.addCopyFile(float_runtime_linux_arm64.getEmittedBin(), "silex-float-runtime-linux-arm64.elf");
+    const float_runtime_linux_arm64_import = float_runtime_linux_arm64_files.add(
+        "FloatRuntimeLinuxArm64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-float-runtime-linux-arm64.elf\");\n",
+    );
+    module.addAnonymousImport("float_runtime_linux_arm64_object", .{ .root_source_file = float_runtime_linux_arm64_import });
     const float_runtime_x64_target = b.resolveTargetQuery(.{
         .cpu_arch = .x86_64,
         .os_tag = .linux,
@@ -90,6 +114,26 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-deep-copy-runtime.macho\");\n",
     );
     module.addAnonymousImport("deep_copy_runtime_object", .{ .root_source_file = deep_copy_runtime_import });
+    const deep_copy_runtime_linux_arm64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/DeepCopy.zig"),
+        .target = runtime_linux_arm64_target,
+        .optimize = .ReleaseSmall,
+        .pic = true,
+        .strip = true,
+        .unwind_tables = .none,
+    });
+    const deep_copy_runtime_linux_arm64 = b.addExecutable(.{
+        .name = "silex-deep-copy-runtime-linux-arm64",
+        .root_module = deep_copy_runtime_linux_arm64_module,
+    });
+    deep_copy_runtime_linux_arm64.entry = .{ .symbol_name = "silex_deep_copy" };
+    const deep_copy_runtime_linux_arm64_files = b.addWriteFiles();
+    _ = deep_copy_runtime_linux_arm64_files.addCopyFile(deep_copy_runtime_linux_arm64.getEmittedBin(), "silex-deep-copy-runtime-linux-arm64.elf");
+    const deep_copy_runtime_linux_arm64_import = deep_copy_runtime_linux_arm64_files.add(
+        "DeepCopyRuntimeLinuxArm64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-deep-copy-runtime-linux-arm64.elf\");\n",
+    );
+    module.addAnonymousImport("deep_copy_runtime_linux_arm64_object", .{ .root_source_file = deep_copy_runtime_linux_arm64_import });
     const deep_copy_runtime_x64_module = b.createModule(.{
         .root_source_file = b.path("Runtime/DeepCopy.zig"),
         .target = float_runtime_x64_target,
@@ -130,6 +174,26 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-cycle-runtime.macho\");\n",
     );
     module.addAnonymousImport("cycle_runtime_object", .{ .root_source_file = cycle_runtime_import });
+    const cycle_runtime_linux_arm64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/CycleCollector.zig"),
+        .target = runtime_linux_arm64_target,
+        .optimize = .ReleaseSmall,
+        .pic = true,
+        .strip = true,
+        .unwind_tables = .none,
+    });
+    const cycle_runtime_linux_arm64 = b.addExecutable(.{
+        .name = "silex-cycle-runtime-linux-arm64",
+        .root_module = cycle_runtime_linux_arm64_module,
+    });
+    cycle_runtime_linux_arm64.entry = .{ .symbol_name = "silex_cycle" };
+    const cycle_runtime_linux_arm64_files = b.addWriteFiles();
+    _ = cycle_runtime_linux_arm64_files.addCopyFile(cycle_runtime_linux_arm64.getEmittedBin(), "silex-cycle-runtime-linux-arm64.elf");
+    const cycle_runtime_linux_arm64_import = cycle_runtime_linux_arm64_files.add(
+        "CycleRuntimeLinuxArm64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-cycle-runtime-linux-arm64.elf\");\n",
+    );
+    module.addAnonymousImport("cycle_runtime_linux_arm64_object", .{ .root_source_file = cycle_runtime_linux_arm64_import });
     const cycle_runtime_x64_module = b.createModule(.{
         .root_source_file = b.path("Runtime/CycleCollector.zig"),
         .target = float_runtime_x64_target,

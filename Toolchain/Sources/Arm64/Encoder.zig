@@ -12,6 +12,7 @@ const TextRuntime = @import("TextRuntime.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
 const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
 const CycleRuntime = @import("CycleRuntime.zig");
+const System = @import("System.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Allocation = @import("Allocation.zig");
 const Pairing = @import("Pairing.zig");
@@ -82,9 +83,10 @@ pub const Entry = union(enum) {
     none,
     test_function: Machine.FunctionId,
     executable_main: Machine.FunctionId,
+    standalone_main: Machine.FunctionId,
 };
 
-pub const Platform = enum { darwin, windows };
+pub const Platform = System.Platform;
 
 pub const Image = struct {
     code: []u8,
@@ -138,6 +140,10 @@ pub fn encodeWindows(allocator: Allocator, program: Machine.Program, entry: Entr
     return encodeForPlatform(allocator, program, entry, .windows);
 }
 
+pub fn encodeLinux(allocator: Allocator, program: Machine.Program, entry: Entry) Error!Image {
+    return encodeForPlatform(allocator, program, entry, .linux);
+}
+
 fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entry, platform: Platform) Error!Image {
     _ = FloatRuntime.object_bytes;
     _ = DeepCopyRuntime.object_bytes;
@@ -177,7 +183,11 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             try words.append(allocator, returnInstruction());
             break :entry offset;
         },
-        .executable_main => |function| entry: {
+        .executable_main, .standalone_main => |function| entry: {
+            const standalone = switch (entry) {
+                .standalone_main => true,
+                else => false,
+            };
             if (function >= program.functions.len) return error.InvalidMachineProgram;
             const main = program.functions[function];
             if (main.parameter_count != 0 or (main.return_type != .void and !main.recoverable_entry_result)) {
@@ -208,56 +218,56 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             try words.append(allocator, compareBranchZero(.x8));
             if (main.recoverable_entry_result) try emitStackAdjustment(allocator, &words, 16, true);
             try words.append(allocator, moveWideZero32(.x0, 1));
-            try words.append(allocator, restoreFrame());
-            try words.append(allocator, returnInstruction());
+            try emitMainReturn(allocator, &words, platform, standalone);
             try patch19(words.items, runtime_success, words.items.len);
             if (main.recoverable_entry_result) {
                 try words.append(allocator, loadStack(.x9, 0));
                 const result_success = words.items.len;
                 try words.append(allocator, compareBranchZero(.x9));
                 const prefix = findString(program, "error: ") orelse return error.InvalidMachineProgram;
-                try StringRuntime.emitWriteStatic(allocator, &words, &data_fixups, program, prefix, 2);
-                try StringRuntime.emitPrint(allocator, &words, &data_fixups, program, 1, 2, true);
+                try StringRuntime.emitWriteStatic(allocator, &words, &data_fixups, platform, program, prefix, 2);
+                try StringRuntime.emitPrint(allocator, &words, &data_fixups, platform, program, 1, 2, true);
                 try words.append(allocator, moveWideZero32(.x0, 1));
                 try emitStackAdjustment(allocator, &words, 16, true);
-                try words.append(allocator, restoreFrame());
-                try words.append(allocator, returnInstruction());
+                try emitMainReturn(allocator, &words, platform, standalone);
                 try patch19(words.items, result_success, words.items.len);
                 try emitStackAdjustment(allocator, &words, 16, true);
             }
             try words.append(allocator, moveWideZero32(.x0, 0));
-            try words.append(allocator, restoreFrame());
-            try words.append(allocator, returnInstruction());
+            try emitMainReturn(allocator, &words, platform, standalone);
             break :entry offset;
         },
     };
     var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
-        const runtime = try FloatRuntime.payload();
-        try appendRuntimePadding(allocator, words.items.len, &runtime_bytes, runtime.page_offset);
-        const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
-        const formatter_target = (runtime_start + runtime.entry_offset) / 4;
-        for (float_calls.items) |at| try patch26(words.items, at, formatter_target);
-        try appendRuntimeAddressSites(allocator, runtime_start, runtime, &address_sites);
-        try runtime_bytes.appendSlice(allocator, runtime.bytes);
+        if (platform == .linux) {
+            var runtime = try FloatRuntime.linuxPayload(allocator);
+            defer runtime.deinit(allocator);
+            try appendFloatRuntime(allocator, words.items.len, &runtime_bytes, &float_calls, runtime, &address_sites, words.items);
+        } else {
+            const runtime = try FloatRuntime.payload();
+            try appendFloatRuntime(allocator, words.items.len, &runtime_bytes, &float_calls, runtime, &address_sites, words.items);
+        }
     }
     if (deep_copy_calls.items.len != 0) {
-        const runtime = try DeepCopyRuntime.payload();
-        try appendRuntimePadding(allocator, words.items.len, &runtime_bytes, runtime.page_offset);
-        const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
-        const target = (runtime_start + runtime.entry_offset) / 4;
-        for (deep_copy_calls.items) |fixup| try patch26(words.items, fixup.call_at, target);
-        try appendRuntimeAddressSites(allocator, runtime_start, runtime, &address_sites);
-        try runtime_bytes.appendSlice(allocator, runtime.bytes);
+        if (platform == .linux) {
+            var runtime = try DeepCopyRuntime.linuxPayload(allocator);
+            defer runtime.deinit(allocator);
+            try appendDeepCopyRuntime(allocator, words.items.len, &runtime_bytes, &deep_copy_calls, runtime, &address_sites, words.items);
+        } else {
+            const runtime = try DeepCopyRuntime.payload();
+            try appendDeepCopyRuntime(allocator, words.items.len, &runtime_bytes, &deep_copy_calls, runtime, &address_sites, words.items);
+        }
     }
     if (cycle_calls.items.len != 0) {
-        const runtime = try CycleRuntime.payload();
-        try appendRuntimePadding(allocator, words.items.len, &runtime_bytes, runtime.page_offset);
-        const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
-        const target = (runtime_start + runtime.entry_offset) / 4;
-        for (cycle_calls.items) |fixup| try patch26(words.items, fixup.call_at, target);
-        try appendRuntimeAddressSites(allocator, runtime_start, runtime, &address_sites);
-        try runtime_bytes.appendSlice(allocator, runtime.bytes);
+        if (platform == .linux) {
+            var runtime = try CycleRuntime.linuxPayload(allocator);
+            defer runtime.deinit(allocator);
+            try appendCycleRuntime(allocator, words.items.len, &runtime_bytes, &cycle_calls, runtime, &address_sites, words.items);
+        } else {
+            const runtime = try CycleRuntime.payload();
+            try appendCycleRuntime(allocator, words.items.len, &runtime_bytes, &cycle_calls, runtime, &address_sites, words.items);
+        }
     }
 
     for (calls.items) |call| {
@@ -380,6 +390,21 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     };
 }
 
+fn emitMainReturn(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    platform: Platform,
+    standalone: bool,
+) Error!void {
+    if (standalone) {
+        if (platform != .linux) return error.InvalidMachineProgram;
+        try System.emitUnixCall(allocator, words, platform, 93);
+        return;
+    }
+    try words.append(allocator, restoreFrame());
+    try words.append(allocator, returnInstruction());
+}
+
 fn appendRuntimePadding(
     allocator: Allocator,
     word_count: usize,
@@ -392,12 +417,70 @@ fn appendRuntimePadding(
     try runtime_bytes.appendNTimes(allocator, 0, padding);
 }
 
+fn appendFloatRuntime(
+    allocator: Allocator,
+    word_count: usize,
+    runtime_bytes: *std.ArrayList(u8),
+    calls: *const std.ArrayList(usize),
+    runtime: anytype,
+    address_sites: *std.ArrayList(AddressSite),
+    words: []u32,
+) Error!void {
+    try appendRuntimePadding(allocator, word_count, runtime_bytes, @intCast(runtime.page_offset));
+    const runtime_start = word_count * 4 + runtime_bytes.items.len;
+    const target = (runtime_start + runtime.entry_offset) / 4;
+    for (calls.items) |at| try patch26(words, at, target);
+    try appendRuntimeAddressSites(allocator, runtime_start, runtime, address_sites);
+    try runtime_bytes.appendSlice(allocator, runtime.bytes);
+}
+
+fn appendDeepCopyRuntime(
+    allocator: Allocator,
+    word_count: usize,
+    runtime_bytes: *std.ArrayList(u8),
+    calls: *const std.ArrayList(DeepCopyFixup),
+    runtime: anytype,
+    address_sites: *std.ArrayList(AddressSite),
+    words: []u32,
+) Error!void {
+    try appendRuntimePadding(allocator, word_count, runtime_bytes, @intCast(runtime.page_offset));
+    const runtime_start = word_count * 4 + runtime_bytes.items.len;
+    const target = (runtime_start + runtime.entry_offset) / 4;
+    for (calls.items) |fixup| try patch26(words, fixup.call_at, target);
+    try appendRuntimeAddressSites(allocator, runtime_start, runtime, address_sites);
+    try runtime_bytes.appendSlice(allocator, runtime.bytes);
+}
+
+fn appendCycleRuntime(
+    allocator: Allocator,
+    word_count: usize,
+    runtime_bytes: *std.ArrayList(u8),
+    calls: *const std.ArrayList(CycleFixup),
+    runtime: anytype,
+    address_sites: *std.ArrayList(AddressSite),
+    words: []u32,
+) Error!void {
+    try appendRuntimePadding(allocator, word_count, runtime_bytes, @intCast(runtime.page_offset));
+    const runtime_start = word_count * 4 + runtime_bytes.items.len;
+    const target = (runtime_start + runtime.entry_offset) / 4;
+    for (calls.items) |fixup| try patch26(words, fixup.call_at, target);
+    try appendRuntimeAddressSites(allocator, runtime_start, runtime, address_sites);
+    try runtime_bytes.appendSlice(allocator, runtime.bytes);
+}
+
 fn appendRuntimeAddressSites(
     allocator: Allocator,
     runtime_start: usize,
     runtime: anytype,
     sites: *std.ArrayList(AddressSite),
 ) Error!void {
+    // ELF payloads retain every PT_LOAD segment at its original relative
+    // virtual offset. appendRuntimePadding preserves their page congruence,
+    // so linked ADRP sequences remain valid without being decoded or exposed
+    // as relocations in the enclosing Silex image.
+    if (comptime @hasField(@TypeOf(runtime), "preserves_page_layout")) {
+        if (runtime.preserves_page_layout) return;
+    }
     var offset: usize = 0;
     while (offset + 8 <= runtime.text_size) : (offset += 4) {
         const page = std.mem.readInt(u32, runtime.bytes[offset..][0..4], .little);
@@ -710,7 +793,7 @@ fn encodeFunction(
                 data_fixups,
                 &fixups.epilogue,
                 external_call_sites,
-                @enumFromInt(@intFromEnum(platform)),
+                platform,
                 program,
                 constant,
             ),
@@ -999,6 +1082,7 @@ fn encodeFunction(
                 external_call_sites,
                 switch (platform) {
                     .darwin => .darwin,
+                    .linux => .linux,
                     .windows => .windows,
                 },
                 initialization,
@@ -1021,7 +1105,7 @@ fn encodeFunction(
                 const cycle_prepare = words.items.len;
                 var cycle_unavailable: ?usize = null;
                 var cycle_claimed: ?usize = null;
-                if (platform == .darwin and enable_cycle_collector) {
+                if (platform != .windows and enable_cycle_collector) {
                     try words.append(allocator, loadStack(.x10, drop.operand));
                     try words.append(allocator, load64(.x9, .x10, 3 * Machine.slot_size));
                     cycle_claimed = words.items.len;
@@ -1034,6 +1118,7 @@ fn encodeFunction(
                     const call_at = words.items.len;
                     try words.append(allocator, branchLink());
                     try cycle_calls.append(allocator, .{ .call_at = call_at, .data_at = data_at });
+                    try words.append(allocator, moveWideZero32(.x8, 0));
                     cycle_unavailable = words.items.len;
                     try words.append(allocator, compareBranchZero64(.x0));
                     try words.append(allocator, storeStack(.x0, cycle_context_slot));
@@ -1060,14 +1145,14 @@ fn encodeFunction(
                     }
                     try words.append(allocator, loadStack(.x0, drop.operand));
                     try emitImmediate64(allocator, words, .x1, plan.byte_count);
-                    try Allocation.emitFree(allocator, words, external_call_sites, @enumFromInt(@intFromEnum(platform)));
+                    try Allocation.emitFree(allocator, words, external_call_sites, platform);
                     try finalized.append(allocator, words.items.len);
                     try words.append(allocator, branch());
                     try Fixups.patch19(words.items, skip, words.items.len);
                 }
                 const finalization_complete = words.items.len;
                 for (finalized.items) |at| try Fixups.patch26(words.items, at, finalization_complete);
-                if (platform == .darwin and enable_cycle_collector) {
+                if (platform != .windows and enable_cycle_collector) {
                     try words.append(allocator, loadStack(.x1, cycle_context_slot));
                     const no_context = words.items.len;
                     try words.append(allocator, compareBranchZero64(.x1));
@@ -1077,6 +1162,7 @@ fn encodeFunction(
                     const finish_call = words.items.len;
                     try words.append(allocator, branchLink());
                     try cycle_calls.append(allocator, .{ .call_at = finish_call });
+                    try words.append(allocator, moveWideZero32(.x8, 0));
                     try Fixups.patch19(words.items, no_context, words.items.len);
                 }
                 const done = words.items.len;
@@ -1097,6 +1183,7 @@ fn encodeFunction(
                 external_call_sites,
                 switch (platform) {
                     .darwin => .darwin,
+                    .linux => .linux,
                     .windows => .windows,
                 },
                 drop,
@@ -1106,10 +1193,10 @@ fn encodeFunction(
                 allocator,
                 words,
                 external_call_sites,
-                @enumFromInt(@intFromEnum(platform)),
+                platform,
                 drop,
             ),
-            .list_init => |initialization| try ListRuntime.emitInit(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), initialization),
+            .list_init => |initialization| try ListRuntime.emitInit(allocator, words, &fixups.epilogue, external_call_sites, platform, initialization),
             .enum_init => |initialization| {
                 try emitImmediate64(allocator, words, .x9, initialization.tag);
                 for (0..initialization.result.width) |index| {
@@ -1166,26 +1253,28 @@ fn encodeFunction(
                         words,
                         data_fixups,
                         &fixups.epilogue,
+                        platform,
                         program,
                         function,
                         access,
                         eagerCollectionWidth(function, instruction_index, access),
                     )
                 else
-                    try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access)
+                    try encodeCollectionLoad(allocator, words, data_fixups, &fixups, platform, program, access)
             else if (access.dynamic)
                 try ListRuntime.emitLoad(
                     allocator,
                     words,
                     data_fixups,
                     &fixups.epilogue,
+                    platform,
                     program,
                     function,
                     access,
                     eagerCollectionWidth(function, instruction_index, access),
                 )
             else
-                try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access),
+                try encodeCollectionLoad(allocator, words, data_fixups, &fixups, platform, program, access),
             .collection_reference => |access| if (access.dynamic)
                 try ListRuntime.emitReference(
                     allocator,
@@ -1193,27 +1282,28 @@ fn encodeFunction(
                     data_fixups,
                     &fixups.epilogue,
                     external_call_sites,
-                    @enumFromInt(@intFromEnum(platform)),
+                    platform,
                     program,
                     access,
                 )
             else
-                try encodeCollectionReference(allocator, words, data_fixups, &fixups, program, access),
+                try encodeCollectionReference(allocator, words, data_fixups, &fixups, platform, program, access),
             .collection_replace => |replacement| if (replacement.dynamic)
-                try ListRuntime.emitReplace(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement)
+                try ListRuntime.emitReplace(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, platform, program, replacement)
             else
-                try encodeCollectionReplace(allocator, words, data_fixups, &fixups, program, replacement),
+                try encodeCollectionReplace(allocator, words, data_fixups, &fixups, platform, program, replacement),
             .collection_count => |count| if (!viewCountFeedsNextComparison(function, instruction_index, count))
                 try ListRuntime.emitCount(allocator, words, function, count),
-            .list_edit => |edit| try ListRuntime.emitEdit(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, edit),
-            .collection_slice => |slice| try ListRuntime.emitSlice(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), slice),
-            .collection_view => |view| try ListRuntime.emitView(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), view),
+            .list_edit => |edit| try ListRuntime.emitEdit(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, platform, program, edit),
+            .collection_slice => |slice| try ListRuntime.emitSlice(allocator, words, &fixups.epilogue, external_call_sites, platform, slice),
+            .collection_view => |view| try ListRuntime.emitView(allocator, words, &fixups.epilogue, external_call_sites, platform, view),
             .aggregate_equal => |comparison| try encodeAggregateEqual(allocator, words, &fixups, comparison),
             .convert => |conversion| try encodeConversion(
                 allocator,
                 words,
                 &fixups,
                 data_fixups,
+                platform,
                 program,
                 function,
                 conversion,
@@ -1224,9 +1314,11 @@ fn encodeFunction(
                 float_calls,
                 data_fixups,
                 &fixups.epilogue,
+                external_call_sites,
+                platform,
                 format,
             ),
-            .string_concat => |concat| try StringRuntime.emitConcat(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), concat),
+            .string_concat => |concat| try StringRuntime.emitConcat(allocator, words, &fixups.epilogue, external_call_sites, platform, concat),
             .string_count => |count| try StringRuntime.emitCount(allocator, words, count),
             .string_byte_count => |count| try StringRuntime.emitByteCount(allocator, words, count),
             .string_byte_at => |access| {
@@ -1242,7 +1334,7 @@ fn encodeFunction(
                 words,
                 &fixups.epilogue,
                 external_call_sites,
-                @enumFromInt(@intFromEnum(platform)),
+                platform,
                 conversion,
             ),
             .unary => |unary| {
@@ -1391,40 +1483,41 @@ fn encodeFunction(
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
-            .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, program, function, call),
+            .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, platform, program, function, call),
             .external_indirect_call => |call| try ExternalCalls.emitIndirect(allocator, words, function, call),
             .mutex_lock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, false),
             .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, function, call),
             .print => |value| switch (value.kind) {
-                .signed_integer => try emitPrintInteger(allocator, words, value.value, 1, value.newline),
-                .unsigned_integer => try emitPrintUnsigned(allocator, words, value.value, value.newline),
+                .signed_integer => try emitPrintInteger(allocator, words, platform, value.value, 1, value.newline),
+                .unsigned_integer => try emitPrintUnsigned(allocator, words, platform, value.value, value.newline),
                 .float32, .float64 => try emitPrintFloat(
                     allocator,
                     words,
                     float_calls,
                     data_fixups,
+                    platform,
                     program,
                     value.value,
                     value.kind == .float64,
                     value.newline,
                 ),
-                .boolean => try emitPrintBoolean(allocator, words, data_fixups, program, value.value, value.newline),
-                .string => try StringRuntime.emitPrint(allocator, words, data_fixups, program, value.value, 1, value.newline),
+                .boolean => try emitPrintBoolean(allocator, words, data_fixups, platform, program, value.value, value.newline),
+                .string => try StringRuntime.emitPrint(allocator, words, data_fixups, platform, program, value.value, 1, value.newline),
             },
             .assert => |assertion| {
                 try words.append(allocator, loadStack(.x9, assertion.condition));
                 const passed = words.items.len;
                 try words.append(allocator, compareBranchNonZero(.x9));
-                try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, assertion.header, 2);
-                try StringRuntime.emitPrint(allocator, words, data_fixups, program, assertion.message, 2, true);
+                try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, assertion.header, 2);
+                try StringRuntime.emitPrint(allocator, words, data_fixups, platform, program, assertion.message, 2, true);
                 try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
                 try patch19(words.items, passed, words.items.len);
             },
             .panic => |panic_value| {
-                try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, panic_value.header, 2);
-                try StringRuntime.emitPrint(allocator, words, data_fixups, program, panic_value.message, 2, true);
+                try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, panic_value.header, 2);
+                try StringRuntime.emitPrint(allocator, words, data_fixups, platform, program, panic_value.message, 2, true);
                 try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
             },
@@ -1799,6 +1892,49 @@ fn emitMutexOperation(
             if (lock) .enter_critical_section else .leave_critical_section,
         );
     }
+    if (platform == .linux) {
+        try System.emitUnixCall(allocator, words, platform, 178); // gettid
+        try words.append(allocator, moveRegister(.x12, .x0));
+        try data_fixups.append(allocator, .{ .at = words.items.len, .global = global });
+        try appendRelocatableAddress(allocator, words, .x11);
+        try words.append(allocator, load64(.x9, .x11, 0));
+        try words.append(allocator, compareRegisters(.x9, .x12));
+        if (lock) {
+            const recursive = words.items.len;
+            try words.append(allocator, conditionalBranch(.equal));
+            const retry = words.items.len;
+            try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x11));
+            const occupied = words.items.len;
+            try words.append(allocator, compareBranchNonZero64(.x9));
+            try words.append(allocator, A64.storeReleaseExclusive64(.x10, .x12, .x11));
+            const conflicted = words.items.len;
+            try words.append(allocator, compareBranchNonZero(.x10));
+            try words.append(allocator, moveWideZero64(.x9, 1, 0));
+            try words.append(allocator, store64(.x9, .x11, Machine.slot_size));
+            const finished = words.items.len;
+            try words.append(allocator, branch());
+            const recursive_target = words.items.len;
+            try words.append(allocator, load64(.x9, .x11, Machine.slot_size));
+            try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, true));
+            try words.append(allocator, store64(.x9, .x11, Machine.slot_size));
+            try Fixups.patch19(words.items, recursive, recursive_target);
+            try Fixups.patch19(words.items, occupied, retry);
+            try Fixups.patch19(words.items, conflicted, retry);
+            try Fixups.patch26(words.items, finished, words.items.len);
+        } else {
+            const not_owner = words.items.len;
+            try words.append(allocator, conditionalBranch(.not_equal));
+            try words.append(allocator, load64(.x9, .x11, Machine.slot_size));
+            try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, false));
+            try words.append(allocator, store64(.x9, .x11, Machine.slot_size));
+            const still_owned = words.items.len;
+            try words.append(allocator, compareBranchNonZero64(.x9));
+            try words.append(allocator, A64.storeRelease64(.zero_or_sp, .x11));
+            try Fixups.patch19(words.items, not_owner, words.items.len);
+            try Fixups.patch19(words.items, still_owned, words.items.len);
+        }
+        return;
+    }
     const function_id = if (lock)
         program.mutex_lock_function orelse return error.InvalidMachineProgram
     else
@@ -2096,6 +2232,7 @@ fn encodeCollectionLoad(
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(DataFixup),
     function_fixups: *FunctionFixups,
+    platform: Platform,
     program: Machine.Program,
     access: Machine.Instruction.CollectionLoad,
 ) Error!void {
@@ -2125,9 +2262,9 @@ fn encodeCollectionLoad(
     const failure = words.items.len;
     try patch19(words.items, bounds.negative, failure);
     try patch19(words.items, bounds.upper, failure);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.header, 2);
-    try emitPrintInteger(allocator, words, access.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.tail, 2);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, access.header, 2);
+    try emitPrintInteger(allocator, words, platform, access.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, access.tail, 2);
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
     try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
     try patch26(words.items, complete, words.items.len);
@@ -2138,6 +2275,7 @@ fn encodeCollectionReference(
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(DataFixup),
     function_fixups: *FunctionFixups,
+    platform: Platform,
     program: Machine.Program,
     access: Machine.Instruction.CollectionReference,
 ) Error!void {
@@ -2152,9 +2290,9 @@ fn encodeCollectionReference(
     const failure = words.items.len;
     try patch19(words.items, bounds.negative, failure);
     try patch19(words.items, bounds.upper, failure);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.header, 2);
-    try emitPrintInteger(allocator, words, access.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.tail, 2);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, access.header, 2);
+    try emitPrintInteger(allocator, words, platform, access.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, access.tail, 2);
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
     try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
     try patch26(words.items, complete, words.items.len);
@@ -2165,6 +2303,7 @@ fn encodeCollectionReplace(
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(DataFixup),
     function_fixups: *FunctionFixups,
+    platform: Platform,
     program: Machine.Program,
     replacement: Machine.Instruction.CollectionReplace,
 ) Error!void {
@@ -2184,9 +2323,9 @@ fn encodeCollectionReplace(
     const failure = words.items.len;
     try patch19(words.items, bounds.negative, failure);
     try patch19(words.items, bounds.upper, failure);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, replacement.header, 2);
-    try emitPrintInteger(allocator, words, replacement.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, replacement.tail, 2);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, replacement.header, 2);
+    try emitPrintInteger(allocator, words, platform, replacement.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, replacement.tail, 2);
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
     try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
     try patch26(words.items, complete, words.items.len);
@@ -3156,6 +3295,7 @@ fn encodeConversion(
     words: *std.ArrayList(u32),
     fixups: *FunctionFixups,
     data_fixups: *std.ArrayList(DataFixup),
+    platform: Platform,
     program: Machine.Program,
     function: Machine.Function,
     conversion: Machine.Instruction.Convert,
@@ -3168,7 +3308,7 @@ fn encodeConversion(
         if (conversion.checked) {
             try words.append(allocator, floatToInteger(.x11, result, conversion.source.isSignedInteger(), double));
             try words.append(allocator, compareRegisters(operand, .x11));
-            try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .equal);
+            try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .equal);
         }
         if (floatResultRegister(function, conversion.result) == null) {
             try storeFloatValue(allocator, words, function, result, conversion.result, double);
@@ -3189,6 +3329,7 @@ fn encodeConversion(
             words,
             fixups,
             data_fixups,
+            platform,
             program,
             conversion,
             double,
@@ -3196,12 +3337,13 @@ fn encodeConversion(
         try words.append(allocator, floatToInteger(result, .x9, conversion.target.isSignedInteger(), double));
         try words.append(allocator, integerToFloat(.x11, result, conversion.target.isSignedInteger(), double));
         try words.append(allocator, floatCompare(.x9, .x11, double));
-        try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .equal);
+        try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .equal);
         try emitConvertedIntegerRangeChecks(
             allocator,
             words,
             fixups,
             data_fixups,
+            platform,
             program,
             conversion,
             result,
@@ -3219,7 +3361,7 @@ fn encodeConversion(
         if (conversion.checked and source_double and !target_double) {
             try words.append(allocator, floatConvert(.x11, result, true));
             try words.append(allocator, floatCompare(.x9, .x11, true));
-            try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .equal);
+            try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .equal);
         }
         if (floatResultRegister(function, conversion.result) == null) {
             try storeFloatValue(allocator, words, function, result, conversion.result, target_double);
@@ -3232,7 +3374,7 @@ fn encodeConversion(
             if (conversion.source.isSignedInteger()) {
                 try emitImmediate64(allocator, words, .x10, @bitCast(Numeric.integerMin(conversion.target)));
                 try words.append(allocator, compareRegisters(.x9, .x10));
-                try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .greater_equal);
+                try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .greater_equal);
             }
             try emitImmediate64(allocator, words, .x10, Numeric.integerMax(conversion.target));
             try words.append(allocator, compareRegisters(.x9, .x10));
@@ -3241,6 +3383,7 @@ fn encodeConversion(
                 words,
                 fixups,
                 data_fixups,
+                platform,
                 program,
                 conversion.header,
                 if (conversion.source.isSignedInteger()) .less_equal else .lower_or_same,
@@ -3248,11 +3391,11 @@ fn encodeConversion(
         } else {
             if (conversion.source.isSignedInteger()) {
                 try words.append(allocator, compareRegisters(.x9, .zero_or_sp));
-                try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .greater_equal);
+                try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .greater_equal);
             }
             try emitImmediate64(allocator, words, .x10, Numeric.integerMax(conversion.target));
             try words.append(allocator, compareRegisters(.x9, .x10));
-            try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .lower_or_same);
+            try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .lower_or_same);
         }
     }
     if (conversion.target.isSignedInteger() and conversion.target.bitWidth() < 64) {
@@ -3269,6 +3412,7 @@ fn emitFloatToIntegerRangeGuards(
     words: *std.ArrayList(u32),
     fixups: *FunctionFixups,
     data_fixups: *std.ArrayList(DataFixup),
+    platform: Platform,
     program: Machine.Program,
     conversion: Machine.Instruction.Convert,
     double: bool,
@@ -3284,11 +3428,11 @@ fn emitFloatToIntegerRangeGuards(
     try emitImmediate64(allocator, words, .x12, floatBits(lower, double));
     try words.append(allocator, moveGeneralToFloat(.x12, .x12, double));
     try words.append(allocator, floatCompare(.x9, .x12, double));
-    try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .greater_equal);
+    try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .greater_equal);
     try emitImmediate64(allocator, words, .x12, floatBits(upper, double));
     try words.append(allocator, moveGeneralToFloat(.x12, .x12, double));
     try words.append(allocator, floatCompare(.x9, .x12, double));
-    try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .minus);
+    try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .minus);
 }
 
 fn floatBits(value: f64, double: bool) u64 {
@@ -3300,6 +3444,7 @@ fn emitConvertedIntegerRangeChecks(
     words: *std.ArrayList(u32),
     fixups: *FunctionFixups,
     data_fixups: *std.ArrayList(DataFixup),
+    platform: Platform,
     program: Machine.Program,
     conversion: Machine.Instruction.Convert,
     register: Register,
@@ -3307,14 +3452,14 @@ fn emitConvertedIntegerRangeChecks(
     if (conversion.target.isSignedInteger()) {
         try emitImmediate64(allocator, words, .x12, @bitCast(Numeric.integerMin(conversion.target)));
         try words.append(allocator, compareRegisters(register, .x12));
-        try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .greater_equal);
+        try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .greater_equal);
         try emitImmediate64(allocator, words, .x12, Numeric.integerMax(conversion.target));
         try words.append(allocator, compareRegisters(register, .x12));
-        try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .less_equal);
+        try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .less_equal);
     } else if (conversion.target.bitWidth() < 64) {
         try emitImmediate64(allocator, words, .x12, Numeric.integerMax(conversion.target));
         try words.append(allocator, compareRegisters(register, .x12));
-        try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .lower_or_same);
+        try emitConversionGuard(allocator, words, fixups, data_fixups, platform, program, conversion.header, .lower_or_same);
     }
 }
 
@@ -3323,13 +3468,14 @@ fn emitConversionGuard(
     words: *std.ArrayList(u32),
     fixups: *FunctionFixups,
     data_fixups: *std.ArrayList(DataFixup),
+    platform: Platform,
     program: Machine.Program,
     header: usize,
     valid: Condition,
 ) Error!void {
     const passed = words.items.len;
     try words.append(allocator, conditionalBranch(valid));
-    try emitWriteStatic(allocator, words, data_fixups, program, header, 2);
+    try emitWriteStatic(allocator, words, data_fixups, platform, program, header, 2);
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
     try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
     try patch19(words.items, passed, words.items.len);
@@ -3373,6 +3519,7 @@ fn emitPrintBoolean(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(DataFixup),
+    platform: Platform,
     program: Machine.Program,
     slot: Machine.Slot,
     newline: bool,
@@ -3380,24 +3527,25 @@ fn emitPrintBoolean(
     try words.append(allocator, loadStack(.x9, slot));
     const use_false = words.items.len;
     try words.append(allocator, compareBranchZero(.x9));
-    try emitWriteStatic(allocator, words, data_fixups, program, 1, 1);
+    try emitWriteStatic(allocator, words, data_fixups, platform, program, 1, 1);
     const finished = words.items.len;
     try words.append(allocator, branch());
     try patch19(words.items, use_false, words.items.len);
-    try emitWriteStatic(allocator, words, data_fixups, program, 2, 1);
+    try emitWriteStatic(allocator, words, data_fixups, platform, program, 2, 1);
     try patch26(words.items, finished, words.items.len);
-    if (newline) try emitWriteStatic(allocator, words, data_fixups, program, 0, 1);
+    if (newline) try emitWriteStatic(allocator, words, data_fixups, platform, program, 0, 1);
 }
 
 fn emitWriteStatic(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(DataFixup),
+    platform: Platform,
     program: Machine.Program,
     string_id: usize,
     descriptor: u16,
 ) Error!void {
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, string_id, descriptor);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, platform, program, string_id, descriptor);
 }
 
 fn emitPrintFloat(
@@ -3405,6 +3553,7 @@ fn emitPrintFloat(
     words: *std.ArrayList(u32),
     float_calls: *std.ArrayList(usize),
     data_fixups: *std.ArrayList(DataFixup),
+    platform: Platform,
     program: Machine.Program,
     slot: Machine.Slot,
     double: bool,
@@ -3417,18 +3566,19 @@ fn emitPrintFloat(
     try words.append(allocator, moveWideZero32(.x2, @intFromBool(double)));
     try float_calls.append(allocator, words.items.len);
     try words.append(allocator, branchLink());
+    try words.append(allocator, moveWideZero32(.x8, 0));
     try words.append(allocator, moveRegister(.x2, .x0));
     try words.append(allocator, moveWideZero32(.x0, 1));
     try words.append(allocator, addSubtractImmediate(.x1, .zero_or_sp, 0, true));
-    try words.append(allocator, moveWideZero32(.x16, 4));
-    try words.append(allocator, serviceCall());
+    try System.emitWrite(allocator, words, platform);
     try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, buffer_size, true));
-    if (newline) try emitWriteStatic(allocator, words, data_fixups, program, 0, 1);
+    if (newline) try emitWriteStatic(allocator, words, data_fixups, platform, program, 0, 1);
 }
 
 fn emitPrintInteger(
     allocator: Allocator,
     words: *std.ArrayList(u32),
+    platform: Platform,
     slot: Machine.Slot,
     descriptor: u16,
     newline: bool,
@@ -3489,14 +3639,14 @@ fn emitPrintInteger(
     try words.append(allocator, moveWideZero32(.x0, descriptor));
     try words.append(allocator, moveRegister(.x1, .x11));
     try words.append(allocator, moveRegister(.x2, .x12));
-    try words.append(allocator, moveWideZero32(.x16, 4));
-    try words.append(allocator, serviceCall());
+    try System.emitWrite(allocator, words, platform);
     try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
 }
 
 fn emitPrintUnsigned(
     allocator: Allocator,
     words: *std.ArrayList(u32),
+    platform: Platform,
     slot: Machine.Slot,
     newline: bool,
 ) Error!void {
@@ -3536,8 +3686,7 @@ fn emitPrintUnsigned(
     try words.append(allocator, moveWideZero32(.x0, 1));
     try words.append(allocator, moveRegister(.x1, .x11));
     try words.append(allocator, moveRegister(.x2, .x12));
-    try words.append(allocator, moveWideZero32(.x16, 4));
-    try words.append(allocator, serviceCall());
+    try System.emitWrite(allocator, words, platform);
     try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
 }
 

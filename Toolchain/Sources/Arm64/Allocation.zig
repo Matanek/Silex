@@ -1,16 +1,20 @@
 const std = @import("std");
 const A64 = @import("Instructions.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
+const System = @import("System.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 
 const Allocator = std.mem.Allocator;
-pub const Platform = enum { darwin, windows };
+pub const Platform = System.Platform;
 pub const Error = Allocator.Error;
 
 const macos_mmap = 197;
 const macos_munmap = 73;
 const protection_read_write = 3;
 const map_private_anonymous = 0x1002;
+const linux_mmap = 222;
+const linux_munmap = 215;
+const linux_map_private_anonymous = 0x22;
 
 pub fn emit(
     allocator: Allocator,
@@ -27,6 +31,15 @@ pub fn emit(
             try words.append(allocator, A64.moveWideZero32(.x5, 0));
             try words.append(allocator, A64.moveWideZero32(.x16, macos_mmap));
             try words.append(allocator, A64.serviceCall());
+        },
+        .linux => {
+            try words.append(allocator, A64.moveWideZero32(.x0, 0));
+            try words.append(allocator, A64.moveWideZero32(.x2, protection_read_write));
+            try words.append(allocator, A64.moveWideZero32(.x3, linux_map_private_anonymous));
+            try immediate(allocator, words, .x4, std.math.maxInt(u64));
+            try words.append(allocator, A64.moveWideZero32(.x5, 0));
+            try System.emitUnixCall(allocator, words, platform, linux_mmap);
+            try words.append(allocator, A64.compareRegisters(.x0, .zero_or_sp));
         },
         .windows => {
             try words.append(allocator, A64.moveWideZero32(.x0, 0));
@@ -47,6 +60,7 @@ pub fn emit(
 pub fn failureBranch(platform: Platform) u32 {
     return switch (platform) {
         .darwin => A64.conditionalBranch(.carry_set),
+        .linux => A64.conditionalBranch(.less),
         .windows => A64.compareBranchZero(.x0),
     };
 }
@@ -62,6 +76,7 @@ pub fn emitFree(
             try words.append(allocator, A64.moveWideZero32(.x16, macos_munmap));
             try words.append(allocator, A64.serviceCall());
         },
+        .linux => try System.emitUnixCall(allocator, words, platform, linux_munmap),
         .windows => {
             try words.append(allocator, A64.moveWideZero32(.x1, 0));
             try immediate(allocator, words, .x2, 0x8000);

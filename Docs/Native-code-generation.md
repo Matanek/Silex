@@ -16,7 +16,7 @@ claim that its native backend is implemented.
 | --- | --- | --- |
 | `macos-arm64` | ARM64 | verified and distributed |
 | `macos-x64` | X64 | recognized; Darwin ABI, Mach-O X64, runtime, and linking are not implemented |
-| `linux-arm64` | ARM64 | recognized; Linux AArch64 ABI, ELF AArch64, runtime, and linking are not implemented |
+| `linux-arm64` | ARM64 | implemented; native ARM64 workflow is the verification and distribution gate |
 | `linux-x64` | X64 | verified and distributed |
 | `windows-arm64` | ARM64 | emitted and structurally tested, but not verified or distributed |
 | `windows-x64` | X64 | verified and distributed |
@@ -55,7 +55,7 @@ an assembler or `codesign`.
 ## Link native package boundaries
 
 For a referenced package-private provider, the compiler writes a relocatable
-object for the selected target: ARM64 Mach-O, x64 ELF, or x64/ARM64 COFF. It
+object for the selected target: ARM64 Mach-O, x64/AArch64 ELF, or x64/ARM64 COFF. It
 then invokes the bootstrap linker with only the resolved package archives,
 declared Apple frameworks, and named system libraries. This path does not
 compile foreign sources and does not define a stable Silex object format or
@@ -82,6 +82,29 @@ until the differential corpus covers them.
 Mutable globals are currently appended to the bootstrap image, so its single
 load segment is temporarily executable and writable. A dedicated writable
 data segment is required before the X64 container is hardened.
+
+## Emit Linux ARM64 programs
+
+The Linux ARM64 backend shares the private ARM64 machine convention while
+owning a distinct AArch64 system boundary. Direct builds write an `EM_AARCH64`
+ELF64 executable; package Boundary builds write an AArch64 relocatable ELF
+object with `CALL26`, page, and low-page relocations before invoking the native
+Zig linker. Linux service calls use `x8` and `svc #0`, including output,
+mapping, unmapping, time, random seed, process identity, exit, and the internal
+recursive mutex.
+
+The float formatting, deep-copy, and cycle-collection runtimes are embedded as
+linked AArch64 ELF payloads. Their complete relative load-segment layout and
+page congruence are preserved inside the generated image, so their internal
+PC-relative references do not leak into the Silex machine IR or enclosing
+object format.
+
+`silex setup` installs the native AArch64 Zig linker on this host. Shadercross
+has no upstream native Linux ARM64 archive yet and is deliberately not replaced
+with an emulated X64 tool; full GFX support remains outside this backend slice.
+The `ubuntu-24.04-arm` portability job verifies the real host architecture,
+Debug and Release against the interpreter, the common native corpus, package
+Boundary calls and the clean-home setup path.
 
 ## Emit Windows programs
 

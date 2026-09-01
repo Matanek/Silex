@@ -18,6 +18,8 @@ pub fn executable(
 ) !void {
     const triple = if (target.eql(.linux_x64))
         "x86_64-linux-gnu"
+    else if (target.eql(.linux_arm64))
+        "aarch64-linux-gnu"
     else if (target.eql(.windows_x64))
         "x86_64-windows-gnu"
     else if (target.eql(.windows_arm64))
@@ -29,6 +31,13 @@ pub fn executable(
     if (target.eql(.linux_x64)) try arguments.appendSlice(allocator, &.{
         "-L/usr/lib/x86_64-linux-gnu",
         "-L/lib/x86_64-linux-gnu",
+        "-L/usr/lib64",
+        "-L/lib64",
+        "-L/usr/local/lib",
+    });
+    if (target.eql(.linux_arm64)) try arguments.appendSlice(allocator, &.{
+        "-L/usr/lib/aarch64-linux-gnu",
+        "-L/lib/aarch64-linux-gnu",
         "-L/usr/lib64",
         "-L/lib64",
         "-L/usr/local/lib",
