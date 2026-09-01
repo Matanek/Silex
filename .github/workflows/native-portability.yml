@@ -126,8 +126,51 @@ jobs:
             throw "standalone distribution smoke failed"
           }
 
+  windows-arm64-build:
+    if: inputs.target == 'all' || inputs.target == 'windows-arm64'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Cross-build the Windows ARM64 bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/windows-arm64-bootstrap"
+          mkdir -p "$stage/boundary"
+          zig build -Dtarget=aarch64-windows -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$stage/silex" \
+            --build-file Toolchain/build.zig
+          zig build-lib Fixtures/WindowsArm64BoundaryProbe/Provider.zig \
+            -O ReleaseSmall \
+            -target aarch64-windows \
+            -femit-bin="$stage/boundary/BoundaryProbe.lib"
+          test "$(od -An -tx2 -N2 "$stage/boundary/BoundaryProbe.lib" | tr -d ' ')" = "aa64"
+
+      - name: Transfer the Windows ARM64 bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-bootstrap
+          path: ${{ runner.temp }}/windows-arm64-bootstrap
+          retention-days: 1
+          if-no-files-found: error
+
   windows-arm64:
     if: inputs.target == 'all' || inputs.target == 'windows-arm64'
+    needs: windows-arm64-build
     runs-on: windows-11-arm
     timeout-minutes: 30
 
@@ -135,18 +178,11 @@ jobs:
       - name: Check out Silex
         uses: actions/checkout@v6
 
-      - name: Install Windows X64 bootstrap Zig 0.16.0
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $archive = Join-Path $env:RUNNER_TEMP "zig-x86_64-windows.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $archive
-          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e") {
-            throw "Zig X64 archive checksum mismatch"
-          }
-          Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
-          Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig-x86_64-windows-0.16.0")
+      - name: Download the Windows ARM64 bootstrap
+        uses: actions/download-artifact@v5
+        with:
+          name: windows-arm64-bootstrap
+          path: ${{ runner.temp }}/windows-arm64-bootstrap
 
       - name: Build and validate Silex natively on Windows ARM64
         shell: pwsh
@@ -187,17 +223,8 @@ jobs:
             throw "expected a native Windows ARM64 runner, got PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE OSArchitecture=$architecture"
           }
 
-          $bootstrapZig = (Get-Command zig).Source
-          $bootstrapMachine = Get-PeMachine $bootstrapZig
-          if ($bootstrapMachine -ne 0x8664) {
-            throw "expected the declared X64 bootstrap Zig, got machine 0x$($bootstrapMachine.ToString('x4'))"
-          }
-          & $bootstrapZig version
-
-          $buildPrefix = Join-Path $env:RUNNER_TEMP "silex-build"
-          & $bootstrapZig build -Dtarget=aarch64-windows -Doptimize=ReleaseFast -Dcpu=baseline `
-            --prefix $buildPrefix `
-            --build-file Toolchain/build.zig
+          $bootstrapRoot = Join-Path $env:RUNNER_TEMP "windows-arm64-bootstrap"
+          $buildPrefix = Join-Path $bootstrapRoot "silex"
           $builtSilex = Join-Path $buildPrefix "bin/silex.exe"
           Assert-Arm64Pe $builtSilex
 
@@ -205,9 +232,7 @@ jobs:
           $boundaryDirectory = Join-Path $probeRoot "Boundary/windows-arm64"
           $boundaryArchive = Join-Path $boundaryDirectory "BoundaryProbe.lib"
           New-Item -ItemType Directory -Force $boundaryDirectory | Out-Null
-          & $bootstrapZig build-lib (Join-Path $probeRoot "Provider.zig") -O ReleaseSmall `
-            -target aarch64-windows `
-            -femit-bin=$boundaryArchive
+          Copy-Item (Join-Path $bootstrapRoot "boundary/BoundaryProbe.lib") $boundaryArchive
           $coffMachine = [BitConverter]::ToUInt16([System.IO.File]::ReadAllBytes($boundaryArchive), 0)
           if ($coffMachine -ne 0xaa64) {
             throw "expected ARM64 COFF provider machine 0xaa64, got 0x$($coffMachine.ToString('x4'))"

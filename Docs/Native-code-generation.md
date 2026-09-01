@@ -97,13 +97,14 @@ Package-boundary builds use COFF objects, Win64 or Windows ARM64 C ABI calls,
 and the bootstrap linker with the selected archives and system libraries.
 The X64 bootstrap image likewise keeps its combined code/global section
 writable until PE emission gains a distinct data section. Windows X64 and
-Windows ARM64 are verified by the native portability workflow. The ARM64 job
-runs on the `windows-11-arm` host, checks the declared Windows X64 bootstrap
-tools under the system compatibility layer, then forces an `aarch64-windows`
-compiler build and checks PE/COFF machine `0xaa64`. It executes Debug and
-Release programs and links a package Boundary whose callback crosses the
-Windows ARM64 C ABI. Windows ARM64 does not become a distributed target until
-the release archive and installer are added by the distribution slice.
+Windows ARM64 are verified by the native portability workflow. A Linux X64
+support job cross-builds the ARM64 compiler and Boundary provider as an
+ephemeral workflow artifact. The `windows-11-arm` job checks their PE/COFF
+machine `0xaa64`, executes the compiler and every Debug and Release program
+natively, and verifies the declared Windows X64 setup tools under the system
+compatibility layer. The Boundary callback crosses the Windows ARM64 C ABI.
+Windows ARM64 does not become a distributed target until the release archive
+and installer are added by the distribution slice.
 
 ## Lower the built-in macOS boundary
 
