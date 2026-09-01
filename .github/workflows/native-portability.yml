@@ -296,20 +296,40 @@ jobs:
           $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
 
           $portabilitySource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx"
-          & $silex test $portabilitySource --nocache
           $portabilityDebug = Join-Path $env:RUNNER_TEMP "native-portability-debug.exe"
           $portabilityRelease = Join-Path $env:RUNNER_TEMP "native-portability-release.exe"
           & $silex compile $portabilitySource --debug --nocache -o $portabilityDebug
           & $silex compile $portabilitySource --release --nocache -o $portabilityRelease
           Assert-Arm64Pe $portabilityDebug
           Assert-Arm64Pe $portabilityRelease
+
+          # Keep a native debugger trace actionable when Windows terminates a
+          # generated executable with an NTSTATUS rather than a normal exit.
+          $PSNativeCommandUseErrorActionPreference = $false
           $debugOutput = @(& $portabilityDebug)
+          $debugExitCode = $LASTEXITCODE
+          if ($debugExitCode -ne 0) {
+            $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"
+            $cdb = Get-ChildItem $debuggersRoot -Filter cdb.exe -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '[\\/]arm64[\\/]' } |
+              Select-Object -First 1
+            if ($null -ne $cdb) {
+              Write-Output "debugging failed ARM64 executable with $($cdb.FullName)"
+              & $cdb.FullName -lines -c ".ecxr; r; kv; u @pc-20 L40; q" $portabilityDebug
+            } else {
+              Write-Output "ARM64 cdb.exe is unavailable under $debuggersRoot"
+            }
+            throw "Debug portability executable failed with exit code $debugExitCode"
+          }
+          $PSNativeCommandUseErrorActionPreference = $true
           $releaseOutput = @(& $portabilityRelease)
           Assert-PortabilityOutput $debugOutput "Debug"
           Assert-PortabilityOutput $releaseOutput "Release"
           if (@(Compare-Object $debugOutput $releaseOutput -SyncWindow 0).Count -ne 0) {
             throw "Debug and Release portability outputs differ"
           }
+
+          & $silex test $portabilitySource --nocache
 
           $smokeSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx"
           $debugSmoke = @(& $silex run $smokeSource --debug --nocache)
