@@ -4,6 +4,26 @@ Native lowering begins only after composition has produced portable typed IR.
 Each backend owns its machine convention, executable format, system boundary,
 and target-specific proof.
 
+## Close the native program
+
+Native compilation computes one transitive function closure before Release
+optimization or Debug lowering. An executable starts from its semantic `main`
+entry; a native test compilation starts from all selected test entries. Static
+initialization is already attached to those entries as typed calls.
+
+The closure follows direct calls, function references, every declared dynamic
+dispatch implementation, and class finalizers. An indirect call therefore
+retains the callback declarations whose function references can reach it. When
+semantic dispatch exposes several valid implementations, the closure keeps
+all of them rather than selecting a target speculatively.
+
+Retained functions preserve their original order. Their numeric identities and
+all embedded call, callback, dispatch, and finalizer identities are remapped as
+one deterministic operation. ARM64 and X64 consequently receive the same
+closed portable program; a backend cannot independently discard a different
+semantic slice. The complete typed IR remains available to diagnostics, the
+reference interpreter, and `--emit-ir`.
+
 ## Recognize targets
 
 Package composition recognizes `macos-arm64`, `linux-x64`, `windows-x64`,

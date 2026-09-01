@@ -1,7 +1,8 @@
 # Release optimization
 
-Release mode applies semantics-preserving transformations first to portable IR,
-then to the target's machine representation.
+After native program closure, Release mode applies semantics-preserving
+transformations first to the retained portable IR, then to the target's machine
+representation.
 
 ## Simplify portable IR
 

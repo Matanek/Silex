@@ -61,8 +61,11 @@ phase durations, and structural metrics. The native compilation pipeline is
 currently serial, so the reported worker count is one. Frontend subphases cover
 package resolution, module discovery and
 loading, composition, specialization, interface construction, and semantic
-analysis. Native phases cover cache validation, optimization, lowering,
-register allocation, emission, linking, output, and cache publication.
+analysis. Native phases cover cache validation, program closure, optimization,
+lowering, register allocation, emission, linking, output, and cache
+publication. The structural metrics report both the complete portable function
+count and the reachable portable function count presented to every native
+backend.
 
 `frontend_total` contains its frontend subphases, so phase values are not all
 additive. Every duration uses a monotonic clock. The compiler report deliberately
