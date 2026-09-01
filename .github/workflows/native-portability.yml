@@ -303,25 +303,21 @@ jobs:
           Assert-Arm64Pe $portabilityDebug
           Assert-Arm64Pe $portabilityRelease
 
-          # Keep a native debugger trace actionable when Windows terminates a
-          # generated executable with an NTSTATUS rather than a normal exit.
-          $PSNativeCommandUseErrorActionPreference = $false
-          $debugOutput = @(& $portabilityDebug)
-          $debugExitCode = $LASTEXITCODE
-          if ($debugExitCode -ne 0) {
-            $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"
-            $cdb = Get-ChildItem $debuggersRoot -Filter cdb.exe -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '[\\/]arm64[\\/]' } |
-              Select-Object -First 1
-            if ($null -ne $cdb) {
-              Write-Output "debugging failed ARM64 executable with $($cdb.FullName)"
-              & $cdb.FullName -lines -c ".ecxr; r; kv; u @pc-20 L40; q" $portabilityDebug
-            } else {
-              Write-Output "ARM64 cdb.exe is unavailable under $debuggersRoot"
-            }
-            throw "Debug portability executable failed with exit code $debugExitCode"
+          # Keep a native debugger trace actionable while diagnosing an
+          # NTSTATUS crash before PowerShell can truncate it to an exit byte.
+          $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"
+          $cdb = Get-ChildItem $debuggersRoot -Filter cdb.exe -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '[\\/]arm64[\\/]' } |
+            Select-Object -First 1
+          if ($null -eq $cdb) {
+            throw "ARM64 cdb.exe is unavailable under $debuggersRoot"
           }
-          $PSNativeCommandUseErrorActionPreference = $true
+          Write-Output "debugging ARM64 executable with $($cdb.FullName)"
+          $PSNativeCommandUseErrorActionPreference = $false
+          & $cdb.FullName -lines -c "g; .ecxr; !analyze -v; r; kv; ub @pc L10; u @pc L40; q" $portabilityDebug
+          throw "Windows ARM64 debugger trace completed"
+
+          $debugOutput = @(& $portabilityDebug)
           $releaseOutput = @(& $portabilityRelease)
           Assert-PortabilityOutput $debugOutput "Debug"
           Assert-PortabilityOutput $releaseOutput "Release"
