@@ -135,18 +135,18 @@ jobs:
       - name: Check out Silex
         uses: actions/checkout@v6
 
-      - name: Install native Zig 0.16.0
+      - name: Install Windows X64 bootstrap Zig 0.16.0
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $archive = Join-Path $env:RUNNER_TEMP "zig-aarch64-windows.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-aarch64-windows-0.16.0.zip -OutFile $archive
+          $archive = Join-Path $env:RUNNER_TEMP "zig-x86_64-windows.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $archive
           $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne "aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef") {
-            throw "Zig ARM64 archive checksum mismatch"
+          if ($actual -ne "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e") {
+            throw "Zig X64 archive checksum mismatch"
           }
           Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
-          Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig-aarch64-windows-0.16.0")
+          Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig-x86_64-windows-0.16.0")
 
       - name: Build and validate Silex natively on Windows ARM64
         shell: pwsh
@@ -187,8 +187,15 @@ jobs:
             throw "expected a native Windows ARM64 runner, got PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE OSArchitecture=$architecture"
           }
 
+          $bootstrapZig = (Get-Command zig).Source
+          $bootstrapMachine = Get-PeMachine $bootstrapZig
+          if ($bootstrapMachine -ne 0x8664) {
+            throw "expected the declared X64 bootstrap Zig, got machine 0x$($bootstrapMachine.ToString('x4'))"
+          }
+          & $bootstrapZig version
+
           $buildPrefix = Join-Path $env:RUNNER_TEMP "silex-build"
-          zig build -Doptimize=ReleaseFast -Dcpu=baseline `
+          & $bootstrapZig build -Dtarget=aarch64-windows -Doptimize=ReleaseFast -Dcpu=baseline `
             --prefix $buildPrefix `
             --build-file Toolchain/build.zig
           $builtSilex = Join-Path $buildPrefix "bin/silex.exe"
@@ -198,7 +205,7 @@ jobs:
           $boundaryDirectory = Join-Path $probeRoot "Boundary/windows-arm64"
           $boundaryArchive = Join-Path $boundaryDirectory "BoundaryProbe.lib"
           New-Item -ItemType Directory -Force $boundaryDirectory | Out-Null
-          zig build-lib (Join-Path $probeRoot "Provider.zig") -O ReleaseSmall `
+          & $bootstrapZig build-lib (Join-Path $probeRoot "Provider.zig") -O ReleaseSmall `
             -target aarch64-windows `
             -femit-bin=$boundaryArchive
           $coffMachine = [BitConverter]::ToUInt16([System.IO.File]::ReadAllBytes($boundaryArchive), 0)
@@ -225,9 +232,12 @@ jobs:
           }
           & $silex setup
 
-          $managedZig = Join-Path $env:USERPROFILE ".silex/toolchain/zig/0.16.0/windows-arm64/zig-aarch64-windows-0.16.0/zig.exe"
+          $managedZig = Join-Path $env:USERPROFILE ".silex/toolchain/zig/0.16.0/windows-x64/zig-x86_64-windows-0.16.0/zig.exe"
           $shadercross = Join-Path $env:USERPROFILE ".silex/toolchain/shadercross/3.0.0/windows-arm64/SDL3_shadercross-3.0.0-windows-VC-x64/bin/shadercross.exe"
-          Assert-Arm64Pe $managedZig
+          $managedZigMachine = Get-PeMachine $managedZig
+          if ($managedZigMachine -ne 0x8664) {
+            throw "expected the declared X64 managed linker, got machine 0x$($managedZigMachine.ToString('x4'))"
+          }
           $shaderMachine = Get-PeMachine $shadercross
           if ($shaderMachine -ne 0x8664) {
             throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"
