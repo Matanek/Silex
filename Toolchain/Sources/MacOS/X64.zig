@@ -28,6 +28,7 @@ pub fn emit(allocator: Allocator, image: Encoder.Image) Error![]u8 {
     const data_command_size: usize = if (has_data) @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64) else 0;
     const load_commands_size = @sizeOf(macho.segment_command_64) + text_command_size + data_command_size +
         @sizeOf(macho.segment_command_64) + dylinker_size + @sizeOf(macho.build_version_command) +
+        @sizeOf(macho.dyld_info_command) + @sizeOf(macho.symtab_command) + @sizeOf(macho.dysymtab_command) +
         @sizeOf(macho.entry_point_command) + @sizeOf(macho.linkedit_data_command);
     const text_size = text_offset + image.data_offset;
     const data_content_size = image.code.len - image.data_offset;
@@ -47,7 +48,7 @@ pub fn emit(allocator: Allocator, image: Encoder.Image) Error![]u8 {
         .cputype = macho.CPU_TYPE_X86_64,
         .cpusubtype = 3,
         .filetype = macho.MH_EXECUTE,
-        .ncmds = @intCast(7 + @as(usize, @intFromBool(has_data))),
+        .ncmds = @intCast(10 + @as(usize, @intFromBool(has_data))),
         .sizeofcmds = @intCast(load_commands_size),
         .flags = macho.MH_NOUNDEFS | macho.MH_DYLDLINK | macho.MH_TWOLEVEL | macho.MH_PIE,
         .reserved = 0,
@@ -164,6 +165,23 @@ pub fn emit(allocator: Allocator, image: Encoder.Image) Error![]u8 {
         .ntools = 0,
     };
     try appendStruct(allocator, &bytes, &build_version);
+    var dyld_info: macho.dyld_info_command = .{
+        .rebase_off = @intCast(linkedit_offset),
+        .bind_off = @intCast(linkedit_offset),
+        .weak_bind_off = @intCast(linkedit_offset),
+        .lazy_bind_off = @intCast(linkedit_offset),
+        .export_off = @intCast(linkedit_offset),
+    };
+    try appendStruct(allocator, &bytes, &dyld_info);
+    var symtab: macho.symtab_command = .{
+        .symoff = @intCast(linkedit_offset),
+        .stroff = @intCast(linkedit_offset),
+    };
+    try appendStruct(allocator, &bytes, &symtab);
+    var dysymtab: macho.dysymtab_command = .{
+        .locreloff = @intCast(linkedit_offset),
+    };
+    try appendStruct(allocator, &bytes, &dysymtab);
     var entry: macho.entry_point_command = .{
         .cmd = .MAIN,
         .cmdsize = @sizeOf(macho.entry_point_command),
@@ -220,4 +238,38 @@ test "emit builds a signed X64 Mach-O executable" {
     try std.testing.expectEqual(@as(u32, @bitCast(macho.CPU_TYPE_X86_64)), std.mem.readInt(u32, bytes[4..8], .little));
     try std.testing.expectEqual(@as(u32, macho.MH_EXECUTE), std.mem.readInt(u32, bytes[12..16], .little));
     try std.testing.expect(std.mem.indexOf(u8, bytes, "__LINKEDIT") != null);
+
+    var saw_empty_dyld_info = false;
+    var saw_empty_symtab = false;
+    var saw_empty_dysymtab = false;
+    const command_count = std.mem.readInt(u32, bytes[16..20], .little);
+    var command_offset: usize = @sizeOf(macho.mach_header_64);
+    for (0..command_count) |_| {
+        const command: macho.LC = @enumFromInt(std.mem.readInt(u32, bytes[command_offset..][0..4], .little));
+        const command_size = std.mem.readInt(u32, bytes[command_offset + 4 ..][0..4], .little);
+        if (command == .DYLD_INFO_ONLY) {
+            const rebase_offset = std.mem.readInt(u32, bytes[command_offset + 8 ..][0..4], .little);
+            saw_empty_dyld_info = command_size == @sizeOf(macho.dyld_info_command) and rebase_offset != 0;
+            inline for (0..5) |stream| {
+                const stream_offset = command_offset + 8 + stream * 8;
+                saw_empty_dyld_info = saw_empty_dyld_info and
+                    std.mem.readInt(u32, bytes[stream_offset..][0..4], .little) == rebase_offset and
+                    std.mem.readInt(u32, bytes[stream_offset + 4 ..][0..4], .little) == 0;
+            }
+        } else if (command == .SYMTAB) {
+            const symbol_offset = std.mem.readInt(u32, bytes[command_offset + 8 ..][0..4], .little);
+            saw_empty_symtab = command_size == @sizeOf(macho.symtab_command) and symbol_offset != 0 and
+                std.mem.readInt(u32, bytes[command_offset + 12 ..][0..4], .little) == 0 and
+                std.mem.readInt(u32, bytes[command_offset + 16 ..][0..4], .little) == symbol_offset and
+                std.mem.readInt(u32, bytes[command_offset + 20 ..][0..4], .little) == 0;
+        } else if (command == .DYSYMTAB) {
+            saw_empty_dysymtab = command_size == @sizeOf(macho.dysymtab_command) and
+                std.mem.readInt(u32, bytes[command_offset + 72 ..][0..4], .little) != 0 and
+                std.mem.readInt(u32, bytes[command_offset + 76 ..][0..4], .little) == 0;
+        }
+        command_offset += command_size;
+    }
+    try std.testing.expect(saw_empty_dyld_info);
+    try std.testing.expect(saw_empty_symtab);
+    try std.testing.expect(saw_empty_dysymtab);
 }
