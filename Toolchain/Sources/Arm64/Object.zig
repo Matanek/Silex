@@ -19,6 +19,16 @@ pub fn emitWindows(allocator: Allocator, program: Machine.Program) Error![]u8 {
     return emitWindowsImage(allocator, program, &image);
 }
 
+pub fn emitWindowsFunction(
+    allocator: Allocator,
+    program: Machine.Program,
+    function: Machine.FunctionId,
+) Error![]u8 {
+    var image = try Encoder.encodeWindows(allocator, program, .{ .test_function = function });
+    defer image.deinit(allocator);
+    return emitWindowsImage(allocator, program, &image);
+}
+
 fn emitWindowsImage(allocator: Allocator, program: Machine.Program, image: *Encoder.Image) Error![]u8 {
     const entry_offset = image.entry_offset orelse return error.InvalidImage;
     var external_names: std.ArrayList([]const u8) = .empty;
@@ -177,4 +187,21 @@ test "emit builds an ARM64 COFF object" {
 
     try std.testing.expectEqual(image_file_machine_arm64, std.mem.readInt(u16, bytes[0..2], .little));
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, bytes[2..4], .little));
+}
+
+test "emit exposes an ARM64 test entry as a COFF main symbol" {
+    const Frontend = @import("../Frontend.zig");
+    const Lower = @import("Lower.zig");
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compileTests("test \"answer\" { assert(40 + 2 == 42) }");
+    const machine = try Lower.lower(allocator, compilation.ir);
+    const bytes = try emitWindowsFunction(allocator, machine, 0);
+
+    try std.testing.expectEqual(image_file_machine_arm64, std.mem.readInt(u16, bytes[0..2], .little));
+    const symbol_offset = std.mem.readInt(u32, bytes[8..12], .little);
+    try std.testing.expectEqualStrings("main", std.mem.sliceTo(bytes[symbol_offset..][0..8], 0));
 }

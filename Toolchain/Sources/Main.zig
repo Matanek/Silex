@@ -747,7 +747,8 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
     };
     const packages_root = try globalPackagesRoot(allocator, init.environ_map);
     const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
-    const native_target = target.eql(.macos_arm64) or target.eql(.linux_x64) or target.eql(.windows_x64);
+    const native_target = target.eql(.macos_arm64) or target.eql(.linux_x64) or
+        target.eql(.windows_arm64) or target.eql(.windows_x64);
     var passed: usize = 0;
     var failed: usize = 0;
     var source_errors: usize = 0;

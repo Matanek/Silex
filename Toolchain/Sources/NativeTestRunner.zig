@@ -4,6 +4,7 @@ const CompilationCache = @import("CompilationCache.zig");
 const Ir = @import("Ir.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Machine = @import("Arm64/Machine.zig");
+const Arm64Object = @import("Arm64/Object.zig");
 const MachOObject = @import("MacOS/Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const NativeLink = @import("NativeLink.zig");
@@ -64,10 +65,7 @@ pub fn execute(
         .executable = executable,
     };
     const result = try executeAt(allocator, io, target, linker_path, program, function, executable, providers);
-    if (!reusable) switch (result.term) {
-        .exited => Io.Dir.cwd().deleteFile(io, executable) catch {},
-        else => {},
-    };
+    if (!reusable and !retainArtifact(result.term)) Io.Dir.cwd().deleteFile(io, executable) catch {};
     return .{ .result = result, .executable = executable };
 }
 
@@ -114,7 +112,26 @@ fn executeAt(
         try NativeLink.executable(allocator, io, linker_path, target, object_path, executable, providers);
         return run(allocator, io, executable);
     }
+    if (target.eql(.windows_arm64)) {
+        const object = try Arm64Object.emitWindowsFunction(allocator, program, function);
+        const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
+        defer Io.Dir.cwd().deleteFile(io, object_path) catch {};
+        {
+            const file = try Io.Dir.cwd().createFile(io, object_path, .{});
+            defer file.close(io);
+            try file.writeStreamingAll(io, object);
+        }
+        try NativeLink.executable(allocator, io, linker_path, target, object_path, executable, providers);
+        return run(allocator, io, executable);
+    }
     return error.UnsupportedTarget;
+}
+
+fn retainArtifact(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code != 0,
+        else => true,
+    };
 }
 
 fn run(allocator: Allocator, io: Io, executable: []const u8) !std.process.RunResult {
@@ -124,6 +141,12 @@ fn run(allocator: Allocator, io: Io, executable: []const u8) !std.process.RunRes
 fn exists(io: Io, path: []const u8) bool {
     _ = Io.Dir.cwd().statFile(io, path, .{}) catch return false;
     return true;
+}
+
+test "retain every abnormal native test artifact" {
+    try std.testing.expect(!retainArtifact(.{ .exited = 0 }));
+    try std.testing.expect(retainArtifact(.{ .exited = 1 }));
+    try std.testing.expect(retainArtifact(.{ .signal = @enumFromInt(11) }));
 }
 
 fn artifactPath(

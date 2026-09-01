@@ -18,7 +18,7 @@ claim that its native backend is implemented.
 | `macos-x64` | X64 | recognized; Darwin ABI, Mach-O X64, runtime, and linking are not implemented |
 | `linux-arm64` | ARM64 | recognized; Linux AArch64 ABI, ELF AArch64, runtime, and linking are not implemented |
 | `linux-x64` | X64 | verified and distributed |
-| `windows-arm64` | ARM64 | emitted and structurally tested, but not verified or distributed |
+| `windows-arm64` | ARM64 | verified by the native Windows ARM64 workflow; not distributed yet |
 | `windows-x64` | X64 | verified and distributed |
 
 The target model records machine, system ABI, object, executable, runtime, and
@@ -96,9 +96,13 @@ imported Win32/UCRT functions.
 Package-boundary builds use COFF objects, Win64 or Windows ARM64 C ABI calls,
 and the bootstrap linker with the selected archives and system libraries.
 The X64 bootstrap image likewise keeps its combined code/global section
-writable until PE emission gains a distinct data section. Windows X64 is
-verified by the native portability workflow; Windows ARM64 remains limited to
-structural emission tests.
+writable until PE emission gains a distinct data section. Windows X64 and
+Windows ARM64 are verified by the native portability workflow. The ARM64 job
+runs on the `windows-11-arm` host, builds the compiler with native Zig, checks
+PE/COFF machine `0xaa64`, executes Debug and Release programs and links a
+package Boundary whose callback crosses the Windows ARM64 C ABI. Windows ARM64
+does not become a distributed target until the release archive and installer
+are added by the distribution slice.
 
 ## Lower the built-in macOS boundary
 
