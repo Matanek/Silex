@@ -54,12 +54,24 @@ zig build check
 zig build test
 ```
 
-## Run a source file
+## Run a program
 
 ```sh
 cd Toolchain
 zig build run -- run /path/to/Main.sx
 ```
+
+Pass an application directory to discover its only direct `.sx` file with a
+top-level `main`, or omit the path from inside that directory:
+
+```sh
+silex run /path/to/Application
+cd /path/to/Application
+silex run
+```
+
+Discovery is non-recursive and does not prefer the basename `Main.sx`. Pass a
+source file explicitly when a directory contains several entry points.
 
 Run the one-time toolchain setup before compiling applications that use native
 package boundaries or HLSL:

@@ -150,7 +150,7 @@ pub fn parseRun(args: []const []const u8) RunResult {
     }
 
     return .{ .options = .{
-        .source_path = source_path orelse return failure(RunResult, .missing_source, null),
+        .source_path = source_path orelse ".",
         .emit_ir = emit_ir,
         .mode = mode,
         .cache = cache,
@@ -500,6 +500,7 @@ test "compile diagnoses missing duplicate and unexpected arguments" {
 }
 
 test "run accepts native modes and emit ir but owns its output" {
+    try std.testing.expectEqualStrings(".", parseRun(&.{}).options.source_path);
     try std.testing.expectEqual(Mode.release, parseRun(&.{"Main.sx"}).options.mode);
     const options = parseRun(&.{ "--emit-ir", "--release", "Main.sx" }).options;
     try std.testing.expect(options.emit_ir);

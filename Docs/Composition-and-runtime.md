@@ -41,8 +41,11 @@ resolves a C library or user symbol.
 `main` is the only source name with entry-point semantics. It remains local
 to its physical source: the composer retains it only when that exact file is
 the explicit entry and excludes every other `main` before semantic analysis
-and portable IR construction. It is never a public module declaration.
-Other function names are chosen freely by the user.
+and portable IR construction. `silex run` may discover that exact file from a
+directory before composition; this does not make neighboring `main`
+declarations visible or change the composer's explicit-entry contract. `main`
+is never a public module declaration. Other function names are chosen freely
+by the user.
 
 Test blocks are source-local root declarations activated only by `silex test`
 for each exact physical source selected directly or through directory

@@ -25,6 +25,7 @@ const NativeTermination = @import("NativeTermination.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
 const ProjectPaths = @import("Project/Paths.zig");
+const RunEntryDiscovery = @import("RunEntryDiscovery.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
 const PackageRegistration = @import("PackageRegistration.zig");
@@ -41,7 +42,7 @@ const SelfUpdate = @import("SelfUpdate.zig");
 const Io = std.Io;
 
 const usage =
-    \\Usage: silex run <source.sx> [-d|--debug|-r|--release] [-n|--nocache] [--emit-ir]
+    \\Usage: silex run [source.sx|directory] [-d|--debug|-r|--release] [-n|--nocache] [--emit-ir]
     \\       silex interpret <source.sx> [-n|--nocache] [--emit-ir]
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
@@ -956,14 +957,42 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
             return 1;
         },
     };
+    const source_path = switch (try RunEntryDiscovery.resolve(allocator, init.io, options.source_path)) {
+        .source => |source| source,
+        .no_entry => {
+            std.debug.print(
+                "silex: cannot run directory '{s}': no direct .sx source declares a top-level 'main' function\n",
+                .{options.source_path},
+            );
+            return 1;
+        },
+        .ambiguous => |candidates| {
+            std.debug.print(
+                "silex: cannot choose an entry source in directory '{s}'; multiple direct .sx sources declare 'main':\n",
+                .{options.source_path},
+            );
+            for (candidates) |candidate| std.debug.print("  {s}\n", .{candidate});
+            std.debug.print("silex: pass one source file explicitly\n", .{});
+            return 1;
+        },
+        .invalid_path => {
+            std.debug.print(
+                "silex: run path '{s}' must be a source file or directory\n",
+                .{options.source_path},
+            );
+            return 1;
+        },
+    };
     const target = TargetModule.Target.host() orelse {
         std.debug.print("silex: 'run' requires a recognized host target\n", .{});
         return 1;
     };
     if (options.cache) CompilationCache.maintain(allocator, init.io);
-    const output_path = try runArtifactPath(allocator, options, target);
+    var resolved_options = options;
+    resolved_options.source_path = source_path;
+    const output_path = try runArtifactPath(allocator, resolved_options, target);
     const status = try compileNativeOptions(init, allocator, .{
-        .source_path = options.source_path,
+        .source_path = source_path,
         .output_path = output_path,
         .mode = options.mode,
         .cache = options.cache,
@@ -971,9 +1000,9 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
     }, options.emit_ir);
     if (status != 0) return status;
     var progress = CliProgress.Build.init(init.io);
-    progress.source(.run, options.source_path);
+    progress.source(.run, source_path);
     progress.finish();
-    return executeNative(init, allocator, output_path, options.source_path, options.mode);
+    return executeNative(init, allocator, output_path, source_path, options.mode);
 }
 
 fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -1700,6 +1729,8 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
             std.debug.print("silex: '{s}' expects one source file\n", .{command}),
         .multiple_sources => if (std.mem.eql(u8, command, "test"))
             std.debug.print("silex: 'test' accepts only one source file or directory, found '{s}'\n", .{diagnostic.argument.?})
+        else if (std.mem.eql(u8, command, "run"))
+            std.debug.print("silex: 'run' accepts only one source file or directory, found '{s}'\n", .{diagnostic.argument.?})
         else
             std.debug.print("silex: '{s}' accepts only one source file, found '{s}'\n", .{ command, diagnostic.argument.? }),
         .missing_package => std.debug.print("silex: '{s}' expects one package directory or name\n", .{command}),
