@@ -296,15 +296,14 @@ jobs:
           $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
 
           $portabilitySource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx"
-          $portabilityDebug = Join-Path $env:RUNNER_TEMP "native-portability-debug.exe"
-          $portabilityRelease = Join-Path $env:RUNNER_TEMP "native-portability-release.exe"
-          & $silex compile $portabilitySource --debug --nocache -o $portabilityDebug
-          & $silex compile $portabilitySource --release --nocache -o $portabilityRelease
-          Assert-Arm64Pe $portabilityDebug
-          Assert-Arm64Pe $portabilityRelease
-
-          # Keep a native debugger trace actionable while diagnosing an
-          # NTSTATUS crash before PowerShell can truncate it to an exit byte.
+          # Preserve the independently linked failing tests, then debug those
+          # small PE images before PowerShell can truncate their NTSTATUS.
+          $PSNativeCommandUseErrorActionPreference = $false
+          & $silex test $portabilitySource --nocache
+          $testExitCode = $LASTEXITCODE
+          if ($testExitCode -eq 0) {
+            throw "expected the diagnostic test slice to retain a failing executable"
+          }
           $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"
           $cdb = Get-ChildItem $debuggersRoot -Filter cdb.exe -Recurse -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '[\\/]arm64[\\/]' } |
@@ -312,11 +311,24 @@ jobs:
           if ($null -eq $cdb) {
             throw "ARM64 cdb.exe is unavailable under $debuggersRoot"
           }
-          Write-Output "debugging ARM64 executable with $($cdb.FullName)"
-          $PSNativeCommandUseErrorActionPreference = $false
-          & $cdb.FullName -lines -c "g; .ecxr; !analyze -v; r; kv; ub @pc L10; u @pc L40; q" $portabilityDebug
+          $failedTests = @(Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE ".silex/test") `
+            -Filter "NativePortability-*.exe" -File)
+          if ($failedTests.Count -eq 0) {
+            throw "no failed native test executable was retained"
+          }
+          foreach ($failedTest in $failedTests) {
+            Assert-Arm64Pe $failedTest.FullName
+            Write-Output "debugging retained ARM64 test $($failedTest.Name) with $($cdb.FullName)"
+            & $cdb.FullName -lines -c "g; .ecxr; !analyze -v; r; kv; ub @pc L10; u @pc L40; q" $failedTest.FullName
+          }
           throw "Windows ARM64 debugger trace completed"
 
+          $portabilityDebug = Join-Path $env:RUNNER_TEMP "native-portability-debug.exe"
+          $portabilityRelease = Join-Path $env:RUNNER_TEMP "native-portability-release.exe"
+          & $silex compile $portabilitySource --debug --nocache -o $portabilityDebug
+          & $silex compile $portabilitySource --release --nocache -o $portabilityRelease
+          Assert-Arm64Pe $portabilityDebug
+          Assert-Arm64Pe $portabilityRelease
           $debugOutput = @(& $portabilityDebug)
           $releaseOutput = @(& $portabilityRelease)
           Assert-PortabilityOutput $debugOutput "Debug"
