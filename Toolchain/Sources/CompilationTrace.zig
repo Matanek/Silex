@@ -76,6 +76,7 @@ const Report = struct {
     target: []const u8,
     mode: []const u8,
     compiler_version: []const u8,
+    worker_count: u16 = 1,
     cache_enabled: bool,
     cache_result: CacheResult,
     success: bool,
@@ -189,6 +190,7 @@ pub const Reporter = struct {
             .target = self.metadata.target,
             .mode = self.metadata.mode,
             .compiler_version = self.metadata.compiler_version,
+            .worker_count = 1,
             .cache_enabled = self.metadata.cache_enabled,
             .cache_result = self.cache_result,
             .success = self.success,
@@ -242,9 +244,20 @@ test "compilation trace encodes stable structured phases and metrics" {
     const payload = try reporter.payload(std.testing.allocator);
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"schema_version\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"worker_count\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"name\": \"frontend_total\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"nanoseconds\": 42") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"loaded_modules\": 7") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"cache_result\": \"hit_after_frontend\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"success\": true") != null);
+}
+
+test "compilation trace preserves a diagnosed unsuccessful state" {
+    var reporter = Reporter.initEnabled(std.testing.io, "trace.json", test_metadata);
+    reporter.record(.module_loading, 17);
+    const payload = try reporter.payload(std.testing.allocator);
+    defer std.testing.allocator.free(payload);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"success\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"name\": \"module_loading\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"nanoseconds\": 17") != null);
 }

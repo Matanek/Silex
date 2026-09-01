@@ -56,8 +56,10 @@ report for their native compilation stage. Normal invocations do not allocate a
 trace payload, create a report, or print timing data.
 
 The report identifies the command, source, target, mode, compiler version,
-cache result, success state, total elapsed time, phase durations, and structural
-metrics. Frontend subphases cover package resolution, module discovery and
+current compiler worker count, cache result, success state, total elapsed time,
+phase durations, and structural metrics. The native compilation pipeline is
+currently serial, so the reported worker count is one. Frontend subphases cover
+package resolution, module discovery and
 loading, composition, specialization, interface construction, and semantic
 analysis. Native phases cover cache validation, optimization, lowering,
 register allocation, emission, linking, output, and cache publication.
