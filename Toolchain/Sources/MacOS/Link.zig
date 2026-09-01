@@ -1,6 +1,7 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const Packages = @import("../Packages.zig");
+const TargetModule = @import("../Target.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -11,17 +12,24 @@ pub fn executable(
     allocator: Allocator,
     io: Io,
     linker_path: []const u8,
+    target: TargetModule.Target,
     object_path: []const u8,
     output_path: []const u8,
     providers: []const Packages.BoundaryProvider,
     functions: []const Machine.ExternalFunction,
 ) !void {
+    const triple = if (target.eql(.macos_arm64))
+        "aarch64-macos"
+    else if (target.eql(.macos_x64))
+        "x86_64-macos"
+    else
+        return error.LinkFailed;
     const sdk_path = try sdkPath(allocator, io);
     const framework_path = try std.fs.path.join(allocator, &.{ sdk_path, "System/Library/Frameworks" });
     const library_path = try std.fs.path.join(allocator, &.{ sdk_path, "usr/lib" });
     var arguments: std.ArrayList([]const u8) = .empty;
     try arguments.appendSlice(allocator, &.{
-        linker_path,  "cc",        "-g", "-target",      "aarch64-macos",
+        linker_path,  "cc",        "-g", "-target",      triple,
         "-isysroot",  sdk_path,    "-F", framework_path, "-L",
         library_path, object_path, "-o", output_path,
     });
@@ -135,7 +143,7 @@ test "link and execute a symbol from a static ARM64 archive" {
         .frameworks = &.{},
         .libraries = &.{},
     }};
-    try executable(allocator, std.testing.io, "zig", main_object, output, &providers, &.{});
+    try executable(allocator, std.testing.io, "zig", .macos_arm64, main_object, output, &providers, &.{});
     const executed = try std.process.run(allocator, std.testing.io, .{ .argv = &.{output} });
     try std.testing.expectEqual(@as(u8, 0), exitCode(executed.term));
 }

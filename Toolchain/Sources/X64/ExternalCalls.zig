@@ -6,7 +6,7 @@ const WindowsImports = @import("../Windows/Imports.zig");
 const Allocator = std.mem.Allocator;
 const Register = enum(u4) { rax = 0, rcx = 1, rdx = 2, rbx = 3, rsp = 4, rbp = 5, rsi = 6, rdi = 7, r8 = 8, r9 = 9, r10 = 10, r11 = 11, r12 = 12, r13 = 13, r14 = 14, r15 = 15 };
 
-pub const Platform = enum { linux, windows };
+pub const Platform = enum { darwin, linux, windows };
 pub const Error = Machine.Error || Allocator.Error || error{UnsupportedInstruction};
 pub const Site = struct { displacement_offset: u32, function: usize };
 
@@ -26,6 +26,9 @@ pub fn emit(
         return emitBoundaryCall(allocator, bytes, external_sites, platform, external, call);
     }
     switch (platform) {
+        .darwin => {
+            return emitBoundaryCall(allocator, bytes, external_sites, platform, external, call);
+        },
         .linux => {
             if (!std.mem.eql(u8, external.provider, "Linux.kernel")) {
                 std.debug.print("x64 unsupported Linux boundary: {s}.{s}\n", .{ external.provider, external.source_name });
@@ -447,7 +450,7 @@ pub fn emitIndirect(
         return error.InvalidMachineProgram;
     }
     switch (platform) {
-        .linux => try emitLinuxBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
+        .darwin, .linux => try emitSystemVBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
         .windows => try emitWindowsBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
     }
     try emitLoadStack(allocator, bytes, .rax, call.callee);
@@ -586,7 +589,7 @@ fn emitBoundaryCall(
         return error.InvalidMachineProgram;
     }
     switch (platform) {
-        .linux => try emitLinuxBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
+        .darwin, .linux => try emitSystemVBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
         .windows => try emitWindowsBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
     }
     try bytes.append(allocator, 0xe8);
@@ -609,13 +612,13 @@ fn emitBoundaryCall(
     }
 }
 
-fn emitLinuxBoundaryArguments(
+fn emitSystemVBoundaryArguments(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
     kinds: []const Machine.AbiValue,
     arguments: []const Machine.Slot,
 ) Allocator.Error!void {
-    const stack_size = boundaryStackSize(.linux, kinds);
+    const stack_size = boundaryStackSize(.darwin, kinds);
     if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, stack_size });
     const integer_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9 };
     var integer_index: usize = 0;
@@ -666,7 +669,7 @@ fn emitWindowsBoundaryArguments(
 fn boundaryStackSize(platform: Platform, kinds: []const Machine.AbiValue) u8 {
     var count: usize = 0;
     switch (platform) {
-        .linux => {
+        .darwin, .linux => {
             var integers: usize = 0;
             var floats: usize = 0;
             for (kinds) |kind| if (isFloat(kind)) {

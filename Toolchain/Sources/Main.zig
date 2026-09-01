@@ -13,6 +13,8 @@ const Ir = @import("Ir.zig");
 const Lsp = @import("Lsp/Server.zig");
 const MachO = @import("MacOS/MachO.zig");
 const MachOObject = @import("MacOS/Object.zig");
+const MachOX64 = @import("MacOS/X64.zig");
+const MachOX64Object = @import("MacOS/X64Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const Elf = @import("Linux/Elf.zig");
 const X64Encoder = @import("X64/Encoder.zig");
@@ -67,6 +69,8 @@ const usage =
 test {
     _ = Artifacts;
     _ = MachOObject;
+    _ = MachOX64;
+    _ = MachOX64Object;
     _ = Arm64Object;
     _ = MacOSLink;
     _ = X64Object;
@@ -747,7 +751,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
     };
     const packages_root = try globalPackagesRoot(allocator, init.environ_map);
     const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
-    const native_target = target.eql(.macos_arm64) or target.eql(.linux_x64) or target.eql(.windows_x64);
+    const native_target = target.eql(.macos_arm64) or target.eql(.macos_x64) or target.eql(.linux_x64) or target.eql(.windows_x64);
     var passed: usize = 0;
     var failed: usize = 0;
     var source_errors: usize = 0;
@@ -1241,19 +1245,32 @@ fn compileNativeOptions(
         std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
         return 1;
     };
-    if (options.mode == .release and (target.eql(.linux_x64) or target.eql(.windows_x64))) {
+    if (options.mode == .release and (target.eql(.macos_x64) or target.eql(.linux_x64) or target.eql(.windows_x64))) {
         machine = X64RegisterAllocation.allocateProgram(allocator, machine) catch |err| {
             std.debug.print("silex: X64 register allocation failed: {t}\n", .{err});
             return 1;
         };
     }
     progress.stage(.emit);
-    if (target.eql(.macos_arm64) and
-        (options.mode == .debug or boundary_providers.len != 0 or MacOSLink.requiresSystemLink(machine.external_functions)))
+    if ((target.eql(.macos_arm64) or target.eql(.macos_x64)) and
+        (options.mode == .debug or boundary_providers.len != 0 or MacOSLink.requiresSystemLink(machine.external_functions) or
+            (target.eql(.macos_x64) and machine.external_functions.len != 0)))
     {
-        const object = MachOObject.emit(allocator, machine) catch |err| {
-            std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
-            return 1;
+        const object = if (target.eql(.macos_arm64)) object: {
+            break :object MachOObject.emit(allocator, machine) catch |err| {
+                std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
+                return 1;
+            };
+        } else object: {
+            var image = X64Encoder.encodeDarwinObject(allocator, machine) catch |err| {
+                std.debug.print("silex: macos-x64 encoder cannot emit a linked object: {t}\n", .{err});
+                return 1;
+            };
+            defer image.deinit(allocator);
+            break :object MachOX64Object.emit(allocator, machine, &image) catch |err| {
+                std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
+                return 1;
+            };
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
         defer if (options.mode == .release) Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
@@ -1269,6 +1286,7 @@ fn compileNativeOptions(
             allocator,
             init.io,
             linker_path,
+            target,
             object_path,
             options.output_path,
             boundary_providers,
@@ -1346,6 +1364,17 @@ fn compileNativeOptions(
             std.debug.print("silex: cannot emit native executable: {t}\n", .{err});
             return 1;
         };
+        if (target.eql(.macos_x64)) {
+            var image = X64Encoder.encodeDarwin(allocator, machine) catch |err| {
+                std.debug.print("silex: macOS X64 encoder cannot emit this program yet: {t}\n", .{err});
+                return 1;
+            };
+            defer image.deinit(allocator);
+            break :executable MachOX64.emit(allocator, image) catch |err| {
+                std.debug.print("silex: cannot emit macOS X64 Mach-O executable: {t}\n", .{err});
+                return 1;
+            };
+        }
         if (target.eql(.linux_x64)) {
             var image = X64Encoder.encodeLinux(allocator, machine) catch |err| {
                 std.debug.print("silex: Linux X64 encoder cannot emit this program yet: {t}\n", .{err});

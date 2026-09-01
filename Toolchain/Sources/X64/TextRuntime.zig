@@ -131,6 +131,15 @@ fn emitFloat(
 
 fn emitAllocation(allocator: Allocator, bytes: *std.ArrayList(u8), import_sites: *std.ArrayList(WindowsImports.X64Site), platform: Platform, epilogue: anytype) !void {
     switch (platform) {
+        .darwin => {
+            try emitImmediate(allocator, bytes, .rdi, 0);
+            try emitImmediate(allocator, bytes, .rdx, 3);
+            try emitImmediate(allocator, bytes, .r10, 0x1002);
+            try emitImmediate(allocator, bytes, .r8, std.math.maxInt(u64));
+            try emitImmediate(allocator, bytes, .r9, 0);
+            try emitImmediate(allocator, bytes, .rax, 0x20000c5);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05, 0x0f, 0x83 });
+        },
         .linux => {
             try emitImmediate(allocator, bytes, .rdi, 0);
             try emitImmediate(allocator, bytes, .rdx, 3);
