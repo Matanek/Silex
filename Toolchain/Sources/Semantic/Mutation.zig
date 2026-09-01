@@ -17,7 +17,13 @@ const Model = @import("Model.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
-    collection: struct { base: Ir.ValueId, type: Ast.Type, index: Ir.ValueId, position: @import("../Source.zig").Position },
+    collection: struct {
+        base: Ir.ValueId,
+        type: Ast.Type,
+        index: Ir.ValueId,
+        ownership: Ir.Ownership,
+        position: @import("../Source.zig").Position,
+    },
     optional: struct { base: Ir.ValueId, type: Ast.Type },
     property_class: struct { type: Ast.Type },
 };
@@ -116,6 +122,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     var current_type = binding.type;
     var current_value = root;
     var mutable_path = binding.mutable;
+    var storage_ownership: Ir.Ownership = .root;
     var safe_merge: ?Ir.BlockId = null;
     for (target.fields) |target_field| {
         if (target_field.safe) try enterSafeAssignmentPath(
@@ -129,6 +136,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             target_field,
         );
         try analyzeFieldStep(self, builder, &steps, &current_type, &current_value, &mutable_path, target_field);
+        updateStorageOwnership(self, steps.items, &storage_ownership);
     }
 
     for (target.indices) |target_index| {
@@ -145,6 +153,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             .base = current_value,
             .type = current_type,
             .index = index_value.value,
+            .ownership = storage_ownership,
             .position = target_index.position,
         } });
         const element = try self.newValue(builder, collection.element);
@@ -170,6 +179,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             target_field,
         );
         try analyzeFieldStep(self, builder, &steps, &current_type, &current_value, &mutable_path, target_field);
+        updateStorageOwnership(self, steps.items, &storage_ownership);
     }
 
     if (!mutable_path) return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
@@ -204,12 +214,8 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     // side. Otherwise a stale aggregate base would silently undo that sibling
     // mutation when the target field is stored.
     try refreshPathBases(self, builder, binding, steps.items);
-    const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
-        .field => |step| self.structures[step.structure].is_class,
-        .collection, .optional, .property_class => false,
-    } else false;
     if (Resources.requiresRetain(self, current_type)) {
-        if (class_owned_field) {
+        if (storage_ownership == .edge) {
             try Resources.retainValueOwned(self, builder, current_type, analyzed_replacement.value, .edge);
             if (analyzed_replacement.transferred) {
                 try Resources.releaseTransferredRoot(self, builder, current_type, analyzed_replacement.value);
@@ -219,10 +225,11 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         }
     }
     const drops_replaced_value = Resources.needsDrop(self, current_type) or Resources.containsClass(self, current_type);
-    if (drops_replaced_value and !class_owned_field) {
-        try Resources.emitDropOwned(self, builder, current_type, current_value, if (class_owned_field) .edge else .root);
+    if (drops_replaced_value and storage_ownership == .root) {
+        try Resources.emitDropOwned(self, builder, current_type, current_value, .root);
     }
     var replacement = analyzed_replacement.value;
+    var released_edge_value = false;
     var index = steps.items.len;
     while (index != 0) {
         index -= 1;
@@ -241,8 +248,9 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                     // edge. Besides keeping self-assignment safe, this makes
                     // the field continuously valid for concurrent cycle
                     // tracing.
-                    if (class_owned_field and drops_replaced_value) {
+                    if (storage_ownership == .edge and drops_replaced_value and !released_edge_value) {
                         try Resources.emitDropOwned(self, builder, current_type, current_value, .edge);
+                        released_edge_value = true;
                     }
                     replacement = result;
                     continue;
@@ -294,6 +302,9 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                             .reference = element_reference,
                             .operand = replacement,
                         } });
+                        if (storage_ownership == .edge and drops_replaced_value) {
+                            try Resources.emitDropOwned(self, builder, current_type, current_value, .edge);
+                        }
                         return;
                     },
                     else => {},
@@ -304,6 +315,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                     .collection = step.base,
                     .index = step.index,
                     .replacement = replacement,
+                    .ownership = step.ownership,
                     .position = step.position,
                 } });
                 replacement = result;
@@ -329,6 +341,16 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     if (safe_merge) |merge| {
         self.terminate(builder, .{ .jump = merge });
         builder.current_block = merge;
+    }
+}
+
+fn updateStorageOwnership(self: anytype, steps: []const PathStep, ownership: *Ir.Ownership) void {
+    if (steps.len == 0) return;
+    switch (steps[steps.len - 1]) {
+        .field => |step| if (self.structures[step.structure].is_class) {
+            ownership.* = .edge;
+        },
+        .collection, .optional, .property_class => {},
     }
 }
 

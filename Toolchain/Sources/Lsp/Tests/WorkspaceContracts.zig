@@ -252,7 +252,7 @@ test "server completes additive parent and extension module declarations" {
     try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
@@ -281,6 +281,22 @@ test "server completes additive parent and extension module declarations" {
     const core_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX/Module/Physics.sx", .{root});
     const extension_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Physics/Module/%40Module.sx", .{root});
 
+    {
+        var parent_server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer parent_server.deinit();
+        try Support.initializeServer(&parent_server, allocator, root_uri);
+        const parent_items = try Support.serverCompletion(&parent_server, allocator, main_uri,
+            \\use GFX.Physics
+            \\func main() { Physics.<|> }
+        );
+        try Support.expectPresent("CorePhysics", parent_items);
+        try Support.expectAbsent("ExtensionPhysics", parent_items);
+    }
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX.Physics\":\"=1.0.0\"}}",
+    });
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     try Support.initializeServer(&server, allocator, root_uri);
@@ -415,6 +431,70 @@ test "server completes and navigates authorized umbrella contributions" {
     );
     try Support.expectPresent("Physics", colliding);
     try Support.expectNoDuplicates(colliding);
+}
+
+test "server completes and navigates a merged child catalog contribution" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Application/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Application\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Application\":{\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data = "public struct Application {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public struct Core {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Package.json",
+        .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@BundleManager.sx",
+        .data =
+        \\public struct BundleManager {}
+        \\contribute GFX.Plugins {
+        \\    public use GFX.Application.BundleManager as BundleManager
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const manager_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Application/Module/%40BundleManager.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const items = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Plugins
+        \\func main() { Plugins.<|> }
+    );
+    try Support.expectPresent("BundleManager", items);
+    try Support.expectPresent("Core", items);
+    try Support.expectNoDuplicates(items);
+
+    const definition = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use GFX.Plugins
+        \\func main() { Plugins.BundleMan<|>ager() }
+    )).?;
+    try std.testing.expectEqualStrings(manager_uri, definition.uri);
+    try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
 }
 
 test "server navigates package extensions call chains fields and cascades" {

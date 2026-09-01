@@ -765,17 +765,16 @@ fn analyzeQueryFor(
                 cached_pool = pool;
             };
             const pool = cached_pool orelse return error.InvalidSource;
-            const pool_structure = self.program.structures[pool.structure];
-            const getter_index = methodNamed(pool_structure, "get_known") orelse return error.InvalidSource;
-            const value = try self.newValue(builder, field.type);
-            try self.emit(builder, .{ .call = .{
-                .result = value,
-                .function = methodFunctionId(self.program, pool.structure, getter_index),
-                .arguments = try self.allocator.dupe(Ir.ValueId, &.{
-                    try loadLocalValue(self, builder, pool.local, .structure(pool.structure)),
-                    entity,
-                }),
-            } });
+            const value = try emitKnownQueryComponent(
+                self,
+                builder,
+                pool.structure,
+                pool.local,
+                entity_type,
+                entity,
+                field.type,
+                loop.name_position,
+            );
             try builder.bindings.append(self.allocator, .{
                 .name = binding.name,
                 .type = field.type,
@@ -844,6 +843,70 @@ fn analyzeQueryFor(
     try Resources.emitActiveDrops(self, builder, query_binding_count);
     builder.bindings.shrinkRetainingCapacity(query_binding_count);
     return false;
+}
+
+fn emitKnownQueryComponent(
+    self: anytype,
+    builder: anytype,
+    pool_index: usize,
+    pool_local: Ir.LocalId,
+    entity_type: Ast.Type,
+    entity: Ir.ValueId,
+    component_type: Ast.Type,
+    position: Source.Position,
+) !Ir.ValueId {
+    // The archetype match emitted before the row loop proves that this entity
+    // owns the component, so lower the pool's known lookup without repeating
+    // the checked helper call for every query row.
+    const pool = self.program.structures[pool_index];
+    const sparse_field = fieldNamed(pool, "sparse") orelse return error.InvalidSource;
+    const values_field = fieldNamed(pool, "values") orelse return error.InvalidSource;
+    const entity_index = entity_type.structureIndex() orelse return error.InvalidSource;
+    const entity_structure = self.program.structures[entity_index];
+    const index_field = fieldNamed(entity_structure, "index") orelse return error.InvalidSource;
+
+    const pool_value = try loadLocalValue(self, builder, pool_local, .structure(pool_index));
+    const sparse = try self.newValue(builder, pool.fields[sparse_field].type);
+    try self.emit(builder, .{ .field_load = .{
+        .result = sparse,
+        .base = pool_value,
+        .field = sparse_field,
+    } });
+    const source_index = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .field_load = .{
+        .result = source_index,
+        .base = entity,
+        .field = index_field,
+    } });
+    const encoded = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .collection_load = .{
+        .result = encoded,
+        .collection = sparse,
+        .index = source_index,
+        .position = position,
+    } });
+    const dense_index = try emitBinary(
+        self,
+        builder,
+        .subtract,
+        encoded,
+        try emitInt(self, builder, 1),
+        .int,
+    );
+    const values = try self.newValue(builder, pool.fields[values_field].type);
+    try self.emit(builder, .{ .field_load = .{
+        .result = values,
+        .base = pool_value,
+        .field = values_field,
+    } });
+    const component = try self.newValue(builder, component_type);
+    try self.emit(builder, .{ .collection_load = .{
+        .result = component,
+        .collection = values,
+        .index = dense_index,
+        .position = position,
+    } });
+    return component;
 }
 
 fn missingQueryRegistration(self: anytype, position: Source.Position) !bool {

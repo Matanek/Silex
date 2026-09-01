@@ -255,6 +255,7 @@ pub const Specializer = struct {
             function.return_type = Remap.concreteType(function.return_type, map);
             if (function.intrinsic) |*intrinsic| switch (intrinsic.*) {
                 .system_adapter => |*adapter| {
+                    adapter.host_type = Remap.concreteType(adapter.host_type, map);
                     if (adapter.receiver) |*receiver| {
                         receiver.type = Remap.concreteType(receiver.type, map);
                         receiver.source_type = Remap.concreteType(receiver.source_type, map);
@@ -2129,9 +2130,11 @@ fn functionVisible(packages: ?Packages.Graph, module_scope_roots: []const []cons
     else
         call.owner == function.owner;
     if (call.name_position.file == function.position.file) return true;
-    if (call.owner != function.owner) return false;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
-    return ModuleScopes.same(module_scope_roots, call.module, function.name[0..separator]);
+    const declaration_module = function.name[0..separator];
+    if (call.owner != function.owner and
+        (packages == null or !packages.?.canAccessMergedModule(call.owner, function.owner, declaration_module))) return false;
+    return ModuleScopes.same(module_scope_roots, call.module, declaration_module);
 }
 
 fn methodVisible(packages: ?Packages.Graph, module_scope_roots: []const []const u8, call: Ast.Expression.Call, structure: Ast.Structure, method: Ast.Function) bool {
@@ -2144,9 +2147,11 @@ fn methodVisible(packages: ?Packages.Graph, module_scope_roots: []const []const 
         call.owner == method.owner;
     if (method.is_private or method.is_protected) return call.owner == method.owner;
     if (call.name_position.file == method.position.file) return true;
-    if (call.owner != method.owner) return false;
     const separator = std.mem.lastIndexOfScalar(u8, structure.name, '.') orelse return false;
-    return ModuleScopes.same(module_scope_roots, call.module, structure.name[0..separator]);
+    const declaration_module = structure.name[0..separator];
+    if (call.owner != method.owner and
+        (packages == null or !packages.?.canAccessMergedModule(call.owner, method.owner, declaration_module))) return false;
+    return ModuleScopes.same(module_scope_roots, call.module, declaration_module);
 }
 
 fn samePosition(left: Source.Position, right: Source.Position) bool {

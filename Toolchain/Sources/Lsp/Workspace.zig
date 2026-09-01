@@ -1379,78 +1379,81 @@ fn appendReexportTarget(
 ) !void {
     if (depth > project.index.providers.len or !matchesPrefix(label, prefix)) return;
     const target = declarationTarget(project.index, target_path) orelse return;
-    const provider = project.index.providers[target.provider];
-    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return;
-    const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
-    for (loaded.program.structures) |structure| {
-        if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
-        try appendNominalItems(
-            allocator,
-            loaded,
-            structure,
-            label,
-            call_source,
-            call_cursor,
-            ranked,
-            5,
-            6,
-            type_only,
-        );
-        return;
-    }
-    for (loaded.program.enums) |enumeration| {
-        if (!enumeration.is_public or !std.mem.eql(u8, enumeration.name, target.declaration)) continue;
-        try appendRanked(allocator, ranked, .{
-            .label = label,
-            .kind = CompletionKind.enum_type,
-            .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
-        }, 5, false);
-        return;
-    }
-    var found_function = false;
-    if (!type_only) {
-        for (loaded.program.functions) |function| {
-            if (!function.is_public or !std.mem.eql(u8, function.name, target.declaration)) continue;
-            if (call_source) |text| if (!Completion.callAcceptsParameters(
-                text,
+    const module_name = project.index.providers[target.provider].name;
+    for (project.index.providers) |provider| {
+        if (!std.mem.eql(u8, provider.name, module_name)) continue;
+        if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        for (loaded.program.structures) |structure| {
+            if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
+            try appendNominalItems(
+                allocator,
+                loaded,
+                structure,
+                label,
+                call_source,
                 call_cursor,
-                loaded.program,
-                function.parameters,
-            )) continue;
+                ranked,
+                5,
+                6,
+                type_only,
+            );
+            return;
+        }
+        for (loaded.program.enums) |enumeration| {
+            if (!enumeration.is_public or !std.mem.eql(u8, enumeration.name, target.declaration)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = label,
-                .kind = CompletionKind.function,
-                .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
-            }, 10, true);
-            found_function = true;
-        }
-    }
-    if (found_function) return;
-    for (loaded.program.uses) |exported| {
-        if (!exported.is_public or exported.alias == null or
-            !std.mem.eql(u8, exported.alias.?, target.declaration)) continue;
-        if (fundamentalAliasTarget(loaded.program, exported, 0)) |type_target| {
-            if (type_only or call_source == null) try appendRanked(allocator, ranked, .{
-                .label = label,
-                .kind = 22,
-                .detail = try std.fmt.allocPrint(allocator, "type {s} = {s}", .{ label, type_target.name() }),
+                .kind = CompletionKind.enum_type,
+                .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
             }, 5, false);
             return;
         }
-        return appendReexportTarget(
-            allocator,
-            io,
-            documents,
-            project,
-            exported.path,
-            label,
-            prefix,
-            call_source,
-            call_cursor,
-            ranked,
-            depth + 1,
-            type_only,
-        );
+        var found_function = false;
+        if (!type_only) {
+            for (loaded.program.functions) |function| {
+                if (!function.is_public or !std.mem.eql(u8, function.name, target.declaration)) continue;
+                if (call_source) |text| if (!Completion.callAcceptsParameters(
+                    text,
+                    call_cursor,
+                    loaded.program,
+                    function.parameters,
+                )) continue;
+                try appendRanked(allocator, ranked, .{
+                    .label = label,
+                    .kind = CompletionKind.function,
+                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+                }, 10, true);
+                found_function = true;
+            }
+        }
+        if (found_function) return;
+        for (loaded.program.uses) |exported| {
+            if (!exported.is_public or exported.alias == null or
+                !std.mem.eql(u8, exported.alias.?, target.declaration)) continue;
+            if (fundamentalAliasTarget(loaded.program, exported, 0)) |type_target| {
+                if (type_only or call_source == null) try appendRanked(allocator, ranked, .{
+                    .label = label,
+                    .kind = 22,
+                    .detail = try std.fmt.allocPrint(allocator, "type {s} = {s}", .{ label, type_target.name() }),
+                }, 5, false);
+                return;
+            }
+            return appendReexportTarget(
+                allocator,
+                io,
+                documents,
+                project,
+                exported.path,
+                label,
+                prefix,
+                call_source,
+                call_cursor,
+                ranked,
+                depth + 1,
+                type_only,
+            );
+        }
     }
 }
 

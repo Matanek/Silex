@@ -555,6 +555,42 @@ test "native owner drops match the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native indexed replacement in a class-owned list preserves class lifetimes" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Token {
+        \\    let id:int
+        \\    init(id:int) { self.id = id }
+        \\    drop { print("drop ", self.id) }
+        \\}
+        \\class Cache {
+        \\    var entries:Token[]
+        \\    init() { self.entries = [] }
+        \\    func set(entry:Token) {
+        \\        if self.entries.is_empty() { self.entries.append(entry) }
+        \\        else { self.entries[0] = entry }
+        \\    }
+        \\}
+        \\func main() {
+        \\    var cache = Cache()
+        \\    cache.set(Token(1))
+        \\    cache.set(Token(2))
+        \\    cache.set(Token(3))
+        \\    print("done")
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqualStrings("drop 1\ndrop 2\ndone\ndrop 3\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native generic function specializations match the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

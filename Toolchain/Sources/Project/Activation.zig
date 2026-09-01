@@ -124,6 +124,8 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
                 };
                 if (try self.targetForCall(module, name)) |target| {
                     try self.loadModule(target.module, module);
+                } else if (try self.nominalCandidate(module, name)) |target| {
+                    if (target.module != module) try self.loadModule(target.module, module);
                 } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
             } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
             for (call.arguments) |argument| try self.activateExpression(module, argument);

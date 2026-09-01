@@ -22,7 +22,14 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         try builder.value_types.append(self.allocator, parameter.type);
     }
 
+    const internal_clear = std.mem.eql(u8, method.name, "__silex_resource_clear");
+    if (std.mem.eql(u8, self.program.structures[structure_index].name, GenericResources.canonical_name) and !internal_clear) {
+        const receiver = if (borrowed_mutable) try loadReceiver(self, &builder, structure_index, 0) else 0;
+        try emitValidGuard(self, &builder, structure_index, receiver, method.name_position);
+    }
+
     switch (intrinsic) {
+        .resource_scope => try emitScope(self, &builder, structure_index),
         .resource_insert => |field| try emitInsert(self, &builder, structure_index, field, method),
         .resource_discard => try emitDiscard(self, &builder, method),
         .resource_has => |field| try emitHas(self, &builder, structure_index, field),
@@ -31,7 +38,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         .resource_try_get => |field| try emitTryGet(self, &builder, structure_index, field, false),
         .resource_try_get_mut => |field| try emitTryGet(self, &builder, structure_index, field, true),
         .resource_remove => |field| try emitRemove(self, &builder, structure_index, field, flat),
-        .resource_clear => try emitClear(self, &builder, structure_index),
+        .resource_clear => try emitClear(self, &builder, structure_index, std.mem.eql(u8, method.name, "invalidate")),
         .component_get_mut => return error.InvalidSource,
         .world_component_get_mut => return error.InvalidSource,
         .system_adapter => return error.InvalidSource,
@@ -50,6 +57,29 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
+}
+
+fn emitScope(self: anytype, builder: anytype, structure: usize) !void {
+    const fields = self.structures[structure].fields;
+    const parent_field = parentField(self, structure) orelse return error.InvalidSource;
+    var values = try self.allocator.alloc(Ir.ValueId, fields.len);
+    for (fields, 0..) |field, index| {
+        if (index == parent_field) {
+            const parent = try self.newValue(builder, field.type);
+            try self.emit(builder, .{ .optional_some = .{ .result = parent, .operand = 0 } });
+            values[index] = parent;
+        } else if (std.mem.eql(u8, field.name, GenericResources.order_field_name)) {
+            values[index] = try emptyList(self, builder, field.type);
+        } else {
+            const empty = try self.newValue(builder, field.type);
+            try self.emit(builder, .{ .optional_null = .{ .result = empty } });
+            values[index] = empty;
+        }
+    }
+    try Ownership.retainValueOwned(self, builder, .structure(structure), 0, .edge);
+    const child = try self.newValue(builder, .structure(structure));
+    try self.emit(builder, .{ .structure_init = .{ .result = child, .structure = structure, .fields = values } });
+    self.terminate(builder, .{ .return_value = child });
 }
 
 fn emitDiscard(self: anytype, builder: anytype, method: Ast.Function) !void {
@@ -101,7 +131,13 @@ fn emitHas(self: anytype, builder: anytype, structure: usize, field: usize) !voi
     try self.emit(builder, .{ .optional_null = .{ .result = null_value } });
     const present = try self.newValue(builder, .bool);
     try self.emit(builder, .{ .binary = .{ .result = present, .operator = .not_equal, .left = slot, .right = null_value } });
+    const local = try self.newBlock(builder);
+    const fallback = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = local, .else_block = fallback } });
+    builder.current_block = local;
     self.terminate(builder, .{ .return_value = present });
+    builder.current_block = fallback;
+    try emitParentCallOrValue(self, builder, structure, field, .has, .bool, false, present);
 }
 
 fn emitGet(self: anytype, builder: anytype, structure: usize, field: usize, method: Ast.Function, mutable: bool) !void {
@@ -120,6 +156,11 @@ fn emitGet(self: anytype, builder: anytype, structure: usize, field: usize, meth
     self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = found, .else_block = missing } });
 
     builder.current_block = missing;
+    if (parentField(self, structure) != null) {
+        const no_parent = try self.newBlock(builder);
+        try emitParentCallOrBranch(self, builder, structure, field, if (mutable) .get_mut else .get, if (mutable) .address else resource_type, mutable, no_parent);
+        builder.current_block = no_parent;
+    }
     const message = try self.newValue(builder, .str);
     try self.emit(builder, .{ .constant_str = .{
         .result = message,
@@ -142,12 +183,28 @@ fn emitGet(self: anytype, builder: anytype, structure: usize, field: usize, meth
 fn emitTryGet(self: anytype, builder: anytype, structure: usize, field: usize, mutable: bool) !void {
     if (mutable) {
         const reference = try fieldReference(self, builder, structure, field, 0);
+        const slot_type = self.structures[structure].fields[field].type;
+        const slot = try loadField(self, builder, structure, field, slot_type, try loadReceiver(self, builder, structure, 0));
+        const present = try presence(self, builder, slot_type, slot);
+        const local = try self.newBlock(builder);
+        const fallback = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = local, .else_block = fallback } });
+        builder.current_block = local;
         self.terminate(builder, .{ .return_value = reference });
+        builder.current_block = fallback;
+        try emitParentCallOrValue(self, builder, structure, field, .try_get_mut, .address, true, reference);
         return;
     }
     const slot_type = self.structures[structure].fields[field].type;
     const slot = try loadField(self, builder, structure, field, slot_type, 0);
+    const present = try presence(self, builder, slot_type, slot);
+    const local = try self.newBlock(builder);
+    const fallback = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = local, .else_block = fallback } });
+    builder.current_block = local;
     self.terminate(builder, .{ .return_value = slot });
+    builder.current_block = fallback;
+    try emitParentCallOrValue(self, builder, structure, field, .try_get, slot_type, false, slot);
 }
 
 fn emitRemove(self: anytype, builder: anytype, structure: usize, field: usize, flat: usize) !void {
@@ -167,7 +224,7 @@ fn emitRemove(self: anytype, builder: anytype, structure: usize, field: usize, f
     self.terminate(builder, .{ .return_value = returned });
 }
 
-fn emitClear(self: anytype, builder: anytype, structure: usize) !void {
+fn emitClear(self: anytype, builder: anytype, structure: usize, invalidate: bool) !void {
     const order_field = orderField(self, structure) orelse return error.InvalidSource;
     const order_type = self.structures[structure].fields[order_field].type;
     const order = try loadField(self, builder, structure, order_field, order_type, 0);
@@ -264,7 +321,48 @@ fn emitClear(self: anytype, builder: anytype, structure: usize) !void {
         .field = order_field,
         .replacement = empty_order,
     } });
-    self.terminate(builder, .{ .return_value = 0 });
+    if (invalidate) {
+        const parent_field = parentField(self, structure) orelse return error.InvalidSource;
+        const parent_type = self.structures[structure].fields[parent_field].type;
+        const null_parent = try self.newValue(builder, parent_type);
+        try self.emit(builder, .{ .optional_null = .{ .result = null_parent } });
+        const detached = try self.newValue(builder, .structure(structure));
+        try self.emit(builder, .{ .field_store = .{ .result = detached, .base = order_result, .field = parent_field, .replacement = null_parent } });
+        const invalid_field = namedField(self, structure, GenericResources.invalid_field_name) orelse return error.InvalidSource;
+        const truth = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .constant_bool = .{ .result = truth, .value = true } });
+        const marked_type = self.structures[structure].fields[invalid_field].type;
+        const marked = try self.newValue(builder, marked_type);
+        try self.emit(builder, .{ .optional_some = .{ .result = marked, .operand = truth } });
+        const result = try self.newValue(builder, .structure(structure));
+        try self.emit(builder, .{ .field_store = .{ .result = result, .base = detached, .field = invalid_field, .replacement = marked } });
+        self.terminate(builder, .{ .return_value = result });
+    } else self.terminate(builder, .{ .return_value = order_result });
+}
+
+fn emitValidGuard(self: anytype, builder: anytype, structure: usize, receiver: Ir.ValueId, position: @import("../Source.zig").Position) !void {
+    const invalid_field = namedField(self, structure, GenericResources.invalid_field_name) orelse return error.InvalidSource;
+    const invalid_type = self.structures[structure].fields[invalid_field].type;
+    const invalid = try loadField(self, builder, structure, invalid_field, invalid_type, receiver);
+    const absent = try self.newValue(builder, invalid_type);
+    try self.emit(builder, .{ .optional_null = .{ .result = absent } });
+    const valid = try self.newValue(builder, .bool);
+    try self.emit(builder, .{ .binary = .{ .result = valid, .operator = .equal, .left = invalid, .right = absent } });
+    const proceed = try self.newBlock(builder);
+    const rejected = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{ .condition = valid, .then_block = proceed, .else_block = rejected } });
+    builder.current_block = rejected;
+    const message = try self.newValue(builder, .str);
+    try self.emit(builder, .{ .constant_str = .{ .result = message, .value = GenericResources.invalid_message } });
+    self.terminate(builder, .{ .panic = .{ .message = message, .position = position } });
+    builder.current_block = proceed;
+}
+
+fn namedField(self: anytype, structure: usize, name: []const u8) ?usize {
+    for (self.structures[structure].fields, 0..) |field, index| {
+        if (std.mem.eql(u8, field.name, name)) return index;
+    }
+    return null;
 }
 
 fn loadField(self: anytype, builder: anytype, structure: usize, field: usize, type_value: Ast.Type, receiver: Ir.ValueId) !Ir.ValueId {
@@ -293,6 +391,87 @@ fn orderField(self: anytype, structure: usize) ?usize {
         if (std.mem.eql(u8, field.name, GenericResources.order_field_name)) return index;
     }
     return null;
+}
+
+fn parentField(self: anytype, structure: usize) ?usize {
+    for (self.structures[structure].fields, 0..) |field, index| {
+        if (std.mem.eql(u8, field.name, GenericResources.parent_field_name)) return index;
+    }
+    return null;
+}
+
+fn emptyList(self: anytype, builder: anytype, type_value: Ast.Type) !Ir.ValueId {
+    const result = try self.newValue(builder, type_value);
+    try self.emit(builder, .{ .list_init = .{ .result = result, .values = &.{} } });
+    return result;
+}
+
+fn loadReceiver(self: anytype, builder: anytype, structure: usize, reference: Ir.ValueId) !Ir.ValueId {
+    const result = try self.newValue(builder, .structure(structure));
+    try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = reference } });
+    return result;
+}
+
+const ResourceLookup = enum { has, get, get_mut, try_get, try_get_mut };
+
+fn emitParentCallOrValue(self: anytype, builder: anytype, structure: usize, field: usize, intrinsic: ResourceLookup, return_type: Ast.Type, mutable: bool, fallback_value: Ir.ValueId) !void {
+    const no_parent = try self.newBlock(builder);
+    try emitParentCallOrBranch(self, builder, structure, field, intrinsic, return_type, mutable, no_parent);
+    builder.current_block = no_parent;
+    self.terminate(builder, .{ .return_value = fallback_value });
+}
+
+fn emitParentCallOrBranch(self: anytype, builder: anytype, structure: usize, field: usize, intrinsic: ResourceLookup, return_type: Ast.Type, mutable: bool, no_parent: Ir.BlockId) !void {
+    const parent_field = parentField(self, structure) orelse {
+        self.terminate(builder, .{ .jump = no_parent });
+        return;
+    };
+    const parent_type = self.structures[structure].fields[parent_field].type;
+    const receiver = if (mutable) try loadReceiver(self, builder, structure, 0) else 0;
+    const parent_optional = try loadField(self, builder, structure, parent_field, parent_type, receiver);
+    const present = try presence(self, builder, parent_type, parent_optional);
+    const found = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = found, .else_block = no_parent } });
+    builder.current_block = found;
+    const parent = try self.newValue(builder, .structure(structure));
+    try self.emit(builder, .{ .optional_unwrap = .{ .result = parent, .operand = parent_optional } });
+    const method = intrinsicMethodIndex(self.program.structures[structure], intrinsic, field) orelse return error.InvalidSource;
+    const argument = if (mutable) value: {
+        const local = builder.local_types.items.len;
+        try builder.local_types.append(self.allocator, .structure(structure));
+        try self.emit(builder, .{ .local_store = .{ .local = local, .operand = parent } });
+        const address = try self.newValue(builder, .address);
+        try self.emit(builder, .{ .local_address = .{ .result = address, .local = local } });
+        break :value address;
+    } else parent;
+    const result = try self.newValue(builder, return_type);
+    try self.emit(builder, .{ .call = .{ .result = result, .function = methodFunctionId(self.program, structure, method), .arguments = try self.allocator.dupe(Ir.ValueId, &.{argument}) } });
+    self.terminate(builder, .{ .return_value = result });
+}
+
+fn intrinsicMethodIndex(structure: Ast.Structure, wanted: ResourceLookup, field: usize) ?usize {
+    for (structure.methods, 0..) |method, index| {
+        const candidate = method.intrinsic orelse continue;
+        const matches = switch (candidate) {
+            .resource_has => |candidate_field| wanted == .has and candidate_field == field,
+            .resource_get => |candidate_field| wanted == .get and candidate_field == field,
+            .resource_get_mut => |candidate_field| wanted == .get_mut and candidate_field == field,
+            .resource_try_get => |candidate_field| wanted == .try_get and candidate_field == field,
+            .resource_try_get_mut => |candidate_field| wanted == .try_get_mut and candidate_field == field,
+            else => false,
+        };
+        if (matches) return index;
+    }
+    return null;
+}
+
+fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
+    var result = program.functions.len;
+    for (program.structures) |structure| result += structure.constructors.len;
+    for (program.structures[0..structure_index]) |structure| {
+        if (!structure.is_protocol) result += structure.methods.len;
+    }
+    return result + method_index;
 }
 
 fn constantInt(self: anytype, builder: anytype, value: usize) !Ir.ValueId {

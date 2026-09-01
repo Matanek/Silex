@@ -5,22 +5,21 @@ const Model = @import("Model.zig");
 const Ownership = @import("Resources.zig");
 const Source = @import("../Source.zig");
 
-const application_name = "GFX.Application";
 const resources_name = "GFX.Application.Resources";
 const commands_name = "GFX.ECS.Commands";
 
 pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter) !Ir.Function {
-    const application = structureIndex(self.program, application_name) orelse return error.InvalidSource;
+    const host = adapter.host_type.structureIndex() orelse return error.InvalidSource;
     const resources = structureIndex(self.program, resources_name) orelse return error.InvalidSource;
     var builder: Model.FunctionBuilder = .{ .return_type = .void };
     try builder.blocks.append(self.allocator, .{});
     for (function.parameters) |parameter| try builder.value_types.append(self.allocator, parameter.type);
 
-    const resources_method = methodIndex(self.program.structures[application], "resources") orelse return error.InvalidSource;
+    const resources_method = methodIndex(self.program.structures[host], "resources") orelse return error.InvalidSource;
     const resources_value = try self.newValue(&builder, .structure(resources));
     try self.emit(&builder, .{ .call = .{
         .result = resources_value,
-        .function = methodFunctionId(self.program, application, resources_method),
+        .function = methodFunctionId(self.program, host, resources_method),
         .arguments = try self.allocator.dupe(Ir.ValueId, &.{0}),
     } });
     const resources_local = builder.local_types.items.len;
@@ -28,7 +27,7 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
     try self.emit(&builder, .{ .local_store = .{ .local = resources_local, .operand = resources_value } });
 
     switch (adapter.mode) {
-        .query_dispatch => |dispatch| analyzeDispatch(self, &builder, adapter, dispatch, application, resources, resources_local) catch |err| {
+        .query_dispatch => |dispatch| analyzeDispatch(self, &builder, adapter, dispatch, host, resources, resources_local) catch |err| {
             if (self.diagnostic == null) return self.fail(adapter.target_position, "internal parallel ECS query dispatch lowering failed");
             return err;
         },
@@ -178,7 +177,7 @@ fn analyzeDispatch(
     builder: anytype,
     adapter: Ast.SystemAdapter,
     dispatch: Ast.SystemAdapter.QueryDispatch,
-    application: usize,
+    host: usize,
     resources: usize,
     resources_local: Ir.LocalId,
 ) !void {
@@ -213,19 +212,23 @@ fn analyzeDispatch(
         commands_address = try commandAddress(self, builder, adapter, dependency, resources, resources_local);
         break;
     };
-    const run_method = methodIndex(self.program.structures[application], "__silex_run_query") orelse
-        return self.fail(adapter.target_position, "parallel ECS query requires the internal Application runner");
-    const run = self.program.structures[application].methods[run_method];
+    const run_method = methodIndex(self.program.structures[host], "__silex_run_query") orelse
+        return self.fail(adapter.target_position, "parallel ECS query requires an internal system-host runner");
+    const run = self.program.structures[host].methods[run_method];
     if (run.parameters.len != 4) return self.fail(adapter.target_position, "parallel ECS query runner has an incompatible signature");
     const callback_type = run.parameters[3].type;
     const worker = functionExact(self.program, dispatch.worker) orelse
         return self.fail(adapter.target_position, "parallel ECS query worker adapter is missing");
     const callback = try self.newValue(builder, callback_type);
     try self.emit(builder, .{ .function_reference = .{ .result = callback, .function = worker } });
-    const updated_application = try self.newValue(builder, .structure(application));
+    const flat = flatMethodIndex(self.program, host, run_method);
+    const updated_host = if (flat < self.method_mutability.len and self.method_mutability[flat])
+        try self.newValue(builder, .structure(host))
+    else
+        null;
     try self.emit(builder, .{ .call = .{
-        .result = updated_application,
-        .function = methodFunctionId(self.program, application, run_method),
+        .result = updated_host,
+        .function = methodFunctionId(self.program, host, run_method),
         .arguments = try self.allocator.dupe(Ir.ValueId, &.{ 0, count, 1, commands_address, callback }),
     } });
 }

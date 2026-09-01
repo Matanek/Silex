@@ -153,6 +153,22 @@ class X64FloatStore {
     init() { self.values = [0.0, 0.197275] }
 }
 
+class X64ReplacementToken {
+    static var drops:int = 0
+    drop { X64ReplacementToken.drops++ }
+}
+
+class X64ReplacementCache {
+    var entries:X64ReplacementToken[]
+
+    init() { self.entries = [] }
+
+    func set(entry:X64ReplacementToken) {
+        if self.entries.is_empty() { self.entries.append(entry) }
+        else { self.entries[0] = entry }
+    }
+}
+
 func update_x64_store(store:X64FloatStore) {
     store.values[1] += 0.0025871352
 }
@@ -318,6 +334,19 @@ test "mutate a class-owned x64 list without changing its snapshot" {
     update_x64_store(store)
     assert(snapshot[1] == 0.197275)
     assert(store.values[1] == 0.19986214)
+}
+
+test "replace class elements in a class-owned x64 list" {
+    X64ReplacementToken.drops = 0
+    {
+        var cache = X64ReplacementCache()
+        cache.set(X64ReplacementToken())
+        cache.set(X64ReplacementToken())
+        assert(X64ReplacementToken.drops == 1)
+        cache.set(X64ReplacementToken())
+        assert(X64ReplacementToken.drops == 2)
+    }
+    assert(X64ReplacementToken.drops == 3)
 }
 
 test "preserve embedded byte contents on x64" {

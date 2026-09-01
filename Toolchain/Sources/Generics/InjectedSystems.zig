@@ -4,7 +4,6 @@ const Source = @import("../Source.zig");
 const WorkerSafety = @import("WorkerSafety.zig");
 const QueryParallel = @import("QueryParallel.zig");
 
-const application_name = "GFX.Application";
 const resources_name = "GFX.Application.Resources";
 const world_name = "GFX.ECS.World";
 
@@ -15,8 +14,22 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     call.arguments = ordered;
     call.named_arguments = &.{};
     const receiver_type = self.inferExpressionType(call.receiver.?, locals) orelse return false;
-    const receiver = self.structureForType(receiver_type) orelse return false;
-    if (!std.mem.eql(u8, receiver.name, application_name)) return false;
+    _ = self.structureForType(receiver_type) orelse return false;
+    var host_type = receiver_type;
+    var delegated_host = false;
+    const resources_type = self.typeForName(resources_name) orelse return false;
+    const host_source = self.sourceStructureForType(host_type) orelse return false;
+    _ = sourceMethod(host_source, "resources") orelse return false;
+    _ = sourceMethod(host_source, "__silex_add_system") orelse return false;
+    if (sourceMethod(host_source, "__silex_system_host")) |selector| {
+        if (selector.type_parameters.len != 0 or selector.parameters.len != 0 or
+            selector.return_type == .void or selector.return_mode != .value)
+        {
+            return self.fail(selector.name_position, "__silex_system_host must return one value and accept no parameters");
+        }
+        host_type = try self.rewriteType(selector.return_type, &.{}, selector.name_position);
+        delegated_host = host_type != receiver_type;
+    }
 
     const callback = call.arguments[1];
     const target_name = try systemTargetName(self.allocator, callback) orelse null;
@@ -43,12 +56,11 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         );
         return self.fail(callback.position, message);
     }
-    const application_type = self.typeForName(application_name) orelse return false;
-    if (signature.parameters.len == 1 and signature.parameters[0].type == application_type and signature.parameters[0].mode == .value) {
+    if (signature.parameters.len == 1 and signature.parameters[0].type == host_type and signature.parameters[0].mode == .value) {
         return false;
     }
-    for (signature.parameters) |parameter| if (parameter.type == application_type) {
-        return self.fail(callback.position, "Application must be the sole system parameter");
+    for (signature.parameters) |parameter| if (parameter.type == host_type) {
+        return self.fail(callback.position, "the system host must be the sole system parameter");
     };
     if (target_name == null) {
         return self.fail(callback.position, "system callback must be a named or captureless function");
@@ -59,7 +71,6 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         if (!target.structure.is_class) {
             return self.fail(callback.position, "instance system methods require a class receiver");
         }
-        const resources_type = self.typeForName(resources_name) orelse return error.InvalidSource;
         const resource_source = self.sourceStructureForType(resources_type) orelse return error.InvalidSource;
         const has_template = findGenericMethod(resource_source, "has") orelse return error.InvalidSource;
         const get_template = findGenericMethod(resource_source, "get") orelse return error.InvalidSource;
@@ -72,7 +83,6 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         };
     }
 
-    const resources_type = self.typeForName(resources_name) orelse return error.InvalidSource;
     const resource_source = self.sourceStructureForType(resources_type) orelse return error.InvalidSource;
     const dependencies = try self.allocator.alloc(Ast.SystemDependency, signature.parameters.len);
     for (signature.parameters, 0..) |parameter, index| {
@@ -213,14 +223,17 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     else
         "";
     try self.functions.append(self.allocator, .{
-        .is_local = true,
+        .is_local = !delegated_host,
+        .is_internal = delegated_host,
+        .owner = call.owner,
         .specialization_file = callback.position.file,
         .position = callback.position,
         .name_position = callback.position,
         .name = adapter_name,
-        .parameters = try adapterParameters(self, callback.position, application_type, false),
+        .parameters = try adapterParameters(self, callback.position, host_type, false),
         .return_type = .void,
         .intrinsic = .{ .system_adapter = .{
+            .host_type = host_type,
             .target = target_name.?,
             .target_position = callback.position,
             .receiver = receiver_dependency,
@@ -234,14 +247,17 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         .statements = &.{},
     });
     if (parallel_dependency) |dependency| try self.functions.append(self.allocator, .{
-        .is_local = true,
+        .is_local = !delegated_host,
+        .is_internal = delegated_host,
+        .owner = call.owner,
         .specialization_file = callback.position.file,
         .position = callback.position,
         .name_position = callback.position,
         .name = worker_name,
-        .parameters = try adapterParameters(self, callback.position, application_type, true),
+        .parameters = try adapterParameters(self, callback.position, host_type, true),
         .return_type = .void,
         .intrinsic = .{ .system_adapter = .{
+            .host_type = host_type,
             .target = target_name.?,
             .target_position = callback.position,
             .receiver = receiver_dependency,
@@ -331,10 +347,10 @@ fn registrationArguments(allocator: std.mem.Allocator, call: Ast.Expression.Call
     return result;
 }
 
-fn adapterParameters(self: anytype, position: Source.Position, application_type: Ast.Type, range: bool) ![]const Ast.Parameter {
+fn adapterParameters(self: anytype, position: Source.Position, host_type: Ast.Type, range: bool) ![]const Ast.Parameter {
     const count: usize = if (range) 5 else 2;
     const parameters = try self.allocator.alloc(Ast.Parameter, count);
-    parameters[0] = .{ .position = position, .name = "application", .type = application_type };
+    parameters[0] = .{ .position = position, .name = "host", .type = host_type };
     parameters[1] = .{ .position = position, .name = "system_order", .type = .int };
     if (range) {
         parameters[2] = .{ .position = position, .name = "range_start", .type = .int };
@@ -342,6 +358,11 @@ fn adapterParameters(self: anytype, position: Source.Position, application_type:
         parameters[4] = .{ .position = position, .name = "commands_address", .type = .uint };
     }
     return parameters;
+}
+
+fn sourceMethod(structure: Ast.Structure, name: []const u8) ?Ast.Function {
+    for (structure.methods) |method| if (!method.is_static and std.mem.eql(u8, method.name, name)) return method;
+    return null;
 }
 
 fn appendUnique(allocator: std.mem.Allocator, values: *std.ArrayList([]const u8), value: []const u8) !void {

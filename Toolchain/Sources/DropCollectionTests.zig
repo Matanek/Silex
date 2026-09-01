@@ -34,6 +34,33 @@ test "collection insertion extraction replacement and clear preserve exact drops
     );
 }
 
+test "indexed replacement in a class-owned list preserves class lifetimes" {
+    const output = try run(
+        \\class Token {
+        \\    let id:int
+        \\    init(id:int) { self.id = id }
+        \\    drop { print("drop ", self.id) }
+        \\}
+        \\class Cache {
+        \\    var entries:Token[]
+        \\    init() { self.entries = [] }
+        \\    func set(entry:Token) {
+        \\        if self.entries.is_empty() { self.entries.append(entry) }
+        \\        else { self.entries[0] = entry }
+        \\    }
+        \\}
+        \\func main() {
+        \\    var cache = Cache()
+        \\    cache.set(Token(1))
+        \\    cache.set(Token(2))
+        \\    cache.set(Token(3))
+        \\    print("done")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop 1\ndrop 2\ndone\ndrop 3\n", output);
+}
+
 test "collection insertion transfers resource-bearing temporaries" {
     const output = try run(
         \\class Token {

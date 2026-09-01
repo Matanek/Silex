@@ -1,4 +1,5 @@
 const std = @import("std");
+const Ast = @import("../Ast.zig");
 const CompilationCache = @import("../CompilationCache.zig");
 const LexerModule = @import("../Lexer.zig");
 const Result = @import("../Intrinsics/Result.zig");
@@ -120,7 +121,7 @@ fn validateMergedDeclarations(self: anytype, module: usize) !void {
                 }
             }
             for (right_program.structures) |structure| {
-                if (Reexports.structureExported(right_program, structure) and hasPublicName(left_program, structure.name)) {
+                if (publicStructureDeclaration(right_program, structure) and hasPublicName(left_program, structure.name)) {
                     return mergedDeclarationCollision(self, right, structure.name, structure.name_position, left_provider.owner);
                 }
             }
@@ -146,11 +147,11 @@ fn validateMergedDeclarations(self: anytype, module: usize) !void {
     }
 }
 
-fn hasPublicName(program: @import("../Ast.zig").Program, name: []const u8) bool {
+fn hasPublicName(program: Ast.Program, name: []const u8) bool {
     if (std.mem.eql(u8, name, Result.name)) return false;
     for (program.functions) |function| if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
     for (program.structures) |structure| {
-        if (Reexports.structureExported(program, structure) and std.mem.eql(u8, structure.name, name)) return true;
+        if (publicStructureDeclaration(program, structure) and std.mem.eql(u8, structure.name, name)) return true;
     }
     for (program.enums) |enumeration| if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
     for (program.uses) |use| {
@@ -159,6 +160,11 @@ fn hasPublicName(program: @import("../Ast.zig").Program, name: []const u8) bool 
         if (std.mem.eql(u8, alias, name)) return true;
     }
     return false;
+}
+
+fn publicStructureDeclaration(program: Ast.Program, structure: Ast.Structure) bool {
+    if (structure.collection != null or structure.is_tuple) return false;
+    return Reexports.structureExported(program, structure);
 }
 
 fn mergedDeclarationCollision(
@@ -243,13 +249,14 @@ fn bind(self: anytype, module: usize) !void {
         if (contribution.target != module) continue;
         const binding = try self.resolveUse(contribution.contributor, contribution.use);
         const dependency = binding.module orelse return invalidContributionSource(self, contribution);
-        if (binding.declaration == null or
-            self.index.providers[dependency].owner != self.index.providers[contribution.contributor].owner)
-        {
-            return invalidContributionSource(self, contribution);
-        }
+        const declaration = binding.declaration orelse return invalidContributionSource(self, contribution);
         try self.loadModule(dependency, module);
-        if (!directPublicDeclaration(self, dependency, binding.declaration.?)) {
+        if (!directPublicDeclarationOwnedBy(
+            self,
+            dependency,
+            declaration,
+            self.index.providers[contribution.contributor].owner,
+        )) {
             return invalidContributionSource(self, contribution);
         }
         try requireAvailableContributionAlias(self, module, program, bindings.items, contribution, binding.alias);
@@ -268,9 +275,10 @@ fn invalidContributionSource(self: anytype, contribution: Reexports.CatalogContr
     return self.fail(contribution.use.position, message);
 }
 
-fn directPublicDeclaration(self: anytype, module: usize, name: []const u8) bool {
+fn directPublicDeclarationOwnedBy(self: anytype, module: usize, name: []const u8, owner: usize) bool {
     for (self.units, 0..) |unit, fragment| {
         if (!Fragments.same(self.index, module, fragment)) continue;
+        if (self.index.providers[fragment].owner != owner) continue;
         const program = unit.program orelse continue;
         for (program.functions) |function| {
             if (function.is_public and std.mem.eql(u8, function.name, name)) return true;

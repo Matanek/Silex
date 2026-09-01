@@ -201,7 +201,7 @@ pub fn combineWithMerges(
     var providers: std.ArrayList(Provider) = .empty;
     for (indexes) |index| for (index.providers) |provider| {
         var merged = provider;
-        merged.merge_owner = mergeOwner(merges, provider);
+        merged.merge_owner = mergeOwner(merges, provider) orelse provider.merge_owner;
         try providers.append(allocator, merged);
     };
     std.mem.sort(Provider, providers.items, {}, lessThan);
@@ -452,4 +452,48 @@ test "reject nested and dotted duplicate providers" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Math/Integer.Checked.sx", .data = "" });
     const root_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     try std.testing.expectError(error.DuplicateModule, discover(allocator, std.testing.io, root_path));
+}
+
+test "preserve merge ownership when appending an entry provider" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const parent: Index = .{ .providers = &.{.{
+        .name = "GFX.Application",
+        .path = "GFX/Module/Application/@Module.sx",
+        .file = 0,
+        .owner = 1,
+    }} };
+    const extension: Index = .{ .providers = &.{.{
+        .name = "GFX.Application",
+        .path = "GFX.Application/Module/@Bundle.sx",
+        .file = 0,
+        .owner = 2,
+    }} };
+    const merged = try combineWithMerges(allocator, &.{ parent, extension }, &.{.{
+        .name = "GFX.Application",
+        .parent_owner = 1,
+        .child_owner = 2,
+    }});
+    const entry: Index = .{ .providers = &.{.{
+        .name = "GFX.Scene2D.Tests.Domain",
+        .path = "GFX.Scene2D/Tests/Domain.sx",
+        .file = 0,
+        .owner = 0,
+        .origin = .entry,
+    }} };
+
+    const combined = try combine(allocator, &.{ merged, entry });
+    try std.testing.expectEqual(@as(usize, 3), combined.providers.len);
+    try std.testing.expectEqual(@as(?usize, 1), combined.providers[0].merge_owner);
+    try std.testing.expectEqual(@as(?usize, 1), combined.providers[1].merge_owner);
+
+    const duplicate: Index = .{ .providers = &.{.{
+        .name = "GFX.Application",
+        .path = "Other/Module/Application.sx",
+        .file = 0,
+        .owner = 3,
+    }} };
+    try std.testing.expectError(error.DuplicateModule, combine(allocator, &.{ merged, duplicate }));
 }

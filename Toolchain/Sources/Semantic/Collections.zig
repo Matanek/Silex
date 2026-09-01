@@ -531,6 +531,16 @@ pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !
     return analyzeCallForType(self, builder, call, receiver_type);
 }
 
+pub fn analyzeCallWithValue(self: anytype, builder: anytype, call: Ast.Expression.Call, source: Model.TypedValue) !?Model.TypedValue {
+    const collection = collectionForType(self.structures, source.type) orelse return null;
+    if (call.safe or call.arguments.len != 0 or call.named_arguments.len != 0 or call.type_arguments.len != 0) return null;
+    if (std.mem.eql(u8, call.name, "indexed")) {
+        if (collection.view) return self.fail(call.name_position, "indexed() expects an array or list");
+        return self.fail(call.name_position, "indexed() is available only as a for source with two bindings");
+    }
+    return analyzeReadCall(self, builder, call, source, collection);
+}
+
 fn staticReceiverType(self: anytype, expression: *const Ast.Expression) !?Ast.Type {
     if (expression.value != .field_access) return null;
     const access = expression.value.field_access;
@@ -552,6 +562,10 @@ fn analyzeCallForType(self: anytype, builder: anytype, call: Ast.Expression.Call
         return self.fail(call.name_position, "indexed() is available only as a for source with two bindings");
     }
     const source = try self.analyzeExpression(builder, receiver_expression);
+    return analyzeReadCall(self, builder, call, source, collection);
+}
+
+fn analyzeReadCall(self: anytype, builder: anytype, call: Ast.Expression.Call, source: Model.TypedValue, collection: Ast.Collection) !?Model.TypedValue {
     if (std.mem.eql(u8, call.name, "count")) {
         const result = try self.newValue(builder, .int);
         if (collection.length) |count|

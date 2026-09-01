@@ -213,7 +213,10 @@ fn canAccessPackage(self: anytype, accessor_module: usize, provider_module: usiz
 }
 
 fn sameModuleScope(self: anytype, left: usize, right: usize) bool {
-    if (self.index.providers[left].owner != self.index.providers[right].owner) return false;
+    const accessor = self.index.providers[left];
+    const provider = self.index.providers[right];
+    if (accessor.owner != provider.owner and
+        !self.packages.canAccessMergedModule(accessor.owner, provider.owner, provider.name)) return false;
     return ModuleScopes.same(
         self.module_scope_roots,
         self.index.providers[left].name,

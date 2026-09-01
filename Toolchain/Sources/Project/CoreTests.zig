@@ -1029,6 +1029,101 @@ test "compile an explicit package test entry outside public module roots" {
     try std.testing.expect(compiler.index.find("Toolkit.Tests.Unloaded") == null);
 }
 
+test "compile an explicit package suite entry after composing a merged extension" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Application");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Application/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Scene2D/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Scene2D/Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data =
+        \\{"name":"GFX","version":"1.0.0","extensions":{"GFX.Application":{"merge":true,"suite":true},"GFX.Scene2D":{"suite":true}}}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application/@Module.sx",
+        .data =
+        \\public protocol Plugin {
+        \\    func id() str
+        \\    func build(application:&Application)
+        \\}
+        \\public class Application {
+        \\    func add_plugin<P:Plugin>(plugin:P) {
+        \\        assert(plugin.id() == "time")
+        \\        var candidate = plugin
+        \\        var host = self
+        \\        candidate.build(host)
+        \\    }
+        \\    func mark_ready() {}
+        \\}
+        \\public func core_value() int { return 20 }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application/Time.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.Application.Plugin as PluginProtocol
+        \\public struct Time:PluginProtocol {
+        \\    func id() str { return "time" }
+        \\    func build(application:&Application) { application.mark_ready() }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Package.json",
+        .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@Bundle.sx",
+        .data = "public func bundle_value() int { return 22 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Scene2D/Package.json",
+        .data = "{\"name\":\"GFX.Scene2D\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Application\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Scene2D/Module/Domain.sx",
+        .data = "public func value() int { return 1 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Scene2D/Tests/Domain.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.Application.Time as TimePlugin
+        \\test "consume merged application" {
+        \\    var host = Application()
+        \\    host.add_plugin(TimePlugin())
+        \\    assert(Application.core_value() + Application.bundle_value() == 42)
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(
+        allocator,
+        &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX.Scene2D", "Tests", "Domain.sx" },
+    );
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compileTests(input);
+    try std.testing.expectEqual(@as(usize, 1), compilation.tests.len);
+    try std.testing.expect(compiler.index.find("GFX.Scene2D.Tests.Domain") != null);
+    const result = try @import("../Interpreter.zig").runFunctionCaptureWithBoundaries(
+        allocator,
+        null,
+        compilation.ir,
+        compilation.tests[0].function,
+        compilation.boundaries,
+    );
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    _ = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+}
+
 test "qualified packages share namespaces without sharing ownership" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1256,6 +1351,192 @@ test "parent packages own exact extension modules and may merge them additively"
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
         "function 'GFX.Physics.extension_hidden' is module-visible and unavailable outside its module",
+        compiler.diagnostic.?.message,
+    );
+}
+
+test "public package lists preserve collection behavior in consumers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Parent/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\"Tests\",\"dependencies\":{\"Parent\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Package.json",
+        .data = "{\"name\":\"Parent\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/@Module.sx",
+        .data =
+        \\public use Parent.Item.Item
+        \\public use Parent.Store.Store
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/Item.sx",
+        .data = "public struct Item { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/Store.sx",
+        .data =
+        \\use Parent.Item.Item
+        \\public class Store {
+        \\    func items() Item[] { return [Item(value:2), Item(value:3)] }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Tests/PublicList.sx",
+        .data =
+        \\use Parent
+        \\func total() int {
+        \\    var store = Parent.Store()
+        \\    assert(store.items().count() == 2)
+        \\    let values = store.items()
+        \\    assert(values.count() == 2)
+        \\    assert(values[0].value == 2)
+        \\    var result = 0
+        \\    for value in values { result += value.value }
+        \\    return result
+        \\}
+        \\func main() { print(total()) }
+        \\test "consume public list" { assert(total() == 5) }
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Tests", "PublicList.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("5\n", result.stdout);
+    _ = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+
+    compiler = Compiler.init(allocator, std.testing.io);
+    const suite = try compiler.compileTests(input);
+    const test_result = try @import("../Interpreter.zig").runFunctionCaptureWithBoundaries(
+        allocator,
+        null,
+        suite.ir,
+        suite.tests[0].function,
+        suite.boundaries,
+    );
+    try std.testing.expectEqual(@as(u8, 0), test_result.exit_code);
+    _ = try @import("../Arm64/Lower.zig").lower(allocator, suite.ir);
+}
+
+test "merged extension atoms ignore synthetic internal types but preserve public collisions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Application/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX.Application\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Application\":{\"merge\":true}}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data =
+        \\public enum Schedule { update }
+        \\public intrinsic class Resources {
+        \\    func scope() Resources
+        \\    func insert<T>(value:T)
+        \\    module func retain_class<T>(value:T)
+        \\    func has<T>() bool
+        \\    func get<T>() @T
+        \\    func get_mut<T>() &T
+        \\    func try_get<T>() @T?
+        \\    func try_get_mut<T>() &T?
+        \\    func remove<T>() T?
+        \\    func clear()
+        \\    module func invalidate()
+        \\}
+        \\class RegisteredSystem {
+        \\    let reads:str[]
+        \\    let writes:str[]
+        \\    init(reads:str[], writes:str[]) { self.reads = reads; self.writes = writes }
+        \\}
+        \\public class Application {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Package.json",
+        .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@Bundle.sx",
+        .data =
+        \\class BundleSystem {
+        \\    let reads:str[]
+        \\    let writes:str[]
+        \\    init(reads:str[], writes:str[]) { self.reads = reads; self.writes = writes }
+        \\}
+        \\public class Bundle {
+        \\    var resources:Resources
+        \\    init(resources:Resources) { resources.invalidate(); self.resources = resources }
+        \\    func add_system(schedule:Schedule) { var system = BundleSystem([], []) }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Application
+        \\func main() {}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    _ = try compiler.compile(input);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Application.Resources
+        \\func main() { var resources = Resources(); resources.invalidate() }
+        ,
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "method 'invalidate' is module-visible and unavailable outside its module",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Application
+        \\func main() {}
+        ,
+    });
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@Bundle.sx",
+        .data =
+        \\public intrinsic class Resources {}
+        \\public class Bundle {}
+        ,
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "public declaration 'Resources' from extension package 'GFX.Application' collides with package 'GFX' in merged module 'GFX.Application'",
         compiler.diagnostic.?.message,
     );
 }
@@ -1564,6 +1845,56 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
         "umbrella contributions must be declared in a named package's portable principal module",
         compiler.diagnostic.?.message,
     );
+}
+
+test "compose a merged child-owned declaration into an authorized umbrella catalog" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Application/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Application\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Application\":{\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data = "public struct Application {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public struct Core {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Package.json",
+        .data = "{\"name\":\"GFX.Application\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Application/Module/@BundleManager.sx",
+        .data =
+        \\public struct BundleManager { let value:int }
+        \\contribute GFX.Plugins {
+        \\    public use GFX.Application.BundleManager as BundleManager
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Plugins\nfunc main() { print(Plugins.BundleManager(value:42).value) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
 test "compose and execute structures inside their declaring module" {
