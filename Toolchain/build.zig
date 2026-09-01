@@ -126,7 +126,7 @@ pub fn build(b: *std.Build) void {
         .name = "silex-deep-copy-runtime-linux-arm64",
         .root_module = deep_copy_runtime_linux_arm64_module,
     });
-    deep_copy_runtime_linux_arm64.entry = .{ .symbol_name = "silex_deep_copy" };
+    deep_copy_runtime_linux_arm64.entry = .{ .symbol_name = "silex_deep_copy_with_allocator" };
     const deep_copy_runtime_linux_arm64_files = b.addWriteFiles();
     _ = deep_copy_runtime_linux_arm64_files.addCopyFile(deep_copy_runtime_linux_arm64.getEmittedBin(), "silex-deep-copy-runtime-linux-arm64.elf");
     const deep_copy_runtime_linux_arm64_import = deep_copy_runtime_linux_arm64_files.add(

@@ -83,6 +83,24 @@ export fn silex_deep_copy_x64(
     allocate_function: AllocateFunction,
     release_function: ReleaseFunction,
 ) callconv(.c) u64 {
+    return silex_deep_copy_with_allocator(
+        source,
+        destination,
+        model,
+        type_value,
+        allocate_function,
+        release_function,
+    );
+}
+
+export fn silex_deep_copy_with_allocator(
+    source: [*]const u64,
+    destination: [*]u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) callconv(.c) u64 {
     return deepCopy(.{
         .model = model,
         .allocate_function = allocate_function,

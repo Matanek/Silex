@@ -94,10 +94,12 @@ mapping, unmapping, time, random seed, process identity, exit, and the internal
 recursive mutex.
 
 The float formatting, deep-copy, and cycle-collection runtimes are embedded as
-linked AArch64 ELF payloads. Their complete relative load-segment layout and
-page congruence are preserved inside the generated image, so their internal
-PC-relative references do not leak into the Silex machine IR or enclosing
-object format.
+linked AArch64 ELF payloads. Deep-copy receives AAPCS64 allocation and release
+callbacks emitted by the Linux backend, so its memory boundary uses the same
+checked system-call stubs as generated Silex code. The payloads' complete
+relative load-segment layout and page congruence are preserved inside the
+generated image, so their internal PC-relative references do not leak into the
+Silex machine IR or enclosing object format.
 
 `silex setup` installs the native AArch64 Zig linker on this host. Shadercross
 has no upstream native Linux ARM64 archive yet and is deliberately not replaced

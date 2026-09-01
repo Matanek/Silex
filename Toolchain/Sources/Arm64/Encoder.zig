@@ -128,7 +128,12 @@ const FunctionFixups = struct {
     epilogue: std.ArrayList(LocalFixup) = .empty,
 };
 
-const DeepCopyFixup = struct { call_at: usize, data_at: usize };
+const DeepCopyFixup = struct {
+    call_at: usize,
+    data_at: usize,
+    allocate_at: ?usize = null,
+    release_at: ?usize = null,
+};
 const CycleFixup = struct { call_at: usize, data_at: ?usize = null };
 const FunctionAddressFixup = struct { at: usize, function: Machine.FunctionId };
 
@@ -238,6 +243,15 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             break :entry offset;
         },
     };
+    var deep_copy_allocate_callback: ?usize = null;
+    var deep_copy_release_callback: ?usize = null;
+    if (platform == .linux and deep_copy_calls.items.len != 0) {
+        deep_copy_allocate_callback = words.items.len * @sizeOf(u32);
+        try emitLinuxRuntimeAllocateCallback(allocator, &words, &external_call_sites);
+        deep_copy_release_callback = words.items.len * @sizeOf(u32);
+        try emitLinuxRuntimeReleaseCallback(allocator, &words, &external_call_sites);
+    }
+
     var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
         if (platform == .linux) {
@@ -285,6 +299,22 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             .target_offset = offsets[fixup.function],
         });
     }
+    if (platform == .linux) for (deep_copy_calls.items) |fixup| {
+        const allocate_at = fixup.allocate_at orelse return error.InvalidMachineProgram;
+        const release_at = fixup.release_at orelse return error.InvalidMachineProgram;
+        const allocate_target = deep_copy_allocate_callback orelse return error.InvalidMachineProgram;
+        const release_target = deep_copy_release_callback orelse return error.InvalidMachineProgram;
+        try patchPageAddress(words.items, allocate_at, allocate_target);
+        try address_sites.append(allocator, .{
+            .instruction_offset = @intCast(allocate_at * @sizeOf(u32)),
+            .target_offset = @intCast(allocate_target),
+        });
+        try patchPageAddress(words.items, release_at, release_target);
+        try address_sites.append(allocator, .{
+            .instruction_offset = @intCast(release_at * @sizeOf(u32)),
+            .target_offset = @intCast(release_target),
+        });
+    };
 
     const machine_code_size = words.items.len * 4;
     const code_size = std.mem.alignForward(usize, machine_code_size + runtime_bytes.items.len, 4);
@@ -466,6 +496,32 @@ fn appendCycleRuntime(
     for (calls.items) |fixup| try patch26(words, fixup.call_at, target);
     try appendRuntimeAddressSites(allocator, runtime_start, runtime, address_sites);
     try runtime_bytes.appendSlice(allocator, runtime.bytes);
+}
+
+fn emitLinuxRuntimeAllocateCallback(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    sites: *std.ArrayList(ExternalCalls.Site),
+) Error!void {
+    // The embedded runtime follows AAPCS64 and receives the byte count in X0;
+    // the Silex allocation primitive expects it in X1 before issuing mmap.
+    try words.append(allocator, moveRegister(.x1, .x0));
+    try Allocation.emit(allocator, words, sites, .linux);
+    const failed = words.items.len;
+    try words.append(allocator, Allocation.failureBranch(.linux));
+    try words.append(allocator, returnInstruction());
+    try patch19(words.items, failed, words.items.len);
+    try words.append(allocator, moveWideZero32(.x0, 0));
+    try words.append(allocator, returnInstruction());
+}
+
+fn emitLinuxRuntimeReleaseCallback(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    sites: *std.ArrayList(ExternalCalls.Site),
+) Error!void {
+    try Allocation.emitFree(allocator, words, sites, .linux);
+    try words.append(allocator, returnInstruction());
 }
 
 fn appendRuntimeAddressSites(
@@ -973,9 +1029,18 @@ fn encodeFunction(
                 const data_at = words.items.len;
                 try appendRelocatableAddress(allocator, words, .x2);
                 try emitImmediate64(allocator, words, .x3, @intFromEnum(copy.type));
+                const allocate_at: ?usize = if (platform == .linux) words.items.len else null;
+                if (platform == .linux) try appendRelocatableAddress(allocator, words, .x4);
+                const release_at: ?usize = if (platform == .linux) words.items.len else null;
+                if (platform == .linux) try appendRelocatableAddress(allocator, words, .x5);
                 const call_at = words.items.len;
                 try words.append(allocator, branchLink());
-                try deep_copy_calls.append(allocator, .{ .call_at = call_at, .data_at = data_at });
+                try deep_copy_calls.append(allocator, .{
+                    .call_at = call_at,
+                    .data_at = data_at,
+                    .allocate_at = allocate_at,
+                    .release_at = release_at,
+                });
                 try words.append(allocator, moveRegister(.x8, .x0));
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
             },

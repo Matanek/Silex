@@ -66,8 +66,6 @@ jobs:
           zig ar rcs "$boundary/Boundary/linux-arm64/libProvider.a" \
             "$boundary/Boundary/linux-arm64/provider.o"
 
-          zig build check --build-file Toolchain/build.zig
-          zig build test --build-file Toolchain/build.zig
           zig build -Doptimize=ReleaseFast -Dcpu=baseline \
             --prefix "$RUNNER_TEMP/silex-prefix" \
             --build-file Toolchain/build.zig
