@@ -105,34 +105,49 @@ test "discover recursive tests deterministically for the active target" {
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    for ([_][]const u8{
-        "Nested",
-        ".hidden",
-        "Platform/MacOS/Module",
-        "Platform/Linux/Module",
-        "Target/macos-arm64/Module",
-        "Target/windows-x64/Module",
-    }) |directory| try temporary.dir.createDirPath(std.testing.io, directory);
+    for ([_][]const u8{ "Nested", ".hidden" }) |directory| {
+        try temporary.dir.createDirPath(std.testing.io, directory);
+    }
+    for ([_][]const u8{ "MacOS", "Linux", "Windows" }) |platform| {
+        const directory = try std.fmt.allocPrint(allocator, "Platform/{s}/Module", .{platform});
+        try temporary.dir.createDirPath(std.testing.io, directory);
+        const source = try std.fmt.allocPrint(allocator, "{s}/Platform.sx", .{directory});
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = source, .data = "test { assert(true) }" });
+    }
+    for (Target.recognized) |target| {
+        const directory = try std.fmt.allocPrint(allocator, "Target/{s}/Module", .{target.name()});
+        try temporary.dir.createDirPath(std.testing.io, directory);
+        const source = try std.fmt.allocPrint(allocator, "{s}/Selected.sx", .{directory});
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = source, .data = "test { assert(true) }" });
+    }
 
     const files = [_]struct { path: []const u8, source: []const u8 }{
         .{ .path = "Zeta.sx", .source = "test { assert(true) }" },
         .{ .path = "Nested/Alpha.sx", .source = "test \"alpha\" { assert(true) }" },
         .{ .path = "Nested/NoTest.sx", .source = "func test() {}" },
         .{ .path = ".hidden/Hidden.sx", .source = "test { assert(false) }" },
-        .{ .path = "Platform/MacOS/Module/Host.sx", .source = "test { assert(true) }" },
-        .{ .path = "Platform/Linux/Module/Other.sx", .source = "test { assert(false) }" },
-        .{ .path = "Target/macos-arm64/Module/Selected.sx", .source = "test { assert(true) }" },
-        .{ .path = "Target/windows-x64/Module/Other.sx", .source = "test { assert(false) }" },
     };
     for (files) |file| try temporary.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.source });
 
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
-    const found = try sources(allocator, std.testing.io, root, .macos_arm64);
-    try std.testing.expectEqual(@as(usize, 4), found.len);
-    try std.testing.expect(std.mem.endsWith(u8, found[0], "Nested/Alpha.sx"));
-    try std.testing.expect(std.mem.endsWith(u8, found[1], "Platform/MacOS/Module/Host.sx"));
-    try std.testing.expect(std.mem.endsWith(u8, found[2], "Target/macos-arm64/Module/Selected.sx"));
-    try std.testing.expect(std.mem.endsWith(u8, found[3], "Zeta.sx"));
+    for (Target.recognized) |target| {
+        const found = try sources(allocator, std.testing.io, root, target);
+        const platform_source = try std.fmt.allocPrint(
+            allocator,
+            "Platform/{s}/Module/Platform.sx",
+            .{target.platform.directoryName()},
+        );
+        const target_source = try std.fmt.allocPrint(
+            allocator,
+            "Target/{s}/Module/Selected.sx",
+            .{target.name()},
+        );
+        try std.testing.expectEqual(@as(usize, 4), found.len);
+        try std.testing.expect(std.mem.endsWith(u8, found[0], "Nested/Alpha.sx"));
+        try std.testing.expect(std.mem.endsWith(u8, found[1], platform_source));
+        try std.testing.expect(std.mem.endsWith(u8, found[2], target_source));
+        try std.testing.expect(std.mem.endsWith(u8, found[3], "Zeta.sx"));
+    }
 }
 
 test "keep an explicit source even when it has no test block" {

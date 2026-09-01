@@ -228,6 +228,10 @@ fn setupToolchain(init: std.process.Init, allocator: std.mem.Allocator, args: []
         std.debug.print("silex: Shadercross is unavailable for this host\n", .{});
         return 1;
     };
+    if (!host.hasNativeEmitter()) {
+        std.debug.print("silex: toolchain setup for '{s}' is not implemented yet\n", .{host.name()});
+        return 1;
+    }
     const root = try globalToolchainRoot(allocator, init.environ_map) orelse {
         std.debug.print("silex: cannot locate the user home directory for toolchain setup\n", .{});
         return 1;
@@ -921,7 +925,7 @@ fn listTargets(init: std.process.Init, allocator: std.mem.Allocator, args: []con
         return 1;
     }
     const host = TargetModule.Target.host();
-    for (TargetModule.Target.supported) |target| {
+    for (TargetModule.Target.recognized) |target| {
         const line = if (host) |selected|
             if (selected.eql(target))
                 try std.fmt.allocPrint(allocator, "{s} (host)\n", .{target.name()})
@@ -1112,7 +1116,7 @@ fn compileNativeOptions(
     };
     var progress = CliProgress.Build.init(init.io);
     progress.source(.analyze, options.source_path);
-    const executable_kind = if (target.eql(.macos_arm64)) "macho" else if (target.eql(.linux_x64)) "elf" else "pe";
+    const executable_kind = target.executableKind();
     const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ target.name(), @tagName(options.mode), options.source_path });
     if (options.cache) if (CompilationCache.loadNativeState(allocator, init.io, options.source_path, target.name())) |state| {
         const digest = CompilationCache.nativeKey(
@@ -1666,7 +1670,7 @@ fn writeExecutable(init: std.process.Init, output_path: []const u8, executable: 
 fn runArtifactPath(allocator: std.mem.Allocator, options: Cli.RunOptions, target: TargetModule.Target) ![]const u8 {
     const digest = CompilationCache.artifactKey("run-executable", &.{ options.source_path, target.name(), @tagName(options.mode) });
     const hex = std.fmt.bytesToHex(digest, .lower);
-    const extension = if (target.eql(.windows_x64) or target.eql(.windows_arm64)) ".exe" else "";
+    const extension = target.executableExtension();
     return std.fmt.allocPrint(
         allocator,
         ".silex/run/{s}-{s}-{s}-{s}{s}",
@@ -1812,6 +1816,7 @@ fn nativeLinkerPath(
 ) ![]const u8 {
     const root = try globalToolchainRoot(allocator, environment) orelse return "zig";
     const host = TargetModule.Target.host() orelse target;
+    if (!host.hasNativeEmitter()) return "zig";
     const managed = try ToolchainSetup.linkerExecutablePath(allocator, root, host);
     const file = Io.Dir.cwd().openFile(io, managed, .{}) catch return "zig";
     file.close(io);
@@ -1825,6 +1830,7 @@ fn configureShaderCompiler(
 ) !void {
     const root = try globalToolchainRoot(allocator, environment) orelse return;
     const host = TargetModule.Target.host() orelse return;
+    if (!host.hasNativeEmitter()) return;
     compiler.shadercross_path = try ToolchainSetup.executablePath(allocator, root, host);
 }
 

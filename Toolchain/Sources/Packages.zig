@@ -1800,9 +1800,11 @@ fn validArchive(io: Io, path: []const u8, target: TargetModule.Target) bool {
             else if (target.eql(.windows_x64))
                 std.mem.readInt(u16, object_header[0..2], .little) == 0x8664 and
                     std.mem.readInt(u16, object_header[2..4], .little) != 0
-            else
+            else if (target.eql(.windows_arm64))
                 std.mem.readInt(u16, object_header[0..2], .little) == 0xaa64 and
-                    std.mem.readInt(u16, object_header[2..4], .little) != 0;
+                    std.mem.readInt(u16, object_header[2..4], .little) != 0
+            else
+                false;
             if (matches) found_object = true;
         }
         offset = data_offset + member_size + (member_size & 1);
@@ -2423,6 +2425,39 @@ test "resolve a target-private ARM64 archive and reject escaping paths" {
     resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
     try std.testing.expectEqualStrings("boundary archive does not match its target", resolver.diagnostic.?);
+}
+
+test "select exact boundary manifests across the recognized target matrix" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{
+        \\  "macos-arm64":{"providers":{"Native":{"libraries":["macos-arm64"]}}},
+        \\  "macos-x64":{"providers":{"Native":{"libraries":["macos-x64"]}}},
+        \\  "linux-arm64":{"providers":{"Native":{"libraries":["linux-arm64"]}}},
+        \\  "linux-x64":{"providers":{"Native":{"libraries":["linux-x64"]}}},
+        \\  "windows-arm64":{"providers":{"Native":{"libraries":["windows-arm64"]}}},
+        \\  "windows-x64":{"providers":{"Native":{"libraries":["windows-x64"]}}}
+        \\}}
+        ,
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Bridge" });
+
+    for (TargetModule.Target.recognized) |target| {
+        var resolver = Resolver.initForTarget(allocator, std.testing.io, null, target);
+        const graph = try resolver.resolve(base);
+        try std.testing.expectEqual(@as(usize, 1), graph.packages[0].boundary_providers.len);
+        const provider = graph.packages[0].boundary_providers[0];
+        try std.testing.expectEqualStrings("Native", provider.name);
+        try std.testing.expectEqual(@as(usize, 1), provider.libraries.len);
+        try std.testing.expectEqualStrings(target.name(), provider.libraries[0]);
+    }
 }
 
 test "resolve ELF and COFF boundary archives with system libraries" {

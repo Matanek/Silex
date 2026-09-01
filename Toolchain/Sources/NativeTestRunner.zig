@@ -136,7 +136,7 @@ fn artifactPath(
     return std.fmt.allocPrint(
         allocator,
         ".silex/test/{s}-{s}{s}",
-        .{ std.fs.path.stem(source_path), hex[0..], if (target.eql(.windows_x64)) ".exe" else "" },
+        .{ std.fs.path.stem(source_path), hex[0..], target.executableExtension() },
     );
 }
 

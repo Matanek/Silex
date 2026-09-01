@@ -45,33 +45,33 @@ struct CopyPair {
     var again:CopyState
 }
 
-struct X64FloatPair {
+struct NativeFloatPair {
     let x:float
     let y:float
 }
 
-enum X64AssetKind {
+enum NativeAssetKind {
     html
     css
     javascript
     custom(str)
 }
 
-enum X64AssetContent {
+enum NativeAssetContent {
     text(str)
     bytes(uint8[])
 }
 
-struct X64Asset {
+struct NativeAsset {
     let path_value:str
-    let kind_value:X64AssetKind
-    let content_value:X64AssetContent
+    let kind_value:NativeAssetKind
+    let content_value:NativeAssetContent
 
-    static func text(path:str, kind:X64AssetKind, content:str) X64Asset {
-        return X64Asset(
+    static func text(path:str, kind:NativeAssetKind, content:str) NativeAsset {
+        return NativeAsset(
             path_value:path,
             kind_value:kind,
-            content_value:X64AssetContent.text(content)
+            content_value:NativeAssetContent.text(content)
         )
     }
 
@@ -85,38 +85,38 @@ struct X64Asset {
     }
 }
 
-struct X64Site {
+struct NativeSite {
     let entry_path:str
-    var assets:X64Asset[]
+    var assets:NativeAsset[]
 
-    init(entry:X64Asset) {
+    init(entry:NativeAsset) {
         self.entry_path = entry.path()
         self.assets = [entry]
     }
 
-    func add(asset:X64Asset) {
+    func add(asset:NativeAsset) {
         for let existing in self.assets {
-            if existing.path() == asset.path() { panic("duplicate x64 asset") }
+            if existing.path() == asset.path() { panic("duplicate native asset") }
         }
         self.assets.append(asset)
     }
 
-    func find(path:str) X64Asset? {
+    func find(path:str) NativeAsset? {
         for let asset in self.assets {
             if asset.path() == path { return asset }
         }
         return null
     }
 
-    func require(path:str) X64Asset {
+    func require(path:str) NativeAsset {
         if let asset = self.find(path) { return asset }
-        panic("missing x64 asset")
+        panic("missing native asset")
     }
 
-    func entry() X64Asset { return self.require(self.entry_path) }
+    func entry() NativeAsset { return self.require(self.entry_path) }
 }
 
-func paired_float_checksum(left:X64FloatPair, right:X64FloatPair) float {
+func paired_float_checksum(left:NativeFloatPair, right:NativeFloatPair) float {
     let sum_x = left.x + right.x
     let sum_y = left.y + right.y
     let scaled_x = sum_x * 2.0
@@ -126,14 +126,14 @@ func paired_float_checksum(left:X64FloatPair, right:X64FloatPair) float {
 
 class DirectCycleNode {
     var next:DirectCycleNode? = null
-    drop { print("x64 cycle drop") }
+    drop { print("native cycle drop") }
 }
 
 class CollectionCycleNode {
     var links:CollectionCycleNode[]
 
     init() { self.links = [] }
-    drop { print("x64 cycle drop") }
+    drop { print("native cycle drop") }
 }
 
 protocol CycleLink {
@@ -144,32 +144,40 @@ class ProtocolCycleNode : CycleLink {
     var next:CycleLink? = null
 
     func linked() bool { return true }
-    drop { print("x64 cycle drop") }
+    drop { print("native cycle drop") }
 }
 
-class X64FloatStore {
+class NativeFloatStore {
     var values:float[]
 
     init() { self.values = [0.0, 0.197275] }
 }
 
-class X64ReplacementToken {
+class NativeReplacementToken {
     static var drops:int = 0
-    drop { X64ReplacementToken.drops++ }
+    drop { NativeReplacementToken.drops++ }
 }
 
-class X64ReplacementCache {
-    var entries:X64ReplacementToken[]
+class NativeReplacementCache {
+    var entries:NativeReplacementToken[]
 
     init() { self.entries = [] }
 
-    func set(entry:X64ReplacementToken) {
+    func set(entry:NativeReplacementToken) {
         if self.entries.is_empty() { self.entries.append(entry) }
         else { self.entries[0] = entry }
     }
 }
 
-func update_x64_store(store:X64FloatStore) {
+struct NativeCounter {
+    var value:int
+
+    func increment() {
+        mutex { self.value++ }
+    }
+}
+
+func update_native_store(store:NativeFloatStore) {
     store.values[1] += 0.0025871352
 }
 
@@ -184,7 +192,7 @@ func dynamic_class_total() int {
 }
 
 func verify_embedded_bytes() {
-    let source = embed_bytes("X64Portability.sx")
+    let source = embed_bytes("NativePortability.sx")
     assert(source.count() > 300)
     assert(source[0] == 102 as uint8)
     assert(source[1] == 117 as uint8)
@@ -302,9 +310,9 @@ func verify_collections() {
 }
 
 func verify_resource_aggregate_list() {
-    var site = X64Site(X64Asset.text("/index.html", X64AssetKind.html, "index"))
-    site.add(X64Asset.text("/style.css", X64AssetKind.css, "style"))
-    site.add(X64Asset.text("/app.js", X64AssetKind.javascript, "script"))
+    var site = NativeSite(NativeAsset.text("/index.html", NativeAssetKind.html, "index"))
+    site.add(NativeAsset.text("/style.css", NativeAssetKind.css, "style"))
+    site.add(NativeAsset.text("/app.js", NativeAssetKind.javascript, "script"))
     assert(site.assets.count() == 3)
     assert(site.entry().path() == "/index.html")
     assert(site.entry().text() == "index")
@@ -314,46 +322,53 @@ func verify_resource_aggregate_list() {
     assert(site.assets[2].text() == "script")
 }
 
-test "execute direct indirect and dynamic calls beyond x64 registers" {
+func verify_mutex() {
+    var counter = NativeCounter(value:0)
+    counter.increment()
+    counter.increment()
+    assert(counter.value == 2)
+}
+
+test "execute direct indirect and dynamic calls beyond native registers" {
     assert(total(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
     assert(callback_total() == 55)
     assert(dynamic_total() == 42)
     assert(dynamic_class_total() == 42)
 }
 
-test "preserve paired float32 arithmetic on x64" {
+test "preserve paired float32 arithmetic on native" {
     assert(paired_float_checksum(
-        X64FloatPair(x:1.0, y:2.0),
-        X64FloatPair(x:3.0, y:4.0)
+        NativeFloatPair(x:1.0, y:2.0),
+        NativeFloatPair(x:3.0, y:4.0)
     ) == 20.0)
 }
 
-test "mutate a class-owned x64 list without changing its snapshot" {
-    var store = X64FloatStore()
+test "mutate a class-owned native list without changing its snapshot" {
+    var store = NativeFloatStore()
     let snapshot = store.values
-    update_x64_store(store)
+    update_native_store(store)
     assert(snapshot[1] == 0.197275)
     assert(store.values[1] == 0.19986214)
 }
 
-test "replace class elements in a class-owned x64 list" {
-    X64ReplacementToken.drops = 0
+test "replace class elements in a class-owned native list" {
+    NativeReplacementToken.drops = 0
     {
-        var cache = X64ReplacementCache()
-        cache.set(X64ReplacementToken())
-        cache.set(X64ReplacementToken())
-        assert(X64ReplacementToken.drops == 1)
-        cache.set(X64ReplacementToken())
-        assert(X64ReplacementToken.drops == 2)
+        var cache = NativeReplacementCache()
+        cache.set(NativeReplacementToken())
+        cache.set(NativeReplacementToken())
+        assert(NativeReplacementToken.drops == 1)
+        cache.set(NativeReplacementToken())
+        assert(NativeReplacementToken.drops == 2)
     }
-    assert(X64ReplacementToken.drops == 3)
+    assert(NativeReplacementToken.drops == 3)
 }
 
-test "preserve embedded byte contents on x64" {
+test "preserve embedded byte contents on native" {
     verify_embedded_bytes()
 }
 
-test "replace and preserve an aliased x64 list" {
+test "replace and preserve an aliased native list" {
     var values = [1, 2, 3]
     let duplicate = values
     let previous = values.replace(1, 8)
@@ -368,7 +383,7 @@ test "replace and preserve an aliased x64 list" {
     assert(duplicate[2] == 3)
 }
 
-test "swap and reverse an x64 list" {
+test "swap and reverse a native list" {
     var values = [1, 8, 3]
     values.swap(0, -1)
     assert(values[0] == 3)
@@ -380,7 +395,7 @@ test "swap and reverse an x64 list" {
     assert(values[2] == 3)
 }
 
-test "grow an x64 list at every position" {
+test "grow a native list at every position" {
     var values = [1, 2, 3]
     values.append(4)
     assert(values.count() == 4)
@@ -405,7 +420,7 @@ test "grow an x64 list at every position" {
     assert(values[7] == 6)
 }
 
-test "remove x64 list elements from every position" {
+test "remove native list elements from every position" {
     var values = [0, 1, 7, 8, 3, 4, 5, 6]
     assert(values.take(3) == 8)
     assert(values.take_first() == 0)
@@ -418,7 +433,7 @@ test "remove x64 list elements from every position" {
     assert(values[4] == 5)
 }
 
-test "slice view mutate and clear x64 lists" {
+test "slice view mutate and clear native lists" {
     var values = [1, 7, 3, 4, 5]
     let slice = values[-4:-1]
     assert(slice.count() == 3)
@@ -443,7 +458,7 @@ test "slice view mutate and clear x64 lists" {
     assert(values.is_empty())
 }
 
-test "deep-copy repeated x64 class roots without collections" {
+test "deep-copy repeated native class roots without collections" {
     var state = CopyState(value:5)
     var source = CopyPair(first:state, again:state)
     var detached = copy source
@@ -454,40 +469,44 @@ test "deep-copy repeated x64 class roots without collections" {
     assert(detached.again.value == 9)
 }
 
-test "finalize a direct x64 class cycle" {
+test "finalize a direct native class cycle" {
     var first = DirectCycleNode()
     var second = DirectCycleNode()
     first.next = second
     second.next = first
 }
 
-test "finalize an x64 class cycle through lists" {
+test "finalize a native class cycle through lists" {
     var first = CollectionCycleNode()
     var second = CollectionCycleNode()
     first.links.append(second)
     second.links.append(first)
 }
 
-test "finalize an x64 class cycle through protocols" {
+test "finalize a native class cycle through protocols" {
     var first = ProtocolCycleNode()
     var second = ProtocolCycleNode()
     first.next = second
     second.next = first
 }
 
-test "execute the complete x64 collection mutation slice" {
+test "execute the complete native collection mutation slice" {
     verify_collections()
 }
 
-test "execute x64 ownership and deep-copy runtime" {
+test "execute native ownership and deep-copy runtime" {
     verify_deep_copy()
 }
 
-test "preserve resource aggregates across x64 list growth" {
+test "preserve resource aggregates across native list growth" {
     verify_resource_aggregate_list()
 }
 
-test "finalize x64 cycles across direct collection and protocol edges" {
+test "serialize native mutations with mutex" {
+    verify_mutex()
+}
+
+test "finalize native cycles across direct collection and protocol edges" {
     verify_cycles()
 }
 
@@ -497,18 +516,19 @@ func main() {
     assert(dynamic_total() == 42)
     assert(dynamic_class_total() == 42)
     assert(paired_float_checksum(
-        X64FloatPair(x:1.0, y:2.0),
-        X64FloatPair(x:3.0, y:4.0)
+        NativeFloatPair(x:1.0, y:2.0),
+        NativeFloatPair(x:3.0, y:4.0)
     ) == 20.0)
     {
-        var store = X64FloatStore()
+        var store = NativeFloatStore()
         let snapshot = store.values
-        update_x64_store(store)
+        update_native_store(store)
         assert(snapshot[1] == 0.197275)
         assert(store.values[1] == 0.19986214)
     }
     verify_collections()
     verify_resource_aggregate_list()
+    verify_mutex()
     verify_deep_copy()
     verify_cycles()
 }

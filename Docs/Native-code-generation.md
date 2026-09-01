@@ -6,18 +6,26 @@ and target-specific proof.
 
 ## Recognize targets
 
-Package composition recognizes `macos-arm64`, `linux-x64`, `windows-x64`,
-and `windows-arm64`. It combines common modules with an OS-level
-`Platform/<OS>/Module/` root and an optional exact `Target/<target>/Module/`
-root. Recognizing and analyzing a target does not claim that its native
-backend is implemented.
+Package composition recognizes `macos-arm64`, `macos-x64`, `linux-arm64`,
+`linux-x64`, `windows-arm64`, and `windows-x64`. It combines common modules
+with an OS-level `Platform/<OS>/Module/` root and an optional exact
+`Target/<target>/Module/` root. Recognizing and analyzing a target does not
+claim that its native backend is implemented.
 
-| Target | Current status |
-| --- | --- |
-| `macos-arm64` | verified and distributed |
-| `linux-x64` | verified and distributed |
-| `windows-x64` | verified and distributed |
-| `windows-arm64` | emitted and structurally tested, but not verified or distributed |
+| Target | Machine backend | Native status |
+| --- | --- | --- |
+| `macos-arm64` | ARM64 | verified and distributed |
+| `macos-x64` | X64 | recognized; Darwin ABI, Mach-O X64, runtime, and linking are not implemented |
+| `linux-arm64` | ARM64 | recognized; Linux AArch64 ABI, ELF AArch64, runtime, and linking are not implemented |
+| `linux-x64` | X64 | verified and distributed |
+| `windows-arm64` | ARM64 | emitted and structurally tested, but not verified or distributed |
+| `windows-x64` | X64 | verified and distributed |
+
+The target model records machine, system ABI, object, executable, runtime, and
+boundary-linking capabilities separately. Sharing an ARM64 or X64 instruction
+encoder therefore never makes another OS/architecture pair executable by
+implication. `silex targets` lists recognized composition targets; native
+commands still reject a target whose executable capability is incomplete.
 
 ## Emit macOS ARM64 programs
 

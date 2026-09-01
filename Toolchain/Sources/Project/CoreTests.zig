@@ -728,7 +728,7 @@ test "compose same-package module fragments across active roots" {
     inline for (.{ "MacOS", "Linux", "Windows" }) |platform| {
         try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/" ++ platform ++ "/Module");
     }
-    inline for (.{ "macos-arm64", "linux-x64", "windows-x64", "windows-arm64" }) |target| {
+    inline for (.{ "macos-arm64", "macos-x64", "linux-arm64", "linux-x64", "windows-arm64", "windows-x64" }) |target| {
         try temporary.dir.createDirPath(std.testing.io, "Bridge/Target/" ++ target ++ "/Module");
     }
     try temporary.dir.writeFile(std.testing.io, .{
@@ -743,9 +743,11 @@ test "compose same-package module fragments across active roots" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Platform/Linux/Module/Combined.sx", .data = "struct PlatformValue { let value:int }\nfunc value() int { return 200 }" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Platform/Windows/Module/Combined.sx", .data = "struct PlatformValue { let value:int }\nfunc value() int { return 300 }" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/macos-arm64/Module/Combined.sx", .data = "func value() int { return 1 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/linux-x64/Module/Combined.sx", .data = "func value() int { return 2 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-x64/Module/Combined.sx", .data = "func value() int { return 3 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-arm64/Module/Combined.sx", .data = "func value() int { return 4 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/macos-x64/Module/Combined.sx", .data = "func value() int { return 2 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/linux-arm64/Module/Combined.sx", .data = "func value() int { return 3 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/linux-x64/Module/Combined.sx", .data = "func value() int { return 4 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-arm64/Module/Combined.sx", .data = "func value() int { return 5 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-x64/Module/Combined.sx", .data = "func value() int { return 6 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
         .data = "use Bridge.Combined\nfunc answer() int { return Combined.value() }\nfunc main() {}",
@@ -754,9 +756,11 @@ test "compose same-package module fragments across active roots" {
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     const cases = [_]struct { target: @import("../Target.zig").Target, expected: i64 }{
         .{ .target = .macos_arm64, .expected = 101 },
-        .{ .target = .linux_x64, .expected = 202 },
-        .{ .target = .windows_x64, .expected = 303 },
-        .{ .target = .windows_arm64, .expected = 304 },
+        .{ .target = .macos_x64, .expected = 102 },
+        .{ .target = .linux_arm64, .expected = 203 },
+        .{ .target = .linux_x64, .expected = 204 },
+        .{ .target = .windows_arm64, .expected = 305 },
+        .{ .target = .windows_x64, .expected = 306 },
     };
     for (cases) |case| {
         var compiler = Compiler.init(allocator, std.testing.io);
@@ -927,7 +931,7 @@ test "compose platform and exact target roots across the portability matrix" {
     inline for (.{ "MacOS", "Linux", "Windows" }) |platform| {
         try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/" ++ platform ++ "/Module");
     }
-    inline for (.{ "macos-arm64", "linux-x64", "windows-x64", "windows-arm64" }) |target| {
+    inline for (.{ "macos-arm64", "macos-x64", "linux-arm64", "linux-x64", "windows-arm64", "windows-x64" }) |target| {
         try temporary.dir.createDirPath(std.testing.io, "Bridge/Target/" ++ target ++ "/Module");
     }
     try temporary.dir.writeFile(std.testing.io, .{
@@ -946,9 +950,11 @@ test "compose platform and exact target roots across the portability matrix" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Platform/Linux/Module/PlatformValue.sx", .data = "public func value() int { return 200 }" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Platform/Windows/Module/PlatformValue.sx", .data = "public func value() int { return 300 }" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/macos-arm64/Module/TargetValue.sx", .data = "public func value() int { return 1 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/linux-x64/Module/TargetValue.sx", .data = "public func value() int { return 2 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-x64/Module/TargetValue.sx", .data = "public func value() int { return 3 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-arm64/Module/TargetValue.sx", .data = "public func value() int { return 4 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/macos-x64/Module/TargetValue.sx", .data = "public func value() int { return 2 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/linux-arm64/Module/TargetValue.sx", .data = "public func value() int { return 3 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/linux-x64/Module/TargetValue.sx", .data = "public func value() int { return 4 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-arm64/Module/TargetValue.sx", .data = "public func value() int { return 5 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-x64/Module/TargetValue.sx", .data = "public func value() int { return 6 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
         .data = "use Bridge.Public\nfunc answer() int { return Public.value() }\nfunc main() {}",
@@ -957,9 +963,11 @@ test "compose platform and exact target roots across the portability matrix" {
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     const cases = [_]struct { target: @import("../Target.zig").Target, expected: i64 }{
         .{ .target = .macos_arm64, .expected = 101 },
-        .{ .target = .linux_x64, .expected = 202 },
-        .{ .target = .windows_x64, .expected = 303 },
-        .{ .target = .windows_arm64, .expected = 304 },
+        .{ .target = .macos_x64, .expected = 102 },
+        .{ .target = .linux_arm64, .expected = 203 },
+        .{ .target = .linux_x64, .expected = 204 },
+        .{ .target = .windows_arm64, .expected = 305 },
+        .{ .target = .windows_x64, .expected = 306 },
     };
     for (cases) |case| {
         var compiler = Compiler.init(allocator, std.testing.io);

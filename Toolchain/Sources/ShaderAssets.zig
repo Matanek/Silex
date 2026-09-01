@@ -94,17 +94,21 @@ fn analyzeGraphics(self: anytype, builder: anytype, structure_index: usize, call
         .fragment = fragment_reflection,
     };
     const target = self.target orelse Target.macos_arm64;
-    if (target.eql(.macos_arm64)) {
-        build.vertex_msl = try compileStage(self, input, .vertex, vertex_entry, .msl);
-        build.fragment_msl = try compileStage(self, input, .fragment, fragment_entry, .msl);
-    } else if (target.eql(.linux_x64)) {
-        build.vertex_spirv = try compileStage(self, input, .vertex, vertex_entry, .spirv);
-        build.fragment_spirv = try compileStage(self, input, .fragment, fragment_entry, .spirv);
-    } else {
-        build.vertex_dxil = try compileStage(self, input, .vertex, vertex_entry, .dxil);
-        build.fragment_dxil = try compileStage(self, input, .fragment, fragment_entry, .dxil);
-        build.vertex_spirv = try compileStage(self, input, .vertex, vertex_entry, .spirv);
-        build.fragment_spirv = try compileStage(self, input, .fragment, fragment_entry, .spirv);
+    switch (target.platform) {
+        .macos => {
+            build.vertex_msl = try compileStage(self, input, .vertex, vertex_entry, .msl);
+            build.fragment_msl = try compileStage(self, input, .fragment, fragment_entry, .msl);
+        },
+        .linux => {
+            build.vertex_spirv = try compileStage(self, input, .vertex, vertex_entry, .spirv);
+            build.fragment_spirv = try compileStage(self, input, .fragment, fragment_entry, .spirv);
+        },
+        .windows => {
+            build.vertex_dxil = try compileStage(self, input, .vertex, vertex_entry, .dxil);
+            build.fragment_dxil = try compileStage(self, input, .fragment, fragment_entry, .dxil);
+            build.vertex_spirv = try compileStage(self, input, .vertex, vertex_entry, .spirv);
+            build.fragment_spirv = try compileStage(self, input, .fragment, fragment_entry, .spirv);
+        },
     }
     return emitGraphics(self, builder, structure_index, build);
 }
@@ -117,13 +121,13 @@ fn analyzeCompute(self: anytype, builder: anytype, structure_index: usize, call:
     const reflection = try reflectCompute(self, input, entry);
     var build = ComputeBuild{ .entry = entry, .reflection = reflection };
     const target = self.target orelse Target.macos_arm64;
-    if (target.eql(.macos_arm64)) {
-        build.msl = try compileStage(self, input, .compute, entry, .msl);
-    } else if (target.eql(.linux_x64)) {
-        build.spirv = try compileStage(self, input, .compute, entry, .spirv);
-    } else {
-        build.dxil = try compileStage(self, input, .compute, entry, .dxil);
-        build.spirv = try compileStage(self, input, .compute, entry, .spirv);
+    switch (target.platform) {
+        .macos => build.msl = try compileStage(self, input, .compute, entry, .msl),
+        .linux => build.spirv = try compileStage(self, input, .compute, entry, .spirv),
+        .windows => {
+            build.dxil = try compileStage(self, input, .compute, entry, .dxil);
+            build.spirv = try compileStage(self, input, .compute, entry, .spirv);
+        },
     }
     return emitCompute(self, builder, structure_index, build);
 }

@@ -411,6 +411,10 @@ test "install accepts one package and an optional target" {
     try std.testing.expect(cross.target.?.eql(.windows_arm64));
     try std.testing.expect(cross.development);
     try std.testing.expect(cross.suite);
+    for (TargetModule.Target.recognized) |target| {
+        const selected = parseInstall(&.{ "Sandbox/GFX", "--target", target.name() }).options;
+        try std.testing.expect(selected.target.?.eql(target));
+    }
     try expectInstallDiagnostic(parseInstall(&.{}), .missing_package, null);
     try expectInstallDiagnostic(parseInstall(&.{ "A", "B" }), .multiple_packages, "B");
     try expectInstallDiagnostic(parseInstall(&.{ "A", "--target" }), .missing_target, "--target");
@@ -431,6 +435,10 @@ test "link and unlink accept an explicit workspace" {
     try std.testing.expectEqualStrings("Packages/STD", linked.package_path);
     try std.testing.expectEqualStrings("Sandbox", linked.workspace.?);
     try std.testing.expect(linked.target.?.eql(.macos_arm64));
+    for (TargetModule.Target.recognized) |target| {
+        const selected = parseLink(&.{ "Packages/STD", "--target", target.name() }).options;
+        try std.testing.expect(selected.target.?.eql(target));
+    }
     try expectLinkDiagnostic(parseLink(&.{ "STD", "--workspace" }), .missing_workspace, "--workspace");
     try expectLinkDiagnostic(parseLink(&.{ "STD", "--workspace", "A", "--workspace", "B" }), .duplicate_workspace, "--workspace");
 
@@ -466,8 +474,10 @@ test "register accepts exactly one package directory" {
 }
 
 test "compile accepts recognized targets and diagnoses invalid selections" {
-    const options = parseCompile(&.{ "Main.sx", "--target", "linux-x64", "-o", "Application" }).options;
-    try std.testing.expect(options.target.?.eql(.linux_x64));
+    for (TargetModule.Target.recognized) |target| {
+        const options = parseCompile(&.{ "Main.sx", "--target", target.name(), "-o", "Application" }).options;
+        try std.testing.expect(options.target.?.eql(target));
+    }
     try expectDiagnostic(parseCompile(&.{ "Main.sx", "--target", "unknown", "-o", "Application" }), .unknown_target, "unknown");
     try expectDiagnostic(parseCompile(&.{ "Main.sx", "--target", "-o", "Application" }), .missing_target, "--target");
     try expectDiagnostic(parseCompile(&.{ "Main.sx", "--target" }), .missing_target, "--target");
