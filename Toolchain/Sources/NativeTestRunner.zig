@@ -8,6 +8,7 @@ const MachOObject = @import("MacOS/Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const NativeLink = @import("NativeLink.zig");
 const Packages = @import("Packages.zig");
+const ProgramScope = @import("ProgramScope.zig");
 const Project = @import("Project.zig");
 const TargetModule = @import("Target.zig");
 const X64Encoder = @import("X64/Encoder.zig");
@@ -20,6 +21,31 @@ pub const Execution = struct {
     result: std.process.RunResult,
     executable: []const u8,
 };
+
+pub const ScopedProgram = struct {
+    program: Machine.Program,
+    old_to_new: []const ?Ir.FunctionId,
+
+    pub fn function(self: ScopedProgram, original: Ir.FunctionId) ?Machine.FunctionId {
+        if (original >= self.old_to_new.len) return null;
+        return self.old_to_new[original];
+    }
+};
+
+pub fn lowerSelected(
+    allocator: Allocator,
+    io: Io,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    roots: []const Ir.FunctionId,
+    cache: bool,
+) !ScopedProgram {
+    const scope = try ProgramScope.close(allocator, program, roots);
+    return .{
+        .program = try lower(allocator, io, scope.program, boundaries, cache),
+        .old_to_new = scope.old_to_new,
+    };
+}
 
 pub fn lower(
     allocator: Allocator,

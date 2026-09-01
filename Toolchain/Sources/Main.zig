@@ -6,6 +6,7 @@ const Cli = @import("Cli.zig");
 const CliProgress = @import("CliProgress.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const CompilationTrace = @import("CompilationTrace.zig");
+const ProgramScope = @import("ProgramScope.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Arm64Encoder = @import("Arm64/Encoder.zig");
 const Arm64Object = @import("Arm64/Object.zig");
@@ -771,20 +772,22 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
         if (options.emit_ir) {
             try Io.File.stdout().writeStreamingAll(init.io, try Ir.writeText(source_allocator, compilation.ir));
         }
-        const native_program = if (native_target)
-            NativeTestRunner.lower(
+        const native_program = if (native_target) native: {
+            const roots = try source_allocator.alloc(Ir.FunctionId, compilation.tests.len);
+            for (compilation.tests, 0..) |case, index| roots[index] = case.function;
+            break :native NativeTestRunner.lowerSelected(
                 source_allocator,
                 init.io,
                 compilation.ir,
                 compilation.boundaries,
+                roots,
                 options.cache,
-            ) catch |err| native: {
+            ) catch |err| native_error: {
                 std.debug.print("silex: native test backend cannot lower '{s}': {t}\n", .{ source_path, err });
                 source_errors += 1;
-                break :native null;
-            }
-        else
-            null;
+                break :native_error null;
+            };
+        } else null;
         if (native_target and native_program == null) continue;
         const boundary_providers = try requiredBoundaryProviders(
             source_allocator,
@@ -815,14 +818,20 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                 try std.fmt.allocPrint(source_allocator, "{s} :: {s}", .{ display_path, case_name })
             else
                 case_name;
-            const succeeded = if (native_program) |machine| succeeded: {
+            const succeeded = if (native_program) |native| succeeded: {
+                const function = native.function(case.function) orelse {
+                    failed += 1;
+                    std.debug.print("silex: native test entry '{s}' was not retained\n", .{label});
+                    try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                    continue;
+                };
                 const execution = NativeTestRunner.execute(
                     source_allocator,
                     init.io,
                     target,
                     linker_path,
-                    machine,
-                    case.function,
+                    native.program,
+                    function,
                     source_path,
                     compilation.files,
                     boundary_providers,
@@ -1271,15 +1280,25 @@ fn compileNativeOptions(
         },
     };
 
+    const scoped_program = scoped_program: {
+        var closure_span = trace.span(.program_closure);
+        defer closure_span.finish();
+        const scope = ProgramScope.executable(allocator, program) catch |err| {
+            std.debug.print("silex: cannot close the native program from its entry: {t}\n", .{err});
+            return 1;
+        };
+        trace.metrics.reachable_portable_functions = scope.program.functions.len;
+        break :scoped_program scope.program;
+    };
     const native_ir = native_ir: {
         var optimize_span = trace.span(.optimization);
         defer optimize_span.finish();
         break :native_ir switch (options.mode) {
-            .debug => program,
+            .debug => scoped_program,
             .release => (if (options.cache)
-                ReleaseOptimizer.optimizeCached(allocator, init.io, program)
+                ReleaseOptimizer.optimizeCached(allocator, init.io, scoped_program)
             else
-                ReleaseOptimizer.optimize(allocator, program)) catch |err| {
+                ReleaseOptimizer.optimize(allocator, scoped_program)) catch |err| {
                 std.debug.print("silex: optimizer rejected the portable IR: {t}\n", .{err});
                 return 1;
             },
