@@ -82,7 +82,7 @@ pub fn build(b: *std.Build) void {
         .name = "silex-deep-copy-runtime",
         .root_module = deep_copy_runtime_module,
     });
-    deep_copy_runtime.entry = .{ .symbol_name = "_silex_deep_copy" };
+    deep_copy_runtime.entry = .{ .symbol_name = "_silex_deep_copy_arm64" };
     const deep_copy_runtime_files = b.addWriteFiles();
     _ = deep_copy_runtime_files.addCopyFile(deep_copy_runtime.getEmittedBin(), "silex-deep-copy-runtime.macho");
     const deep_copy_runtime_import = deep_copy_runtime_files.add(
@@ -122,7 +122,7 @@ pub fn build(b: *std.Build) void {
         .name = "silex-cycle-runtime",
         .root_module = cycle_runtime_module,
     });
-    cycle_runtime.entry = .{ .symbol_name = "_silex_cycle" };
+    cycle_runtime.entry = .{ .symbol_name = "_silex_cycle_arm64" };
     const cycle_runtime_files = b.addWriteFiles();
     _ = cycle_runtime_files.addCopyFile(cycle_runtime.getEmittedBin(), "silex-cycle-runtime.macho");
     const cycle_runtime_import = cycle_runtime_files.add(

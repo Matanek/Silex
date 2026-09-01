@@ -126,8 +126,18 @@ const FunctionFixups = struct {
     epilogue: std.ArrayList(LocalFixup) = .empty,
 };
 
-const DeepCopyFixup = struct { call_at: usize, data_at: usize };
-const CycleFixup = struct { call_at: usize, data_at: ?usize = null };
+const DeepCopyFixup = struct {
+    call_at: usize,
+    data_at: usize,
+    allocate_at: usize,
+    release_at: usize,
+};
+const CycleFixup = struct {
+    call_at: usize,
+    data_at: ?usize = null,
+    allocate_at: ?usize = null,
+    release_at: ?usize = null,
+};
 const FunctionAddressFixup = struct { at: usize, function: Machine.FunctionId };
 
 pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Error!Image {
@@ -231,6 +241,43 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             break :entry offset;
         },
     };
+    var allocate_callback: ?usize = null;
+    var release_callback: ?usize = null;
+    if (deep_copy_calls.items.len != 0 or cycle_calls.items.len != 0) {
+        allocate_callback = words.items.len * @sizeOf(u32);
+        try emitRuntimeAllocateCallback(allocator, &words, &external_call_sites, platform);
+        release_callback = words.items.len * @sizeOf(u32);
+        try emitRuntimeReleaseCallback(allocator, &words, &external_call_sites, platform);
+        for (deep_copy_calls.items) |fixup| {
+            try patchPageAddress(words.items, fixup.allocate_at, allocate_callback.?);
+            try address_sites.append(allocator, .{
+                .instruction_offset = @intCast(fixup.allocate_at * @sizeOf(u32)),
+                .target_offset = @intCast(allocate_callback.?),
+            });
+            try patchPageAddress(words.items, fixup.release_at, release_callback.?);
+            try address_sites.append(allocator, .{
+                .instruction_offset = @intCast(fixup.release_at * @sizeOf(u32)),
+                .target_offset = @intCast(release_callback.?),
+            });
+        }
+        for (cycle_calls.items) |fixup| {
+            if (fixup.allocate_at) |at| {
+                try patchPageAddress(words.items, at, allocate_callback.?);
+                try address_sites.append(allocator, .{
+                    .instruction_offset = @intCast(at * @sizeOf(u32)),
+                    .target_offset = @intCast(allocate_callback.?),
+                });
+            }
+            if (fixup.release_at) |at| {
+                try patchPageAddress(words.items, at, release_callback.?);
+                try address_sites.append(allocator, .{
+                    .instruction_offset = @intCast(at * @sizeOf(u32)),
+                    .target_offset = @intCast(release_callback.?),
+                });
+            }
+        }
+    }
+
     var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
         const runtime = try FloatRuntime.payload();
@@ -890,9 +937,18 @@ fn encodeFunction(
                 const data_at = words.items.len;
                 try appendRelocatableAddress(allocator, words, .x2);
                 try emitImmediate64(allocator, words, .x3, @intFromEnum(copy.type));
+                const allocate_at = words.items.len;
+                try appendRelocatableAddress(allocator, words, .x4);
+                const release_at = words.items.len;
+                try appendRelocatableAddress(allocator, words, .x5);
                 const call_at = words.items.len;
                 try words.append(allocator, branchLink());
-                try deep_copy_calls.append(allocator, .{ .call_at = call_at, .data_at = data_at });
+                try deep_copy_calls.append(allocator, .{
+                    .call_at = call_at,
+                    .data_at = data_at,
+                    .allocate_at = allocate_at,
+                    .release_at = release_at,
+                });
                 try words.append(allocator, moveRegister(.x8, .x0));
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
             },
@@ -1021,7 +1077,7 @@ fn encodeFunction(
                 const cycle_prepare = words.items.len;
                 var cycle_unavailable: ?usize = null;
                 var cycle_claimed: ?usize = null;
-                if (platform == .darwin and enable_cycle_collector) {
+                if (enable_cycle_collector) {
                     try words.append(allocator, loadStack(.x10, drop.operand));
                     try words.append(allocator, load64(.x9, .x10, 3 * Machine.slot_size));
                     cycle_claimed = words.items.len;
@@ -1031,9 +1087,18 @@ fn encodeFunction(
                     const data_at = words.items.len;
                     try appendRelocatableAddress(allocator, words, .x2);
                     try emitImmediate64(allocator, words, .x3, 0x100 + drop.static_type);
+                    const allocate_at = words.items.len;
+                    try appendRelocatableAddress(allocator, words, .x4);
+                    const release_at = words.items.len;
+                    try appendRelocatableAddress(allocator, words, .x5);
                     const call_at = words.items.len;
                     try words.append(allocator, branchLink());
-                    try cycle_calls.append(allocator, .{ .call_at = call_at, .data_at = data_at });
+                    try cycle_calls.append(allocator, .{
+                        .call_at = call_at,
+                        .data_at = data_at,
+                        .allocate_at = allocate_at,
+                        .release_at = release_at,
+                    });
                     cycle_unavailable = words.items.len;
                     try words.append(allocator, compareBranchZero64(.x0));
                     try words.append(allocator, storeStack(.x0, cycle_context_slot));
@@ -1067,13 +1132,15 @@ fn encodeFunction(
                 }
                 const finalization_complete = words.items.len;
                 for (finalized.items) |at| try Fixups.patch26(words.items, at, finalization_complete);
-                if (platform == .darwin and enable_cycle_collector) {
+                if (enable_cycle_collector) {
                     try words.append(allocator, loadStack(.x1, cycle_context_slot));
                     const no_context = words.items.len;
                     try words.append(allocator, compareBranchZero64(.x1));
                     try words.append(allocator, moveWideZero64(.x0, 1, 0));
                     try words.append(allocator, moveWideZero32(.x2, 0));
                     try words.append(allocator, moveWideZero32(.x3, 0));
+                    try words.append(allocator, moveWideZero32(.x4, 0));
+                    try words.append(allocator, moveWideZero32(.x5, 0));
                     const finish_call = words.items.len;
                     try words.append(allocator, branchLink());
                     try cycle_calls.append(allocator, .{ .call_at = finish_call });
@@ -1833,6 +1900,41 @@ fn emitWindowsMutexCall(
     try words.append(allocator, A64.addressPage(.x16));
     try words.append(allocator, load64(.x16, .x16, 0));
     try words.append(allocator, A64.branchLinkRegister(.x16));
+}
+
+fn emitRuntimeAllocateCallback(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Platform,
+) Error!void {
+    try words.append(allocator, saveFrame());
+    try words.append(allocator, moveFramePointer());
+    try words.append(allocator, moveRegister(.x1, .x0));
+    try Allocation.emit(allocator, words, sites, @enumFromInt(@intFromEnum(platform)));
+    if (platform == .darwin) {
+        const failed = words.items.len;
+        try words.append(allocator, Allocation.failureBranch(.darwin));
+        try words.append(allocator, restoreFrame());
+        try words.append(allocator, returnInstruction());
+        try patch19(words.items, failed, words.items.len);
+        try words.append(allocator, moveWideZero32(.x0, 0));
+    }
+    try words.append(allocator, restoreFrame());
+    try words.append(allocator, returnInstruction());
+}
+
+fn emitRuntimeReleaseCallback(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Platform,
+) Error!void {
+    try words.append(allocator, saveFrame());
+    try words.append(allocator, moveFramePointer());
+    try Allocation.emitFree(allocator, words, sites, @enumFromInt(@intFromEnum(platform)));
+    try words.append(allocator, restoreFrame());
+    try words.append(allocator, returnInstruction());
 }
 
 fn encodeDynamicCall(
@@ -4051,6 +4153,26 @@ test "form function addresses beyond the ADR range" {
     try std.testing.expectEqual(
         A64.addSubtractImmediate(.x9, .x9, 0, true),
         words[1],
+    );
+}
+
+test "Windows ARM64 runtime callbacks use the platform allocator imports" {
+    var words: std.ArrayList(u32) = .empty;
+    defer words.deinit(std.testing.allocator);
+    var sites: std.ArrayList(ExternalCalls.Site) = .empty;
+    defer sites.deinit(std.testing.allocator);
+
+    try emitRuntimeAllocateCallback(std.testing.allocator, &words, &sites, .windows);
+    try emitRuntimeReleaseCallback(std.testing.allocator, &words, &sites, .windows);
+
+    try std.testing.expectEqual(@as(usize, 2), sites.items.len);
+    try std.testing.expectEqual(
+        @import("../Windows/Imports.zig").Symbol.virtual_alloc,
+        sites.items[0].windows_symbol.?,
+    );
+    try std.testing.expectEqual(
+        @import("../Windows/Imports.zig").Symbol.virtual_free,
+        sites.items[1].windows_symbol.?,
     );
 }
 

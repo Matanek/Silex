@@ -88,6 +88,17 @@ export fn silex_cycle_x64(
     return cycle(operation, value, model, type_value, allocate_function, release_function);
 }
 
+export fn silex_cycle_arm64(
+    operation: u64,
+    value: u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) callconv(.c) u64 {
+    return cycle(operation, value, model, type_value, allocate_function, release_function);
+}
+
 fn cycle(
     operation: u64,
     value: u64,

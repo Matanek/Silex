@@ -90,6 +90,21 @@ export fn silex_deep_copy_x64(
     }, source, destination, type_value);
 }
 
+export fn silex_deep_copy_arm64(
+    source: [*]const u64,
+    destination: [*]u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) callconv(.c) u64 {
+    return deepCopy(.{
+        .model = model,
+        .allocate_function = allocate_function,
+        .release_function = release_function,
+    }, source, destination, type_value);
+}
+
 fn deepCopy(context: Context, source: [*]const u64, destination: [*]u64, type_value: u64) u64 {
     clear(destination, context.width(type_value));
     if (!cloneValue(context, source, destination, type_value, false)) {
