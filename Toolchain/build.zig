@@ -23,9 +23,22 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     module.addOptions("build_options", build_options);
+    // These Mach-O payloads are embedded by both ARM64 backends. Keep their
+    // instructions and ABI inside the common macOS/Windows baseline.
     const runtime_target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
         .os_tag = .macos,
+        .cpu_model = .baseline,
+        .cpu_features_add = std.Target.aarch64.featureSet(&.{.reserve_x18}),
+        .cpu_features_sub = std.Target.aarch64.featureSet(&.{
+            .lse,
+            .lse128,
+            .lse2,
+            .outline_atomics,
+            .rcpc,
+            .rcpc3,
+            .rcpc_immo,
+        }),
     });
     const float_runtime_module = b.createModule(.{
         .root_source_file = b.path("Runtime/FloatFormat.zig"),
@@ -33,6 +46,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
         .strip = true,
         .unwind_tables = .none,
+        .red_zone = false,
     });
     const float_runtime = b.addExecutable(.{
         .name = "silex-float-runtime",
@@ -77,6 +91,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
         .strip = true,
         .unwind_tables = .none,
+        .red_zone = false,
     });
     const deep_copy_runtime = b.addExecutable(.{
         .name = "silex-deep-copy-runtime",
@@ -117,6 +132,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
         .strip = true,
         .unwind_tables = .none,
+        .red_zone = false,
     });
     const cycle_runtime = b.addExecutable(.{
         .name = "silex-cycle-runtime",
