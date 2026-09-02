@@ -430,10 +430,10 @@ pub fn emitEdit(
         try Fixups.patch19(words.items, bounds.negative, bounds_failure);
         if (bounds.upper != bounds.negative) try Fixups.patch19(words.items, bounds.upper, bounds_failure);
         try words.append(allocator, A64.storeStack(.x13, value.result));
-        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.header, 2);
-        try emitPrintInteger(allocator, words, value.index orelse value.result, 2, false);
-        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.tail, 2);
-        try emitPrintInteger(allocator, words, value.result, 2, true);
+        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
+        try emitPrintInteger(allocator, words, sites, platform, value.index orelse value.result, 2, false);
+        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.tail, 2);
+        try emitPrintInteger(allocator, words, sites, platform, value.result, 2, true);
         try fail(allocator, words, epilogue);
     }
     try Fixups.patch26(words.items, complete, words.items.len);
@@ -759,6 +759,8 @@ pub fn emitLoad(
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(Fixups.Data),
     epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     program: Machine.Program,
     function: Machine.Function,
     value: Machine.Instruction.CollectionLoad,
@@ -815,10 +817,10 @@ pub fn emitLoad(
     try Fixups.patch19(words.items, bounds.negative, failure);
     try Fixups.patch19(words.items, bounds.upper, failure);
     try words.append(allocator, A64.storeStack(.x13, value.result.start));
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.header, 2);
-    try emitPrintInteger(allocator, words, value.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.tail, 2);
-    try emitPrintInteger(allocator, words, value.result.start, 2, true);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
+    try emitPrintInteger(allocator, words, sites, platform, value.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.tail, 2);
+    try emitPrintInteger(allocator, words, sites, platform, value.result.start, 2, true);
     try fail(allocator, words, epilogue);
     try Fixups.patch26(words.items, complete, words.items.len);
 }
@@ -1125,9 +1127,9 @@ pub fn emitReference(
     const failure = words.items.len;
     try Fixups.patch19(words.items, bounds.negative, failure);
     try Fixups.patch19(words.items, bounds.upper, failure);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.header, 2);
-    try emitPrintInteger(allocator, words, value.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.tail, 2);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
+    try emitPrintInteger(allocator, words, sites, platform, value.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.tail, 2);
     try fail(allocator, words, epilogue);
     try Fixups.patch26(words.items, complete, words.items.len);
 }
@@ -1168,10 +1170,10 @@ pub fn emitReplace(
         try Fixups.patch19(words.items, bounds.negative, failure);
         try Fixups.patch19(words.items, bounds.upper, failure);
         try words.append(allocator, A64.storeStack(.x13, value.result.start));
-        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.header, 2);
-        try emitPrintInteger(allocator, words, value.index, 2, false);
-        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.tail, 2);
-        try emitPrintInteger(allocator, words, value.result.start, 2, true);
+        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
+        try emitPrintInteger(allocator, words, sites, platform, value.index, 2, false);
+        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.tail, 2);
+        try emitPrintInteger(allocator, words, sites, platform, value.result.start, 2, true);
         try fail(allocator, words, epilogue);
         try Fixups.patch26(words.items, complete, words.items.len);
         return;
@@ -1275,10 +1277,10 @@ pub fn emitReplace(
     try Fixups.patch19(words.items, bounds.negative, bounds_failure);
     try Fixups.patch19(words.items, bounds.upper, bounds_failure);
     try words.append(allocator, A64.storeStack(.x13, value.result.start));
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.header, 2);
-    try emitPrintInteger(allocator, words, value.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.tail, 2);
-    try emitPrintInteger(allocator, words, value.result.start, 2, true);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
+    try emitPrintInteger(allocator, words, sites, platform, value.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.tail, 2);
+    try emitPrintInteger(allocator, words, sites, platform, value.result.start, 2, true);
     try fail(allocator, words, epilogue);
     try Fixups.patch26(words.items, complete, words.items.len);
 }
@@ -1361,7 +1363,15 @@ fn ensureMinimumAllocation(
     try Fixups.patch19(words.items, sufficient, words.items.len);
 }
 
-fn emitPrintInteger(allocator: Allocator, words: *std.ArrayList(u32), slot: Machine.Slot, descriptor: u16, newline: bool) Error!void {
+fn emitPrintInteger(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
+    slot: Machine.Slot,
+    descriptor: u16,
+    newline: bool,
+) Error!void {
     try words.append(allocator, A64.loadStack(.x9, slot));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
     try words.append(allocator, A64.addSubtractImmediate(.x11, .zero_or_sp, if (newline) 31 else 32, true));
@@ -1413,8 +1423,7 @@ fn emitPrintInteger(allocator: Allocator, words: *std.ArrayList(u32), slot: Mach
     try words.append(allocator, A64.moveWideZero32(.x0, descriptor));
     try words.append(allocator, A64.moveRegister(.x1, .x11));
     try words.append(allocator, A64.moveRegister(.x2, .x12));
-    try words.append(allocator, A64.moveWideZero32(.x16, 4));
-    try words.append(allocator, A64.serviceCall());
+    try StringRuntime.emitWrite(allocator, words, sites, platform);
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
 }
 

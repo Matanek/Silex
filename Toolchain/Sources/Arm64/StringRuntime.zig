@@ -287,6 +287,8 @@ pub fn emitPrint(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(Fixups.Data),
+    external_call_sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     program: Machine.Program,
     slot: Machine.Slot,
     descriptor: u16,
@@ -296,15 +298,16 @@ pub fn emitPrint(
     try loadLength(allocator, words, .x2, .x9, .x10);
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x9, descriptor_header_size, true));
     try words.append(allocator, A64.moveWideZero32(.x0, descriptor));
-    try words.append(allocator, A64.moveWideZero32(.x16, macos_write));
-    try words.append(allocator, A64.serviceCall());
-    if (newline) try emitWriteStatic(allocator, words, data_fixups, program, 0, descriptor);
+    try emitWrite(allocator, words, external_call_sites, platform);
+    if (newline) try emitWriteStatic(allocator, words, data_fixups, external_call_sites, platform, program, 0, descriptor);
 }
 
 pub fn emitWriteStatic(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(Fixups.Data),
+    external_call_sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     program: Machine.Program,
     string_id: usize,
     descriptor: u16,
@@ -318,8 +321,31 @@ pub fn emitWriteStatic(
     });
     try appendRelocatableAddress(allocator, words, .x1);
     try emitImmediate64(allocator, words, .x2, program.strings[string_id].len);
-    try words.append(allocator, A64.moveWideZero32(.x16, macos_write));
-    try words.append(allocator, A64.serviceCall());
+    try emitWrite(allocator, words, external_call_sites, platform);
+}
+
+pub fn emitWrite(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    external_call_sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
+) Error!void {
+    switch (platform) {
+        .darwin => {
+            try words.append(allocator, A64.moveWideZero32(.x16, macos_write));
+            try words.append(allocator, A64.serviceCall());
+        },
+        .windows => {
+            try external_call_sites.append(allocator, .{
+                .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
+                .function = 0,
+                .windows_symbol = .crt_write,
+            });
+            try words.append(allocator, A64.addressPage(.x16));
+            try words.append(allocator, A64.load64(.x16, .x16, 0));
+            try words.append(allocator, A64.branchLinkRegister(.x16));
+        },
+    }
 }
 
 fn appendRelocatableAddress(
