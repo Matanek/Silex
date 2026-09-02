@@ -58,6 +58,15 @@ spans. Aggregate arguments use internal addresses and aggregate returns use
 an internal hidden destination; neither convention, nor the flattened layout,
 is observable or stable outside the backend.
 
+For programs retaining at least 256 functions, ARM64 lowering divides the
+function sequence into at most four fixed ranges. Each worker writes only its
+own destination range, so the final machine program keeps the canonical
+function order. String collection and machine-function cache reads happen
+before this parallel region; cache publication and whole-program validation
+happen after it. Those barriers keep shared cache mutation and global table
+construction deterministic. Smaller programs use the direct path to avoid
+thread startup overhead.
+
 Without a package-native provider, Release writes the Mach-O headers, load
 commands, `__text`, entry wrapper, and ad-hoc SHA-256 code signature itself.
 Debug emits the same machine code through the relocatable-object path so the
