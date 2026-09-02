@@ -1209,10 +1209,6 @@ fn compileNativeOptions(
         trace.metrics.source_bytes_read = compilation.metrics.source_bytes_read;
         trace.metrics.ast_functions = compilation.metrics.ast_functions;
         trace.metrics.portable_functions = compilation.metrics.portable_functions;
-        trace.metrics.package_functions_reused = compilation.metrics.package_functions_reused;
-        trace.metrics.package_function_misses = compilation.metrics.package_function_misses;
-        trace.metrics.package_function_relocation_failures = compilation.metrics.package_function_relocation_failures;
-        trace.metrics.package_functions_stored = compilation.metrics.package_functions_stored;
         trace.metrics.boundaries = boundaries.len;
         trace.metrics.boundary_providers = boundary_providers.len;
         trace.metrics.dependency_files = dependency_files.len;

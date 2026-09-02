@@ -3,12 +3,10 @@ const Ast = @import("../Ast.zig");
 const Arguments = @import("Arguments.zig");
 const NamedCalls = @import("NamedCalls.zig");
 const Boundary = @import("../Boundary.zig");
-const CompilationTrace = @import("../CompilationTrace.zig");
 const Ir = @import("../Ir.zig");
 const MainBoundary = @import("../MainBoundary.zig");
 const InjectedSystems = @import("InjectedSystems.zig");
 const Packages = @import("../Packages.zig");
-const PackageCache = @import("PackageCache.zig");
 const Numeric = @import("../Numeric.zig");
 const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
@@ -87,12 +85,6 @@ pub const Analyzer = struct {
     shadercross_path: ?[]const u8 = null,
     shader_files: std.ArrayList([]const u8) = .empty,
     embedded_files: std.ArrayList([]const u8) = .empty,
-    package_cache_digest: ?[std.crypto.hash.Blake3.digest_length]u8 = null,
-    trace: ?*CompilationTrace.Reporter = null,
-    package_functions_reused: usize = 0,
-    package_function_misses: usize = 0,
-    package_function_relocation_failures: usize = 0,
-    package_functions_stored: usize = 0,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -122,35 +114,10 @@ pub const Analyzer = struct {
         try Declarations.validateFieldDefaults(self);
         try self.validateDeclarations(require_entry);
         try self.validateParameterDefaults();
-        const semantic_target = if (self.target) |target| target else Target.macos_arm64;
-        var package_cache = cache: {
-            var span = if (self.trace) |trace| trace.span(.package_cache_read) else CompilationTrace.Span{};
-            defer span.finish();
-            break :cache if (self.package_cache_digest) |digest| PackageCache.Session.init(
-                self.allocator,
-                self.io.?,
-                digest,
-                semantic_target.name(),
-                self.packages.?,
-                self.source_files,
-                program,
-                self.structures,
-                self.enums,
-                function_types,
-                self.globals,
-                self.external_functions,
-            ) catch null else null;
-        };
         const source_functions = try self.allocator.alloc(?Ir.Function, program.functions.len);
         @memset(source_functions, null);
         for (program.functions, 0..) |function, function_id| {
-            if (function.is_anonymous) continue;
-            const cached = if (package_cache) |*cache| cached: {
-                var span = if (self.trace) |trace| trace.span(.package_cache_relocation) else CompilationTrace.Span{};
-                defer span.finish();
-                break :cached cache.loadSource(function);
-            } else null;
-            source_functions[function_id] = cached orelse try self.analyzeFunction(function_id, function);
+            if (!function.is_anonymous) source_functions[function_id] = try self.analyzeFunction(function_id, function);
         }
         var generated_functions: std.ArrayList(Ir.Function) = .empty;
         for (program.structures, 0..) |structure, structure_index| {
@@ -201,17 +168,6 @@ pub const Analyzer = struct {
                 source_functions[function_id] = try self.analyzeFunction(function_id, function);
             }
             try functions.append(self.allocator, source_functions[function_id].?);
-        }
-        if (package_cache) |*cache| {
-            {
-                var span = if (self.trace) |trace| trace.span(.package_cache_write) else CompilationTrace.Span{};
-                defer span.finish();
-                cache.storeSources(source_functions);
-            }
-            self.package_functions_reused = cache.function_hits;
-            self.package_function_misses = cache.function_misses;
-            self.package_function_relocation_failures = cache.relocation_failures;
-            self.package_functions_stored = cache.functions_stored;
         }
         try functions.appendSlice(self.allocator, generated_functions.items);
         if (try StaticInitialization.analyze(self)) |initializer| {
