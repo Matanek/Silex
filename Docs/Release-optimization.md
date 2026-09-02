@@ -29,6 +29,9 @@ value constructors. Immutable, single-definition aggregate projections can
 be reused across blocks; joins and escaping or addressable values retain
 their storage. This keeps a constructor's intermediate field assignments
 from becoming repeated whole-structure copies in a branching caller.
+Within one block, loads of non-addressed scalar-structure locals reuse their
+last single-definition snapshot. Stores remain observable across blocks;
+redefined sources and addressed locals are not forwarded.
 
 Release inlines direct callees under a bounded cost across branches, loops,
 and multiple returns, in addition to constant-result and small straight-line

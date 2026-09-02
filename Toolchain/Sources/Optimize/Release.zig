@@ -238,17 +238,24 @@ const ScalarWorker = struct {
 };
 
 fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, input_function: Ir.Function) !Ir.Function {
-    const function = try UnusedLocals.removeStores(allocator, input_function);
+    const definitions = try allocator.alloc(usize, input_function.value_types.len);
+    @memset(definitions, 0);
+    for (0..input_function.capture_types.len + input_function.parameter_types.len) |parameter| definitions[parameter] = 1;
+    for (input_function.blocks) |block| for (block.instructions) |instruction| countDefinitions(instruction, definitions);
+    const eligible = try allocator.alloc(bool, input_function.local_types.len);
+    defer allocator.free(eligible);
+    for (input_function.local_types, 0..) |local_type, local| eligible[local] = if (local_type.structureIndex()) |structure|
+        scalarStructure(program, structure, 0)
+    else
+        false;
+    const forwarded = try UnusedLocals.forwardLoads(allocator, input_function, eligible, definitions);
+    const function = try UnusedLocals.removeStores(allocator, forwarded);
     const roots = try allocator.alloc(?Ir.ValueId, function.value_types.len);
     @memset(roots, null);
     const fields = try allocator.alloc(?[]const Ir.ValueId, function.value_types.len);
     @memset(fields, null);
     // Lowered joins can define the same value on several predecessor edges.
     // Only immutable, single-definition values may become global aliases.
-    const definitions = try allocator.alloc(usize, function.value_types.len);
-    @memset(definitions, 0);
-    for (0..function.capture_types.len + function.parameter_types.len) |parameter| definitions[parameter] = 1;
-    for (function.blocks) |block| for (block.instructions) |instruction| countDefinitions(instruction, definitions);
     for (function.blocks) |block| {
         for (block.instructions) |instruction| switch (instruction) {
             .structure_init => |value| if (definitions[value.result] == 1 and scalarStructure(program, value.structure, 0)) {

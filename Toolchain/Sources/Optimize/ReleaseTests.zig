@@ -400,3 +400,35 @@ test "release aggregate aliases preserve joined returns and loop snapshots" {
     try std.testing.expectEqualStrings(reference.stdout, release.stdout);
     try std.testing.expectEqualStrings(reference.stderr, release.stderr);
 }
+
+test "release scalarizes block local aggregate field updates after a branch" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func transform(seed:int, positive:bool) int {
+        \\    var total = seed
+        \\    if positive { total += 1 }
+        \\    var point = Pair(x:seed, y:seed + 1)
+        \\    let snapshot = point
+        \\    point.x += total
+        \\    point.y *= 2
+        \\    return point.x + point.y + snapshot.x
+        \\}
+        \\func main() { print(transform(3, true)); print(transform(3, false)) }
+    );
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const optimized = try optimize(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("18\n17\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @transform") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    try std.testing.expect(!std.mem.containsAtLeast(u8, tail[0..end], 1, "struct.init @Pair"));
+}

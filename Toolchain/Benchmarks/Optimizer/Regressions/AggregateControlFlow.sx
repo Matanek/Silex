@@ -23,8 +23,33 @@ func accumulate(positive:bool) float {
     return total
 }
 
+func transform(seed:float, positive:bool) float {
+    var total = seed
+    if positive { total += 1.0 }
+    var point = Pair(x:seed, y:seed + 1.0)
+    let snapshot = point
+    point.x += total
+    point.y *= 2.0
+    return point.x + point.y + snapshot.x
+}
+
+func change(point:&Pair) {
+    point.x += point.y
+    point.y = -point.y
+}
+
+func borrowed_snapshot() float {
+    var point = Pair(x:3.0, y:4.0)
+    let snapshot = point
+    change(point)
+    return point.x + point.y + snapshot.x
+}
+
 func main() {
     assert(accumulate(true) == 164.0)
     assert(accumulate(false) == 116.0)
+    assert(transform(3.0, true) == 18.0)
+    assert(transform(3.0, false) == 17.0)
+    assert(borrowed_snapshot() == 6.0)
     print("aggregate control flow preserved")
 }
