@@ -244,6 +244,29 @@ jobs:
             }
           }
 
+          function Invoke-NativeCapture([string] $Path, [string[]] $Arguments = @()) {
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $Path
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw "failed to start native command: $Path"
+            }
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) {
+              throw "native command failed with exit code $($process.ExitCode): $Path`n$stderr"
+            }
+            return @($stdout -split "`r?`n" | Where-Object { $_.Length -ne 0 })
+          }
+
           $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
           if ($env:PROCESSOR_ARCHITECTURE -ne "ARM64" -or $architecture -ne "Arm64") {
             throw "expected a native Windows ARM64 runner, got PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE OSArchitecture=$architecture"
@@ -325,8 +348,8 @@ jobs:
           & $silex compile $portabilitySource --release --nocache -o $portabilityRelease
           Assert-Arm64Pe $portabilityDebug
           Assert-Arm64Pe $portabilityRelease
-          $debugOutput = @(& $portabilityDebug)
-          $releaseOutput = @(& $portabilityRelease)
+          $debugOutput = @(Invoke-NativeCapture $portabilityDebug)
+          $releaseOutput = @(Invoke-NativeCapture $portabilityRelease)
           Assert-PortabilityOutput $debugOutput "Debug"
           Assert-PortabilityOutput $releaseOutput "Release"
           if (@(Compare-Object $debugOutput $releaseOutput -SyncWindow 0).Count -ne 0) {
@@ -336,8 +359,8 @@ jobs:
           & $silex test $portabilitySource --nocache
 
           $smokeSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx"
-          $debugSmoke = @(& $silex run $smokeSource --debug --nocache)
-          $releaseSmoke = @(& $silex run $smokeSource --release --nocache)
+          $debugSmoke = @(Invoke-NativeCapture -Path $silex -Arguments @("run", $smokeSource, "--debug", "--nocache"))
+          $releaseSmoke = @(Invoke-NativeCapture -Path $silex -Arguments @("run", $smokeSource, "--release", "--nocache"))
           if ($debugSmoke.Count -ne 1 -or $debugSmoke[0] -ne "silex distribution ready" -or
               $releaseSmoke.Count -ne 1 -or $releaseSmoke[0] -ne "silex distribution ready") {
             throw "distribution run smoke failed"
@@ -345,7 +368,7 @@ jobs:
           $standaloneSmoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
           & $silex compile $smokeSource --release --nocache -o $standaloneSmoke
           Assert-Arm64Pe $standaloneSmoke
-          $standaloneOutput = @(& $standaloneSmoke)
+          $standaloneOutput = @(Invoke-NativeCapture $standaloneSmoke)
           if ($standaloneOutput.Count -ne 1 -or $standaloneOutput[0] -ne "silex distribution ready") {
             throw "standalone distribution smoke failed"
           }
@@ -359,8 +382,8 @@ jobs:
           & $silex compile $boundaryMain --release --nocache -o $boundaryRelease
           Assert-Arm64Pe $boundaryDebug
           Assert-Arm64Pe $boundaryRelease
-          $boundaryDebugOutput = @(& $boundaryDebug)
-          $boundaryReleaseOutput = @(& $boundaryRelease)
+          $boundaryDebugOutput = @(Invoke-NativeCapture $boundaryDebug)
+          $boundaryReleaseOutput = @(Invoke-NativeCapture $boundaryRelease)
           if ($boundaryDebugOutput.Count -ne 1 -or $boundaryDebugOutput[0] -ne "windows arm64 boundary ready" -or
               $boundaryReleaseOutput.Count -ne 1 -or $boundaryReleaseOutput[0] -ne "windows arm64 boundary ready") {
             throw "Windows ARM64 Boundary smoke failed"
