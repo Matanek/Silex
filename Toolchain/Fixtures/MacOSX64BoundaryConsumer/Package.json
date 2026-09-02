@@ -1,0 +1,6 @@
+{
+  "sources": ".",
+  "dependencies": {
+    "MacOSX64Boundary": "=1.0.0"
+  }
+}

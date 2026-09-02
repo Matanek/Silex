@@ -15,7 +15,7 @@ claim that its native backend is implemented.
 | Target | Machine backend | Native status |
 | --- | --- | --- |
 | `macos-arm64` | ARM64 | verified and distributed |
-| `macos-x64` | X64 | recognized; Darwin ABI, Mach-O X64, runtime, and linking are not implemented |
+| `macos-x64` | X64 | implemented; native Intel validation is owned by the `macos-15-intel` portability job |
 | `linux-arm64` | ARM64 | recognized; Linux AArch64 ABI, ELF AArch64, runtime, and linking are not implemented |
 | `linux-x64` | X64 | verified and distributed |
 | `windows-arm64` | ARM64 | verified by the native Windows ARM64 workflow; not distributed yet |
@@ -52,10 +52,34 @@ Debug emits the same machine code through the relocatable-object path so the
 bootstrap linker can preserve its Silex source symbols. Neither path invokes
 an assembler or `codesign`.
 
+## Emit macOS X64 programs
+
+The macOS X64 backend shares the X64 instruction encoder with Linux and
+Windows while selecting a Darwin runtime and the System V register and stack
+rules required by the Apple C ABI. Internal Silex calls remain private to the
+backend; named and indirect package boundaries are lowered separately to C
+calls, including integer and floating-point arguments beyond the available
+registers.
+
+Release programs without a native package boundary are written directly as
+x86_64 Mach-O executables with `LC_MAIN`, a macOS 13 minimum version, separate
+text and data segments, and an ad-hoc SHA-256 code signature. Debug programs
+and builds that reference a package archive use x86_64 Mach-O objects,
+PC-relative data and branch relocations, and the bootstrap Zig linker. The
+embedded float formatting, deep-copy, and cycle-collection helpers are built
+as x86_64 Mach-O runtime inputs rather than reusing their ELF images.
+
+The `macos-15-intel` native-portability job builds the compiler with the
+official x86_64 Zig archive, installs the private linker and universal
+Shadercross asset into a clean home, verifies the asset's x86_64 slice, and
+executes `setup`, `compile`, `run`, `test`, direct emission, linked emission,
+and a package boundary on an Intel host. Rosetta executions are useful local
+diagnostics but are not the target's native verification gate.
+
 ## Link native package boundaries
 
 For a referenced package-private provider, the compiler writes a relocatable
-object for the selected target: ARM64 Mach-O, x64 ELF, or x64/ARM64 COFF. It
+object for the selected target: ARM64 or X64 Mach-O, x64 ELF, or x64/ARM64 COFF. It
 then invokes the bootstrap linker with only the resolved package archives,
 declared Apple frameworks, and named system libraries. This path does not
 compile foreign sources and does not define a stable Silex object format or

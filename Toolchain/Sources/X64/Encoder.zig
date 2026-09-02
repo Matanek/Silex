@@ -26,14 +26,22 @@ pub const Error = Machine.Error || Allocator.Error || FloatRuntime.Error || Deep
 pub const Image = struct {
     code: []u8,
     entry_offset: u32,
+    data_offset: u32,
+    address_sites: []const AddressSite = &.{},
     windows_import_sites: []const WindowsImports.X64Site = &.{},
     external_call_sites: []const ExternalCalls.Site = &.{},
 
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
+        allocator.free(self.address_sites);
         allocator.free(self.windows_import_sites);
         allocator.free(self.external_call_sites);
     }
+};
+
+pub const AddressSite = struct {
+    displacement_offset: u32,
+    target_offset: u32,
 };
 
 const Register = enum(u4) { rax = 0, rcx = 1, rdx = 2, rbx = 3, rsp = 4, rbp = 5, rsi = 6, rdi = 7, r8 = 8, r9 = 9, r10 = 10, r11 = 11, r12 = 12, r13 = 13, r14 = 14, r15 = 15 };
@@ -66,6 +74,10 @@ pub fn encodeLinux(allocator: Allocator, program: Machine.Program) Error!Image {
     return encode(allocator, program, .linux, false, null);
 }
 
+pub fn encodeDarwin(allocator: Allocator, program: Machine.Program) Error!Image {
+    return encode(allocator, program, .darwin, false, null);
+}
+
 pub fn encodeWindows(allocator: Allocator, program: Machine.Program) Error!Image {
     return encode(allocator, program, .windows, false, null);
 }
@@ -74,12 +86,20 @@ pub fn encodeLinuxObject(allocator: Allocator, program: Machine.Program) Error!I
     return encode(allocator, program, .linux, true, null);
 }
 
+pub fn encodeDarwinObject(allocator: Allocator, program: Machine.Program) Error!Image {
+    return encode(allocator, program, .darwin, true, null);
+}
+
 pub fn encodeWindowsObject(allocator: Allocator, program: Machine.Program) Error!Image {
     return encode(allocator, program, .windows, true, null);
 }
 
 pub fn encodeLinuxFunctionObject(allocator: Allocator, program: Machine.Program, function: Machine.FunctionId) Error!Image {
     return encode(allocator, program, .linux, true, function);
+}
+
+pub fn encodeDarwinFunctionObject(allocator: Allocator, program: Machine.Program, function: Machine.FunctionId) Error!Image {
+    return encode(allocator, program, .darwin, true, function);
 }
 
 pub fn encodeWindowsFunctionObject(allocator: Allocator, program: Machine.Program, function: Machine.FunctionId) Error!Image {
@@ -131,6 +151,12 @@ fn encode(
 
     const entry_offset: u32 = @intCast(bytes.items.len);
     switch (platform) {
+        .darwin => {
+            try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
+            try appendCall(allocator, &bytes, &calls, main_id);
+            try emitMoveRegister(allocator, &bytes, .rax, .rdx);
+            try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
+        },
         .linux => {
             if (linked) try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
             try appendCall(allocator, &bytes, &calls, main_id);
@@ -166,7 +192,7 @@ fn encode(
         if (!thunk.found_existing) {
             thunk.value_ptr.* = bytes.items.len;
             switch (platform) {
-                .linux => try emitLinuxFunctionThunk(allocator, &bytes, &calls, program.functions[fixup.function], fixup.function),
+                .darwin, .linux => try emitLinuxFunctionThunk(allocator, &bytes, &calls, program.functions[fixup.function], fixup.function),
                 .windows => try emitWindowsFunctionThunk(allocator, &bytes, &calls, program.functions[fixup.function], fixup.function),
             }
         }
@@ -179,7 +205,7 @@ fn encode(
     }
 
     if (float_calls.items.len != 0) {
-        var runtime = try FloatRuntime.payload(allocator);
+        var runtime = try FloatRuntime.payloadForPlatform(allocator, platform == .darwin);
         defer runtime.deinit(allocator);
         while (bytes.items.len % 4096 != runtime.page_offset) try bytes.append(allocator, 0);
         const runtime_start = bytes.items.len;
@@ -198,7 +224,7 @@ fn encode(
     }
 
     if (deep_copy_calls.items.len != 0) {
-        var runtime = try DeepCopyRuntime.payload(allocator);
+        var runtime = try DeepCopyRuntime.payloadForPlatform(allocator, platform == .darwin);
         defer runtime.deinit(allocator);
         while (bytes.items.len % 4096 != runtime.page_offset) try bytes.append(allocator, 0);
         const runtime_start = bytes.items.len;
@@ -212,7 +238,7 @@ fn encode(
     }
 
     if (cycle_calls.items.len != 0) {
-        var runtime = try CycleRuntime.payload(allocator);
+        var runtime = try CycleRuntime.payloadForPlatform(allocator, platform == .darwin);
         defer runtime.deinit(allocator);
         while (bytes.items.len % 4096 != runtime.page_offset) try bytes.append(allocator, 0);
         const runtime_start = bytes.items.len;
@@ -225,6 +251,10 @@ fn encode(
         try bytes.appendSlice(allocator, runtime.bytes);
     }
 
+    if (platform == .darwin) while (bytes.items.len % 4096 != 0) try bytes.append(allocator, 0);
+    const data_offset: u32 = @intCast(bytes.items.len);
+    var address_sites: std.ArrayList(AddressSite) = .empty;
+    defer address_sites.deinit(allocator);
     const string_offsets = try allocator.alloc(usize, program.strings.len);
     defer allocator.free(string_offsets);
     for (program.strings, 0..) |string, index| {
@@ -236,14 +266,31 @@ fn encode(
     }
     for (data_fixups.items) |fixup| {
         if (fixup.string >= string_offsets.len) return error.InvalidMachineProgram;
-        try patchRelative(bytes.items, fixup.displacement_at, string_offsets[fixup.string]);
+        const target_offset = string_offsets[fixup.string];
+        try patchRelative(bytes.items, fixup.displacement_at, target_offset);
+        try address_sites.append(allocator, .{
+            .displacement_offset = @intCast(fixup.displacement_at),
+            .target_offset = @intCast(target_offset),
+        });
     }
     if (deep_copy_calls.items.len != 0 or cycle_calls.items.len != 0) {
         while (bytes.items.len % Machine.slot_size != 0) try bytes.append(allocator, 0);
         const copy_model_offset = bytes.items.len;
         for (program.copy_model) |word| try appendInt(allocator, &bytes, u64, word);
-        for (deep_copy_calls.items) |fixup| try patchRelative(bytes.items, fixup.model_at, copy_model_offset);
-        for (cycle_calls.items) |fixup| if (fixup.model_at) |at| try patchRelative(bytes.items, at, copy_model_offset);
+        for (deep_copy_calls.items) |fixup| {
+            try patchRelative(bytes.items, fixup.model_at, copy_model_offset);
+            try address_sites.append(allocator, .{
+                .displacement_offset = @intCast(fixup.model_at),
+                .target_offset = @intCast(copy_model_offset),
+            });
+        }
+        for (cycle_calls.items) |fixup| if (fixup.model_at) |at| {
+            try patchRelative(bytes.items, at, copy_model_offset);
+            try address_sites.append(allocator, .{
+                .displacement_offset = @intCast(at),
+                .target_offset = @intCast(copy_model_offset),
+            });
+        };
     }
     const global_offsets = try allocator.alloc(usize, program.globals.len);
     defer allocator.free(global_offsets);
@@ -259,11 +306,18 @@ fn encode(
         if (fixup.global >= global_offsets.len or fixup.byte_offset >= @as(usize, program.globals[fixup.global].width) * Machine.slot_size) {
             return error.InvalidMachineProgram;
         }
-        try patchRelative(bytes.items, fixup.displacement_at, global_offsets[fixup.global] + fixup.byte_offset);
+        const target_offset = global_offsets[fixup.global] + fixup.byte_offset;
+        try patchRelative(bytes.items, fixup.displacement_at, target_offset);
+        try address_sites.append(allocator, .{
+            .displacement_offset = @intCast(fixup.displacement_at),
+            .target_offset = @intCast(target_offset),
+        });
     }
     return .{
         .code = try bytes.toOwnedSlice(allocator),
         .entry_offset = entry_offset,
+        .data_offset = data_offset,
+        .address_sites = try address_sites.toOwnedSlice(allocator),
         .windows_import_sites = try windows_import_sites.toOwnedSlice(allocator),
         .external_call_sites = try external_call_sites.toOwnedSlice(allocator),
     };
@@ -727,7 +781,7 @@ fn encodeFunction(
             .indirect_call => |call| {
                 if (call.result) |result| if (result.aggregate) try emitAddressStack(allocator, bytes, .r15, result.start);
                 const outgoing_stack_size = switch (platform) {
-                    .linux => try emitLinuxCallbackArguments(allocator, bytes, call.arguments),
+                    .darwin, .linux => try emitLinuxCallbackArguments(allocator, bytes, call.arguments),
                     .windows => try emitWindowsCallbackArguments(allocator, bytes, call.arguments),
                 };
                 try emitLoadStack(allocator, bytes, .r12, call.callee + 1);
@@ -1412,6 +1466,13 @@ fn emitWriteBuffer(
     count: Register,
 ) Error!void {
     switch (platform) {
+        .darwin => {
+            if (address != .rsi) try emitMoveRegister(allocator, bytes, .rsi, address);
+            if (count != .rdx) try emitMoveRegister(allocator, bytes, .rdx, count);
+            try emitImmediate(allocator, bytes, .rax, 0x2000004);
+            try emitImmediate(allocator, bytes, .rdi, descriptor);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+        },
         .linux => {
             if (address != .rsi) try emitMoveRegister(allocator, bytes, .rsi, address);
             if (count != .rdx) try emitMoveRegister(allocator, bytes, .rdx, count);
@@ -1483,6 +1544,15 @@ fn emitAllocation(
     epilogue: *std.ArrayList(EpilogueFixup),
 ) Error!void {
     switch (platform) {
+        .darwin => {
+            try emitImmediate(allocator, bytes, .rdi, 0);
+            try emitImmediate(allocator, bytes, .rdx, 3);
+            try emitImmediate(allocator, bytes, .r10, 0x1002);
+            try emitImmediate(allocator, bytes, .r8, std.math.maxInt(u64));
+            try emitImmediate(allocator, bytes, .r9, 0);
+            try emitImmediate(allocator, bytes, .rax, 0x20000c5);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05, 0x0f, 0x83 });
+        },
         .linux => {
             try emitImmediate(allocator, bytes, .rdi, 0);
             try emitImmediate(allocator, bytes, .rdx, 3);
@@ -1640,6 +1710,12 @@ fn emitDeallocation(
     byte_count: Register,
 ) Error!void {
     switch (platform) {
+        .darwin => {
+            if (pointer != .rdi) try emitMoveRegister(allocator, bytes, .rdi, pointer);
+            if (byte_count != .rsi) try emitMoveRegister(allocator, bytes, .rsi, byte_count);
+            try emitImmediate(allocator, bytes, .rax, 0x2000049);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+        },
         .linux => {
             if (pointer != .rdi) try emitMoveRegister(allocator, bytes, .rdi, pointer);
             if (byte_count != .rsi) try emitMoveRegister(allocator, bytes, .rsi, byte_count);
@@ -1662,6 +1738,21 @@ fn emitRuntimeAllocateCallback(
     platform: Platform,
 ) Error!void {
     switch (platform) {
+        .darwin => {
+            try emitMoveRegister(allocator, bytes, .rsi, .rdi);
+            try emitImmediate(allocator, bytes, .rdi, 0);
+            try emitImmediate(allocator, bytes, .rdx, 3);
+            try emitImmediate(allocator, bytes, .r10, 0x1002);
+            try emitImmediate(allocator, bytes, .r8, std.math.maxInt(u64));
+            try emitImmediate(allocator, bytes, .r9, 0);
+            try emitImmediate(allocator, bytes, .rax, 0x20000c5);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05, 0x0f, 0x83 });
+            const succeeded = bytes.items.len;
+            try bytes.appendNTimes(allocator, 0, 4);
+            try bytes.appendSlice(allocator, &.{ 0x31, 0xc0, 0xc3 });
+            try patchRelative(bytes.items, succeeded, bytes.items.len);
+            try bytes.append(allocator, 0xc3);
+        },
         .linux => {
             try emitMoveRegister(allocator, bytes, .rsi, .rdi);
             try emitImmediate(allocator, bytes, .rdi, 0);
@@ -1698,6 +1789,10 @@ fn emitRuntimeReleaseCallback(
     platform: Platform,
 ) Error!void {
     switch (platform) {
+        .darwin => {
+            try emitImmediate(allocator, bytes, .rax, 0x2000049);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05, 0xc3 });
+        },
         .linux => {
             try emitImmediate(allocator, bytes, .rax, 11);
             try bytes.appendSlice(allocator, &.{ 0x0f, 0x05, 0xc3 });
@@ -2692,6 +2787,12 @@ fn emitStringDrop(
     const retained = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     switch (platform) {
+        .darwin => {
+            try emitMoveRegister(allocator, bytes, .rdi, .r10);
+            try emitLoadMemory(allocator, bytes, .rsi, .r10, 8);
+            try emitImmediate(allocator, bytes, .rax, 0x2000049);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+        },
         .linux => {
             try emitMoveRegister(allocator, bytes, .rdi, .r10);
             try emitLoadMemory(allocator, bytes, .rsi, .r10, 8);
@@ -2999,7 +3100,9 @@ fn emitMutexOperation(
         return;
     }
 
-    try emitImmediate(allocator, bytes, .rax, 186); // gettid
+    // Linux exposes gettid(2); Darwin exposes thread_selfid(2). Both return
+    // a stable non-zero identifier suitable for the private reentrant owner.
+    try emitImmediate(allocator, bytes, .rax, if (platform == .darwin) 0x2000174 else 186);
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x05, 0x48, 0x89, 0xc2 }); // syscall; mov rdx, rax
     try emitAddressGlobal(allocator, bytes, global_fixups, global, 0, .r11);
     try bytes.appendSlice(allocator, &.{ 0x49, 0x39, 0x13 }); // cmp [r11], rdx
@@ -3240,7 +3343,7 @@ fn unsupported(reason: []const u8) error{UnsupportedInstruction} {
     return error.UnsupportedInstruction;
 }
 
-test "encode a no-op Silex main for the Linux X64 process contract" {
+test "encode a no-op Silex main for the X64 process and Mach-O entry contracts" {
     const instructions = [_]Machine.Instruction{.return_void};
     const functions = [_]Machine.Function{.{
         .name = "main",
@@ -3254,6 +3357,13 @@ test "encode a no-op Silex main for the Linux X64 process contract" {
     defer image.deinit(std.testing.allocator);
     try std.testing.expect(image.entry_offset > 0);
     try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x0f, 0x05 }) != null);
+
+    const darwin = try encodeDarwin(std.testing.allocator, .{ .functions = &functions });
+    defer darwin.deinit(std.testing.allocator);
+    const darwin_entry = darwin.code[darwin.entry_offset..][0..27];
+    try std.testing.expectEqualSlices(u8, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 }, darwin_entry[0..9]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 }, darwin_entry[17..27]);
+    try std.testing.expect(std.mem.indexOf(u8, darwin_entry, &.{ 0x0f, 0x05 }) == null);
 
     const windows = try encodeWindows(std.testing.allocator, .{ .functions = &functions });
     defer windows.deinit(std.testing.allocator);

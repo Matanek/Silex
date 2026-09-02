@@ -90,10 +90,10 @@ pub const Target = struct {
     }
 
     pub fn nativeCapabilities(self: Target) NativeCapabilities {
-        if (self.eql(macos_x64) or self.eql(linux_arm64)) return .{
+        if (self.eql(linux_arm64)) return .{
             .machine_backend = true,
         };
-        if (self.eql(macos_arm64) or self.eql(linux_x64) or self.eql(windows_arm64) or self.eql(windows_x64)) {
+        if (self.eql(macos_arm64) or self.eql(macos_x64) or self.eql(linux_x64) or self.eql(windows_arm64) or self.eql(windows_x64)) {
             return .{
                 .machine_backend = true,
                 .system_abi = true,
@@ -141,7 +141,7 @@ test "parse the recognized portability matrix" {
     try std.testing.expect((try Target.parse("windows-x64")).eql(.windows_x64));
     try std.testing.expectError(error.UnknownTarget, Target.parse("linux-x86"));
     try std.testing.expect(Target.macos_arm64.hasNativeEmitter());
-    try std.testing.expect(!Target.macos_x64.hasNativeEmitter());
+    try std.testing.expect(Target.macos_x64.hasNativeEmitter());
     try std.testing.expect(!Target.linux_arm64.hasNativeEmitter());
     try std.testing.expect(Target.linux_x64.hasNativeEmitter());
     try std.testing.expect(Target.windows_arm64.hasNativeEmitter());
@@ -152,13 +152,13 @@ test "parse the recognized portability matrix" {
 test "separate shared machine backends from complete native targets" {
     const macos_x64 = Target.macos_x64.nativeCapabilities();
     try std.testing.expect(macos_x64.machine_backend);
-    try std.testing.expect(!macos_x64.system_abi);
-    try std.testing.expect(!macos_x64.object_emitter);
-    try std.testing.expect(!macos_x64.executable_emitter);
-    try std.testing.expect(!macos_x64.runtime);
-    try std.testing.expect(!macos_x64.boundary_linker);
-    try std.testing.expect(!macos_x64.hasExecutableEmitter());
-    try std.testing.expect(!macos_x64.hasBoundaryEmitter());
+    try std.testing.expect(macos_x64.system_abi);
+    try std.testing.expect(macos_x64.object_emitter);
+    try std.testing.expect(macos_x64.executable_emitter);
+    try std.testing.expect(macos_x64.runtime);
+    try std.testing.expect(macos_x64.boundary_linker);
+    try std.testing.expect(macos_x64.hasExecutableEmitter());
+    try std.testing.expect(macos_x64.hasBoundaryEmitter());
 
     const linux_arm64 = Target.linux_arm64.nativeCapabilities();
     try std.testing.expect(linux_arm64.machine_backend);
@@ -170,7 +170,7 @@ test "separate shared machine backends from complete native targets" {
     try std.testing.expect(!linux_arm64.hasExecutableEmitter());
     try std.testing.expect(!linux_arm64.hasBoundaryEmitter());
 
-    for ([_]Target{ .macos_arm64, .linux_x64, .windows_arm64, .windows_x64 }) |target| {
+    for ([_]Target{ .macos_arm64, .macos_x64, .linux_x64, .windows_arm64, .windows_x64 }) |target| {
         const capabilities = target.nativeCapabilities();
         try std.testing.expect(capabilities.hasExecutableEmitter());
         try std.testing.expect(capabilities.hasBoundaryEmitter());

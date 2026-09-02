@@ -6,6 +6,7 @@ const Lower = @import("Arm64/Lower.zig");
 const Machine = @import("Arm64/Machine.zig");
 const Arm64Object = @import("Arm64/Object.zig");
 const MachOObject = @import("MacOS/Object.zig");
+const MachOX64Object = @import("MacOS/X64Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const NativeLink = @import("NativeLink.zig");
 const Packages = @import("Packages.zig");
@@ -89,7 +90,21 @@ fn executeAt(
             defer file.close(io);
             try file.writeStreamingAll(io, object);
         }
-        try MacOSLink.executable(allocator, io, linker_path, object_path, executable, providers, program.external_functions);
+        try MacOSLink.executable(allocator, io, linker_path, target, object_path, executable, providers, program.external_functions);
+        return run(allocator, io, executable);
+    }
+    if (target.eql(.macos_x64)) {
+        var image = try X64Encoder.encodeDarwinFunctionObject(allocator, program, function);
+        defer image.deinit(allocator);
+        const object = try MachOX64Object.emit(allocator, program, &image);
+        const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
+        defer Io.Dir.cwd().deleteFile(io, object_path) catch {};
+        {
+            const file = try Io.Dir.cwd().createFile(io, object_path, .{});
+            defer file.close(io);
+            try file.writeStreamingAll(io, object);
+        }
+        try MacOSLink.executable(allocator, io, linker_path, target, object_path, executable, providers, program.external_functions);
         return run(allocator, io, executable);
     }
     if (target.eql(.linux_x64) or target.eql(.windows_x64)) {

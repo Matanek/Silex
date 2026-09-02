@@ -1790,9 +1790,9 @@ fn validArchive(io: Io, path: []const u8, target: TargetModule.Target) bool {
         if (object_offset + object_header.len <= data_offset + member_size and
             (file.readPositionalAll(io, &object_header, object_offset) catch return false) == object_header.len)
         {
-            const matches = if (target.eql(.macos_arm64))
+            const matches = if (target.eql(.macos_arm64) or target.eql(.macos_x64))
                 std.mem.readInt(u32, object_header[0..4], .little) == macho.MH_MAGIC_64 and
-                    std.mem.readInt(u32, object_header[4..8], .little) == @as(u32, @bitCast(macho.CPU_TYPE_ARM64))
+                    std.mem.readInt(u32, object_header[4..8], .little) == @as(u32, @bitCast(if (target.eql(.macos_arm64)) macho.CPU_TYPE_ARM64 else macho.CPU_TYPE_X86_64))
             else if (target.eql(.linux_x64))
                 std.mem.eql(u8, object_header[0..4], "\x7fELF") and object_header[4] == 2 and object_header[5] == 1 and
                     std.mem.readInt(u16, object_header[16..18], .little) == 1 and
@@ -1859,7 +1859,10 @@ fn writeTestArchive(directory: Io.Dir, io: Io, path: []const u8, target: TargetM
     @memcpy(archive[8..24], "probe.o/        ");
     @memcpy(archive[8 + 48 .. 8 + 58], "20        ");
     @memcpy(archive[8 + 58 .. 8 + 60], "`\n");
-    if (target.eql(.linux_x64)) {
+    if (target.eql(.macos_x64)) {
+        std.mem.writeInt(u32, archive[68..72], macho.MH_MAGIC_64, .little);
+        std.mem.writeInt(u32, archive[72..76], @bitCast(macho.CPU_TYPE_X86_64), .little);
+    } else if (target.eql(.linux_x64)) {
         @memcpy(archive[68..72], "\x7fELF");
         archive[72] = 2;
         archive[73] = 1;
@@ -2460,15 +2463,17 @@ test "select exact boundary manifests across the recognized target matrix" {
     }
 }
 
-test "resolve ELF and COFF boundary archives with system libraries" {
+test "resolve Mach-O X64, ELF and COFF boundary archives with system libraries" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/macos-x64");
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/linux-x64");
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/windows-x64");
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/windows-arm64");
+    try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/macos-x64/libBridge.a", .macos_x64);
     try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/linux-x64/libBridge.a", .linux_x64);
     try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/windows-x64/Bridge.lib", .windows_x64);
     try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/windows-arm64/Bridge.lib", .windows_arm64);
@@ -2477,11 +2482,21 @@ test "resolve ELF and COFF boundary archives with system libraries" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",
         .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-x64":{"providers":{"Native":{"archive":"Boundary/macos-x64/libBridge.a","frameworks":["CoreFoundation"]}}}}}
+        ,
+    });
+    var resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_x64);
+    var graph = try resolver.resolve(base);
+    try std.testing.expectEqualStrings("CoreFoundation", graph.packages[0].boundary_providers[0].frameworks[0]);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
         \\{"name":"Bridge","version":"1.0.0","boundary":{"linux-x64":{"providers":{"Native":{"archive":"Boundary/linux-x64/libBridge.a","libraries":["pthread","dl","m"]}}}}}
         ,
     });
-    var resolver = Resolver.initForTarget(allocator, std.testing.io, null, .linux_x64);
-    var graph = try resolver.resolve(base);
+    resolver = Resolver.initForTarget(allocator, std.testing.io, null, .linux_x64);
+    graph = try resolver.resolve(base);
     try std.testing.expectEqualStrings("dl", graph.packages[0].boundary_providers[0].libraries[0]);
     try std.testing.expectEqualStrings("m", graph.packages[0].boundary_providers[0].libraries[1]);
     try std.testing.expectEqualStrings("pthread", graph.packages[0].boundary_providers[0].libraries[2]);

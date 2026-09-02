@@ -1,6 +1,8 @@
 const std = @import("std");
 
 pub const object_bytes = @import("float_runtime_x64_object").object_bytes;
+pub const macos_object_bytes = @import("float_runtime_macos_x64_object").object_bytes;
+const MachORuntime = @import("MachORuntime.zig");
 
 const Allocator = std.mem.Allocator;
 const load_segment = 1;
@@ -70,6 +72,12 @@ pub fn payload(allocator: Allocator) Error!Payload {
     };
 }
 
+pub fn payloadForPlatform(allocator: Allocator, darwin: bool) (Error || MachORuntime.Error)!Payload {
+    if (!darwin) return payload(allocator);
+    const image = try MachORuntime.payload(allocator, macos_object_bytes);
+    return .{ .bytes = image.bytes, .page_offset = image.page_offset, .entry_offset = image.entry_offset };
+}
+
 fn read16(offset: usize) u16 {
     return std.mem.readInt(u16, object_bytes[offset..][0..2], .little);
 }
@@ -84,6 +92,13 @@ fn read64(offset: usize) u64 {
 
 test "bundled X64 float formatter is an ELF image" {
     var runtime = try payload(std.testing.allocator);
+    defer runtime.deinit(std.testing.allocator);
+    try std.testing.expect(runtime.bytes.len > 4096);
+    try std.testing.expect(runtime.entry_offset < runtime.bytes.len);
+}
+
+test "bundled macOS X64 float formatter is a Mach-O image" {
+    var runtime = try payloadForPlatform(std.testing.allocator, true);
     defer runtime.deinit(std.testing.allocator);
     try std.testing.expect(runtime.bytes.len > 4096);
     try std.testing.expect(runtime.entry_offset < runtime.bytes.len);

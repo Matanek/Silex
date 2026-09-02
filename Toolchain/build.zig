@@ -85,6 +85,31 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-float-runtime-x64.elf\");\n",
     );
     module.addAnonymousImport("float_runtime_x64_object", .{ .root_source_file = runtime_x64_module });
+    const runtime_macos_x64_target = b.resolveTargetQuery(.{
+        .cpu_arch = .x86_64,
+        .os_tag = .macos,
+    });
+    const float_runtime_macos_x64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/FloatFormat.zig"),
+        .target = runtime_macos_x64_target,
+        .optimize = .ReleaseSmall,
+        .pic = true,
+        .strip = true,
+        .unwind_tables = .none,
+        .red_zone = false,
+    });
+    const float_runtime_macos_x64 = b.addExecutable(.{
+        .name = "silex-float-runtime-macos-x64",
+        .root_module = float_runtime_macos_x64_module,
+    });
+    float_runtime_macos_x64.entry = .{ .symbol_name = "_silex_format_float" };
+    const float_runtime_macos_x64_files = b.addWriteFiles();
+    _ = float_runtime_macos_x64_files.addCopyFile(float_runtime_macos_x64.getEmittedBin(), "silex-float-runtime-macos-x64.macho");
+    const float_runtime_macos_x64_import = float_runtime_macos_x64_files.add(
+        "FloatRuntimeMacOSX64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-float-runtime-macos-x64.macho\");\n",
+    );
+    module.addAnonymousImport("float_runtime_macos_x64_object", .{ .root_source_file = float_runtime_macos_x64_import });
     const deep_copy_runtime_module = b.createModule(.{
         .root_source_file = b.path("Runtime/DeepCopy.zig"),
         .target = runtime_target,
@@ -126,6 +151,27 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-deep-copy-runtime-x64.elf\");\n",
     );
     module.addAnonymousImport("deep_copy_runtime_x64_object", .{ .root_source_file = deep_copy_runtime_x64_import });
+    const deep_copy_runtime_macos_x64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/DeepCopy.zig"),
+        .target = runtime_macos_x64_target,
+        .optimize = .ReleaseSmall,
+        .pic = true,
+        .strip = true,
+        .unwind_tables = .none,
+        .red_zone = false,
+    });
+    const deep_copy_runtime_macos_x64 = b.addExecutable(.{
+        .name = "silex-deep-copy-runtime-macos-x64",
+        .root_module = deep_copy_runtime_macos_x64_module,
+    });
+    deep_copy_runtime_macos_x64.entry = .{ .symbol_name = "_silex_deep_copy_x64" };
+    const deep_copy_runtime_macos_x64_files = b.addWriteFiles();
+    _ = deep_copy_runtime_macos_x64_files.addCopyFile(deep_copy_runtime_macos_x64.getEmittedBin(), "silex-deep-copy-runtime-macos-x64.macho");
+    const deep_copy_runtime_macos_x64_import = deep_copy_runtime_macos_x64_files.add(
+        "DeepCopyRuntimeMacOSX64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-deep-copy-runtime-macos-x64.macho\");\n",
+    );
+    module.addAnonymousImport("deep_copy_runtime_macos_x64_object", .{ .root_source_file = deep_copy_runtime_macos_x64_import });
     const cycle_runtime_module = b.createModule(.{
         .root_source_file = b.path("Runtime/CycleCollector.zig"),
         .target = runtime_target,
@@ -167,6 +213,27 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-cycle-runtime-x64.elf\");\n",
     );
     module.addAnonymousImport("cycle_runtime_x64_object", .{ .root_source_file = cycle_runtime_x64_import });
+    const cycle_runtime_macos_x64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/CycleCollector.zig"),
+        .target = runtime_macos_x64_target,
+        .optimize = .ReleaseSmall,
+        .pic = true,
+        .strip = true,
+        .unwind_tables = .none,
+        .red_zone = false,
+    });
+    const cycle_runtime_macos_x64 = b.addExecutable(.{
+        .name = "silex-cycle-runtime-macos-x64",
+        .root_module = cycle_runtime_macos_x64_module,
+    });
+    cycle_runtime_macos_x64.entry = .{ .symbol_name = "_silex_cycle_x64" };
+    const cycle_runtime_macos_x64_files = b.addWriteFiles();
+    _ = cycle_runtime_macos_x64_files.addCopyFile(cycle_runtime_macos_x64.getEmittedBin(), "silex-cycle-runtime-macos-x64.macho");
+    const cycle_runtime_macos_x64_import = cycle_runtime_macos_x64_files.add(
+        "CycleRuntimeMacOSX64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-cycle-runtime-macos-x64.macho\");\n",
+    );
+    module.addAnonymousImport("cycle_runtime_macos_x64_object", .{ .root_source_file = cycle_runtime_macos_x64_import });
     const executable = b.addExecutable(.{
         .name = "silex",
         .root_module = module,
