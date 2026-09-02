@@ -8,6 +8,7 @@ const MachOObject = @import("MacOS/Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const NativeLink = @import("NativeLink.zig");
 const Packages = @import("Packages.zig");
+const ProgramScope = @import("ProgramScope.zig");
 const Project = @import("Project.zig");
 const TargetModule = @import("Target.zig");
 const X64Encoder = @import("X64/Encoder.zig");
@@ -20,6 +21,31 @@ pub const Execution = struct {
     result: std.process.RunResult,
     executable: []const u8,
 };
+
+pub const ScopedProgram = struct {
+    program: Machine.Program,
+    old_to_new: []const ?Ir.FunctionId,
+
+    pub fn function(self: ScopedProgram, original: Ir.FunctionId) ?Machine.FunctionId {
+        if (original >= self.old_to_new.len) return null;
+        return self.old_to_new[original];
+    }
+};
+
+pub fn lowerSelected(
+    allocator: Allocator,
+    io: Io,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    roots: []const Ir.FunctionId,
+    cache: bool,
+) !ScopedProgram {
+    const scope = try ProgramScope.close(allocator, program, roots);
+    return .{
+        .program = try lower(allocator, io, scope.program, boundaries, cache),
+        .old_to_new = scope.old_to_new,
+    };
+}
 
 pub fn lower(
     allocator: Allocator,
@@ -48,6 +74,13 @@ pub fn execute(
 ) !Execution {
     const function_text = try std.fmt.allocPrint(allocator, "{d}", .{function});
     const reusable = cache and providers.len == 0 and !MacOSLink.requiresSystemLink(program.external_functions);
+    defer if (!reusable) {
+        // Expected signal terminations and early execution errors also leave no
+        // empty cache hierarchy behind. These calls cannot remove a directory
+        // owned by another concurrent or pre-existing cache entry.
+        Io.Dir.cwd().deleteDir(io, ".silex/test") catch {};
+        Io.Dir.cwd().deleteDir(io, ".silex") catch {};
+    };
     const digest = if (reusable)
         try CompilationCache.key(
             allocator,
@@ -65,7 +98,14 @@ pub fn execute(
     };
     const result = try executeAt(allocator, io, target, linker_path, program, function, executable, providers);
     if (!reusable) switch (result.term) {
-        .exited => Io.Dir.cwd().deleteFile(io, executable) catch {},
+        .exited => {
+            Io.Dir.cwd().deleteFile(io, executable) catch {};
+            // `--nocache` must not leave an empty local cache hierarchy behind.
+            // These removals succeed only when no concurrent or pre-existing
+            // entry uses the directories.
+            Io.Dir.cwd().deleteDir(io, ".silex/test") catch {};
+            Io.Dir.cwd().deleteDir(io, ".silex") catch {};
+        },
         else => {},
     };
     return .{ .result = result, .executable = executable };

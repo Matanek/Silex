@@ -14,14 +14,33 @@ const State = struct { files: []const []const u8 };
 
 const generated_cache_roots = [_][]const u8{
     ".silex/cache/v4",
+    ".silex/cache/shaders",
     ".silex/artifacts/v1",
     ".silex/run",
     ".silex/test",
 };
 
+// Part03 measured a 269 MiB peak for the representative GFX working set.
+// Keep modest headroom for that set while bounding retained history globally,
+// rather than adding independent per-directory quotas.
+const rolling_history_reserve: u64 = 320 * 1024 * 1024;
+
 // Cache entry helpers do not carry Io through every backend layer. CLI cache
 // entry points initialize this once, before any cache key is computed.
 var active_compiler_identity: ?[Blake3.digest_length]u8 = null;
+var active_session_started_at: ?i96 = null;
+var active_statistics: Statistics = .{};
+
+pub const Statistics = struct {
+    entry_hits: usize = 0,
+    entry_misses: usize = 0,
+    bytes_read: usize = 0,
+    bytes_written: usize = 0,
+};
+
+pub fn statistics() Statistics {
+    return active_statistics;
+}
 
 pub const NativeState = struct {
     files: []const []const u8,
@@ -32,9 +51,12 @@ const RetainedFile = struct {
     path: []const u8,
     size: u64,
     modified: i96,
+    kind: enum { file, tree },
 };
 
 pub fn maintain(allocator: Allocator, io: Io) void {
+    active_statistics = .{};
+    active_session_started_at = Io.Clock.real.now(io).nanoseconds;
     const identity = ensureCompilerIdentity(io) catch {
         // If the running executable cannot be identified, preserving old
         // generated code would be unsafe. Keep caching usable for this process,
@@ -59,18 +81,14 @@ pub fn maintain(allocator: Allocator, io: Io) void {
 
     deleteKind(io, ".silex/cache/v4", ".native-input-json");
     deleteKind(io, ".silex/cache/v4", ".ast-json");
-    maintainAfterMutation(allocator, io);
     Io.Dir.cwd().createDirPath(io, ".silex") catch return;
     const file = Io.Dir.cwd().createFile(io, marker, .{}) catch return;
     file.close(io);
 }
 
 pub fn maintainAfterMutation(allocator: Allocator, io: Io) void {
-    trimDirectory(allocator, io, ".silex/cache/v4", 64 * 1024 * 1024);
-    trimDirectory(allocator, io, ".silex/artifacts/v1", 256 * 1024 * 1024);
-    trimDirectory(allocator, io, ".silex/run", 64 * 1024 * 1024);
-    trimDirectory(allocator, io, ".silex/test", 64 * 1024 * 1024);
-    trimDirectoryTrees(allocator, io, ".silex/cache/shaders", 16 * 1024 * 1024);
+    const started_at = active_session_started_at orelse Io.Clock.real.now(io).nanoseconds;
+    maintainRootAfterMutation(allocator, io, ".silex", rolling_history_reserve, started_at);
 }
 
 fn deleteKind(io: Io, path: []const u8, suffix: []const u8) void {
@@ -84,72 +102,111 @@ fn deleteKind(io: Io, path: []const u8, suffix: []const u8) void {
     }
 }
 
-fn trimDirectory(allocator: Allocator, io: Io, path: []const u8, maximum_size: u64) void {
+fn collectFiles(
+    allocator: Allocator,
+    io: Io,
+    path: []const u8,
+    retained: *std.ArrayList(RetainedFile),
+    total: *u64,
+    current: *u64,
+    session_started_at: i96,
+) void {
     var directory = Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch return;
     defer directory.close(io);
     var iterator = directory.iterateAssumeFirstIteration();
-    var retained: std.ArrayList(RetainedFile) = .empty;
-    var total: u64 = 0;
     while (iterator.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
         const status = directory.statFile(io, entry.name, .{}) catch continue;
-        const name = allocator.dupe(u8, entry.name) catch return;
+        const entry_path = std.fs.path.join(allocator, &.{ path, entry.name }) catch return;
         retained.append(allocator, .{
-            .path = name,
+            .path = entry_path,
             .size = status.size,
             .modified = status.mtime.nanoseconds,
+            .kind = .file,
         }) catch return;
-        total += status.size;
-    }
-    if (total <= maximum_size) return;
-    std.mem.sort(RetainedFile, retained.items, {}, oldestFirst);
-    for (retained.items) |entry| {
-        if (total <= maximum_size) break;
-        directory.deleteFile(io, entry.path) catch continue;
-        total -= entry.size;
+        total.* += status.size;
+        if (status.mtime.nanoseconds >= session_started_at) current.* += status.size;
     }
 }
 
-fn trimDirectoryTrees(allocator: Allocator, io: Io, path: []const u8, maximum_size: u64) void {
+fn collectTrees(
+    allocator: Allocator,
+    io: Io,
+    path: []const u8,
+    retained: *std.ArrayList(RetainedFile),
+    total: *u64,
+    current: *u64,
+    session_started_at: i96,
+) void {
     var directory = Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch return;
     defer directory.close(io);
     var iterator = directory.iterateAssumeFirstIteration();
-    var retained: std.ArrayList(RetainedFile) = .empty;
-    var total: u64 = 0;
     while (iterator.next(io) catch null) |entry| {
         if (entry.kind != .directory) continue;
-        const status = directory.statFile(io, entry.name, .{}) catch continue;
-        const size = size: {
+        const tree = tree: {
             var child = directory.openDir(io, entry.name, .{ .iterate = true }) catch continue;
             defer child.close(io);
             var walker = child.walk(allocator) catch continue;
             defer walker.deinit();
             var bytes: u64 = 0;
+            var modified: i96 = 0;
             while (walker.next(io) catch null) |nested| {
                 if (nested.kind != .file) continue;
-                bytes += (child.statFile(io, nested.path, .{}) catch continue).size;
+                const status = child.statFile(io, nested.path, .{}) catch continue;
+                bytes += status.size;
+                modified = @max(modified, status.mtime.nanoseconds);
             }
-            break :size bytes;
+            break :tree .{ .size = bytes, .modified = modified };
         };
-        const name = allocator.dupe(u8, entry.name) catch return;
+        const entry_path = std.fs.path.join(allocator, &.{ path, entry.name }) catch return;
         retained.append(allocator, .{
-            .path = name,
-            .size = size,
-            .modified = status.mtime.nanoseconds,
+            .path = entry_path,
+            .size = tree.size,
+            .modified = tree.modified,
+            .kind = .tree,
         }) catch return;
-        total += size;
+        total.* += tree.size;
+        if (tree.modified >= session_started_at) current.* += tree.size;
     }
-    if (total <= maximum_size) return;
+}
+
+fn maintainRootAfterMutation(
+    allocator: Allocator,
+    io: Io,
+    root: []const u8,
+    history_reserve: u64,
+    session_started_at: i96,
+) void {
+    var retained: std.ArrayList(RetainedFile) = .empty;
+    var total: u64 = 0;
+    var current: u64 = 0;
+    const flat_roots = [_][]const u8{ "cache/v4", "artifacts/v1", "run", "test" };
+    for (flat_roots) |relative| {
+        const path = std.fs.path.join(allocator, &.{ root, relative }) catch continue;
+        defer allocator.free(path);
+        collectFiles(allocator, io, path, &retained, &total, &current, session_started_at);
+    }
+    const shader_root = std.fs.path.join(allocator, &.{ root, "cache/shaders" }) catch return;
+    defer allocator.free(shader_root);
+    collectTrees(allocator, io, shader_root, &retained, &total, &current, session_started_at);
+
+    const retained_limit = @max(history_reserve, current);
+    if (total <= retained_limit) return;
     std.mem.sort(RetainedFile, retained.items, {}, oldestFirst);
     for (retained.items) |entry| {
-        if (total <= maximum_size) break;
-        directory.deleteTree(io, entry.path) catch continue;
+        if (total <= retained_limit) break;
+        if (entry.modified >= session_started_at) continue;
+        switch (entry.kind) {
+            .file => Io.Dir.cwd().deleteFile(io, entry.path) catch continue,
+            .tree => Io.Dir.cwd().deleteTree(io, entry.path) catch continue,
+        }
         total -= entry.size;
     }
 }
 
 fn oldestFirst(_: void, left: RetainedFile, right: RetainedFile) bool {
-    return left.modified < right.modified;
+    if (left.modified != right.modified) return left.modified < right.modified;
+    return std.mem.lessThan(u8, left.path, right.path);
 }
 
 fn ensureCompilerIdentity(io: Io) ![Blake3.digest_length]u8 {
@@ -205,7 +262,7 @@ fn clearGeneratedCache(io: Io) void {
 }
 
 fn clearGeneratedCacheAt(allocator: Allocator, io: Io, root: []const u8) void {
-    const relative_roots = [_][]const u8{ "cache/v4", "artifacts/v1", "run", "test" };
+    const relative_roots = [_][]const u8{ "cache/v4", "cache/shaders", "artifacts/v1", "run", "test" };
     for (relative_roots) |relative| {
         const path = std.fs.path.join(allocator, &.{ root, relative }) catch continue;
         defer allocator.free(path);
@@ -252,14 +309,35 @@ pub fn storeNativeState(
 }
 
 pub fn loadAst(allocator: Allocator, io: Io, path: []const u8, source: []const u8) ?Ast.Program {
+    return loadAstAt(allocator, io, ".silex/cache/v4", path, source);
+}
+
+pub fn loadAstAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    path: []const u8,
+    source: []const u8,
+) ?Ast.Program {
     const digest = contentIdentity("module-ast", path, source);
-    const payload = load(allocator, io, digest, "ast-json") orelse return null;
+    const payload = loadAt(allocator, io, directory, digest, "ast-json") orelse return null;
     return std.json.parseFromSliceLeaky(Ast.Program, allocator, payload, .{}) catch null;
 }
 
 pub fn storeAst(allocator: Allocator, io: Io, path: []const u8, source: []const u8, program: Ast.Program) void {
+    storeAstAt(allocator, io, ".silex/cache/v4", path, source, program);
+}
+
+pub fn storeAstAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    path: []const u8,
+    source: []const u8,
+    program: Ast.Program,
+) void {
     const payload = std.json.Stringify.valueAlloc(allocator, program, .{}) catch return;
-    store(allocator, io, contentIdentity("module-ast", path, source), "ast-json", payload);
+    storeAt(allocator, io, directory, contentIdentity("module-ast", path, source), "ast-json", payload);
 }
 
 fn contentIdentity(namespace: []const u8, path: []const u8, source: []const u8) [Blake3.digest_length]u8 {
@@ -473,13 +551,31 @@ fn hashAncestorManifests(allocator: Allocator, io: Io, hasher: *Blake3, source_p
 }
 
 pub fn load(allocator: Allocator, io: Io, digest: [Blake3.digest_length]u8, kind: []const u8) ?[]const u8 {
-    const path = entryPath(allocator, digest, kind) catch return null;
-    const bytes = Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(128 * 1024 * 1024)) catch return null;
-    if (bytes.len < digest.len or !std.mem.eql(u8, bytes[0..digest.len], &digest)) return null;
+    return loadAt(allocator, io, ".silex/cache/v4", digest, kind);
+}
+
+fn loadAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    digest: [Blake3.digest_length]u8,
+    kind: []const u8,
+) ?[]const u8 {
+    const path = entryPathAt(allocator, directory, digest, kind) catch return null;
+    const bytes = Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(128 * 1024 * 1024)) catch {
+        active_statistics.entry_misses += 1;
+        return null;
+    };
+    active_statistics.bytes_read += bytes.len;
+    if (bytes.len < digest.len or !std.mem.eql(u8, bytes[0..digest.len], &digest)) {
+        active_statistics.entry_misses += 1;
+        return null;
+    }
     if (Io.Dir.cwd().openFile(io, path, .{})) |file| {
         defer file.close(io);
         file.setTimestampsNow(io) catch {};
     } else |_| {}
+    active_statistics.entry_hits += 1;
     return bytes[digest.len..];
 }
 
@@ -490,19 +586,39 @@ pub fn store(
     kind: []const u8,
     payload: []const u8,
 ) void {
-    const directory = ".silex/cache/v4";
+    storeAt(allocator, io, ".silex/cache/v4", digest, kind, payload);
+}
+
+fn storeAt(
+    allocator: Allocator,
+    io: Io,
+    directory: []const u8,
+    digest: [Blake3.digest_length]u8,
+    kind: []const u8,
+    payload: []const u8,
+) void {
     Io.Dir.cwd().createDirPath(io, directory) catch return;
-    const path = entryPath(allocator, digest, kind) catch return;
+    const path = entryPathAt(allocator, directory, digest, kind) catch return;
     var atomic = Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true, .replace = true }) catch return;
     defer atomic.deinit(io);
     atomic.file.writeStreamingAll(io, &digest) catch return;
     atomic.file.writeStreamingAll(io, payload) catch return;
     atomic.replace(io) catch return;
+    active_statistics.bytes_written += digest.len + payload.len;
 }
 
 fn entryPath(allocator: Allocator, digest: [Blake3.digest_length]u8, kind: []const u8) ![]const u8 {
+    return entryPathAt(allocator, ".silex/cache/v4", digest, kind);
+}
+
+fn entryPathAt(
+    allocator: Allocator,
+    directory: []const u8,
+    digest: [Blake3.digest_length]u8,
+    kind: []const u8,
+) ![]const u8 {
     const hex = std.fmt.bytesToHex(digest, .lower);
-    return std.fmt.allocPrint(allocator, ".silex/cache/v4/{s}.{s}", .{ hex, kind });
+    return std.fmt.allocPrint(allocator, "{s}/{s}.{s}", .{ directory, hex, kind });
 }
 
 fn lessThan(_: void, left: []const u8, right: []const u8) bool {
@@ -565,7 +681,7 @@ test "compiler generation rotation removes old generated code only once" {
 
     synchronizeCompilerGeneration(allocator, std.testing.io, root, first);
     try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/old"));
-    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/shaders/kept/output"));
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/shaders/kept/output"));
 
     try temporary.dir.createDirPath(std.testing.io, "cache/v4");
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/current", .data = "current" });
@@ -574,7 +690,6 @@ test "compiler generation rotation removes old generated code only once" {
 
     synchronizeCompilerGeneration(allocator, std.testing.io, root, second);
     try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/current"));
-    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/shaders/kept/output"));
 }
 
 fn pathExists(directory: Io.Dir, io: Io, path: []const u8) bool {
@@ -582,69 +697,119 @@ fn pathExists(directory: Io.Dir, io: Io, path: []const u8) bool {
     return true;
 }
 
-test "flat cache maintenance enforces its byte budget" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "a", .data = "12345678" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "b", .data = "12345678" });
-    const path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
-
-    trimDirectory(allocator, std.testing.io, path, 8);
-
-    var iterator = temporary.dir.iterateAssumeFirstIteration();
-    var files: usize = 0;
-    while (try iterator.next(std.testing.io)) |entry| if (entry.kind == .file) {
-        files += 1;
-    };
-    try std.testing.expectEqual(@as(usize, 1), files);
+fn setModified(directory: Io.Dir, io: Io, path: []const u8, nanoseconds: i96) !void {
+    const file = try directory.openFile(io, path, .{});
+    defer file.close(io);
+    try file.setTimestamps(io, .{ .modify_timestamp = .{ .new = .{ .nanoseconds = nanoseconds } } });
 }
 
-test "nested cache maintenance removes complete content groups" {
+test "rolling retention admits an oversized current working set and evicts history first" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.createDirPath(std.testing.io, "first");
-    try temporary.dir.createDirPath(std.testing.io, "second");
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "first/output", .data = "12345678" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "second/output", .data = "12345678" });
-    const path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    try temporary.dir.createDirPath(std.testing.io, "cache/v4");
+    try temporary.dir.createDirPath(std.testing.io, "artifacts/v1");
+    try temporary.dir.createDirPath(std.testing.io, "run");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/history", .data = "12345678" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "artifacts/v1/history", .data = "12345678" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "run/current", .data = "123456789012" });
+    try setModified(temporary.dir, std.testing.io, "cache/v4/history", 10);
+    try setModified(temporary.dir, std.testing.io, "artifacts/v1/history", 20);
+    try setModified(temporary.dir, std.testing.io, "run/current", 200);
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
 
-    trimDirectoryTrees(allocator, std.testing.io, path, 8);
+    maintainRootAfterMutation(allocator, std.testing.io, root, 10, 100);
 
-    var iterator = temporary.dir.iterateAssumeFirstIteration();
-    var directories: usize = 0;
-    while (try iterator.next(std.testing.io)) |entry| if (entry.kind == .directory) {
-        directories += 1;
-    };
-    try std.testing.expectEqual(@as(usize, 1), directories);
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/history"));
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "artifacts/v1/history"));
+    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "run/current"));
 }
 
-test "compact native state retains linked boundary providers" {
+test "a later small working set automatically releases an old oversized set" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}\n" });
-    const source_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    const files = &.{source_path};
+    try temporary.dir.createDirPath(std.testing.io, "artifacts/v1");
+    try temporary.dir.createDirPath(std.testing.io, "cache/v4");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "artifacts/v1/previous-large", .data = "123456789012" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/current-small", .data = "1234" });
+    try setModified(temporary.dir, std.testing.io, "artifacts/v1/previous-large", 200);
+    try setModified(temporary.dir, std.testing.io, "cache/v4/current-small", 400);
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+
+    maintainRootAfterMutation(allocator, std.testing.io, root, 8, 300);
+
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "artifacts/v1/previous-large"));
+    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/v4/current-small"));
+}
+
+test "rolling retention bounds one global history across cache classes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "cache/v4");
+    try temporary.dir.createDirPath(std.testing.io, "artifacts/v1");
+    try temporary.dir.createDirPath(std.testing.io, "cache/shaders/group");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/first", .data = "12345678" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "artifacts/v1/second", .data = "12345678" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/shaders/group/output", .data = "12345678" });
+    try setModified(temporary.dir, std.testing.io, "cache/v4/first", 10);
+    try setModified(temporary.dir, std.testing.io, "artifacts/v1/second", 20);
+    try setModified(temporary.dir, std.testing.io, "cache/shaders/group/output", 30);
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+
+    maintainRootAfterMutation(allocator, std.testing.io, root, 8, 100);
+
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/first"));
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "artifacts/v1/second"));
+    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/shaders/group/output"));
+}
+
+test "compact native state serialization retains linked boundary providers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const files = &.{"Main.sx"};
     const providers = &.{Packages.BoundaryProvider{
         .name = "SDL3",
         .archive = "Boundary/macos-arm64/libSDL3.a",
         .frameworks = &.{"Metal"},
         .libraries = &.{},
     }};
-    storeNativeState(allocator, std.testing.io, source_path, "macos-arm64", files, providers);
-    const loaded = loadNativeState(allocator, std.testing.io, source_path, "macos-arm64").?;
+    const state = NativeState{ .files = files, .providers = providers };
+    const payload = try std.json.Stringify.valueAlloc(allocator, state, .{});
+    const loaded = try std.json.parseFromSliceLeaky(NativeState, allocator, payload, .{});
 
     try std.testing.expectEqual(@as(usize, 1), loaded.providers.len);
     try std.testing.expectEqualStrings("SDL3", loaded.providers[0].name);
     try std.testing.expectEqualStrings("Metal", loaded.providers[0].frameworks[0]);
+}
+
+test "a corrupt cache entry is a measured safe miss" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const directory = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "cache" });
+    const digest: [Blake3.digest_length]u8 = @splat(0x44);
+    storeAt(allocator, std.testing.io, directory, digest, "test", "complete");
+    const path = try entryPathAt(allocator, directory, digest, "test");
+    try Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = "truncated" });
+    const before = statistics();
+
+    try std.testing.expect(loadAt(allocator, std.testing.io, directory, digest, "test") == null);
+
+    const after = statistics();
+    try std.testing.expectEqual(before.entry_misses + 1, after.entry_misses);
 }
 
 test "output parent accepts an existing symbolic link to a directory" {

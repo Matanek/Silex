@@ -1,7 +1,8 @@
 # Release optimization
 
-Release mode applies semantics-preserving transformations first to portable IR,
-then to the target's machine representation.
+After native program closure, Release mode applies semantics-preserving
+transformations first to the retained portable IR, then to the target's machine
+representation.
 
 ## Simplify portable IR
 
@@ -13,6 +14,15 @@ skipped when several live joins would add control-flow work; those locals
 remain candidates for the native global allocator instead. Floating-point
 recurrences retain their local identity for scalar and SLP lane allocation.
 These decisions are automatic and require no source annotation.
+
+When the closed program contains at least 256 functions, the optimizer applies
+its independent per-function simplification and scalar aggregate replacement
+through at most four fixed worker ranges. Global summaries are complete before
+workers start. Inlining, SSA promotion, validation, and every transformation
+that can change cross-function identities remain sequential barriers. Each
+worker writes the original function index in a separate output slice, so using
+one, two, or four workers produces the same canonical portable IR. Smaller
+programs keep the direct path.
 
 Release inlines direct callees under a bounded cost across branches, loops,
 and multiple returns, in addition to constant-result and small straight-line

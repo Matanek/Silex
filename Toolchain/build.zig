@@ -233,6 +233,9 @@ pub fn build(b: *std.Build) void {
     const language_test_command = b.addRunArtifact(executable);
     language_test_command.addArg("test");
     language_test_command.addDirectoryArg(b.path("../Tests"));
+    // The build runner executes from Toolchain/. Language validation must not
+    // create a second project cache there; cache behavior has dedicated tests.
+    language_test_command.addArg("--nocache");
     const language_test_step = b.step("test-language", "Run executable Silex language tests");
     language_test_step.dependOn(&language_test_command.step);
 

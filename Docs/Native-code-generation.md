@@ -4,6 +4,26 @@ Native lowering begins only after composition has produced portable typed IR.
 Each backend owns its machine convention, executable format, system boundary,
 and target-specific proof.
 
+## Close the native program
+
+Native compilation computes one transitive function closure before Release
+optimization or Debug lowering. An executable starts from its semantic `main`
+entry; a native test compilation starts from all selected test entries. Static
+initialization is already attached to those entries as typed calls.
+
+The closure follows direct calls, function references, every declared dynamic
+dispatch implementation, and class finalizers. An indirect call therefore
+retains the callback declarations whose function references can reach it. When
+semantic dispatch exposes several valid implementations, the closure keeps
+all of them rather than selecting a target speculatively.
+
+Retained functions preserve their original order. Their numeric identities and
+all embedded call, callback, dispatch, and finalizer identities are remapped as
+one deterministic operation. ARM64 and X64 consequently receive the same
+closed portable program; a backend cannot independently discard a different
+semantic slice. The complete typed IR remains available to diagnostics, the
+reference interpreter, and `--emit-ir`.
+
 ## Recognize targets
 
 Package composition recognizes `macos-arm64`, `linux-x64`, `windows-x64`,
@@ -37,6 +57,15 @@ Native structure lowering flattens fundamental leaves into private stack-slot
 spans. Aggregate arguments use internal addresses and aggregate returns use
 an internal hidden destination; neither convention, nor the flattened layout,
 is observable or stable outside the backend.
+
+For programs retaining at least 256 functions, ARM64 lowering divides the
+function sequence into at most four fixed ranges. Each worker writes only its
+own destination range, so the final machine program keeps the canonical
+function order. String collection and machine-function cache reads happen
+before this parallel region; cache publication and whole-program validation
+happen after it. Those barriers keep shared cache mutation and global table
+construction deterministic. Smaller programs use the direct path to avoid
+thread startup overhead.
 
 Without a package-native provider, Release writes the Mach-O headers, load
 commands, `__text`, entry wrapper, and ad-hoc SHA-256 code signature itself.

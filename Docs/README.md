@@ -22,10 +22,11 @@ The first native path branches only after the typed IR:
 
 ```text
 typed Silex IR
-    -> macos-arm64 lowering
-    -> ARM64 machine IR
-    -> direct AArch64 instruction encoding
-    -> direct Mach-O executable emission and ad-hoc signature
+    -> closure from the selected native entry points
+    -> Release optimization, or direct Debug lowering
+    -> shared machine IR lowering
+    -> target instruction encoding
+    -> Mach-O, ELF or PE emission
     -> native executable
 ```
 

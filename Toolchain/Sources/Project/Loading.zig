@@ -10,6 +10,106 @@ const Names = @import("Names.zig");
 
 const Binding = Reexports.Binding;
 
+pub const PublicDeclarations = struct {
+    functions: usize = 0,
+    structures: usize = 0,
+    enumerations: usize = 0,
+
+    pub fn isUnambiguous(self: PublicDeclarations) bool {
+        const kinds = @as(u2, @intFromBool(self.functions != 0)) +
+            @as(u2, @intFromBool(self.structures != 0)) +
+            @as(u2, @intFromBool(self.enumerations != 0));
+        return kinds == 1 and self.structures <= 1 and self.enumerations <= 1;
+    }
+};
+
+pub fn indexPublicDeclarations(self: anytype, module: usize, name: []const u8) !PublicDeclarations {
+    return indexPublicDeclarationsOwnedBy(self, module, name, null);
+}
+
+fn indexPublicDeclarationsOwnedBy(
+    self: anytype,
+    module: usize,
+    name: []const u8,
+    owner: ?usize,
+) !PublicDeclarations {
+    var declarations: PublicDeclarations = .{};
+    const fragments = self.units[module].fragments;
+    const candidates = if (fragments.len == 0) &[_]usize{module} else fragments;
+    for (candidates) |fragment| {
+        if (owner) |required_owner| {
+            if (self.index.providers[fragment].owner != required_owner) continue;
+        }
+        try indexPublicSurface(self, fragment);
+        for (self.units[fragment].public_declarations) |declaration| {
+            if (!std.mem.eql(u8, declaration.name, name)) continue;
+            switch (declaration.kind) {
+                .function => declarations.functions += 1,
+                .structure => declarations.structures += 1,
+                .enumeration => declarations.enumerations += 1,
+            }
+        }
+    }
+    return declarations;
+}
+
+fn indexPublicSurface(self: anytype, fragment: usize) !void {
+    if (self.units[fragment].public_surface_indexed) return;
+    const provider = self.index.providers[fragment];
+    const source = self.units[fragment].source orelse source: {
+        const loaded = try std.Io.Dir.cwd().readFileAlloc(self.io, provider.path, self.allocator, .limited(1024 * 1024));
+        self.source_bytes_read += loaded.len;
+        self.units[fragment].source = loaded;
+        break :source loaded;
+    };
+    var declarations: std.ArrayList(Reexports.PublicDeclaration) = .empty;
+    try scanPublicDeclarations(self.allocator, source, &declarations);
+    self.units[fragment].public_declarations = try declarations.toOwnedSlice(self.allocator);
+    self.units[fragment].public_surface_indexed = true;
+    self.indexed_declarations += self.units[fragment].public_declarations.len;
+}
+
+fn scanPublicDeclarations(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    declarations: *std.ArrayList(Reexports.PublicDeclaration),
+) std.mem.Allocator.Error!void {
+    var lexer = LexerModule.Lexer.init(source);
+    var depth: usize = 0;
+    while (true) {
+        const token = lexer.next() catch return;
+        switch (token.tag) {
+            .left_brace => depth += 1,
+            .right_brace => depth -|= 1,
+            .keyword_public => if (depth == 0) try scanPublicDeclaration(allocator, &lexer, declarations),
+            .end => return,
+            else => {},
+        }
+    }
+}
+
+fn scanPublicDeclaration(
+    allocator: std.mem.Allocator,
+    lexer: *LexerModule.Lexer,
+    declarations: *std.ArrayList(Reexports.PublicDeclaration),
+) std.mem.Allocator.Error!void {
+    var marker = lexer.next() catch return;
+    if (marker.tag == .keyword_static) marker = lexer.next() catch return;
+    if (marker.tag == .identifier and std.mem.eql(u8, marker.lexeme, "intrinsic")) {
+        marker = lexer.next() catch return;
+    }
+    const kind = marker.tag;
+    const declaration_name = lexer.next() catch return;
+    if (declaration_name.tag != .identifier) return;
+    const declaration_kind: Reexports.DeclarationKind = switch (kind) {
+        .keyword_func => .function,
+        .keyword_struct, .keyword_class, .keyword_protocol => .structure,
+        .keyword_enum => .enumeration,
+        else => return,
+    };
+    try declarations.append(allocator, .{ .name = declaration_name.lexeme, .kind = declaration_kind });
+}
+
 pub fn discoverCatalogContributions(self: anytype) !void {
     var contributions: std.ArrayList(Reexports.CatalogContribution) = .empty;
     for (self.index.providers, 0..) |provider, module| {
@@ -18,12 +118,15 @@ pub fn discoverCatalogContributions(self: anytype) !void {
         if (!std.mem.eql(u8, provider.name, package_name)) continue;
 
         const source = try std.Io.Dir.cwd().readFileAlloc(self.io, provider.path, self.allocator, .limited(1024 * 1024));
+        self.source_bytes_read += source.len;
+        self.units[module].source = source;
         if (!containsContribution(source)) continue;
         var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
         const parsed = parser.parse() catch |err| {
             self.diagnostic = parser.diagnostic;
             return err;
         };
+        self.parsed_modules += 1;
         const program = try Result.install(self.allocator, parsed);
         self.units[module].program = program;
         for (program.catalog_contributions) |contribution| {
@@ -190,8 +293,19 @@ fn mergedDeclarationCollision(
 fn parse(self: anytype, fragment: usize) !void {
     const provider = self.index.providers[fragment];
     if (self.units[fragment].program == null) {
-        const source = try std.Io.Dir.cwd().readFileAlloc(self.io, provider.path, self.allocator, .limited(1024 * 1024));
-        const cached = if (self.cache_modules) CompilationCache.loadAst(self.allocator, self.io, provider.path, source) else null;
+        const source = self.units[fragment].source orelse source: {
+            const loaded = try std.Io.Dir.cwd().readFileAlloc(self.io, provider.path, self.allocator, .limited(1024 * 1024));
+            self.source_bytes_read += loaded.len;
+            self.units[fragment].source = loaded;
+            break :source loaded;
+        };
+        const cached = if (self.cache_modules) CompilationCache.loadAstAt(
+            self.allocator,
+            self.io,
+            self.module_cache_directory,
+            provider.path,
+            source,
+        ) else null;
         self.units[fragment].program = cached orelse parsed: {
             var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
             const parsed_program = parser.parse() catch |err| {
@@ -199,7 +313,15 @@ fn parse(self: anytype, fragment: usize) !void {
                 return err;
             };
             const installed = try Result.install(self.allocator, parsed_program);
-            if (self.cache_modules) CompilationCache.storeAst(self.allocator, self.io, provider.path, source, installed);
+            self.parsed_modules += 1;
+            if (self.cache_modules) CompilationCache.storeAstAt(
+                self.allocator,
+                self.io,
+                self.module_cache_directory,
+                provider.path,
+                source,
+                installed,
+            );
             break :parsed installed;
         };
     }
@@ -243,20 +365,22 @@ fn bind(self: anytype, module: usize) !void {
             return self.fail(position, message);
         }
         try bindings.append(self.allocator, binding);
-        if (binding.module) |dependency| try self.loadModule(dependency, module);
+        // Public uses describe a module's exported catalog. Keep the binding
+        // discoverable, but load its provider only when a declaration from
+        // that catalog enters the active semantic closure.
+        if (!binding.is_public) if (binding.module) |dependency| try self.loadModule(dependency, module);
     }
     for (self.catalog_contributions) |contribution| {
         if (contribution.target != module) continue;
         const binding = try self.resolveUse(contribution.contributor, contribution.use);
         const dependency = binding.module orelse return invalidContributionSource(self, contribution);
         const declaration = binding.declaration orelse return invalidContributionSource(self, contribution);
-        try self.loadModule(dependency, module);
-        if (!directPublicDeclarationOwnedBy(
-            self,
-            dependency,
-            declaration,
-            self.index.providers[contribution.contributor].owner,
-        )) {
+        const contributor_owner = self.index.providers[contribution.contributor].owner;
+        const indexed = try indexPublicDeclarationsOwnedBy(self, dependency, declaration, contributor_owner);
+        if (!indexed.isUnambiguous()) {
+            try self.loadModule(dependency, module);
+        }
+        if (!indexed.isUnambiguous() and !directPublicDeclarationOwnedBy(self, dependency, declaration, contributor_owner)) {
             return invalidContributionSource(self, contribution);
         }
         try requireAvailableContributionAlias(self, module, program, bindings.items, contribution, binding.alias);

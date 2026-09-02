@@ -5,6 +5,8 @@ const Boundary = @import("Boundary.zig");
 const Cli = @import("Cli.zig");
 const CliProgress = @import("CliProgress.zig");
 const CompilationCache = @import("CompilationCache.zig");
+const CompilationTrace = @import("CompilationTrace.zig");
+const ProgramScope = @import("ProgramScope.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Arm64Encoder = @import("Arm64/Encoder.zig");
 const Arm64Object = @import("Arm64/Object.zig");
@@ -75,6 +77,7 @@ test {
     _ = EmbeddedFiles;
     _ = ShaderAssets;
     _ = CliProgress;
+    _ = CompilationTrace;
     _ = PackageStore;
     _ = PackageRegistry;
     _ = PackageRegistration;
@@ -769,20 +772,22 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
         if (options.emit_ir) {
             try Io.File.stdout().writeStreamingAll(init.io, try Ir.writeText(source_allocator, compilation.ir));
         }
-        const native_program = if (native_target)
-            NativeTestRunner.lower(
+        const native_program = if (native_target) native: {
+            const roots = try source_allocator.alloc(Ir.FunctionId, compilation.tests.len);
+            for (compilation.tests, 0..) |case, index| roots[index] = case.function;
+            break :native NativeTestRunner.lowerSelected(
                 source_allocator,
                 init.io,
                 compilation.ir,
                 compilation.boundaries,
+                roots,
                 options.cache,
-            ) catch |err| native: {
+            ) catch |err| native_error: {
                 std.debug.print("silex: native test backend cannot lower '{s}': {t}\n", .{ source_path, err });
                 source_errors += 1;
-                break :native null;
-            }
-        else
-            null;
+                break :native_error null;
+            };
+        } else null;
         if (native_target and native_program == null) continue;
         const boundary_providers = try requiredBoundaryProviders(
             source_allocator,
@@ -813,14 +818,20 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                 try std.fmt.allocPrint(source_allocator, "{s} :: {s}", .{ display_path, case_name })
             else
                 case_name;
-            const succeeded = if (native_program) |machine| succeeded: {
+            const succeeded = if (native_program) |native| succeeded: {
+                const function = native.function(case.function) orelse {
+                    failed += 1;
+                    std.debug.print("silex: native test entry '{s}' was not retained\n", .{label});
+                    try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                    continue;
+                };
                 const execution = NativeTestRunner.execute(
                     source_allocator,
                     init.io,
                     target,
                     linker_path,
-                    machine,
-                    case.function,
+                    native.program,
+                    function,
                     source_path,
                     compilation.files,
                     boundary_providers,
@@ -997,7 +1008,7 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
         .mode = options.mode,
         .cache = options.cache,
         .target = target,
-    }, options.emit_ir);
+    }, options.emit_ir, .run);
     if (status != 0) return status;
     var progress = CliProgress.Build.init(init.io);
     progress.source(.run, source_path);
@@ -1097,7 +1108,7 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
         },
     };
     if (options.cache) CompilationCache.maintain(allocator, init.io);
-    return compileNativeOptions(init, allocator, options, false);
+    return compileNativeOptions(init, allocator, options, false, .compile);
 }
 
 fn compileNativeOptions(
@@ -1105,37 +1116,64 @@ fn compileNativeOptions(
     allocator: std.mem.Allocator,
     options: Cli.CompileOptions,
     emit_ir: bool,
+    command: CompilationTrace.Command,
 ) !u8 {
     const target = options.target orelse TargetModule.Target.host() orelse {
         std.debug.print("silex: 'compile' requires --target on this host\n", .{});
         return 1;
     };
+    var trace = CompilationTrace.Reporter.init(init.io, init.environ_map, .{
+        .command = command,
+        .source_path = options.source_path,
+        .target = target.name(),
+        .mode = @tagName(options.mode),
+        .cache_enabled = options.cache,
+        .compiler_version = build_options.version,
+    });
+    defer trace.write(allocator);
+    defer if (options.cache) {
+        const statistics = CompilationCache.statistics();
+        trace.metrics.cache_entry_hits = statistics.entry_hits;
+        trace.metrics.cache_entry_misses = statistics.entry_misses;
+        trace.metrics.cache_bytes_read = statistics.bytes_read;
+        trace.metrics.cache_bytes_written = statistics.bytes_written;
+    };
     var progress = CliProgress.Build.init(init.io);
     progress.source(.analyze, options.source_path);
     const executable_kind = if (target.eql(.macos_arm64)) "macho" else if (target.eql(.linux_x64)) "elf" else "pe";
     const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ target.name(), @tagName(options.mode), options.source_path });
-    if (options.cache) if (CompilationCache.loadNativeState(allocator, init.io, options.source_path, target.name())) |state| {
-        const digest = CompilationCache.nativeKey(
-            allocator,
-            init.io,
-            state.files,
-            state.providers,
-            "compile",
-            native_variant,
-        ) catch null;
-        if (digest) |key| if (CompilationCache.executableExists(allocator, init.io, key, executable_kind)) {
-            progress.target(target.name(), @tagName(options.mode));
-            progress.stage(.cache);
-            progress.source(.write, options.output_path);
-            CompilationCache.materializeExecutable(allocator, init.io, key, executable_kind, options.output_path) catch |err| {
-                std.debug.print("silex: unable to materialize cached executable: {t}\n", .{err});
-                return 1;
+    {
+        var cache_span = trace.span(.cache_validation);
+        defer cache_span.finish();
+        if (options.cache) if (CompilationCache.loadNativeState(allocator, init.io, options.source_path, target.name())) |state| {
+            const digest = CompilationCache.nativeKey(
+                allocator,
+                init.io,
+                state.files,
+                state.providers,
+                "compile",
+                native_variant,
+            ) catch null;
+            if (digest) |key| if (CompilationCache.executableExists(allocator, init.io, key, executable_kind)) {
+                progress.target(target.name(), @tagName(options.mode));
+                progress.stage(.cache);
+                progress.source(.write, options.output_path);
+                var materialize_span = trace.span(.output_write);
+                CompilationCache.materializeExecutable(allocator, init.io, key, executable_kind, options.output_path) catch |err| {
+                    materialize_span.finish();
+                    std.debug.print("silex: unable to materialize cached executable: {t}\n", .{err});
+                    return 1;
+                };
+                materialize_span.finish();
+                recordOutputSize(&trace, init.io, options.output_path);
+                trace.cacheHit(.hit_before_frontend);
+                trace.succeeded();
+                progress.source(.ready, options.output_path);
+                progress.finish();
+                return 0;
             };
-            progress.source(.ready, options.output_path);
-            progress.finish();
-            return 0;
         };
-    };
+    }
     var boundaries: []const Boundary.Function = &.{};
     var boundary_providers: []const Packages.BoundaryProvider = &.{};
     var dependency_files: []const []const u8 = &.{};
@@ -1147,28 +1185,52 @@ fn compileNativeOptions(
             options.cache,
         );
         compiler.target = target;
+        if (trace.enabled()) compiler.trace = &trace;
         try configureShaderCompiler(&compiler, allocator, init.environ_map);
-        const compilation = compiler.compile(options.source_path) catch |err| switch (err) {
-            error.InvalidSource => {
-                printSourceDiagnostic(compiler, options.source_path);
-                return 1;
-            },
-            else => return err,
+        const compilation = compilation: {
+            var frontend_span = trace.span(.frontend_total);
+            defer frontend_span.finish();
+            break :compilation compiler.compile(options.source_path) catch |err| switch (err) {
+                error.InvalidSource => {
+                    printSourceDiagnostic(compiler, options.source_path);
+                    return 1;
+                },
+                else => return err,
+            };
         };
         boundaries = compilation.boundaries;
         boundary_providers = try requiredBoundaryProviders(allocator, boundaries, compilation.packages);
         dependency_files = compilation.cache_files;
-        if (options.cache and boundaries.len == 0) {
-            CompilationCache.storeIr(allocator, init.io, options.source_path, target.name(), compilation.cache_files, compilation.ir);
+        trace.metrics.packages = compilation.metrics.packages;
+        trace.metrics.discovered_modules = compilation.metrics.discovered_modules;
+        trace.metrics.loaded_modules = compilation.metrics.loaded_modules;
+        trace.metrics.parsed_modules = compilation.metrics.parsed_modules;
+        trace.metrics.indexed_declarations = compilation.metrics.indexed_declarations;
+        trace.metrics.source_bytes_read = compilation.metrics.source_bytes_read;
+        trace.metrics.ast_functions = compilation.metrics.ast_functions;
+        trace.metrics.portable_functions = compilation.metrics.portable_functions;
+        trace.metrics.package_functions_reused = compilation.metrics.package_functions_reused;
+        trace.metrics.package_function_misses = compilation.metrics.package_function_misses;
+        trace.metrics.package_function_relocation_failures = compilation.metrics.package_function_relocation_failures;
+        trace.metrics.package_functions_stored = compilation.metrics.package_functions_stored;
+        trace.metrics.boundaries = boundaries.len;
+        trace.metrics.boundary_providers = boundary_providers.len;
+        trace.metrics.dependency_files = dependency_files.len;
+        {
+            var cache_span = trace.span(.cache_update);
+            defer cache_span.finish();
+            if (options.cache and boundaries.len == 0) {
+                CompilationCache.storeIr(allocator, init.io, options.source_path, target.name(), compilation.cache_files, compilation.ir);
+            }
+            if (options.cache) CompilationCache.storeNativeState(
+                allocator,
+                init.io,
+                options.source_path,
+                target.name(),
+                compilation.cache_files,
+                boundary_providers,
+            );
         }
-        if (options.cache) CompilationCache.storeNativeState(
-            allocator,
-            init.io,
-            options.source_path,
-            target.name(),
-            compilation.cache_files,
-            boundary_providers,
-        );
         break :program compilation.ir;
     };
 
@@ -1192,20 +1254,31 @@ fn compileNativeOptions(
 
     progress.target(target.name(), @tagName(options.mode));
 
-    const cache_key = if (options.cache)
-        CompilationCache.nativeKey(allocator, init.io, dependency_files, boundary_providers, "compile", native_variant) catch null
-    else
-        null;
-    if (cache_key) |digest| if (CompilationCache.executableExists(allocator, init.io, digest, executable_kind)) {
-        progress.stage(.cache);
-        progress.source(.write, options.output_path);
-        CompilationCache.materializeExecutable(allocator, init.io, digest, executable_kind, options.output_path) catch |err| {
-            std.debug.print("silex: unable to materialize cached executable: {t}\n", .{err});
-            return 1;
+    const cache_key = cache_key: {
+        var cache_span = trace.span(.cache_validation);
+        defer cache_span.finish();
+        const key = if (options.cache)
+            CompilationCache.nativeKey(allocator, init.io, dependency_files, boundary_providers, "compile", native_variant) catch null
+        else
+            null;
+        if (key) |digest| if (CompilationCache.executableExists(allocator, init.io, digest, executable_kind)) {
+            progress.stage(.cache);
+            progress.source(.write, options.output_path);
+            var materialize_span = trace.span(.output_write);
+            CompilationCache.materializeExecutable(allocator, init.io, digest, executable_kind, options.output_path) catch |err| {
+                materialize_span.finish();
+                std.debug.print("silex: unable to materialize cached executable: {t}\n", .{err});
+                return 1;
+            };
+            materialize_span.finish();
+            recordOutputSize(&trace, init.io, options.output_path);
+            trace.cacheHit(.hit_after_frontend);
+            trace.succeeded();
+            progress.source(.ready, options.output_path);
+            progress.finish();
+            return 0;
         };
-        progress.source(.ready, options.output_path);
-        progress.finish();
-        return 0;
+        break :cache_key key;
     };
 
     // Cached outputs are hard links to their canonical artifact. Detach the
@@ -1219,125 +1292,198 @@ fn compileNativeOptions(
         },
     };
 
-    const native_ir = switch (options.mode) {
-        .debug => program,
-        .release => (if (options.cache)
-            ReleaseOptimizer.optimizeCached(allocator, init.io, program)
-        else
-            ReleaseOptimizer.optimize(allocator, program)) catch |err| {
-            std.debug.print("silex: optimizer rejected the portable IR: {t}\n", .{err});
+    const scoped_program = scoped_program: {
+        var closure_span = trace.span(.program_closure);
+        defer closure_span.finish();
+        const scope = ProgramScope.executable(allocator, program) catch |err| {
+            std.debug.print("silex: cannot close the native program from its entry: {t}\n", .{err});
             return 1;
-        },
+        };
+        trace.metrics.reachable_portable_functions = scope.program.functions.len;
+        break :scoped_program scope.program;
+    };
+    const worker_count = compilationWorkerCount(init.environ_map, scoped_program.functions.len);
+    trace.workers(worker_count);
+    const native_ir = native_ir: {
+        var optimize_span = trace.span(.optimization);
+        defer optimize_span.finish();
+        break :native_ir switch (options.mode) {
+            .debug => scoped_program,
+            .release => (if (options.cache)
+                ReleaseOptimizer.optimizeCachedWithWorkers(allocator, init.io, scoped_program, worker_count)
+            else
+                ReleaseOptimizer.optimizeWithWorkers(allocator, scoped_program, worker_count)) catch |err| {
+                std.debug.print("silex: optimizer rejected the portable IR: {t}\n", .{err});
+                return 1;
+            },
+        };
     };
     const lower_mode = lowerModeForTarget(options.mode, target);
-    var machine = (if (options.cache)
-        Lower.lowerCachedWithBoundaries(allocator, init.io, native_ir, boundaries, lower_mode)
-    else
-        Lower.lowerWithModeAndBoundaries(allocator, native_ir, boundaries, lower_mode)) catch |err| {
-        std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
-        return 1;
+    var machine = machine: {
+        var lower_span = trace.span(.lowering);
+        defer lower_span.finish();
+        break :machine (if (options.cache)
+            Lower.lowerCachedWithBoundariesAndWorkers(allocator, init.io, native_ir, boundaries, lower_mode, worker_count)
+        else
+            Lower.lowerWithBoundariesAndWorkers(allocator, native_ir, boundaries, lower_mode, worker_count)) catch |err| {
+            std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
+            return 1;
+        };
     };
     if (options.mode == .release and (target.eql(.linux_x64) or target.eql(.windows_x64))) {
+        var allocation_span = trace.span(.register_allocation);
+        defer allocation_span.finish();
         machine = X64RegisterAllocation.allocateProgram(allocator, machine) catch |err| {
             std.debug.print("silex: X64 register allocation failed: {t}\n", .{err});
             return 1;
         };
     }
+    trace.metrics.machine_functions = machine.functions.len;
     progress.stage(.emit);
     if (target.eql(.macos_arm64) and
         (options.mode == .debug or boundary_providers.len != 0 or MacOSLink.requiresSystemLink(machine.external_functions)))
     {
-        const object = MachOObject.emit(allocator, machine) catch |err| {
-            std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
-            return 1;
+        const object = object: {
+            var emit_span = trace.span(.emission);
+            defer emit_span.finish();
+            break :object MachOObject.emit(allocator, machine) catch |err| {
+                std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
+                return 1;
+            };
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
         defer if (options.mode == .release) Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
         if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         {
+            var write_span = trace.span(.output_write);
+            defer write_span.finish();
             const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
             defer file.close(init.io);
             try file.writeStreamingAll(init.io, object);
         }
         try CompilationCache.ensureOutputParent(init.io, options.output_path);
         progress.stage(.link);
-        MacOSLink.executable(
-            allocator,
-            init.io,
-            linker_path,
-            object_path,
-            options.output_path,
-            boundary_providers,
-            machine.external_functions,
-        ) catch |err| {
-            std.debug.print("silex: cannot link native package artifacts: {t}\n", .{err});
-            return 1;
-        };
-        if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        {
+            var link_span = trace.span(.linking);
+            defer link_span.finish();
+            MacOSLink.executable(
+                allocator,
+                init.io,
+                linker_path,
+                object_path,
+                options.output_path,
+                boundary_providers,
+                machine.external_functions,
+            ) catch |err| {
+                std.debug.print("silex: cannot link native package artifacts: {t}\n", .{err});
+                return 1;
+            };
+        }
+        recordOutputSize(&trace, init.io, options.output_path);
+        if (cache_key) |digest| {
+            var publish_span = trace.span(.cache_publication);
+            defer publish_span.finish();
+            storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        }
+        trace.succeeded();
         progress.source(.ready, options.output_path);
         progress.finish();
         return 0;
     }
     if ((target.eql(.linux_x64) or target.eql(.windows_x64)) and boundary_providers.len != 0) {
-        var image = (if (target.eql(.linux_x64))
-            X64Encoder.encodeLinuxObject(allocator, machine)
-        else
-            X64Encoder.encodeWindowsObject(allocator, machine)) catch |err| {
-            std.debug.print("silex: {s} encoder cannot emit a linked object: {t}\n", .{ target.name(), err });
-            return 1;
-        };
-        defer image.deinit(allocator);
-        const object = (if (target.eql(.linux_x64))
-            X64Object.emitElf(allocator, machine, image)
-        else
-            X64Object.emitCoff(allocator, machine, image)) catch |err| {
-            std.debug.print("silex: cannot emit a {s} relocatable object: {t}\n", .{ target.name(), err });
-            return 1;
+        const object = object: {
+            var emit_span = trace.span(.emission);
+            defer emit_span.finish();
+            var image = (if (target.eql(.linux_x64))
+                X64Encoder.encodeLinuxObject(allocator, machine)
+            else
+                X64Encoder.encodeWindowsObject(allocator, machine)) catch |err| {
+                std.debug.print("silex: {s} encoder cannot emit a linked object: {t}\n", .{ target.name(), err });
+                return 1;
+            };
+            defer image.deinit(allocator);
+            break :object (if (target.eql(.linux_x64))
+                X64Object.emitElf(allocator, machine, image)
+            else
+                X64Object.emitCoff(allocator, machine, image)) catch |err| {
+                std.debug.print("silex: cannot emit a {s} relocatable object: {t}\n", .{ target.name(), err });
+                return 1;
+            };
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
         defer Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
         if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         {
+            var write_span = trace.span(.output_write);
+            defer write_span.finish();
             const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
             defer file.close(init.io);
             try file.writeStreamingAll(init.io, object);
         }
         try CompilationCache.ensureOutputParent(init.io, options.output_path);
         progress.stage(.link);
-        NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
-            std.debug.print("silex: cannot link native package artifacts for {s}: {t}\n", .{ target.name(), err });
-            return 1;
-        };
-        if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        {
+            var link_span = trace.span(.linking);
+            defer link_span.finish();
+            NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
+                std.debug.print("silex: cannot link native package artifacts for {s}: {t}\n", .{ target.name(), err });
+                return 1;
+            };
+        }
+        recordOutputSize(&trace, init.io, options.output_path);
+        if (cache_key) |digest| {
+            var publish_span = trace.span(.cache_publication);
+            defer publish_span.finish();
+            storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        }
+        trace.succeeded();
         progress.source(.ready, options.output_path);
         progress.finish();
         return 0;
     }
     if (target.eql(.windows_arm64) and boundary_providers.len != 0) {
-        const object = Arm64Object.emitWindows(allocator, machine) catch |err| {
-            std.debug.print("silex: cannot emit a Windows ARM64 relocatable object: {t}\n", .{err});
-            return 1;
+        const object = object: {
+            var emit_span = trace.span(.emission);
+            defer emit_span.finish();
+            break :object Arm64Object.emitWindows(allocator, machine) catch |err| {
+                std.debug.print("silex: cannot emit a Windows ARM64 relocatable object: {t}\n", .{err});
+                return 1;
+            };
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
         defer Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
         if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         {
+            var write_span = trace.span(.output_write);
+            defer write_span.finish();
             const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
             defer file.close(init.io);
             try file.writeStreamingAll(init.io, object);
         }
         try CompilationCache.ensureOutputParent(init.io, options.output_path);
         progress.stage(.link);
-        NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
-            std.debug.print("silex: cannot link native package artifacts for windows-arm64: {t}\n", .{err});
-            return 1;
-        };
-        if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        {
+            var link_span = trace.span(.linking);
+            defer link_span.finish();
+            NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
+                std.debug.print("silex: cannot link native package artifacts for windows-arm64: {t}\n", .{err});
+                return 1;
+            };
+        }
+        recordOutputSize(&trace, init.io, options.output_path);
+        if (cache_key) |digest| {
+            var publish_span = trace.span(.cache_publication);
+            defer publish_span.finish();
+            storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        }
+        trace.succeeded();
         progress.source(.ready, options.output_path);
         progress.finish();
         return 0;
     }
     const executable = executable: {
+        var emit_span = trace.span(.emission);
+        defer emit_span.finish();
         if (target.eql(.macos_arm64)) break :executable MachO.emit(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit native executable: {t}\n", .{err});
             return 1;
@@ -1483,20 +1629,36 @@ fn compileNativeOptions(
         unreachable;
     };
 
+    trace.metrics.output_bytes = executable.len;
     progress.source(.write, options.output_path);
-    const status = writeExecutable(init, options.output_path, executable);
+    const status = status: {
+        var write_span = trace.span(.output_write);
+        defer write_span.finish();
+        break :status writeExecutable(init, options.output_path, executable);
+    };
     if (status == 0) {
-        if (cache_key) |digest| CompilationCache.storeExecutableFile(
-            allocator,
-            init.io,
-            digest,
-            executable_kind,
-            options.output_path,
-        );
+        if (cache_key) |digest| {
+            var publish_span = trace.span(.cache_publication);
+            defer publish_span.finish();
+            CompilationCache.storeExecutableFile(
+                allocator,
+                init.io,
+                digest,
+                executable_kind,
+                options.output_path,
+            );
+        }
+        trace.succeeded();
         progress.source(.ready, options.output_path);
         progress.finish();
     }
     return status;
+}
+
+fn recordOutputSize(trace: *CompilationTrace.Reporter, io: Io, output_path: []const u8) void {
+    if (!trace.enabled()) return;
+    const status = Io.Dir.cwd().statFile(io, output_path, .{}) catch return;
+    trace.metrics.output_bytes = @intCast(status.size);
 }
 
 fn storeLinkedExecutable(
@@ -1833,6 +1995,14 @@ fn lowerModeForTarget(mode: Cli.Mode, target: TargetModule.Target) Lower.Mode {
     // X64 starts from the stack-compatible machine form, then applies its own
     // target-specific scalar allocation after lowering.
     return .debug;
+}
+
+fn compilationWorkerCount(environment: *const std.process.Environ.Map, function_count: usize) u16 {
+    const requested = if (environment.get("SILEX_COMPILATION_WORKERS")) |value|
+        std.fmt.parseInt(u16, value, 10) catch null
+    else
+        null;
+    return Lower.selectedWorkerCount(function_count, requested);
 }
 
 test "select release register allocation only for its supported target" {

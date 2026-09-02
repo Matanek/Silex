@@ -752,6 +752,7 @@ test "compose same-package module fragments across active roots" {
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    const module_cache_directory = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "cache" });
     const cases = [_]struct { target: @import("../Target.zig").Target, expected: i64 }{
         .{ .target = .macos_arm64, .expected = 101 },
         .{ .target = .linux_x64, .expected = 202 },
@@ -761,6 +762,7 @@ test "compose same-package module fragments across active roots" {
     for (cases) |case| {
         var compiler = Compiler.init(allocator, std.testing.io);
         compiler.cache_modules = true;
+        compiler.module_cache_directory = module_cache_directory;
         compiler.target = case.target;
         const compilation = try compiler.compile(input);
         var answer_id: ?usize = null;
@@ -787,6 +789,7 @@ test "compose same-package module fragments across active roots" {
     });
     var changed_compiler = Compiler.init(allocator, std.testing.io);
     changed_compiler.cache_modules = true;
+    changed_compiler.module_cache_directory = module_cache_directory;
     changed_compiler.target = .macos_arm64;
     const changed = try changed_compiler.compile(input);
     var changed_answer_id: ?usize = null;
@@ -1757,6 +1760,20 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
     const compilation = try compiler.compile(input);
     const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\n", result.stdout);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Plugins\nfunc main() { print(Plugins.Core(value:42).value) }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    const lazy_compilation = try compiler.compile(input);
+    const lazy_result = try @import("../Interpreter.zig").runCapture(allocator, lazy_compilation.ir);
+    try std.testing.expectEqualStrings("42\n", lazy_result.stdout);
+    try std.testing.expect(lazy_compilation.metrics.parsed_modules < compilation.metrics.parsed_modules);
+    try std.testing.expect(lazy_compilation.metrics.indexed_declarations != 0);
+    for (lazy_compilation.cache_files) |path| {
+        try std.testing.expect(!std.mem.endsWith(u8, path, "GFX.Physics/Module/Plugin.sx"));
+    }
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",

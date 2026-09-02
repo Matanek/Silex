@@ -78,3 +78,24 @@ through an authorized `merge`. Conflicting aliases or child namespaces are
 rejected deterministically. Contributions become ordinary typed reexport
 bindings before semantic lowering; they inject no declarations, executable
 code, runtime registry or backend concept into the parent module.
+
+## Build the active semantic closure
+
+Source discovery records every provider needed for deterministic name and
+namespace lookup, but discovery alone does not make a provider executable.
+The compiler deeply parses the entry module and its active dependency closure.
+An ordinary private `use` activates its target immediately because the loaded
+module may refer to that binding from any declaration body.
+
+Public reexports and authenticated catalog contributions keep a lighter
+in-memory surface. The compiler lexically indexes direct public declaration
+names to validate an exported binding without parsing the provider's bodies.
+It loads the complete provider when an active type, call, field access or
+qualified path crosses that binding. Ambiguous surfaces, chained reexports and
+invalid targets also load enough of the chain to preserve the established
+diagnostic and its source position.
+
+The surface index lives only for the current compilation. If a provider later
+enters the active closure, its already-read source text is reused by the full
+parser. No persistent index artifact is added to `.silex`; persistent cache
+retention remains a separate compilation-cache policy.
