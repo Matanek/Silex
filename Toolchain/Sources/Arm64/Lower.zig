@@ -17,6 +17,9 @@ const irConforms = TypeLayout.irConforms;
 const isAggregate = TypeLayout.isAggregate;
 const leafCount = TypeLayout.leafCount;
 
+pub const max_worker_count: u16 = 4;
+pub const parallel_function_threshold: usize = 256;
+
 pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Program {
     return lowerWithMode(allocator, program, .debug);
 }
@@ -28,11 +31,11 @@ pub fn lowerBoundaries(allocator: Allocator, program: Ir.Program, boundaries: []
 pub const Mode = enum { debug, release };
 
 pub fn lowerWithMode(allocator: Allocator, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
-    return lowerInternal(allocator, null, program, &.{}, mode);
+    return lowerInternal(allocator, null, program, &.{}, mode, 1);
 }
 
 pub fn lowerCached(allocator: Allocator, io: std.Io, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
-    return lowerInternal(allocator, io, program, &.{}, mode);
+    return lowerInternal(allocator, io, program, &.{}, mode, 1);
 }
 
 pub fn lowerWithModeAndBoundaries(
@@ -41,7 +44,7 @@ pub fn lowerWithModeAndBoundaries(
     boundaries: []const Boundary.Function,
     mode: Mode,
 ) Machine.Error!Machine.Program {
-    return lowerInternal(allocator, null, program, boundaries, mode);
+    return lowerInternal(allocator, null, program, boundaries, mode, 1);
 }
 
 pub fn lowerCachedWithBoundaries(
@@ -51,7 +54,38 @@ pub fn lowerCachedWithBoundaries(
     boundaries: []const Boundary.Function,
     mode: Mode,
 ) Machine.Error!Machine.Program {
-    return lowerInternal(allocator, io, program, boundaries, mode);
+    return lowerInternal(allocator, io, program, boundaries, mode, 1);
+}
+
+pub fn lowerCachedWithBoundariesAndWorkers(
+    allocator: Allocator,
+    io: std.Io,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    mode: Mode,
+    worker_count: u16,
+) Machine.Error!Machine.Program {
+    return lowerInternal(allocator, io, program, boundaries, mode, worker_count);
+}
+
+pub fn lowerWithBoundariesAndWorkers(
+    allocator: Allocator,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    mode: Mode,
+    worker_count: u16,
+) Machine.Error!Machine.Program {
+    return lowerInternal(allocator, null, program, boundaries, mode, worker_count);
+}
+
+pub fn recommendedWorkerCount(function_count: usize) u16 {
+    if (function_count < parallel_function_threshold) return 1;
+    const available = std.Thread.getCpuCount() catch return 1;
+    return @intCast(@min(available, max_worker_count));
+}
+
+pub fn selectedWorkerCount(function_count: usize, requested: ?u16) u16 {
+    return boundedWorkerCount(requested orelse recommendedWorkerCount(function_count), function_count);
 }
 
 fn lowerInternal(
@@ -60,36 +94,50 @@ fn lowerInternal(
     program: Ir.Program,
     boundaries: []const Boundary.Function,
     mode: Mode,
+    requested_worker_count: u16,
 ) Machine.Error!Machine.Program {
-    var functions: std.ArrayList(Machine.Function) = .empty;
-    var strings: std.ArrayList([]const u8) = .empty;
-    try strings.append(allocator, "\n");
-    try strings.append(allocator, "true");
-    try strings.append(allocator, "false");
-    try strings.append(allocator, "error: ");
-    for (program.functions) |function| {
-        var lowered = cached: {
-            if (io) |cache_io| if (cacheSafe(function)) {
-                const encoded = std.json.Stringify.valueAlloc(allocator, function, .{}) catch break :cached try lowerFunction(allocator, program, &strings, function);
-                const digest = CompilationCache.artifactKey(@tagName(mode), &.{encoded});
-                if (CompilationCache.load(allocator, cache_io, digest, "machine-function")) |payload| {
-                    if (std.json.parseFromSliceLeaky(Machine.Function, allocator, payload, .{})) |value| {
-                        break :cached value;
-                    } else |_| {}
+    var strings = StringTable.init(allocator);
+    _ = try strings.intern("\n");
+    _ = try strings.intern("true");
+    _ = try strings.intern("false");
+    _ = try strings.intern("error: ");
+    try collectStrings(allocator, program, &strings);
+
+    const functions = try allocator.alloc(Machine.Function, program.functions.len);
+    const pending = try allocator.alloc(bool, program.functions.len);
+    @memset(pending, true);
+    if (io) |cache_io| for (program.functions, 0..) |function, index| if (cacheSafe(function)) {
+        const encoded = std.json.Stringify.valueAlloc(allocator, function, .{}) catch continue;
+        const digest = CompilationCache.artifactKey(@tagName(mode), &.{encoded});
+        if (CompilationCache.load(allocator, cache_io, digest, "machine-function")) |payload| {
+            if (std.json.parseFromSliceLeaky(Machine.Function, allocator, payload, .{})) |value| {
+                functions[index] = value;
+                if (mode == .release and functions[index].register_slots.len == 0) {
+                    functions[index] = try allocateRegisters(allocator, functions[index]);
                 }
-                var value = try lowerFunction(allocator, program, &strings, function);
-                if (mode == .release) value = try allocateRegisters(allocator, value);
-                const payload = std.json.Stringify.valueAlloc(allocator, value, .{}) catch break :cached value;
-                CompilationCache.store(allocator, cache_io, digest, "machine-function", payload);
-                break :cached value;
-            };
-            var value = try lowerFunction(allocator, program, &strings, function);
-            if (mode == .release) value = try allocateRegisters(allocator, value);
-            break :cached value;
-        };
-        if (mode == .release and lowered.register_slots.len == 0) lowered = try allocateRegisters(allocator, lowered);
-        try functions.append(allocator, lowered);
+                pending[index] = false;
+            } else |_| {}
+        }
+    };
+
+    const worker_count = boundedWorkerCount(requested_worker_count, program.functions.len);
+    if (worker_count == 1) {
+        try lowerRange(allocator, program, &strings, program.functions, functions, pending, mode, 0, program.functions.len);
+    } else {
+        try lowerParallel(allocator, program, &strings, program.functions, functions, pending, mode, worker_count);
     }
+
+    if (io) |cache_io| for (program.functions, 0..) |function, index| if (pending[index] and cacheSafe(function)) {
+        const encoded = std.json.Stringify.valueAlloc(allocator, function, .{}) catch continue;
+        const digest = CompilationCache.artifactKey(@tagName(mode), &.{encoded});
+        const payload = std.json.Stringify.valueAlloc(allocator, functions[index], .{}) catch continue;
+        CompilationCache.store(allocator, cache_io, digest, "machine-function", payload);
+    };
+
+    for (functions) |*lowered| {
+        if (mode == .release and lowered.register_slots.len == 0) lowered.* = try allocateRegisters(allocator, lowered.*);
+    }
+
     const has_mutex = programUsesMutex(program);
     const globals = try allocator.alloc(Machine.Global, program.globals.len + @intFromBool(has_mutex));
     for (program.globals, 0..) |global, index| globals[index] = .{
@@ -125,12 +173,12 @@ fn lowerInternal(
         };
     }
     const result: Machine.Program = .{
-        .functions = try functions.toOwnedSlice(allocator),
+        .functions = functions,
         .files = program.files,
         .debug = mode == .debug,
         .external_functions = external_functions,
         .globals = globals,
-        .strings = try strings.toOwnedSlice(allocator),
+        .strings = try strings.values.toOwnedSlice(allocator),
         .copy_model = try buildCopyModel(allocator, program),
         .mutex_global = if (has_mutex) program.globals.len else null,
         .mutex_lock_function = if (has_mutex) boundaries.len else null,
@@ -139,6 +187,160 @@ fn lowerInternal(
     try Machine.validate(result);
     return result;
 }
+
+fn boundedWorkerCount(requested: u16, function_count: usize) u16 {
+    if (function_count < parallel_function_threshold) return 1;
+    return @max(1, @min(requested, max_worker_count));
+}
+
+fn lowerRange(
+    allocator: Allocator,
+    program: Ir.Program,
+    strings: *const StringTable,
+    source_functions: []const Ir.Function,
+    functions: []Machine.Function,
+    pending: []const bool,
+    mode: Mode,
+    start: usize,
+    end: usize,
+) Machine.Error!void {
+    for (start..end) |index| {
+        if (!pending[index]) continue;
+        var value = try lowerFunction(allocator, program, strings, source_functions[index]);
+        if (mode == .release) value = try allocateRegisters(allocator, value);
+        functions[index] = value;
+    }
+}
+
+const LowerWorker = struct {
+    allocator: Allocator,
+    program: Ir.Program,
+    strings: *const StringTable,
+    source_functions: []const Ir.Function,
+    functions: []Machine.Function,
+    pending: []const bool,
+    mode: Mode,
+    start: usize,
+    end: usize,
+    failure: ?Machine.Error = null,
+
+    fn run(self: *LowerWorker) void {
+        lowerRange(
+            self.allocator,
+            self.program,
+            self.strings,
+            self.source_functions,
+            self.functions,
+            self.pending,
+            self.mode,
+            self.start,
+            self.end,
+        ) catch |err| {
+            self.failure = err;
+        };
+    }
+};
+
+fn lowerParallel(
+    allocator: Allocator,
+    program: Ir.Program,
+    strings: *const StringTable,
+    source_functions: []const Ir.Function,
+    functions: []Machine.Function,
+    pending: []const bool,
+    mode: Mode,
+    worker_count: u16,
+) Machine.Error!void {
+    var workers: [max_worker_count]LowerWorker = undefined;
+    var threads: [max_worker_count - 1]std.Thread = undefined;
+    const count: usize = worker_count;
+    const chunk = std.math.divCeil(usize, source_functions.len, count) catch unreachable;
+    for (0..count) |index| workers[index] = .{
+        .allocator = allocator,
+        .program = program,
+        .strings = strings,
+        .source_functions = source_functions,
+        .functions = functions,
+        .pending = pending,
+        .mode = mode,
+        .start = index * chunk,
+        .end = @min((index + 1) * chunk, source_functions.len),
+    };
+
+    var spawned: usize = 0;
+    while (spawned + 1 < count) : (spawned += 1) {
+        threads[spawned] = std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, LowerWorker.run, .{&workers[spawned]}) catch break;
+    }
+    for (spawned..count) |index| workers[index].run();
+    for (threads[0..spawned]) |thread| thread.join();
+    for (workers[0..count]) |worker| if (worker.failure) |err| return err;
+}
+
+fn collectStrings(allocator: Allocator, program: Ir.Program, strings: *StringTable) Machine.Error!void {
+    for (program.functions) |function| for (function.blocks) |block| {
+        for (block.instructions) |instruction| switch (instruction) {
+            .constant_str => |constant| _ = try strings.intern(constant.value),
+            .constant_bytes => |constant| _ = try strings.intern(constant.value),
+            .enum_init => |initialization| {
+                const enumeration = program.enums[initialization.enumeration];
+                if (enumeration.variants[initialization.variant].raw_value) |raw_value| switch (raw_value) {
+                    .integer => {},
+                    .string => |value| _ = try strings.intern(value),
+                };
+            },
+            .collection_load => |access| {
+                const collection = collectionForType(program, function.value_types[access.collection]) orelse return error.InvalidMachineProgram;
+                const count: u32 = @intCast(collection.length orelse 0);
+                _ = try strings.intern(try collectionRuntimeHeader(allocator, program, access.position));
+                _ = try strings.intern(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count}));
+            },
+            .collection_reference => |access| {
+                const collection = collectionForType(program, function.value_types[access.collection]) orelse return error.InvalidMachineProgram;
+                _ = try strings.intern(try collectionRuntimeHeader(allocator, program, access.position));
+                _ = try strings.intern(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{collection.length.?}));
+            },
+            .collection_replace => |replacement| {
+                const collection = collectionForType(program, function.value_types[replacement.collection]) orelse return error.InvalidMachineProgram;
+                const count: u32 = @intCast(collection.length orelse 0);
+                _ = try strings.intern(try collectionRuntimeHeader(allocator, program, replacement.position));
+                _ = try strings.intern(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count}));
+            },
+            .list_edit => |edit| {
+                _ = collectionForType(program, function.value_types[edit.collection]) orelse return error.InvalidMachineProgram;
+                _ = try strings.intern(try collectionRuntimeHeader(allocator, program, edit.position));
+                _ = try strings.intern(" is out of bounds for count ");
+            },
+            .convert => |conversion| _ = try strings.intern(try runtimeConversionHeader(allocator, program, conversion.position)),
+            .assert => |assertion| _ = try strings.intern(try runtimeHeader(allocator, program, assertion.position, true)),
+            else => {},
+        };
+        switch (block.terminator) {
+            .panic => |panic_value| _ = try strings.intern(try runtimeHeader(allocator, program, panic_value.position, false)),
+            else => {},
+        }
+    };
+}
+
+const StringTable = struct {
+    values: std.ArrayList([]const u8) = .empty,
+    indices: std.StringHashMap(usize),
+
+    fn init(allocator: Allocator) StringTable {
+        return .{ .indices = std.StringHashMap(usize).init(allocator) };
+    }
+
+    fn intern(self: *StringTable, value: []const u8) Allocator.Error!usize {
+        if (self.indices.get(value)) |existing_index| return existing_index;
+        const index = self.values.items.len;
+        try self.values.append(self.indices.allocator, value);
+        try self.indices.put(value, index);
+        return index;
+    }
+
+    fn lookup(self: *const StringTable, value: []const u8) Machine.Error!usize {
+        return self.indices.get(value) orelse error.InvalidMachineProgram;
+    }
+};
 
 fn programUsesMutex(program: Ir.Program) bool {
     for (program.functions) |function| for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
@@ -199,7 +401,7 @@ fn scalarType(type_value: Ir.Type) bool {
 fn lowerFunction(
     allocator: Allocator,
     program: Ir.Program,
-    strings: *std.ArrayList([]const u8),
+    strings: *const StringTable,
     function: Ir.Function,
 ) Machine.Error!Machine.Function {
     const parameter_count = try Machine.checkedArgumentCount(function.parameter_types.len);
@@ -281,7 +483,7 @@ fn lowerSlpGroups(allocator: Allocator, layout: Layout, plan: Slp.Plan) Allocato
 fn lowerInstruction(
     allocator: Allocator,
     program: Ir.Program,
-    strings: *std.ArrayList([]const u8),
+    strings: *const StringTable,
     function: Ir.Function,
     layout: Layout,
     instruction: Ir.Instruction,
@@ -298,11 +500,11 @@ fn lowerInstruction(
         } },
         .constant_str => |constant| .{ .constant_str = .{
             .result = layout.values[constant.result].start,
-            .string = try internString(allocator, strings, constant.value),
+            .string = try strings.lookup(constant.value),
         } },
         .constant_bytes => |constant| .{ .constant_bytes = .{
             .result = layout.values[constant.result].start,
-            .string = try internString(allocator, strings, constant.value),
+            .string = try strings.lookup(constant.value),
         } },
         .constant_float32 => |constant| .{ .constant_float32 = .{
             .result = layout.values[constant.result].start,
@@ -427,7 +629,7 @@ fn lowerInstruction(
                 .values = values,
                 .raw_value = if (program.enums[initialization.enumeration].variants[initialization.variant].raw_value) |raw_value| switch (raw_value) {
                     .integer => |value| .{ .integer = @bitCast(value) },
-                    .string => |value| .{ .string = try internString(allocator, strings, value) },
+                    .string => |value| .{ .string = try strings.lookup(value) },
                 } else null,
             } };
         },
@@ -452,8 +654,8 @@ fn lowerInstruction(
                     collection.element,
                     @intCast(try leafCount(program, collection.element)),
                 ),
-                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, access.position)),
-                .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
+                .header = try strings.lookup(try collectionRuntimeHeader(allocator, program, access.position)),
+                .tail = try strings.lookup(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
         },
         .collection_reference => |access| collection_reference: {
@@ -470,8 +672,8 @@ fn lowerInstruction(
                 .count = @intCast(collection.length orelse 0),
                 .dynamic = collection.length == null,
                 .view = collection.view,
-                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, access.position)),
-                .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{collection.length.?})),
+                .header = try strings.lookup(try collectionRuntimeHeader(allocator, program, access.position)),
+                .tail = try strings.lookup(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{collection.length.?})),
             } };
         },
         .collection_replace => |replacement| collection_replace: {
@@ -491,8 +693,8 @@ fn lowerInstruction(
                     collection.element,
                     @intCast(try leafCount(program, collection.element)),
                 ),
-                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, replacement.position)),
-                .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
+                .header = try strings.lookup(try collectionRuntimeHeader(allocator, program, replacement.position)),
+                .tail = try strings.lookup(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
         },
         .collection_count => |count| .{ .collection_count = .{
@@ -520,8 +722,8 @@ fn lowerInstruction(
                     collection.element,
                     @intCast(try leafCount(program, collection.element)),
                 ),
-                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, edit.position)),
-                .tail = try internString(allocator, strings, " is out of bounds for count "),
+                .header = try strings.lookup(try collectionRuntimeHeader(allocator, program, edit.position)),
+                .tail = try strings.lookup(" is out of bounds for count "),
             } };
         },
         .collection_slice => |slice| slice_value: {
@@ -675,9 +877,7 @@ fn lowerInstruction(
             .source = conversion.source,
             .target = conversion.target,
             .checked = conversion.checked,
-            .header = try internString(
-                allocator,
-                strings,
+            .header = try strings.lookup(
                 try runtimeConversionHeader(allocator, program, conversion.position),
             ),
         } },
@@ -816,7 +1016,7 @@ fn lowerInstruction(
         .assert => |assertion| .{ .assert = .{
             .condition = layout.values[assertion.condition].start,
             .message = layout.values[assertion.message].start,
-            .header = try internString(allocator, strings, try runtimeHeader(allocator, program, assertion.position, true)),
+            .header = try strings.lookup(try runtimeHeader(allocator, program, assertion.position, true)),
         } },
         .mutex_lock => .mutex_lock,
         .mutex_unlock => .mutex_unlock,
@@ -838,7 +1038,7 @@ fn printKind(type_value: Ir.Type) Machine.Error!Machine.PrintKind {
 fn lowerTerminator(
     allocator: Allocator,
     program: Ir.Program,
-    strings: *std.ArrayList([]const u8),
+    strings: *const StringTable,
     layout: Layout,
     terminator: Ir.Terminator,
     starts: []const usize,
@@ -854,7 +1054,7 @@ fn lowerTerminator(
         .return_void => .return_void,
         .panic => |panic_value| .{ .panic = .{
             .message = layout.values[panic_value.message].start,
-            .header = try internString(allocator, strings, try runtimeHeader(allocator, program, panic_value.position, false)),
+            .header = try strings.lookup(try runtimeHeader(allocator, program, panic_value.position, false)),
         } },
     };
 }
@@ -1221,19 +1421,6 @@ fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []con
     return result.toOwnedSlice(allocator);
 }
 
-fn internString(
-    allocator: Allocator,
-    strings: *std.ArrayList([]const u8),
-    value: []const u8,
-) Allocator.Error!usize {
-    for (strings.items, 0..) |existing, index| {
-        if (std.mem.eql(u8, existing, value)) return index;
-    }
-    const index = strings.items.len;
-    try strings.append(allocator, value);
-    return index;
-}
-
 fn runtimeHeader(
     allocator: Allocator,
     program: Ir.Program,
@@ -1277,93 +1464,6 @@ fn runtimeConversionHeader(
     );
 }
 
-fn compile(allocator: Allocator, source: []const u8) !Machine.Program {
-    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
-    return lower(allocator, (try frontend.compile(source)).ir);
-}
-
-test "lower answer and nested calls to deterministic machine slots" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const program = try compile(arena.allocator(),
-        \\func add(left:int, right:int) int { return left + right }
-        \\func answer() int { return add(40, 2) }
-        \\func main() { answer() }
-    );
-    try std.testing.expectEqual(@as(usize, 3), program.functions.len);
-    try std.testing.expectEqual(@as(u12, 2), program.functions[0].parameter_count);
-    try std.testing.expectEqual(@as(u12, 3), program.functions[0].slot_count);
-    try std.testing.expectEqual(@as(u32, 32), program.functions[0].frame_size);
-    try std.testing.expectEqual(Machine.BinaryOperator.add, program.functions[0].instructions[0].binary.operator);
-    try std.testing.expectEqual(@as(Machine.Slot, 0), program.functions[0].instructions[0].binary.left);
-    try std.testing.expectEqual(@as(Machine.FunctionId, 0), program.functions[1].instructions[2].call.function);
-    try std.testing.expectEqual(@as(Machine.Slot, 2), program.functions[1].instructions[2].call.result.?.start);
-    try std.testing.expectEqual(@as(Machine.FunctionId, 1), program.functions[2].instructions[0].call.function);
-    try std.testing.expect(program.debug);
-    try std.testing.expectEqual(@as(usize, 1), program.functions[0].source_position.?.line);
-    try std.testing.expectEqual(@as(usize, 1), program.functions[0].instruction_positions[0].?.line);
-    try std.testing.expectEqual(@as(usize, 3), program.functions[2].instruction_positions[0].?.line);
-}
-
-test "lower internal stack arguments before encoding" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        "func many(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,i:int) int { return i } func main() { many(1,2,3,4,5,6,7,8,9) }",
-    );
-    const lowered = try lower(allocator, compilation.ir);
-    try std.testing.expectEqual(@as(u12, 9), lowered.functions[0].parameter_count);
-    try std.testing.expectEqual(@as(usize, 9), lowered.functions[1].instructions[9].call.arguments.len);
-
-    const functions = [_]Ir.Function{.{
-        .name = "floating",
-        .parameter_types = &.{.float32},
-        .return_type = .void,
-        .value_types = &.{.float32},
-        .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
-    }};
-    _ = try lower(allocator, .{ .functions = &functions });
-}
-
-test "lower abstract mutable locals after value slots" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const program = try compile(arena.allocator(),
-        \\func main() {
-        \\    var value:int = 1
-        \\    value = 42
-        \\    print(value)
-        \\}
-    );
-    const function = program.functions[0];
-    try std.testing.expectEqual(@as(Machine.Slot, 4), function.slot_count);
-    try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[1].copy.result);
-    try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[3].copy.result);
-    try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[4].copy.operand);
-}
-
-test "lower trivial aggregate copies without the deep-copy runtime" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const program = try compile(arena.allocator(),
-        \\struct Quaternion { let x:float; let y:float; let z:float; let w:float }
-        \\class State { var value:int }
-        \\func main() {
-        \\    let rotation = Quaternion(x:0.0, y:0.0, z:0.0, w:1.0)
-        \\    let rotation_copy = copy rotation
-        \\    var state = State(value:1)
-        \\    var state_copy = copy state
-        \\}
-    );
-    var found_range = false;
-    var found_deep = false;
-    for (program.functions[0].instructions) |instruction| switch (instruction) {
-        .copy_range => found_range = true,
-        .deep_copy => found_deep = true,
-        else => {},
-    };
-    try std.testing.expect(found_range);
-    try std.testing.expect(found_deep);
+test {
+    _ = @import("LowerTests.zig");
 }

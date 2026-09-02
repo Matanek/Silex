@@ -118,6 +118,7 @@ pub const Reporter = struct {
     phase_nanoseconds: [phase_count]u64 = @splat(0),
     phase_invocations: [phase_count]u32 = @splat(0),
     cache_result: CacheResult,
+    worker_count: u16 = 1,
     success: bool = false,
     metrics: Metrics = .{},
 
@@ -171,6 +172,11 @@ pub const Reporter = struct {
         self.cache_result = result;
     }
 
+    pub fn workers(self: *Reporter, count: u16) void {
+        if (!self.enabled()) return;
+        self.worker_count = @max(1, count);
+    }
+
     pub fn succeeded(self: *Reporter) void {
         if (!self.enabled()) return;
         self.success = true;
@@ -215,7 +221,7 @@ pub const Reporter = struct {
             .target = self.metadata.target,
             .mode = self.metadata.mode,
             .compiler_version = self.metadata.compiler_version,
-            .worker_count = 1,
+            .worker_count = self.worker_count,
             .cache_enabled = self.metadata.cache_enabled,
             .cache_result = self.cache_result,
             .success = self.success,
@@ -264,12 +270,13 @@ test "compilation trace encodes stable structured phases and metrics" {
     var reporter = Reporter.initEnabled(std.testing.io, "trace.json", test_metadata);
     reporter.record(.frontend_total, 42);
     reporter.metrics.loaded_modules = 7;
+    reporter.workers(4);
     reporter.cacheHit(.hit_after_frontend);
     reporter.succeeded();
     const payload = try reporter.payload(std.testing.allocator);
     defer std.testing.allocator.free(payload);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"schema_version\": 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, payload, "\"worker_count\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"worker_count\": 4") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"name\": \"frontend_total\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"nanoseconds\": 42") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"loaded_modules\": 7") != null);

@@ -1317,13 +1317,15 @@ fn compileNativeOptions(
         };
     };
     const lower_mode = lowerModeForTarget(options.mode, target);
+    const worker_count = compilationWorkerCount(init.environ_map, native_ir.functions.len);
+    trace.workers(worker_count);
     var machine = machine: {
         var lower_span = trace.span(.lowering);
         defer lower_span.finish();
         break :machine (if (options.cache)
-            Lower.lowerCachedWithBoundaries(allocator, init.io, native_ir, boundaries, lower_mode)
+            Lower.lowerCachedWithBoundariesAndWorkers(allocator, init.io, native_ir, boundaries, lower_mode, worker_count)
         else
-            Lower.lowerWithModeAndBoundaries(allocator, native_ir, boundaries, lower_mode)) catch |err| {
+            Lower.lowerWithBoundariesAndWorkers(allocator, native_ir, boundaries, lower_mode, worker_count)) catch |err| {
             std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
             return 1;
         };
@@ -1993,6 +1995,14 @@ fn lowerModeForTarget(mode: Cli.Mode, target: TargetModule.Target) Lower.Mode {
     // X64 starts from the stack-compatible machine form, then applies its own
     // target-specific scalar allocation after lowering.
     return .debug;
+}
+
+fn compilationWorkerCount(environment: *const std.process.Environ.Map, function_count: usize) u16 {
+    const requested = if (environment.get("SILEX_COMPILATION_WORKERS")) |value|
+        std.fmt.parseInt(u16, value, 10) catch null
+    else
+        null;
+    return Lower.selectedWorkerCount(function_count, requested);
 }
 
 test "select release register allocation only for its supported target" {
