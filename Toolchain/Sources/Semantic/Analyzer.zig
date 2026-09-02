@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const CompilationTrace = @import("../CompilationTrace.zig");
 const Arguments = @import("Arguments.zig");
 const NamedCalls = @import("NamedCalls.zig");
 const Boundary = @import("../Boundary.zig");
@@ -85,6 +86,7 @@ pub const Analyzer = struct {
     shadercross_path: ?[]const u8 = null,
     shader_files: std.ArrayList([]const u8) = .empty,
     embedded_files: std.ArrayList([]const u8) = .empty,
+    trace: ?*CompilationTrace.Reporter = null,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -95,93 +97,123 @@ pub const Analyzer = struct {
         return self.analyzeProgram(program, false);
     }
     fn analyzeProgram(self: *Analyzer, source_program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
-        const program = try Protocols.materializeFieldWitnesses(self.allocator, source_program);
+        const program = materialized: {
+            var span = self.traceSpan(.semantic_materialization);
+            defer span.finish();
+            break :materialized try Protocols.materializeFieldWitnesses(self.allocator, source_program);
+        };
         self.program = program;
         self.diagnostic = null;
         self.bound_methods.clearRetainingCapacity();
         self.anonymous_captures = try self.allocator.alloc(?[]const AnonymousCapture, program.functions.len);
         @memset(self.anonymous_captures, null);
-        self.structures = try Declarations.prepareStructures(self);
-        const function_types = try Callbacks.prepare(self);
-        self.globals = try StaticMembers.prepare(self);
-        self.external_functions = try Interop.prepare(self);
-        self.enums = try Enums.prepare(self);
-        self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
-        try Methods.validateAccessors(self);
-        self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
-        try Inheritance.validateOverrides(self);
-        try Protocols.validate(self);
-        try Declarations.validateFieldDefaults(self);
-        try self.validateDeclarations(require_entry);
-        try self.validateParameterDefaults();
+        const function_types = prepared: {
+            var span = self.traceSpan(.semantic_preparation);
+            defer span.finish();
+            self.structures = try Declarations.prepareStructures(self);
+            const prepared_function_types = try Callbacks.prepare(self);
+            self.globals = try StaticMembers.prepare(self);
+            self.external_functions = try Interop.prepare(self);
+            self.enums = try Enums.prepare(self);
+            self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
+            try Methods.validateAccessors(self);
+            self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
+            break :prepared prepared_function_types;
+        };
+        {
+            var span = self.traceSpan(.semantic_validation);
+            defer span.finish();
+            try Inheritance.validateOverrides(self);
+            try Protocols.validate(self);
+            try Declarations.validateFieldDefaults(self);
+            try self.validateDeclarations(require_entry);
+            try self.validateParameterDefaults();
+        }
         const source_functions = try self.allocator.alloc(?Ir.Function, program.functions.len);
         @memset(source_functions, null);
-        for (program.functions, 0..) |function, function_id| {
-            if (!function.is_anonymous) source_functions[function_id] = try self.analyzeFunction(function_id, function);
+        {
+            var span = self.traceSpan(.semantic_source_functions);
+            defer span.finish();
+            for (program.functions, 0..) |function, function_id| {
+                if (!function.is_anonymous) source_functions[function_id] = try self.analyzeFunction(function_id, function);
+            }
         }
         var generated_functions: std.ArrayList(Ir.Function) = .empty;
-        for (program.structures, 0..) |structure, structure_index| {
-            if (structure.is_protocol) continue;
-            for (structure.constructors, 0..) |constructor, constructor_index| {
-                try generated_functions.append(
-                    self.allocator,
-                    try Constructors.analyze(self, structure_index, constructor_index, constructor),
-                );
+        {
+            var span = self.traceSpan(.semantic_generated_functions);
+            defer span.finish();
+            for (program.structures, 0..) |structure, structure_index| {
+                if (structure.is_protocol) continue;
+                for (structure.constructors, 0..) |constructor, constructor_index| {
+                    try generated_functions.append(
+                        self.allocator,
+                        try Constructors.analyze(self, structure_index, constructor_index, constructor),
+                    );
+                }
+            }
+            for (program.structures, 0..) |structure, structure_index| {
+                if (structure.is_protocol) continue;
+                for (structure.methods, 0..) |method, method_index| {
+                    try generated_functions.append(
+                        self.allocator,
+                        try Methods.analyze(self, structure_index, method_index, method),
+                    );
+                }
+            }
+            for (program.structures) |structure| if (structure.drop) |drop| {
+                const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
+                try generated_functions.append(self.allocator, try Resources.analyzeDrop(self, nominal, structure, drop));
+            };
+            for (program.structures) |structure| if (structure.is_class and !structure.is_static) {
+                const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
+                try generated_functions.append(self.allocator, try Resources.analyzeClassFields(self, nominal, structure));
+            };
+            for (self.bound_methods.items) |bound| {
+                try generated_functions.append(self.allocator, try BoundMethods.analyze(self, bound));
             }
         }
-        for (program.structures, 0..) |structure, structure_index| {
-            if (structure.is_protocol) continue;
-            for (structure.methods, 0..) |method, method_index| {
-                try generated_functions.append(
-                    self.allocator,
-                    try Methods.analyze(self, structure_index, method_index, method),
-                );
+        return finalized: {
+            var span = self.traceSpan(.semantic_finalization);
+            defer span.finish();
+            var remaining = program.functions.len;
+            while (remaining != 0) {
+                var progressed = false;
+                for (program.functions, 0..) |function, function_id| {
+                    if (!function.is_anonymous or source_functions[function_id] != null or self.anonymous_captures[function_id] == null) continue;
+                    source_functions[function_id] = try self.analyzeFunction(function_id, function);
+                    progressed = true;
+                }
+                if (!progressed) break;
+                remaining -= 1;
             }
-        }
-        for (program.structures) |structure| if (structure.drop) |drop| {
-            const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
-            try generated_functions.append(self.allocator, try Resources.analyzeDrop(self, nominal, structure, drop));
-        };
-        for (program.structures) |structure| if (structure.is_class and !structure.is_static) {
-            const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
-            try generated_functions.append(self.allocator, try Resources.analyzeClassFields(self, nominal, structure));
-        };
-        for (self.bound_methods.items) |bound| {
-            try generated_functions.append(self.allocator, try BoundMethods.analyze(self, bound));
-        }
-        var remaining = program.functions.len;
-        while (remaining != 0) {
-            var progressed = false;
+            var functions: std.ArrayList(Ir.Function) = .empty;
             for (program.functions, 0..) |function, function_id| {
-                if (!function.is_anonymous or source_functions[function_id] != null or self.anonymous_captures[function_id] == null) continue;
-                source_functions[function_id] = try self.analyzeFunction(function_id, function);
-                progressed = true;
+                if (source_functions[function_id] == null) {
+                    if (!function.is_anonymous) return error.InvalidSource;
+                    self.anonymous_captures[function_id] = &.{};
+                    source_functions[function_id] = try self.analyzeFunction(function_id, function);
+                }
+                try functions.append(self.allocator, source_functions[function_id].?);
             }
-            if (!progressed) break;
-            remaining -= 1;
-        }
-        var functions: std.ArrayList(Ir.Function) = .empty;
-        for (program.functions, 0..) |function, function_id| {
-            if (source_functions[function_id] == null) {
-                if (!function.is_anonymous) return error.InvalidSource;
-                self.anonymous_captures[function_id] = &.{};
-                source_functions[function_id] = try self.analyzeFunction(function_id, function);
+            try functions.appendSlice(self.allocator, generated_functions.items);
+            if (try StaticInitialization.analyze(self)) |initializer| {
+                const initializer_id = functions.items.len;
+                try functions.append(self.allocator, initializer);
+                try StaticInitialization.attachToEntries(self, &functions, initializer_id);
             }
-            try functions.append(self.allocator, source_functions[function_id].?);
-        }
-        try functions.appendSlice(self.allocator, generated_functions.items);
-        if (try StaticInitialization.analyze(self)) |initializer| {
-            const initializer_id = functions.items.len;
-            try functions.append(self.allocator, initializer);
-            try StaticInitialization.attachToEntries(self, &functions, initializer_id);
-        }
-        return .{
-            .globals = self.globals,
-            .structures = self.structures,
-            .enums = self.enums,
-            .function_types = function_types,
-            .functions = try functions.toOwnedSlice(self.allocator),
+            break :finalized .{
+                .globals = self.globals,
+                .structures = self.structures,
+                .enums = self.enums,
+                .function_types = function_types,
+                .functions = try functions.toOwnedSlice(self.allocator),
+            };
         };
+    }
+
+    fn traceSpan(self: *Analyzer, phase: CompilationTrace.Phase) CompilationTrace.Span {
+        const trace = self.trace orelse return .{};
+        return trace.span(phase);
     }
 
     fn validateDeclarations(self: *Analyzer, require_entry: bool) AnalyzeError!void {

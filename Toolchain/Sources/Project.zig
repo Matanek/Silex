@@ -249,6 +249,7 @@ pub const Compiler = struct {
         analyzer.source_files = self.files;
         analyzer.module_scope_roots = self.module_scope_roots;
         analyzer.shadercross_path = self.shadercross_path;
+        analyzer.trace = self.trace;
         var ir = analyzed: {
             var span = self.traceSpan(.semantic_analysis);
             defer span.finish();
