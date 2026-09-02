@@ -60,6 +60,16 @@ and a missing, truncated, corrupt, or unknown entry becomes a miss. A storage
 failure may prevent publication but does not invalidate a successful
 compilation. `--nocache` performs no reusable cache reads or writes.
 
+An unchanged package graph may publish one private binary semantic fragment in
+this same root cache. It contains generated functions only when their package,
+source declaration, and referenced function identities can be mapped without
+ambiguity. Project-owned extensions, entry-dependent specializations, bound
+methods, source-function side effects, and uncertain references are rebuilt.
+The fragment is replaced by the current package working set rather than merged
+with every entry ever compiled. Its key covers package sources and ancestor
+manifests, target, test mode, private format, and compiler identity; it is not a
+package ABI or a public precompiled-interface format.
+
 ## Report interactive progress
 
 In an interactive terminal, native compilation reports intention-level
@@ -82,13 +92,15 @@ phase durations, and structural metrics. The native compilation pipeline is
 currently serial, so the reported worker count is one. Frontend subphases cover
 package resolution, module discovery and
 loading, composition, specialization, interface construction, and semantic
-analysis. Native phases cover cache validation, program closure, optimization,
-lowering, register allocation, emission, linking, output, and cache
-publication. The structural metrics report both the complete portable function
-count and the reachable portable function count presented to every native
-backend. Cache metrics separately report entry hits, misses, bytes read, and
-bytes written so a fast result can be distinguished from an expensive cache
-representation.
+analysis. Semantic measurements further separate materialization, preparation,
+validation, source functions, generated constructors and methods, resource
+helpers, and finalization. Native phases cover cache validation, program
+closure, optimization, lowering, register allocation, emission, linking,
+output, and cache publication. The structural metrics report both the complete
+portable function count and the reachable portable function count presented to
+every native backend. Cache metrics separately report entry hits, misses,
+relocation failures, bytes read, and bytes written so a fast result can be
+distinguished from an expensive cache representation.
 
 `frontend_total` contains its frontend subphases, so phase values are not all
 additive. Every duration uses a monotonic clock. The compiler report deliberately

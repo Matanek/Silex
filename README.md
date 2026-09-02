@@ -155,10 +155,15 @@ The cache selectively persists frontend or native input state, profitable
 machine-function fragments, generated shaders, test and run artifacts, and
 linked Mach-O, ELF or PE executables. The command-line compiler does not cache
 every parsed module: representations that cost more to read than to rebuild are
-excluded. Entries are keyed by the exact inputs relevant to their layer,
-including source and boundary-archive contents, target, mode, cache format and
-compiler identity. Validation failure or corruption is a cache miss, and every
-publication is atomic.
+excluded. For package graphs, a private binary fragment can reuse generated
+constructors, methods, drops, and class-field helpers whose identities and
+references are safely relocatable. Source functions are still analyzed, so
+shader, embedded-file, specialization, and diagnostic side effects remain
+authoritative. Entries are keyed by the exact inputs relevant to their layer,
+including package sources and manifests, source and boundary-archive contents,
+target, mode, cache format and compiler identity. Validation failure,
+ambiguous relocation, or corruption is a cache miss, and every publication is
+atomic.
 
 Retention is global across these cache classes instead of adding one quota per
 directory. Silex retains up to 320 MiB of rolling history, but this is not an
