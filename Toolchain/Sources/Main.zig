@@ -1302,23 +1302,23 @@ fn compileNativeOptions(
         trace.metrics.reachable_portable_functions = scope.program.functions.len;
         break :scoped_program scope.program;
     };
+    const worker_count = compilationWorkerCount(init.environ_map, scoped_program.functions.len);
+    trace.workers(worker_count);
     const native_ir = native_ir: {
         var optimize_span = trace.span(.optimization);
         defer optimize_span.finish();
         break :native_ir switch (options.mode) {
             .debug => scoped_program,
             .release => (if (options.cache)
-                ReleaseOptimizer.optimizeCached(allocator, init.io, scoped_program)
+                ReleaseOptimizer.optimizeCachedWithWorkers(allocator, init.io, scoped_program, worker_count)
             else
-                ReleaseOptimizer.optimize(allocator, scoped_program)) catch |err| {
+                ReleaseOptimizer.optimizeWithWorkers(allocator, scoped_program, worker_count)) catch |err| {
                 std.debug.print("silex: optimizer rejected the portable IR: {t}\n", .{err});
                 return 1;
             },
         };
     };
     const lower_mode = lowerModeForTarget(options.mode, target);
-    const worker_count = compilationWorkerCount(init.environ_map, native_ir.functions.len);
-    trace.workers(worker_count);
     var machine = machine: {
         var lower_span = trace.span(.lowering);
         defer lower_span.finish();

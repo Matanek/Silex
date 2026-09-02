@@ -8,6 +8,7 @@ const RegisterAllocation = @import("RegisterAllocation.zig");
 const Slp = @import("../Optimize/Slp.zig");
 const StackLayout = @import("StackLayout.zig");
 const TypeLayout = @import("TypeLayout.zig");
+const Workers = @import("../Workers.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -17,8 +18,8 @@ const irConforms = TypeLayout.irConforms;
 const isAggregate = TypeLayout.isAggregate;
 const leafCount = TypeLayout.leafCount;
 
-pub const max_worker_count: u16 = 4;
-pub const parallel_function_threshold: usize = 256;
+pub const max_worker_count = Workers.max_count;
+pub const parallel_function_threshold = Workers.minimum_items;
 
 pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Program {
     return lowerWithMode(allocator, program, .debug);
@@ -79,13 +80,11 @@ pub fn lowerWithBoundariesAndWorkers(
 }
 
 pub fn recommendedWorkerCount(function_count: usize) u16 {
-    if (function_count < parallel_function_threshold) return 1;
-    const available = std.Thread.getCpuCount() catch return 1;
-    return @intCast(@min(available, max_worker_count));
+    return Workers.recommendedCount(function_count);
 }
 
 pub fn selectedWorkerCount(function_count: usize, requested: ?u16) u16 {
-    return boundedWorkerCount(requested orelse recommendedWorkerCount(function_count), function_count);
+    return Workers.selectedCount(function_count, requested);
 }
 
 fn lowerInternal(
@@ -189,8 +188,7 @@ fn lowerInternal(
 }
 
 fn boundedWorkerCount(requested: u16, function_count: usize) u16 {
-    if (function_count < parallel_function_threshold) return 1;
-    return @max(1, @min(requested, max_worker_count));
+    return Workers.selectedCount(function_count, requested);
 }
 
 fn lowerRange(
@@ -252,7 +250,6 @@ fn lowerParallel(
     worker_count: u16,
 ) Machine.Error!void {
     var workers: [max_worker_count]LowerWorker = undefined;
-    var threads: [max_worker_count - 1]std.Thread = undefined;
     const count: usize = worker_count;
     const chunk = std.math.divCeil(usize, source_functions.len, count) catch unreachable;
     for (0..count) |index| workers[index] = .{
@@ -267,12 +264,7 @@ fn lowerParallel(
         .end = @min((index + 1) * chunk, source_functions.len),
     };
 
-    var spawned: usize = 0;
-    while (spawned + 1 < count) : (spawned += 1) {
-        threads[spawned] = std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, LowerWorker.run, .{&workers[spawned]}) catch break;
-    }
-    for (spawned..count) |index| workers[index].run();
-    for (threads[0..spawned]) |thread| thread.join();
+    Workers.run(LowerWorker, workers[0..count], LowerWorker.run);
     for (workers[0..count]) |worker| if (worker.failure) |err| return err;
 }
 

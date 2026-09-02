@@ -5,6 +5,7 @@ const DenseBlocks = @import("DenseBlocks.zig");
 const InlineControlFlow = @import("InlineControlFlow.zig");
 const InlineValues = @import("InlineValues.zig");
 const SsaPromotion = @import("SsaPromotion.zig");
+const Workers = @import("../Workers.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -32,22 +33,42 @@ const BinarySummary = struct {
 };
 
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
-    const prepared = try optimizeWithoutInlining(allocator, program);
+    return optimizeWithWorkers(allocator, program, 1);
+}
+
+pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_count: u16) !Ir.Program {
+    const prepared = try optimizeWithoutInliningWithWorkers(allocator, program, worker_count);
     const inlined = try InlineValues.optimize(allocator, prepared);
     const control_flow_inlined = try InlineControlFlow.optimize(allocator, inlined);
-    const scalarized = try replaceScalarAggregates(allocator, control_flow_inlined);
-    return optimizeWithoutInlining(allocator, scalarized);
+    const scalarized = try replaceScalarAggregatesWithWorkers(allocator, control_flow_inlined, worker_count);
+    return optimizeWithoutInliningWithWorkers(allocator, scalarized, worker_count);
 }
 
 pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithoutInliningWithWorkers(allocator, program, 1);
+}
+
+fn optimizeWithoutInliningWithWorkers(allocator: Allocator, program: Ir.Program, requested_worker_count: u16) !Ir.Program {
     const summaries = try allocator.alloc(GlobalSummary, program.functions.len);
     for (program.functions, 0..) |function, index| summaries[index] = summarize(function);
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
-    for (program.functions, 0..) |function, index| {
-        const localized = try optimizeDenseBlocks(allocator, function);
-        const optimized = try optimizeFunction(allocator, localized, summaries);
-        const simplified = try simplifyBooleanDiamonds(allocator, optimized);
-        functions[index] = try Bounds.optimize(allocator, simplified);
+    const worker_count = Workers.selectedCount(program.functions.len, requested_worker_count);
+    if (worker_count == 1) {
+        try optimizeFunctionRange(allocator, program.functions, functions, summaries, 0, program.functions.len);
+    } else {
+        var workers: [Workers.max_count]OptimizeWorker = undefined;
+        const count: usize = worker_count;
+        const chunk = std.math.divCeil(usize, program.functions.len, count) catch unreachable;
+        for (workers[0..count], 0..) |*worker, index| worker.* = .{
+            .allocator = allocator,
+            .source = program.functions,
+            .destination = functions,
+            .summaries = summaries,
+            .start = index * chunk,
+            .end = @min((index + 1) * chunk, program.functions.len),
+        };
+        Workers.run(OptimizeWorker, workers[0..count], OptimizeWorker.run);
+        for (workers[0..count]) |worker| if (worker.failure) |err| return err;
     }
     var result = program;
     result.functions = functions;
@@ -56,6 +77,38 @@ pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Pr
     allocator.free(validated);
     return result;
 }
+
+fn optimizeFunctionRange(
+    allocator: Allocator,
+    source: []const Ir.Function,
+    destination: []Ir.Function,
+    summaries: []const GlobalSummary,
+    start: usize,
+    end: usize,
+) !void {
+    for (start..end) |index| {
+        const localized = try optimizeDenseBlocks(allocator, source[index]);
+        const optimized = try optimizeFunction(allocator, localized, summaries);
+        const simplified = try simplifyBooleanDiamonds(allocator, optimized);
+        destination[index] = try Bounds.optimize(allocator, simplified);
+    }
+}
+
+const OptimizeWorker = struct {
+    allocator: Allocator,
+    source: []const Ir.Function,
+    destination: []Ir.Function,
+    summaries: []const GlobalSummary,
+    start: usize,
+    end: usize,
+    failure: ?anyerror = null,
+
+    fn run(self: *OptimizeWorker) void {
+        optimizeFunctionRange(self.allocator, self.source, self.destination, self.summaries, self.start, self.end) catch |err| {
+            self.failure = err;
+        };
+    }
+};
 
 fn simplifyBooleanDiamonds(allocator: Allocator, function: Ir.Function) !Ir.Function {
     if (function.blocks.len < 4) return function;
@@ -128,15 +181,57 @@ pub fn optimizeCached(allocator: Allocator, io: std.Io, program: Ir.Program) !Ir
     return optimize(allocator, program);
 }
 
+pub fn optimizeCachedWithWorkers(allocator: Allocator, io: std.Io, program: Ir.Program, worker_count: u16) !Ir.Program {
+    _ = io;
+    return optimizeWithWorkers(allocator, program, worker_count);
+}
+
 fn replaceScalarAggregates(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return replaceScalarAggregatesWithWorkers(allocator, program, 1);
+}
+
+fn replaceScalarAggregatesWithWorkers(allocator: Allocator, program: Ir.Program, requested_worker_count: u16) !Ir.Program {
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
-    for (program.functions, 0..) |function, index| {
-        functions[index] = try replaceFunctionScalarAggregates(allocator, program, function);
+    const worker_count = Workers.selectedCount(program.functions.len, requested_worker_count);
+    if (worker_count == 1) {
+        try replaceScalarAggregateRange(allocator, program, functions, 0, program.functions.len);
+    } else {
+        var workers: [Workers.max_count]ScalarWorker = undefined;
+        const count: usize = worker_count;
+        const chunk = std.math.divCeil(usize, program.functions.len, count) catch unreachable;
+        for (workers[0..count], 0..) |*worker, index| worker.* = .{
+            .allocator = allocator,
+            .program = program,
+            .destination = functions,
+            .start = index * chunk,
+            .end = @min((index + 1) * chunk, program.functions.len),
+        };
+        Workers.run(ScalarWorker, workers[0..count], ScalarWorker.run);
+        for (workers[0..count]) |worker| if (worker.failure) |err| return err;
     }
     var result = program;
     result.functions = functions;
     return result;
 }
+
+fn replaceScalarAggregateRange(allocator: Allocator, program: Ir.Program, destination: []Ir.Function, start: usize, end: usize) !void {
+    for (start..end) |index| destination[index] = try replaceFunctionScalarAggregates(allocator, program, program.functions[index]);
+}
+
+const ScalarWorker = struct {
+    allocator: Allocator,
+    program: Ir.Program,
+    destination: []Ir.Function,
+    start: usize,
+    end: usize,
+    failure: ?anyerror = null,
+
+    fn run(self: *ScalarWorker) void {
+        replaceScalarAggregateRange(self.allocator, self.program, self.destination, self.start, self.end) catch |err| {
+            self.failure = err;
+        };
+    }
+};
 
 fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
     const roots = try allocator.alloc(?Ir.ValueId, function.value_types.len);
@@ -1361,246 +1456,6 @@ test "release preserves representation-changing copies" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "class.retain %1"));
 }
 
-test "release preserves effects and observable execution" {
-    const Frontend = @import("../Frontend.zig");
-    const Interpreter = @import("../Interpreter.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\struct Resource {
-        \\    let value:int
-        \\    drop { print("drop ", self.value) }
-        \\}
-        \\func calculate(limit:int) int {
-        \\    var total = 0
-        \\    var index = 0
-        \\    while index < limit {
-        \\        total += index
-        \\        index += 1
-        \\    }
-        \\    return total
-        \\}
-        \\func main() {
-        \\    let resource = Resource(value:3)
-        \\    let answer = calculate(10)
-        \\    assert(answer == 45, "wrong answer")
-        \\    print(answer)
-        \\}
-    );
-    const reference = try Interpreter.runCapture(allocator, compilation.ir);
-    const optimized = try optimize(allocator, compilation.ir);
-    const release = try Interpreter.runCapture(allocator, optimized);
-    try std.testing.expectEqual(reference.exit_code, release.exit_code);
-    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
-    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
-}
-
-test "release preserves floating branches and loops" {
-    const Frontend = @import("../Frontend.zig");
-    const Interpreter = @import("../Interpreter.zig");
-    const Lower = @import("../Arm64/Lower.zig");
-    const Runner = @import("../Arm64/Runner.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\func root(value:float) float {
-        \\    if value < 0.0 { return invalid(value) }
-        \\    if value == 0.0 || value + value == value { return value }
-        \\    var estimate = 1.0
-        \\    if value > 1.0 { estimate = value }
-        \\    var previous = 0.0
-        \\    var iteration = 0
-        \\    while iteration < 128 {
-        \\        let next = (estimate + value / estimate) * 0.5
-        \\        if next == estimate || next == previous { return next }
-        \\        previous = estimate
-        \\        estimate = next
-        \\        iteration += 1
-        \\    }
-        \\    return estimate
-        \\}
-        \\func invalid(value:float) float {
-        \\    let zero = value - value
-        \\    return zero / zero
-        \\}
-        \\func main() { assert(root(0.0) == 0.0, "root zero") }
-    );
-    const optimized = try optimize(allocator, compilation.ir);
-    const release = try Interpreter.runCapture(allocator, optimized);
-    try std.testing.expectEqual(@as(u8, 0), release.exit_code);
-    try std.testing.expectEqualStrings("", release.stderr);
-    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
-    const native = try Runner.invoke(allocator, machine, 0, &.{0});
-    try std.testing.expectEqual(@as(i64, 0), native.value);
-}
-
-test "release preserves helper mutations of class-owned list elements" {
-    const Frontend = @import("../Frontend.zig");
-    const Interpreter = @import("../Interpreter.zig");
-    const Lower = @import("../Arm64/Lower.zig");
-    const Runner = @import("../Arm64/Runner.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\class Store {
-        \\    var active:bool[]
-        \\    var weights:float[]
-        \\    var values:float[]
-        \\    init() {
-        \\        self.active = [false, true]
-        \\        self.weights = [0.0, 1.0]
-        \\        self.values = [0.0, 0.197275]
-        \\    }
-        \\}
-        \\func translate(store:Store, index:int, offset:float) {
-        \\    if !store.active[index] || store.weights[index] <= 0.0 { return }
-        \\    store.values[index] += offset
-        \\}
-        \\func resolve(store:Store) {
-        \\    translate(store, 0, 0.0)
-        \\    translate(store, 1, 0.0025871352)
-        \\}
-        \\func answer() float { var store = Store(); resolve(store); return store.values[1] }
-        \\func main() {
-        \\    var store = Store()
-        \\    let snapshot = store.values
-        \\    resolve(store)
-        \\    print(snapshot[1], " ", store.values[1])
-        \\}
-    );
-    const reference = try Interpreter.runCapture(allocator, compilation.ir);
-    const optimized = try optimize(allocator, compilation.ir);
-    const release = try Interpreter.runCapture(allocator, optimized);
-    var answer: ?usize = null;
-    for (optimized.functions, 0..) |function, index| {
-        if (std.mem.eql(u8, function.name, "answer")) answer = index;
-    }
-    const function = answer orelse return error.TestUnexpectedResult;
-    const debug_machine = try Lower.lowerWithMode(allocator, optimized, .debug);
-    const debug_native = try Runner.invoke(allocator, debug_machine, function, &.{});
-    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
-    const native = try Runner.invoke(allocator, machine, function, &.{});
-    try std.testing.expectEqualStrings("0.197275 0.19986214\n", reference.stdout);
-    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
-    try std.testing.expectEqual(
-        @as(u32, @bitCast(@as(f32, 0.19986214))),
-        @as(u32, @truncate(@as(u64, @bitCast(debug_native.value)))),
-    );
-    try std.testing.expectEqual(
-        @as(u32, @bitCast(@as(f32, 0.19986214))),
-        @as(u32, @truncate(@as(u64, @bitCast(native.value)))),
-    );
-}
-
-test "release removes calls to proven constant functions" {
-    const Frontend = @import("../Frontend.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\func answer() int { return 42 }
-        \\func main() { print(answer()) }
-    );
-    const optimized = try optimize(allocator, compilation.ir);
-    const text = try Ir.writeText(allocator, optimized);
-    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @answer"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 42"));
-}
-
-test "release inlines proven identity and scalar binary functions" {
-    const Frontend = @import("../Frontend.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\func identity(value:int) int { return value }
-        \\func add(left:int, right:int) int { return left + right }
-        \\func main() { print(add(identity(20), 22)) }
-    );
-    const optimized = try optimize(allocator, compilation.ir);
-    const text = try Ir.writeText(allocator, optimized);
-    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @identity"));
-    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @add"));
-}
-
-test "release inlines small value calculations and structure construction" {
-    const Frontend = @import("../Frontend.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\struct Pair { let x:float; let y:float }
-        \\func pair(x:float, y:float) Pair { return Pair(x:x, y:y) }
-        \\func squared(value:Pair) float { return value.x * value.x + value.y * value.y }
-        \\func calculate(x:float, y:float) float { return squared(pair(x, y)) }
-        \\func main() { print(calculate(3.0, 4.0)) }
-    );
-    const optimized = try optimize(allocator, compilation.ir);
-    const text = try Ir.writeText(allocator, optimized);
-    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @pair"));
-    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @squared"));
-    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @calculate"));
-}
-
-test "release scalarizes non escaping value structures" {
-    const Frontend = @import("../Frontend.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\struct Pair { let x:float; let y:float }
-        \\func add(left:Pair, right:Pair) Pair { return Pair(x:left.x + right.x, y:left.y + right.y) }
-        \\func sum(value:Pair) float {
-        \\    let combined = add(value, Pair(x:1.0, y:2.0))
-        \\    return combined.x + combined.y
-        \\}
-        \\func main() { print(sum(Pair(x:3.0, y:4.0))) }
-    );
-    const optimized = try optimize(allocator, compilation.ir);
-    const text = try Ir.writeText(allocator, optimized);
-    const start = std.mem.indexOf(u8, text, "func @sum") orelse return error.TestUnexpectedResult;
-    const tail = text[start..];
-    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
-    const body = tail[0..end];
-    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @add"));
-    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
-}
-
-test "release keeps scalar aggregates materialized across control flow" {
-    const Frontend = @import("../Frontend.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\struct Pair { let x:float; let y:float }
-        \\func component(value:Pair, condition:bool) float {
-        \\    let scaled = Pair(x:value.x * 0.5, y:value.y * 0.5)
-        \\    var offset = 0.0
-        \\    if condition { offset = 1.0 }
-        \\    return scaled.x + offset
-        \\}
-        \\func main() { print(component(Pair(x:8.0, y:4.0), true)) }
-    );
-    const optimized = try optimize(allocator, compilation.ir);
-    const text = try Ir.writeText(allocator, optimized);
-    const start = std.mem.indexOf(u8, text, "func @component") orelse return error.TestUnexpectedResult;
-    const tail = text[start..];
-    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
-    const body = tail[0..end];
-    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
-}
-
-test "release removes only collection bounds proven by zero-origin loops" {
-    try @import("ReleaseTests.zig").boundedCollectionLoops(optimize);
+test {
+    _ = @import("ReleaseTests.zig");
 }
