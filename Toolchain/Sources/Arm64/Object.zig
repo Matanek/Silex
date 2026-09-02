@@ -243,3 +243,52 @@ test "emit builds ARM64 ELF and COFF objects" {
     try std.testing.expectEqual(image_file_machine_arm64, std.mem.readInt(u16, bytes[0..2], .little));
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, bytes[2..4], .little));
 }
+
+test "emit page-aligns an embedded Linux ARM64 deep-copy runtime" {
+    const Frontend = @import("../Frontend.zig");
+    const Lower = @import("Lower.zig");
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = frontend.compileTests(
+        \\class State {
+        \\    var value:int
+        \\}
+        \\struct Pair {
+        \\    var first:State
+        \\    var again:State
+        \\}
+        \\test "copy" {
+        \\    var state = State(value:5)
+        \\    var source = Pair(first:state, again:state)
+        \\    var detached = copy source
+        \\    assert(detached.first == detached.again)
+        \\}
+    ) catch |err| {
+        std.debug.print("deep-copy fixture compilation failed: {t}\n", .{err});
+        return err;
+    };
+    const machine = Lower.lower(allocator, compilation.ir) catch |err| {
+        std.debug.print("deep-copy fixture lowering failed: {t}\n", .{err});
+        return err;
+    };
+    var test_function: ?Machine.FunctionId = null;
+    for (compilation.ast.functions, 0..) |function, function_id| {
+        if (function.is_test_entry) test_function = function_id;
+    }
+
+    const object = emitLinuxFunction(allocator, machine, test_function orelse return error.TestUnexpectedResult) catch |err| {
+        std.debug.print("deep-copy object emission failed: {t}\n", .{err});
+        return err;
+    };
+    try std.testing.expectEqualStrings("\x7fELF", object[0..4]);
+    try std.testing.expectEqual(@as(u16, 183), std.mem.readInt(u16, object[18..20], .little));
+    const section_offset: usize = @intCast(std.mem.readInt(u64, object[40..48], .little));
+    const text_section = section_offset + 64;
+    try std.testing.expectEqual(@as(u64, 4096), std.mem.readInt(u64, object[text_section + 48 ..][0..8], .little));
+    const relocation_section = section_offset + 2 * 64;
+    const relocation_size = std.mem.readInt(u64, object[relocation_section + 32 ..][0..8], .little);
+    try std.testing.expect(relocation_size >= 2 * 24);
+}

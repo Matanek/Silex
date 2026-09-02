@@ -536,8 +536,8 @@ fn appendRuntimeAddressSites(
 ) Error!void {
     // ELF payloads retain every PT_LOAD segment at its original relative
     // virtual offset. appendRuntimePadding preserves their page congruence,
-    // so linked ADRP sequences remain valid without being decoded or exposed
-    // as relocations in the enclosing Silex image.
+    // and the ELF object writer gives ARM64 text page alignment, so linked
+    // ADRP sequences remain valid without per-instruction relocations.
     if (comptime @hasField(@TypeOf(runtime), "preserves_page_layout")) {
         if (runtime.preserves_page_layout) return;
     }

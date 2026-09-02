@@ -12,6 +12,16 @@ pub const Architecture = enum {
             .arm64 => 183,
         };
     }
+
+    fn textAlignment(self: Architecture) usize {
+        return switch (self) {
+            .x64 => 16,
+            // Embedded AArch64 ELF runtimes retain page-relative ADRP
+            // sequences, so their enclosing text section must keep the page
+            // congruence established by the ARM64 encoder.
+            .arm64 => 4096,
+        };
+    }
 };
 
 pub const RelocationKind = enum {
@@ -87,7 +97,8 @@ pub fn emit(
 
     const section_names = "\x00.text\x00.rela.text\x00.symtab\x00.strtab\x00.shstrtab\x00.note.GNU-stack\x00";
     const header_size: usize = 64;
-    const text_offset = std.mem.alignForward(usize, header_size, 16);
+    const text_alignment = architecture.textAlignment();
+    const text_offset = std.mem.alignForward(usize, header_size, text_alignment);
     const relocation_offset = std.mem.alignForward(usize, text_offset + code.len, 8);
     const relocation_size = relocations.len * 24;
     const symbol_offset = std.mem.alignForward(usize, relocation_offset + relocation_size, 8);
@@ -144,7 +155,7 @@ pub fn emit(
     try bytes.appendSlice(allocator, section_names);
     try padTo(allocator, &bytes, section_offset);
     try bytes.appendNTimes(allocator, 0, 64);
-    try appendSection(allocator, &bytes, 1, 1, 0x7, text_offset, code.len, 0, 0, 16, 0);
+    try appendSection(allocator, &bytes, 1, 1, 0x7, text_offset, code.len, 0, 0, text_alignment, 0);
     try appendSection(allocator, &bytes, 7, 4, 0, relocation_offset, relocation_size, 3, 1, 8, 24);
     try appendSection(allocator, &bytes, 18, 2, 0, symbol_offset, symbol_size, 4, 2, 8, 24);
     try appendSection(allocator, &bytes, 26, 3, 0, string_offset, strings.items.len, 0, 0, 1, 0);
