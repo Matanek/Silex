@@ -151,12 +151,23 @@ silex compile Sandbox/Main.sx -r -n -o Application
 For `run`, `--nocache` forces a rebuild but the executable still belongs under
 `.silex/run/`; cache policy does not change the command's output location.
 
-The cache persists per-module ASTs, the complete native input assembled from
-packages and boundaries, and linked Mach-O, ELF or PE executables. Entries are
-keyed by exact source and boundary-archive contents, target and compilation
-mode. They are validated before use and published atomically, so an unchanged
-GPU application can skip Shadercross, native emission and external linkage.
-Removing `.silex/cache` is always safe.
+The cache selectively persists frontend or native input state, profitable
+machine-function fragments, generated shaders, test and run artifacts, and
+linked Mach-O, ELF or PE executables. The command-line compiler does not cache
+every parsed module: representations that cost more to read than to rebuild are
+excluded. Entries are keyed by the exact inputs relevant to their layer,
+including source and boundary-archive contents, target, mode, cache format and
+compiler identity. Validation failure or corruption is a cache miss, and every
+publication is atomic.
+
+Retention is global across these cache classes instead of adding one quota per
+directory. Silex retains up to 320 MiB of rolling history, but this is not an
+admission limit: a larger current working set is written in full after older
+history is evicted. A later smaller working set lets maintenance recover that
+peak. Only one compiler generation remains active, so changing compiler or
+cache format replaces the old generation instead of accumulating it. Removing
+the generated `.silex` data is always safe and only makes the next invocation a
+miss.
 
 Run the reproducible Apple Silicon comparison against an equivalent C++23
 workload compiled by `clang++ -O2`:
