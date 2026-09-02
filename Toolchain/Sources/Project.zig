@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Ast = @import("Ast.zig");
 const Boundary = @import("Boundary.zig");
+const CompilationCache = @import("CompilationCache.zig");
 const CompilationTrace = @import("CompilationTrace.zig");
 const Interface = @import("Interface.zig");
 const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
@@ -61,6 +62,10 @@ pub const Metrics = struct {
     source_bytes_read: usize,
     ast_functions: usize,
     portable_functions: usize,
+    package_functions_reused: usize,
+    package_function_misses: usize,
+    package_function_relocation_failures: usize,
+    package_functions_stored: usize,
 };
 pub const TestCase = struct {
     name: ?[]const u8,
@@ -103,7 +108,9 @@ pub const Compiler = struct {
     generic_type_maps: []const []const Ast.Type = &.{},
     function_type_maps: []const []const Ast.Type = &.{},
     cache_modules: bool = false,
+    cache_packages: bool = false,
     module_cache_directory: []const u8 = ".silex/cache/v4",
+    package_cache_digest: ?[std.crypto.hash.Blake3.digest_length]u8 = null,
     include_tests: bool = false,
     target: TargetModule.Target,
     shadercross_path: ?[]const u8 = null,
@@ -135,12 +142,12 @@ pub const Compiler = struct {
         // source on GFX-sized graphs. Keep the explicit test hook available,
         // but do not pay that cost on command-line builds. Package-level
         // binary interfaces will replace this transitional cache.
-        _ = cache_modules;
         return .{
             .allocator = allocator,
             .io = io,
             .global_packages_root = global_packages_root,
             .cache_modules = false,
+            .cache_packages = cache_modules,
             .target = TargetModule.Target.host() orelse .macos_arm64,
         };
     }
@@ -201,6 +208,19 @@ pub const Compiler = struct {
             const files = try self.allocator.alloc([]const u8, self.index.providers.len);
             for (self.index.providers, 0..) |provider, file| files[file] = provider.path;
             self.files = files;
+            if (self.cache_packages) {
+                var package_files: std.ArrayList([]const u8) = .empty;
+                for (self.index.providers) |provider| if (provider.owner != 0) {
+                    try package_files.append(self.allocator, provider.path);
+                };
+                self.package_cache_digest = CompilationCache.key(
+                    self.allocator,
+                    self.io,
+                    package_files.items,
+                    "semantic-packages",
+                    self.target.name(),
+                ) catch null;
+            }
         }
 
         {
@@ -249,6 +269,8 @@ pub const Compiler = struct {
         analyzer.source_files = self.files;
         analyzer.module_scope_roots = self.module_scope_roots;
         analyzer.shadercross_path = self.shadercross_path;
+        analyzer.package_cache_digest = self.package_cache_digest;
+        analyzer.trace = self.trace;
         var ir = analyzed: {
             var span = self.traceSpan(.semantic_analysis);
             defer span.finish();
@@ -314,6 +336,10 @@ pub const Compiler = struct {
                 .source_bytes_read = self.source_bytes_read,
                 .ast_functions = ast.functions.len,
                 .portable_functions = ir.functions.len,
+                .package_functions_reused = analyzer.package_functions_reused,
+                .package_function_misses = analyzer.package_function_misses,
+                .package_function_relocation_failures = analyzer.package_function_relocation_failures,
+                .package_functions_stored = analyzer.package_functions_stored,
             },
             .tests = try tests.toOwnedSlice(self.allocator),
         };
