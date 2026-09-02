@@ -135,6 +135,9 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
                 call.name;
             if (qualified_name) |name| {
                 if (call.receiver) |receiver| if (try expressionName(self.allocator, receiver)) |prefix| {
+                    if (try self.nominalCandidate(module, prefix)) |target| {
+                        if (target.module != module) try self.activateDeclaration(module, target);
+                    }
                     for (self.units[module].bindings) |binding| {
                         if (std.mem.eql(u8, binding.alias, prefix)) {
                             if (binding.module) |target_module| try self.loadModule(target_module, module);

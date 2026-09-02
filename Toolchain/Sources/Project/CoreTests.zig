@@ -1434,6 +1434,49 @@ test "public package lists preserve collection behavior in consumers" {
     _ = try @import("../Arm64/Lower.zig").lower(allocator, suite.ir);
 }
 
+test "activate a static method through a public structure reexport" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Parent/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Parent\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Package.json",
+        .data = "{\"name\":\"Parent\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/@Module.sx",
+        .data = "public use Parent.Program.Program",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Parent/Module/Program.sx",
+        .data =
+        \\public struct Program {
+        \\    static func build() int { return 42 }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Parent
+        \\func main() { print(Parent.Program.build()) }
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
 test "merged extension atoms ignore synthetic internal types but preserve public collisions" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
