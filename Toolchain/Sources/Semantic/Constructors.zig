@@ -266,6 +266,7 @@ pub fn analyzeCall(
     const constructor = declaration.constructors[constructor_index];
     try Borrowing.validateReadArguments(self, constructor.parameters, call.arguments);
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+    var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     for (arguments.items, constructor.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
@@ -279,10 +280,16 @@ pub fn analyzeCall(
         if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
+        if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+            try read_temporaries.append(self.allocator, converted);
+        }
         try argument_ids.append(self.allocator, converted.value);
     }
     for (constructor.parameters[arguments.items.len..]) |parameter| {
         const value = try self.analyzeParameterDefault(builder, parameter);
+        if (parameter.mode == .read and value.transferred and Resources.ownsValue(self, value.type)) {
+            try read_temporaries.append(self.allocator, value);
+        }
         try argument_ids.append(self.allocator, value.value);
     }
     const result_type = Ast.Type.structure(structure_index);
@@ -293,6 +300,7 @@ pub fn analyzeCall(
         .arguments = try argument_ids.toOwnedSlice(self.allocator),
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
     return .{
         .type = result_type,
         .value = result,
@@ -382,10 +390,15 @@ fn analyzeNamedCall(
     const mapped = (try Arguments.map(self.allocator, constructor.parameters, call.arguments, call.named_arguments)).arguments;
     try Borrowing.validateMappedReadArguments(self, constructor.parameters, mapped);
     var ids: std.ArrayList(Ir.ValueId) = .empty;
+    var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     for (constructor.parameters, mapped, 0..) |parameter, maybe_source, index| {
         const source = maybe_source orelse {
-            try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
+            const value = try self.analyzeParameterDefault(builder, parameter);
+            if (parameter.mode == .read and value.transferred and Resources.ownsValue(self, value.type)) {
+                try read_temporaries.append(self.allocator, value);
+            }
+            try ids.append(self.allocator, value.value);
             continue;
         };
         const argument = typed[index].?;
@@ -400,12 +413,16 @@ fn analyzeNamedCall(
         if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
+        if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+            try read_temporaries.append(self.allocator, converted);
+        }
         try ids.append(self.allocator, converted.value);
     }
     const result_type = Ast.Type.structure(structure_index);
     const result = try self.newValue(builder, result_type);
     try self.emit(builder, .{ .call = .{ .result = result, .function = constructorFunctionId(self.program, declaration.name, constructor_index), .arguments = try ids.toOwnedSlice(self.allocator) } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
     return .{
         .type = result_type,
         .value = result,

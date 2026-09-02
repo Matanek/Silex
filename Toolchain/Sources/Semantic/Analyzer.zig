@@ -1706,6 +1706,7 @@ pub const Analyzer = struct {
         const function = self.program.functions[function_id];
         try Borrowing.validateReadArguments(self, function.parameters, call.arguments);
         var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+        var read_temporaries: std.ArrayList(TypedValue) = .empty;
         const MutableArgument = struct { source: *const Ast.Expression, prepared: MutableReferences.Prepared };
         var mutable_arguments: std.ArrayList(MutableArgument) = .empty;
         for (arguments.items, function.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
@@ -1742,10 +1743,16 @@ pub const Analyzer = struct {
             if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
                 try Resources.retainValue(self, builder, parameter.type, converted.value);
             }
+            if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+                try read_temporaries.append(self.allocator, converted);
+            }
             try argument_ids.append(self.allocator, converted.value);
         }
         for (function.parameters[arguments.items.len..]) |parameter| {
             const value = try self.analyzeParameterDefault(builder, parameter);
+            if (parameter.mode == .read and value.transferred and Resources.ownsValue(self, value.type)) {
+                try read_temporaries.append(self.allocator, value);
+            }
             try argument_ids.append(self.allocator, value.value);
         }
         const result_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type);
@@ -1768,6 +1775,7 @@ pub const Analyzer = struct {
             .arguments = try argument_ids.toOwnedSlice(self.allocator),
         } });
         for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
+        try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
         if (result == null) return null;
         if (function.return_mode == .value) return .{
             .type = function.return_type,

@@ -994,6 +994,33 @@ test "native list clear releases class elements immediately" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native read arguments release owned aggregate temporaries after the call" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Counter { var drops:int }
+        \\class Token {
+        \\    var counter:Counter
+        \\    init(counter:Counter) { self.counter = counter }
+        \\    drop { self.counter.drops++ }
+        \\}
+        \\struct Parcel { var tokens:Token[] }
+        \\func make(counter:Counter) Parcel { return Parcel(tokens:[Token(counter)]) }
+        \\func inspect(parcel:@Parcel) int { return parcel.tokens.count() }
+        \\func main() {
+        \\    var counter = Counter(drops:0)
+        \\    print(inspect(make(counter)))
+        \\    print(counter.drops)
+        \\}
+    ;
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(@as(u8, 0), exitCode(native));
+    try std.testing.expectEqualStrings("1\n1\n", native.stdout);
+    try std.testing.expectEqualStrings("", native.stderr);
+}
+
 test "native copied slices match the reference" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

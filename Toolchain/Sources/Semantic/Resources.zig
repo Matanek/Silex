@@ -227,6 +227,18 @@ pub fn emitDropOwned(self: anytype, builder: anytype, type_value: Ast.Type, valu
     return emitDropOwnedInner(self, builder, type_value, value, ownership, true);
 }
 
+/// Releases owned expressions whose lifetime was extended only long enough to
+/// satisfy a read-reference call parameter. Callees borrow these values and
+/// therefore never assume their lifetime obligation.
+pub fn emitReadTemporaryDrops(self: anytype, builder: anytype, values: []const Model.TypedValue) AnalyzeError!void {
+    var index = values.len;
+    while (index > 0) {
+        index -= 1;
+        const value = values[index];
+        try emitDrop(self, builder, value.type, value.value);
+    }
+}
+
 /// Converts a retained root into another ownership domain without invoking
 /// value `drop` hooks. The value itself remains alive in its new storage; only
 /// the resource roots carried by the temporary are released.

@@ -82,6 +82,43 @@ test "drop structures remain inspectable through read references" {
     try std.testing.expectEqualStrings("9\nclosed\n", output);
 }
 
+test "owned temporaries borrowed by calls are released after every call form" {
+    const output = try run(
+        \\class Counter { var drops:int }
+        \\class Token {
+        \\    var counter:Counter
+        \\    init(counter:Counter) { self.counter = counter }
+        \\    drop { self.counter.drops++ }
+        \\}
+        \\struct Parcel { var tokens:Token[] }
+        \\func make(counter:Counter) Parcel { return Parcel(tokens:[Token(counter)]) }
+        \\func inspect(parcel:@Parcel) int { return parcel.tokens.count() }
+        \\struct Inspector { func inspect(parcel:@Parcel) int { return parcel.tokens.count() } }
+        \\struct Measurement {
+        \\    let count:int
+        \\    init(parcel:@Parcel) { self.count = parcel.tokens.count() }
+        \\}
+        \\func invoke(callback:func(@Parcel) int, counter:Counter) int {
+        \\    return callback(make(counter))
+        \\}
+        \\func main() {
+        \\    var counter = Counter(drops:0)
+        \\    let positional = inspect(make(counter))
+        \\    print(positional, " ", counter.drops)
+        \\    let named = inspect(parcel:make(counter))
+        \\    print(named, " ", counter.drops)
+        \\    let method = Inspector().inspect(make(counter))
+        \\    print(method, " ", counter.drops)
+        \\    let measurement = Measurement(make(counter))
+        \\    print(measurement.count, " ", counter.drops)
+        \\    let callback = invoke(inspect, counter)
+        \\    print(callback, " ", counter.drops)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1 1\n1 2\n1 3\n1 4\n1 5\n", output);
+}
+
 test "copies with drop preserve shared class fields" {
     const output = try run(
         \\class State {

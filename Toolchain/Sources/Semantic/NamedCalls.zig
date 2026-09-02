@@ -92,11 +92,16 @@ pub fn analyzeFunction(self: anytype, builder: anytype, call: Ast.Expression.Cal
     const mapped = (try Arguments.map(self.allocator, function.parameters, call.arguments, call.named_arguments)).arguments;
     try Borrowing.validateMappedReadArguments(self, function.parameters, mapped);
     var ids: std.ArrayList(Ir.ValueId) = .empty;
+    var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     const MutableArgument = struct { source: *const Ast.Expression, prepared: MutableReferences.Prepared };
     var mutable: std.ArrayList(MutableArgument) = .empty;
     for (function.parameters, mapped, 0..) |parameter, maybe_source, index| {
         const source = maybe_source orelse {
-            try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
+            const value = try self.analyzeParameterDefault(builder, parameter);
+            if (parameter.mode == .read and value.transferred and Resources.ownsValue(self, value.type)) {
+                try read_temporaries.append(self.allocator, value);
+            }
+            try ids.append(self.allocator, value.value);
             continue;
         };
         const argument = typed[index].?;
@@ -123,12 +128,16 @@ pub fn analyzeFunction(self: anytype, builder: anytype, call: Ast.Expression.Cal
         if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
+        if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+            try read_temporaries.append(self.allocator, converted);
+        }
         try ids.append(self.allocator, converted.value);
     }
     const result_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type);
     const result: ?Ir.ValueId = if (function.return_type == .void) null else try self.newValue(builder, result_type);
     try self.emit(builder, .{ .call = .{ .result = result, .function = function_id, .arguments = try ids.toOwnedSlice(self.allocator) } });
     for (mutable.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
+    try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
     if (result == null) return null;
     if (function.return_mode == .value) return .{ .type = function.return_type, .value = result.?, .transferred = Resources.ownsValue(self, function.return_type) };
     const provenance = function.return_provenance.?;

@@ -289,6 +289,7 @@ pub fn call(self: anytype, builder: anytype, call_value: Ast.Expression.Call) !?
     try Borrowing.validateReadArguments(self, parameters, call_value.arguments);
 
     var arguments: std.ArrayList(Ir.ValueId) = .empty;
+    var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableArgument) = .empty;
     for (call_value.arguments, signature.parameters, 0..) |expression, parameter, index| {
         const argument = try self.analyzeExpressionExpected(builder, expression, Optionals.expectedContext(parameter.type, expression));
@@ -306,6 +307,9 @@ pub fn call(self: anytype, builder: anytype, call_value: Ast.Expression.Call) !?
             if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
                 try Resources.retainValue(self, builder, parameter.type, converted.value);
             }
+            if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+                try read_temporaries.append(self.allocator, converted);
+            }
             try arguments.append(self.allocator, converted.value);
         }
     }
@@ -313,6 +317,7 @@ pub fn call(self: anytype, builder: anytype, call_value: Ast.Expression.Call) !?
     const result = if (signature.return_type == .void) null else try self.newValue(builder, signature.return_type);
     try self.emit(builder, .{ .indirect_call = .{ .result = result, .callee = callee.value, .arguments = try arguments.toOwnedSlice(self.allocator) } });
     for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
+    try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
     return .{ .value = if (result) |value| .{ .type = signature.return_type, .value = value } else null };
 }
 

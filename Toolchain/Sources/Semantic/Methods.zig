@@ -555,6 +555,7 @@ pub fn analyzeCallWithReceiver(
         null;
 
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+    var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     const method_receiver = if (receiver_structure_index != structure_index and borrowed_receiver == null)
         try self.coerce(builder, resolved_receiver, .structure(structure_index), call.name_position)
@@ -573,10 +574,16 @@ pub fn analyzeCallWithReceiver(
         if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
+        if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+            try read_temporaries.append(self.allocator, converted);
+        }
         try argument_ids.append(self.allocator, converted.value);
     }
     for (method.parameters[arguments.items.len..]) |parameter| {
         const value = try self.analyzeParameterDefault(builder, parameter);
+        if (parameter.mode == .read and value.transferred and Resources.ownsValue(self, value.type)) {
+            try read_temporaries.append(self.allocator, value);
+        }
         try argument_ids.append(self.allocator, value.value);
     }
 
@@ -605,6 +612,7 @@ pub fn analyzeCallWithReceiver(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
     if (receiver.transferred and Resources.requiresRetain(self, receiver.type)) {
         try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     }
@@ -775,10 +783,15 @@ fn analyzeNamedCall(
         resolved_receiver;
     var ids: std.ArrayList(Ir.ValueId) = .empty;
     try ids.append(self.allocator, if (borrowed_receiver) |prepared| prepared.reference else method_receiver.value);
+    var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     for (method.parameters, mapped, 0..) |parameter, maybe_source, index| {
         const source = maybe_source orelse {
-            try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
+            const value = try self.analyzeParameterDefault(builder, parameter);
+            if (parameter.mode == .read and value.transferred and Resources.ownsValue(self, value.type)) {
+                try read_temporaries.append(self.allocator, value);
+            }
+            try ids.append(self.allocator, value.value);
             continue;
         };
         const argument = typed[index].?;
@@ -792,6 +805,9 @@ fn analyzeNamedCall(
         const converted = try self.coerce(builder, argument, parameter.type, source.position);
         if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
+        }
+        if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+            try read_temporaries.append(self.allocator, converted);
         }
         try ids.append(self.allocator, converted.value);
     }
@@ -818,6 +834,7 @@ fn analyzeNamedCall(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
     if (receiver.transferred and Resources.requiresRetain(self, receiver.type)) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     if (borrowed_mutable) {
         try MutableReferences.writeBack(self, builder, borrowed_receiver.?);
@@ -898,6 +915,7 @@ fn analyzeProtocolCall(
     try Borrowing.validateReadArguments(self, requirement.parameters, call.arguments);
     const place = try requireMutablePlace(self, builder, call.receiver.?, call.name);
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+    var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     for (arguments, requirement.parameters[0..arguments.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
@@ -906,11 +924,18 @@ fn analyzeProtocolCall(
             try argument_ids.append(self.allocator, prepared.reference);
         } else {
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
-            try argument_ids.append(self.allocator, (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value);
+            const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
+            if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
+                try read_temporaries.append(self.allocator, converted);
+            }
+            try argument_ids.append(self.allocator, converted.value);
         }
     }
     for (requirement.parameters[arguments.len..]) |parameter| {
         const value = try self.analyzeParameterDefault(builder, parameter);
+        if (parameter.mode == .read and value.transferred and Resources.ownsValue(self, value.type)) {
+            try read_temporaries.append(self.allocator, value);
+        }
         try argument_ids.append(self.allocator, value.value);
     }
 
@@ -920,6 +945,7 @@ fn analyzeProtocolCall(
         if (requirement.return_type != .void) {
             return self.fail(call.name_position, "dynamic protocol has no concrete conforming type in this program");
         }
+        try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
         return null;
     }
     const updated = try self.newValue(builder, receiver.type);
@@ -976,6 +1002,7 @@ fn analyzeProtocolCall(
     self.terminate(builder, .{ .jump = merge_block });
     builder.current_block = merge_block;
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
     const replacement = if (safe_receiver_type) |optional_type|
         (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = updated }, optional_type)).?.value
     else
