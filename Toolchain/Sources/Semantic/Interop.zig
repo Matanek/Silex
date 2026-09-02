@@ -704,6 +704,7 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             .return_type = return_type,
             .owner = external.owner,
             .package_private = package_private,
+            .system_math = package_private and systemMathProvider(self, external),
         });
     }
     return result.toOwnedSlice(self.allocator);
@@ -768,6 +769,16 @@ fn mathFunctionAvailable(library: []const u8, name: []const u8, parameters: []co
     if (parameters.len != count or return_type != expected) return false;
     for (parameters) |parameter| if (parameter != expected) return false;
     return true;
+}
+
+fn systemMathProvider(self: anytype, external: Ast.ExternalFunction) bool {
+    const packages = self.packages orelse return false;
+    const target = self.target orelse return false;
+    if (!std.mem.eql(u8, target.name(), "macos-arm64")) return false;
+    const provider = packages.boundaryProvider(external.owner, external.library) orelse return false;
+    return provider.archive == null and provider.requires.len == 0 and
+        provider.frameworks.len == 0 and provider.libraries.len == 1 and
+        std.mem.eql(u8, provider.libraries[0], "System");
 }
 
 fn customProviderAvailable(self: anytype, external: Ast.ExternalFunction) !bool {

@@ -1,0 +1,58 @@
+struct Impulses {
+    var normal:float = 0.0
+    var tangent:float = 7.0
+}
+
+func update_contact(
+    positions:@float[..],
+    velocities:&float[..],
+    impulses:&Impulses,
+    index:int,
+    active:bool
+) float {
+    let distance = positions[index] - positions[0]
+    let previous:float = velocities[index] + 0.0
+    let correction = (distance * 0.25 - previous) * 0.5
+    var applied = correction
+    if !active { applied = -applied }
+    velocities[index] = previous + applied
+    impulses.normal += applied
+    return (velocities[index] - previous) * 2.0 + distance
+}
+
+test "leaf memory arithmetic preserves view writes and reference siblings" {
+    var positions:float[] = [2.0, 6.0, 10.0, 14.0]
+    var velocities:float[] = [99.0, 1.0, 2.0, 3.0]
+    var impulses = Impulses()
+    let first = update_contact(@positions[1:4], &velocities[1:4], impulses, 1, true)
+    assert(first == 3.0)
+    assert(velocities[2] == 1.5)
+    assert(impulses.normal == -0.5)
+    let second = update_contact(@positions[1:4], &velocities[1:4], impulses, 1, false)
+    assert(second == 4.5)
+    assert(velocities[2] == 1.75)
+    assert(impulses.normal == -0.25)
+    assert(impulses.tangent == 7.0)
+    assert(velocities[0] == 99.0 && velocities[1] == 1.0 && velocities[3] == 3.0)
+}
+
+struct WideImpulse {
+    var value:float64 = 0.0
+    var sibling:int = 42
+}
+
+func update_wide(values:@float64[..], result:&WideImpulse, index:int) float64 {
+    let previous:float64 = result.value + 0.0
+    let increment:float64 = values[index] * 0.25
+    result.value = previous + increment
+    return result.value - previous
+}
+
+test "resident view and reference loads preserve float64 and negative indices" {
+    let values:float64[] = [1.0, 2.0, 3.0]
+    var result = WideImpulse()
+    assert(update_wide(@values[0:3], result, -1) == 0.75)
+    assert(update_wide(@values[0:3], result, 0) == 0.25)
+    assert(result.value == 1.0)
+    assert(result.sibling == 42)
+}

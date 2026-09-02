@@ -807,7 +807,10 @@ pub fn emitLoad(
         if (stride == @as(u64, value.result.width) * 4) {
             try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
         } else try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
-        try words.append(allocator, A64.storeStack(.x12, @intCast(@as(usize, value.result.start) + leaf)));
+        const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+        if (function.float_register_slots.len != 0 and function.float_register_slots[slot] != null) {
+            try words.append(allocator, A64.moveGeneralToFloat(@enumFromInt(function.float_register_slots[slot].?), .x12, true));
+        } else try storeValue(allocator, words, function, .x12, slot);
     }
     const complete = words.items.len;
     try words.append(allocator, A64.branch());

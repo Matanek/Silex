@@ -297,7 +297,7 @@ test "release scalarizes non escaping value structures" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
 }
 
-test "release keeps scalar aggregates materialized across control flow" {
+test "release scalarizes immutable aggregates across control flow" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -318,9 +318,85 @@ test "release keeps scalar aggregates materialized across control flow" {
     const tail = text[start..];
     const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
     const body = tail[0..end];
-    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
 }
 
 test "release removes only collection bounds proven by zero-origin loops" {
     try boundedCollectionLoops(optimize);
+}
+
+test "release materializes a scalar constructor only once after dead local stores" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { let x:float; let y:float }
+        \\struct Contact {
+        \\    let first:int; let second:int; let normal:Pair; let mass:float
+        \\    init(first:int, second:int, normal:Pair, mass:float) {
+        \\        self.first = first
+        \\        self.second = second
+        \\        self.normal = normal
+        \\        self.mass = mass
+        \\    }
+        \\}
+        \\func main() {
+        \\    let contact = Contact(3, 5, Pair(x:0.5, y:1.0), 2.0)
+        \\    print(contact.first + contact.second)
+        \\    print(contact.normal.x * contact.mass + contact.normal.y)
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @Contact.init") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, tail[0..end], "struct.init @Contact"));
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+}
+
+test "release aggregate aliases preserve joined returns and loop snapshots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func choose(value:int, condition:bool) Pair {
+        \\    if condition { return Pair(x:value, y:value + 1) }
+        \\    return Pair(x:-value, y:value - 1)
+        \\}
+        \\func sum(condition:bool) int {
+        \\    let scale = Pair(x:2, y:3)
+        \\    var total = 0
+        \\    var index = 0
+        \\    while index < 8 {
+        \\        var value = choose(index, condition)
+        \\        let snapshot = Pair(x:value.x * scale.x, y:value.y * scale.y)
+        \\        if index % 2 == 0 { value.x = 100 }
+        \\        if condition { total += snapshot.x } else { total -= snapshot.x }
+        \\        total += snapshot.y
+        \\        index++
+        \\    }
+        \\    return total
+        \\}
+        \\func main() { print(sum(true)); print(sum(false)) }
+    );
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const optimized = try optimize(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("164\n116\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
 }

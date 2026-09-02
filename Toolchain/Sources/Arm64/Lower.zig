@@ -153,6 +153,7 @@ fn lowerInternal(
             .provider = if (std.mem.eql(u8, external.provider, "MacOS.lib_system")) "Darwin.lib_system" else external.provider,
             .source_name = external.source_name,
             .package_private = external.package_private,
+            .system_math = external.system_math,
             .signature = .{
                 .arguments = arguments,
                 .result = if (external.return_type == .void) null else try lowerExternalType(external.return_type),
@@ -171,6 +172,14 @@ fn lowerInternal(
             .signature = .{ .arguments = &.{.read_address}, .result = null },
         };
     }
+    if (mode == .release) for (functions) |*function| {
+        if (function.register_slots.len != 0) continue;
+        const allocation = try RegisterAllocation.allocateWithExternals(allocator, function.*, external_functions);
+        function.register_slots = allocation.residences;
+        function.float_register_slots = allocation.float_residences;
+        function.float_lane_slots = allocation.float_lane_residences;
+        function.frame_size = allocation.frame_size;
+    };
     const result: Machine.Program = .{
         .functions = functions,
         .files = program.files,

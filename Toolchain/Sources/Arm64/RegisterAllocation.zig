@@ -1,5 +1,6 @@
 const std = @import("std");
 const Machine = @import("Machine.zig");
+const MemoryResidence = @import("MemoryResidence.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -25,7 +26,7 @@ pub fn allocateFloatLanePairsFor(
     function: Machine.Function,
     registers: []const u5,
 ) Allocator.Error![]const ?Machine.FloatLaneResidence {
-    if (!isCompatibleFunction(function) or registers.len == 0) return try allocator.alloc(?Machine.FloatLaneResidence, 0);
+    if (!isCompatibleFunction(function, false, &.{}) or registers.len == 0) return try allocator.alloc(?Machine.FloatLaneResidence, 0);
     const residences = try allocator.alloc(?Machine.FloatLaneResidence, function.slot_count);
     @memset(residences, null);
     const float_slots = try allocator.alloc(bool, function.slot_count);
@@ -43,7 +44,11 @@ pub fn allocateFloatLanePairsFor(
 /// outside it keeps the entire function stack-resident until its encoder can
 /// consume and produce registered values safely.
 pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Error || Machine.Error)!Result {
-    if (!isCompatibleFunction(function)) return spilled(allocator, function);
+    return allocateWithExternals(allocator, function, &.{});
+}
+
+pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, externals: []const Machine.ExternalFunction) (Allocator.Error || Machine.Error)!Result {
+    if (!isCompatibleFunction(function, true, externals)) return spilled(allocator, function);
 
     const residences = try allocator.alloc(?u5, function.slot_count);
     @memset(residences, null);
@@ -61,7 +66,8 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Err
         8,  13, 14, 15, 0,  1,  2,  3,
         4,  5,  6,  7,
     };
-    try allocateFloatPairs(allocator, function, float_slots, float_lane_residences, &pair_registers);
+    if (!MemoryResidence.required(function))
+        try allocateFloatPairs(allocator, function, float_slots, float_lane_residences, &pair_registers);
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
     @memset(forced, false);
@@ -333,7 +339,7 @@ fn instructionUses(instruction: Machine.Instruction, slot: usize) bool {
         } else false,
         .return_value => |value| spanContains(value, slot),
         .branch => |value| value.condition == slot,
-        else => false,
+        else => MemoryResidence.uses(instruction, slot),
     };
 }
 
@@ -353,7 +359,7 @@ fn instructionDefines(instruction: Machine.Instruction, slot: usize) bool {
         .collection_load => |value| spanContains(value.result, slot),
         .collection_count => |value| value.result == slot,
         .call => |call| if (call.result) |result| spanContains(result, slot) else false,
-        else => false,
+        else => MemoryResidence.defines(instruction, slot),
     };
 }
 
@@ -1469,8 +1475,9 @@ fn propagateFloat(left: Machine.Slot, right: Machine.Slot, result: []bool, chang
     changed.* = true;
 }
 
-fn isCompatibleFunction(function: Machine.Function) bool {
+fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, externals: []const Machine.ExternalFunction) bool {
     if (function.reuses_slots) return false;
+    const memory_leaf = allow_stack_effects and MemoryResidence.required(function);
     var has_unchecked_collection_load = false;
     for (function.instructions) |instruction| switch (instruction) {
         .collection_load => |load| has_unchecked_collection_load = has_unchecked_collection_load or !load.checked,
@@ -1491,15 +1498,18 @@ fn isCompatibleFunction(function: Machine.Function) bool {
         .jump,
         .branch,
         => {},
-        .copy_range, .aggregate_init => if (!has_unchecked_collection_load) return false,
-        .collection_load => |load| if (load.checked) return false,
+        .copy_range, .aggregate_init => if (!has_unchecked_collection_load and !memory_leaf) return false,
+        .collection_load => |load| if (load.checked and !(allow_stack_effects and MemoryResidence.supports(instruction))) return false,
         .binary => |binary| if (binary.type == .str) return false,
-        else => return false,
+        .external_call => |call| if (!allow_stack_effects or call.function >= externals.len or
+            MemoryResidence.copySignPrecision(externals[call.function]) == null) return false,
+        else => if (!allow_stack_effects or !MemoryResidence.supports(instruction)) return false,
     };
     return true;
 }
 
 fn forceStackOperands(instruction: Machine.Instruction, forced: []bool) void {
+    MemoryResidence.pin(instruction, forced);
     switch (instruction) {
         .collection_load => |load| {
             _ = load;

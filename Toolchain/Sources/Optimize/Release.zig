@@ -6,6 +6,7 @@ const InlineControlFlow = @import("InlineControlFlow.zig");
 const InlineValues = @import("InlineValues.zig");
 const SsaPromotion = @import("SsaPromotion.zig");
 const Workers = @import("../Workers.zig");
+const UnusedLocals = @import("UnusedLocals.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -38,7 +39,10 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
 
 pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_count: u16) !Ir.Program {
     const prepared = try optimizeWithoutInliningWithWorkers(allocator, program, worker_count);
-    const inlined = try InlineValues.optimize(allocator, prepared);
+    // Simplify constructors before cloning them into branching callers:
+    // otherwise each field assignment carries its whole aggregate along.
+    const scalar_prepared = try replaceScalarAggregatesWithWorkers(allocator, prepared, worker_count);
+    const inlined = try InlineValues.optimize(allocator, scalar_prepared);
     const control_flow_inlined = try InlineControlFlow.optimize(allocator, inlined);
     const scalarized = try replaceScalarAggregatesWithWorkers(allocator, control_flow_inlined, worker_count);
     return optimizeWithoutInliningWithWorkers(allocator, scalarized, worker_count);
@@ -233,19 +237,23 @@ const ScalarWorker = struct {
     }
 };
 
-fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
+fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, input_function: Ir.Function) !Ir.Function {
+    const function = try UnusedLocals.removeStores(allocator, input_function);
     const roots = try allocator.alloc(?Ir.ValueId, function.value_types.len);
     @memset(roots, null);
     const fields = try allocator.alloc(?[]const Ir.ValueId, function.value_types.len);
     @memset(fields, null);
-    const root_blocks = try allocator.alloc(?usize, function.value_types.len);
-    @memset(root_blocks, null);
-    for (function.blocks, 0..) |block, block_index| {
+    // Lowered joins can define the same value on several predecessor edges.
+    // Only immutable, single-definition values may become global aliases.
+    const definitions = try allocator.alloc(usize, function.value_types.len);
+    @memset(definitions, 0);
+    for (0..function.capture_types.len + function.parameter_types.len) |parameter| definitions[parameter] = 1;
+    for (function.blocks) |block| for (block.instructions) |instruction| countDefinitions(instruction, definitions);
+    for (function.blocks) |block| {
         for (block.instructions) |instruction| switch (instruction) {
-            .structure_init => |value| if (scalarStructure(program, value.structure, 0)) {
+            .structure_init => |value| if (definitions[value.result] == 1 and scalarStructure(program, value.structure, 0)) {
                 roots[value.result] = value.result;
                 fields[value.result] = value.fields;
-                root_blocks[value.result] = block_index;
             },
             else => {},
         };
@@ -254,7 +262,7 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, fu
     while (changed) {
         changed = false;
         for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
-            .copy => |value| if (roots[value.result] == null and roots[value.operand] != null and
+            .copy => |value| if (definitions[value.result] == 1 and roots[value.result] == null and roots[value.operand] != null and
                 function.value_types[value.result] == function.value_types[value.operand])
             {
                 roots[value.result] = roots[value.operand];
@@ -276,7 +284,7 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, fu
         .copy => |value| if (roots[value.operand] != null and roots[value.result] == roots[value.operand]) {
             allowed[value.operand] += 1;
         },
-        .field_load => |value| if (roots[value.base] != null) {
+        .field_load => |value| if (roots[value.base] != null and definitions[value.result] == 1) {
             allowed[value.base] += 1;
         },
         else => {},
@@ -286,44 +294,49 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, fu
     for (roots, 0..) |root, value| if (root) |resolved| {
         if (uses[value] != allowed[value]) escaped[resolved] = true;
     };
-    const block_uses = try allocator.alloc(usize, function.value_types.len);
-    for (function.blocks, 0..) |block, block_index| {
-        @memset(block_uses, 0);
-        for (block.instructions) |instruction| countUses(instruction, block_uses);
-        countTerminatorUses(block.terminator, block_uses);
-        for (roots, 0..) |root, value| if (root) |resolved| {
-            if (block_uses[value] > 0 and root_blocks[resolved].? != block_index) {
-                escaped[resolved] = true;
-            }
+    for (fields, 0..) |aggregate, root| if (aggregate) |values| {
+        for (values) |value| if (definitions[value] != 1) {
+            escaped[root] = true;
         };
-    }
+    };
+
+    const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
+    for (aliases, 0..) |*alias, value| alias.* = value;
+    // Compute all projections before rewriting any block: block order need
+    // not be dominance order, and a projection can feed a later aggregate.
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .copy => |value| if (roots[value.operand]) |root| {
+            if (!escaped[root] and roots[value.result] == root) aliases[value.result] = value.operand;
+        },
+        .field_load => |value| if (roots[value.base]) |root| {
+            if (!escaped[root] and definitions[value.result] == 1) {
+                const aggregate_fields = fields[root] orelse return error.InvalidProgram;
+                if (value.field >= aggregate_fields.len) return error.InvalidProgram;
+                aliases[value.result] = aggregate_fields[value.field];
+            }
+        },
+        else => {},
+    };
 
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     const constants = try allocator.alloc(Constant, function.value_types.len);
     @memset(constants, .unknown);
     for (function.blocks, 0..) |block, block_index| {
-        const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
-        for (aliases, 0..) |*alias, value| alias.* = value;
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
         for (block.instructions) |original| {
+            switch (original) {
+                .copy => |value| if (aliases[value.result] != value.result) {
+                    continue;
+                },
+                .field_load => |value| if (aliases[value.result] != value.result) {
+                    continue;
+                },
+                else => {},
+            }
             const instruction = try rewriteInstruction(allocator, original, aliases);
             switch (instruction) {
                 .structure_init => |value| if (roots[value.result]) |root| {
                     if (!escaped[root]) continue;
-                },
-                .copy => |value| if (roots[value.operand]) |root| {
-                    if (!escaped[root] and roots[value.result] == root) {
-                        aliases[value.result] = canonical(aliases, value.operand);
-                        continue;
-                    }
-                },
-                .field_load => |value| if (roots[value.base]) |root| {
-                    if (!escaped[root]) {
-                        const aggregate_fields = fields[root] orelse return error.InvalidProgram;
-                        if (value.field >= aggregate_fields.len) return error.InvalidProgram;
-                        aliases[value.result] = canonical(aliases, aggregate_fields[value.field]);
-                        continue;
-                    }
                 },
                 else => {},
             }

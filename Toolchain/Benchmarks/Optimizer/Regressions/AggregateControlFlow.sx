@@ -1,0 +1,30 @@
+struct Pair {
+    var x:float
+    var y:float
+}
+
+func choose(value:float, positive:bool) Pair {
+    if positive { return Pair(x:value, y:value + 1.0) }
+    return Pair(x:-value, y:value - 1.0)
+}
+
+func accumulate(positive:bool) float {
+    let scale = Pair(x:2.0, y:3.0)
+    var total = 0.0
+    var index = 0
+    while index < 8 {
+        var value = choose(index as float, positive)
+        let snapshot = Pair(x:value.x * scale.x, y:value.y * scale.y)
+        if index % 2 == 0 { value.x = 100.0 }
+        if positive { total += snapshot.x } else { total -= snapshot.x }
+        total += snapshot.y
+        index++
+    }
+    return total
+}
+
+func main() {
+    assert(accumulate(true) == 164.0)
+    assert(accumulate(false) == 116.0)
+    print("aggregate control flow preserved")
+}

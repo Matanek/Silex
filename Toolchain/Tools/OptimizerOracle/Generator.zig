@@ -34,6 +34,10 @@ pub const corpus = [_]CorpusEntry{
 
 pub const regressions = [_]RegressionEntry{
     .{
+        .name = "Regressions/AggregateControlFlow.sx",
+        .concern = "immutable aggregate projections across branches and loops preserve snapshots and joined returns",
+    },
+    .{
         .name = "Regressions/BooleanSharedChain.sx",
         .concern = "shared boolean-chain blocks and reused branch values",
         .contract = .{ .reduces_blocks = "hot_chain" },

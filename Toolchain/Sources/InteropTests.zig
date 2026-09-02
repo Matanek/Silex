@@ -7,6 +7,35 @@ const Lower = @import("Arm64/Lower.zig");
 const MachO = @import("MacOS/MachO.zig");
 const Project = @import("Project.zig");
 
+test "recognize system math only from an isolated libSystem provider" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]bool{ true, false }) |standard| {
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        const libraries = if (standard) "[\"System\"]" else "[\"System\",\"custom_math\"]";
+        const manifest = try std.fmt.allocPrint(allocator, "{{\"name\":\"MathProof\",\"version\":\"1.0.0\",\"boundary\":{{\"macos-arm64\":{{\"providers\":{{\"System\":{{\"libraries\":{s}}}}}}}}}}}", .{libraries});
+        try temporary.dir.createDirPath(std.testing.io, "MathProof/Module");
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "MathProof/Package.json", .data = manifest });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "MathProof/Main.sx", .data =
+            \\use Interop.C
+            \\use Interop.Boundary
+            \\let copy_sign = C.function<func(float32, float32) float32>(library:Boundary.System, name:"copysignf")
+            \\func main() { assert(copy_sign(2.0, -1.0) == -2.0) }
+        });
+        const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "MathProof", "Main.sx" });
+        var compiler = Project.Compiler.init(allocator, std.testing.io);
+        compiler.target = .macos_arm64;
+        const compilation = try compiler.compile(input);
+        try std.testing.expectEqual(@as(usize, 1), compilation.boundaries.len);
+        try std.testing.expect(compilation.boundaries[0].package_private);
+        try std.testing.expectEqual(standard, compilation.boundaries[0].system_math);
+        const machine = try Lower.lowerBoundaries(allocator, compilation.ir, compilation.boundaries);
+        try std.testing.expectEqual(standard, machine.external_functions[0].system_math);
+    }
+}
+
 const source =
     \\use Interop.C
     \\use Interop.MacOS

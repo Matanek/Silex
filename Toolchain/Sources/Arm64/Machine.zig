@@ -611,6 +611,7 @@ pub const ExternalFunction = struct {
     source_name: []const u8,
     signature: Signature,
     package_private: bool = false,
+    system_math: bool = false,
 
     pub const Signature = struct {
         arguments: []const AbiValue,

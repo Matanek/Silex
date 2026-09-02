@@ -24,6 +24,12 @@ worker writes the original function index in a separate output slice, so using
 one, two, or four workers produces the same canonical portable IR. Smaller
 programs keep the direct path.
 
+Before inlining, Release removes unobserved local stores and scalarizes pure
+value constructors. Immutable, single-definition aggregate projections can
+be reused across blocks; joins and escaping or addressable values retain
+their storage. This keeps a constructor's intermediate field assignments
+from becoming repeated whole-structure copies in a branching caller.
+
 Release inlines direct callees under a bounded cost across branches, loops,
 and multiple returns, in addition to constant-result and small straight-line
 specialization. It then re-runs scalar aggregate replacement, propagation,
@@ -52,6 +58,21 @@ transfers are bypassed after allocation, and the ARM64 collection cursor
 recognizes induction updates separated by independent SSA copies. Fully
 resident leaf functions allocate no value frame. Debug retains the direct
 stack-resident lowering.
+
+ARM64 also admits a restricted set of leaf memory operations. Checked dynamic
+loads, view replacement, and explicit address/reference accesses retain their
+bounds and failure behavior. Addresses, indices and composite memory operands
+stay pinned; scalar loads and reference stores may transfer directly to a
+register. Functions taking local addresses or making arbitrary calls remain
+outside this path, and these memory kernels keep scalar rather than paired
+SIMD residences.
+
+Exact `copysignf`/`copysign` calls to a proven system provider use a sign-bit
+transfer on ARM64. The transformation preserves signed zeros, infinities and
+NaN payloads without relaxing floating-point arithmetic. A package-private
+provider qualifies only when its macOS ARM64 metadata links libSystem alone,
+without an archive, framework or provider dependency. Custom providers keep
+their call. X64 register eligibility is unchanged by this ARM64 extension.
 
 The native layout normally keeps unique deterministic homes. If their
 cumulative count would exceed the shared machine limit, ARM64 and X64 instead

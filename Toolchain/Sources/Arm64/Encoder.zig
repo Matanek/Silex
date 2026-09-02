@@ -13,6 +13,7 @@ const FloatRuntime = @import("FloatRuntime.zig");
 const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
 const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
+const MemoryResidence = @import("MemoryResidence.zig");
 const Allocation = @import("Allocation.zig");
 const Pairing = @import("Pairing.zig");
 const LoopCursor = @import("LoopCursor.zig");
@@ -916,7 +917,7 @@ fn encodeFunction(
                 try emitStackAddress(allocator, words, .x9, address.local);
                 try words.append(allocator, storeStack(.x9, address.result));
             },
-            .reference_load => |load| try emitReferenceCopy(allocator, words, load.result, load.reference, true),
+            .reference_load => |load| try emitReferenceCopy(allocator, words, function, load.result, load.reference, true),
             .address_load => |load| {
                 try words.append(allocator, loadStack(.x9, load.address));
                 try words.append(allocator, loadStack(.x10, load.byte_offset));
@@ -946,7 +947,7 @@ fn encodeFunction(
                     else => return error.InvalidMachineProgram,
                 });
             },
-            .reference_store => |store| try emitReferenceCopy(allocator, words, store.operand, store.reference, false),
+            .reference_store => |store| try emitReferenceCopy(allocator, words, function, store.operand, store.reference, false),
             .reference_offset => |offset| {
                 try words.append(allocator, loadStack(.x9, offset.reference));
                 if (offset.byte_offset <= std.math.maxInt(u12)) {
@@ -978,11 +979,17 @@ fn encodeFunction(
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {
                     for (0..field.width) |leaf| {
+                        const destination: Machine.Slot = @intCast(@as(usize, initialization.result.start) + destination_offset + leaf);
+                        // Dead aggregate leaves may share the register of a
+                        // live sibling defined by this same instruction.
+                        // Materializing them would overwrite that sibling.
+                        if (((function.register_slots.len != 0 and function.register_slots[destination] != null) or floatResidence(function, destination) != null) and
+                            !slotHasUse(function.instructions, destination)) continue;
                         try emitRegisteredCopy(
                             allocator,
                             words,
                             function,
-                            @intCast(@as(usize, initialization.result.start) + destination_offset + leaf),
+                            destination,
                             @intCast(@as(usize, field.start) + leaf),
                         );
                     }
@@ -1949,6 +1956,7 @@ fn emitSpanCopy(
 fn emitReferenceCopy(
     allocator: Allocator,
     words: *std.ArrayList(u32),
+    function: Machine.Function,
     span: Machine.Span,
     reference: Machine.Slot,
     load_reference: bool,
@@ -1956,11 +1964,16 @@ fn emitReferenceCopy(
     try words.append(allocator, loadStack(.x9, reference));
     for (0..span.width) |index| {
         const offset = index * Machine.slot_size;
+        const slot: Machine.Slot = @intCast(@as(usize, span.start) + index);
         if (load_reference) {
             try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
-            try words.append(allocator, storeStack(.x10, @intCast(@as(usize, span.start) + index)));
+            if (floatResidence(function, slot)) |register| {
+                try words.append(allocator, moveGeneralToFloat(@enumFromInt(register), .x10, true));
+            } else try storeValue(allocator, words, function, .x10, slot);
         } else {
-            try words.append(allocator, loadStack(.x10, @intCast(@as(usize, span.start) + index)));
+            if (floatResidence(function, slot)) |register| {
+                try words.append(allocator, moveFloatToGeneral(.x10, @enumFromInt(register), true));
+            } else try loadValue(allocator, words, function, .x10, slot);
             try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
         }
     }
@@ -2855,7 +2868,7 @@ fn instructionUsesSlot(instruction: Machine.Instruction, slot: Machine.Slot) boo
         .collection_count => |value| spanContainsSlot(value.collection, slot),
         .return_value => |value| spanContainsSlot(value, slot),
         .branch => |value| value.condition == slot,
-        else => false,
+        else => MemoryResidence.uses(instruction, slot),
     };
 }
 
