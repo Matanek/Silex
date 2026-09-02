@@ -1,5 +1,75 @@
 const std = @import("std");
 const Project = @import("Project.zig");
+const Interpreter = @import("Interpreter.zig");
+
+test "invalidate the cached package graph when a consumer source changes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources");
+    try temporary.dir.createDirPath(std.testing.io, "DependencySources/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{\"sources\":\"Sources\",\"dependencies\":{\"Store\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Package.json",
+        .data = "{\"name\":\"Store\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Module/Box.sx",
+        .data =
+        \\public class Box {
+        \\    let value:int
+        \\    init(value:int) { self.value = value }
+        \\    func get() int { return self.value }
+        \\}
+        ,
+    });
+    const entry = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Application",
+        "Sources",
+        "Main.sx",
+    });
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Main.sx",
+        .data =
+        \\use Store.Box.Box
+        \\func main() {
+        \\    var box = Box(7)
+        \\    print(box.get())
+        \\}
+        ,
+    });
+    var first_compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+    const first = try first_compiler.compile(entry);
+    const first_result = try Interpreter.runCapture(allocator, first.ir);
+    try std.testing.expectEqualStrings("7\n", first_result.stdout);
+    try std.testing.expect(first.metrics.package_functions_stored != 0);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Main.sx",
+        .data =
+        \\use Store.Box.Box
+        \\func main() {
+        \\    var box = Box(7)
+        \\    print(box.get() + 2)
+        \\}
+        ,
+    });
+    var second_compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+    const second = try second_compiler.compile(entry);
+    const second_result = try Interpreter.runCapture(allocator, second.ir);
+    try std.testing.expectEqualStrings("9\n", second_result.stdout);
+    try std.testing.expectEqual(@as(usize, 0), second.metrics.package_functions_reused);
+}
 
 test "resolve a custom source root through canonical package and module paths" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

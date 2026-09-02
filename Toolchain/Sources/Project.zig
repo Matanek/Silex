@@ -210,9 +210,13 @@ pub const Compiler = struct {
             self.files = files;
             if (self.cache_packages) {
                 var package_files: std.ArrayList([]const u8) = .empty;
-                for (self.index.providers) |provider| if (provider.owner != 0) {
+                // A dependency generic may be specialized with a project-owned
+                // type. Its generated ownership and field operations therefore
+                // depend on the consumer sources as well as the package that
+                // declares the generic.
+                for (self.index.providers) |provider| {
                     try package_files.append(self.allocator, provider.path);
-                };
+                }
                 self.package_cache_digest = CompilationCache.key(
                     self.allocator,
                     self.io,
