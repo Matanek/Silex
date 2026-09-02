@@ -778,7 +778,7 @@ fn encodeFunction(
     const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
     try words.append(allocator, saveFrame());
     try words.append(allocator, moveFramePointer());
-    try emitStackAdjustment(allocator, words, encoded_frame_size, false);
+    try emitFrameAllocation(allocator, words, platform, encoded_frame_size);
     var saved_register_index: usize = 0;
     for (callee_saved_registers) |register| if (shouldSaveRegister(function, register, extended_frame)) {
         try emitStoreAtOffset(
@@ -4201,6 +4201,25 @@ fn emitStackAdjustment(
     }
 }
 
+fn emitFrameAllocation(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    platform: Platform,
+    frame_size: u32,
+) Allocator.Error!void {
+    var remaining = frame_size;
+    if (platform == .windows) {
+        while (remaining > 4080) {
+            try emitStackAdjustment(allocator, words, 4080, false);
+            // Windows grows committed stack memory one guarded page at a time.
+            // Touch every crossed page before moving SP farther down.
+            try words.append(allocator, store64(.zero_or_sp, .zero_or_sp, 0));
+            remaining -= 4080;
+        }
+    }
+    try emitStackAdjustment(allocator, words, remaining, false);
+}
+
 fn emitRegisterAdjustment(
     allocator: Allocator,
     words: *std.ArrayList(u32),
@@ -4318,6 +4337,27 @@ test "encode known AArch64 instruction words" {
     try std.testing.expectEqual(@as(u32, 0xc80afdc9), A64.storeReleaseExclusive64(.x10, .x9, .x14));
     try std.testing.expectEqual(@as(u32, 0xc89ffddf), A64.storeRelease64(.zero_or_sp, .x14));
     try std.testing.expectEqual(@as(u32, 0xd65f03c0), returnInstruction());
+}
+
+test "probe every Windows stack page in large ARM64 frames" {
+    var words: std.ArrayList(u32) = .empty;
+    defer words.deinit(std.testing.allocator);
+    try emitFrameAllocation(std.testing.allocator, &words, .windows, 8192);
+    try std.testing.expectEqualSlices(u32, &.{
+        addSubtractImmediate(.zero_or_sp, .zero_or_sp, 4080, false),
+        store64(.zero_or_sp, .zero_or_sp, 0),
+        addSubtractImmediate(.zero_or_sp, .zero_or_sp, 4080, false),
+        store64(.zero_or_sp, .zero_or_sp, 0),
+        addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false),
+    }, words.items);
+
+    words.clearRetainingCapacity();
+    try emitFrameAllocation(std.testing.allocator, &words, .linux, 8192);
+    try std.testing.expectEqualSlices(u32, &.{
+        addSubtractImmediate(.zero_or_sp, .zero_or_sp, 4080, false),
+        addSubtractImmediate(.zero_or_sp, .zero_or_sp, 4080, false),
+        addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false),
+    }, words.items);
 }
 
 test "runtime padding reaches a page offset after an unaligned payload" {
