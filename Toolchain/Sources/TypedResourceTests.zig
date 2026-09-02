@@ -219,6 +219,7 @@ const application_declaration =
     \\    private var store:Resources
     \\    init() { self.store = Resources() }
     \\    func resources() Resources { return self.store }
+    \\    module func __silex_system_resources() @Resources { return self.store }
     \\    func add_system(schedule:int, callback:func(Application)) { callback(self) }
     \\    func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
     \\    func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
@@ -230,6 +231,41 @@ const application_declaration =
 ;
 
 const application_source = resources_source ++ application_declaration;
+
+test "injected systems borrow the application resource store when the host exposes the compiler hook" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\struct State { var value:int }
+        \\func update(state:&State) { state.value++ }
+        \\func main() {
+        \\    var application = Application()
+        \\    application.resources().insert(State(value:41))
+        \\    application.add_system(0, update)
+        \\}
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "__silex_system_resources") != null);
+    const adapter_start = std.mem.indexOf(u8, text, "__silex_system_adapter_") orelse
+        return error.TestUnexpectedResult;
+    const adapter_tail = text[adapter_start..];
+    const adapter_end = std.mem.indexOf(u8, adapter_tail, "\n}\n") orelse
+        return error.TestUnexpectedResult;
+    const adapter = adapter_tail[0 .. adapter_end + 3];
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, adapter, "Resources.drop"));
+    _ = try Lower.lower(allocator, compilation.ir);
+}
 
 fn prepare(temporary: anytype) !void {
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");

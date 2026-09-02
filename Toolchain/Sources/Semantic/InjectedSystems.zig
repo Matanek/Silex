@@ -6,6 +6,7 @@ const Ownership = @import("Resources.zig");
 const Source = @import("../Source.zig");
 
 const resources_name = "GFX.Application.Resources";
+const borrowed_resources_method = "__silex_system_resources";
 const commands_name = "GFX.ECS.Commands";
 
 pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter) !Ir.Function {
@@ -15,7 +16,9 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
     try builder.blocks.append(self.allocator, .{});
     for (function.parameters) |parameter| try builder.value_types.append(self.allocator, parameter.type);
 
-    const resources_method = methodIndex(self.program.structures[host], "resources") orelse return error.InvalidSource;
+    const resources_method = methodIndex(self.program.structures[host], borrowed_resources_method) orelse
+        methodIndex(self.program.structures[host], "resources") orelse return error.InvalidSource;
+    const borrowed_resources = self.program.structures[host].methods[resources_method].return_mode != .value;
     const resources_value = try self.newValue(&builder, .structure(resources));
     try self.emit(&builder, .{ .call = .{
         .result = resources_value,
@@ -50,7 +53,9 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
             }
         },
     }
-    try Ownership.emitDrop(self, &builder, .structure(resources), try loadLocal(self, &builder, resources_local, .structure(resources)));
+    if (!borrowed_resources) {
+        try Ownership.emitDrop(self, &builder, .structure(resources), try loadLocal(self, &builder, resources_local, .structure(resources)));
+    }
     self.terminate(&builder, .return_void);
     return finishFunction(self, function, &builder);
 }
