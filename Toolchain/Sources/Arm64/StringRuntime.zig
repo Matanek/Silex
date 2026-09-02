@@ -4,6 +4,7 @@ const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Allocation = @import("Allocation.zig");
+const System = @import("System.zig");
 
 const Allocator = std.mem.Allocator;
 const Register = A64.Register;
@@ -15,7 +16,6 @@ const dynamic_prefix_size = 16;
 const dynamic_flag: u64 = 1 << 63;
 const length_mask: u64 = dynamic_flag - 1;
 const concat_scratch_size = 48;
-const macos_write = 4;
 
 pub fn emitLiteral(
     allocator: Allocator,
@@ -330,22 +330,7 @@ pub fn emitWrite(
     external_call_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Allocation.Platform,
 ) Error!void {
-    switch (platform) {
-        .darwin => {
-            try words.append(allocator, A64.moveWideZero32(.x16, macos_write));
-            try words.append(allocator, A64.serviceCall());
-        },
-        .windows => {
-            try external_call_sites.append(allocator, .{
-                .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
-                .function = 0,
-                .windows_symbol = .crt_write,
-            });
-            try words.append(allocator, A64.addressPage(.x16));
-            try words.append(allocator, A64.load64(.x16, .x16, 0));
-            try words.append(allocator, A64.branchLinkRegister(.x16));
-        },
-    }
+    try System.emitWrite(allocator, words, external_call_sites, platform);
 }
 
 fn appendRelocatableAddress(

@@ -241,7 +241,15 @@ fn setupToolchain(init: std.process.Init, allocator: std.mem.Allocator, args: []
         return 1;
     };
     var installer = Artifacts.Installer.init(allocator, init.gpa, init.io);
-    for ([_]Artifacts.ToolSpec{ ToolchainSetup.shadercross(host), ToolchainSetup.linker(host) }) |tool| {
+    var tools: [2]Artifacts.ToolSpec = undefined;
+    var tool_count: usize = 0;
+    if (!host.eql(.linux_arm64)) {
+        tools[tool_count] = ToolchainSetup.shadercross(host);
+        tool_count += 1;
+    }
+    tools[tool_count] = ToolchainSetup.linker(host);
+    tool_count += 1;
+    for (tools[0..tool_count]) |tool| {
         const summary = installer.installTool(root, tool) catch |err| switch (err) {
             error.InvalidManifest => {
                 std.debug.print(
@@ -752,7 +760,8 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
     const packages_root = try globalPackagesRoot(allocator, init.environ_map);
     const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
     const native_target = target.eql(.macos_arm64) or target.eql(.macos_x64) or
-        target.eql(.linux_x64) or target.eql(.windows_arm64) or target.eql(.windows_x64);
+        target.eql(.linux_arm64) or target.eql(.linux_x64) or
+        target.eql(.windows_arm64) or target.eql(.windows_x64);
     var passed: usize = 0;
     var failed: usize = 0;
     var source_errors: usize = 0;
@@ -1360,6 +1369,30 @@ fn compileNativeOptions(
         progress.finish();
         return 0;
     }
+    if (target.eql(.linux_arm64) and boundary_providers.len != 0) {
+        const object = Arm64Object.emitLinux(allocator, machine) catch |err| {
+            std.debug.print("silex: cannot emit a Linux ARM64 relocatable object: {t}\n", .{err});
+            return 1;
+        };
+        const object_path = try linkedObjectPath(allocator, options, boundary_providers);
+        defer Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
+        if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        {
+            const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
+            defer file.close(init.io);
+            try file.writeStreamingAll(init.io, object);
+        }
+        try CompilationCache.ensureOutputParent(init.io, options.output_path);
+        progress.stage(.link);
+        NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
+            std.debug.print("silex: cannot link native package artifacts for linux-arm64: {t}\n", .{err});
+            return 1;
+        };
+        if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        progress.source(.ready, options.output_path);
+        progress.finish();
+        return 0;
+    }
     const executable = executable: {
         if (target.eql(.macos_arm64)) break :executable MachO.emit(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit native executable: {t}\n", .{err});
@@ -1382,8 +1415,23 @@ fn compileNativeOptions(
                 return 1;
             };
             defer image.deinit(allocator);
-            break :executable Elf.emit(allocator, image.code, image.entry_offset) catch |err| {
+            break :executable Elf.emit(allocator, .x64, image.code, image.entry_offset) catch |err| {
                 std.debug.print("silex: cannot emit Linux ELF executable: {t}\n", .{err});
+                return 1;
+            };
+        }
+        if (target.eql(.linux_arm64)) {
+            const main_id = findMachineMain(machine) orelse {
+                std.debug.print("silex: Linux ARM64 executable has no valid main function\n", .{});
+                return 1;
+            };
+            var image = Arm64Encoder.encodeLinux(allocator, machine, .{ .standalone_main = main_id }) catch |err| {
+                std.debug.print("silex: Linux ARM64 encoder cannot emit this program yet: {t}\n", .{err});
+                return 1;
+            };
+            defer image.deinit(allocator);
+            break :executable Elf.emit(allocator, .arm64, image.code, image.entry_offset.?) catch |err| {
+                std.debug.print("silex: cannot emit Linux ARM64 ELF executable: {t}\n", .{err});
                 return 1;
             };
         }
@@ -1779,7 +1827,7 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
         .duplicate_output => std.debug.print("silex: output is specified more than once by '{s}'\n", .{diagnostic.argument.?}),
         .missing_target => std.debug.print("silex: option '--target' expects a target name\n", .{}),
         .duplicate_target => std.debug.print("silex: target is specified more than once\n", .{}),
-        .unknown_target => std.debug.print("silex: unknown target '{s}'; expected macos-arm64, linux-x64, windows-x64 or windows-arm64\n", .{diagnostic.argument.?}),
+        .unknown_target => std.debug.print("silex: unknown target '{s}'; expected macos-arm64, macos-x64, linux-arm64, linux-x64, windows-arm64 or windows-x64\n", .{diagnostic.argument.?}),
         .missing_workspace => std.debug.print("silex: option '--workspace' expects a directory\n", .{}),
         .duplicate_workspace => std.debug.print("silex: workspace is specified more than once\n", .{}),
         .duplicate_dev => std.debug.print("silex: development dependencies are requested more than once\n", .{}),
@@ -1861,11 +1909,15 @@ fn configureShaderCompiler(
     const root = try globalToolchainRoot(allocator, environment) orelse return;
     const host = TargetModule.Target.host() orelse return;
     if (!host.hasNativeEmitter()) return;
+    // Shadercross has no upstream native Linux ARM64 artifact yet. GFX is
+    // outside this backend slice; leave the compiler path absent rather than
+    // installing or invoking an emulated X64 host tool.
+    if (host.eql(.linux_arm64)) return;
     compiler.shadercross_path = try ToolchainSetup.executablePath(allocator, root, host);
 }
 
 fn lowerModeForTarget(mode: Cli.Mode, target: TargetModule.Target) Lower.Mode {
-    if (mode == .release and target.eql(.macos_arm64)) return .release;
+    if (mode == .release and (target.eql(.macos_arm64) or target.eql(.linux_arm64))) return .release;
     // X64 starts from the stack-compatible machine form, then applies its own
     // target-specific scalar allocation after lowering.
     return .debug;
@@ -1873,6 +1925,7 @@ fn lowerModeForTarget(mode: Cli.Mode, target: TargetModule.Target) Lower.Mode {
 
 test "select release register allocation only for its supported target" {
     try std.testing.expectEqual(Lower.Mode.release, lowerModeForTarget(.release, .macos_arm64));
+    try std.testing.expectEqual(Lower.Mode.release, lowerModeForTarget(.release, .linux_arm64));
     try std.testing.expectEqual(Lower.Mode.debug, lowerModeForTarget(.release, .linux_x64));
     try std.testing.expectEqual(Lower.Mode.debug, lowerModeForTarget(.release, .windows_x64));
     try std.testing.expectEqual(Lower.Mode.debug, lowerModeForTarget(.debug, .macos_arm64));

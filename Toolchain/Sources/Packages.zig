@@ -1793,10 +1793,10 @@ fn validArchive(io: Io, path: []const u8, target: TargetModule.Target) bool {
             const matches = if (target.eql(.macos_arm64) or target.eql(.macos_x64))
                 std.mem.readInt(u32, object_header[0..4], .little) == macho.MH_MAGIC_64 and
                     std.mem.readInt(u32, object_header[4..8], .little) == @as(u32, @bitCast(if (target.eql(.macos_arm64)) macho.CPU_TYPE_ARM64 else macho.CPU_TYPE_X86_64))
-            else if (target.eql(.linux_x64))
+            else if (target.eql(.linux_x64) or target.eql(.linux_arm64))
                 std.mem.eql(u8, object_header[0..4], "\x7fELF") and object_header[4] == 2 and object_header[5] == 1 and
                     std.mem.readInt(u16, object_header[16..18], .little) == 1 and
-                    std.mem.readInt(u16, object_header[18..20], .little) == 62
+                    std.mem.readInt(u16, object_header[18..20], .little) == @as(u16, if (target.eql(.linux_arm64)) 183 else 62)
             else if (target.eql(.windows_x64))
                 std.mem.readInt(u16, object_header[0..2], .little) == 0x8664 and
                     std.mem.readInt(u16, object_header[2..4], .little) != 0
@@ -1862,12 +1862,12 @@ fn writeTestArchive(directory: Io.Dir, io: Io, path: []const u8, target: TargetM
     if (target.eql(.macos_x64)) {
         std.mem.writeInt(u32, archive[68..72], macho.MH_MAGIC_64, .little);
         std.mem.writeInt(u32, archive[72..76], @bitCast(macho.CPU_TYPE_X86_64), .little);
-    } else if (target.eql(.linux_x64)) {
+    } else if (target.eql(.linux_x64) or target.eql(.linux_arm64)) {
         @memcpy(archive[68..72], "\x7fELF");
         archive[72] = 2;
         archive[73] = 1;
         std.mem.writeInt(u16, archive[84..86], 1, .little);
-        std.mem.writeInt(u16, archive[86..88], 62, .little);
+        std.mem.writeInt(u16, archive[86..88], if (target.eql(.linux_arm64)) 183 else 62, .little);
     } else {
         std.mem.writeInt(u16, archive[68..70], if (target.eql(.windows_x64)) 0x8664 else 0xaa64, .little);
         std.mem.writeInt(u16, archive[70..72], 1, .little);
@@ -2471,10 +2471,12 @@ test "resolve Mach-O X64, ELF and COFF boundary archives with system libraries" 
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/macos-x64");
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/linux-x64");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/linux-arm64");
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/windows-x64");
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/windows-arm64");
     try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/macos-x64/libBridge.a", .macos_x64);
     try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/linux-x64/libBridge.a", .linux_x64);
+    try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/linux-arm64/libBridge.a", .linux_arm64);
     try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/windows-x64/Bridge.lib", .windows_x64);
     try writeTestArchive(temporary.dir, std.testing.io, "Bridge/Boundary/windows-arm64/Bridge.lib", .windows_arm64);
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Bridge" });
@@ -2500,6 +2502,16 @@ test "resolve Mach-O X64, ELF and COFF boundary archives with system libraries" 
     try std.testing.expectEqualStrings("dl", graph.packages[0].boundary_providers[0].libraries[0]);
     try std.testing.expectEqualStrings("m", graph.packages[0].boundary_providers[0].libraries[1]);
     try std.testing.expectEqualStrings("pthread", graph.packages[0].boundary_providers[0].libraries[2]);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"linux-arm64":{"providers":{"Native":{"archive":"Boundary/linux-arm64/libBridge.a"}}}}}
+        ,
+    });
+    resolver = Resolver.initForTarget(allocator, std.testing.io, null, .linux_arm64);
+    graph = try resolver.resolve(base);
+    try std.testing.expect(std.mem.endsWith(u8, graph.packages[0].boundary_providers[0].archive.?, "Boundary/linux-arm64/libBridge.a"));
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",

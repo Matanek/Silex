@@ -13,6 +13,7 @@ on:
         options:
           - all
           - macos-x64
+          - linux-arm64
           - linux-x64
           - windows-arm64
           - windows-x64
@@ -106,6 +107,81 @@ jobs:
           printf '%s\n' "$portability_output"
           cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')
           test "$cycle_drops" -eq 6
+
+  linux-arm64:
+    if: inputs.target == 'all' || inputs.target == 'linux-arm64'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Verify native ARM64 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            aarch64|arm64) ;;
+            *) echo "expected a native ARM64 runner, got $(uname -m)" >&2; exit 1 ;;
+          esac
+
+      - name: Install Zig 0.16.0 for Linux ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz -o "$archive"
+          echo "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-aarch64-linux-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Build and validate Silex on Linux ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+
+          boundary="$GITHUB_WORKSPACE/Tests/Target/linux-arm64/LinuxArm64Boundary"
+          mkdir -p "$boundary/Boundary/linux-arm64"
+          zig cc -target aarch64-linux-gnu -O2 -c "$boundary/provider.c" \
+            -o "$boundary/Boundary/linux-arm64/provider.o"
+          zig ar rcs "$boundary/Boundary/linux-arm64/libProvider.a" \
+            "$boundary/Boundary/linux-arm64/provider.o"
+
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/silex-prefix" \
+            --build-file Toolchain/build.zig
+
+          silex="$RUNNER_TEMP/silex-prefix/bin/silex"
+          "$silex" setup
+          managed_zig="$HOME/.silex/toolchain/zig/0.16.0/linux-arm64/zig"
+          test -x "$managed_zig"
+          file "$managed_zig" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64)'
+
+          source="$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
+          "$silex" interpret "$source" > "$RUNNER_TEMP/interpreted.txt"
+          "$silex" compile "$source" --debug -o "$RUNNER_TEMP/native-debug"
+          "$RUNNER_TEMP/native-debug" > "$RUNNER_TEMP/debug.txt"
+          cmp "$RUNNER_TEMP/interpreted.txt" "$RUNNER_TEMP/debug.txt"
+          "$silex" compile "$source" --release -o "$RUNNER_TEMP/native-release"
+          "$RUNNER_TEMP/native-release" > "$RUNNER_TEMP/release.txt"
+          cmp "$RUNNER_TEMP/interpreted.txt" "$RUNNER_TEMP/release.txt"
+          file "$RUNNER_TEMP/native-release" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64)'
+          readelf -h "$RUNNER_TEMP/native-release" | grep -E 'Machine:.*AArch64'
+
+          "$silex" run "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" --debug
+          "$silex" test "$source"
+
+          "$managed_zig" cc -target aarch64-linux-gnu -O2 -c "$boundary/provider.c" \
+            -o "$boundary/Boundary/linux-arm64/provider.o"
+          "$managed_zig" ar rcs "$boundary/Boundary/linux-arm64/libProvider.a" \
+            "$boundary/Boundary/linux-arm64/provider.o"
+          "$silex" test "$boundary/Tests/Boundary.sx"
+          "$silex" compile "$boundary/Tests/Boundary.sx" --release \
+            -o "$RUNNER_TEMP/boundary"
+          test "$("$RUNNER_TEMP/boundary")" = "linux arm64 boundary ready"
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'

@@ -1,9 +1,12 @@
 const std = @import("std");
 const Instructions = @import("Instructions.zig");
 const Machine = @import("Machine.zig");
+const MathBoundary = @import("../Math/Boundary.zig");
+const System = @import("System.zig");
 
 const Allocator = std.mem.Allocator;
 const Register = Instructions.Register;
+pub const Error = Machine.Error || error{UnsupportedInstruction};
 
 pub const Site = struct {
     instruction_offset: u32,
@@ -15,13 +18,39 @@ pub fn emit(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     sites: *std.ArrayList(Site),
+    platform: System.Platform,
     program: Machine.Program,
     function: Machine.Function,
     call: Machine.Instruction.ExternalCall,
-) Machine.Error!void {
+) Error!void {
     if (call.function >= program.external_functions.len) return error.InvalidMachineProgram;
     const external = program.external_functions[call.function];
     if (external.signature.arguments.len != call.arguments.len) return error.InvalidMachineProgram;
+
+    if (platform == .linux and !external.package_private and MathBoundary.identify(external.source_name) == null) {
+        if (!std.mem.eql(u8, external.provider, "Linux.kernel")) return error.UnsupportedInstruction;
+        if (call.arguments.len > 6) return error.TooManyArguments;
+        for (call.arguments, 0..) |argument, index| {
+            try loadValue(allocator, words, function, @enumFromInt(index), argument);
+        }
+        const number: u16 = if (std.mem.eql(u8, external.source_name, "read") and call.arguments.len == 3)
+            63
+        else if (std.mem.eql(u8, external.source_name, "write") and call.arguments.len == 3)
+            64
+        else if (std.mem.eql(u8, external.source_name, "clock_gettime") and call.arguments.len == 2)
+            113
+        else if (std.mem.eql(u8, external.source_name, "getpid") and call.arguments.len == 0)
+            172
+        else if (std.mem.eql(u8, external.source_name, "getrandom") and call.arguments.len == 3)
+            278
+        else if (std.mem.eql(u8, external.source_name, "exit") and call.arguments.len == 1)
+            93
+        else
+            return error.UnsupportedInstruction;
+        try System.emitUnixCall(allocator, words, platform, number);
+        if (call.result) |result| try storeValue(allocator, words, function, .x0, result);
+        return;
+    }
 
     var has_float = false;
     for (external.signature.arguments) |kind| if (kind == .float32 or kind == .float64) {
@@ -63,6 +92,10 @@ pub fn emit(
     try words.append(allocator, Instructions.load64(.x16, .x16, 0));
     try words.append(allocator, Instructions.branchLinkRegister(.x16));
     if (!has_float and call.arguments.len > 8) try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, true));
+    // x8 is caller-clobbered by AAPCS64 but carries the private Silex status
+    // between generated calls. A successful C Boundary call starts a fresh
+    // success status explicitly.
+    try words.append(allocator, Instructions.moveWideZero32(.x8, 0));
     if (call.result) |result| {
         if (external.signature.result == .float32 or external.signature.result == .float64) {
             try words.append(allocator, Instructions.moveFloatToGeneral(.x9, .x0, external.signature.result == .float64));
@@ -120,6 +153,7 @@ pub fn emitIndirect(
     }
     try words.append(allocator, Instructions.branchLinkRegister(.x16));
     if (!has_float and call.arguments.len > 8) try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, true));
+    try words.append(allocator, Instructions.moveWideZero32(.x8, 0));
     if (call.result) |result| {
         if (call.signature.result == .float32 or call.signature.result == .float64) {
             try words.append(allocator, Instructions.moveFloatToGeneral(.x9, .x0, call.signature.result == .float64));

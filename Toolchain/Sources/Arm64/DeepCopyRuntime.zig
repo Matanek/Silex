@@ -1,6 +1,8 @@
 const std = @import("std");
 
 pub const object_bytes = @import("deep_copy_runtime_object").object_bytes;
+pub const linux_object_bytes = @import("deep_copy_runtime_linux_arm64_object").object_bytes;
+const ElfRuntime = @import("ElfRuntime.zig");
 
 const mach_header_size = 32;
 const segment_command_64 = 0x19;
@@ -78,6 +80,10 @@ pub fn payload() Error!Payload {
     };
 }
 
+pub fn linuxPayload(allocator: std.mem.Allocator) ElfRuntime.Error!ElfRuntime.Payload {
+    return ElfRuntime.payload(allocator, linux_object_bytes);
+}
+
 fn read32(offset: usize) u32 {
     return std.mem.readInt(u32, object_bytes[offset..][0..4], .little);
 }
@@ -98,4 +104,11 @@ test "bundled deep-copy runtime is an ARM64 Mach-O image" {
     try std.testing.expect(runtime.bytes.len > 0);
     try std.testing.expect(runtime.entry_offset < runtime.bytes.len);
     try std.testing.expectEqual(@as(u12, 0), runtime.page_offset % 4);
+}
+
+test "bundled Linux ARM64 deep-copy runtime is an AArch64 ELF image" {
+    var runtime = try linuxPayload(std.testing.allocator);
+    defer runtime.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("\x7fELF", linux_object_bytes[0..4]);
+    try std.testing.expect(runtime.entry_offset < runtime.bytes.len);
 }

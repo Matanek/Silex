@@ -87,6 +87,18 @@ pub fn linker(host: TargetModule.Target) Artifacts.ToolSpec {
             .strip_components = 1,
         },
     };
+    if (host.eql(.linux_arm64)) return .{
+        .name = "Native linker",
+        .path = "downloads/zig-aarch64-linux-0.16.0.tar.xz",
+        .url = zig_release ++ "zig-aarch64-linux-0.16.0.tar.xz",
+        .sha256 = "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17",
+        .archive = .{
+            .format = .tar_xz,
+            .into = "zig/0.16.0/linux-arm64",
+            .provides = "zig",
+            .strip_components = 1,
+        },
+    };
     if (host.eql(.windows_x64)) return .{
         .name = "Native linker",
         .path = "downloads/zig-x86_64-windows-0.16.0.zip",
@@ -138,6 +150,10 @@ test "Shadercross belongs to the host toolchain" {
     try std.testing.expectEqualStrings("zig", linux_linker.archive.provides);
     const macos_x64_linker = linker(.macos_x64);
     try std.testing.expect(std.mem.endsWith(u8, macos_x64_linker.url, "zig-x86_64-macos-0.16.0.tar.xz"));
+
+    const linux_arm64_linker = linker(.linux_arm64);
+    try std.testing.expectEqualStrings("zig/0.16.0/linux-arm64", linux_arm64_linker.archive.into);
+    try std.testing.expect(std.mem.endsWith(u8, linux_arm64_linker.url, "zig-aarch64-linux-0.16.0.tar.xz"));
 
     const windows_linker = linker(.windows_x64);
     try std.testing.expectEqual(.zip, windows_linker.archive.format);

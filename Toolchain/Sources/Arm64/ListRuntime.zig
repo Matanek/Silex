@@ -1345,6 +1345,7 @@ fn immediate(allocator: Allocator, words: *std.ArrayList(u32), register: A64.Reg
 fn minimumAllocation(platform: Allocation.Platform) u64 {
     return switch (platform) {
         .darwin => darwin_page_size,
+        .linux => windows_page_size,
         .windows => windows_page_size,
     };
 }

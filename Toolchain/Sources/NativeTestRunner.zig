@@ -1,10 +1,10 @@
 const std = @import("std");
 const Boundary = @import("Boundary.zig");
+const Arm64Object = @import("Arm64/Object.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const Ir = @import("Ir.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Machine = @import("Arm64/Machine.zig");
-const Arm64Object = @import("Arm64/Object.zig");
 const MachOObject = @import("MacOS/Object.zig");
 const MachOX64Object = @import("MacOS/X64Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
@@ -129,6 +129,18 @@ fn executeAt(
     }
     if (target.eql(.windows_arm64)) {
         const object = try Arm64Object.emitWindowsFunction(allocator, program, function);
+        const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
+        defer Io.Dir.cwd().deleteFile(io, object_path) catch {};
+        {
+            const file = try Io.Dir.cwd().createFile(io, object_path, .{});
+            defer file.close(io);
+            try file.writeStreamingAll(io, object);
+        }
+        try NativeLink.executable(allocator, io, linker_path, target, object_path, executable, providers);
+        return run(allocator, io, executable);
+    }
+    if (target.eql(.linux_arm64)) {
+        const object = try Arm64Object.emitLinuxFunction(allocator, program, function);
         const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
         defer Io.Dir.cwd().deleteFile(io, object_path) catch {};
         {
