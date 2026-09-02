@@ -74,6 +74,13 @@ pub fn execute(
 ) !Execution {
     const function_text = try std.fmt.allocPrint(allocator, "{d}", .{function});
     const reusable = cache and providers.len == 0 and !MacOSLink.requiresSystemLink(program.external_functions);
+    defer if (!reusable) {
+        // Expected signal terminations and early execution errors also leave no
+        // empty cache hierarchy behind. These calls cannot remove a directory
+        // owned by another concurrent or pre-existing cache entry.
+        Io.Dir.cwd().deleteDir(io, ".silex/test") catch {};
+        Io.Dir.cwd().deleteDir(io, ".silex") catch {};
+    };
     const digest = if (reusable)
         try CompilationCache.key(
             allocator,
