@@ -30,7 +30,7 @@ const usage =
 ;
 
 const output_directory = ".zig-cache/optimizer-oracle";
-const generated_source_directory = "/private/tmp/SilexOptimizerOracle";
+const generated_source_directory = output_directory ++ "/SilexOptimizerOracle";
 
 pub fn main(init: std.process.Init) u8 {
     return run(init) catch |err| {
@@ -147,7 +147,12 @@ fn qualifyGeneratedNative(
     count: usize,
     initial_seed: u64,
 ) !void {
-    try std.Io.Dir.cwd().createDirPath(io, generated_source_directory);
+    // Generated consumers own a package root: never inherit a manifest from
+    // a shared temporary parent or collide with another worktree's campaign.
+    try std.Io.Dir.cwd().createDirPath(io, generated_source_directory ++ "/Module");
+    try writeFile(io, generated_source_directory ++ "/Package.json",
+        \\{"name":"SilexOptimizerOracle","version":"0.0.0"}
+    );
     for (0..count) |index| {
         const seed = initial_seed +% index;
         const source = try NativeGenerator.source(allocator, seed);
