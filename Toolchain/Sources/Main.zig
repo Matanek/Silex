@@ -1318,7 +1318,7 @@ fn compileNativeOptions(
         progress.finish();
         return 0;
     }
-    if (target.eql(.windows_arm64) and boundary_providers.len != 0) {
+    if (target.eql(.windows_arm64)) {
         const object = Arm64Object.emitWindows(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit a Windows ARM64 relocatable object: {t}\n", .{err});
             return 1;
@@ -1334,7 +1334,7 @@ fn compileNativeOptions(
         try CompilationCache.ensureOutputParent(init.io, options.output_path);
         progress.stage(.link);
         NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
-            std.debug.print("silex: cannot link native package artifacts for windows-arm64: {t}\n", .{err});
+            std.debug.print("silex: cannot link the Windows ARM64 executable: {t}\n", .{err});
             return 1;
         };
         if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
