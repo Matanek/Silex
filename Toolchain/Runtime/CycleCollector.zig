@@ -380,12 +380,22 @@ fn grow(context: *Context) bool {
     const new_capacity = new_byte_count / @sizeOf(Node);
     const mapping = context.allocate(new_byte_count) orelse return false;
     const nodes: [*]Node = @ptrCast(@alignCast(mapping));
-    for (context.nodes[0..context.count], 0..) |node, index| nodes[index] = node;
+    for (context.nodes[0..context.count], 0..) |node, index| copyNode(&nodes[index], node);
     context.release(@ptrCast(context.nodes), context.node_byte_count);
     context.nodes = nodes;
     context.capacity = new_capacity;
     context.node_byte_count = new_byte_count;
     return true;
+}
+
+fn copyNode(destination: *Node, source: Node) void {
+    destination.address = source.address;
+    destination.type_value = source.type_value;
+    destination.byte_count = source.byte_count;
+    destination.internal = source.internal;
+    destination.feedback_internal = source.feedback_internal;
+    destination.active = source.active;
+    destination.kind = source.kind;
 }
 
 fn traceValue(context: *Context, value: [*]u64, type_value: u64) bool {

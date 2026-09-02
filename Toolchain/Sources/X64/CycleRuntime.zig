@@ -102,4 +102,5 @@ test "bundled macOS X64 cycle runtime is a Mach-O image" {
     defer runtime.deinit(std.testing.allocator);
     try std.testing.expect(runtime.bytes.len > 0);
     try std.testing.expect(runtime.entry_offset < runtime.bytes.len);
+    try std.testing.expect(std.mem.indexOf(u8, macos_object_bytes, "_memmove\x00") == null);
 }
