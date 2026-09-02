@@ -507,7 +507,7 @@ pub const Resolver = struct {
             if ((user_root == null or !std.mem.eql(u8, candidate, user_root.?)) and try exists(self.io, candidate)) {
                 return candidate;
             }
-            const next = std.fs.path.dirname(directory) orelse break;
+            const next = workspaceParentDirectory(directory) orelse break;
             if (std.mem.eql(u8, next, directory)) break;
             directory = next;
         }
@@ -1650,6 +1650,12 @@ fn belongsTo(module_name: []const u8, package_name: []const u8) bool {
             module_name[package_name.len] == '.');
 }
 
+fn workspaceParentDirectory(directory: []const u8) ?[]const u8 {
+    if (std.fs.path.dirname(directory)) |parent| return parent;
+    if (!std.fs.path.isAbsolute(directory) and !std.mem.eql(u8, directory, ".")) return ".";
+    return null;
+}
+
 fn validMetadataLine(text: []const u8) bool {
     return text.len != 0 and
         std.mem.trim(u8, text, " \t\r\n").len == text.len and
@@ -2669,6 +2675,12 @@ test "reject path fields conflicts and package cycles" {
     resolver = Resolver.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
     try std.testing.expectEqualStrings("package dependency cycle", resolver.diagnostic.?);
+}
+
+test "ascend a relative project root through the current workspace" {
+    try std.testing.expectEqualStrings("Packages", workspaceParentDirectory("Packages/App").?);
+    try std.testing.expectEqualStrings(".", workspaceParentDirectory("Packages").?);
+    try std.testing.expect(workspaceParentDirectory(".") == null);
 }
 
 test "resolve qualified identities literally from an injected global root" {
