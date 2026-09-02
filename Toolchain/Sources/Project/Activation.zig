@@ -1,7 +1,8 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Iterations = @import("Iterations.zig");
-const expressionName = @import("Names.zig").expression;
+const Names = @import("Names.zig");
+const expressionName = Names.expression;
 
 pub fn activate(self: anytype, module: usize) !void {
     const program = self.units[module].program.?;
@@ -78,7 +79,11 @@ pub fn activateType(self: anytype, module: usize, type_value: Ast.Type) !void {
     }
     const index = type_value.structureIndex() orelse return;
     if (index >= program.type_names.len) return;
-    const target = try self.nominalCandidate(module, program.type_names[index]) orelse return;
+    const name = program.type_names[index];
+    if (Names.findStructure(program, name)) |structure| if (structure.collection) |collection| {
+        return self.activateType(module, collection.element);
+    };
+    const target = try self.nominalCandidate(module, name) orelse return;
     if (target.module != module) try self.activateDeclaration(module, target);
 }
 

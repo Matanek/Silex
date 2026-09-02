@@ -217,12 +217,21 @@ pub const Compiler = struct {
                 for (self.index.providers) |provider| {
                     try package_files.append(self.allocator, provider.path);
                 }
+                // Each entry composes its own reachable module subset. Sharing
+                // one semantic artifact between entries can relocate generated
+                // functions against a context that does not contain their
+                // referenced types.
+                const cache_variant = try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}:{s}",
+                    .{ self.target.name(), input_path },
+                );
                 self.package_cache_digest = CompilationCache.key(
                     self.allocator,
                     self.io,
                     package_files.items,
                     if (self.include_tests) "semantic-packages-test" else "semantic-packages",
-                    self.target.name(),
+                    cache_variant,
                 ) catch null;
             }
         }

@@ -2,6 +2,69 @@ const std = @import("std");
 const Project = @import("Project.zig");
 const Interpreter = @import("Interpreter.zig");
 
+test "activate an imported element used only by a package view signature" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources");
+    try temporary.dir.createDirPath(std.testing.io, "DependencySources/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{\"sources\":\"Sources\",\"dependencies\":{\"Views\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Package.json",
+        .data = "{\"name\":\"Views\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Module/Item.sx",
+        .data = "public struct Item { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Module/@Module.sx",
+        .data = "public use Views.Item.Item",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Module/Store.sx",
+        .data =
+        \\use Views.Item
+        \\public class Store {
+        \\    private var items:Item[]
+        \\    init() { self.items = [Item(value:4)] }
+        \\    func values() @Item[..] {
+        \\        return @self.items[0:self.items.count()]
+        \\    }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Main.sx",
+        .data =
+        \\use Views.Store.Store
+        \\func main() {
+        \\    var store = Store()
+        \\    print(store.values()[0].value)
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Application",
+        "Sources",
+        "Main.sx",
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("4\n", result.stdout);
+}
+
 test "invalidate the cached package graph when a consumer source changes" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -37,6 +100,14 @@ test "invalidate the cached package graph when a consumer source changes" {
         "Sources",
         "Main.sx",
     });
+    const other_entry = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Application",
+        "Sources",
+        "Other.sx",
+    });
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Sources/Main.sx",
@@ -48,11 +119,27 @@ test "invalidate the cached package graph when a consumer source changes" {
         \\}
         ,
     });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Other.sx",
+        .data =
+        \\use Store.Box.Box
+        \\func main() {
+        \\    var box = Box(8)
+        \\    print(box.get())
+        \\}
+        ,
+    });
     var first_compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
     const first = try first_compiler.compile(entry);
     const first_result = try Interpreter.runCapture(allocator, first.ir);
     try std.testing.expectEqualStrings("7\n", first_result.stdout);
     try std.testing.expect(first.metrics.package_functions_stored != 0);
+
+    var other_compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+    const other = try other_compiler.compile(other_entry);
+    const other_result = try Interpreter.runCapture(allocator, other.ir);
+    try std.testing.expectEqualStrings("8\n", other_result.stdout);
+    try std.testing.expectEqual(@as(usize, 0), other.metrics.package_functions_reused);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Application/Sources/Main.sx",
