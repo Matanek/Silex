@@ -12,6 +12,7 @@ const image_file_machine_arm64: u16 = 0xaa64;
 const image_rel_arm64_branch26: u16 = 0x0003;
 const image_rel_arm64_pagebase_rel21: u16 = 0x0004;
 const image_rel_arm64_pageoffset_12a: u16 = 0x0006;
+const image_rel_arm64_pageoffset_12l: u16 = 0x0007;
 
 pub fn emitWindows(allocator: Allocator, program: Machine.Program) Error![]u8 {
     var image = try Encoder.encodeWindows(allocator, program, .{ .executable_main = try findMain(program) });
@@ -103,7 +104,13 @@ fn emitWindowsImage(allocator: Allocator, program: Machine.Program, image: *Enco
     for (image.address_sites, 0..) |site, index| {
         const symbol: u32 = @intCast(1 + index);
         try appendRelocation(allocator, &bytes, site.instruction_offset, symbol, image_rel_arm64_pagebase_rel21);
-        try appendRelocation(allocator, &bytes, site.instruction_offset + 4, symbol, image_rel_arm64_pageoffset_12a);
+        try appendRelocation(
+            allocator,
+            &bytes,
+            site.instruction_offset + 4,
+            symbol,
+            try pageOffsetRelocation(image.code, site.instruction_offset + 4),
+        );
     }
     for (image.external_call_sites, 0..) |site, index| {
         try appendRelocation(allocator, &bytes, site.instruction_offset, external_symbol_for_site[index], image_rel_arm64_branch26);
@@ -135,6 +142,14 @@ fn appendRelocation(allocator: Allocator, bytes: *std.ArrayList(u8), offset: u32
     try appendInt(allocator, bytes, u32, offset);
     try appendInt(allocator, bytes, u32, symbol);
     try appendInt(allocator, bytes, u16, kind);
+}
+
+fn pageOffsetRelocation(code: []const u8, instruction_offset: u32) Error!u16 {
+    if (@as(usize, instruction_offset) + 4 > code.len) return error.InvalidImage;
+    const instruction = std.mem.readInt(u32, code[instruction_offset..][0..4], .little);
+    if (instruction & 0x1f000000 == 0x11000000) return image_rel_arm64_pageoffset_12a;
+    if (instruction & 0x3b000000 == 0x39000000) return image_rel_arm64_pageoffset_12l;
+    return error.InvalidImage;
 }
 
 fn appendSymbol(
@@ -204,4 +219,14 @@ test "emit exposes an ARM64 test entry as a COFF main symbol" {
     try std.testing.expectEqual(image_file_machine_arm64, std.mem.readInt(u16, bytes[0..2], .little));
     const symbol_offset = std.mem.readInt(u32, bytes[8..12], .little);
     try std.testing.expectEqualStrings("main", std.mem.sliceTo(bytes[symbol_offset..][0..8], 0));
+}
+
+test "emit uses the COFF page-offset relocation matching the low instruction" {
+    var add_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &add_bytes, 0x91000000, .little);
+    try std.testing.expectEqual(image_rel_arm64_pageoffset_12a, try pageOffsetRelocation(&add_bytes, 0));
+
+    var load_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &load_bytes, 0x3dc00000, .little);
+    try std.testing.expectEqual(image_rel_arm64_pageoffset_12l, try pageOffsetRelocation(&load_bytes, 0));
 }

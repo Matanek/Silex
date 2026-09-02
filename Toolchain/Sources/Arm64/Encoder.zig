@@ -178,6 +178,16 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             const offset: u32 = @intCast(words.items.len * 4);
             try words.append(allocator, saveFrame());
             try words.append(allocator, moveFramePointer());
+            if (platform == .windows) if (program.mutex_global) |global| {
+                try emitWindowsMutexCall(
+                    allocator,
+                    &words,
+                    &data_fixups,
+                    &external_call_sites,
+                    global,
+                    .initialize_critical_section,
+                );
+            };
             try emitSnapshotAcquire(allocator, &words, &snapshot_data_fixups);
             try calls.append(allocator, .{ .at = words.items.len, .function = function });
             try words.append(allocator, branchLink());
