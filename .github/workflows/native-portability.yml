@@ -66,6 +66,13 @@ jobs:
           "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" \
             --release -o "$RUNNER_TEMP/distribution-smoke"
           test "$("$RUNNER_TEMP/distribution-smoke")" = "silex distribution ready"
+          aggregate_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/AggregateFieldStores.sx"
+          test "$("$silex" interpret "$aggregate_fixture" --nocache)" = "aggregate field stores preserved"
+          for mode in debug release; do
+            "$silex" compile "$aggregate_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/aggregate-fields-$mode"
+            test "$("$RUNNER_TEMP/aggregate-fields-$mode")" = "aggregate field stores preserved"
+          done
 
   windows-x64:
     if: inputs.target == 'all' || inputs.target == 'windows-x64'
@@ -123,4 +130,17 @@ jobs:
           $smokeOutput = @(& $smoke)
           if ($LASTEXITCODE -ne 0 -or $smokeOutput.Count -ne 1 -or $smokeOutput[0] -ne "silex distribution ready") {
             throw "standalone distribution smoke failed"
+          }
+          $aggregateFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/AggregateFieldStores.sx"
+          $interpreted = @(& $silex interpret $aggregateFixture --nocache)
+          if ($LASTEXITCODE -ne 0 -or $interpreted.Count -ne 1 -or $interpreted[0] -ne "aggregate field stores preserved") {
+            throw "aggregate field interpreter regression failed"
+          }
+          foreach ($mode in @("debug", "release")) {
+            $aggregateBinary = Join-Path $env:RUNNER_TEMP "aggregate-fields-$mode.exe"
+            & $silex compile $aggregateFixture "--$mode" --nocache -o $aggregateBinary
+            $aggregateOutput = @(& $aggregateBinary)
+            if ($LASTEXITCODE -ne 0 -or $aggregateOutput.Count -ne 1 -or $aggregateOutput[0] -ne "aggregate field stores preserved") {
+              throw "aggregate field $mode regression failed"
+            }
           }

@@ -1,6 +1,10 @@
 const Machine = @import("Machine.zig");
 const std = @import("std");
 
+test {
+    _ = @import("AggregateCopyTests.zig");
+}
+
 pub fn copySignPrecision(external: Machine.ExternalFunction) ?bool {
     const built_in = !external.package_private and
         (std.mem.eql(u8, external.provider, "Darwin.lib_system") or

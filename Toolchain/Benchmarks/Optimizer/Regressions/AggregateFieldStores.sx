@@ -1,0 +1,62 @@
+struct State {
+    var x:float
+    var y:float
+    var z:float
+    var w:float
+
+    func change_sibling() float {
+        self.y += 10.0
+        return 2.0
+    }
+}
+
+func change(state:&State, values:&State[..], index:int, positive:bool) {
+    let snapshot = copy state
+    if positive { state.x += 2.0 } else { state.x -= 2.0 }
+    state.z = snapshot.x
+    values[index].x = state.x
+    values[index].y += snapshot.y
+    state.x += state.change_sibling()
+}
+
+func restore(state:&State, branching:bool) {
+    let snapshot = copy state
+    state.y = 90.0
+    if branching { state.z = 70.0 }
+    state = State(x:state.x + 1.0, y:snapshot.y, z:snapshot.z, w:snapshot.w)
+}
+
+func replace(values:State[]) State[] {
+    var result = values
+    result[0].x = 60.0
+    return result
+}
+
+func capture(state:&State, values:&State[..], index:int, branching:bool) float {
+    let saved = copy state
+    let item = values[index]
+    state.x = 100.0
+    values[index].y = 200.0
+    if branching { return saved.x + item.y }
+    return saved.y + item.x
+}
+
+func main() {
+    var state = State(x:3.0, y:5.0, z:7.0, w:11.0)
+    let snapshot = state
+    var values:State[] = [State(x:13.0, y:17.0, z:19.0, w:23.0)]
+    change(state, &values[0:values.count()], -1, true)
+    assert(state.x == 7.0 && state.y == 15.0 && state.z == 3.0 && state.w == 11.0)
+    assert(snapshot.x == 3.0 && snapshot.y == 5.0 && snapshot.z == 7.0)
+    assert(values[0].x == 5.0 && values[0].y == 22.0)
+    assert(values[0].z == 19.0 && values[0].w == 23.0)
+    restore(state, false)
+    restore(state, true)
+    assert(state.x == 9.0 && state.y == 15.0 && state.z == 3.0 && state.w == 11.0)
+    let modified = replace(values)
+    assert(values[0].x == 5.0 && modified[0].x == 60.0 && modified[0].y == 22.0)
+    assert(capture(state, &values[0:1], -1, true) == 31.0)
+    assert(capture(state, &values[0:1], 0, false) == 20.0)
+    assert(state.x == 100.0 && values[0].y == 200.0)
+    print("aggregate field stores preserved")
+}

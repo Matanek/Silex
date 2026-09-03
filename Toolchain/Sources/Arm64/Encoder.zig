@@ -859,7 +859,9 @@ fn encodeFunction(
             .copy_range => |copy| for (0..copy.result.width) |leaf| {
                 const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
                 const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
-                if ((floatResidence(function, result) != null or floatLaneResidence(function, result) != null) and
+                // The allocator may assign a dead leaf the register of a
+                // live sibling defined by this same aggregate transfer.
+                if ((valueResultRegister(function, result) != null or floatResidence(function, result) != null or floatLaneResidence(function, result) != null) and
                     !slotHasUse(function.instructions, result)) continue;
                 if (floatLaneResidence(function, operand)) |source| if (floatLaneResidence(function, result)) |destination| {
                     if (source.register == destination.register and source.lane == destination.lane) continue;

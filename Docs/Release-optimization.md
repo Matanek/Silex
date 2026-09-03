@@ -35,6 +35,18 @@ block are removed when no remaining load observes them and the local is never
 addressed. The last store remains available to successor blocks;
 redefined sources and addressed locals are not forwarded.
 
+For flat numeric or boolean value structures, a reconstructed reference or
+mutable-view store writes only the changed fields when the other fields come
+from a still-current snapshot of that exact destination. Calls, unknown
+effects, and block boundaries end this proof. Owning collection replacement,
+stale snapshots, and structures with owned fields keep their value semantics.
+Non-escaping reference and view snapshots can also become scalar reads,
+including explicit copies of these plain values. Each needed field is read
+at the original snapshot, before any later aliasing write or branch. Checked
+view indices retain their diagnostics; an unused snapshot is kept when its
+read could fail. Floating-point fields are copied without arithmetic, so
+signed zeros and NaN payloads are unchanged.
+
 Release inlines direct callees under a bounded cost across branches, loops,
 and multiple returns, in addition to constant-result and small straight-line
 specialization. It then re-runs scalar aggregate replacement, propagation,
@@ -87,6 +99,9 @@ in these memory kernels; safety and operand-residency checks still apply.
 In these leaf functions, a borrowed aggregate read materializes only the fields
 used by the function. Those fields are still loaded at the original read,
 not at a later projection that could follow an aliasing write.
+Aggregate copies omit unused register destinations in both integer and
+floating-point registers: an unused leaf may share a register with a live
+sibling defined by the same transfer and must not overwrite it.
 
 Exact `copysignf`/`copysign` calls to a proven system provider use a sign-bit
 transfer on ARM64. The transformation preserves signed zeros, infinities and

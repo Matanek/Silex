@@ -7,6 +7,8 @@ const InlineValues = @import("InlineValues.zig");
 const SsaPromotion = @import("SsaPromotion.zig");
 const Workers = @import("../Workers.zig");
 const UnusedLocals = @import("UnusedLocals.zig");
+const AggregateStores = @import("AggregateStores.zig");
+const AggregateLoads = @import("AggregateLoads.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -237,7 +239,8 @@ const ScalarWorker = struct {
     }
 };
 
-fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, input_function: Ir.Function) !Ir.Function {
+fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, input: Ir.Function) !Ir.Function {
+    const input_function = try AggregateStores.optimize(allocator, program, input);
     const definitions = try allocator.alloc(usize, input_function.value_types.len);
     @memset(definitions, 0);
     for (0..input_function.capture_types.len + input_function.parameter_types.len) |parameter| definitions[parameter] = 1;
@@ -357,7 +360,12 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, in
     }
     var result = function;
     result.blocks = blocks;
-    return result;
+    @memset(uses, 0);
+    for (blocks) |block| {
+        for (block.instructions) |instruction| countUses(instruction, uses);
+        countTerminatorUses(block.terminator, uses);
+    }
+    return AggregateLoads.optimize(allocator, program, result, definitions, uses);
 }
 
 fn scalarStructure(program: Ir.Program, structure_index: usize, depth: usize) bool {
@@ -1479,5 +1487,6 @@ test "release preserves representation-changing copies" {
 
 test {
     _ = @import("ReleaseTests.zig");
+    _ = @import("AggregateStoresTests.zig");
     _ = @import("UnusedLocals.zig");
 }
