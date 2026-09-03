@@ -39,6 +39,52 @@ pub fn forwardLoads(
     return result;
 }
 
+// Forwarded reads can leave intermediate stores that are overwritten in the
+// same block. Keep the last store and every store observed by an unforwarded
+// load. Addressed locals are excluded globally: a call may observe their home.
+pub fn removeOverwrittenStores(
+    allocator: std.mem.Allocator,
+    function: Ir.Function,
+    eligible: []const bool,
+) !Ir.Function {
+    if (function.local_types.len == 0) return function;
+    const allowed = try allocator.dupe(bool, eligible);
+    defer allocator.free(allowed);
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .local_address => |value| allowed[value.local] = false,
+        else => {},
+    };
+    const overwritten = try allocator.alloc(bool, eligible.len);
+    defer allocator.free(overwritten);
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    for (function.blocks, 0..) |block, block_index| {
+        @memset(overwritten, false);
+        const remove = try allocator.alloc(bool, block.instructions.len);
+        defer allocator.free(remove);
+        @memset(remove, false);
+        var index = block.instructions.len;
+        while (index != 0) {
+            index -= 1;
+            switch (block.instructions[index]) {
+                .local_store => |value| if (allowed[value.local]) {
+                    remove[index] = overwritten[value.local];
+                    overwritten[value.local] = true;
+                },
+                .local_load => |value| overwritten[value.local] = false,
+                else => {},
+            }
+        }
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions, 0..) |instruction, instruction_index| {
+            if (!remove[instruction_index]) try instructions.append(allocator, instruction);
+        }
+        blocks[block_index] = .{ .instructions = try instructions.toOwnedSlice(allocator), .terminator = block.terminator };
+    }
+    var result = function;
+    result.blocks = blocks;
+    return result;
+}
+
 // Alias propagation can remove every read of a local while leaving its
 // stores behind. Those stores unnecessarily make temporary aggregates escape
 // scalar replacement. Remove only unobserved local stores, not their operands
@@ -128,4 +174,41 @@ test "forwarding respects block boundaries addresses reused values and eligibili
     for ([_]usize{ 3, 5, 7 }) |index| try std.testing.expect(result.blocks[0].instructions[index] == .local_load);
     try std.testing.expect(result.blocks[1].instructions[0] == .local_load);
     try std.testing.expect(function.blocks[0].instructions[1] == .local_load);
+}
+
+test "overwritten stores preserve reads addresses ineligible locals and successor state" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const first = [_]Ir.Instruction{
+        .{ .local_store = .{ .local = 0, .operand = 0 } },
+        .{ .local_store = .{ .local = 1, .operand = 0 } },
+        .{ .local_store = .{ .local = 2, .operand = 0 } },
+        .{ .local_store = .{ .local = 0, .operand = 1 } },
+        .{ .local_load = .{ .result = 2, .local = 0 } },
+        .{ .local_store = .{ .local = 0, .operand = 0 } },
+        .{ .local_store = .{ .local = 1, .operand = 1 } },
+        .{ .local_store = .{ .local = 2, .operand = 1 } },
+    };
+    const second = [_]Ir.Instruction{
+        .{ .local_address = .{ .result = 3, .local = 1 } },
+        .{ .local_load = .{ .result = 4, .local = 0 } },
+    };
+    const function: Ir.Function = .{
+        .name = "overwritten_boundaries",
+        .parameter_types = &.{ .int, .int },
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .int, .address, .int },
+        .local_types = &.{ .int, .int, .int },
+        .blocks = &.{
+            .{ .instructions = &first, .terminator = .{ .jump = 1 } },
+            .{ .instructions = &second, .terminator = .{ .return_value = 4 } },
+        },
+    };
+    const result = try removeOverwrittenStores(arena.allocator(), function, &.{ true, true, false });
+    try std.testing.expectEqual(@as(usize, 7), result.blocks[0].instructions.len);
+    for (first[1..], result.blocks[0].instructions) |expected, actual| {
+        try std.testing.expectEqualDeep(expected, actual);
+    }
+    try std.testing.expectEqualDeep(second[0..], result.blocks[1].instructions);
+    try std.testing.expectEqual(@as(usize, 8), function.blocks[0].instructions.len);
 }

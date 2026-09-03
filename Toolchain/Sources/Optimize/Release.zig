@@ -249,7 +249,8 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, in
     else
         false;
     const forwarded = try UnusedLocals.forwardLoads(allocator, input_function, eligible, definitions);
-    const function = try UnusedLocals.removeStores(allocator, forwarded);
+    const pruned = try UnusedLocals.removeOverwrittenStores(allocator, forwarded, eligible);
+    const function = try UnusedLocals.removeStores(allocator, pruned);
     const roots = try allocator.alloc(?Ir.ValueId, function.value_types.len);
     @memset(roots, null);
     const fields = try allocator.alloc(?[]const Ir.ValueId, function.value_types.len);
@@ -1478,4 +1479,5 @@ test "release preserves representation-changing copies" {
 
 test {
     _ = @import("ReleaseTests.zig");
+    _ = @import("UnusedLocals.zig");
 }

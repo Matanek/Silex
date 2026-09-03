@@ -45,11 +45,25 @@ func borrowed_snapshot() float {
     return point.x + point.y + snapshot.x
 }
 
+func rewrite(input:Pair, flip:bool) Pair {
+    var value = input
+    value.x += 1.0
+    if flip { value.y = -value.y }
+    value.x += 2.0
+    value.y += value.x
+    value.x *= 2.0
+    return value
+}
+
 func main() {
     assert(accumulate(true) == 164.0)
     assert(accumulate(false) == 116.0)
     assert(transform(3.0, true) == 18.0)
     assert(transform(3.0, false) == 17.0)
     assert(borrowed_snapshot() == 6.0)
+    let first = rewrite(Pair(x:3.0, y:4.0), true)
+    let second = rewrite(Pair(x:3.0, y:4.0), false)
+    assert(first.x == 12.0 && first.y == 2.0)
+    assert(second.x == 12.0 && second.y == 10.0)
     print("aggregate control flow preserved")
 }

@@ -432,3 +432,39 @@ test "release scalarizes block local aggregate field updates after a branch" {
     const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
     try std.testing.expect(!std.mem.containsAtLeast(u8, tail[0..end], 1, "struct.init @Pair"));
 }
+
+test "release drops overwritten aggregate stores but retains branch snapshots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func rewrite(input:Pair, flip:bool) Pair {
+        \\    var value = input
+        \\    value.x += 1
+        \\    if flip { value.y = -value.y }
+        \\    value.x += 2
+        \\    value.y += value.x
+        \\    value.x *= 2
+        \\    return value
+        \\}
+        \\func main() {
+        \\    let first = rewrite(Pair(x:3, y:4), true)
+        \\    let second = rewrite(Pair(x:3, y:4), false)
+        \\    print(first.x); print(first.y); print(second.x); print(second.y)
+        \\}
+    );
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const optimized = try optimize(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("12\n2\n12\n10\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @rewrite") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    try std.testing.expect(std.mem.count(u8, tail[0..end], "struct.init @Pair") <= 3);
+}

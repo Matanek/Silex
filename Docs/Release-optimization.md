@@ -30,7 +30,9 @@ be reused across blocks; joins and escaping or addressable values retain
 their storage. This keeps a constructor's intermediate field assignments
 from becoming repeated whole-structure copies in a branching caller.
 Within one block, loads of non-addressed scalar-structure locals reuse their
-last single-definition snapshot. Stores remain observable across blocks;
+last single-definition snapshot. Intermediate stores overwritten in the same
+block are removed when no remaining load observes them and the local is never
+addressed. The last store remains available to successor blocks;
 redefined sources and addressed locals are not forwarded.
 
 Release inlines direct callees under a bounded cost across branches, loops,
