@@ -74,6 +74,9 @@ original use, before another scalar can reuse its register.
 Memory kernels also reject a pair when delaying its first calculation would
 cross a use of that result. Aggregate returns copy resident lanes into the
 caller's return storage instead of reading stale stack homes.
+In these leaf functions, a borrowed aggregate read materializes only the fields
+used by the function. Those fields are still loaded at the original read,
+not at a later projection that could follow an aliasing write.
 
 Exact `copysignf`/`copysign` calls to a proven system provider use a sign-bit
 transfer on ARM64. The transformation preserves signed zeros, infinities and

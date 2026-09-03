@@ -1981,6 +1981,11 @@ fn emitReferenceCopy(
         const offset = index * Machine.slot_size;
         const slot: Machine.Slot = @intCast(@as(usize, span.start) + index);
         if (load_reference) {
+            // A projected borrowed aggregate need not materialize unused
+            // fields. Keep live fields at this read, before any aliasing
+            // write; Debug and unsupported functions retain the full copy.
+            if (span.width > 1 and function.register_slots.len != 0 and
+                !slotHasUse(function.instructions, slot)) continue;
             try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
             if (floatResidence(function, slot)) |register| {
                 try words.append(allocator, moveGeneralToFloat(@enumFromInt(register), .x10, true));

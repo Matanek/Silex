@@ -448,3 +448,47 @@ test "memory stores consume arithmetic before a later SIMD partner" {
     try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 8))), @as(u32, @truncate(first)));
     try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -6))), @as(u32, @truncate(second)));
 }
+
+test "aggregate reference reads materialize only used leaves at the original read" {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    const Encoder = @import("Encoder.zig");
+    const Runner = @import("Runner.zig");
+    const builtin = @import("builtin");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const instructions = [_]Machine.Instruction{
+        .{ .reference_load = .{ .reference = 0, .result = .{ .start = 1, .width = 64, .aggregate = true } } },
+        .{ .constant_int = .{ .result = 65, .bits = 99 } },
+        .{ .reference_store = .{ .reference = 0, .operand = .{ .start = 65, .width = 1 } } },
+        .{ .return_value = .{ .start = 1, .width = 1 } },
+    };
+    var function: Machine.Function = .{
+        .name = "projected_snapshot",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 66,
+        .frame_size = try Machine.frameSize(66),
+        .instructions = &instructions,
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    const wide = try Encoder.encode(allocator, .{ .functions = &.{function} }, .{ .test_function = 0 });
+    var narrow_instructions = instructions;
+    narrow_instructions[0].reference_load.result.width = 1;
+    var narrow_function = function;
+    narrow_function.instructions = &narrow_instructions;
+    const narrow = try Encoder.encode(allocator, .{ .functions = &.{narrow_function} }, .{ .test_function = 0 });
+    try std.testing.expectEqualSlices(u8, narrow.code, wide.code);
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var values = [_]u64{7} ** 64;
+    const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{@intCast(@intFromPtr(&values))});
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(i64, 7), result.value);
+    try std.testing.expectEqual(@as(u64, 99), values[0]);
+    try std.testing.expectEqual(@as(u64, 7), values[63]);
+}
