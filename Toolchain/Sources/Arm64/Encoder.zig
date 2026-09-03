@@ -1988,15 +1988,19 @@ fn emitReferenceCopy(
             // write; Debug and unsupported functions retain the full copy.
             if (span.width > 1 and function.register_slots.len != 0 and
                 !slotHasUse(function.instructions, slot)) continue;
-            try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
             if (floatResidence(function, slot)) |register| {
-                try words.append(allocator, moveGeneralToFloat(@enumFromInt(register), .x10, true));
-            } else try storeValue(allocator, words, function, .x10, slot);
+                try words.append(allocator, A64.loadVector64(@enumFromInt(register), .x9, @intCast(offset)));
+            } else {
+                try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
+                try storeValue(allocator, words, function, .x10, slot);
+            }
         } else {
             if (floatResidence(function, slot)) |register| {
-                try words.append(allocator, moveFloatToGeneral(.x10, @enumFromInt(register), true));
-            } else try loadValue(allocator, words, function, .x10, slot);
-            try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
+                try words.append(allocator, A64.storeVector64(@enumFromInt(register), .x9, @intCast(offset)));
+            } else {
+                try loadValue(allocator, words, function, .x10, slot);
+                try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
+            }
         }
     }
 }
@@ -3825,8 +3829,12 @@ fn loadOptionalFloatValue(
         if (source != destination) try words.append(allocator, moveFloat(destination, source, double));
         return;
     };
+    if (double) {
+        try words.append(allocator, A64.loadFloat64Stack(destination, slot));
+        return;
+    }
     const byte_offset = @as(usize, slot) * Machine.slot_size;
-    if (!double and byte_offset <= std.math.maxInt(u12)) {
+    if (byte_offset <= std.math.maxInt(u12)) {
         try words.append(allocator, A64.loadFloat32(destination, .zero_or_sp, @intCast(byte_offset)));
         return;
     }
@@ -3862,8 +3870,12 @@ fn storeOptionalFloatValue(
         if (source != destination) try words.append(allocator, moveFloat(destination, source, double));
         return;
     };
+    if (double) {
+        try words.append(allocator, A64.storeFloat64Stack(source, slot));
+        return;
+    }
     const byte_offset = @as(usize, slot) * Machine.slot_size;
-    if (!double and byte_offset <= std.math.maxInt(u12)) {
+    if (byte_offset <= std.math.maxInt(u12)) {
         try words.append(allocator, A64.storeFloat32(source, .zero_or_sp, @intCast(byte_offset)));
         return;
     }

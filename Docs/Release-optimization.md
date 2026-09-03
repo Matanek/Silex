@@ -102,6 +102,11 @@ not at a later projection that could follow an aliasing write.
 Aggregate copies omit unused register destinations in both integer and
 floating-point registers: an unused leaf may share a register with a live
 sibling defined by the same transfer and must not overwrite it.
+Reference transfers to resident floating-point registers use direct 64-bit
+loads and stores. Floating-point 64-bit stack transfers use the same direct
+instructions in both stack-address windows, in Debug and Release. These are
+bit transfers, preserving signed zeros and NaN payloads without an intermediate
+integer register. The width of each memory access is unchanged.
 
 Exact `copysignf`/`copysign` calls to a proven system provider use a sign-bit
 transfer on ARM64. The transformation preserves signed zeros, infinities and

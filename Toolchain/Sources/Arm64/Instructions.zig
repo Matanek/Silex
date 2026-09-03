@@ -155,11 +155,27 @@ pub fn storeFloat32(source: Register, base: Register, byte_offset: u12) u32 {
         registerBits(source);
 }
 
-pub fn loadVector64(destination: Register, base: Register, byte_offset: u12) u32 {
+pub fn loadVector64(destination: Register, base: Register, byte_offset: u15) u32 {
     return 0xfd400000 |
         ((@as(u32, byte_offset) / 8) << 10) |
         (registerBits(base) << 5) |
         registerBits(destination);
+}
+
+pub fn storeVector64(source: Register, base: Register, byte_offset: u15) u32 {
+    return 0xfd000000 |
+        ((@as(u32, byte_offset) / 8) << 10) |
+        (registerBits(base) << 5) |
+        registerBits(source);
+}
+
+pub fn loadFloat64Stack(destination: Register, slot: Machine.Slot) u32 {
+    // The V bit selects the SIMD/FP register bank; address scaling remains 8.
+    return loadStack(destination, slot) | 0x04000000;
+}
+
+pub fn storeFloat64Stack(source: Register, slot: Machine.Slot) u32 {
+    return storeStack(source, slot) | 0x04000000;
 }
 
 pub fn loadVector64PostIndex(destination: Register, base: Register, byte_offset: i9) u32 {
@@ -556,6 +572,17 @@ test "encode byte zero extension" {
 test "encode direct float32 stack accesses" {
     try std.testing.expectEqual(@as(u32, 0xbd401be5), loadFloat32(.x5, .zero_or_sp, 24));
     try std.testing.expectEqual(@as(u32, 0xbd001be5), storeFloat32(.x5, .zero_or_sp, 24));
+}
+
+test "encode direct float64 memory and stack windows" {
+    try std.testing.expectEqual(@as(u32, 0xfd400131), loadVector64(.x17, .x9, 0));
+    try std.testing.expectEqual(@as(u32, 0xfd000130), storeVector64(.x16, .x9, 0));
+    try std.testing.expectEqual(@as(u32, 0xfd7fffe5), loadFloat64Stack(.x5, 4095));
+    try std.testing.expectEqual(@as(u32, 0xfd3fffe5), storeFloat64Stack(.x5, 4095));
+    try std.testing.expectEqual(@as(u32, 0xfd400385), loadFloat64Stack(.x5, 4096));
+    try std.testing.expectEqual(@as(u32, 0xfd000385), storeFloat64Stack(.x5, 4096));
+    try std.testing.expectEqual(@as(u32, 0xfd7fff25), loadVector64(.x5, .x25, 32760));
+    try std.testing.expectEqual(@as(u32, 0xfd3fff25), storeVector64(.x5, .x25, 32760));
 }
 
 test "encode two-lane float32 arithmetic and lane movement" {
