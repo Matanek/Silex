@@ -32,6 +32,13 @@ jobs:
       - name: Check out Silex
         uses: actions/checkout@v6
 
+      - name: Check out the pinned STD fixture dependency
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-STD
+          ref: 5a018305fb470dfe00e94466150b3c04f207e252
+          path: Dependencies/STD
+
       - name: Install Zig 0.16.0
         shell: bash
         run: |
@@ -54,6 +61,7 @@ jobs:
             --build-file Toolchain/build.zig
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
+          "$silex" link "$GITHUB_WORKSPACE/Dependencies/STD" --workspace "$GITHUB_WORKSPACE"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx"
@@ -89,6 +97,13 @@ jobs:
       - name: Check out Silex
         uses: actions/checkout@v6
 
+      - name: Check out the pinned STD fixture dependency
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-STD
+          ref: 5a018305fb470dfe00e94466150b3c04f207e252
+          path: Dependencies/STD
+
       - name: Install Zig 0.16.0
         shell: pwsh
         run: |
@@ -118,6 +133,7 @@ jobs:
             --build-file Toolchain/build.zig
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
+          & $silex link (Join-Path $env:GITHUB_WORKSPACE "Dependencies/STD") --workspace $env:GITHUB_WORKSPACE
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx")
