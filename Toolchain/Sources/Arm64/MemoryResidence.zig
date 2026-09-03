@@ -81,6 +81,45 @@ test "constructed memory arithmetic retains SIMD seeds" {
     try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -6))), @as(u32, @truncate(values[1])));
 }
 
+test "memory kernels keep isolated arithmetic scalar when lane setup costs more" {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const function: Machine.Function = .{
+        .name = "isolated_memory_pair",
+        .parameter_count = 6,
+        .parameters = &.{
+            .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 },
+            .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 },
+            .{ .start = 4, .width = 1 }, .{ .start = 5, .width = 1 },
+        },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 9,
+        .frame_size = try Machine.frameSize(9),
+        .float_lane_groups = &.{.{
+            .slots = .{ 6, 7, 0, 0 },
+            .width = 2,
+            .priority = 9,
+            .recurrence = false,
+            .in_loop = false,
+        }},
+        .instructions = &.{
+            .{ .binary = .{ .result = 6, .operator = .multiply, .left = 0, .right = 2, .type = .float32 } },
+            .{ .binary = .{ .result = 7, .operator = .multiply, .left = 1, .right = 3, .type = .float32 } },
+            .{ .reference_store = .{ .reference = 4, .operand = .{ .start = 5, .width = 1 } } },
+            .{ .binary = .{ .result = 8, .operator = .add, .left = 6, .right = 7, .type = .float32 } },
+            .{ .return_value = .{ .start = 8, .width = 1 } },
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), allocation.float_lane_residences[6]);
+    try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), allocation.float_lane_residences[7]);
+    try std.testing.expect(allocation.float_residences[6] != null);
+    try std.testing.expect(allocation.float_residences[7] != null);
+}
+
 test "memory arithmetic affinity wins over conflicting copy groups" {
     try checkArithmeticAffinity(false);
     try checkArithmeticAffinity(true);

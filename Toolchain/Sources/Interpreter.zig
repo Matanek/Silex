@@ -1084,6 +1084,7 @@ fn calculate(operator: Ir.BinaryOperator, left: Value, right: Value, result_type
     const right_integer = try numericInteger(right);
     return switch (operator) {
         .add, .subtract, .multiply, .divide, .remainder => integerArithmetic(operator, left_integer, right_integer),
+        .minimum, .maximum => error.InvalidProgram,
         .bit_and => integerResult(left_integer.type, left_integer.bits & right_integer.bits),
         .bit_xor => integerResult(left_integer.type, left_integer.bits ^ right_integer.bits),
         .shift_left, .shift_right => shiftInteger(operator, left_integer, right_integer),
@@ -1166,6 +1167,8 @@ fn calculateFloat(operator: Ir.BinaryOperator, left: Value, right: Value, result
             .subtract => .{ .float32 = a - b },
             .multiply => .{ .float32 = a * b },
             .divide => .{ .float32 = a / b },
+            .minimum => .{ .float32 = exactFloatMinimum(a, b) },
+            .maximum => .{ .float32 = exactFloatMaximum(a, b) },
             .less => .{ .boolean = a < b },
             .less_equal => .{ .boolean = a <= b },
             .greater => .{ .boolean = a > b },
@@ -1183,6 +1186,8 @@ fn calculateFloat(operator: Ir.BinaryOperator, left: Value, right: Value, result
         .subtract => .{ .float64 = a - b },
         .multiply => .{ .float64 = a * b },
         .divide => .{ .float64 = a / b },
+        .minimum => .{ .float64 = exactFloatMinimum(a, b) },
+        .maximum => .{ .float64 = exactFloatMaximum(a, b) },
         .less => .{ .boolean = a < b },
         .less_equal => .{ .boolean = a <= b },
         .greater => .{ .boolean = a > b },
@@ -1191,6 +1196,22 @@ fn calculateFloat(operator: Ir.BinaryOperator, left: Value, right: Value, result
         .not_equal => .{ .boolean = a != b },
         else => error.InvalidProgram,
     };
+}
+
+fn exactFloatMinimum(left: anytype, right: @TypeOf(left)) @TypeOf(left) {
+    if (std.math.isNan(left)) return right;
+    if (std.math.isNan(right)) return left;
+    if (left < right) return left;
+    if (right < left) return right;
+    return if (std.math.signbit(left)) left else right;
+}
+
+fn exactFloatMaximum(left: anytype, right: @TypeOf(left)) @TypeOf(left) {
+    if (std.math.isNan(left)) return right;
+    if (std.math.isNan(right)) return left;
+    if (left > right) return left;
+    if (right > left) return right;
+    return if (!std.math.signbit(left)) left else right;
 }
 
 fn convert(value: Value, target: Ir.Type, checked: bool) Error!Value {
@@ -1472,6 +1493,28 @@ test "format IEEE floating special values deterministically" {
     )).ir;
     const result = try runCapture(allocator, program);
     try std.testing.expectEqualStrings("-0.0\ninf\n-inf\nnan\n", result.stdout);
+}
+
+test "interpret scalar minimum and maximum with exact NaN and signed-zero semantics" {
+    const nan32: f32 = @bitCast(@as(u32, 0x7fc12345));
+    const other_nan32: f32 = @bitCast(@as(u32, 0x7fc54321));
+    const negative_zero32: f32 = @bitCast(@as(u32, 0x80000000));
+    const minimum32 = try calculateFloat(.minimum, .{ .float32 = 0.0 }, .{ .float32 = negative_zero32 }, .float32);
+    const maximum32 = try calculateFloat(.maximum, .{ .float32 = negative_zero32 }, .{ .float32 = 0.0 }, .float32);
+    const nan_result32 = try calculateFloat(.minimum, .{ .float32 = nan32 }, .{ .float32 = other_nan32 }, .float32);
+    try std.testing.expectEqual(@as(u32, 0x80000000), @as(u32, @bitCast(minimum32.float32)));
+    try std.testing.expectEqual(@as(u32, 0), @as(u32, @bitCast(maximum32.float32)));
+    try std.testing.expectEqual(@as(u32, 0x7fc54321), @as(u32, @bitCast(nan_result32.float32)));
+
+    const nan64: f64 = @bitCast(@as(u64, 0x7ff8123456789abc));
+    const other_nan64: f64 = @bitCast(@as(u64, 0x7ff8abcdef012345));
+    const negative_zero64: f64 = @bitCast(@as(u64, 0x8000000000000000));
+    const minimum64 = try calculateFloat(.minimum, .{ .float64 = 0.0 }, .{ .float64 = negative_zero64 }, .float64);
+    const maximum64 = try calculateFloat(.maximum, .{ .float64 = negative_zero64 }, .{ .float64 = 0.0 }, .float64);
+    const nan_result64 = try calculateFloat(.maximum, .{ .float64 = nan64 }, .{ .float64 = other_nan64 }, .float64);
+    try std.testing.expectEqual(@as(u64, 0x8000000000000000), @as(u64, @bitCast(minimum64.float64)));
+    try std.testing.expectEqual(@as(u64, 0), @as(u64, @bitCast(maximum64.float64)));
+    try std.testing.expectEqual(@as(u64, 0x7ff8abcdef012345), @as(u64, @bitCast(nan_result64.float64)));
 }
 
 test "interpolate values and print multiple arguments without separators" {

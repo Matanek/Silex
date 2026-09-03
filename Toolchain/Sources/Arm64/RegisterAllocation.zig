@@ -630,7 +630,7 @@ fn inferFloatSlots(function: Machine.Function, result: []bool) void {
             result[value.left] = true;
             result[value.right] = true;
             switch (value.operator) {
-                .add, .subtract, .multiply, .divide => result[value.result] = true,
+                .add, .subtract, .multiply, .divide, .minimum, .maximum => result[value.result] = true,
                 else => {},
             }
         },

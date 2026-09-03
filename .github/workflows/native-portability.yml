@@ -73,6 +73,12 @@ jobs:
               -o "$RUNNER_TEMP/aggregate-fields-$mode"
             test "$("$RUNNER_TEMP/aggregate-fields-$mode")" = "aggregate field stores preserved"
           done
+          minmax_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Native/ScalarMathMinMax.sx"
+          for mode in debug release; do
+            "$silex" compile "$minmax_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/scalar-math-minmax-$mode"
+            test "$("$RUNNER_TEMP/scalar-math-minmax-$mode")" = "scalar-math-minmax: pass"
+          done
 
   windows-x64:
     if: inputs.target == 'all' || inputs.target == 'windows-x64'
@@ -142,5 +148,14 @@ jobs:
             $aggregateOutput = @(& $aggregateBinary)
             if ($LASTEXITCODE -ne 0 -or $aggregateOutput.Count -ne 1 -or $aggregateOutput[0] -ne "aggregate field stores preserved") {
               throw "aggregate field $mode regression failed"
+            }
+          }
+          $minmaxFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Native/ScalarMathMinMax.sx"
+          foreach ($mode in @("debug", "release")) {
+            $minmaxBinary = Join-Path $env:RUNNER_TEMP "scalar-math-minmax-$mode.exe"
+            & $silex compile $minmaxFixture "--$mode" --nocache -o $minmaxBinary
+            $minmaxOutput = @(& $minmaxBinary)
+            if ($LASTEXITCODE -ne 0 -or $minmaxOutput.Count -ne 1 -or $minmaxOutput[0] -ne "scalar-math-minmax: pass") {
+              throw "scalar math minmax $mode regression failed"
             }
           }

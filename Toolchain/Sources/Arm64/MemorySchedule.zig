@@ -200,7 +200,7 @@ const fixture_instructions = [_]Machine.Instruction{
     .return_void,
 };
 
-test "memory arithmetic schedule exposes independent SIMD trees before stores" {
+test "memory arithmetic schedule preserves independent trees before scalar stores" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -222,7 +222,10 @@ test "memory arithmetic schedule exposes independent SIMD trees before stores" {
     scheduled.register_slots = allocation.residences;
     scheduled.float_register_slots = allocation.float_residences;
     scheduled.float_lane_slots = allocation.float_lane_residences;
-    try std.testing.expect(scheduled.float_lane_slots[5] != null);
+    try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), scheduled.float_lane_slots[5]);
+    try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), scheduled.float_lane_slots[8]);
+    try std.testing.expect(scheduled.float_register_slots[5] != null);
+    try std.testing.expect(scheduled.float_register_slots[8] != null);
     const builtin = @import("builtin");
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
     const Runner = @import("Runner.zig");

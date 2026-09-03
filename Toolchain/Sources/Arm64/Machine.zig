@@ -54,6 +54,8 @@ pub const BinaryOperator = enum {
     multiply,
     divide,
     remainder,
+    minimum,
+    maximum,
     less,
     less_equal,
     greater,

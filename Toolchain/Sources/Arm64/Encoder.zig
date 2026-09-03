@@ -2391,6 +2391,7 @@ fn encodeBinary(
             try words.append(allocator, multiplySubtract(destination, .x11, right, left));
             try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
+        .minimum, .maximum => return error.InvalidMachineProgram,
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
             try words.append(allocator, compareRegisters(left, right));
             try words.append(allocator, moveWideZero32(destination, 0));
@@ -3014,8 +3015,70 @@ fn encodeFloatBinary(
             try patch19(words.items, skip_true, words.items.len);
             try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
+        .minimum, .maximum => try encodeFloatMinimumMaximum(
+            allocator,
+            words,
+            function,
+            binary,
+            left,
+            right,
+            double,
+        ),
         else => return error.InvalidMachineProgram,
     }
+}
+
+fn encodeFloatMinimumMaximum(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    binary: Machine.Instruction.Binary,
+    left: Register,
+    right: Register,
+    double: bool,
+) Error!void {
+    const destination = floatResultRegister(function, binary.result) orelse .x11;
+    var choose_left: std.ArrayList(usize) = .empty;
+    defer choose_left.deinit(allocator);
+    var choose_right: std.ArrayList(usize) = .empty;
+    defer choose_right.deinit(allocator);
+    try words.append(allocator, floatCompare(left, left, double));
+    try choose_right.append(allocator, words.items.len);
+    try words.append(allocator, conditionalBranch(.overflow));
+    try words.append(allocator, floatCompare(right, right, double));
+    try choose_left.append(allocator, words.items.len);
+    try words.append(allocator, conditionalBranch(.overflow));
+    try words.append(allocator, floatCompare(left, right, double));
+    try choose_left.append(allocator, words.items.len);
+    try words.append(allocator, conditionalBranch(if (binary.operator == .maximum) .greater else .less));
+    try choose_right.append(allocator, words.items.len);
+    try words.append(allocator, conditionalBranch(if (binary.operator == .maximum) .less else .greater));
+    try words.append(allocator, moveFloatToGeneral(.x13, left, double));
+    if (!double) try words.append(allocator, signExtendRegister(.x13, .x13, 32));
+    try words.append(allocator, compareRegisters(.x13, .zero_or_sp));
+    if (binary.operator == .maximum) {
+        try choose_right.append(allocator, words.items.len);
+    } else {
+        try choose_left.append(allocator, words.items.len);
+    }
+    try words.append(allocator, conditionalBranch(.minus));
+    const equal_fallthrough = if (binary.operator == .maximum) left else right;
+    if (destination != equal_fallthrough) try words.append(allocator, moveFloat(destination, equal_fallthrough, double));
+    const equal_done = words.items.len;
+    try words.append(allocator, branch());
+    const right_label = words.items.len;
+    if (destination != right) try words.append(allocator, moveFloat(destination, right, double));
+    const right_done = words.items.len;
+    try words.append(allocator, branch());
+    const left_label = words.items.len;
+    if (destination != left) try words.append(allocator, moveFloat(destination, left, double));
+    const done = words.items.len;
+    try patch26(words.items, equal_done, done);
+    try patch26(words.items, right_done, done);
+    for (choose_left.items) |site| try patch19(words.items, site, left_label);
+    for (choose_right.items) |site| try patch19(words.items, site, right_label);
+    if (floatResultRegister(function, binary.result) == null)
+        try storeOptionalFloatValue(allocator, words, function, destination, binary.result, double);
 }
 
 fn encodeFloatPairBinary(

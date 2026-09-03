@@ -44,10 +44,57 @@ pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_cou
     // Simplify constructors before cloning them into branching callers:
     // otherwise each field assignment carries its whole aggregate along.
     const scalar_prepared = try replaceScalarAggregatesWithWorkers(allocator, prepared, worker_count);
-    const inlined = try InlineValues.optimize(allocator, scalar_prepared);
+    const intrinsic_prepared = try replaceScalarMathCalls(allocator, scalar_prepared);
+    const inlined = try InlineValues.optimize(allocator, intrinsic_prepared);
     const control_flow_inlined = try InlineControlFlow.optimize(allocator, inlined);
     const scalarized = try replaceScalarAggregatesWithWorkers(allocator, control_flow_inlined, worker_count);
     return optimizeWithoutInliningWithWorkers(allocator, scalarized, worker_count);
+}
+
+fn replaceScalarMathCalls(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    const functions = try allocator.alloc(Ir.Function, program.functions.len);
+    for (program.functions, 0..) |function, function_index| {
+        const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+        for (function.blocks, 0..) |block, block_index| {
+            const instructions = try allocator.alloc(Ir.Instruction, block.instructions.len);
+            for (block.instructions, 0..) |instruction, instruction_index| {
+                instructions[instruction_index] = scalarMathCall(program, function, instruction) orelse instruction;
+            }
+            blocks[block_index] = .{ .instructions = instructions, .terminator = block.terminator };
+        }
+        functions[function_index] = function;
+        functions[function_index].blocks = blocks;
+    }
+    var result = program;
+    result.functions = functions;
+    return result;
+}
+
+fn scalarMathCall(program: Ir.Program, caller: Ir.Function, instruction: Ir.Instruction) ?Ir.Instruction {
+    const call = switch (instruction) {
+        .call => |value| value,
+        else => return null,
+    };
+    const result = call.result orelse return null;
+    if (call.function >= program.functions.len or call.arguments.len != 2 or result >= caller.value_types.len) return null;
+    const callee = program.functions[call.function];
+    if (callee.parameter_types.len != 2 or callee.return_type != caller.value_types[result]) return null;
+    const value_type = caller.value_types[result];
+    if (value_type != .float32 and value_type != .float64) return null;
+    if (callee.parameter_types[0] != value_type or callee.parameter_types[1] != value_type) return null;
+    const operator: Ir.BinaryOperator = if (std.mem.eql(u8, callee.name, "STD.Math.min"))
+        .minimum
+    else if (std.mem.eql(u8, callee.name, "STD.Math.max"))
+        .maximum
+    else
+        return null;
+    return .{ .binary = .{
+        .result = result,
+        .operator = operator,
+        .left = call.arguments[0],
+        .right = call.arguments[1],
+        .checked = false,
+    } };
 }
 
 pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Program {
@@ -1369,6 +1416,53 @@ test "release folds constants and propagates copies in straight-line code" {
     const text = try Ir.writeText(allocator, optimized);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 42"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
+}
+
+test "release replaces only exact scalar STD Math minimum and maximum calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const arguments = [_]Ir.ValueId{ 0, 1 };
+    const caller_instructions = [_]Ir.Instruction{
+        .{ .call = .{ .result = 2, .function = 0, .arguments = &arguments } },
+        .{ .call = .{ .result = 3, .function = 1, .arguments = &arguments } },
+        .{ .call = .{ .result = 4, .function = 2, .arguments = &arguments } },
+    };
+    const functions = [_]Ir.Function{
+        .{
+            .name = "STD.Math.min",
+            .parameter_types = &.{ .float32, .float32 },
+            .return_type = .float32,
+            .value_types = &.{ .float32, .float32 },
+            .blocks = &.{},
+        },
+        .{
+            .name = "STD.Math.max",
+            .parameter_types = &.{ .float32, .float32 },
+            .return_type = .float32,
+            .value_types = &.{ .float32, .float32 },
+            .blocks = &.{},
+        },
+        .{
+            .name = "Application.max",
+            .parameter_types = &.{ .float32, .float32 },
+            .return_type = .float32,
+            .value_types = &.{ .float32, .float32 },
+            .blocks = &.{},
+        },
+        .{
+            .name = "caller",
+            .parameter_types = &.{ .float32, .float32 },
+            .return_type = .float32,
+            .value_types = &.{ .float32, .float32, .float32, .float32, .float32 },
+            .blocks = &.{.{ .instructions = &caller_instructions, .terminator = .{ .return_value = 2 } }},
+        },
+    };
+    const optimized = try replaceScalarMathCalls(allocator, .{ .functions = &functions });
+    const instructions = optimized.functions[3].blocks[0].instructions;
+    try std.testing.expectEqual(Ir.BinaryOperator.minimum, instructions[0].binary.operator);
+    try std.testing.expectEqual(Ir.BinaryOperator.maximum, instructions[1].binary.operator);
+    try std.testing.expect(instructions[2] == .call);
 }
 
 test "boolean diamond simplification preserves a merged result used after the branch" {

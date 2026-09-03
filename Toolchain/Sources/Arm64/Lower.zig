@@ -925,6 +925,8 @@ fn lowerInstruction(
                     .multiply => .multiply,
                     .divide => .divide,
                     .remainder => .remainder,
+                    .minimum => .minimum,
+                    .maximum => .maximum,
                     .less => .less,
                     .less_equal => .less_equal,
                     .greater => .greater,

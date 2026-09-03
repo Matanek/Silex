@@ -1,0 +1,51 @@
+use Interop.C
+use STD.Math
+
+func float32_bits(value:float32) uint32 {
+    var stored = value
+    return C.load<uint32>(C.address_bits(C.mutable_pointer(stored)), 0 as uint)
+}
+
+func float64_bits(value:float64) uint {
+    var stored = value
+    return C.load<uint>(C.address_bits(C.mutable_pointer(stored)), 0 as uint)
+}
+
+func float32_from_bits(bits:uint32) float32 {
+    var stored = bits
+    return C.load<float32>(C.address_bits(C.mutable_pointer(stored)), 0 as uint)
+}
+
+func float64_from_bits(bits:uint) float64 {
+    var stored = bits
+    return C.load<float64>(C.address_bits(C.mutable_pointer(stored)), 0 as uint)
+}
+
+func main() {
+    let positive_zero32 = float32_from_bits(0)
+    let negative_zero32 = float32_from_bits(0x80000000)
+    let first_nan32 = float32_from_bits(0x7fc12345)
+    let second_nan32 = float32_from_bits(0x7fc54321)
+    assert(float32_bits(Math.min(positive_zero32, negative_zero32)) == 0x80000000)
+    assert(float32_bits(Math.min(negative_zero32, positive_zero32)) == 0x80000000)
+    assert(float32_bits(Math.max(positive_zero32, negative_zero32)) == 0)
+    assert(float32_bits(Math.max(negative_zero32, positive_zero32)) == 0)
+    assert(float32_bits(Math.min(first_nan32, 7.0)) == float32_bits(7.0))
+    assert(float32_bits(Math.max(7.0, second_nan32)) == float32_bits(7.0))
+    assert(float32_bits(Math.min(first_nan32, second_nan32)) == 0x7fc54321)
+    assert(float32_bits(Math.max(first_nan32, second_nan32)) == 0x7fc54321)
+
+    let positive_zero64 = float64_from_bits(0)
+    let negative_zero64 = float64_from_bits(0x8000000000000000)
+    let first_nan64 = float64_from_bits(0x7ff8123456789abc)
+    let second_nan64 = float64_from_bits(0x7ff8abcdef012345)
+    assert(float64_bits(Math.min(positive_zero64, negative_zero64)) == 0x8000000000000000)
+    assert(float64_bits(Math.min(negative_zero64, positive_zero64)) == 0x8000000000000000)
+    assert(float64_bits(Math.max(positive_zero64, negative_zero64)) == 0)
+    assert(float64_bits(Math.max(negative_zero64, positive_zero64)) == 0)
+    assert(float64_bits(Math.min(first_nan64, 7.0 as float64)) == float64_bits(7.0 as float64))
+    assert(float64_bits(Math.max(7.0 as float64, second_nan64)) == float64_bits(7.0 as float64))
+    assert(float64_bits(Math.min(first_nan64, second_nan64)) == 0x7ff8abcdef012345)
+    assert(float64_bits(Math.max(first_nan64, second_nan64)) == 0x7ff8abcdef012345)
+    print("scalar-math-minmax: pass")
+}

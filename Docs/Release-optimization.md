@@ -49,7 +49,12 @@ signed zeros and NaN payloads are unchanged.
 
 Release inlines direct callees under a bounded cost across branches, loops,
 and multiple returns, in addition to constant-result and small straight-line
-specialization. It then re-runs scalar aggregate replacement, propagation,
+specialization. Before this inlining, exact scalar `STD.Math.min` and
+`STD.Math.max` calls become portable float32 or float64 operations. Native
+lowering emits them directly on ARM64 and X64 while preserving the library
+contract for NaN operands, signed zeros, infinities, and ordinary values.
+Other names and signatures remain ordinary calls. Release then re-runs scalar
+aggregate replacement, propagation,
 dead-code elimination, dense-block reuse, and bounds analysis on the combined
 graph. In call-free functions containing a proven repeated scalar collection
 read, it reuses the corresponding local, field and collection loads within
@@ -99,7 +104,11 @@ operations remain barriers; expression trees and source positions are preserved.
 Constructed aggregates can seed those lanes by copying each leaf at its original
 construction point, without requiring the input leaves to be packed already.
 Arithmetic dependencies are selected before competing copy-only affinities
-in these memory kernels; safety and operand-residency checks still apply.
+in these memory kernels; safety and operand-residency checks still apply. A
+memory kernel keeps an isolated pair scalar when its final values must be
+extracted before separate scalar stores. Chained arithmetic and aggregate
+returns can retain their lanes, where the setup cost is amortized or the
+result remains grouped.
 In these leaf functions, a borrowed aggregate read materializes only the fields
 used by the function. Those fields are still loaded at the original read,
 not at a later projection that could follow an aliasing write.

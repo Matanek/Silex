@@ -489,12 +489,55 @@ fn pruneUnprofitableFloatPairs(
         const first = definingInstruction(instructions, @intCast(slot)) orelse continue;
         const second = definingInstruction(instructions, residence.?.partner) orelse continue;
         if (first == .binary and second == .binary) {
+            if (scalar_copies and
+                !pairHasBinaryDependency(instructions, residences, first.binary, second.binary) and
+                !pairFeedsAggregateReturn(instructions, @intCast(slot), residence.?.partner)) continue;
             markPairDependencies(instructions, residences, required, @intCast(slot), residence.?.partner);
         }
     }
     for (residences, 0..) |residence, slot| if (residence != null and !required[slot]) {
         residences[slot] = null;
     };
+}
+
+fn pairHasBinaryDependency(
+    instructions: []const Machine.Instruction,
+    residences: []const ?Machine.FloatLaneResidence,
+    first: Machine.Instruction.Binary,
+    second: Machine.Instruction.Binary,
+) bool {
+    return pairedOperandsAreBinary(instructions, residences, first.left, second.left) or
+        pairedOperandsAreBinary(instructions, residences, first.right, second.right);
+}
+
+fn pairedOperandsAreBinary(
+    instructions: []const Machine.Instruction,
+    residences: []const ?Machine.FloatLaneResidence,
+    first: Machine.Slot,
+    second: Machine.Slot,
+) bool {
+    if (first == second) return false;
+    const left = residences[first] orelse return false;
+    const right = residences[second] orelse return false;
+    if (left.register != right.register or left.lane != 0 or right.lane != 1) return false;
+    const left_definition = definingInstruction(instructions, first) orelse return false;
+    const right_definition = definingInstruction(instructions, second) orelse return false;
+    return left_definition == .binary and right_definition == .binary;
+}
+
+fn pairFeedsAggregateReturn(
+    instructions: []const Machine.Instruction,
+    first: Machine.Slot,
+    second: Machine.Slot,
+) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .return_value => |value| if (value.aggregate and
+            first >= value.start and second >= value.start and
+            first < @as(usize, value.start) + value.width and
+            second < @as(usize, value.start) + value.width) return true,
+        else => {},
+    };
+    return false;
 }
 fn pairDefinitionReady(
     instructions: []const Machine.Instruction,

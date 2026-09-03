@@ -216,6 +216,7 @@ const FunctionEmitter = struct {
             else
                 try self.emitDivision(block_id, value, left_type),
             .shift_left, .shift_right => try self.emitShift(block_id, value, left_type),
+            .minimum, .maximum => try self.emitFloatMinimumMaximum(value, left_type),
             .bit_and, .bit_xor => try self.write("  %v{d} = {s} {s} %v{d}, %v{d}\n", .{
                 value.result,
                 if (value.operator == .bit_and) "and" else "xor",
@@ -261,6 +262,59 @@ const FunctionEmitter = struct {
                 });
             },
         }
+    }
+
+    fn emitFloatMinimumMaximum(
+        self: *FunctionEmitter,
+        value: Ir.Instruction.Binary,
+        type_value: Ir.Type,
+    ) Error!void {
+        if (!type_value.isFloat()) return error.UnsupportedInstruction;
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(type_value);
+        const integer_name = if (type_value == .float32) "i32" else "i64";
+        try self.write("  %t{d}.left_nan = fcmp uno {s} %v{d}, %v{d}\n", .{
+            serial, type_name, value.left, value.left,
+        });
+        try self.write("  %t{d}.right_nan = fcmp uno {s} %v{d}, %v{d}\n", .{
+            serial, type_name, value.right, value.right,
+        });
+        try self.write("  %t{d}.ordered = fcmp {s} {s} %v{d}, %v{d}\n", .{
+            serial,
+            if (value.operator == .minimum) "olt" else "ogt",
+            type_name,
+            value.left,
+            value.right,
+        });
+        try self.write("  %t{d}.equal = fcmp oeq {s} %v{d}, %v{d}\n", .{
+            serial, type_name, value.left, value.right,
+        });
+        try self.write("  %t{d}.left_bits = bitcast {s} %v{d} to {s}\n", .{
+            serial, type_name, value.left, integer_name,
+        });
+        try self.write("  %t{d}.left_negative = icmp slt {s} %t{d}.left_bits, 0\n", .{
+            serial, integer_name, serial,
+        });
+        try self.write("  %t{d}.equal_value = select i1 %t{d}.left_negative, {s} %v{d}, {s} %v{d}\n", .{
+            serial,
+            serial,
+            type_name,
+            if (value.operator == .minimum) value.left else value.right,
+            type_name,
+            if (value.operator == .minimum) value.right else value.left,
+        });
+        try self.write("  %t{d}.ordered_value = select i1 %t{d}.ordered, {s} %v{d}, {s} %v{d}\n", .{
+            serial, serial, type_name, value.left, type_name, value.right,
+        });
+        try self.write("  %t{d}.finite_value = select i1 %t{d}.equal, {s} %t{d}.equal_value, {s} %t{d}.ordered_value\n", .{
+            serial, serial, type_name, serial, type_name, serial,
+        });
+        try self.write("  %t{d}.right_checked = select i1 %t{d}.right_nan, {s} %v{d}, {s} %t{d}.finite_value\n", .{
+            serial, serial, type_name, value.left, type_name, serial,
+        });
+        try self.write("  %v{d} = select i1 %t{d}.left_nan, {s} %v{d}, {s} %t{d}.right_checked\n", .{
+            value.result, serial, type_name, value.right, type_name, serial,
+        });
     }
 
     fn emitOverflowOperation(

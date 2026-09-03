@@ -921,6 +921,7 @@ fn emitBinary(
             }
             if (binary.operator == .remainder) try emitMoveRegister(allocator, bytes, .rax, .rdx);
         },
+        .minimum, .maximum => return error.UnsupportedInstruction,
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
             try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f });
             const signed = binary.type.isSignedInteger();
@@ -1053,8 +1054,78 @@ fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Mach
             try bytes.appendSlice(allocator, &.{ 0x0f, condition, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 });
             try emitStoreStack(allocator, bytes, .rax, binary.result);
         },
+        .minimum, .maximum => try emitFloatMinimumMaximum(allocator, bytes, binary, double),
         else => return error.UnsupportedInstruction,
     }
+}
+
+fn emitFloatMinimumMaximum(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    binary: Machine.Instruction.Binary,
+    double: bool,
+) Error!void {
+    var choose_left: std.ArrayList(usize) = .empty;
+    defer choose_left.deinit(allocator);
+    var choose_right: std.ArrayList(usize) = .empty;
+    defer choose_right.deinit(allocator);
+
+    // STD.Math returns the other operand for one NaN and preserves the first
+    // operand's sign when equal values differ only by signed zero.
+    if (double) try bytes.append(allocator, 0x66);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc0 });
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x8a });
+    try choose_right.append(allocator, bytes.items.len);
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    if (double) try bytes.append(allocator, 0x66);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc9 });
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x8a });
+    try choose_left.append(allocator, bytes.items.len);
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    if (double) try bytes.append(allocator, 0x66);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc1 });
+    try bytes.appendSlice(allocator, &.{ 0x0f, if (binary.operator == .maximum) 0x87 else 0x82 });
+    try choose_left.append(allocator, bytes.items.len);
+    try bytes.appendNTimes(allocator, 0, 4);
+    try bytes.appendSlice(allocator, &.{ 0x0f, if (binary.operator == .maximum) 0x82 else 0x87 });
+    try choose_right.append(allocator, bytes.items.len);
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    if (double) {
+        try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0, 0x48, 0x85, 0xc0 });
+    } else {
+        try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0, 0x85, 0xc0 });
+    }
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x88 });
+    if (binary.operator == .maximum) {
+        try choose_right.append(allocator, bytes.items.len);
+    } else {
+        try choose_left.append(allocator, bytes.items.len);
+    }
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    if (binary.operator == .minimum) try bytes.appendSlice(allocator, &.{
+        if (double) 0xf2 else 0xf3, 0x0f, 0x10, 0xc1,
+    });
+    try bytes.append(allocator, 0xe9);
+    const equal_done = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    const right_label = bytes.items.len;
+    try bytes.appendSlice(allocator, &.{ if (double) 0xf2 else 0xf3, 0x0f, 0x10, 0xc1 });
+    try bytes.append(allocator, 0xe9);
+    const right_done = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    const left_label = bytes.items.len;
+    const done = bytes.items.len;
+    try patchRelative(bytes.items, equal_done, done);
+    try patchRelative(bytes.items, right_done, done);
+    for (choose_left.items) |site| try patchRelative(bytes.items, site, left_label);
+    for (choose_right.items) |site| try patchRelative(bytes.items, site, right_label);
+    try emitStoreFloatStack(allocator, bytes, 0, binary.result, double);
 }
 
 fn emitClassInit(
