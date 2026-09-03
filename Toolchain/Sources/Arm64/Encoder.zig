@@ -655,13 +655,28 @@ fn encodeFunction(
                 try words.append(allocator, moveGeneralToFloat(.x9, incoming, true));
                 try storeFloatValue(allocator, words, function, .x9, parameter.start, true);
             } else try storeValue(allocator, words, function, incoming, parameter.start);
-        } else for (0..parameter.width) |leaf| {
-            try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
-            const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
-            if (floatResidence(function, slot) != null or floatLaneResidence(function, slot) != null) {
-                try words.append(allocator, moveGeneralToFloat(.x10, .x9, true));
-                try storeFloatValue(allocator, words, function, .x10, slot, true);
-            } else try storeValue(allocator, words, function, .x9, slot);
+        } else {
+            var leaf: usize = 0;
+            while (leaf < parameter.width) {
+                const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+                if (pairAggregateParameterLeaves(function, parameter, leaf)) {
+                    const stack_slot = if (slot >= Machine.direct_stack_slots)
+                        slot - Machine.direct_stack_slots
+                    else
+                        slot;
+                    const stack_base: Register = if (slot >= Machine.direct_stack_slots) .x28 else .zero_or_sp;
+                    try words.append(allocator, A64.load64Pair(.x9, .x10, incoming, @intCast(leaf * Machine.slot_size)));
+                    try words.append(allocator, A64.store64Pair(.x9, .x10, stack_base, @intCast(@as(usize, stack_slot) * Machine.slot_size)));
+                    leaf += 2;
+                    continue;
+                }
+                try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
+                if (floatResidence(function, slot) != null or floatLaneResidence(function, slot) != null) {
+                    try words.append(allocator, moveGeneralToFloat(.x10, .x9, true));
+                    try storeFloatValue(allocator, words, function, .x10, slot, true);
+                } else try storeValue(allocator, words, function, .x9, slot);
+                leaf += 1;
+            }
         }
     }
     for (function.capture_parameters, 0..) |capture, index| {
@@ -1730,6 +1745,23 @@ fn encodeFunction(
             .position = position,
         });
     };
+}
+
+fn pairAggregateParameterLeaves(function: Machine.Function, parameter: Machine.Span, leaf: usize) bool {
+    // Two-slot aggregates include collection-view ABI descriptors. Preserve
+    // their individually captured pointer/count path until they carry an
+    // explicit machine type distinct from ordinary value aggregates.
+    if (parameter.width == 2 or leaf + 1 >= parameter.width or leaf * Machine.slot_size > 504) return false;
+    const first: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+    const second: Machine.Slot = first + 1;
+    if ((first >= Machine.direct_stack_slots) != (second >= Machine.direct_stack_slots)) return false;
+    const stack_slot = if (first >= Machine.direct_stack_slots)
+        first - Machine.direct_stack_slots
+    else
+        first;
+    if (@as(usize, stack_slot) * Machine.slot_size > 504) return false;
+    return floatResidence(function, first) == null and floatLaneResidence(function, first) == null and
+        floatResidence(function, second) == null and floatLaneResidence(function, second) == null;
 }
 
 fn resolveEncodedTarget(function: Machine.Function, initial: usize) usize {
@@ -4205,6 +4237,35 @@ test "resolve calls and append a native test entry" {
     const encoded_call = std.mem.readInt(u32, image.code[call_word * 4 ..][0..4], .little);
     try std.testing.expectEqual(@as(u32, 0xa9bf7bfd), entry_word);
     try std.testing.expectEqual(expected, encoded_call);
+}
+
+test "copy stack-resident aggregate parameters with paired transfers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const function: Machine.Function = .{
+        .name = "aggregate_parameter",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 4, .aggregate = true }},
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = try Machine.frameSize(4),
+        .register_slots = &([_]?u5{null} ** 4),
+        .instructions = &.{.return_void},
+    };
+    const image = try encode(arena.allocator(), .{ .functions = &.{function} }, .none);
+    const expected = [_]u32{
+        A64.load64Pair(.x9, .x10, .x0, 0),
+        A64.store64Pair(.x9, .x10, .zero_or_sp, 0),
+        A64.load64Pair(.x9, .x10, .x0, 16),
+        A64.store64Pair(.x9, .x10, .zero_or_sp, 16),
+    };
+    var found: usize = 0;
+    var offset: usize = 0;
+    while (offset + 4 <= image.code.len and found < expected.len) : (offset += 4) {
+        const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+        if (word == expected[found]) found += 1;
+    }
+    try std.testing.expectEqual(expected.len, found);
 }
 
 test "recognize a comparison-only while header at its back edge" {

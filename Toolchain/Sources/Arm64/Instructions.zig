@@ -141,6 +141,32 @@ pub fn load64(destination: Register, base: Register, byte_offset: u12) u32 {
         registerBits(destination);
 }
 
+pub fn load64Pair(
+    first: Register,
+    second: Register,
+    base: Register,
+    byte_offset: u9,
+) u32 {
+    return 0xa9400000 |
+        ((@as(u32, byte_offset) / 8) << 15) |
+        (registerBits(second) << 10) |
+        (registerBits(base) << 5) |
+        registerBits(first);
+}
+
+pub fn store64Pair(
+    first: Register,
+    second: Register,
+    base: Register,
+    byte_offset: u9,
+) u32 {
+    return 0xa9000000 |
+        ((@as(u32, byte_offset) / 8) << 15) |
+        (registerBits(second) << 10) |
+        (registerBits(base) << 5) |
+        registerBits(first);
+}
+
 pub fn loadFloat32(destination: Register, base: Register, byte_offset: u12) u32 {
     return 0xbd400000 |
         ((@as(u32, byte_offset) / 4) << 10) |
@@ -546,6 +572,13 @@ test "encode paired scalar float slot loads" {
     try std.testing.expectEqual(@as(u32, 0x6d410d42), loadFloat64Pair(.x2, .x3, .x10, 16));
     try std.testing.expectEqual(@as(u32, 0x2d400540), loadFloat32Pair(.x0, .x1, .x10, 0));
     try std.testing.expectEqual(@as(u32, 0x2d410d42), loadFloat32Pair(.x2, .x3, .x10, 8));
+}
+
+test "encode paired general-purpose loads and stores" {
+    try std.testing.expectEqual(@as(u32, 0xa9402829), load64Pair(.x9, .x10, .x1, 0));
+    try std.testing.expectEqual(@as(u32, 0xa9421062), load64Pair(.x2, .x4, .x3, 32));
+    try std.testing.expectEqual(@as(u32, 0xa9012be9), store64Pair(.x9, .x10, .zero_or_sp, 16));
+    try std.testing.expectEqual(@as(u32, 0xa90310a2), store64Pair(.x2, .x4, .x5, 48));
 }
 
 test "encode zero vector immediate for scalar float registers" {
