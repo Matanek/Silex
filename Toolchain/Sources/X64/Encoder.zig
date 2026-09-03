@@ -1042,21 +1042,47 @@ fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Mach
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
             if (double) try bytes.append(allocator, 0x66);
             try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc1 });
-            const condition: u8 = switch (binary.operator) {
-                .less => 0x92,
-                .less_equal => 0x96,
-                .greater => 0x97,
-                .greater_equal => 0x93,
-                .equal => 0x94,
-                .not_equal => 0x95,
-                else => unreachable,
-            };
-            try bytes.appendSlice(allocator, &.{ 0x0f, condition, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 });
+            try emitFloatComparisonResult(allocator, bytes, binary.operator);
             try emitStoreStack(allocator, bytes, .rax, binary.result);
         },
         .minimum, .maximum => try emitFloatMinimumMaximum(allocator, bytes, binary, double),
         else => return error.UnsupportedInstruction,
     }
+}
+
+fn emitFloatComparisonResult(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    operator: Machine.BinaryOperator,
+) Allocator.Error!void {
+    const condition: u8 = switch (operator) {
+        .less => 0x92,
+        .less_equal => 0x96,
+        .greater => 0x97,
+        .greater_equal => 0x93,
+        .equal => 0x94,
+        .not_equal => 0x95,
+        else => unreachable,
+    };
+    try bytes.appendSlice(allocator, &.{ 0x0f, condition, 0xc0 });
+    switch (operator) {
+        // UCOMISS/UCOMISD set parity, carry, and zero together for unordered
+        // operands. Ordered predicates which otherwise accept carry or zero
+        // must therefore mask their result with !parity.
+        .less, .less_equal, .equal => try bytes.appendSlice(allocator, &.{
+            0x0f, 0x9b, 0xc1, // setnp cl
+            0x20, 0xc8, // and al, cl
+        }),
+        // IEEE inequality accepts unordered operands even though setne alone
+        // observes the zero flag and rejects them.
+        .not_equal => try bytes.appendSlice(allocator, &.{
+            0x0f, 0x9a, 0xc1, // setp cl
+            0x08, 0xc8, // or al, cl
+        }),
+        .greater, .greater_equal => {},
+        else => unreachable,
+    }
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
 }
 
 fn emitFloatMinimumMaximum(
@@ -3542,6 +3568,28 @@ test "X64 scalar allocation reduces leaf arithmetic code" {
     const register_image = try encodeLinux(allocator, register_program);
     defer register_image.deinit(allocator);
     try std.testing.expect(register_image.code.len < stack_image.code.len);
+}
+
+test "encode IEEE unordered float comparison results on X64" {
+    const Case = struct {
+        operator: Machine.BinaryOperator,
+        expected: []const u8,
+    };
+    const cases = [_]Case{
+        .{ .operator = .less, .expected = &.{ 0x0f, 0x92, 0xc0, 0x0f, 0x9b, 0xc1, 0x20, 0xc8, 0x48, 0x0f, 0xb6, 0xc0 } },
+        .{ .operator = .less_equal, .expected = &.{ 0x0f, 0x96, 0xc0, 0x0f, 0x9b, 0xc1, 0x20, 0xc8, 0x48, 0x0f, 0xb6, 0xc0 } },
+        .{ .operator = .greater, .expected = &.{ 0x0f, 0x97, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 } },
+        .{ .operator = .greater_equal, .expected = &.{ 0x0f, 0x93, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 } },
+        .{ .operator = .equal, .expected = &.{ 0x0f, 0x94, 0xc0, 0x0f, 0x9b, 0xc1, 0x20, 0xc8, 0x48, 0x0f, 0xb6, 0xc0 } },
+        .{ .operator = .not_equal, .expected = &.{ 0x0f, 0x95, 0xc0, 0x0f, 0x9a, 0xc1, 0x08, 0xc8, 0x48, 0x0f, 0xb6, 0xc0 } },
+    };
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    for (cases) |case| {
+        bytes.clearRetainingCapacity();
+        try emitFloatComparisonResult(std.testing.allocator, &bytes, case.operator);
+        try std.testing.expectEqualSlices(u8, case.expected, bytes.items);
+    }
 }
 
 test "X64 keeps the scalar fallback when portable SLP groups are present" {
