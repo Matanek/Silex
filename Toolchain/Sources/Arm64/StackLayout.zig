@@ -66,13 +66,30 @@ pub fn build(
 ) Machine.Error!Layout {
     if (function.blocks.len == 0) return error.InvalidMachineProgram;
     const value_count = function.value_types.len;
+    // Optimizations retain stable value IDs, including declarations whose
+    // definitions and uses disappeared. They need no native storage. Keep
+    // every ABI parameter even when its value is unused by the body.
+    const present = try allocator.alloc(bool, value_count);
+    defer allocator.free(present);
+    @memset(present, false);
+    var valid = true;
+    const set: ValueSet = .{ .bits = present, .valid = &valid };
+    for (0..function.parameter_types.len + function.capture_types.len) |parameter| set.add(parameter);
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| {
+            addInstructionDefinitions(instruction, set);
+            addInstructionUses(instruction, set);
+        }
+        addTerminatorUses(block.terminator, set);
+    }
+    if (!valid) return error.InvalidMachineProgram;
     const widths = try allocator.alloc(u12, value_count);
     const aggregates = try allocator.alloc(bool, value_count);
     const classes = try allocator.alloc(ResidenceClass, value_count);
     var naive_slots: usize = 0;
     for (function.value_types, 0..) |type_value, value| {
-        widths[value] = std.math.cast(u12, try TypeLayout.leafCount(program, type_value)) orelse
-            return error.FrameTooLarge;
+        widths[value] = if (present[value]) std.math.cast(u12, try TypeLayout.leafCount(program, type_value)) orelse
+            return error.FrameTooLarge else 0;
         aggregates[value] = TypeLayout.isAggregate(program, type_value);
         classes[value] = residenceClass(type_value, aggregates[value]);
         naive_slots = std.math.add(usize, naive_slots, widths[value]) catch return error.FrameTooLarge;
@@ -595,7 +612,7 @@ test "reuse stack homes beyond the former virtual slot ceiling" {
     try std.testing.expect(layout.values[0].start != layout.values[1].start);
 }
 
-test "keep simultaneously live branch values in distinct homes" {
+test "prune unused declarations while keeping branch values in distinct homes" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -620,5 +637,31 @@ test "keep simultaneously live branch values in distinct homes" {
     }} };
     const layout = try build(allocator, program, program.functions[0]);
     try std.testing.expect(layout.values[0].start != layout.values[1].start);
-    try std.testing.expect(layout.values[3].start == layout.values[4].start);
+    try std.testing.expectEqual(@as(Machine.Slot, 5), layout.slot_count);
+    try std.testing.expect(!layout.reuses_slots);
+}
+
+test "prune unused declarations without dropping ABI parameters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const types = try allocator.alloc(Ir.Type, 256);
+    @memset(types, .int);
+    const function: Ir.Function = .{
+        .name = "sparse_value_ids",
+        .parameter_types = &.{.int},
+        .capture_types = &.{.int},
+        .return_type = .int,
+        .value_types = types,
+        .blocks = &.{.{
+            .instructions = &.{.{ .constant_int = .{ .result = 255, .bits = 42 } }},
+            .terminator = .{ .return_value = 255 },
+        }},
+    };
+    const layout = try build(allocator, .{ .functions = &.{function} }, function);
+    try std.testing.expectEqual(@as(Machine.Slot, 3), layout.slot_count);
+    try std.testing.expectEqual(@as(u12, 1), layout.parameters[0].width);
+    try std.testing.expectEqual(@as(u12, 1), layout.capture_parameters[0].width);
+    try std.testing.expect(layout.parameters[0].start != layout.capture_parameters[0].start);
+    try std.testing.expectEqual(@as(u12, 0), layout.values[2].width);
 }

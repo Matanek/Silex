@@ -110,7 +110,10 @@ provider qualifies only when its macOS ARM64 metadata links libSystem alone,
 without an archive, framework or provider dependency. Custom providers keep
 their call. X64 register eligibility is unchanged by this ARM64 extension.
 
-The native layout normally keeps unique deterministic homes. If their
+Native layout omits storage for value declarations whose definitions and uses
+have disappeared from the IR. Parameters and closure captures still retain
+their ABI homes even when the body does not use them. Remaining values
+normally keep unique deterministic homes. If their
 cumulative count would exceed the shared machine limit, ARM64 and X64 instead
 color physical stack spans from portable-IR liveness. Simultaneously live
 values and incompatible scalar or aggregate residence classes never overlap;
