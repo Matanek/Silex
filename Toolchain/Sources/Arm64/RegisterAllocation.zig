@@ -700,6 +700,10 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
     return true;
 }
 
+pub fn supportsMemoryScheduling(function: Machine.Function, externals: []const Machine.ExternalFunction) bool {
+    return MemoryResidence.required(function) and isCompatibleFunction(function, true, externals);
+}
+
 fn forceStackOperands(instruction: Machine.Instruction, forced: []bool) void {
     MemoryResidence.pin(instruction, forced);
     switch (instruction) {

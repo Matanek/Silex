@@ -42,6 +42,13 @@ func snapshot_before_write(value:&Pair) float {
     return saved.x
 }
 
+func separated_arithmetic(value:Pair, output:&Pair, scale:float) {
+    let x = value.x * scale + scale
+    let y = value.y * scale + scale
+    output.x = x
+    output.y = y
+}
+
 func main() {
     let values:Pair[] = [Pair(x:3.0, y:-4.0), Pair(x:-2.0, y:5.0)]
     let view = @values[0:values.count()]
@@ -56,6 +63,8 @@ func main() {
     var snapshot = Pair(x:3.0, y:-4.0)
     assert(snapshot_before_write(snapshot) == 3.0)
     assert(snapshot.x == 99.0 && snapshot.y == -4.0)
+    separated_arithmetic(values[0], output, 2.0)
+    assert(output.x == 8.0 && output.y == -6.0)
     var velocities:Pair[] = [Pair(x:2.0, y:1.0), Pair(x:-7.0, y:-3.0)]
     var mutable = &velocities[0:2]
     apply(mutable, Pair(x:1.0, y:0.0), 0.5, 1.0, 2.0)

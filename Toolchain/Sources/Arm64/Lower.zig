@@ -5,6 +5,7 @@ const CompilationCache = @import("../CompilationCache.zig");
 const MainBoundary = @import("../MainBoundary.zig");
 const Machine = @import("Machine.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
+const MemorySchedule = @import("MemorySchedule.zig");
 const Slp = @import("../Optimize/Slp.zig");
 const StackLayout = @import("StackLayout.zig");
 const TypeLayout = @import("TypeLayout.zig");
@@ -174,6 +175,7 @@ fn lowerInternal(
     }
     if (mode == .release) for (functions) |*function| {
         if (function.register_slots.len != 0) continue;
+        function.* = try MemorySchedule.optimizeWithExternals(allocator, function.*, external_functions);
         const allocation = try RegisterAllocation.allocateWithExternals(allocator, function.*, external_functions);
         function.register_slots = allocation.residences;
         function.float_register_slots = allocation.float_residences;
@@ -365,7 +367,7 @@ fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
 }
 
 fn allocateRegisters(allocator: Allocator, function: Machine.Function) Machine.Error!Machine.Function {
-    var result = function;
+    var result = try MemorySchedule.optimize(allocator, function);
     const allocation = try RegisterAllocation.allocate(allocator, result);
     result.register_slots = allocation.residences;
     result.float_register_slots = allocation.float_residences;
@@ -1467,4 +1469,5 @@ fn runtimeConversionHeader(
 
 test {
     _ = @import("LowerTests.zig");
+    _ = MemorySchedule;
 }

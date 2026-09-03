@@ -76,6 +76,10 @@ original use, before another scalar can reuse its register.
 Memory kernels also reject a pair when delaying its first calculation would
 cross a use of that result. Aggregate returns copy resident lanes into the
 caller's return storage instead of reading stale stack homes.
+Before allocation, compatible ARM64 memory kernels may reorder independent
+single-definition arithmetic trees inside a pure region to make their lanes
+adjacent. Memory accesses, calls, control-flow entries and potentially trapping
+operations remain barriers; expression trees and source positions are preserved.
 In these leaf functions, a borrowed aggregate read materializes only the fields
 used by the function. Those fields are still loaded at the original read,
 not at a later projection that could follow an aliasing write.
