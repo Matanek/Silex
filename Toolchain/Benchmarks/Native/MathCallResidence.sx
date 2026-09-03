@@ -1,0 +1,64 @@
+// macOS ARM64 native ABI fixture. These are real, linked libSystem calls.
+use Interop.C
+use Interop.MacOS
+
+let sqrt32 = C.function<func(float32) float32>(library:MacOS.lib_system, name:"sqrtf")
+let sqrt64 = C.function<func(float64) float64>(library:MacOS.lib_system, name:"sqrt")
+
+func accumulate32(value:float32, marker:float32, count:int) float32 {
+    var total = value
+    var i = 0
+    while i < count {
+        let carried = total + 1.0
+        total = carried + sqrt32(marker)
+        i++
+    }
+    return total
+}
+
+func accumulate64(value:float64, marker:float64, count:int) float64 {
+    var total = value
+    var i = 0
+    while i < count {
+        let carried = total + 1.0
+        total = carried + sqrt64(marker)
+        i++
+    }
+    return total
+}
+
+func preserve32(value:float32, marker:float32) float32 {
+    let carried = -value
+    let root = sqrt32(marker)
+    if root < 0.0 { return 0.0 }
+    return -carried
+}
+
+func preserve64(value:float64, marker:float64) float64 {
+    let carried = -value
+    let root = sqrt64(marker)
+    if root < 0.0 { return 0.0 }
+    return -carried
+}
+
+func main() {
+    assert(accumulate32(9.0, 4.0, 16) == 57.0)
+    assert(accumulate64(9.0, 4.0, 16) == 57.0)
+    let payloads32:uint32[] = [0, 0x80000000, 0x7f800001, 0x7fc12345]
+    for payload in payloads32 {
+        var bits = payload
+        let value = C.load<float32>(C.address_bits(C.mutable_pointer(bits)), 0 as uint)
+        var result = preserve32(value, 4.0)
+        let actual = C.load<uint32>(C.address_bits(C.mutable_pointer(result)), 0 as uint)
+        assert(actual == payload)
+    }
+    let payloads64:uint[] = [0, 0x8000000000000000, 0x7ff0000000000001, 0x7ff8123456789abc]
+    for payload in payloads64 {
+        var bits = payload
+        let value = C.load<float64>(C.address_bits(C.mutable_pointer(bits)), 0 as uint)
+        var result = preserve64(value, 4.0)
+        let actual = C.load<uint>(C.address_bits(C.mutable_pointer(result)), 0 as uint)
+        assert(actual == payload)
+    }
+    print("math-call-residence: pass")
+}

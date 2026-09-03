@@ -120,6 +120,16 @@ provider qualifies only when its macOS ARM64 metadata links libSystem alone,
 without an archive, framework or provider dependency. Custom providers keep
 their call. X64 register eligibility is unchanged by this ARM64 extension.
 
+Functions with exact scalar system-math signatures may also retain ARM64
+residences across actual C calls. Their colors are restricted to x19–x28
+(x28 remains reserved for a second stack window) and the preserved low 64 bits
+of v8/v13–v15. Argument and result homes remain on the stack; the existing ABI
+call, its result and its side effects are retained. Unknown providers and
+signatures still take the conservative path. Call-free functions keep their
+larger register set. Structural tests cover both float precisions and stack
+windows; `Toolchain/Benchmarks/Native/MathCallResidence.sx` exercises linked
+macOS calls with live loop values and exact NaN/signed-zero payloads.
+
 Native layout omits storage for value declarations whose definitions and uses
 have disappeared from the IR. Parameters and closure captures still retain
 their ABI homes even when the body does not use them. Remaining values

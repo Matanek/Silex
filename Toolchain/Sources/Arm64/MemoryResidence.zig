@@ -5,6 +5,20 @@ test {
     _ = @import("AggregateCopyTests.zig");
     _ = @import("FloatMemoryTests.zig");
     _ = @import("DeadCollectionLoadTests.zig");
+    _ = @import("MathCallResidenceTests.zig");
+}
+
+pub fn scalarMathCall(external: Machine.ExternalFunction) bool {
+    const built_in = !external.package_private and
+        (std.mem.eql(u8, external.provider, "Darwin.lib_system") or
+            std.mem.eql(u8, external.provider, "Windows.ucrtbase"));
+    if (!built_in and !external.system_math) return false;
+    const math = @import("../Math/Boundary.zig").identify(external.source_name) orelse return false;
+    const kind: Machine.AbiValue = if (math.precision == .float64) .float64 else .float32;
+    const arity: usize = if (math.arity == .unary) 1 else 2;
+    if (external.signature.result != kind or external.signature.arguments.len != arity) return false;
+    for (external.signature.arguments) |argument| if (argument != kind) return false;
+    return true;
 }
 
 pub fn copySignPrecision(external: Machine.ExternalFunction) ?bool {

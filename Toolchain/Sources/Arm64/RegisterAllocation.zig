@@ -54,6 +54,13 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Err
 
 pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, externals: []const Machine.ExternalFunction) (Allocator.Error || Machine.Error)!Result {
     if (!isCompatibleFunction(function, true, externals)) return spilled(allocator, function);
+    // Actual C calls preserve x19...x28 and only the low 64 bits of v8...v15.
+    // Keep the existing argument/result stack homes and use preserved colors
+    // for the whole function. Scratch v9...v12 remain excluded as before.
+    const has_calls = for (function.instructions) |instruction| {
+        if (instruction == .external_call and
+            MemoryResidence.copySignPrecision(externals[instruction.external_call.function]) == null) break true;
+    } else false;
 
     const residences = try allocator.alloc(?u5, function.slot_count);
     @memset(residences, null);
@@ -71,7 +78,8 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         8,  13, 14, 15, 0,  1,  2,  3,
         4,  5,  6,  7,
     };
-    try FloatPairs.allocate(allocator, function, float_slots, float_lane_residences, &pair_registers);
+    const float_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
+    try FloatPairs.allocate(allocator, function, float_slots, float_lane_residences, float_registers);
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
     @memset(forced, false);
@@ -120,7 +128,12 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             try float_intervals.append(allocator, interval);
         } else try integer_intervals.append(allocator, interval);
     }
-    const integer_registers = if (function.slot_count >= Machine.direct_stack_slots)
+    const integer_registers: []const u5 = if (has_calls)
+        (if (function.slot_count >= Machine.direct_stack_slots)
+            &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27 }
+        else
+            &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 })
+    else if (function.slot_count >= Machine.direct_stack_slots)
         &[_]u5{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8 }
     else
         &[_]u5{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
@@ -134,8 +147,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     );
     // Incoming arguments occupy x0...x7 until every parameter has been
     // captured by the prologue. Keep parameter residences out of that range;
-    // later temporaries may freely reuse those volatile registers because
-    // compatible functions contain no calls.
+    // Call-free functions may still reuse volatile registers for temporaries.
     for (function.parameters) |parameter| for (0..parameter.width) |leaf| {
         const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
         if (residences[slot]) |register| {
@@ -152,7 +164,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         allocator,
         float_residences,
         float_intervals.items,
-        &.{ 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 8, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7 },
+        float_registers,
         function.instructions,
         function.slot_count,
     );
@@ -694,7 +706,7 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
         .collection_load => |load| if (load.checked and !(allow_stack_effects and MemoryResidence.supports(instruction))) return false,
         .binary => |binary| if (binary.type == .str) return false,
         .external_call => |call| if (!allow_stack_effects or call.function >= externals.len or
-            MemoryResidence.copySignPrecision(externals[call.function]) == null) return false,
+            !MemoryResidence.scalarMathCall(externals[call.function])) return false,
         else => if (!allow_stack_effects or !MemoryResidence.supports(instruction)) return false,
     };
     return true;

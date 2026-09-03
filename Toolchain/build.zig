@@ -245,6 +245,29 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cycle_test_command.step);
     test_step.dependOn(&language_test_command.step);
 
+    var native_math_validation: ?*std.Build.Step = null;
+    if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and
+        b.graph.host.result.os.tag == .macos and b.graph.host.result.cpu.arch == .aarch64)
+    {
+        // This fixture needs the real Mach-O import linker; Runner.invoke
+        // intentionally executes images without resolving external call sites.
+        const native_math_debug = b.addRunArtifact(executable);
+        native_math_debug.setCwd(b.path("../.."));
+        native_math_debug.addArg("run");
+        native_math_debug.addFileArg(b.path("Benchmarks/Native/MathCallResidence.sx"));
+        native_math_debug.addArgs(&.{ "--debug", "--nocache" });
+        const native_math_release = b.addRunArtifact(executable);
+        native_math_release.setCwd(b.path("../.."));
+        native_math_release.addArg("run");
+        native_math_release.addFileArg(b.path("Benchmarks/Native/MathCallResidence.sx"));
+        native_math_release.addArgs(&.{ "--release", "--nocache" });
+        native_math_release.step.dependOn(&native_math_debug.step);
+        const native_math_step = b.step("test-native-math-calls", "Verify linked ARM64 math calls in Debug and Release");
+        native_math_step.dependOn(&native_math_release.step);
+        native_math_validation = &native_math_release.step;
+        test_step.dependOn(&native_math_release.step);
+    }
+
     const lsp_test_module = b.createModule(.{
         .root_source_file = b.path("Sources/LspTests.zig"),
         .target = target,
@@ -266,6 +289,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&language_test_command.step);
     check_step.dependOn(&lsp_test_command.step);
     check_step.dependOn(&optimizer_oracle_test_command.step);
+    if (native_math_validation) |validation| check_step.dependOn(validation);
 }
 
 fn manifestVersion() []const u8 {
