@@ -80,6 +80,10 @@ Before allocation, compatible ARM64 memory kernels may reorder independent
 single-definition arithmetic trees inside a pure region to make their lanes
 adjacent. Memory accesses, calls, control-flow entries and potentially trapping
 operations remain barriers; expression trees and source positions are preserved.
+Constructed aggregates can seed those lanes by copying each leaf at its original
+construction point, without requiring the input leaves to be packed already.
+Arithmetic dependencies are selected before competing copy-only affinities
+in these memory kernels; safety and operand-residency checks still apply.
 In these leaf functions, a borrowed aggregate read materializes only the fields
 used by the function. Those fields are still loaded at the original read,
 not at a later projection that could follow an aliasing write.

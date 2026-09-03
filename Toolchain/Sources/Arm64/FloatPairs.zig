@@ -52,31 +52,41 @@ pub fn allocate(
     // identity. ARM64 consumes pairs today; XYZ remains one portable group and
     // is lowered as XY plus a scalar Z until a profitable .4s realization is
     // selected by this backend.
-    for (function.float_lane_groups) |group| {
-        if (group.priority == 0 or
-            (group.recurrence and (!group.in_loop or group.priority < 8))) continue;
-        var lane: usize = 0;
-        while (lane + 1 < group.width) : (lane += 2) {
-            const first = group.slots[lane];
-            const second = group.slots[lane + 1];
-            if (float_slots[first] and float_slots[second] and
-                partners[first] == null and partners[second] == null)
-            {
-                const first_instruction = definingInstruction(function.instructions, first) orelse continue;
-                const second_instruction = definingInstruction(function.instructions, second) orelse continue;
-                pairSlots(partners, first, second);
-                if (group.in_loop and group.priority >= 8) {
-                    planned[first] = true;
-                    planned[second] = true;
+    const rounds: usize = if (MemoryResidence.required(function)) 2 else 1;
+    for (0..rounds) |round| {
+        for (function.float_lane_groups) |group| {
+            if (group.priority == 0 or
+                (group.recurrence and (!group.in_loop or group.priority < 8))) continue;
+            var lane: usize = 0;
+            while (lane + 1 < group.width) : (lane += 2) {
+                const first = group.slots[lane];
+                const second = group.slots[lane + 1];
+                if (float_slots[first] and float_slots[second] and
+                    ((partners[first] == null and partners[second] == null) or
+                        (rounds == 2 and partners[first] == second and partners[second] == first)))
+                {
+                    const first_instruction = definingInstruction(function.instructions, first) orelse continue;
+                    const second_instruction = definingInstruction(function.instructions, second) orelse continue;
+                    // In a memory kernel, establish arithmetic dependencies before
+                    // copy-only affinities can reserve their operands differently.
+                    if (rounds == 2 and round == 0 and
+                        (first_instruction != .binary or second_instruction != .binary or
+                            first_instruction.binary.type != .float32 or second_instruction.binary.type != .float32 or
+                            first_instruction.binary.operator != second_instruction.binary.operator)) continue;
+                    pairSlots(partners, first, second);
+                    if (group.in_loop and group.priority >= 8) {
+                        planned[first] = true;
+                        planned[second] = true;
+                    }
+                    pairDefinitionOperands(
+                        function.instructions,
+                        partners,
+                        first,
+                        second,
+                        first_instruction,
+                        second_instruction,
+                    );
                 }
-                pairDefinitionOperands(
-                    function.instructions,
-                    partners,
-                    first,
-                    second,
-                    first_instruction,
-                    second_instruction,
-                );
             }
         }
     }
@@ -512,6 +522,10 @@ fn pairDefinitionReady(
             ),
             else => false,
         },
+        // Aggregate construction copies each leaf immediately, just like a
+        // scalar copy. Memory kernels may seed lanes from those snapshots;
+        // their original operands need not already form a SIMD pair.
+        .aggregate_init => scalar_copies and second.? == .aggregate_init,
         .collection_load => |left| switch (second.?) {
             .collection_load => |right| left.result.start == right.result.start and left.result.width == right.result.width,
             else => false,

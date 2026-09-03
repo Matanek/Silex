@@ -13,6 +13,120 @@ pub fn copySignPrecision(external: Machine.ExternalFunction) ?bool {
     return double;
 }
 
+test "constructed memory arithmetic retains SIMD seeds" {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var function: Machine.Function = .{
+        .name = "constructed_pair",
+        .parameter_count = 4,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 12,
+        .frame_size = 96,
+        .float_lane_groups = &.{
+            .{ .slots = .{ 4, 5, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 6, 7, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 8, 9, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
+        },
+        .instructions = &.{
+            .{ .aggregate_init = .{ .result = .{ .start = 4, .width = 2, .aggregate = true }, .fields = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } } } },
+            .{ .binary = .{ .result = 6, .left = 4, .right = 2, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 7, .left = 5, .right = 2, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 8, .left = 6, .right = 2, .operator = .add, .type = .float32 } },
+            .{ .binary = .{ .result = 9, .left = 7, .right = 2, .operator = .add, .type = .float32 } },
+            .{ .copy_range = .{ .result = .{ .start = 10, .width = 2 }, .operand = .{ .start = 8, .width = 2 } } },
+            .{ .reference_store = .{ .reference = 3, .operand = .{ .start = 10, .width = 2 } } },
+            .return_void,
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    try std.testing.expect(function.float_lane_slots[4] != null);
+    try std.testing.expect(function.float_lane_slots[6] != null);
+    try std.testing.expect(function.float_lane_slots[8] != null);
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    const Runner = @import("Runner.zig");
+    var values = [_]u64{ 0, 0 };
+    const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{
+        @as(u32, @bitCast(@as(f32, 3))), @as(u32, @bitCast(@as(f32, -4))),
+        @as(u32, @bitCast(@as(f32, 2))), @intCast(@intFromPtr(&values)),
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 8))), @as(u32, @truncate(values[0])));
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -6))), @as(u32, @truncate(values[1])));
+}
+
+test "memory arithmetic affinity wins over conflicting copy groups" {
+    try checkArithmeticAffinity(false);
+    try checkArithmeticAffinity(true);
+}
+
+fn checkArithmeticAffinity(reverse_arithmetic: bool) !void {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var function: Machine.Function = .{
+        .name = "conflicting_copy_groups",
+        .parameter_count = 6,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 }, .{ .start = 4, .width = 1 }, .{ .start = 5, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 22,
+        .frame_size = 176,
+        .float_lane_groups = &.{
+            .{ .slots = .{ 6, 8, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 7, 9, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 10, 11, 12, 13 }, .width = 4, .priority = 1, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 14, 15, 16, 17 }, .width = 4, .priority = 1, .recurrence = false, .in_loop = false },
+        },
+        .instructions = &.{
+            .{ .copy = .{ .result = 6, .operand = 0 } },
+            .{ .copy = .{ .result = 7, .operand = 1 } },
+            .{ .copy = .{ .result = 8, .operand = 2 } },
+            .{ .copy = .{ .result = 9, .operand = 3 } },
+            .{ .binary = .{ .result = 10, .left = 6, .right = 4, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 11, .left = 7, .right = 4, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 12, .left = 8, .right = 4, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 13, .left = 9, .right = 4, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 14, .left = 10, .right = 4, .operator = .add, .type = .float32 } },
+            .{ .binary = .{ .result = 15, .left = 11, .right = 4, .operator = .add, .type = .float32 } },
+            .{ .binary = .{ .result = 16, .left = 12, .right = 4, .operator = .add, .type = .float32 } },
+            .{ .binary = .{ .result = 17, .left = 13, .right = 4, .operator = .add, .type = .float32 } },
+            .{ .copy_range = .{ .result = .{ .start = 18, .width = 4 }, .operand = .{ .start = 14, .width = 4 } } },
+            .{ .reference_store = .{ .reference = 5, .operand = .{ .start = 18, .width = 4 } } },
+            .return_void,
+        },
+    };
+    if (reverse_arithmetic) {
+        const groups = try allocator.dupe(Machine.FloatLaneGroup, function.float_lane_groups);
+        std.mem.swap(Machine.FloatLaneGroup, &groups[2], &groups[3]);
+        function.float_lane_groups = groups;
+    }
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    for (6..18) |slot| try std.testing.expect(function.float_lane_slots[slot] != null);
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    const Runner = @import("Runner.zig");
+    var values = [_]u64{0} ** 4;
+    const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{
+        @as(u32, @bitCast(@as(f32, 3))), @as(u32, @bitCast(@as(f32, -4))),
+        @as(u32, @bitCast(@as(f32, 5))), @as(u32, @bitCast(@as(f32, -6))),
+        @as(u32, @bitCast(@as(f32, 2))), @intCast(@intFromPtr(&values)),
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    for ([_]f32{ 8, -6, 12, -10 }, values) |expected, actual| {
+        try std.testing.expectEqual(@as(u32, @bitCast(expected)), @as(u32, @truncate(actual)));
+    }
+}
+
 test "memory lane recurrence preserves source-level borrowed updates" {
     const builtin = @import("builtin");
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;

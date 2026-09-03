@@ -49,6 +49,13 @@ func separated_arithmetic(value:Pair, output:&Pair, scale:float) {
     output.y = y
 }
 
+func constructed_arithmetic(x:float, y:float, output:&Pair, scale:float) {
+    let input = Pair(x:x, y:y)
+    let scaled = Pair(x:input.x * scale, y:input.y * scale)
+    output.x = scaled.x + scale
+    output.y = scaled.y + scale
+}
+
 func main() {
     let values:Pair[] = [Pair(x:3.0, y:-4.0), Pair(x:-2.0, y:5.0)]
     let view = @values[0:values.count()]
@@ -65,6 +72,8 @@ func main() {
     assert(snapshot.x == 99.0 && snapshot.y == -4.0)
     separated_arithmetic(values[0], output, 2.0)
     assert(output.x == 8.0 && output.y == -6.0)
+    constructed_arithmetic(values[1].x, values[1].y, output, 2.0)
+    assert(output.x == -2.0 && output.y == 12.0)
     var velocities:Pair[] = [Pair(x:2.0, y:1.0), Pair(x:-7.0, y:-3.0)]
     var mutable = &velocities[0:2]
     apply(mutable, Pair(x:1.0, y:0.0), 0.5, 1.0, 2.0)
