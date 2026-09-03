@@ -4,6 +4,7 @@ const std = @import("std");
 test {
     _ = @import("AggregateCopyTests.zig");
     _ = @import("FloatMemoryTests.zig");
+    _ = @import("DeadCollectionLoadTests.zig");
 }
 
 pub fn copySignPrecision(external: Machine.ExternalFunction) ?bool {

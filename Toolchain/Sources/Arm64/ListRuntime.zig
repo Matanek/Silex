@@ -800,17 +800,21 @@ pub fn emitLoad(
         try boundsView(allocator, words, value.collection, value.index)
     else
         try boundsDynamic(allocator, words, value.collection.start, value.index);
-    if (!value.view) try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
-    const stride = elementStride(value.result.width, value.element_stride);
-    try addElementOffset(allocator, words, .x10, .x9, stride);
-    for (0..value.result.width) |leaf| {
-        if (stride == @as(u64, value.result.width) * 4) {
-            try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
-        } else try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
-        const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
-        if (function.float_register_slots.len != 0 and function.float_register_slots[slot] != null) {
-            try words.append(allocator, A64.moveGeneralToFloat(@enumFromInt(function.float_register_slots[slot].?), .x12, true));
-        } else try storeValue(allocator, words, function, .x12, slot);
+    // Zero leaves preserve the checked read's failure path without touching
+    // an unobserved aggregate payload. Keep the original stride and count.
+    if (leaf_count != 0) {
+        if (!value.view) try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
+        const stride = elementStride(value.result.width, value.element_stride);
+        try addElementOffset(allocator, words, .x10, .x9, stride);
+        for (0..leaf_count) |leaf| {
+            if (stride == @as(u64, value.result.width) * 4) {
+                try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
+            } else try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+            const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+            if (function.float_register_slots.len != 0 and function.float_register_slots[slot] != null) {
+                try words.append(allocator, A64.moveGeneralToFloat(@enumFromInt(function.float_register_slots[slot].?), .x12, true));
+            } else try storeValue(allocator, words, function, .x12, slot);
+        }
     }
     const complete = words.items.len;
     try words.append(allocator, A64.branch());

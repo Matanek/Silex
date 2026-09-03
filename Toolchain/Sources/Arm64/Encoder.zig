@@ -2903,6 +2903,19 @@ fn eagerCollectionWidth(
     load_index: usize,
     load: Machine.Instruction.CollectionLoad,
 ) u12 {
+    // An unused checked aggregate still validates its index, but its payload
+    // need not be copied. Only ordinary Release slots have stable identities.
+    if (load.checked and load.dynamic and load.result.width > 1 and function.register_slots.len != 0) {
+        var used = false;
+        for (0..load.result.width) |leaf| {
+            const slot: Machine.Slot = @intCast(@as(usize, load.result.start) + leaf);
+            if (slotHasUse(function.instructions, slot)) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) return 0;
+    }
     if (load.checked or !load.dynamic or load.result.width < 2 or
         function.float_register_slots.len == 0) return load.result.width;
     for (0..load.result.width) |leaf| {
@@ -2948,6 +2961,7 @@ fn emitDeferredCollectionLoads(
             .collection_load => |value| value,
             else => continue,
         };
+        if (load.checked) continue;
         const eager_width = eagerCollectionWidth(function, load_index, load);
         if (eager_width >= load.result.width) continue;
         const first_slot: Machine.Slot = @intCast(@as(usize, load.result.start) + eager_width);

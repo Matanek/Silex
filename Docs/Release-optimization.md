@@ -107,6 +107,11 @@ loads and stores. Floating-point 64-bit stack transfers use the same direct
 instructions in both stack-address windows, in Debug and Release. These are
 bit transfers, preserving signed zeros and NaN payloads without an intermediate
 integer register. The width of each memory access is unchanged.
+In compatible Release functions, checked dynamic collection reads whose
+aggregate payload is unused keep the original index checks and diagnostics
+without copying any element fields. Views and owning lists retain their
+negative-index behavior. Debug and functions that reuse physical slots keep
+their existing lowering.
 
 Exact `copysignf`/`copysign` calls to a proven system provider use a sign-bit
 transfer on ARM64. The transformation preserves signed zeros, infinities and

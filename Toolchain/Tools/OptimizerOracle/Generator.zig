@@ -35,7 +35,7 @@ pub const corpus = [_]CorpusEntry{
 pub const regressions = [_]RegressionEntry{
     .{
         .name = "Regressions/AggregateFieldStores.sx",
-        .concern = "narrow reference and view field writes preserve stale snapshots, sibling mutations and owning collection copies",
+        .concern = "scalar field reads and writes preserve snapshots, alias mutations across calls and loops, and owning collection copies",
     },
     .{
         .name = "Regressions/CheckedMemoryLanes.sx",

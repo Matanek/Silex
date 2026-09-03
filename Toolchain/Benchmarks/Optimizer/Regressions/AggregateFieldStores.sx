@@ -41,6 +41,28 @@ func capture(state:&State, values:&State[..], index:int, branching:bool) float {
     return saved.y + item.x
 }
 
+func score_value(state:@State) float {
+    return state.x * state.y + state.x * state.y
+}
+
+func set_x(state:&State) float { state.x = 17.0; return 0.0 }
+
+func score_reference(state:&State, other:&State) float {
+    return state.x * state.x + set_x(other) + state.x
+}
+
+func sum_references(state:&State, other:&State, rounds:int) float {
+    var total:float = 0.0
+    var index = 0
+    while index < rounds {
+        total += state.x
+        other.x += 1.0
+        total += state.x
+        index++
+    }
+    return total
+}
+
 func main() {
     var state = State(x:3.0, y:5.0, z:7.0, w:11.0)
     let snapshot = state
@@ -58,5 +80,11 @@ func main() {
     assert(capture(state, &values[0:1], -1, true) == 31.0)
     assert(capture(state, &values[0:1], 0, false) == 20.0)
     assert(state.x == 100.0 && values[0].y == 200.0)
+    var repeated = State(x:3.0, y:5.0)
+    assert(score_value(repeated) == 30.0)
+    assert(score_reference(repeated, repeated) == 26.0)
+    repeated.x = 3.0
+    assert(sum_references(repeated, repeated, 4) == 40.0)
+    assert(repeated.x == 7.0 && repeated.y == 5.0)
     print("aggregate field stores preserved")
 }
