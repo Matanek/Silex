@@ -159,8 +159,10 @@ pub fn allocate(
         if (partners[slot]) |partner| partners[partner] = null;
         partners[slot] = null;
     };
+    // Delayed pair emission must preserve every original scalar use,
+    // including in pure aggregate constructors without memory operations.
+    pruneEarlyUses(function.instructions, partners);
     if (MemoryResidence.required(function)) {
-        pruneEarlyMemoryUses(function.instructions, partners);
         // Memory exclusions can break a planned arithmetic chain. Require
         // every surviving pair to have resident operands, even in hot loops.
         @memset(planned, false);
@@ -209,7 +211,7 @@ pub fn allocate(
     try pruneUnprofitableFloatPairs(allocator, function.instructions, residences, planned, MemoryResidence.required(function));
 }
 
-fn pruneEarlyMemoryUses(instructions: []const Machine.Instruction, partners: []?Machine.Slot) void {
+fn pruneEarlyUses(instructions: []const Machine.Instruction, partners: []?Machine.Slot) void {
     for (partners, 0..) |maybe_partner, slot| {
         const partner = maybe_partner orelse continue;
         if (partner <= slot) continue;

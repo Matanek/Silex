@@ -63,6 +63,18 @@ func sum_references(state:&State, other:&State, rounds:int) float {
     return total
 }
 
+// The first subtraction is consumed before its later SIMD-affine sibling.
+func construct_state(index:int, frame:int) State {
+    let k = index as float
+    let phase = frame as float
+    var result = State(x:(k - 8.0) * 0.03125 + phase * 0.001953125,
+        y:0.125 + phase * 0.0078125,
+        z:k * 0.0625,
+        w:(k - 8.0) * 0.125)
+    if index % 4 == 0 { result.z = 0.0 }
+    return result
+}
+
 func main() {
     var state = State(x:3.0, y:5.0, z:7.0, w:11.0)
     let snapshot = state
@@ -86,5 +98,19 @@ func main() {
     repeated.x = 3.0
     assert(sum_references(repeated, repeated, 4) == 40.0)
     assert(repeated.x == 7.0 && repeated.y == 5.0)
+    var frame = 0
+    while frame < 4 {
+        var index = 0
+        while index < 16 {
+            let constructed = construct_state(index, frame)
+            assert(constructed.x == ((index - 8) as float * 0.03125 + frame as float * 0.001953125))
+            assert(constructed.y == 0.125 + frame as float * 0.0078125)
+            assert(constructed.w == (index - 8) as float * 0.125)
+            if index % 4 == 0 { assert(constructed.z == 0.0) }
+            else { assert(constructed.z == index as float * 0.0625) }
+            index++
+        }
+        frame++
+    }
     print("aggregate field stores preserved")
 }

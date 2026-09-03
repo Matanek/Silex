@@ -80,13 +80,17 @@ ARM64 also admits a restricted set of leaf memory operations. Checked dynamic
 loads, view replacement, and explicit address/reference accesses retain their
 bounds and failure behavior. Addresses, indices and composite memory operands
 stay pinned; scalar loads and reference stores may transfer directly to a
-register. Functions taking local addresses or making arbitrary calls remain
-outside this path. Independent arithmetic may use paired SIMD residences,
+register. Pure aggregate construction and copies can also retain arithmetic
+residences
+on ARM64, with the existing parameter and return homes. Functions taking local
+addresses or making arbitrary calls remain outside this path. Independent
+arithmetic may use paired SIMD residences,
 while values consumed or produced by the memory instructions remain scalar
 or stack-resident. Packing a scalar into a SIMD lane captures it at its
 original use, before another scalar can reuse its register.
-Memory kernels also reject a pair when delaying its first calculation would
-cross a use of that result. Aggregate returns copy resident lanes into the
+Every eligible function rejects a pair when delaying its first calculation
+would cross a scalar use of that result, including pure aggregate constructors.
+Aggregate returns copy resident lanes into the
 caller's return storage instead of reading stale stack homes.
 Before allocation, compatible ARM64 memory kernels may reorder independent
 single-definition arithmetic trees inside a pure region to make their lanes

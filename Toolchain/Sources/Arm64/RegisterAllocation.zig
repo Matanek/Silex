@@ -681,7 +681,6 @@ fn propagateFloat(left: Machine.Slot, right: Machine.Slot, result: []bool, chang
 
 fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, externals: []const Machine.ExternalFunction) bool {
     if (function.reuses_slots) return false;
-    const memory_leaf = allow_stack_effects and MemoryResidence.required(function);
     var has_unchecked_collection_load = false;
     for (function.instructions) |instruction| switch (instruction) {
         .collection_load => |load| has_unchecked_collection_load = has_unchecked_collection_load or !load.checked,
@@ -702,7 +701,10 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
         .jump,
         .branch,
         => {},
-        .copy_range, .aggregate_init => if (!has_unchecked_collection_load and !memory_leaf) return false,
+        // ARM64's aggregate emitters already consume registered scalar leaves.
+        // Pure constructors need no unrelated memory operation to qualify.
+        // The shared lane-only path retains its previous, narrower contract.
+        .copy_range, .aggregate_init => if (!has_unchecked_collection_load and !allow_stack_effects) return false,
         .collection_load => |load| if (load.checked and !(allow_stack_effects and MemoryResidence.supports(instruction))) return false,
         .binary => |binary| if (binary.type == .str) return false,
         .external_call => |call| if (!allow_stack_effects or call.function >= externals.len or
