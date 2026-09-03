@@ -13,6 +13,54 @@ pub fn copySignPrecision(external: Machine.ExternalFunction) ?bool {
     return double;
 }
 
+test "memory lane recurrence preserves source-level borrowed updates" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    const Frontend = @import("../Frontend.zig").Frontend;
+    const Release = @import("../Optimize/Release.zig");
+    const Lower = @import("Lower.zig");
+    const Runner = @import("Runner.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:float; var y:float }
+        \\func transform(values:@Pair[..], output:&Pair, index:int, scale:float, invert:bool) {
+        \\    let input = values[index]
+        \\    var x = input.x
+        \\    var y = input.y
+        \\    var step = 0
+        \\    while step < 3 {
+        \\        x = x * scale + 1.0
+        \\        y = y * scale + 1.0
+        \\        step++
+        \\    }
+        \\    if invert { x = -x; y = -y }
+        \\    output.x = x
+        \\    output.y = y
+        \\    output.x += output.y
+        \\}
+        \\func main() {}
+    );
+    const optimized = try Release.optimizeWithoutInlining(allocator, compilation.ir);
+    const program = try Lower.lowerWithMode(allocator, optimized, .release);
+    var values = [_]u32{ @bitCast(@as(f32, 3)), @bitCast(@as(f32, -4)) };
+    var view = [_]u64{ @intFromPtr(&values), 1 };
+    var stored = [_]u64{ 0, 0 };
+    for ([_]bool{ false, true }) |invert| {
+        const result = try Runner.invoke(allocator, program, 0, &.{
+            @intCast(@intFromPtr(&view)),    @intCast(@intFromPtr(&stored)), -1,
+            @as(u32, @bitCast(@as(f32, 2))), @intFromBool(invert),
+        });
+        try std.testing.expectEqual(Machine.Status.success, result.status);
+        const expected_x: f32 = if (invert) -6 else 6;
+        const expected_y: f32 = if (invert) 25 else -25;
+        try std.testing.expectEqual(@as(u32, @bitCast(expected_x)), @as(u32, @truncate(stored[0])));
+        try std.testing.expectEqual(@as(u32, @bitCast(expected_y)), @as(u32, @truncate(stored[1])));
+    }
+}
+
 // These leaf memory operations use stack homes and scratch x9...x15. Their
 // error paths terminate the function; their successful paths call no runtime.
 // Keep addresses, indices and composite operands in memory; scalar loads and
@@ -90,6 +138,20 @@ pub fn pin(instruction: Machine.Instruction, forced: []bool) void {
 
 fn pinSpan(span: Machine.Span, forced: []bool) void {
     for (0..span.width) |leaf| forced[@as(usize, span.start) + leaf] = true;
+}
+
+/// Memory emitters accept scalar float registers, but not packed float lanes.
+/// Keep this exclusion separate from stack pinning so scalar residency survives.
+pub fn pinFloatLanes(instruction: Machine.Instruction, forced: []bool) void {
+    pin(instruction, forced);
+    switch (instruction) {
+        .reference_load => |value| pinSpan(value.result, forced),
+        .reference_store => |value| pinSpan(value.operand, forced),
+        .collection_load => |value| if (value.checked) {
+            pinSpan(value.result, forced);
+        },
+        else => {},
+    }
 }
 
 pub fn uses(instruction: Machine.Instruction, slot: usize) bool {
@@ -209,4 +271,180 @@ test "dead aggregate leaves do not overwrite a live sibling register" {
     try std.testing.expectEqual(Machine.Status.success, result.status);
     try std.testing.expectEqual(@as(i64, 1), result.value);
     try std.testing.expectEqual(@as(u64, @as(u32, @bitCast(@as(f32, 1)))), stored);
+}
+
+test "checked memory kernels retain arithmetic lanes without vectorizing memory operands" {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    const Runner = @import("Runner.zig");
+    const builtin = @import("builtin");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const instructions = [_]Machine.Instruction{
+        .{ .collection_load = .{
+            .result = .{ .start = 4, .width = 2, .aggregate = true },
+            .collection = .{ .start = 0, .width = 2, .aggregate = true },
+            .index = 2,
+            .count = 0,
+            .dynamic = true,
+            .view = true,
+            .header = 0,
+            .tail = 0,
+        } },
+        .{ .copy = .{ .result = 6, .operand = 4 } },
+        .{ .copy = .{ .result = 7, .operand = 5 } },
+        .{ .constant_float32 = .{ .result = 8, .bits = @bitCast(@as(f32, 2)) } },
+        .{ .binary = .{ .result = 9, .operator = .multiply, .left = 6, .right = 8, .type = .float32 } },
+        .{ .binary = .{ .result = 10, .operator = .multiply, .left = 7, .right = 8, .type = .float32 } },
+        .{ .binary = .{ .result = 11, .operator = .add, .left = 9, .right = 8, .type = .float32 } },
+        .{ .binary = .{ .result = 12, .operator = .add, .left = 10, .right = 8, .type = .float32 } },
+        .{ .copy = .{ .result = 13, .operand = 11 } },
+        .{ .copy = .{ .result = 14, .operand = 12 } },
+        .{ .reference_store = .{ .reference = 3, .operand = .{ .start = 13, .width = 2, .aggregate = true } } },
+        .{ .return_value = .{ .start = 11, .width = 1 } },
+    };
+    const groups = [_]Machine.FloatLaneGroup{
+        .{ .slots = .{ 4, 5, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 6, 7, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 9, 10, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 11, 12, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 13, 14, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = true },
+    };
+    var function: Machine.Function = .{
+        .name = "checked_memory_lanes",
+        .parameter_count = 3,
+        .parameters = &.{ .{ .start = 0, .width = 2, .aggregate = true }, .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 } },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 15,
+        .frame_size = try Machine.frameSize(15),
+        .instructions = &instructions,
+        .float_lane_groups = &groups,
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    for ([_]usize{ 0, 1, 2, 3, 4, 5, 13, 14 }) |slot| {
+        try std.testing.expectEqual(null, allocation.float_lane_residences[slot]);
+    }
+    for ([_]usize{ 6, 7, 9, 10, 11, 12 }) |slot| {
+        try std.testing.expect(allocation.float_lane_residences[slot] != null);
+    }
+    // The shared allocator used by X64 retains its prior eligibility contract.
+    const shared = try RegisterAllocation.allocateFloatLanePairsFor(allocator, function, &.{ 0, 1 });
+    try std.testing.expectEqual(@as(usize, 0), shared.len);
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var values = [_]u64{ @as(u32, @bitCast(@as(f32, 3))), @as(u32, @bitCast(@as(f32, -4))) };
+    var stored = [_]u64{ 0, 0 };
+    var view = [_]u64{ @intFromPtr(&values), 1 };
+    const result = try Runner.invoke(allocator, .{ .functions = &.{function}, .strings = &.{""} }, 0, &.{
+        @intCast(@intFromPtr(&view)), 0, @intCast(@intFromPtr(&stored)),
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    // float32 occupies the low word of a machine slot; upper bits are padding.
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 8))), @as(u32, @truncate(stored[0])));
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -6))), @as(u32, @truncate(stored[1])));
+}
+
+test "memory kernel returns aggregate values held in SIMD lanes" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    const Runner = @import("Runner.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var callee: Machine.Function = .{
+        .name = "paired_return",
+        .parameter_count = 3,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 } },
+        .return_type = .float32,
+        .return_width = 2,
+        .return_aggregate = true,
+        .hidden_return_slot = 7,
+        .slot_count = 8,
+        .frame_size = try Machine.frameSize(8),
+        .instructions = &.{
+            .{ .reference_load = .{ .result = .{ .start = 3, .width = 1 }, .reference = 0 } },
+            .{ .binary = .{ .result = 5, .operator = .add, .left = 1, .right = 3, .type = .float32 } },
+            .{ .binary = .{ .result = 6, .operator = .add, .left = 2, .right = 3, .type = .float32 } },
+            .{ .return_value = .{ .start = 5, .width = 2, .aggregate = true } },
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, callee);
+    callee.register_slots = allocation.residences;
+    callee.float_register_slots = allocation.float_residences;
+    callee.float_lane_slots = allocation.float_lane_residences;
+    try std.testing.expect(callee.float_lane_slots[5] != null);
+    const caller: Machine.Function = .{
+        .name = "consume_return",
+        .parameter_count = 3,
+        .parameters = callee.parameters,
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 6,
+        .frame_size = try Machine.frameSize(6),
+        .instructions = &.{
+            .{ .call = .{ .function = 0, .arguments = callee.parameters, .result = .{ .start = 3, .width = 2, .aggregate = true } } },
+            .{ .binary = .{ .result = 5, .operator = .add, .left = 3, .right = 4, .type = .float32 } },
+            .{ .return_value = .{ .start = 5, .width = 1 } },
+        },
+    };
+    var offset: u64 = @as(u32, @bitCast(@as(f32, 3)));
+    const result = try Runner.invoke(allocator, .{ .functions = &.{ callee, caller } }, 1, &.{
+        @intCast(@intFromPtr(&offset)), @as(u32, @bitCast(@as(f32, 2))), @as(u32, @bitCast(@as(f32, 4))),
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 12))), @as(u32, @truncate(@as(u64, @bitCast(result.value)))));
+}
+
+test "memory stores consume arithmetic before a later SIMD partner" {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    const Runner = @import("Runner.zig");
+    const builtin = @import("builtin");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var function: Machine.Function = .{
+        .name = "ordered_stores",
+        .parameter_count = 5,
+        .parameters = &.{
+            .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 },
+            .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 },
+            .{ .start = 4, .width = 1 },
+        },
+        .return_type = .void,
+        .slot_count = 9,
+        .frame_size = try Machine.frameSize(9),
+        .float_lane_groups = &.{
+            .{ .slots = .{ 5, 7, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = true },
+        },
+        .instructions = &.{
+            .{ .binary = .{ .result = 5, .operator = .multiply, .left = 2, .right = 4, .type = .float32 } },
+            .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 4, .type = .float32 } },
+            .{ .reference_store = .{ .reference = 0, .operand = .{ .start = 6, .width = 1 } } },
+            .{ .binary = .{ .result = 7, .operator = .multiply, .left = 3, .right = 4, .type = .float32 } },
+            .{ .binary = .{ .result = 8, .operator = .add, .left = 7, .right = 4, .type = .float32 } },
+            .{ .reference_store = .{ .reference = 1, .operand = .{ .start = 8, .width = 1 } } },
+            .return_void,
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    try std.testing.expectEqual(null, function.float_lane_slots[5]);
+    try std.testing.expectEqual(null, function.float_lane_slots[7]);
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var first: u64 = 0;
+    var second: u64 = 0;
+    const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{
+        @intCast(@intFromPtr(&first)),   @intCast(@intFromPtr(&second)),
+        @as(u32, @bitCast(@as(f32, 3))), @as(u32, @bitCast(@as(f32, -4))),
+        @as(u32, @bitCast(@as(f32, 2))),
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 8))), @as(u32, @truncate(first)));
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -6))), @as(u32, @truncate(second)));
 }

@@ -807,6 +807,13 @@ fn encodeFunction(
             .optional_unwrap => |optional| try emitSpanCopy(allocator, words, optional.result, optional.operand),
             .copy => |copy| {
                 if (floatLaneResidence(function, copy.result)) |pair| {
+                    // Scalar sources may reuse their register before the
+                    // partner copy. Capture them at the original use, not
+                    // when a later instruction finishes the packed transfer.
+                    if (floatLaneResidence(function, copy.operand) == null) {
+                        try emitRegisteredCopy(allocator, words, function, copy.result, copy.operand);
+                        continue;
+                    }
                     if (definingTransferOperandAfter(function.instructions, instruction_index, pair.partner) != null) continue;
                     const partner_operand = definingTransferOperandBefore(
                         function.instructions,
@@ -858,6 +865,10 @@ fn encodeFunction(
                     if (source.register == destination.register and source.lane == destination.lane) continue;
                 };
                 if (floatLaneResidence(function, result)) |pair| {
+                    if (floatLaneResidence(function, operand) == null) {
+                        try emitRegisteredCopy(allocator, words, function, result, operand);
+                        continue;
+                    }
                     if (pair.lane == 0) {
                         if (definingTransferOperandAfter(
                             function.instructions,
@@ -1440,7 +1451,11 @@ fn encodeFunction(
                     const hidden_slot = function.hidden_return_slot orelse return error.InvalidMachineProgram;
                     try words.append(allocator, loadStack(.x14, hidden_slot));
                     for (0..value.width) |leaf| {
-                        try words.append(allocator, loadStack(.x9, @intCast(@as(usize, value.start) + leaf)));
+                        const slot: Machine.Slot = @intCast(@as(usize, value.start) + leaf);
+                        if (floatLaneResidence(function, slot) != null) {
+                            try loadFloatValue(allocator, words, function, .x9, slot, false);
+                            try words.append(allocator, moveFloatToGeneral(.x9, .x9, false));
+                        } else try words.append(allocator, loadStack(.x9, slot));
                         try emitStoreAtOffset(allocator, words, .x9, .x14, leaf * Machine.slot_size);
                     }
                     try words.append(allocator, moveWideZero64(.x0, 0, 0));

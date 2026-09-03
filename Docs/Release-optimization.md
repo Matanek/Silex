@@ -67,8 +67,13 @@ loads, view replacement, and explicit address/reference accesses retain their
 bounds and failure behavior. Addresses, indices and composite memory operands
 stay pinned; scalar loads and reference stores may transfer directly to a
 register. Functions taking local addresses or making arbitrary calls remain
-outside this path, and these memory kernels keep scalar rather than paired
-SIMD residences.
+outside this path. Independent arithmetic may use paired SIMD residences,
+while values consumed or produced by the memory instructions remain scalar
+or stack-resident. Packing a scalar into a SIMD lane captures it at its
+original use, before another scalar can reuse its register.
+Memory kernels also reject a pair when delaying its first calculation would
+cross a use of that result. Aggregate returns copy resident lanes into the
+caller's return storage instead of reading stale stack homes.
 
 Exact `copysignf`/`copysign` calls to a proven system provider use a sign-bit
 transfer on ARM64. The transformation preserves signed zeros, infinities and

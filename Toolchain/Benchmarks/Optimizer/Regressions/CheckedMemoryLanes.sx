@@ -1,0 +1,59 @@
+struct Pair {
+    var x:float
+    var y:float
+}
+
+func transform(values:@Pair[..], output:&Pair, index:int, scale:float, invert:bool) {
+    let input = values[index]
+    var x = input.x
+    var y = input.y
+    var step = 0
+    while step < 3 {
+        x = x * scale + 1.0
+        y = y * scale + 1.0
+        step++
+    }
+    if invert {
+        x = -x
+        y = -y
+    }
+    output.x = x
+    output.y = y
+    // A later read must observe the stored value, not an earlier snapshot.
+    output.x += output.y
+}
+
+func apply(velocities:&Pair[..], normal:Pair, impulse:float, first_mass:float, second_mass:float) {
+    velocities[0].x -= normal.x * impulse * first_mass
+    velocities[0].y -= normal.y * impulse * first_mass
+    velocities[1].x += normal.x * impulse * second_mass
+    velocities[1].y += normal.y * impulse * second_mass
+}
+
+func shifted(value:@Pair, scale:float) Pair {
+    let x = value.x * scale
+    let y = value.y * scale
+    return Pair(x:x + 1.0, y:y + 1.0)
+}
+
+func main() {
+    let values:Pair[] = [Pair(x:3.0, y:-4.0), Pair(x:-2.0, y:5.0)]
+    let view = @values[0:values.count()]
+    var output = Pair(x:0.0, y:0.0)
+    transform(view, output, 0, 2.0, false)
+    assert(output.x == 6.0 && output.y == -25.0)
+    transform(view, output, -1, 0.5, true)
+    assert(output.x == -3.875 && output.y == -2.375)
+    assert(values[0].x == 3.0 && values[1].y == 5.0)
+    let returned = shifted(values[0], 2.0)
+    assert(returned.x == 7.0 && returned.y == -7.0)
+    var velocities:Pair[] = [Pair(x:2.0, y:1.0), Pair(x:-7.0, y:-3.0)]
+    var mutable = &velocities[0:2]
+    apply(mutable, Pair(x:1.0, y:0.0), 0.5, 1.0, 2.0)
+    assert(mutable[0].x == 1.5 && mutable[0].y == 1.0)
+    assert(mutable[1].x == -6.0 && mutable[1].y == -3.0)
+    apply(mutable, Pair(x:0.0, y:1.0), 0.5, 1.0, 2.0)
+    assert(mutable[0].x == 1.5 && mutable[0].y == 0.5)
+    assert(mutable[1].x == -6.0 && mutable[1].y == -2.0)
+    print("checked memory arithmetic and writes preserved")
+}

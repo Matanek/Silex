@@ -34,6 +34,10 @@ pub const corpus = [_]CorpusEntry{
 
 pub const regressions = [_]RegressionEntry{
     .{
+        .name = "Regressions/CheckedMemoryLanes.sx",
+        .concern = "checked aggregate loads, independent arithmetic lanes, branches and borrowed writes",
+    },
+    .{
         .name = "Regressions/AggregateControlFlow.sx",
         .concern = "immutable aggregate projections across branches and loops preserve snapshots and joined returns",
     },
