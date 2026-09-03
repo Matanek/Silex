@@ -3,6 +3,7 @@ const Frontend = @import("../Frontend.zig");
 const Interpreter = @import("../Interpreter.zig");
 const Ir = @import("../Ir.zig");
 const Lower = @import("../Arm64/Lower.zig");
+const Machine = @import("../Arm64/Machine.zig");
 const Release = @import("Release.zig");
 const Runner = @import("../Arm64/Runner.zig");
 
@@ -328,6 +329,78 @@ test "release scalarizes immutable aggregates across control flow" {
 
 test "release removes only collection bounds proven by zero-origin loops" {
     try boundedCollectionLoops(optimize);
+}
+
+test "release reuses checked mutable view references across sibling field writes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct State { var x:int; var y:int; var z:int }
+        \\func rewrite(values:&State[..], first:int, second:int) {
+        \\    values[first].x = 11
+        \\    values[first].y = 13
+        \\    values[first].z = 17
+        \\    values[second].x = 19
+        \\    values[second].y = 23
+        \\    values[second].z = 29
+        \\}
+        \\func answer() int {
+        \\    var values:State[] = [State(x:1, y:2, z:3), State(x:4, y:5, z:6)]
+        \\    rewrite(&values[0:values.count()], 0, -1)
+        \\    return values[0].x + values[0].y + values[0].z + values[1].x + values[1].y + values[1].z
+        \\}
+        \\func main() { print(answer()) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("112\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+
+    var references: usize = 0;
+    var checked_loads: usize = 0;
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "rewrite")) continue;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .collection_reference => references += 1,
+            .collection_load => |load| if (load.checked) {
+                checked_loads += 1;
+            },
+            else => {},
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 2), references);
+    try std.testing.expectEqual(@as(usize, 0), checked_loads);
+
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    var answer: ?usize = null;
+    var rewrite: ?usize = null;
+    for (optimized.functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, "answer")) answer = index;
+        if (std.mem.eql(u8, function.name, "rewrite")) rewrite = index;
+    }
+    const native = try Runner.invoke(allocator, machine, answer orelse return error.TestUnexpectedResult, &.{});
+    try std.testing.expectEqual(@as(i64, 112), native.value);
+    var values = [_]i64{ 1, 2, 3, 4, 5, 6 };
+    const pointer: i64 = @intCast(@intFromPtr(&values));
+    var invoked = machine.functions[rewrite orelse return error.TestUnexpectedResult];
+    invoked.parameter_count = 4;
+    invoked.parameters = &.{
+        .{ .start = 0, .width = 1 },
+        .{ .start = 1, .width = 1 },
+        .{ .start = 2, .width = 1 },
+        .{ .start = 3, .width = 1 },
+    };
+    const direct: Machine.Program = .{ .functions = &.{invoked}, .strings = machine.strings };
+    const valid = try Runner.invoke(allocator, direct, 0, &.{ pointer, 2, 0, -1 });
+    try std.testing.expectEqual(Machine.Status.success, valid.status);
+    try std.testing.expectEqualSlices(i64, &.{ 11, 13, 17, 19, 23, 29 }, &values);
+    const invalid = try Runner.invoke(allocator, direct, 0, &.{ pointer, 2, 0, -3 });
+    try std.testing.expectEqual(Machine.Status.runtime_failure, invalid.status);
 }
 
 test "release materializes a scalar constructor only once after dead local stores" {

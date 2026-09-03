@@ -107,13 +107,14 @@ fn optimizeWithoutInliningWithWorkers(allocator: Allocator, program: Ir.Program,
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     const worker_count = Workers.selectedCount(program.functions.len, requested_worker_count);
     if (worker_count == 1) {
-        try optimizeFunctionRange(allocator, program.functions, functions, summaries, 0, program.functions.len);
+        try optimizeFunctionRange(allocator, program, program.functions, functions, summaries, 0, program.functions.len);
     } else {
         var workers: [Workers.max_count]OptimizeWorker = undefined;
         const count: usize = worker_count;
         const chunk = std.math.divCeil(usize, program.functions.len, count) catch unreachable;
         for (workers[0..count], 0..) |*worker, index| worker.* = .{
             .allocator = allocator,
+            .program = program,
             .source = program.functions,
             .destination = functions,
             .summaries = summaries,
@@ -133,6 +134,7 @@ fn optimizeWithoutInliningWithWorkers(allocator: Allocator, program: Ir.Program,
 
 fn optimizeFunctionRange(
     allocator: Allocator,
+    program: Ir.Program,
     source: []const Ir.Function,
     destination: []Ir.Function,
     summaries: []const GlobalSummary,
@@ -140,7 +142,7 @@ fn optimizeFunctionRange(
     end: usize,
 ) !void {
     for (start..end) |index| {
-        const localized = try optimizeDenseBlocks(allocator, source[index]);
+        const localized = try optimizeDenseBlocks(allocator, program, source[index]);
         const optimized = try optimizeFunction(allocator, localized, summaries);
         const simplified = try simplifyBooleanDiamonds(allocator, optimized);
         destination[index] = try Bounds.optimize(allocator, simplified);
@@ -149,6 +151,7 @@ fn optimizeFunctionRange(
 
 const OptimizeWorker = struct {
     allocator: Allocator,
+    program: Ir.Program,
     source: []const Ir.Function,
     destination: []Ir.Function,
     summaries: []const GlobalSummary,
@@ -157,7 +160,7 @@ const OptimizeWorker = struct {
     failure: ?anyerror = null,
 
     fn run(self: *OptimizeWorker) void {
-        optimizeFunctionRange(self.allocator, self.source, self.destination, self.summaries, self.start, self.end) catch |err| {
+        optimizeFunctionRange(self.allocator, self.program, self.source, self.destination, self.summaries, self.start, self.end) catch |err| {
             self.failure = err;
         };
     }
@@ -476,8 +479,9 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
     return result;
 }
 
-fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function {
+fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
     if (!DenseBlocks.isEligible(function)) return function;
+    const locals_cannot_alias = !hasLocalAddress(function);
     const definitions = try allocator.alloc(usize, function.value_types.len);
     @memset(definitions, 0);
     for (function.blocks) |block| for (block.instructions) |instruction| countDefinitions(instruction, definitions);
@@ -491,6 +495,7 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
         @memset(local_values, null);
         var field_loads: std.ArrayList(Ir.Instruction.FieldLoad) = .empty;
         var collection_loads: std.ArrayList(Ir.Instruction.CollectionLoad) = .empty;
+        var collection_references: std.ArrayList(Ir.Instruction.CollectionReference) = .empty;
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
         for (block.instructions) |original| {
             const instruction = try rewriteInstruction(allocator, original, aliases);
@@ -505,7 +510,7 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
                 },
                 .local_load => |load| {
                     const local_type = function.local_types[load.local];
-                    if (local_type.isNumeric() or local_type == .bool) {
+                    if (local_type.isNumeric() or local_type == .bool or isViewType(program, local_type)) {
                         if (local_values[load.local]) |previous| {
                             aliases[load.result] = canonical(aliases, previous);
                             continue;
@@ -515,7 +520,7 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
                 },
                 .local_store => |store| {
                     const local_type = function.local_types[store.local];
-                    local_values[store.local] = if (local_type.isNumeric() or local_type == .bool)
+                    local_values[store.local] = if (local_type.isNumeric() or local_type == .bool or isViewType(program, local_type))
                         canonical(aliases, store.operand)
                     else
                         null;
@@ -537,6 +542,13 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
                         try collection_loads.append(allocator, load);
                     }
                 },
+                .collection_reference => |reference| {
+                    if (matchingCollectionReference(collection_references.items, reference)) |previous| {
+                        aliases[reference.result] = canonical(aliases, previous);
+                        continue;
+                    }
+                    try collection_references.append(allocator, reference);
+                },
                 .global_store,
                 .field_store,
                 .collection_replace,
@@ -550,8 +562,11 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
                 .mutex_lock,
                 .mutex_unlock,
                 => {
-                    field_loads.clearRetainingCapacity();
+                    if (instruction == .reference_store and locals_cannot_alias) {
+                        retainStableFieldLoads(&field_loads, program, function);
+                    } else field_loads.clearRetainingCapacity();
                     collection_loads.clearRetainingCapacity();
+                    if (instruction != .reference_store) collection_references.clearRetainingCapacity();
                     switch (instruction) {
                         .reference_store,
                         .address_store,
@@ -561,7 +576,7 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
                         .dynamic_call,
                         .mutex_lock,
                         .mutex_unlock,
-                        => @memset(local_values, null),
+                        => if (instruction != .reference_store or !locals_cannot_alias) @memset(local_values, null),
                         else => {},
                     }
                 },
@@ -576,7 +591,149 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
     }
     var result = function;
     result.blocks = blocks;
+    return removeRedundantCollectionChecks(allocator, result);
+}
+
+fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    const uses = try allocator.alloc(usize, function.value_types.len);
+    @memset(uses, 0);
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| countUses(instruction, uses);
+        countTerminatorUses(block.terminator, uses);
+    }
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    var changed = false;
+    for (function.blocks, 0..) |block, block_index| {
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions, 0..) |instruction, instruction_index| {
+            if (instruction == .collection_load) {
+                const load = instruction.collection_load;
+                if (load.checked and uses[load.result] == 0 and
+                    collectionCheckProven(block.instructions, instruction_index, load))
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+            try instructions.append(allocator, instruction);
+        }
+        blocks[block_index] = .{
+            .instructions = try instructions.toOwnedSlice(allocator),
+            .terminator = block.terminator,
+        };
+    }
+    if (!changed) return function;
+    var result = function;
+    result.blocks = blocks;
     return result;
+}
+
+fn collectionCheckProven(
+    instructions: []const Ir.Instruction,
+    load_index: usize,
+    load: Ir.Instruction.CollectionLoad,
+) bool {
+    for (instructions, 0..) |instruction, reference_index| {
+        const reference = switch (instruction) {
+            .collection_reference => |value| value,
+            else => continue,
+        };
+        if (reference.collection != load.collection or reference.index != load.index) continue;
+        if (!referenceFeedsStore(instructions, reference.result, 0)) continue;
+        const start = @min(load_index, reference_index);
+        const end = @max(load_index, reference_index);
+        if (!collectionAddressStable(instructions[start + 1 .. end])) continue;
+        if (reference_index < load_index) return true;
+        if (std.meta.eql(reference.position, load.position) and
+            collectionCheckOrderStable(instructions[start + 1 .. end])) return true;
+    }
+    return false;
+}
+
+fn referenceFeedsStore(instructions: []const Ir.Instruction, reference: Ir.ValueId, depth: usize) bool {
+    if (depth >= instructions.len) return false;
+    for (instructions) |instruction| switch (instruction) {
+        .reference_store => |store| if (store.reference == reference) return true,
+        .reference_field => |field| if (field.reference == reference and
+            referenceFeedsStore(instructions, field.result, depth + 1)) return true,
+        .reference_optional => |optional| if (optional.reference == reference and
+            referenceFeedsStore(instructions, optional.result, depth + 1)) return true,
+        .copy => |copy| if (copy.operand == reference and
+            referenceFeedsStore(instructions, copy.result, depth + 1)) return true,
+        else => {},
+    };
+    return false;
+}
+
+fn collectionCheckOrderStable(instructions: []const Ir.Instruction) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .local_store,
+        .global_store,
+        .field_store,
+        .collection_replace,
+        .list_edit,
+        .reference_store,
+        .address_store,
+        .call,
+        .indirect_call,
+        .boundary_call,
+        .boundary_indirect_call,
+        .dynamic_call,
+        .mutex_lock,
+        .mutex_unlock,
+        => return false,
+        else => {},
+    };
+    return true;
+}
+
+fn collectionAddressStable(instructions: []const Ir.Instruction) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .global_store,
+        .field_store,
+        .collection_replace,
+        .list_edit,
+        .address_store,
+        .call,
+        .indirect_call,
+        .boundary_call,
+        .boundary_indirect_call,
+        .dynamic_call,
+        .mutex_lock,
+        .mutex_unlock,
+        => return false,
+        else => {},
+    };
+    return true;
+}
+
+fn retainStableFieldLoads(
+    loads: *std.ArrayList(Ir.Instruction.FieldLoad),
+    program: Ir.Program,
+    function: Ir.Function,
+) void {
+    var retained: usize = 0;
+    for (loads.items) |load| {
+        const structure = function.value_types[load.base].structureIndex() orelse continue;
+        if (structure >= program.structures.len or program.structures[structure].is_class) continue;
+        loads.items[retained] = load;
+        retained += 1;
+    }
+    loads.shrinkRetainingCapacity(retained);
+}
+
+fn hasLocalAddress(function: Ir.Function) bool {
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        if (instruction == .local_address) return true;
+    };
+    return false;
+}
+
+fn isViewType(program: Ir.Program, value_type: Ir.Type) bool {
+    const structure = value_type.structureIndex() orelse return false;
+    if (structure >= program.structures.len) return false;
+    const collection = program.structures[structure].collection orelse return false;
+    return collection.view;
 }
 
 fn countDefinitions(instruction: Ir.Instruction, definitions: []usize) void {
@@ -633,6 +790,18 @@ fn matchingCollectionLoad(
     for (loads) |load| {
         if (load.collection == candidate.collection and load.index == candidate.index and
             load.checked == candidate.checked) return load.result;
+    }
+    return null;
+}
+
+fn matchingCollectionReference(
+    references: []const Ir.Instruction.CollectionReference,
+    candidate: Ir.Instruction.CollectionReference,
+) ?Ir.ValueId {
+    for (references) |reference| {
+        if (reference.collection == candidate.collection and reference.index == candidate.index and
+            reference.reference == candidate.reference and reference.ownership == candidate.ownership)
+            return reference.result;
     }
     return null;
 }

@@ -2,7 +2,20 @@ const Ir = @import("../Ir.zig");
 
 pub fn isEligible(function: Ir.Function) bool {
     if (containsCalls(function)) return false;
-    return hasRepeatedCollectionRead(function);
+    return hasRepeatedCollectionRead(function) or hasMultipleCollectionReferences(function);
+}
+
+fn hasMultipleCollectionReferences(function: Ir.Function) bool {
+    for (function.blocks) |block| {
+        var references: usize = 0;
+        for (block.instructions) |instruction| {
+            if (instruction == .collection_reference) {
+                references += 1;
+                if (references > 1) return true;
+            }
+        }
+    }
+    return false;
 }
 
 fn containsCalls(function: Ir.Function) bool {
