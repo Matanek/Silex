@@ -33,6 +33,18 @@ pub fn copySignPrecision(external: Machine.ExternalFunction) ?bool {
     return double;
 }
 
+pub fn squareRootPrecision(external: Machine.ExternalFunction) ?bool {
+    const built_in = !external.package_private and
+        (std.mem.eql(u8, external.provider, "Darwin.lib_system") or
+            std.mem.eql(u8, external.provider, "Windows.ucrtbase"));
+    if (!built_in and !external.system_math) return null;
+    const double = if (std.mem.eql(u8, external.source_name, "sqrt")) true else if (std.mem.eql(u8, external.source_name, "sqrtf")) false else return null;
+    const kind: Machine.AbiValue = if (double) .float64 else .float32;
+    if (external.signature.result != kind or external.signature.arguments.len != 1 or
+        external.signature.arguments[0] != kind) return null;
+    return double;
+}
+
 test "constructed memory arithmetic retains SIMD seeds" {
     const RegisterAllocation = @import("RegisterAllocation.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

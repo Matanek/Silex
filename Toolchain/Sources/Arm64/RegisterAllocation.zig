@@ -58,8 +58,12 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     // Keep the existing argument/result stack homes and use preserved colors
     // for the whole function. Scratch v9...v12 remain excluded as before.
     const has_calls = for (function.instructions) |instruction| {
-        if (instruction == .external_call and
-            MemoryResidence.copySignPrecision(externals[instruction.external_call.function]) == null) break true;
+        if (instruction == .external_call) {
+            const call = instruction.external_call;
+            if (call.function >= externals.len or call.result == null or
+                (MemoryResidence.copySignPrecision(externals[call.function]) == null and
+                    MemoryResidence.squareRootPrecision(externals[call.function]) == null)) break true;
+        }
     } else false;
 
     const residences = try allocator.alloc(?u5, function.slot_count);
@@ -72,6 +76,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     defer allocator.free(float_slots);
     @memset(float_slots, false);
     inferFloatSlots(function, float_slots);
+    inferExternalFloatSlots(function, externals, float_slots);
     const pair_registers = [_]u5{
         16, 17, 18, 19, 20, 21, 22, 23,
         24, 25, 26, 27, 28, 29, 30, 31,
@@ -108,7 +113,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     }
     for (function.instructions, 0..) |instruction, index| {
         visit(instruction, index, first, last, weights, instruction_weights[index]);
-        forceStackOperands(instruction, forced);
+        forceStackOperands(instruction, forced, externals);
     }
     extendLoopCarriedIntervals(function.instructions, first, last);
 
@@ -705,6 +710,22 @@ fn inferFloatSlots(function: Machine.Function, result: []bool) void {
     }
 }
 
+fn inferExternalFloatSlots(function: Machine.Function, externals: []const Machine.ExternalFunction, result: []bool) void {
+    for (function.instructions) |instruction| switch (instruction) {
+        .external_call => |call| {
+            if (call.function >= externals.len) continue;
+            const signature = externals[call.function].signature;
+            for (call.arguments, signature.arguments) |argument, kind| {
+                if (kind == .float32 or kind == .float64) result[argument] = true;
+            }
+            if (call.result) |slot| if (signature.result == .float32 or signature.result == .float64) {
+                result[slot] = true;
+            };
+        },
+        else => {},
+    };
+}
+
 fn propagateFloat(left: Machine.Slot, right: Machine.Slot, result: []bool, changed: *bool) void {
     if (result[left] == result[right]) return;
     result[left] = true;
@@ -751,8 +772,13 @@ pub fn supportsMemoryScheduling(function: Machine.Function, externals: []const M
     return MemoryResidence.required(function) and isCompatibleFunction(function, true, externals);
 }
 
-fn forceStackOperands(instruction: Machine.Instruction, forced: []bool) void {
-    MemoryResidence.pin(instruction, forced);
+fn forceStackOperands(instruction: Machine.Instruction, forced: []bool, externals: []const Machine.ExternalFunction) void {
+    const inline_square_root = if (instruction == .external_call) root: {
+        const call = instruction.external_call;
+        break :root call.result != null and call.function < externals.len and
+            MemoryResidence.squareRootPrecision(externals[call.function]) != null;
+    } else false;
+    if (!inline_square_root) MemoryResidence.pin(instruction, forced);
     switch (instruction) {
         .collection_load => |load| {
             _ = load;
@@ -827,6 +853,10 @@ fn visit(
         .call => |call| {
             for (call.arguments) |argument| if (!argument.aggregate) touch(argument.start, index, first, last, weights, weight);
             if (call.result) |result| if (!result.aggregate) touch(result.start, index, first, last, weights, weight);
+        },
+        .external_call => |call| {
+            for (call.arguments) |argument| touch(argument, index, first, last, weights, weight);
+            if (call.result) |result| touch(result, index, first, last, weights, weight);
         },
         .return_value => |value| if (!value.aggregate) touch(value.start, index, first, last, weights, weight),
         .branch => |value| touch(value.condition, index, first, last, weights, weight),

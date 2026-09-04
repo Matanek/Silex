@@ -13,7 +13,7 @@ test "scalar math calls retain live values in ABI-preserved registers" {
         const type_value: Types.Type = if (double) .float64 else .float32;
         const external: Machine.ExternalFunction = .{
             .provider = "Darwin.lib_system",
-            .source_name = if (double) "sqrt" else "sqrtf",
+            .source_name = if (double) "sin" else "sinf",
             .signature = .{ .arguments = &.{kind}, .result = kind },
         };
         var instructions = [_]Machine.Instruction{

@@ -22,6 +22,20 @@ pub fn emit(
     if (call.function >= program.external_functions.len) return error.InvalidMachineProgram;
     const external = program.external_functions[call.function];
     if (external.signature.arguments.len != call.arguments.len) return error.InvalidMachineProgram;
+    if (@import("MemoryResidence.zig").squareRootPrecision(external)) |double| if (call.result) |result| {
+        const source = floatResidence(function, call.arguments[0]) orelse source: {
+            try loadValue(allocator, words, function, .x9, call.arguments[0]);
+            try words.append(allocator, Instructions.moveGeneralToFloat(.x9, .x9, double));
+            break :source .x9;
+        };
+        const destination = floatResidence(function, result) orelse .x9;
+        try words.append(allocator, Instructions.floatSquareRoot(destination, source, double));
+        if (floatResidence(function, result) == null) {
+            try words.append(allocator, Instructions.moveFloatToGeneral(.x9, destination, double));
+            try storeValue(allocator, words, function, .x9, result);
+        }
+        return;
+    };
     if (@import("MemoryResidence.zig").copySignPrecision(external)) |double| {
         const result = call.result orelse return;
         // copysign is a bit operation: preserve payloads, infinities, subnormals
@@ -175,6 +189,13 @@ fn storeValue(
     try words.append(allocator, Instructions.storeStack(source, slot));
 }
 
+fn floatResidence(function: Machine.Function, slot: Machine.Slot) ?Register {
+    if (function.float_register_slots.len != 0) if (function.float_register_slots[slot]) |number| {
+        return @enumFromInt(number);
+    };
+    return null;
+}
+
 test "inline copysign preserves every IEEE payload bit except the sign" {
     const builtin = @import("builtin");
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
@@ -230,5 +251,62 @@ test "inline copysign preserves every IEEE payload bit except the sign" {
                 }
             }
         }
+    }
+}
+
+test "inline system square root uses scalar float residences and exact IEEE results" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    const Runner = @import("Runner.zig");
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]bool{ false, true }) |double| {
+        const kind: Machine.AbiValue = if (double) .float64 else .float32;
+        const external: Machine.ExternalFunction = .{
+            .provider = "Darwin.lib_system",
+            .source_name = if (double) "sqrt" else "sqrtf",
+            .signature = .{ .arguments = &.{kind}, .result = kind },
+        };
+        const call: Machine.Instruction.ExternalCall = .{ .result = 1, .function = 0, .arguments = &.{0} };
+        var function: Machine.Function = .{
+            .name = "resident_square_root",
+            .parameter_count = 1,
+            .parameters = &.{.{ .start = 0, .width = 1 }},
+            .return_type = if (double) .float64 else .float32,
+            .return_width = 1,
+            .slot_count = 2,
+            .frame_size = try Machine.frameSize(2),
+            .instructions = &.{ .{ .external_call = call }, .{ .return_value = .{ .start = 1, .width = 1 } } },
+        };
+        const allocation = try RegisterAllocation.allocateWithExternals(allocator, function, &.{external});
+        function.register_slots = allocation.residences;
+        function.float_register_slots = allocation.float_residences;
+        function.float_lane_slots = allocation.float_lane_residences;
+        try std.testing.expect(function.float_register_slots[0] != null);
+        try std.testing.expect(function.float_register_slots[1] != null);
+        const program: Machine.Program = .{ .functions = &.{function}, .external_functions = &.{external} };
+        const image = try @import("Encoder.zig").encode(allocator, program, .{ .test_function = 0 });
+        try std.testing.expectEqual(@as(usize, 0), image.external_call_sites.len);
+        const sign: u64 = if (double) 0x8000000000000000 else 0x80000000;
+        const infinity: u64 = if (double) 0x7ff0000000000000 else 0x7f800000;
+        const quiet_nan: u64 = infinity | (if (double) @as(u64, 0x0008000000001234) else 0x00401234);
+        for ([_]u64{ 0, sign, 0x40800000, 0x4010000000000000, infinity, quiet_nan }) |bits| {
+            if ((!double and bits > std.math.maxInt(u32)) or (double and bits != 0 and bits != sign and bits <= std.math.maxInt(u32))) continue;
+            const result = try Runner.invoke(allocator, program, 0, &.{@bitCast(bits)});
+            try std.testing.expectEqual(Machine.Status.success, result.status);
+            if (double) {
+                const value: f64 = @bitCast(bits);
+                try std.testing.expectEqual(@as(u64, @bitCast(@sqrt(value))), @as(u64, @bitCast(result.value)));
+            } else {
+                const value: f32 = @bitCast(@as(u32, @truncate(bits)));
+                try std.testing.expectEqual(@as(u32, @bitCast(@sqrt(value))), @as(u32, @truncate(@as(u64, @bitCast(result.value)))));
+            }
+        }
+        var lookalike = external;
+        lookalike.provider = "unrelated_library";
+        const fallback = try RegisterAllocation.allocateWithExternals(allocator, function, &.{lookalike});
+        try std.testing.expectEqual(@as(usize, 0), fallback.residences.len);
     }
 }

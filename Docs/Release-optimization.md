@@ -144,7 +144,13 @@ provider qualifies only when its macOS ARM64 metadata links libSystem alone,
 without an archive, framework or provider dependency. Custom providers keep
 their call. X64 register eligibility is unchanged by this ARM64 extension.
 
-Functions with exact scalar system-math signatures may also retain ARM64
+Exact system `sqrtf` and `sqrt` signatures lower to the scalar ARM64 `FSQRT`
+instruction. Inputs and results may use ordinary floating-point residences, so
+the function does not acquire call-preserved register restrictions. This is
+the same IEEE operation already used for constant evaluation; unrelated
+providers and mismatched signatures retain their calls.
+
+Functions with other exact scalar system-math signatures may also retain ARM64
 residences across actual C calls. Their colors are restricted to x19–x28
 (x28 remains reserved for a second stack window) and the preserved low 64 bits
 of v8/v13–v15. Argument and result homes remain on the stack; the existing ABI

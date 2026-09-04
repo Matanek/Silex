@@ -386,6 +386,11 @@ pub fn floatNegate(destination: Register, source: Register, double: bool) u32 {
     return base | (registerBits(source) << 5) | registerBits(destination);
 }
 
+pub fn floatSquareRoot(destination: Register, source: Register, double: bool) u32 {
+    const base: u32 = if (double) 0x1e61c000 else 0x1e21c000;
+    return base | (registerBits(source) << 5) | registerBits(destination);
+}
+
 pub fn floatZero(destination: Register) u32 {
     return 0x2f00e400 | registerBits(destination);
 }
@@ -584,6 +589,11 @@ test "encode paired general-purpose loads and stores" {
 test "encode zero vector immediate for scalar float registers" {
     try std.testing.expectEqual(@as(u32, 0x2f00e400), floatZero(.x0));
     try std.testing.expectEqual(@as(u32, 0x2f00e413), floatZero(.x19));
+}
+
+test "encode scalar IEEE square root" {
+    try std.testing.expectEqual(@as(u32, 0x1e21c020), floatSquareRoot(.x0, .x1, false));
+    try std.testing.expectEqual(@as(u32, 0x1e61c062), floatSquareRoot(.x2, .x3, true));
 }
 
 test "encode clear exclusive" {
