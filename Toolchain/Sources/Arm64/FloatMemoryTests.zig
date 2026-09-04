@@ -51,6 +51,32 @@ test "floating copies transfer directly between stack and resident registers" {
     try std.testing.expect(!containsWord(second, A64.moveFloat(.x9, .x16, true)));
 }
 
+test "floating negation writes its resident destination directly" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const function: Machine.Function = .{
+        .name = "resident_negation",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .float64,
+        .return_width = 1,
+        .slot_count = 2,
+        .frame_size = try Machine.frameSize(2),
+        .register_slots = &.{ null, null },
+        .float_register_slots = &.{ 16, 17 },
+        .instructions = &.{
+            .{ .unary = .{ .result = 1, .operand = 0, .operator = .negate, .type = .float64 } },
+            .{ .return_value = .{ .start = 1, .width = 1 } },
+        },
+    };
+    const image = try Encoder.encode(arena.allocator(), .{
+        .functions = &.{ function, sentinel },
+    }, .{ .test_function = 0 });
+    const code = image.code[image.function_offsets[0]..image.function_offsets[1]];
+    try std.testing.expect(containsWord(code, A64.floatNegate(.x17, .x16, true)));
+    try std.testing.expect(!containsWord(code, A64.floatNegate(.x10, .x9, true)));
+}
+
 test "floating reference transfers use direct memory instructions and preserve payloads" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

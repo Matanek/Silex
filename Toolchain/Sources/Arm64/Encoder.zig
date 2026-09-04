@@ -1320,9 +1320,13 @@ fn encodeFunction(
             ),
             .unary => |unary| {
                 if (unary.type.isFloat()) {
-                    try loadFloatValue(allocator, words, function, .x9, unary.operand, unary.type == .float64);
-                    try words.append(allocator, floatNegate(.x10, .x9, unary.type == .float64));
-                    try storeFloatValue(allocator, words, function, .x10, unary.result, unary.type == .float64);
+                    const double = unary.type == .float64;
+                    const operand = try prepareFloatOperand(allocator, words, function, .x9, unary.operand, double);
+                    const destination = floatResultRegister(function, unary.result) orelse .x10;
+                    try words.append(allocator, floatNegate(destination, operand, double));
+                    if (floatResultRegister(function, unary.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, unary.result, double);
+                    }
                     continue;
                 }
                 try loadCachedValue(allocator, words, function, &scalar_cache, .x9, unary.operand);

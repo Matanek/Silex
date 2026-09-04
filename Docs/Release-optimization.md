@@ -138,6 +138,8 @@ Copies between a stack-resident floating-point value and a scalar SIMD
 residence also use the final source or destination register directly. This
 removes the otherwise redundant move through the floating-point scratch
 register while retaining the same 64-bit payload transfer.
+Floating-point negation similarly reads its allocated operand and writes its
+allocated result directly; spilled endpoints retain the ordinary stack path.
 On ARM64, a field offset used exactly once by the immediately following
 reference load or store is folded into that memory access. A control-flow entry
 at the transfer, an additional use or an indirect class field keeps the explicit
