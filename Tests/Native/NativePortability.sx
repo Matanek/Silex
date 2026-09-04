@@ -129,6 +129,11 @@ func verify_float_formatting() {
     assert("values: $(1.5), $(-0.0)" == "values: 1.5, -0.0")
 }
 
+func verify_float_precision_conversion() {
+    let narrowed = 100.0 as float32
+    assert(narrowed as float64 == 100.0)
+}
+
 class DirectCycleNode {
     var next:DirectCycleNode? = null
     drop { print("native cycle drop") }
@@ -375,6 +380,10 @@ test "preserve embedded byte contents on native" {
 
 test "format native floats through the standalone runtime" {
     verify_float_formatting()
+}
+
+test "convert native float precision in both directions" {
+    verify_float_precision_conversion()
 }
 
 test "replace and preserve an aliased native list" {

@@ -705,6 +705,10 @@ fn encodeFunction(
                     try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, false);
                     try bytes.appendSlice(allocator, &.{ 0xf3, 0x0f, 0x5a, 0xc0 });
                     try emitStoreFloatStack(allocator, bytes, 0, conversion.result, true);
+                } else if (conversion.source == .float64 and conversion.target == .float32) {
+                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, true);
+                    try bytes.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x5a, 0xc0 });
+                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, false);
                 } else {
                     try emitLoadStack(allocator, bytes, .rax, conversion.operand);
                     try emitStoreStack(allocator, bytes, .rax, conversion.result);
@@ -3493,6 +3497,35 @@ test "encode float32 to float64 widening on X64" {
     const image = try encodeLinux(std.testing.allocator, program);
     defer image.deinit(std.testing.allocator);
     try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf3, 0x0f, 0x5a, 0xc0 }) != null);
+}
+
+test "encode float64 to float32 narrowing on X64" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float64 = .{ .result = 0, .bits = @bitCast(@as(f64, 100.0)) } },
+        .{ .convert = .{
+            .result = 1,
+            .operand = 0,
+            .source = .float64,
+            .target = .float32,
+            .header = 0,
+            .checked = true,
+        } },
+        .return_void,
+    };
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 2,
+        .frame_size = 16,
+        .instructions = &instructions,
+    }};
+    const program: Machine.Program = .{ .functions = &functions, .strings = &.{"conversion"} };
+    try Machine.validate(program);
+
+    const image = try encodeLinux(std.testing.allocator, program);
+    defer image.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf2, 0x0f, 0x5a, 0xc0 }) != null);
 }
 
 test "encode indirect C ABI calls on Linux and Windows X64" {
