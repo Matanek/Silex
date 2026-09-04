@@ -465,6 +465,8 @@ pub fn emitIndirect(
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
             } else if (kind == .uint8) {
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
+            } else if (call.signature.result_signed_32) {
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
             }
         }
         try emitStoreStack(allocator, bytes, .rax, result);
@@ -606,6 +608,8 @@ fn emitBoundaryCall(
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
             } else if (kind == .uint8) {
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
+            } else if (external.signature.result_signed_32) {
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
             }
         }
         try emitStoreStack(allocator, bytes, .rax, result);
@@ -803,4 +807,40 @@ test "encode syscall immediates in extended registers" {
     defer bytes.deinit(std.testing.allocator);
     try emitImmediate(std.testing.allocator, &bytes, .r9, 4);
     try std.testing.expectEqualSlices(u8, &.{ 0x49, 0xb9, 4, 0, 0, 0, 0, 0, 0, 0 }, bytes.items);
+}
+
+test "x64 boundary calls sign extend int32 results before storing them" {
+    const external_functions = [_]Machine.ExternalFunction{.{
+        .provider = "Boundary.Native",
+        .source_name = "signed_result",
+        .signature = .{ .arguments = &.{}, .result = .int32, .result_signed_32 = true },
+    }};
+    const function: Machine.Function = .{
+        .name = "test",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 1,
+        .frame_size = try Machine.frameSize(1),
+        .instructions = &.{},
+    };
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    var imports: std.ArrayList(WindowsImports.X64Site) = .empty;
+    defer imports.deinit(std.testing.allocator);
+    var sites: std.ArrayList(Site) = .empty;
+    defer sites.deinit(std.testing.allocator);
+
+    try emit(
+        std.testing.allocator,
+        &bytes,
+        &imports,
+        &sites,
+        .darwin,
+        .{ .functions = &.{function}, .external_functions = &external_functions },
+        function,
+        .{ .result = 0, .function = 0, .arguments = &.{} },
+    );
+
+    try std.testing.expectEqual(@as(usize, 1), sites.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0x63, 0xc0 }) != null);
 }
