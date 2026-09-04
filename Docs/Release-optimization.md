@@ -63,6 +63,15 @@ collection load as bounded when a zero-origin induction variable is dominated
 by the exact collection-count comparison and cannot advance before that load;
 every unproved access retains its runtime bounds diagnostic.
 
+A checked mutable-view reference in the entry block can also prove an
+equivalent reference in a later block bounded. This proof accepts only views
+whose descriptor and index originate from unchanged locals, copies, or fields
+of value structures. Calls, storage-replacing mutations, explicit addresses,
+and synchronization disable it. The later reference still recomputes its local
+address and normalizes a negative index; ARM64 and X64 omit only the duplicate
+failure branches and diagnostic path. Keeping the address local avoids
+extending one reference lifetime across the whole control-flow graph.
+
 ## Allocate native registers
 
 Native Release lowering performs deterministic CFG-wide liveness and graph

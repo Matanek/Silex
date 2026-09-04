@@ -305,6 +305,7 @@ pub const Instruction = union(enum) {
         collection: ValueId,
         reference: ?ValueId,
         index: ValueId,
+        checked: bool = true,
         ownership: Ownership = .root,
         position: Source.Position,
     };
@@ -1011,6 +1012,7 @@ fn writeInstruction(
                 try appendValueChecked(output, allocator, function, source);
                 if (function.value_types[source] != .address) return error.InvalidProgram;
             }
+            if (!reference.checked) try output.appendSlice(allocator, " bounded");
             if (function.value_types[reference.result] != .address or function.value_types[reference.index] != .int) return error.InvalidProgram;
         },
         .collection_replace => |replacement| {

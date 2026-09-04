@@ -403,6 +403,76 @@ test "release reuses checked mutable view references across sibling field writes
     try std.testing.expectEqual(Machine.Status.runtime_failure, invalid.status);
 }
 
+test "release proves later view references from invariant local and field loads" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct State { var x:int; var y:int }
+        \\struct Index { let value:int }
+        \\func rewrite(values:&State[..], index:Index, condition:bool) {
+        \\    let snapshot = values[index.value]
+        \\    if condition {
+        \\        values[index.value].x = snapshot.x + 10
+        \\    } else {
+        \\        values[index.value].y = snapshot.y + 20
+        \\    }
+        \\}
+        \\func main() {}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    var rewrite: ?usize = null;
+    var references: usize = 0;
+    var checked: usize = 0;
+    for (optimized.functions, 0..) |function, index| {
+        if (!std.mem.eql(u8, function.name, "rewrite")) continue;
+        rewrite = index;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .collection_reference => |reference| {
+                references += 1;
+                checked += @intFromBool(reference.checked);
+            },
+            else => {},
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 3), references);
+    try std.testing.expectEqual(@as(usize, 1), checked);
+
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    const rewrite_index = rewrite orelse return error.TestUnexpectedResult;
+    var machine_references: usize = 0;
+    var machine_checked: usize = 0;
+    for (machine.functions[rewrite_index].instructions) |instruction| switch (instruction) {
+        .collection_reference => |reference| {
+            machine_references += 1;
+            machine_checked += @intFromBool(reference.checked);
+        },
+        else => {},
+    };
+    try std.testing.expectEqual(@as(usize, 3), machine_references);
+    try std.testing.expectEqual(@as(usize, 1), machine_checked);
+    var values = [_]i64{ 1, 2, 3, 4 };
+    const pointer: i64 = @intCast(@intFromPtr(&values));
+    var invoked = machine.functions[rewrite_index];
+    invoked.parameter_count = 4;
+    invoked.parameters = &.{
+        .{ .start = 0, .width = 1 },
+        .{ .start = 1, .width = 1 },
+        .{ .start = 2, .width = 1 },
+        .{ .start = 3, .width = 1 },
+    };
+    const direct: Machine.Program = .{ .functions = &.{invoked}, .strings = machine.strings };
+    const first = try Runner.invoke(allocator, direct, 0, &.{ pointer, 2, 0, 1 });
+    try std.testing.expectEqual(Machine.Status.success, first.status);
+    try std.testing.expectEqualSlices(i64, &.{ 11, 2, 3, 4 }, &values);
+    const last = try Runner.invoke(allocator, direct, 0, &.{ pointer, 2, -1, 0 });
+    try std.testing.expectEqual(Machine.Status.success, last.status);
+    try std.testing.expectEqualSlices(i64, &.{ 11, 2, 3, 24 }, &values);
+    const invalid = try Runner.invoke(allocator, direct, 0, &.{ pointer, 2, 2, 1 });
+    try std.testing.expectEqual(Machine.Status.runtime_failure, invalid.status);
+}
+
 test "release materializes a scalar constructor only once after dead local stores" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

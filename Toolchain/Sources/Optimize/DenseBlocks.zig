@@ -6,8 +6,8 @@ pub fn isEligible(function: Ir.Function) bool {
 }
 
 fn hasMultipleCollectionReferences(function: Ir.Function) bool {
+    var references: usize = 0;
     for (function.blocks) |block| {
-        var references: usize = 0;
         for (block.instructions) |instruction| {
             if (instruction == .collection_reference) {
                 references += 1;

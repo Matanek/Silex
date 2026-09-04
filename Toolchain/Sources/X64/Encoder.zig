@@ -2025,11 +2025,13 @@ fn emitCollectionReference(
     }
     try emitLoadStack(allocator, bytes, .rax, value.index);
     try emitNormalizeCollectionIndex(allocator, bytes, .rax, .rcx);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
-    const in_bounds = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try emitRuntimeFailure(allocator, bytes, epilogue);
-    try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    if (value.checked) {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
+        const in_bounds = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try emitRuntimeFailure(allocator, bytes, epilogue);
+        try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    }
     try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
     try appendInt(allocator, bytes, u32, if (value.element_stride != 0) value.element_stride else @as(u32, value.element_width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xd8 });

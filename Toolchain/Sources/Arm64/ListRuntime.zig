@@ -1116,7 +1116,10 @@ pub fn emitReference(
             value.ownership,
         );
     }
-    const bounds = if (value.view)
+    const bounds: ?Bounds = if (value.view and !value.checked) unchecked: {
+        try loadAndNormalizeViewIndex(allocator, words, value.collection, value.index);
+        break :unchecked null;
+    } else if (value.view)
         try boundsView(allocator, words, value.collection, value.index)
     else if (value.reference) |reference|
         try boundsDynamicReference(allocator, words, reference, value.index)
@@ -1127,11 +1130,12 @@ pub fn emitReference(
     try words.append(allocator, A64.multiply(.x9, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
     try words.append(allocator, A64.storeStack(.x10, value.result));
+    if (bounds == null) return;
     const complete = words.items.len;
     try words.append(allocator, A64.branch());
     const failure = words.items.len;
-    try Fixups.patch19(words.items, bounds.negative, failure);
-    try Fixups.patch19(words.items, bounds.upper, failure);
+    try Fixups.patch19(words.items, bounds.?.negative, failure);
+    try Fixups.patch19(words.items, bounds.?.upper, failure);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.header, 2);
     try emitPrintInteger(allocator, words, value.index, 2, false);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.tail, 2);
@@ -1292,9 +1296,14 @@ pub fn emitReplace(
 
 const Bounds = struct { negative: usize, upper: usize };
 fn boundsView(allocator: Allocator, words: *std.ArrayList(u32), collection: Machine.Span, index: Machine.Slot) Error!Bounds {
+    try loadAndNormalizeViewIndex(allocator, words, collection, index);
+    return boundsWithNormalizedIndex(allocator, words);
+}
+
+fn loadAndNormalizeViewIndex(allocator: Allocator, words: *std.ArrayList(u32), collection: Machine.Span, index: Machine.Slot) Error!void {
     try words.append(allocator, A64.loadStack(.x10, collection.start));
     try words.append(allocator, A64.loadStack(.x13, @intCast(@as(usize, collection.start) + 1)));
-    return boundsWithLoadedCollection(allocator, words, index);
+    try normalizeWithLoadedCollection(allocator, words, index);
 }
 
 fn boundsDynamic(allocator: Allocator, words: *std.ArrayList(u32), collection: Machine.Slot, index: Machine.Slot) Error!Bounds {
@@ -1311,12 +1320,20 @@ fn boundsDynamicReference(allocator: Allocator, words: *std.ArrayList(u32), refe
 }
 
 fn boundsWithLoadedCollection(allocator: Allocator, words: *std.ArrayList(u32), index: Machine.Slot) Error!Bounds {
+    try normalizeWithLoadedCollection(allocator, words, index);
+    return boundsWithNormalizedIndex(allocator, words);
+}
+
+fn normalizeWithLoadedCollection(allocator: Allocator, words: *std.ArrayList(u32), index: Machine.Slot) Error!void {
     try words.append(allocator, A64.loadStack(.x9, index));
     try words.append(allocator, A64.compareRegisters(.x9, .zero_or_sp));
     const nonnegative = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.greater_equal));
     try words.append(allocator, A64.addRegisters(.x9, .x9, .x13));
     try Fixups.patch19(words.items, nonnegative, words.items.len);
+}
+
+fn boundsWithNormalizedIndex(allocator: Allocator, words: *std.ArrayList(u32)) Error!Bounds {
     try words.append(allocator, A64.compareRegisters(.x9, .zero_or_sp));
     const negative = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.less));

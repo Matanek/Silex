@@ -675,6 +675,7 @@ fn lowerInstruction(
                 .count = @intCast(collection.length orelse 0),
                 .dynamic = collection.length == null,
                 .view = collection.view,
+                .checked = access.checked,
                 .header = try strings.lookup(try collectionRuntimeHeader(allocator, program, access.position)),
                 .tail = try strings.lookup(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{collection.length.?})),
             } };

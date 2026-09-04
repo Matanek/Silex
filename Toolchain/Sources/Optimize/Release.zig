@@ -482,12 +482,21 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
 fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
     if (!DenseBlocks.isEligible(function)) return function;
     const locals_cannot_alias = !hasLocalAddress(function);
+    const references_stable_across_blocks = referencesStableAcrossBlocks(function);
     const definitions = try allocator.alloc(usize, function.value_types.len);
     @memset(definitions, 0);
     for (function.blocks) |block| for (block.instructions) |instruction| countDefinitions(instruction, definitions);
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     const constants = try allocator.alloc(Constant, function.value_types.len);
     @memset(constants, .unknown);
+    var entry_references: std.ArrayList(Ir.Instruction.CollectionReference) = .empty;
+    const stable_local_origins = try stableLocalOrigins(
+        allocator,
+        program,
+        function,
+        definitions,
+        references_stable_across_blocks and locals_cannot_alias,
+    );
     for (function.blocks, 0..) |block, block_index| {
         const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
         for (aliases, 0..) |*alias, value| alias.* = value;
@@ -498,7 +507,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
         var collection_references: std.ArrayList(Ir.Instruction.CollectionReference) = .empty;
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
         for (block.instructions) |original| {
-            const instruction = try rewriteInstruction(allocator, original, aliases);
+            var instruction = try rewriteInstruction(allocator, original, aliases);
             switch (instruction) {
                 .copy => |copy| {
                     if (definitions[copy.result] == 1 and
@@ -543,6 +552,16 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                     }
                 },
                 .collection_reference => |reference| {
+                    if (block_index != 0 and matchingDominatingCollectionReference(
+                        program,
+                        function,
+                        definitions,
+                        stable_local_origins,
+                        entry_references.items,
+                        reference,
+                    )) {
+                        instruction.collection_reference.checked = false;
+                    }
                     if (matchingCollectionReference(collection_references.items, reference)) |previous| {
                         aliases[reference.result] = canonical(aliases, previous);
                         continue;
@@ -584,6 +603,13 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
             }
             try instructions.append(allocator, instruction);
         }
+        if (block_index == 0 and references_stable_across_blocks) {
+            for (collection_references.items) |reference| {
+                if (reference.checked and reference.reference == null and isViewType(program, function.value_types[reference.collection])) {
+                    try entry_references.append(allocator, reference);
+                }
+            }
+        }
         blocks[block_index] = .{
             .instructions = try instructions.toOwnedSlice(allocator),
             .terminator = rewriteTerminator(block.terminator, aliases, constants),
@@ -592,6 +618,158 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
     var result = function;
     result.blocks = blocks;
     return removeRedundantCollectionChecks(allocator, result);
+}
+
+fn referencesStableAcrossBlocks(function: Ir.Function) bool {
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .global_store,
+        .field_store,
+        .collection_replace,
+        .list_edit,
+        .address_store,
+        .call,
+        .indirect_call,
+        .boundary_call,
+        .boundary_indirect_call,
+        .dynamic_call,
+        .mutex_lock,
+        .mutex_unlock,
+        => return false,
+        else => {},
+    };
+    return true;
+}
+
+fn stableLocalOrigins(
+    allocator: Allocator,
+    program: Ir.Program,
+    function: Ir.Function,
+    definitions: []const usize,
+    enabled: bool,
+) ![]?Ir.ValueId {
+    const origins = try allocator.alloc(?Ir.ValueId, function.local_types.len);
+    @memset(origins, null);
+    if (!enabled) return origins;
+    for (function.local_types, 0..) |local_type, local| {
+        if (!isStableReferenceSourceType(program, local_type)) continue;
+        var seed: ?Ir.ValueId = null;
+        var valid = true;
+        for (function.blocks, 0..) |block, block_index| for (block.instructions) |instruction| switch (instruction) {
+            .local_store => |store| if (store.local == local) {
+                const origin = copyOriginAcrossBlocks(function, definitions, store.operand);
+                if (localLoadProducing(function, definitions, origin)) |load| {
+                    if (load.local == local) continue;
+                }
+                if (block_index != 0 or (seed != null and seed.? != origin)) {
+                    valid = false;
+                    break;
+                }
+                seed = origin;
+            },
+            else => {},
+        };
+        if (valid) origins[local] = seed;
+    }
+    return origins;
+}
+
+fn isStableReferenceSourceType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (value_type.isNumeric() or value_type == .bool or isViewType(program, value_type)) return true;
+    const structure = value_type.structureIndex() orelse return false;
+    return structure < program.structures.len and !program.structures[structure].is_class and
+        program.structures[structure].collection == null;
+}
+
+fn matchingDominatingCollectionReference(
+    program: Ir.Program,
+    function: Ir.Function,
+    definitions: []const usize,
+    stable_local_origins: []const ?Ir.ValueId,
+    references: []const Ir.Instruction.CollectionReference,
+    candidate: Ir.Instruction.CollectionReference,
+) bool {
+    if (candidate.reference != null) return false;
+    const collection = stableValueOrigin(program, function, definitions, stable_local_origins, candidate.collection);
+    const index = stableValueOrigin(program, function, definitions, stable_local_origins, candidate.index);
+    for (references) |reference| {
+        if (reference.reference == null and reference.ownership == candidate.ownership and
+            stableValueOrigin(program, function, definitions, stable_local_origins, reference.collection) == collection and
+            stableValueOrigin(program, function, definitions, stable_local_origins, reference.index) == index) return true;
+    }
+    return false;
+}
+
+fn stableValueOrigin(
+    program: Ir.Program,
+    function: Ir.Function,
+    definitions: []const usize,
+    stable_local_origins: []const ?Ir.ValueId,
+    value: Ir.ValueId,
+) Ir.ValueId {
+    var current = copyOriginAcrossBlocks(function, definitions, value);
+    var remaining = function.value_types.len;
+    while (remaining != 0) : (remaining -= 1) {
+        if (localLoadProducing(function, definitions, current)) |load| {
+            current = stable_local_origins[load.local] orelse return current;
+            current = copyOriginAcrossBlocks(function, definitions, current);
+            continue;
+        }
+        const field = fieldLoadProducingAcrossBlocks(function, definitions, current) orelse return current;
+        const structure_index = function.value_types[field.base].structureIndex() orelse return current;
+        if (structure_index >= program.structures.len or program.structures[structure_index].is_class) return current;
+        const base = stableValueOrigin(program, function, definitions, stable_local_origins, field.base);
+        return stableFieldOrigin(function, definitions, base, field.field, current);
+    }
+    return current;
+}
+
+fn stableFieldOrigin(function: Ir.Function, definitions: []const usize, base: Ir.ValueId, field: usize, fallback: Ir.ValueId) Ir.ValueId {
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .field_load => |load| if (load.field == field and
+            copyOriginAcrossBlocks(function, definitions, load.base) == base) return load.result,
+        else => {},
+    };
+    return fallback;
+}
+
+fn copyOriginAcrossBlocks(function: Ir.Function, definitions: []const usize, value: Ir.ValueId) Ir.ValueId {
+    var current = value;
+    var remaining = definitions.len;
+    while (remaining != 0) : (remaining -= 1) {
+        if (definitions[current] != 1) return current;
+        const instruction = instructionProducing(function, current) orelse return current;
+        if (instruction != .copy) return current;
+        current = instruction.copy.operand;
+    }
+    return value;
+}
+
+fn localLoadProducing(function: Ir.Function, definitions: []const usize, value: Ir.ValueId) ?Ir.Instruction.LocalLoad {
+    if (definitions[value] != 1) return null;
+    const instruction = instructionProducing(function, value) orelse return null;
+    return switch (instruction) {
+        .local_load => |load| load,
+        else => null,
+    };
+}
+
+fn fieldLoadProducingAcrossBlocks(function: Ir.Function, definitions: []const usize, value: Ir.ValueId) ?Ir.Instruction.FieldLoad {
+    if (definitions[value] != 1) return null;
+    const instruction = instructionProducing(function, value) orelse return null;
+    return switch (instruction) {
+        .field_load => |load| load,
+        else => null,
+    };
+}
+
+fn instructionProducing(function: Ir.Function, value: Ir.ValueId) ?Ir.Instruction {
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .copy => |copy| if (copy.result == value) return instruction,
+        .local_load => |load| if (load.result == value) return instruction,
+        .field_load => |load| if (load.result == value) return instruction,
+        else => {},
+    };
+    return null;
 }
 
 fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) !Ir.Function {
@@ -1000,6 +1178,7 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .collection = canonical(aliases, value.collection),
             .reference = rewriteOptional(value.reference, aliases),
             .index = canonical(aliases, value.index),
+            .checked = value.checked,
             .ownership = value.ownership,
             .position = value.position,
         } },

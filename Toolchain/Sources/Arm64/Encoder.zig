@@ -2253,13 +2253,7 @@ fn emitCollectionBounds(
     index: Machine.Slot,
     count: u32,
 ) Error!CollectionBounds {
-    try words.append(allocator, loadStack(.x9, index));
-    try words.append(allocator, compareRegisters(.x9, .zero_or_sp));
-    const nonnegative = words.items.len;
-    try words.append(allocator, conditionalBranch(.greater_equal));
-    try emitImmediate64(allocator, words, .x10, count);
-    try words.append(allocator, addRegisters(.x9, .x9, .x10));
-    try patch19(words.items, nonnegative, words.items.len);
+    try emitNormalizedCollectionIndex(allocator, words, index, count);
     try words.append(allocator, compareRegisters(.x9, .zero_or_sp));
     const negative = words.items.len;
     try words.append(allocator, conditionalBranch(.less));
@@ -2268,6 +2262,21 @@ fn emitCollectionBounds(
     const upper = words.items.len;
     try words.append(allocator, conditionalBranch(.greater_equal));
     return .{ .negative = negative, .upper = upper };
+}
+
+fn emitNormalizedCollectionIndex(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    index: Machine.Slot,
+    count: u32,
+) Error!void {
+    try words.append(allocator, loadStack(.x9, index));
+    try words.append(allocator, compareRegisters(.x9, .zero_or_sp));
+    const nonnegative = words.items.len;
+    try words.append(allocator, conditionalBranch(.greater_equal));
+    try emitImmediate64(allocator, words, .x10, count);
+    try words.append(allocator, addRegisters(.x9, .x9, .x10));
+    try patch19(words.items, nonnegative, words.items.len);
 }
 
 fn encodeCollectionLoad(
@@ -2320,17 +2329,23 @@ fn encodeCollectionReference(
     program: Machine.Program,
     access: Machine.Instruction.CollectionReference,
 ) Error!void {
-    const bounds = try emitCollectionBounds(allocator, words, access.index, access.count);
+    const bounds: ?CollectionBounds = if (access.checked)
+        try emitCollectionBounds(allocator, words, access.index, access.count)
+    else unchecked: {
+        try emitNormalizedCollectionIndex(allocator, words, access.index, access.count);
+        break :unchecked null;
+    };
     try words.append(allocator, loadStack(.x10, access.reference.?));
     try emitImmediate64(allocator, words, .x11, @as(u64, access.element_width) * Machine.slot_size);
     try words.append(allocator, multiply(.x9, .x9, .x11));
     try words.append(allocator, addRegisters(.x10, .x10, .x9));
     try words.append(allocator, storeStack(.x10, access.result));
+    if (bounds == null) return;
     const complete = words.items.len;
     try words.append(allocator, branch());
     const failure = words.items.len;
-    try patch19(words.items, bounds.negative, failure);
-    try patch19(words.items, bounds.upper, failure);
+    try patch19(words.items, bounds.?.negative, failure);
+    try patch19(words.items, bounds.?.upper, failure);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.header, 2);
     try emitPrintInteger(allocator, words, access.index, 2, false);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.tail, 2);
