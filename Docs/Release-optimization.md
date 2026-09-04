@@ -83,10 +83,11 @@ stack-resident lowering.
 
 ARM64 also admits a restricted set of leaf memory operations. Checked dynamic
 loads, view replacement, and explicit address/reference accesses retain their
-bounds and failure behavior. Addresses, indices and composite memory operands
-stay pinned; scalar loads and reference stores may transfer directly to a
-register. Pure aggregate construction and copies can also retain arithmetic
-residences
+bounds and failure behavior. Indices, composite memory operands and explicit
+addresses stay pinned. Scalar references, loads and reference stores may remain
+in registers; direct reference transfers address a resident reference without
+first copying it through a scratch register. Pure aggregate construction and
+copies can also retain arithmetic residences
 on ARM64, with the existing parameter and return homes. Functions taking local
 addresses or making arbitrary calls remain outside this path. Independent
 arithmetic may use paired SIMD residences,

@@ -1002,17 +1002,17 @@ fn encodeFunction(
             },
             .reference_offset => |offset| {
                 if (referenceOffsetFeedsNextCopy(function, instruction_index, offset)) continue;
-                try words.append(allocator, loadStack(.x9, offset.reference));
+                try loadValue(allocator, words, function, .x9, offset.reference);
                 if (offset.byte_offset <= std.math.maxInt(u12)) {
                     try words.append(allocator, addSubtractImmediate(.x9, .x9, @intCast(offset.byte_offset), true));
                 } else {
                     try emitImmediate64(allocator, words, .x10, offset.byte_offset);
                     try words.append(allocator, addRegisters(.x9, .x9, .x10));
                 }
-                try words.append(allocator, storeStack(.x9, offset.result));
+                try storeValue(allocator, words, function, .x9, offset.result);
             },
             .reference_indirect_offset => |offset| {
-                try words.append(allocator, loadStack(.x9, offset.reference));
+                try loadValue(allocator, words, function, .x9, offset.reference);
                 try words.append(allocator, load64(.x9, .x9, 0));
                 if (offset.byte_offset <= std.math.maxInt(u12)) {
                     try words.append(allocator, addSubtractImmediate(.x9, .x9, @intCast(offset.byte_offset), true));
@@ -1020,7 +1020,7 @@ fn encodeFunction(
                     try emitImmediate64(allocator, words, .x10, offset.byte_offset);
                     try words.append(allocator, addRegisters(.x9, .x9, .x10));
                 }
-                try words.append(allocator, storeStack(.x9, offset.result));
+                try storeValue(allocator, words, function, .x9, offset.result);
             },
             .storage_init => |storage| for (0..storage.width) |leaf| {
                 try words.append(allocator, storeStack(
@@ -2047,7 +2047,8 @@ fn emitOffsetReferenceCopy(
     byte_offset: u32,
     load_reference: bool,
 ) Allocator.Error!void {
-    try words.append(allocator, loadStack(.x9, reference));
+    const base = valueResultRegister(function, reference) orelse .x9;
+    if (base == .x9) try words.append(allocator, loadStack(.x9, reference));
     for (0..span.width) |index| {
         const offset = @as(usize, byte_offset) + index * Machine.slot_size;
         const slot: Machine.Slot = @intCast(@as(usize, span.start) + index);
@@ -2059,26 +2060,26 @@ fn emitOffsetReferenceCopy(
                 !slotHasUse(function.instructions, slot)) continue;
             if (floatResidence(function, slot)) |register| {
                 if (offset <= std.math.maxInt(u15)) {
-                    try words.append(allocator, A64.loadVector64(@enumFromInt(register), .x9, @intCast(offset)));
+                    try words.append(allocator, A64.loadVector64(@enumFromInt(register), base, @intCast(offset)));
                 } else {
-                    try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
+                    try emitLoadAtOffset(allocator, words, .x10, base, offset);
                     try storeFloatValue(allocator, words, function, .x10, slot, true);
                 }
             } else {
-                try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
+                try emitLoadAtOffset(allocator, words, .x10, base, offset);
                 try storeValue(allocator, words, function, .x10, slot);
             }
         } else {
             if (floatResidence(function, slot)) |register| {
                 if (offset <= std.math.maxInt(u15)) {
-                    try words.append(allocator, A64.storeVector64(@enumFromInt(register), .x9, @intCast(offset)));
+                    try words.append(allocator, A64.storeVector64(@enumFromInt(register), base, @intCast(offset)));
                 } else {
                     try loadFloatValue(allocator, words, function, .x10, slot, true);
-                    try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
+                    try emitStoreAtOffset(allocator, words, .x10, base, offset);
                 }
             } else {
                 try loadValue(allocator, words, function, .x10, slot);
-                try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
+                try emitStoreAtOffset(allocator, words, .x10, base, offset);
             }
         }
     }

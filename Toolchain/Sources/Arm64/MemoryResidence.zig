@@ -236,9 +236,9 @@ test "memory lane recurrence preserves source-level borrowed updates" {
 
 // These leaf memory operations use stack homes and scratch x9...x15. Their
 // error paths terminate the function; their successful paths call no runtime.
-// Keep addresses, indices and composite operands in memory; scalar loads and
-// reference stores can transfer directly to registers. No local_address is
-// admitted: indirect writes therefore
+// Keep indices and composite operands in memory; scalar references, loads and
+// stores can transfer directly to registers. No local_address is admitted:
+// indirect writes therefore
 // cannot modify a register-resident local behind the allocator's back.
 pub fn supports(instruction: Machine.Instruction) bool {
     return switch (instruction) {
@@ -263,17 +263,12 @@ pub fn required(function: Machine.Function) bool {
 pub fn pin(instruction: Machine.Instruction, forced: []bool) void {
     switch (instruction) {
         .reference_load => |value| {
-            forced[value.reference] = true;
             if (value.result.width != 1) pinSpan(value.result, forced);
         },
         .reference_store => |value| {
-            forced[value.reference] = true;
             if (value.operand.width != 1) pinSpan(value.operand, forced);
         },
-        .reference_offset => |value| {
-            forced[value.reference] = true;
-            forced[value.result] = true;
-        },
+        .reference_offset => {},
         .address_load => |value| {
             forced[value.address] = true;
             forced[value.byte_offset] = true;
@@ -391,11 +386,12 @@ test "checked leaf loads pin memory operands but retain arithmetic registers" {
         .instructions = &instructions,
     };
     const result = try RegisterAllocation.allocate(arena.allocator(), function);
-    for ([_]usize{ 0, 1, 2, 3 }) |slot| {
+    for ([_]usize{ 0, 1, 2 }) |slot| {
         try std.testing.expectEqual(null, result.residences[slot]);
         try std.testing.expectEqual(null, result.float_residences[slot]);
         try std.testing.expectEqual(null, result.float_lane_residences[slot]);
     }
+    try std.testing.expect(result.residences[3] != null);
     try std.testing.expect(result.float_residences[6] != null);
     try std.testing.expect(result.float_residences[4] != null);
     try std.testing.expect(result.float_residences[7] != null);

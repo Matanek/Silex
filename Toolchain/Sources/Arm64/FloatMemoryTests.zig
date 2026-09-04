@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Machine = @import("Machine.zig");
 const Encoder = @import("Encoder.zig");
+const RegisterAllocation = @import("RegisterAllocation.zig");
 const Runner = @import("Runner.zig");
 
 test "floating reference transfers use direct memory instructions and preserve payloads" {
@@ -70,6 +71,49 @@ test "single-use reference field offsets fuse into scalar loads and stores" {
     try std.testing.expect(containsWord(code, 0xfd000930)); // str d16, [x9, #16]
     try std.testing.expect(!containsWord(code, 0xf9000be9)); // no field-address spill to slot 2
     try std.testing.expect(!containsWord(code, 0xf90013e9)); // no field-address spill to slot 4
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    const payloads = [_]u64{ 0, 0x8000000000000000, 0x7ff8000000001234, 0x7ff0000000005678 };
+    for (payloads, 0..) |original, index| {
+        var fields = [_]u64{ 1, original, 3 };
+        const replacement = payloads[(index + 1) % payloads.len];
+        const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{
+            @intCast(@intFromPtr(&fields)), @bitCast(replacement),
+        });
+        try std.testing.expectEqual(Machine.Status.success, result.status);
+        try std.testing.expectEqual(original, @as(u64, @bitCast(result.value)));
+        try std.testing.expectEqual(replacement, fields[2]);
+    }
+}
+
+test "allocated scalar references remain resident through unfused field transfers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var function: Machine.Function = .{
+        .name = "exchange_resident_field_bits",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .float64,
+        .return_width = 1,
+        .slot_count = 7,
+        .frame_size = try Machine.frameSize(7),
+        .instructions = &.{
+            .{ .reference_offset = .{ .reference = 0, .result = 2, .byte_offset = 8 } },
+            .{ .copy = .{ .result = 3, .operand = 2 } },
+            .{ .reference_load = .{ .reference = 3, .result = .{ .start = 4, .width = 1 } } },
+            .{ .reference_offset = .{ .reference = 0, .result = 5, .byte_offset = 16 } },
+            .{ .copy = .{ .result = 6, .operand = 5 } },
+            .{ .reference_store = .{ .reference = 6, .operand = .{ .start = 1, .width = 1 } } },
+            .{ .return_value = .{ .start = 4, .width = 1 } },
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    for ([_]Machine.Slot{ 0, 2, 3, 5, 6 }) |slot| {
+        try std.testing.expect(function.register_slots[slot] != null);
+    }
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
     const payloads = [_]u64{ 0, 0x8000000000000000, 0x7ff8000000001234, 0x7ff0000000005678 };
     for (payloads, 0..) |original, index| {
