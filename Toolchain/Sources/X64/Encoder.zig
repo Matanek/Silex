@@ -701,6 +701,10 @@ fn encodeFunction(
                     else
                         &.{ 0xf2, 0x48, 0x0f, 0x2c, 0xc0 });
                     try emitStoreStack(allocator, bytes, .rax, conversion.result);
+                } else if (conversion.source == .float32 and conversion.target == .float64) {
+                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, false);
+                    try bytes.appendSlice(allocator, &.{ 0xf3, 0x0f, 0x5a, 0xc0 });
+                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, true);
                 } else {
                     try emitLoadStack(allocator, bytes, .rax, conversion.operand);
                     try emitStoreStack(allocator, bytes, .rax, conversion.result);
@@ -3460,6 +3464,35 @@ test "encode internal X64 arguments beyond the register window" {
     defer windows.deinit(allocator);
     try std.testing.expect(linux.code.len > 0);
     try std.testing.expect(windows.code.len > 0);
+}
+
+test "encode float32 to float64 widening on X64" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 1.5)) } },
+        .{ .convert = .{
+            .result = 1,
+            .operand = 0,
+            .source = .float32,
+            .target = .float64,
+            .header = 0,
+            .checked = true,
+        } },
+        .return_void,
+    };
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 2,
+        .frame_size = 16,
+        .instructions = &instructions,
+    }};
+    const program: Machine.Program = .{ .functions = &functions, .strings = &.{"conversion"} };
+    try Machine.validate(program);
+
+    const image = try encodeLinux(std.testing.allocator, program);
+    defer image.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf3, 0x0f, 0x5a, 0xc0 }) != null);
 }
 
 test "encode indirect C ABI calls on Linux and Windows X64" {
