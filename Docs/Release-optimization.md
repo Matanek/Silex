@@ -103,6 +103,10 @@ adjacent. Memory accesses, calls, control-flow entries and potentially trapping
 operations remain barriers; expression trees and source positions are preserved.
 Constructed aggregates can seed those lanes by copying each leaf at its original
 construction point, without requiring the input leaves to be packed already.
+Scalar aggregate construction also contributes ordinary copy affinity per
+leaf. When liveness proves the source dead at that construction, the source,
+constructed field and later aggregate copies may share one register; live
+siblings and repeated source fields still interfere normally.
 Arithmetic dependencies are selected before competing copy-only affinities
 in these memory kernels; safety and operand-residency checks still apply. A
 memory kernel keeps an isolated pair scalar when its final values must be

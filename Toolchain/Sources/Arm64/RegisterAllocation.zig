@@ -513,6 +513,10 @@ fn safePureAliasOperand(
         operand = switch (instruction) {
             .copy => |copy| copy.operand,
             .copy_range => |copy| @intCast(@as(usize, copy.operand.start) + result - copy.result.start),
+            .aggregate_init => |initialization| if (aggregateResultsAllUsed(instructions, initialization))
+                aggregateOperandForResult(initialization, result)
+            else
+                null,
             .collection_count => |count| if (count.view) count.collection.start + 1 else null,
             else => null,
         };
@@ -524,6 +528,35 @@ fn safePureAliasOperand(
             (live[index * slot_count + result] or successorLive(instructions, live, slot_count, index, result))) return null;
     }
     return operand;
+}
+
+fn slotIsUsed(instructions: []const Machine.Instruction, slot: Machine.Slot) bool {
+    for (instructions) |instruction| if (instructionUses(instruction, slot)) return true;
+    return false;
+}
+
+fn aggregateResultsAllUsed(
+    instructions: []const Machine.Instruction,
+    initialization: Machine.Instruction.AggregateInit,
+) bool {
+    for (0..initialization.result.width) |leaf| {
+        const slot: Machine.Slot = @intCast(@as(usize, initialization.result.start) + leaf);
+        if (!slotIsUsed(instructions, slot)) return false;
+    }
+    return true;
+}
+
+fn aggregateOperandForResult(
+    initialization: Machine.Instruction.AggregateInit,
+    result: Machine.Slot,
+) ?Machine.Slot {
+    if (!ResidenceLiveness.spanContains(initialization.result, result)) return null;
+    var remaining: usize = result - initialization.result.start;
+    for (initialization.fields) |field| {
+        if (remaining < field.width) return @intCast(@as(usize, field.start) + remaining);
+        remaining -= field.width;
+    }
+    return null;
 }
 
 fn instructionCanShareResidence(
@@ -866,6 +899,23 @@ test "graph allocation coalesces a dead arithmetic operand with its result" {
     try std.testing.expectEqual(@as(?u5, 20), result.residences[1]);
     try std.testing.expectEqual(result.residences[0], result.residences[2]);
     try std.testing.expectEqual(function.frame_size, result.frame_size);
+}
+
+test "aggregate construction exposes leaf copy affinity" {
+    const initialization: Machine.Instruction.AggregateInit = .{
+        .result = .{ .start = 6, .width = 4, .aggregate = true },
+        .fields = &.{
+            .{ .start = 1, .width = 1 },
+            .{ .start = 3, .width = 2, .aggregate = true },
+            .{ .start = 0, .width = 1 },
+        },
+    };
+    try std.testing.expectEqual(@as(?Machine.Slot, 1), aggregateOperandForResult(initialization, 6));
+    try std.testing.expectEqual(@as(?Machine.Slot, 3), aggregateOperandForResult(initialization, 7));
+    try std.testing.expectEqual(@as(?Machine.Slot, 4), aggregateOperandForResult(initialization, 8));
+    try std.testing.expectEqual(@as(?Machine.Slot, 0), aggregateOperandForResult(initialization, 9));
+    try std.testing.expectEqual(@as(?Machine.Slot, null), aggregateOperandForResult(initialization, 5));
+    try std.testing.expectEqual(@as(?Machine.Slot, null), aggregateOperandForResult(initialization, 10));
 }
 
 test "linear scan keeps operands distinct at their shared instruction" {

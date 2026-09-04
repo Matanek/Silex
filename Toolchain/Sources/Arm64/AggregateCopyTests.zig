@@ -27,6 +27,10 @@ test "pure aggregate construction and copies retain arithmetic residences" {
         const allocation = try RegisterAllocation.allocate(allocator, function);
         try std.testing.expectEqual(@as(usize, 10), allocation.residences.len);
         try std.testing.expect(allocation.residences[9] != null or allocation.float_residences[9] != null);
+        const residences = if (floating) allocation.float_residences else allocation.residences;
+        try std.testing.expect(residences[0] != null);
+        try std.testing.expectEqual(residences[0], residences[3]);
+        try std.testing.expectEqual(residences[0], residences[6]);
         function.register_slots = allocation.residences;
         function.float_register_slots = allocation.float_residences;
         function.float_lane_slots = allocation.float_lane_residences;
