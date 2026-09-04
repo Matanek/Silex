@@ -124,6 +124,11 @@ func paired_float_checksum(left:NativeFloatPair, right:NativeFloatPair) float {
     return scaled_x + scaled_y
 }
 
+func verify_float_formatting() {
+    assert("size=$(12.0)" == "size=12.0")
+    assert("values: $(1.5), $(-0.0)" == "values: 1.5, -0.0")
+}
+
 class DirectCycleNode {
     var next:DirectCycleNode? = null
     drop { print("native cycle drop") }
@@ -368,6 +373,10 @@ test "preserve embedded byte contents on native" {
     verify_embedded_bytes()
 }
 
+test "format native floats through the standalone runtime" {
+    verify_float_formatting()
+}
+
 test "replace and preserve an aliased native list" {
     var values = [1, 2, 3]
     let duplicate = values
@@ -519,6 +528,7 @@ func main() {
         NativeFloatPair(x:1.0, y:2.0),
         NativeFloatPair(x:3.0, y:4.0)
     ) == 20.0)
+    verify_float_formatting()
     {
         var store = NativeFloatStore()
         let snapshot = store.values

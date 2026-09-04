@@ -53,3 +53,49 @@ export fn __udivti3(numerator: u128, denominator: u128) callconv(.c) u128 {
     }
     return quotient;
 }
+
+export fn __ashlti3(value: u128, raw_shift: i32) callconv(.c) u128 {
+    if (raw_shift <= 0) return value;
+    if (raw_shift >= 128) return 0;
+    const parts: [2]u64 = @bitCast(value);
+    const shift: u7 = @intCast(raw_shift);
+    if (shift >= 64) {
+        const upper_shift: u6 = @intCast(shift - 64);
+        return @bitCast([2]u64{ 0, parts[0] << upper_shift });
+    }
+    const narrow_shift: u6 = @intCast(shift);
+    const complement: u6 = @intCast(64 - shift);
+    return @bitCast([2]u64{
+        parts[0] << narrow_shift,
+        (parts[1] << narrow_shift) | (parts[0] >> complement),
+    });
+}
+
+export fn __lshrti3(value: u128, raw_shift: i32) callconv(.c) u128 {
+    if (raw_shift <= 0) return value;
+    if (raw_shift >= 128) return 0;
+    const parts: [2]u64 = @bitCast(value);
+    const shift: u7 = @intCast(raw_shift);
+    if (shift >= 64) {
+        const lower_shift: u6 = @intCast(shift - 64);
+        return @bitCast([2]u64{ parts[1] >> lower_shift, 0 });
+    }
+    const narrow_shift: u6 = @intCast(shift);
+    const complement: u6 = @intCast(64 - shift);
+    return @bitCast([2]u64{
+        (parts[0] >> narrow_shift) | (parts[1] << complement),
+        parts[1] >> narrow_shift,
+    });
+}
+
+test "wide shifts used by the standalone float formatter" {
+    const value = (@as(u128, 0x0123456789abcdef) << 64) | 0xfedcba9876543210;
+    try std.testing.expectEqual(value << 1, __ashlti3(value, 1));
+    try std.testing.expectEqual(value << 63, __ashlti3(value, 63));
+    try std.testing.expectEqual(value << 64, __ashlti3(value, 64));
+    try std.testing.expectEqual(value << 127, __ashlti3(value, 127));
+    try std.testing.expectEqual(value >> 1, __lshrti3(value, 1));
+    try std.testing.expectEqual(value >> 63, __lshrti3(value, 63));
+    try std.testing.expectEqual(value >> 64, __lshrti3(value, 64));
+    try std.testing.expectEqual(value >> 127, __lshrti3(value, 127));
+}
