@@ -54,6 +54,9 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Err
 
 pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, externals: []const Machine.ExternalFunction) (Allocator.Error || Machine.Error)!Result {
     if (!isCompatibleFunction(function, true, externals)) return spilled(allocator, function);
+    const fully_compatible = isFullyResidenceCompatible(function, externals);
+    if (!fully_compatible and !hasProfitableScalarRegion(function.instructions, externals)) return spilled(allocator, function);
+    if (!fully_compatible and hasLoopAggregateCall(function.instructions)) return spilled(allocator, function);
     // Actual C calls preserve x19...x28 and only the low 64 bits of v8...v15.
     // Keep the existing argument/result stack homes and use preserved colors
     // for the whole function. Scratch v9...v12 remain excluded as before.
@@ -78,6 +81,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     @memset(float_slots, false);
     inferFloatSlots(function, float_slots);
     inferExternalFloatSlots(function, externals, float_slots);
+    if (!fully_compatible and hasMixedAggregateLoad(function, float_slots)) return spilled(allocator, function);
     const pair_registers = [_]u5{
         16, 17, 18, 19, 20, 21, 22, 23,
         24, 25, 26, 27, 28, 29, 30, 31,
@@ -85,7 +89,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         4,  5,  6,  7,
     };
     const float_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
-    try FloatPairs.allocate(allocator, function, float_slots, float_lane_residences, float_registers);
+    if (fully_compatible) try FloatPairs.allocate(allocator, function, float_slots, float_lane_residences, float_registers);
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
     @memset(forced, false);
@@ -114,9 +118,17 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     }
     for (function.instructions, 0..) |instruction, index| {
         visit(instruction, index, first, last, weights, instruction_weights[index]);
+        if (!isResidenceCompatibleInstruction(instruction, externals)) {
+            visitBarrier(instruction, index, first, last, weights, instruction_weights[index]);
+        }
         forceStackOperands(function, instruction, forced, externals);
     }
     extendLoopCarriedIntervals(function.instructions, first, last);
+    for (function.instructions, 0..) |instruction, index| {
+        if (!isResidenceCompatibleInstruction(instruction, externals)) {
+            pinIntervalsAt(index, first, last, forced);
+        }
+    }
 
     var integer_intervals: std.ArrayList(Interval) = .empty;
     defer integer_intervals.deinit(allocator);
@@ -195,6 +207,32 @@ fn isCollectionParameter(function: Machine.Function, parameter: Machine.Span) bo
         .collection_count => |count| if (count.collection.start == parameter.start and
             count.collection.width == parameter.width) return true,
         else => {},
+    };
+    return false;
+}
+
+fn hasMixedAggregateLoad(function: Machine.Function, float_slots: []const bool) bool {
+    for (function.instructions) |instruction| if (instruction == .collection_load) {
+        const result = instruction.collection_load.result;
+        if (result.width < 2) continue;
+        var floats: usize = 0;
+        for (0..result.width) |leaf| floats += @intFromBool(float_slots[@as(usize, result.start) + leaf]);
+        if (floats != 0 and floats != result.width) return true;
+    };
+    return false;
+}
+
+fn hasLoopAggregateCall(instructions: []const Machine.Instruction) bool {
+    for (instructions, 0..) |instruction, index| if (instruction == .call) {
+        var aggregate = false;
+        for (instruction.call.arguments) |argument| aggregate = aggregate or argument.aggregate;
+        if (!aggregate) continue;
+        for (instructions, 0..) |control, source| switch (control) {
+            .jump => |target| if (target <= index and index <= source) return true,
+            .branch => |value| if ((value.then_instruction <= index and index <= source) or
+                (value.else_instruction <= index and index <= source)) return true,
+            else => {},
+        };
     };
     return false;
 }
@@ -767,17 +805,82 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
         // Pure constructors need no unrelated memory operation to qualify.
         // The shared lane-only path retains its previous, narrower contract.
         .copy_range, .aggregate_init => if (!has_unchecked_collection_load and !allow_stack_effects) return false,
-        .collection_load => |load| if (load.checked and !(allow_stack_effects and MemoryResidence.supports(instruction))) return false,
-        .binary => |binary| if (binary.type == .str) return false,
-        .external_call => |call| if (!allow_stack_effects or call.function >= externals.len or
-            !MemoryResidence.scalarMathCall(externals[call.function])) return false,
-        else => if (!allow_stack_effects or !MemoryResidence.supports(instruction)) return false,
+        .collection_load => |load| if (load.checked and !(allow_stack_effects and MemoryResidence.supports(instruction))) {
+            if (!allow_stack_effects) return false;
+        },
+        .binary => |binary| if (binary.type == .str and !allow_stack_effects) return false,
+        .external_call => |call| if (call.function >= externals.len or
+            !MemoryResidence.scalarMathCall(externals[call.function]))
+        {
+            if (!allow_stack_effects) return false;
+        },
+        else => if (!allow_stack_effects and !MemoryResidence.supports(instruction)) return false,
     };
     return true;
 }
 
 pub fn supportsMemoryScheduling(function: Machine.Function, externals: []const Machine.ExternalFunction) bool {
-    return MemoryResidence.required(function) and isCompatibleFunction(function, true, externals);
+    return MemoryResidence.required(function) and isCompatibleFunction(function, true, externals) and
+        isFullyResidenceCompatible(function, externals);
+}
+
+fn isFullyResidenceCompatible(function: Machine.Function, externals: []const Machine.ExternalFunction) bool {
+    for (function.instructions) |instruction| if (!isResidenceCompatibleInstruction(instruction, externals)) return false;
+    return true;
+}
+
+fn hasProfitableScalarRegion(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+    const has_wide_float_candidate = for (instructions) |instruction| {
+        if (instruction == .collection_load and instruction.collection_load.result.width >= 16) break true;
+    } else false;
+    if (!has_wide_float_candidate) return false;
+
+    var arithmetic: usize = 0;
+    for (instructions) |instruction| {
+        if (!isResidenceCompatibleInstruction(instruction, externals)) {
+            arithmetic = 0;
+            continue;
+        }
+        arithmetic += switch (instruction) {
+            .binary => |value| @intFromBool(value.type.isFloat()),
+            .unary => |value| @intFromBool(value.type.isFloat()),
+            .convert => |value| @intFromBool(value.source.isFloat() or value.target.isFloat()),
+            else => 0,
+        };
+        if (arithmetic >= 32) return true;
+    }
+    return false;
+}
+
+fn isResidenceCompatibleInstruction(instruction: Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+    return switch (instruction) {
+        .constant_int,
+        .constant_bool,
+        .constant_float32,
+        .constant_float64,
+        .copy,
+        .copy_range,
+        .aggregate_init,
+        .collection_count,
+        .convert,
+        .unary,
+        .return_value,
+        .return_void,
+        .jump,
+        .branch,
+        .call,
+        => true,
+        .collection_load => |load| !load.checked or MemoryResidence.supports(instruction),
+        .binary => |binary| binary.type != .str,
+        .external_call => |call| call.function < externals.len and MemoryResidence.scalarMathCall(externals[call.function]),
+        else => MemoryResidence.supports(instruction),
+    };
+}
+
+fn pinIntervalsAt(index: usize, first: []const usize, last: []const usize, forced: []bool) void {
+    for (first, last, forced) |start, end, *pinned| {
+        if (start != std.math.maxInt(usize) and start <= index and end >= index) pinned.* = true;
+    }
 }
 
 fn forceStackOperands(function: Machine.Function, instruction: Machine.Instruction, forced: []bool, externals: []const Machine.ExternalFunction) void {
@@ -889,6 +992,21 @@ fn visit(
         .return_value => |value| if (!value.aggregate) touch(value.start, index, first, last, weights, weight),
         .branch => |value| touch(value.condition, index, first, last, weights, weight),
         else => {},
+    }
+}
+
+fn visitBarrier(
+    instruction: Machine.Instruction,
+    index: usize,
+    first: []usize,
+    last: []usize,
+    weights: []u64,
+    weight: u64,
+) void {
+    for (0..first.len) |slot| {
+        if (instructionUses(instruction, slot) or instructionDefines(instruction, slot)) {
+            touch(@intCast(slot), index, first, last, weights, weight);
+        }
     }
 }
 
@@ -1234,4 +1352,65 @@ test "independent XYZ group keeps XY paired and Z scalar" {
     try std.testing.expectEqual(@as(u1, 1), y.lane);
     try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[4]);
     try std.testing.expect(result.float_residences[4] != null);
+}
+
+test "profitable wide float regions stop at unsupported instructions" {
+    var instructions: std.ArrayList(Machine.Instruction) = .empty;
+    defer instructions.deinit(std.testing.allocator);
+    try instructions.append(std.testing.allocator, .{ .constant_int = .{ .result = 2, .bits = 0 } });
+    try instructions.append(std.testing.allocator, .{ .collection_load = .{
+        .result = .{ .start = 3, .width = 16, .aggregate = true },
+        .collection = .{ .start = 0, .width = 2, .aggregate = true },
+        .index = 2,
+        .count = 0,
+        .dynamic = true,
+        .checked = false,
+        .header = 0,
+        .tail = 0,
+    } });
+    try instructions.append(std.testing.allocator, .{ .constant_float32 = .{ .result = 19, .bits = 0x3f800000 } });
+    for (0..16) |leaf| try instructions.append(std.testing.allocator, .{ .binary = .{
+        .result = @intCast(20 + leaf),
+        .operator = .multiply,
+        .left = @intCast(3 + leaf),
+        .right = 19,
+        .type = .float32,
+    } });
+    for (0..16) |leaf| try instructions.append(std.testing.allocator, .{ .binary = .{
+        .result = @intCast(36 + leaf),
+        .operator = .add,
+        .left = @intCast(20 + leaf),
+        .right = 19,
+        .type = .float32,
+    } });
+    try instructions.append(std.testing.allocator, .{ .constant_str = .{ .result = 52, .string = 0 } });
+    try instructions.append(std.testing.allocator, .{ .print = .{ .value = 52, .kind = .string, .newline = false } });
+    try instructions.append(std.testing.allocator, .{ .binary = .{
+        .result = 53,
+        .operator = .add,
+        .left = 51,
+        .right = 19,
+        .type = .float32,
+    } });
+    try instructions.append(std.testing.allocator, .{ .return_value = .{ .start = 53, .width = 1 } });
+
+    const function: Machine.Function = .{
+        .name = "regional_reduction",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 2, .aggregate = true }},
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 54,
+        .frame_size = try Machine.frameSize(54),
+        .instructions = instructions.items,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    try std.testing.expect(result.float_residences[20] != null);
+    try std.testing.expectEqual(@as(?u5, null), result.float_residences[51]);
+    try std.testing.expect(result.float_residences[53] != null);
+    try std.testing.expectEqual(@as(?u5, null), result.residences[52]);
 }

@@ -143,6 +143,15 @@ arithmetic may use paired SIMD residences,
 while values consumed or produced by the memory instructions remain scalar
 or stack-resident. Packing a scalar into a SIMD lane captures it at its
 original use, before another scalar can reuse its register.
+
+Release may also color a long scalar floating-point region inside a function
+that contains unsupported machine operations. This regional path is limited to
+functions that load a wide homogeneous aggregate and contain at least 32
+contiguous floating-point operations, so its setup is amortized. Every
+unsupported instruction is a hard barrier: its complete uses and definitions,
+and every interval live across it, remain stack-resident. Mixed aggregate
+loads and aggregate calls inside loops retain the whole-function spill path.
+The regional path does not use paired SIMD residences or memory scheduling.
 Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.
 Aggregate returns copy resident lanes into the
