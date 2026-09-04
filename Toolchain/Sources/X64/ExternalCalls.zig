@@ -434,7 +434,14 @@ pub fn emit(
             } else return unsupported("Windows external boundary");
         },
     }
-    if (call.result) |result| try emitStoreStack(allocator, bytes, .rax, result);
+    if (call.result) |result| {
+        if (external.signature.result == .uint8) {
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
+        } else if (external.signature.result_signed_32) {
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
+        }
+        try emitStoreStack(allocator, bytes, .rax, result);
+    }
     _ = function;
 }
 
@@ -842,5 +849,42 @@ test "x64 boundary calls sign extend int32 results before storing them" {
     );
 
     try std.testing.expectEqual(@as(usize, 1), sites.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0x63, 0xc0 }) != null);
+}
+
+test "Windows x64 imports sign extend int32 results before storing them" {
+    const argument_types = [_]Machine.AbiValue{ .read_address, .int32, .int32 };
+    const external_functions = [_]Machine.ExternalFunction{.{
+        .provider = "Windows.ucrtbase",
+        .source_name = "_wopen",
+        .signature = .{ .arguments = &argument_types, .result = .int32, .result_signed_32 = true },
+    }};
+    const function: Machine.Function = .{
+        .name = "test",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = try Machine.frameSize(4),
+        .instructions = &.{},
+    };
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    var imports: std.ArrayList(WindowsImports.X64Site) = .empty;
+    defer imports.deinit(std.testing.allocator);
+    var sites: std.ArrayList(Site) = .empty;
+    defer sites.deinit(std.testing.allocator);
+
+    try emit(
+        std.testing.allocator,
+        &bytes,
+        &imports,
+        &sites,
+        .windows,
+        .{ .functions = &.{function}, .external_functions = &external_functions },
+        function,
+        .{ .result = 3, .function = 0, .arguments = &.{ 0, 1, 2 } },
+    );
+
+    try std.testing.expectEqual(@as(usize, 1), imports.items.len);
     try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0x63, 0xc0 }) != null);
 }
