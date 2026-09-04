@@ -147,10 +147,18 @@ Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.
 Aggregate returns copy resident lanes into the
 caller's return storage instead of reading stale stack homes.
+When an aggregate construction is immediately returned, ARM64 writes its
+source fields straight to that storage and omits the temporary aggregate's
+stack materialization. The return must be the construction's unique linear
+successor; control-flow entry points keep the ordinary materialized path.
 Stack-resident aggregate parameters use paired 64-bit transfers only for
 leaves without scalar register residence. When the parameter pointer itself
 arrives on the stack, the second transfer scratch stays distinct from that
 pointer so consecutive pairs retain the same source base.
+Replacing an ordinary slot-width aggregate in a collection similarly forms
+the source stack address once and uses paired 64-bit transfers where their
+offsets are encodable. Compact float32 storage and larger replacements retain
+the scalar copy path.
 Before allocation, compatible ARM64 memory kernels may reorder independent
 single-definition arithmetic trees inside a pure region to make their lanes
 adjacent. Memory accesses, calls, control-flow entries and potentially trapping

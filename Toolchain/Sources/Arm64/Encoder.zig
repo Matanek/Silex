@@ -1045,6 +1045,7 @@ fn encodeFunction(
                 ));
             },
             .aggregate_init => |initialization| {
+                if (aggregateInitializationFeedsImmediateReturn(function, instruction_index, initialization)) continue;
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {
                     for (0..field.width) |leaf| {
@@ -1513,7 +1514,9 @@ fn encodeFunction(
                 if (value.aggregate) {
                     const hidden_slot = function.hidden_return_slot orelse return error.InvalidMachineProgram;
                     try words.append(allocator, loadStack(.x14, hidden_slot));
-                    for (0..value.width) |leaf| {
+                    if (immediateReturnedAggregateInitialization(function, instruction_index, value)) |initialization| {
+                        try emitAggregateFieldsToAddress(allocator, words, function, initialization, .x14);
+                    } else for (0..value.width) |leaf| {
                         const slot: Machine.Slot = @intCast(@as(usize, value.start) + leaf);
                         if (floatLaneResidence(function, slot) != null) {
                             try loadFloatValue(allocator, words, function, .x9, slot, false);
@@ -3956,6 +3959,63 @@ fn emitRegisteredCopy(
     try storeValue(allocator, words, function, .x9, result);
 }
 
+fn aggregateInitializationFeedsImmediateReturn(
+    function: Machine.Function,
+    instruction_index: usize,
+    initialization: Machine.Instruction.AggregateInit,
+) bool {
+    if (instruction_index + 1 >= function.instructions.len or
+        controlTargetsInstruction(function.instructions, instruction_index + 1)) return false;
+    const returned = switch (function.instructions[instruction_index + 1]) {
+        .return_value => |value| value,
+        else => return false,
+    };
+    return returned.aggregate and returned.start == initialization.result.start and
+        returned.width == initialization.result.width;
+}
+
+fn immediateReturnedAggregateInitialization(
+    function: Machine.Function,
+    instruction_index: usize,
+    returned: Machine.Span,
+) ?Machine.Instruction.AggregateInit {
+    if (instruction_index == 0 or controlTargetsInstruction(function.instructions, instruction_index)) return null;
+    const initialization = switch (function.instructions[instruction_index - 1]) {
+        .aggregate_init => |value| value,
+        else => return null,
+    };
+    if (!returned.aggregate or returned.start != initialization.result.start or
+        returned.width != initialization.result.width) return null;
+    return initialization;
+}
+
+fn emitAggregateFieldsToAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    initialization: Machine.Instruction.AggregateInit,
+    address: Register,
+) Allocator.Error!void {
+    var output_leaf: usize = 0;
+    for (initialization.fields) |field| for (0..field.width) |leaf| {
+        const slot: Machine.Slot = @intCast(@as(usize, field.start) + leaf);
+        const byte_offset = output_leaf * Machine.slot_size;
+        if (floatLaneResidence(function, slot) != null) {
+            try loadFloatValue(allocator, words, function, .x9, slot, false);
+            try words.append(allocator, moveFloatToGeneral(.x9, .x9, false));
+            try emitStoreAtOffset(allocator, words, .x9, address, byte_offset);
+        } else if (floatResidence(function, slot)) |number| {
+            try words.append(allocator, A64.storeVector64(@enumFromInt(number), address, @intCast(byte_offset)));
+        } else if (valueResultRegister(function, slot)) |source| {
+            try emitStoreAtOffset(allocator, words, source, address, byte_offset);
+        } else {
+            try words.append(allocator, loadStack(.x9, slot));
+            try emitStoreAtOffset(allocator, words, .x9, address, byte_offset);
+        }
+        output_leaf += 1;
+    };
+}
+
 fn emitScalarFloatCopy(
     allocator: Allocator,
     words: *std.ArrayList(u32),
@@ -4423,6 +4483,48 @@ test "copy stack-resident aggregate parameters with paired transfers" {
         A64.store64Pair(.x9, .x11, .zero_or_sp, 0),
         A64.load64Pair(.x9, .x11, .x0, 16),
         A64.store64Pair(.x9, .x11, .zero_or_sp, 16),
+    };
+    var found: usize = 0;
+    var offset: usize = 0;
+    while (offset + 4 <= image.code.len and found < expected.len) : (offset += 4) {
+        const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+        if (word == expected[found]) found += 1;
+    }
+    try std.testing.expectEqual(expected.len, found);
+}
+
+test "return an immediate aggregate construction directly from resident fields" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const function: Machine.Function = .{
+        .name = "direct_aggregate_return",
+        .parameter_count = 3,
+        .parameters = &.{
+            .{ .start = 0, .width = 1 },
+            .{ .start = 1, .width = 1 },
+            .{ .start = 2, .width = 1 },
+        },
+        .return_type = .float32,
+        .return_width = 3,
+        .return_aggregate = true,
+        .hidden_return_slot = 6,
+        .slot_count = 7,
+        .frame_size = try Machine.frameSize(7),
+        .register_slots = &([_]?u5{null} ** 7),
+        .float_register_slots = &.{ 16, 17, 18, null, null, null, null },
+        .instructions = &.{
+            .{ .aggregate_init = .{
+                .result = .{ .start = 3, .width = 3, .aggregate = true },
+                .fields = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 } },
+            } },
+            .{ .return_value = .{ .start = 3, .width = 3, .aggregate = true } },
+        },
+    };
+    const image = try encode(arena.allocator(), .{ .functions = &.{function} }, .none);
+    const expected = [_]u32{
+        A64.storeVector64(.x16, .x14, 0),
+        A64.storeVector64(.x17, .x14, Machine.slot_size),
+        A64.storeVector64(.x18, .x14, 2 * Machine.slot_size),
     };
     var found: usize = 0;
     var offset: usize = 0;

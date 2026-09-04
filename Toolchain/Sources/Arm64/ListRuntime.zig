@@ -1197,12 +1197,7 @@ pub fn emitReplace(
         try immediate(allocator, words, .x11, stride);
         try words.append(allocator, A64.multiply(.x9, .x9, .x11));
         try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
-        for (0..value.replacement.width) |leaf| {
-            try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.replacement.start) + leaf)));
-            if (compact_float32) {
-                try words.append(allocator, A64.store32Offset(.x12, .x10, @intCast(leaf * 4)));
-            } else try words.append(allocator, A64.store64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
-        }
+        try copyReplacementToAddress(allocator, words, value.replacement, .x10, compact_float32);
         for (0..2) |slot| {
             try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.collection.start) + slot)));
             try words.append(allocator, A64.storeStack(.x12, @intCast(@as(usize, value.result.start) + slot)));
@@ -1236,12 +1231,7 @@ pub fn emitReplace(
     try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x5, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x14, .x14, .x5));
-    for (0..value.replacement.width) |leaf| {
-        try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.replacement.start) + leaf)));
-        if (compact_float32) {
-            try words.append(allocator, A64.store32Offset(.x12, .x14, @intCast(leaf * 4)));
-        } else try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
-    }
+    try copyReplacementToAddress(allocator, words, value.replacement, .x14, compact_float32);
     try words.append(allocator, A64.storeStack(.x10, value.result.start));
     const reused = words.items.len;
     try words.append(allocator, A64.branch());
@@ -1299,12 +1289,7 @@ pub fn emitReplace(
     try words.append(allocator, A64.multiply(.x9, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x14, .x14, .x9));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
-    for (0..value.replacement.width) |leaf| {
-        try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.replacement.start) + leaf)));
-        if (compact_float32) {
-            try words.append(allocator, A64.store32Offset(.x12, .x14, @intCast(leaf * 4)));
-        } else try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
-    }
+    try copyReplacementToAddress(allocator, words, value.replacement, .x14, compact_float32);
     try words.append(allocator, A64.storeStack(.x15, value.result.start));
     try emitDropSlot(allocator, words, sites, platform, value.collection.start, value.ownership);
     const complete = words.items.len;
@@ -1326,6 +1311,36 @@ pub fn emitReplace(
     try emitPrintInteger(allocator, words, value.result.start, 2, true);
     try fail(allocator, words, epilogue);
     try Fixups.patch26(words.items, complete, words.items.len);
+}
+
+fn copyReplacementToAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    replacement: Machine.Span,
+    destination: A64.Register,
+    compact_float32: bool,
+) Error!void {
+    if (compact_float32 or replacement.width > 64) {
+        for (0..replacement.width) |leaf| {
+            try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, replacement.start) + leaf)));
+            if (compact_float32) {
+                try words.append(allocator, A64.store32Offset(.x12, destination, @intCast(leaf * 4)));
+            } else try words.append(allocator, A64.store64(.x12, destination, @intCast(leaf * Machine.slot_size)));
+        }
+        return;
+    }
+    try stackAddress(allocator, words, .x12, replacement.start);
+    var leaf: usize = 0;
+    while (leaf + 1 < replacement.width) : (leaf += 2) {
+        const byte_offset: u9 = @intCast(leaf * Machine.slot_size);
+        try words.append(allocator, A64.load64Pair(.x5, .x6, .x12, byte_offset));
+        try words.append(allocator, A64.store64Pair(.x5, .x6, destination, byte_offset));
+    }
+    if (leaf < replacement.width) {
+        const byte_offset: u12 = @intCast(leaf * Machine.slot_size);
+        try words.append(allocator, A64.load64(.x5, .x12, byte_offset));
+        try words.append(allocator, A64.store64(.x5, destination, byte_offset));
+    }
 }
 
 const Bounds = struct { negative: usize, upper: usize };
@@ -1491,4 +1506,25 @@ test "form fixed collection addresses beyond the immediate range from sp" {
         A64.addRegisters(.x10, .x10, .x11),
         words.items[words.items.len - 1],
     );
+}
+
+test "copy slot aggregates to collection storage with paired transfers" {
+    var words: std.ArrayList(u32) = .empty;
+    defer words.deinit(std.testing.allocator);
+
+    try copyReplacementToAddress(
+        std.testing.allocator,
+        &words,
+        .{ .start = 242, .width = 4, .aggregate = true },
+        .x10,
+        false,
+    );
+
+    try std.testing.expectEqualSlices(u32, &.{
+        A64.addSubtractImmediate(.x12, .zero_or_sp, 242 * Machine.slot_size, true),
+        A64.load64Pair(.x5, .x6, .x12, 0),
+        A64.store64Pair(.x5, .x6, .x10, 0),
+        A64.load64Pair(.x5, .x6, .x12, 2 * Machine.slot_size),
+        A64.store64Pair(.x5, .x6, .x10, 2 * Machine.slot_size),
+    }, words.items);
 }
