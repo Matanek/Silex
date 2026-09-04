@@ -2,8 +2,54 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Machine = @import("Machine.zig");
 const Encoder = @import("Encoder.zig");
+const A64 = @import("Instructions.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
 const Runner = @import("Runner.zig");
+
+test "floating copies transfer directly between stack and resident registers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const stack_to_register: Machine.Function = .{
+        .name = "stack_to_register",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .float64,
+        .return_width = 1,
+        .slot_count = 2,
+        .frame_size = try Machine.frameSize(2),
+        .register_slots = &.{ null, null },
+        .float_register_slots = &.{ null, 17 },
+        .instructions = &.{
+            .{ .copy = .{ .result = 1, .operand = 0 } },
+            .{ .return_value = .{ .start = 1, .width = 1 } },
+        },
+    };
+    const register_to_stack: Machine.Function = .{
+        .name = "register_to_stack",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .float64,
+        .return_width = 1,
+        .slot_count = 2,
+        .frame_size = try Machine.frameSize(2),
+        .register_slots = &.{ null, null },
+        .float_register_slots = &.{ 16, null },
+        .instructions = &.{
+            .{ .copy = .{ .result = 1, .operand = 0 } },
+            .{ .return_value = .{ .start = 1, .width = 1 } },
+        },
+    };
+    const image = try Encoder.encode(allocator, .{
+        .functions = &.{ stack_to_register, register_to_stack, sentinel },
+    }, .{ .test_function = 0 });
+    const first = image.code[image.function_offsets[0]..image.function_offsets[1]];
+    const second = image.code[image.function_offsets[1]..image.function_offsets[2]];
+    try std.testing.expect(containsWord(first, A64.loadFloat64Stack(.x17, 0)));
+    try std.testing.expect(!containsWord(first, A64.moveFloat(.x17, .x9, true)));
+    try std.testing.expect(containsWord(second, A64.storeFloat64Stack(.x16, 1)));
+    try std.testing.expect(!containsWord(second, A64.moveFloat(.x9, .x16, true)));
+}
 
 test "floating reference transfers use direct memory instructions and preserve payloads" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -872,14 +872,7 @@ fn encodeFunction(
                 if (floatResidence(function, copy.operand) != null or floatResidence(function, copy.result) != null or
                     floatLaneResidence(function, copy.operand) != null or floatLaneResidence(function, copy.result) != null)
                 {
-                    const source = floatResultRegister(function, copy.operand);
-                    const destination = floatResultRegister(function, copy.result);
-                    if (source != null and destination != null) {
-                        if (source.? != destination.?) try words.append(allocator, moveFloat(destination.?, source.?, true));
-                    } else {
-                        try loadFloatValue(allocator, words, function, .x9, copy.operand, true);
-                        try storeFloatValue(allocator, words, function, .x9, copy.result, true);
-                    }
+                    try emitScalarFloatCopy(allocator, words, function, copy.result, copy.operand);
                 } else {
                     const source = valueResultRegister(function, copy.operand);
                     const destination = valueResultRegister(function, copy.result);
@@ -3940,14 +3933,7 @@ fn emitRegisteredCopy(
     if (floatResidence(function, operand) != null or floatResidence(function, result) != null or
         floatLaneResidence(function, operand) != null or floatLaneResidence(function, result) != null)
     {
-        const source = floatResultRegister(function, operand);
-        const destination = floatResultRegister(function, result);
-        if (source != null and destination != null) {
-            if (source.? != destination.?) try words.append(allocator, moveFloat(destination.?, source.?, true));
-            return;
-        }
-        try loadFloatValue(allocator, words, function, .x9, operand, true);
-        try storeFloatValue(allocator, words, function, .x9, result, true);
+        try emitScalarFloatCopy(allocator, words, function, result, operand);
         return;
     }
     const source = valueResultRegister(function, operand);
@@ -3958,6 +3944,25 @@ fn emitRegisteredCopy(
     }
     try loadValue(allocator, words, function, .x9, operand);
     try storeValue(allocator, words, function, .x9, result);
+}
+
+fn emitScalarFloatCopy(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    result: Machine.Slot,
+    operand: Machine.Slot,
+) Allocator.Error!void {
+    if (floatResultRegister(function, result)) |destination| {
+        try loadFloatValue(allocator, words, function, destination, operand, true);
+        return;
+    }
+    if (floatResultRegister(function, operand)) |source| {
+        try storeFloatValue(allocator, words, function, source, result, true);
+        return;
+    }
+    try loadFloatValue(allocator, words, function, .x9, operand, true);
+    try storeFloatValue(allocator, words, function, .x9, result, true);
 }
 
 fn valueResultRegister(function: Machine.Function, slot: Machine.Slot) ?Register {
