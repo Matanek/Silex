@@ -32,6 +32,26 @@ pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expressio
         return self.fail(expression.position, "mutable reference requires a var root");
     }
 
+    var stable_reference = binding.reference;
+    if (stable_reference == null and binding.local != null) {
+        stable_reference = try self.newValue(builder, .address);
+        try self.emit(builder, .{ .local_address = .{ .result = stable_reference.?, .local = binding.local.? } });
+    }
+    if (stable_reference) |root_reference| {
+        if (expression.value == .index_access and directIndexedBase(expression.value.index_access.base)) {
+            return prepareDirectIndex(
+                self,
+                builder,
+                root_index,
+                binding,
+                root_name,
+                root_reference,
+                expression.value.index_access,
+                expected,
+            );
+        }
+    }
+
     var current = try loadRoot(self, builder, binding);
     var current_type = binding.type;
     try descend(self, builder, expression, root_name, &steps, &current, &current_type);
@@ -40,11 +60,6 @@ pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expressio
         return self.fail(expression.position, message);
     };
 
-    var stable_reference = binding.reference;
-    if (stable_reference == null and binding.local != null) {
-        stable_reference = try self.newValue(builder, .address);
-        try self.emit(builder, .{ .local_address = .{ .result = stable_reference.?, .local = binding.local.? } });
-    }
     if (stable_reference != null) {
         var only_fields = true;
         var reference = stable_reference.?;
@@ -84,6 +99,72 @@ pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expressio
         .reference = reference,
         .temporary = local,
         .steps = try steps.toOwnedSlice(self.allocator),
+    };
+}
+
+fn prepareDirectIndex(
+    self: anytype,
+    builder: anytype,
+    root_index: usize,
+    binding: Model.Binding,
+    root_name: []const u8,
+    root_reference: Ir.ValueId,
+    access: Ast.Expression.IndexAccess,
+    expected: ?Ast.Type,
+) !Prepared {
+    var steps: std.ArrayList(Step) = .empty;
+    var collection_value = try loadRoot(self, builder, binding);
+    var collection_type = binding.type;
+    try descend(self, builder, access.base, root_name, &steps, &collection_value, &collection_type);
+    const collection = Collections.collectionForType(self.structures, collection_type) orelse
+        return self.fail(access.bracket_position, "mutable index requires an array or list");
+    if (expected) |expected_type| if (collection.element != expected_type) {
+        const message = try std.fmt.allocPrint(self.allocator, "mutable reference expects '{s}', found '{s}'", .{ self.typeName(expected_type), self.typeName(collection.element) });
+        return self.fail(access.bracket_position, message);
+    };
+    const index = try self.analyzeExpressionExpected(builder, access.index, .int);
+    try steps.append(self.allocator, .{ .index = .{
+        .collection_type = collection_type,
+        .index = index.value,
+        .position = access.bracket_position,
+    } });
+
+    var reference = root_reference;
+    for (steps.items[0 .. steps.items.len - 1]) |step| switch (step) {
+        .field => |field| {
+            const next = try self.newValue(builder, .address);
+            try self.emit(builder, .{ .reference_field = .{
+                .result = next,
+                .reference = reference,
+                .structure = field.structure,
+                .field = field.field,
+            } });
+            reference = next;
+        },
+        .index => unreachable,
+    };
+    const element_reference = try self.newValue(builder, .address);
+    try self.emit(builder, .{ .collection_reference = .{
+        .result = element_reference,
+        .collection = collection_value,
+        .reference = reference,
+        .index = index.value,
+        .position = access.bracket_position,
+    } });
+    return .{
+        .root_binding = root_index,
+        .type = collection.element,
+        .reference = element_reference,
+        .temporary = null,
+        .steps = try steps.toOwnedSlice(self.allocator),
+    };
+}
+
+fn directIndexedBase(expression: *const Ast.Expression) bool {
+    return switch (expression.value) {
+        .identifier => true,
+        .field_access => |access| !access.safe and directIndexedBase(access.base),
+        else => false,
     };
 }
 

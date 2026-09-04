@@ -77,6 +77,15 @@ pub fn boundedCollectionLoops(optimize_program: anytype) !void {
         \\    }
         \\    return total
         \\}
+        \\struct Cell { var value:int }
+        \\func increment(cell:&Cell) { cell.value += 1 }
+        \\func mutate(values:&Cell[..]) {
+        \\    var index = 0
+        \\    while index < values.count() {
+        \\        increment(values[index])
+        \\        index++
+        \\    }
+        \\}
         \\func main() {
         \\    let values = [3, 5, 8]
         \\    print(sum(@values[0:values.count()]))
@@ -88,11 +97,17 @@ pub fn boundedCollectionLoops(optimize_program: anytype) !void {
     const unproven_start = std.mem.indexOf(u8, text, "func @unproven") orelse return error.TestUnexpectedResult;
     const advanced_start = std.mem.indexOf(u8, text, "func @advanced_before_access") orelse return error.TestUnexpectedResult;
     const nested_start = std.mem.indexOf(u8, text, "func @nested") orelse return error.TestUnexpectedResult;
+    const mutate_start = std.mem.indexOf(u8, text, "func @mutate") orelse return error.TestUnexpectedResult;
     const main_start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, text[sum_start..unproven_start], "collection.load %0, %7 bounded") != null);
     try std.testing.expect(std.mem.indexOf(u8, text[unproven_start..advanced_start], " bounded") == null);
     try std.testing.expect(std.mem.indexOf(u8, text[advanced_start..nested_start], " bounded") == null);
-    try std.testing.expect(std.mem.indexOf(u8, text[nested_start..main_start], " bounded") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text[nested_start..mutate_start], " bounded") != null);
+    const mutate = text[mutate_start..main_start];
+    try std.testing.expect(std.mem.indexOf(u8, mutate, "collection.reference") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mutate, " bounded") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mutate, "collection.load") == null);
+    try std.testing.expect(std.mem.indexOf(u8, mutate, "collection.replace") == null);
     const result = try Interpreter.runCapture(allocator, optimized);
     try std.testing.expectEqualStrings("16\n", result.stdout);
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);

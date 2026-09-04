@@ -58,10 +58,21 @@ aggregate replacement, propagation,
 dead-code elimination, dense-block reuse, and bounds analysis on the combined
 graph. In call-free functions containing a proven repeated scalar collection
 read, it reuses the corresponding local, field and collection loads within
-each basic block until an aliasing write. It also marks a
-collection load as bounded when a zero-origin induction variable is dominated
-by the exact collection-count comparison and cannot advance before that load;
-every unproved access retains its runtime bounds diagnostic.
+each basic block until an aliasing write. It also marks a collection load or
+element reference as bounded when a zero-origin induction variable is
+dominated by the exact collection-count comparison and cannot advance before
+that access. Equivalent loads of the same unchanged collection and induction
+locals share this proof; every unproved access retains its runtime bounds
+diagnostic.
+
+An indexed argument passed to a mutable parameter addresses the collection
+element directly when its root and any enclosing fields are stable. The
+callee therefore mutates the element in place instead of receiving a complete
+temporary followed by whole-element replacement. Owning lists retain their
+copy-on-write detachment, views retain negative-index normalization, and the
+selected element is still checked unless the surrounding counted loop proves
+it bounded. A type-checking snapshot covered by that same reference is
+removed after its result becomes unused; other checked snapshots remain.
 
 A checked mutable-view reference in the entry block can also prove an
 equivalent reference in a later block bounded. This proof accepts only views

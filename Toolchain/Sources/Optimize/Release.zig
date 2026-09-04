@@ -145,7 +145,10 @@ fn optimizeFunctionRange(
         const localized = try optimizeDenseBlocks(allocator, program, source[index]);
         const optimized = try optimizeFunction(allocator, localized, summaries);
         const simplified = try simplifyBooleanDiamonds(allocator, optimized);
-        destination[index] = try Bounds.optimize(allocator, simplified);
+        const bounded = try Bounds.optimize(allocator, simplified);
+        var cleaned = try removeRedundantCollectionChecks(allocator, bounded);
+        cleaned.blocks = try removeDeadConstants(allocator, cleaned);
+        destination[index] = cleaned;
     }
 }
 
@@ -787,7 +790,7 @@ fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) 
             if (instruction == .collection_load) {
                 const load = instruction.collection_load;
                 if (load.checked and uses[load.result] == 0 and
-                    collectionCheckProven(block.instructions, instruction_index, load))
+                    collectionCheckProven(function, block.instructions, instruction_index, load))
                 {
                     changed = true;
                     continue;
@@ -807,6 +810,7 @@ fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) 
 }
 
 fn collectionCheckProven(
+    function: Ir.Function,
     instructions: []const Ir.Instruction,
     load_index: usize,
     load: Ir.Instruction.CollectionLoad,
@@ -816,28 +820,42 @@ fn collectionCheckProven(
             .collection_reference => |value| value,
             else => continue,
         };
-        if (reference.collection != load.collection or reference.index != load.index) continue;
-        if (!referenceFeedsStore(instructions, reference.result, 0)) continue;
+        const exact_values = reference.collection == load.collection and reference.index == load.index;
+        if (!exact_values and (!sameStableLocalValue(function, reference.collection, load.collection) or
+            !sameStableLocalValue(function, reference.index, load.index))) continue;
+        if (!referenceFeedsMutation(instructions, reference.result, 0)) continue;
         const start = @min(load_index, reference_index);
         const end = @max(load_index, reference_index);
         if (!collectionAddressStable(instructions[start + 1 .. end])) continue;
-        if (reference_index < load_index) return true;
+        if (reference_index < load_index and
+            (exact_values or collectionCheckOrderStable(instructions[start + 1 .. end]))) return true;
         if (std.meta.eql(reference.position, load.position) and
             collectionCheckOrderStable(instructions[start + 1 .. end])) return true;
     }
     return false;
 }
 
-fn referenceFeedsStore(instructions: []const Ir.Instruction, reference: Ir.ValueId, depth: usize) bool {
+fn sameStableLocalValue(function: Ir.Function, left: Ir.ValueId, right: Ir.ValueId) bool {
+    if (left == right) return true;
+    const left_definition = instructionProducing(function, left) orelse return false;
+    const right_definition = instructionProducing(function, right) orelse return false;
+    return left_definition == .local_load and right_definition == .local_load and
+        left_definition.local_load.local == right_definition.local_load.local;
+}
+
+fn referenceFeedsMutation(instructions: []const Ir.Instruction, reference: Ir.ValueId, depth: usize) bool {
     if (depth >= instructions.len) return false;
     for (instructions) |instruction| switch (instruction) {
         .reference_store => |store| if (store.reference == reference) return true,
         .reference_field => |field| if (field.reference == reference and
-            referenceFeedsStore(instructions, field.result, depth + 1)) return true,
+            referenceFeedsMutation(instructions, field.result, depth + 1)) return true,
         .reference_optional => |optional| if (optional.reference == reference and
-            referenceFeedsStore(instructions, optional.result, depth + 1)) return true,
+            referenceFeedsMutation(instructions, optional.result, depth + 1)) return true,
         .copy => |copy| if (copy.operand == reference and
-            referenceFeedsStore(instructions, copy.result, depth + 1)) return true,
+            referenceFeedsMutation(instructions, copy.result, depth + 1)) return true,
+        .call => |call| for (call.arguments) |argument| {
+            if (argument == reference) return true;
+        },
         else => {},
     };
     return false;
@@ -1552,6 +1570,7 @@ fn removableResult(instruction: Ir.Instruction) ?Ir.ValueId {
         .enum_payload => |value| value.result,
         .enum_raw => |value| value.result,
         .field_load => |value| value.result,
+        .collection_load => |value| if (!value.checked) value.result else null,
         .collection_count => |value| value.result,
         .local_load => |value| value.result,
         .reference_field => |value| value.result,

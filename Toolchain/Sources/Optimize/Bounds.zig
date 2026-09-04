@@ -9,6 +9,12 @@ const Definition = struct {
     value: Ir.Instruction,
 };
 
+const CollectionAccess = struct {
+    checked: bool,
+    collection: Ir.ValueId,
+    index: Ir.ValueId,
+};
+
 pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
     if (function.blocks.len < 3 or function.local_types.len == 0) return function;
     const blocks = try allocator.dupe(Ir.Block, function.blocks);
@@ -41,12 +47,25 @@ pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
             var rewritten = try allocator.dupe(Ir.Instruction, block.instructions);
             var block_changed = false;
             for (rewritten, 0..) |instruction, instruction_index| {
-                const load = switch (instruction) {
-                    .collection_load => |value| value,
+                const access: CollectionAccess = switch (instruction) {
+                    .collection_load => |value| .{ .checked = value.checked, .collection = value.collection, .index = value.index },
+                    .collection_reference => |value| .{ .checked = value.checked, .collection = value.collection, .index = value.index },
                     else => continue,
                 };
-                if (!load.checked or load.collection != counted_collection) continue;
-                const index_definition = findDefinition(function, load.index) orelse continue;
+                if (!access.checked or !sameStableLocalValue(function, access.collection, counted_collection)) continue;
+                if (access.collection != counted_collection) {
+                    const collection_local = matchingLocalLoad(function, access.collection, counted_collection) orelse continue;
+                    if (try incrementCanReachLoad(
+                        allocator,
+                        function,
+                        loop_blocks,
+                        header_id,
+                        collection_local,
+                        block_id,
+                        instruction_index,
+                    )) continue;
+                }
+                const index_definition = findDefinition(function, access.index) orelse continue;
                 const index_load = switch (index_definition.value) {
                     .local_load => |value| value,
                     else => continue,
@@ -61,9 +80,19 @@ pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
                     block_id,
                     instruction_index,
                 )) continue;
-                var bounded = load;
-                bounded.checked = false;
-                rewritten[instruction_index] = .{ .collection_load = bounded };
+                switch (instruction) {
+                    .collection_load => |load| {
+                        var bounded = load;
+                        bounded.checked = false;
+                        rewritten[instruction_index] = .{ .collection_load = bounded };
+                    },
+                    .collection_reference => |reference| {
+                        var bounded = reference;
+                        bounded.checked = false;
+                        rewritten[instruction_index] = .{ .collection_reference = bounded };
+                    },
+                    else => unreachable,
+                }
                 block_changed = true;
                 changed = true;
             }
@@ -75,6 +104,19 @@ pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
     var result = function;
     result.blocks = blocks;
     return result;
+}
+
+fn sameStableLocalValue(function: Ir.Function, left: Ir.ValueId, right: Ir.ValueId) bool {
+    if (left == right) return true;
+    return matchingLocalLoad(function, left, right) != null;
+}
+
+fn matchingLocalLoad(function: Ir.Function, left: Ir.ValueId, right: Ir.ValueId) ?Ir.LocalId {
+    const left_definition = findDefinition(function, left) orelse return null;
+    const right_definition = findDefinition(function, right) orelse return null;
+    if (left_definition.value != .local_load or right_definition.value != .local_load or
+        left_definition.value.local_load.local != right_definition.value.local_load.local) return null;
+    return left_definition.value.local_load.local;
 }
 
 fn resolveCollectionCount(
