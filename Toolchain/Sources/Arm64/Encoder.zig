@@ -770,9 +770,19 @@ fn encodeFunction(
                     }
                     continue;
                 }
+                const destination = floatResultRegister(function, constant.result) orelse .x9;
+                if (floatImmediateEncoding(constant.bits, false)) |immediate| {
+                    try words.append(allocator, A64.floatImmediate(destination, immediate, false));
+                    if (floatResultRegister(function, constant.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, constant.result, false);
+                    }
+                    continue;
+                }
                 try emitImmediate64(allocator, words, .x9, constant.bits);
-                try words.append(allocator, moveGeneralToFloat(.x9, .x9, false));
-                try storeFloatValue(allocator, words, function, .x9, constant.result, false);
+                try words.append(allocator, moveGeneralToFloat(destination, .x9, false));
+                if (floatResultRegister(function, constant.result) == null) {
+                    try storeFloatValue(allocator, words, function, destination, constant.result, false);
+                }
             },
             .constant_float64 => |constant| {
                 if (floatMaxDiamond(function, instruction_index, constant.result, constant.bits, true)) |diamond| {
@@ -801,9 +811,19 @@ fn encodeFunction(
                     }
                     continue;
                 }
+                const destination = floatResultRegister(function, constant.result) orelse .x9;
+                if (floatImmediateEncoding(constant.bits, true)) |immediate| {
+                    try words.append(allocator, A64.floatImmediate(destination, immediate, true));
+                    if (floatResultRegister(function, constant.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, constant.result, true);
+                    }
+                    continue;
+                }
                 try emitImmediate64(allocator, words, .x9, constant.bits);
-                try words.append(allocator, moveGeneralToFloat(.x9, .x9, true));
-                try storeFloatValue(allocator, words, function, .x9, constant.result, true);
+                try words.append(allocator, moveGeneralToFloat(destination, .x9, true));
+                if (floatResultRegister(function, constant.result) == null) {
+                    try storeFloatValue(allocator, words, function, destination, constant.result, true);
+                }
             },
             .optional_null => |optional| {
                 try words.append(allocator, moveWideZero32(.x9, 0));
@@ -3927,6 +3947,33 @@ fn emitRegisteredCopy(
 
 fn valueResultRegister(function: Machine.Function, slot: Machine.Slot) ?Register {
     return valueOptionalResultRegister(function, slot);
+}
+
+fn floatImmediateEncoding(bits: u64, double: bool) ?u8 {
+    const exponent_bits: u6 = if (double) 11 else 8;
+    const fraction_bits: u6 = if (double) 52 else 23;
+    const width: u7 = if (double) 64 else 32;
+    for (0..256) |candidate| {
+        const immediate: u8 = @intCast(candidate);
+        const repeated: u64 = if (immediate & 0x40 != 0)
+            ((@as(u64, 1) << (exponent_bits - 3)) - 1) << 2
+        else
+            0;
+        const exponent = (@as(u64, @intFromBool(immediate & 0x40 == 0)) << (exponent_bits - 1)) |
+            repeated | ((immediate >> 4) & 0x3);
+        const expanded = (@as(u64, immediate >> 7) << @as(u6, @intCast(width - 1))) |
+            (exponent << fraction_bits) |
+            (@as(u64, immediate & 0xf) << (fraction_bits - 4));
+        if (expanded == bits) return immediate;
+    }
+    return null;
+}
+
+test "recognize only architectural scalar floating-point immediates" {
+    try std.testing.expectEqual(@as(?u8, 0x70), floatImmediateEncoding(@as(u32, @bitCast(@as(f32, 1.0))), false));
+    try std.testing.expectEqual(@as(?u8, 0xe0), floatImmediateEncoding(@as(u64, @bitCast(@as(f64, -0.5))), true));
+    try std.testing.expectEqual(@as(?u8, null), floatImmediateEncoding(@as(u32, @bitCast(@as(f32, 1.0 / 240.0))), false));
+    try std.testing.expectEqual(@as(?u8, null), floatImmediateEncoding(0, true));
 }
 
 fn valueOptionalResultRegister(function: ?Machine.Function, slot: Machine.Slot) ?Register {

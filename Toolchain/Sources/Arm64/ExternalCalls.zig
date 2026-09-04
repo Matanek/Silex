@@ -40,14 +40,14 @@ pub fn emit(
         const result = call.result orelse return;
         // copysign is a bit operation: preserve payloads, infinities, subnormals
         // and signed zeros without a C call or floating-point arithmetic.
-        try loadValue(allocator, words, function, .x9, call.arguments[0]);
-        try loadValue(allocator, words, function, .x10, call.arguments[1]);
+        try loadFloatBits(allocator, words, function, .x9, call.arguments[0], double);
+        try loadFloatBits(allocator, words, function, .x10, call.arguments[1], double);
         try words.append(allocator, Instructions.exclusiveOrRegisters(.x10, .x10, .x9));
         try words.append(allocator, Instructions.moveWideZero64(.x11, 0x8000, if (double) 3 else 1));
         try words.append(allocator, Instructions.andRegisters(.x10, .x10, .x11));
         try words.append(allocator, Instructions.exclusiveOrRegisters(.x9, .x9, .x10));
         if (!double) try words.append(allocator, Instructions.zeroExtendRegister(.x9, .x9, 32));
-        try storeValue(allocator, words, function, .x9, result);
+        try storeFloatBits(allocator, words, function, .x9, result, double);
         return;
     }
 
@@ -196,6 +196,32 @@ fn floatResidence(function: Machine.Function, slot: Machine.Slot) ?Register {
     return null;
 }
 
+fn loadFloatBits(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    destination: Register,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!void {
+    if (floatResidence(function, slot)) |source| {
+        try words.append(allocator, Instructions.moveFloatToGeneral(destination, source, double));
+    } else try loadValue(allocator, words, function, destination, slot);
+}
+
+fn storeFloatBits(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    source: Register,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!void {
+    if (floatResidence(function, slot)) |destination| {
+        try words.append(allocator, Instructions.moveGeneralToFloat(destination, source, double));
+    } else try storeValue(allocator, words, function, source, slot);
+}
+
 test "inline copysign preserves every IEEE payload bit except the sign" {
     const builtin = @import("builtin");
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
@@ -220,7 +246,7 @@ test "inline copysign preserves every IEEE payload bit except the sign" {
             .name = "copy_sign_bits",
             .parameter_count = 2,
             .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
-            .return_type = .uint,
+            .return_type = if (double) .float64 else .float32,
             .return_width = 1,
             .slot_count = 3,
             .frame_size = try Machine.frameSize(3),
@@ -230,6 +256,9 @@ test "inline copysign preserves every IEEE payload bit except the sign" {
         function.register_slots = allocation.residences;
         function.float_register_slots = allocation.float_residences;
         function.float_lane_slots = allocation.float_lane_residences;
+        try std.testing.expect(function.float_register_slots[0] != null);
+        try std.testing.expect(function.float_register_slots[1] != null);
+        try std.testing.expect(function.float_register_slots[2] != null);
         const program: Machine.Program = .{ .functions = &.{function}, .external_functions = &.{external} };
         var words: std.ArrayList(u32) = .empty;
         var sites: std.ArrayList(Site) = .empty;

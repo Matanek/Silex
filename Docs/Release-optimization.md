@@ -149,6 +149,11 @@ instruction. Inputs and results may use ordinary floating-point residences, so
 the function does not acquire call-preserved register restrictions. This is
 the same IEEE operation already used for constant evaluation; unrelated
 providers and mismatched signatures retain their calls.
+Architecturally encodable nonzero float32 and float64 constants use scalar
+`FMOV` immediates directly in their assigned register; every other bit pattern
+keeps integer materialization. Inline `copysignf` and `copysign` operands and
+results likewise stay in their scalar floating-point residences around the
+existing exact sign-bit operation.
 
 Functions with other exact scalar system-math signatures may also retain ARM64
 residences across actual C calls. Their colors are restricted to x19–x28

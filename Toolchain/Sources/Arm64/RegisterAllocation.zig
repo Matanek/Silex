@@ -773,12 +773,13 @@ pub fn supportsMemoryScheduling(function: Machine.Function, externals: []const M
 }
 
 fn forceStackOperands(instruction: Machine.Instruction, forced: []bool, externals: []const Machine.ExternalFunction) void {
-    const inline_square_root = if (instruction == .external_call) root: {
+    const inline_float_intrinsic = if (instruction == .external_call) root: {
         const call = instruction.external_call;
         break :root call.result != null and call.function < externals.len and
-            MemoryResidence.squareRootPrecision(externals[call.function]) != null;
+            (MemoryResidence.squareRootPrecision(externals[call.function]) != null or
+                MemoryResidence.copySignPrecision(externals[call.function]) != null);
     } else false;
-    if (!inline_square_root) MemoryResidence.pin(instruction, forced);
+    if (!inline_float_intrinsic) MemoryResidence.pin(instruction, forced);
     switch (instruction) {
         .collection_load => |load| {
             _ = load;

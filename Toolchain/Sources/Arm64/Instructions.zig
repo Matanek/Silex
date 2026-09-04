@@ -381,6 +381,11 @@ pub fn moveFloat(destination: Register, source: Register, double: bool) u32 {
         registerBits(destination);
 }
 
+pub fn floatImmediate(destination: Register, immediate: u8, double: bool) u32 {
+    const base: u32 = if (double) 0x1e601000 else 0x1e201000;
+    return base | (@as(u32, immediate) << 13) | registerBits(destination);
+}
+
 pub fn floatNegate(destination: Register, source: Register, double: bool) u32 {
     const base: u32 = if (double) 0x1e614000 else 0x1e214000;
     return base | (registerBits(source) << 5) | registerBits(destination);
@@ -594,6 +599,11 @@ test "encode zero vector immediate for scalar float registers" {
 test "encode scalar IEEE square root" {
     try std.testing.expectEqual(@as(u32, 0x1e21c020), floatSquareRoot(.x0, .x1, false));
     try std.testing.expectEqual(@as(u32, 0x1e61c062), floatSquareRoot(.x2, .x3, true));
+}
+
+test "encode scalar floating-point immediates" {
+    try std.testing.expectEqual(@as(u32, 0x1e2e1000), floatImmediate(.x0, 0x70, false));
+    try std.testing.expectEqual(@as(u32, 0x1e7c1003), floatImmediate(.x3, 0xe0, true));
 }
 
 test "encode clear exclusive" {
