@@ -58,6 +58,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     // Keep the existing argument/result stack homes and use preserved colors
     // for the whole function. Scratch v9...v12 remain excluded as before.
     const has_calls = for (function.instructions) |instruction| {
+        if (instruction == .call) break true;
         if (instruction == .external_call) {
             const call = instruction.external_call;
             if (call.function >= externals.len or call.result == null or
@@ -113,7 +114,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     }
     for (function.instructions, 0..) |instruction, index| {
         visit(instruction, index, first, last, weights, instruction_weights[index]);
-        forceStackOperands(instruction, forced, externals);
+        forceStackOperands(function, instruction, forced, externals);
     }
     extendLoopCarriedIntervals(function.instructions, first, last);
 
@@ -149,6 +150,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         integer_registers,
         function.instructions,
         function.slot_count,
+        forced,
     );
     // Incoming arguments occupy x0...x7 until every parameter has been
     // captured by the prologue. Keep parameter residences out of that range;
@@ -172,6 +174,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         float_registers,
         function.instructions,
         function.slot_count,
+        forced,
     );
     for (float_lane_residences, 0..) |lane, slot| if (lane != null) {
         float_residences[slot] = null;
@@ -203,6 +206,7 @@ fn allocateGraph(
     registers: []const u5,
     instructions: []const Machine.Instruction,
     slot_count: usize,
+    forced: []const bool,
 ) Allocator.Error!void {
     const live = try allocator.alloc(bool, instructions.len * slot_count);
     defer allocator.free(live);
@@ -229,8 +233,8 @@ fn allocateGraph(
 
     const alias_roots = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(alias_roots);
-    try buildPureAliasRoots(allocator, alias_roots, instructions, live, slot_count);
-    coalesceCopyAffinityRoots(alias_roots, instructions, live, slot_count);
+    try buildPureAliasRoots(allocator, alias_roots, instructions, live, slot_count, forced);
+    coalesceCopyAffinityRoots(alias_roots, instructions, live, slot_count, forced);
 
     std.mem.sort(Interval, intervals, {}, heavierThan);
     for (intervals) |interval| {
@@ -417,12 +421,13 @@ fn buildPureAliasRoots(
     instructions: []const Machine.Instruction,
     live: []const bool,
     slot_count: usize,
+    forced: []const bool,
 ) Allocator.Error!void {
     const operands = try allocator.alloc(?Machine.Slot, slot_count);
     defer allocator.free(operands);
     @memset(operands, null);
     for (0..slot_count) |slot| {
-        operands[slot] = safePureAliasOperand(instructions, live, slot_count, @intCast(slot));
+        operands[slot] = safePureAliasOperand(instructions, live, slot_count, forced, @intCast(slot));
     }
     for (roots, 0..) |*root, slot| {
         root.* = @intCast(slot);
@@ -440,18 +445,17 @@ fn coalesceCopyAffinityRoots(
     instructions: []const Machine.Instruction,
     live: []const bool,
     slot_count: usize,
+    forced: []const bool,
 ) void {
     for (instructions) |instruction| switch (instruction) {
-        .copy => |copy| mergeNonInterferingRoots(roots, copy.result, copy.operand, instructions, live, slot_count),
+        .copy => |copy| if (!forced[copy.result] and !forced[copy.operand])
+            mergeNonInterferingRoots(roots, copy.result, copy.operand, instructions, live, slot_count),
         .copy_range => |copy| for (0..copy.result.width) |leaf| {
-            mergeNonInterferingRoots(
-                roots,
-                @intCast(@as(usize, copy.result.start) + leaf),
-                @intCast(@as(usize, copy.operand.start) + leaf),
-                instructions,
-                live,
-                slot_count,
-            );
+            const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
+            const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
+            if (!forced[result] and !forced[operand]) {
+                mergeNonInterferingRoots(roots, result, operand, instructions, live, slot_count);
+            }
         },
         else => {},
     };
@@ -507,8 +511,10 @@ fn safePureAliasOperand(
     instructions: []const Machine.Instruction,
     live: []const bool,
     slot_count: usize,
+    forced: []const bool,
     result: Machine.Slot,
 ) ?Machine.Slot {
+    if (forced[result]) return null;
     var definition_index: ?usize = null;
     var operand: ?Machine.Slot = null;
     for (instructions, 0..) |instruction, index| {
@@ -526,6 +532,7 @@ fn safePureAliasOperand(
             else => null,
         };
         if (operand == null) return null;
+        if (forced[operand.?]) return null;
     }
     if (definition_index == null or operand == null) return null;
     for (instructions, 0..) |instruction, index| {
@@ -754,6 +761,7 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
         .return_void,
         .jump,
         .branch,
+        .call,
         => {},
         // ARM64's aggregate emitters already consume registered scalar leaves.
         // Pure constructors need no unrelated memory operation to qualify.
@@ -772,14 +780,18 @@ pub fn supportsMemoryScheduling(function: Machine.Function, externals: []const M
     return MemoryResidence.required(function) and isCompatibleFunction(function, true, externals);
 }
 
-fn forceStackOperands(instruction: Machine.Instruction, forced: []bool, externals: []const Machine.ExternalFunction) void {
+fn forceStackOperands(function: Machine.Function, instruction: Machine.Instruction, forced: []bool, externals: []const Machine.ExternalFunction) void {
     const inline_float_intrinsic = if (instruction == .external_call) root: {
         const call = instruction.external_call;
         break :root call.result != null and call.function < externals.len and
             (MemoryResidence.squareRootPrecision(externals[call.function]) != null or
                 MemoryResidence.copySignPrecision(externals[call.function]) != null);
     } else false;
-    if (!inline_float_intrinsic) MemoryResidence.pin(instruction, forced);
+    if (!inline_float_intrinsic) {
+        if (instruction == .local_address and addressOnlyAnnotatesViewReferences(function, instruction.local_address.result)) {
+            forced[instruction.local_address.result] = true;
+        } else MemoryResidence.pin(instruction, forced);
+    }
     switch (instruction) {
         .collection_load => |load| {
             _ = load;
@@ -794,6 +806,21 @@ fn forceStackOperands(instruction: Machine.Instruction, forced: []bool, external
         .return_value => |value| if (value.aggregate) forceSpan(value, forced),
         else => {},
     }
+}
+
+fn addressOnlyAnnotatesViewReferences(function: Machine.Function, address: Machine.Slot) bool {
+    var annotated = false;
+    for (function.instructions) |instruction| {
+        if (instruction == .collection_reference) {
+            const reference = instruction.collection_reference;
+            if (reference.view and reference.reference == address) {
+                annotated = true;
+                continue;
+            }
+        }
+        if (instructionUses(instruction, address)) return false;
+    }
+    return annotated;
 }
 
 fn forceSpan(span: Machine.Span, forced: []bool) void {

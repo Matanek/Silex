@@ -837,6 +837,7 @@ fn lowerInstruction(
         .local_address => |address| .{ .local_address = .{
             .result = layout.values[address.result].start,
             .local = layout.locals[address.local].start,
+            .width = layout.locals[address.local].width,
         } },
         .reference_load => |load| .{ .reference_load = .{
             .result = layout.values[load.result],

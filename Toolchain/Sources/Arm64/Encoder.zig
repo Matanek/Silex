@@ -1271,6 +1271,7 @@ fn encodeFunction(
                     external_call_sites,
                     @enumFromInt(@intFromEnum(platform)),
                     program,
+                    function,
                     access,
                 )
             else

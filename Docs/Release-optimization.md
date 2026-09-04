@@ -121,15 +121,24 @@ recognizes induction updates separated by independent SSA copies. Fully
 resident leaf functions allocate no value frame. Debug retains the direct
 stack-resident lowering.
 
-ARM64 also admits a restricted set of leaf memory operations. Checked dynamic
+ARM64 also admits a restricted set of memory operations. Checked dynamic
 loads, view replacement, and explicit address/reference accesses retain their
-bounds and failure behavior. Indices, composite memory operands and explicit
-addresses stay pinned. Scalar references, loads and reference stores may remain
-in registers; direct reference transfers address a resident reference without
-first copying it through a scratch register. Pure aggregate construction and
-copies can also retain arithmetic residences
-on ARM64, with the existing parameter and return homes. Functions taking local
-addresses or making arbitrary calls remain outside this path. Independent
+bounds and failure behavior. Addressed local spans stay pinned. Scalar
+references, loads and reference stores may remain in registers; direct
+reference transfers address a resident reference without first copying it
+through a scratch register. Pure aggregate construction and copies can also
+retain arithmetic residences on ARM64, with the existing parameter and return
+homes. Functions with direct Silex calls use only callee-saved integer colors,
+so loop state can remain resident across the call. A local address used solely
+as provenance for view element references pins the address but not the view
+descriptor: mutating the element cannot change its base or count. Other local
+addresses continue to pin their complete span, whose width is explicit in the
+machine contract. Copy affinity does not cross these forced memory spans, so
+an immutable snapshot taken before an indirect mutation cannot share the
+residence of a post-call reload. View element references consume resident base,
+count and index values directly. Checked references materialize a resident
+original index on their failure edge before producing the unchanged diagnostic.
+Independent
 arithmetic may use paired SIMD residences,
 while values consumed or produced by the memory instructions remain scalar
 or stack-resident. Packing a scalar into a SIMD lane captures it at its

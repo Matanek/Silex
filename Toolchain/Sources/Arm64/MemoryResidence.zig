@@ -6,6 +6,7 @@ test {
     _ = @import("FloatMemoryTests.zig");
     _ = @import("DeadCollectionLoadTests.zig");
     _ = @import("MathCallResidenceTests.zig");
+    _ = @import("CallResidenceTests.zig");
 }
 
 pub fn scalarMathCall(external: Machine.ExternalFunction) bool {
@@ -246,17 +247,16 @@ test "memory lane recurrence preserves source-level borrowed updates" {
     }
 }
 
-// These leaf memory operations use stack homes and scratch x9...x15. Their
-// error paths terminate the function; their successful paths call no runtime.
-// Keep indices and composite operands in memory; scalar references, loads and
-// stores can transfer directly to registers. No local_address is admitted:
-// indirect writes therefore
-// cannot modify a register-resident local behind the allocator's back.
+// These leaf memory operations use scratch x9...x15. Their error paths
+// terminate the function; their successful paths call no runtime. Addressed
+// local spans stay pinned, while view descriptors and indices may remain in
+// registers because view references never mutate the descriptor itself.
 pub fn supports(instruction: Machine.Instruction) bool {
     return switch (instruction) {
         .reference_load,
         .reference_store,
         .reference_offset,
+        .local_address,
         .address_load,
         .address_store,
         => true,
@@ -281,6 +281,10 @@ pub fn pin(instruction: Machine.Instruction, forced: []bool) void {
             if (value.operand.width != 1) pinSpan(value.operand, forced);
         },
         .reference_offset => {},
+        .local_address => |value| {
+            forced[value.result] = true;
+            for (0..value.width) |leaf| forced[@as(usize, value.local) + leaf] = true;
+        },
         .address_load => |value| {
             forced[value.address] = true;
             forced[value.byte_offset] = true;
@@ -297,10 +301,12 @@ pub fn pin(instruction: Machine.Instruction, forced: []bool) void {
             forced[value.index] = true;
         },
         .collection_reference => |value| {
-            pinSpan(value.collection, forced);
-            forced[value.index] = true;
-            forced[value.result] = true;
-            if (value.reference) |reference| forced[reference] = true;
+            if (!value.view) {
+                pinSpan(value.collection, forced);
+                forced[value.index] = true;
+                forced[value.result] = true;
+                if (value.reference) |reference| forced[reference] = true;
+            }
         },
         .collection_replace => |value| {
             pinSpan(value.collection, forced);

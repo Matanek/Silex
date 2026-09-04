@@ -206,6 +206,7 @@ pub const Instruction = union(enum) {
     pub const LocalAddress = struct {
         result: Slot,
         local: Slot,
+        width: u12,
     };
 
     pub const ReferenceLoad = struct {
@@ -723,7 +724,7 @@ pub fn validate(program: Program) Error!void {
                 },
                 .local_address => |value| {
                     try requireSlot(function, value.result);
-                    try requireSlot(function, value.local);
+                    try requireSpan(function, .{ .start = value.local, .width = value.width });
                 },
                 .reference_load => |value| {
                     try requireSpan(function, value.result);
