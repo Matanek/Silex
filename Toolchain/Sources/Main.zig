@@ -243,10 +243,8 @@ fn setupToolchain(init: std.process.Init, allocator: std.mem.Allocator, args: []
     var installer = Artifacts.Installer.init(allocator, init.gpa, init.io);
     var tools: [2]Artifacts.ToolSpec = undefined;
     var tool_count: usize = 0;
-    if (!host.eql(.linux_arm64)) {
-        tools[tool_count] = ToolchainSetup.shadercross(host);
-        tool_count += 1;
-    }
+    tools[tool_count] = ToolchainSetup.shadercross(host);
+    tool_count += 1;
     tools[tool_count] = ToolchainSetup.linker(host);
     tool_count += 1;
     for (tools[0..tool_count]) |tool| {
@@ -1909,10 +1907,6 @@ fn configureShaderCompiler(
     const root = try globalToolchainRoot(allocator, environment) orelse return;
     const host = TargetModule.Target.host() orelse return;
     if (!host.hasNativeEmitter()) return;
-    // Shadercross has no upstream native Linux ARM64 artifact yet. GFX is
-    // outside this backend slice; leave the compiler path absent rather than
-    // installing or invoking an emulated X64 host tool.
-    if (host.eql(.linux_arm64)) return;
     compiler.shadercross_path = try ToolchainSetup.executablePath(allocator, root, host);
 }
 

@@ -3,6 +3,7 @@ const Artifacts = @import("Artifacts.zig");
 const TargetModule = @import("Target.zig");
 
 const release = "https://github.com/Matanek/Silex-Toolchain-Assets/releases/download/shadercross-3.0.0-e55cf5e-silex.1/";
+const portability_release = "https://github.com/Matanek/Silex-Toolchain-Assets/releases/download/shadercross-3.0.0-e55cf5e-silex.3/";
 const zig_release = "https://ziglang.org/download/0.16.0/";
 
 pub fn shadercross(host: TargetModule.Target) Artifacts.ToolSpec {
@@ -26,6 +27,18 @@ pub fn shadercross(host: TargetModule.Target) Artifacts.ToolSpec {
         .archive = .{
             .format = .tar_gz,
             .into = "shadercross/3.0.0/linux-x64",
+            .provides = "bin/shadercross",
+            .strip_components = 1,
+        },
+    };
+    if (host.eql(.linux_arm64)) return .{
+        .name = "Shadercross",
+        .path = "downloads/Shadercross-3.0.0-e55cf5e-linux-arm64.tar.gz",
+        .url = portability_release ++ "Shadercross-3.0.0-e55cf5e-linux-arm64.tar.gz",
+        .sha256 = "0b1fab54e52b22f055831b7e6e5e613e1fb21c0cc38d20057d9dd065b442cfbb",
+        .archive = .{
+            .format = .tar_gz,
+            .into = "shadercross/3.0.0/linux-arm64",
             .provides = "bin/shadercross",
             .strip_components = 1,
         },
@@ -144,6 +157,11 @@ test "Shadercross belongs to the host toolchain" {
     const windows_arm64 = shadercross(.windows_arm64);
     try std.testing.expectEqualStrings("shadercross/3.0.0/windows-arm64", windows_arm64.archive.into);
     try std.testing.expect(std.mem.endsWith(u8, windows_arm64.url, "windows-x64.zip"));
+
+    const linux_arm64 = shadercross(.linux_arm64);
+    try std.testing.expectEqualStrings("shadercross/3.0.0/linux-arm64", linux_arm64.archive.into);
+    try std.testing.expectEqualStrings("bin/shadercross", linux_arm64.archive.provides);
+    try std.testing.expect(std.mem.endsWith(u8, linux_arm64.url, "linux-arm64.tar.gz"));
 
     const linux_linker = linker(.linux_x64);
     try std.testing.expectEqual(.tar_xz, linux_linker.archive.format);
