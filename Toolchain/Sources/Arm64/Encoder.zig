@@ -945,7 +945,19 @@ fn encodeFunction(
                 try emitStackAddress(allocator, words, .x9, address.local);
                 try words.append(allocator, storeStack(.x9, address.result));
             },
-            .reference_load => |load| try emitReferenceCopy(allocator, words, function, load.result, load.reference, true),
+            .reference_load => |load| {
+                if (fusedReferenceOffset(function, instruction_index, load.reference)) |offset| {
+                    try emitOffsetReferenceCopy(
+                        allocator,
+                        words,
+                        function,
+                        load.result,
+                        offset.reference,
+                        offset.byte_offset,
+                        true,
+                    );
+                } else try emitReferenceCopy(allocator, words, function, load.result, load.reference, true);
+            },
             .address_load => |load| {
                 try words.append(allocator, loadStack(.x9, load.address));
                 try words.append(allocator, loadStack(.x10, load.byte_offset));
@@ -975,8 +987,21 @@ fn encodeFunction(
                     else => return error.InvalidMachineProgram,
                 });
             },
-            .reference_store => |store| try emitReferenceCopy(allocator, words, function, store.operand, store.reference, false),
+            .reference_store => |store| {
+                if (fusedReferenceOffset(function, instruction_index, store.reference)) |offset| {
+                    try emitOffsetReferenceCopy(
+                        allocator,
+                        words,
+                        function,
+                        store.operand,
+                        offset.reference,
+                        offset.byte_offset,
+                        false,
+                    );
+                } else try emitReferenceCopy(allocator, words, function, store.operand, store.reference, false);
+            },
             .reference_offset => |offset| {
+                if (referenceOffsetFeedsNextCopy(function, instruction_index, offset)) continue;
                 try words.append(allocator, loadStack(.x9, offset.reference));
                 if (offset.byte_offset <= std.math.maxInt(u12)) {
                     try words.append(allocator, addSubtractImmediate(.x9, .x9, @intCast(offset.byte_offset), true));
@@ -2010,9 +2035,21 @@ fn emitReferenceCopy(
     reference: Machine.Slot,
     load_reference: bool,
 ) Allocator.Error!void {
+    return emitOffsetReferenceCopy(allocator, words, function, span, reference, 0, load_reference);
+}
+
+fn emitOffsetReferenceCopy(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    span: Machine.Span,
+    reference: Machine.Slot,
+    byte_offset: u32,
+    load_reference: bool,
+) Allocator.Error!void {
     try words.append(allocator, loadStack(.x9, reference));
     for (0..span.width) |index| {
-        const offset = index * Machine.slot_size;
+        const offset = @as(usize, byte_offset) + index * Machine.slot_size;
         const slot: Machine.Slot = @intCast(@as(usize, span.start) + index);
         if (load_reference) {
             // A projected borrowed aggregate need not materialize unused
@@ -2021,20 +2058,70 @@ fn emitReferenceCopy(
             if (span.width > 1 and function.register_slots.len != 0 and
                 !slotHasUse(function.instructions, slot)) continue;
             if (floatResidence(function, slot)) |register| {
-                try words.append(allocator, A64.loadVector64(@enumFromInt(register), .x9, @intCast(offset)));
+                if (offset <= std.math.maxInt(u15)) {
+                    try words.append(allocator, A64.loadVector64(@enumFromInt(register), .x9, @intCast(offset)));
+                } else {
+                    try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
+                    try storeFloatValue(allocator, words, function, .x10, slot, true);
+                }
             } else {
                 try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
                 try storeValue(allocator, words, function, .x10, slot);
             }
         } else {
             if (floatResidence(function, slot)) |register| {
-                try words.append(allocator, A64.storeVector64(@enumFromInt(register), .x9, @intCast(offset)));
+                if (offset <= std.math.maxInt(u15)) {
+                    try words.append(allocator, A64.storeVector64(@enumFromInt(register), .x9, @intCast(offset)));
+                } else {
+                    try loadFloatValue(allocator, words, function, .x10, slot, true);
+                    try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
+                }
             } else {
                 try loadValue(allocator, words, function, .x10, slot);
                 try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
             }
         }
     }
+}
+
+fn fusedReferenceOffset(
+    function: Machine.Function,
+    copy_index: usize,
+    reference: Machine.Slot,
+) ?Machine.Instruction.ReferenceOffset {
+    if (copy_index == 0) return null;
+    const offset = switch (function.instructions[copy_index - 1]) {
+        .reference_offset => |value| value,
+        else => return null,
+    };
+    if (offset.result != reference or
+        !referenceOffsetFeedsNextCopy(function, copy_index - 1, offset)) return null;
+    return offset;
+}
+
+fn referenceOffsetFeedsNextCopy(
+    function: Machine.Function,
+    offset_index: usize,
+    offset: Machine.Instruction.ReferenceOffset,
+) bool {
+    const copy_index = offset_index + 1;
+    if (copy_index >= function.instructions.len or instructionIsControlTarget(function.instructions, copy_index) or
+        !slotUsedOnlyAt(function.instructions, offset.result, copy_index)) return false;
+    return switch (function.instructions[copy_index]) {
+        .reference_load => |load| load.reference == offset.result,
+        .reference_store => |store| store.reference == offset.result and
+            !spanContainsSlot(store.operand, offset.result),
+        else => false,
+    };
+}
+
+fn instructionIsControlTarget(instructions: []const Machine.Instruction, target: usize) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .jump => |destination| if (destination == target) return true,
+        .branch => |branch_value| if (branch_value.then_instruction == target or branch_value.else_instruction == target) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn emitStackAddress(

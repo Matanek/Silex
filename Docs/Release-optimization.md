@@ -120,6 +120,12 @@ loads and stores. Floating-point 64-bit stack transfers use the same direct
 instructions in both stack-address windows, in Debug and Release. These are
 bit transfers, preserving signed zeros and NaN payloads without an intermediate
 integer register. The width of each memory access is unchanged.
+On ARM64, a field offset used exactly once by the immediately following
+reference load or store is folded into that memory access. A control-flow entry
+at the transfer, an additional use or an indirect class field keeps the explicit
+address calculation. Large direct offsets synthesize a temporary base without
+materializing the projected reference. The folded transfer uses the same scalar
+or aggregate width and preserves the original access point.
 In compatible Release functions, checked dynamic collection reads whose
 aggregate payload is unused keep the original index checks and diagnostics
 without copying any element fields. Views and owning lists retain their
