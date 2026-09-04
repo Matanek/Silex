@@ -40,12 +40,32 @@ mutable-view store writes only the changed fields when the other fields come
 from a still-current snapshot of that exact destination. Calls, unknown
 effects, and block boundaries end this proof. Owning collection replacement,
 stale snapshots, and structures with owned fields keep their value semantics.
+Unaddressed mutable locals of the same flat scalar form are represented as
+independent field locals before aggregate propagation. A load reconstructs the
+value at its original observation point, while a reconstruction stored in the
+same block writes only fields that differ from that local's current snapshot.
+Control-flow entries start a new snapshot epoch, and addressable, nested, or
+resource-bearing locals retain aggregate storage. Explicit deep copies of
+numeric and boolean scalars become ordinary aliases because these values have
+no identity or owned storage.
 Non-escaping reference and view snapshots can also become scalar reads,
 including explicit copies of these plain values. Each needed field is read
 at the original snapshot, before any later aliasing write or branch. Checked
 view indices retain their diagnostics; an unused snapshot is kept when its
 read could fail. Floating-point fields are copied without arithmetic, so
-signed zeros and NaN payloads are unchanged.
+signed zeros and NaN payloads are unchanged. Large scalar projections also
+apply to loads already proven bounded; their generated element reference
+remains bounded and therefore does not reintroduce a runtime check. Small
+bounded aggregates retain their compact native copy so it can seed SIMD lanes.
+
+A direct call may borrow a collection element for a flat scalar aggregate
+parameter when the callee only projects fields from that parameter. Every
+call site must provide a single-use element load in the same block, and no
+intervening operation may invalidate its address. Function references,
+captures, calls or storage mutations in the callee keep the value parameter.
+Eligible calls pass the element address at the original load point and the
+callee reads each field through it, avoiding the caller load and parameter
+copy while preserving the original bounds check and observation order.
 
 Release inlines direct callees under a bounded cost across branches, loops,
 and multiple returns, in addition to constant-result and small straight-line
@@ -118,6 +138,10 @@ Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.
 Aggregate returns copy resident lanes into the
 caller's return storage instead of reading stale stack homes.
+Stack-resident aggregate parameters use paired 64-bit transfers only for
+leaves without scalar register residence. When the parameter pointer itself
+arrives on the stack, the second transfer scratch stays distinct from that
+pointer so consecutive pairs retain the same source base.
 Before allocation, compatible ARM64 memory kernels may reorder independent
 single-definition arithmetic trees inside a pure region to make their lanes
 adjacent. Memory accesses, calls, control-flow entries and potentially trapping

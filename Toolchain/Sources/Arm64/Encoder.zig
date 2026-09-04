@@ -665,8 +665,11 @@ fn encodeFunction(
                     else
                         slot;
                     const stack_base: Register = if (slot >= Machine.direct_stack_slots) .x28 else .zero_or_sp;
-                    try words.append(allocator, A64.load64Pair(.x9, .x10, incoming, @intCast(leaf * Machine.slot_size)));
-                    try words.append(allocator, A64.store64Pair(.x9, .x10, stack_base, @intCast(@as(usize, stack_slot) * Machine.slot_size)));
+                    // Stack-passed parameters use x10 for their incoming
+                    // pointer. Keep the second transfer scratch in x11 so a
+                    // first pair cannot destroy the base of the next one.
+                    try words.append(allocator, A64.load64Pair(.x9, .x11, incoming, @intCast(leaf * Machine.slot_size)));
+                    try words.append(allocator, A64.store64Pair(.x9, .x11, stack_base, @intCast(@as(usize, stack_slot) * Machine.slot_size)));
                     leaf += 2;
                     continue;
                 }
@@ -1802,7 +1805,9 @@ fn pairAggregateParameterLeaves(function: Machine.Function, parameter: Machine.S
     else
         first;
     if (@as(usize, stack_slot) * Machine.slot_size > 504) return false;
-    return floatResidence(function, first) == null and floatLaneResidence(function, first) == null and
+    return valueOptionalResultRegister(function, first) == null and
+        valueOptionalResultRegister(function, second) == null and
+        floatResidence(function, first) == null and floatLaneResidence(function, first) == null and
         floatResidence(function, second) == null and floatLaneResidence(function, second) == null;
 }
 
@@ -4413,10 +4418,10 @@ test "copy stack-resident aggregate parameters with paired transfers" {
     };
     const image = try encode(arena.allocator(), .{ .functions = &.{function} }, .none);
     const expected = [_]u32{
-        A64.load64Pair(.x9, .x10, .x0, 0),
-        A64.store64Pair(.x9, .x10, .zero_or_sp, 0),
-        A64.load64Pair(.x9, .x10, .x0, 16),
-        A64.store64Pair(.x9, .x10, .zero_or_sp, 16),
+        A64.load64Pair(.x9, .x11, .x0, 0),
+        A64.store64Pair(.x9, .x11, .zero_or_sp, 0),
+        A64.load64Pair(.x9, .x11, .x0, 16),
+        A64.store64Pair(.x9, .x11, .zero_or_sp, 16),
     };
     var found: usize = 0;
     var offset: usize = 0;
@@ -4425,6 +4430,67 @@ test "copy stack-resident aggregate parameters with paired transfers" {
         if (word == expected[found]) found += 1;
     }
     try std.testing.expectEqual(expected.len, found);
+}
+
+test "preserve the pointer of a stack-passed aggregate across paired transfers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parameters = [_]Machine.Span{
+        .{ .start = 0, .width = 1 },
+        .{ .start = 1, .width = 1 },
+        .{ .start = 2, .width = 1 },
+        .{ .start = 3, .width = 1 },
+        .{ .start = 4, .width = 1 },
+        .{ .start = 5, .width = 1 },
+        .{ .start = 6, .width = 1 },
+        .{ .start = 7, .width = 1 },
+        .{ .start = 8, .width = 4, .aggregate = true },
+    };
+    const function: Machine.Function = .{
+        .name = "stack_aggregate_parameter",
+        .parameter_count = parameters.len,
+        .parameters = &parameters,
+        .return_type = .void,
+        .slot_count = 12,
+        .frame_size = try Machine.frameSize(12),
+        .instructions = &.{.return_void},
+    };
+    const image = try encode(arena.allocator(), .{ .functions = &.{function} }, .none);
+    const expected = [_]u32{
+        A64.load64Pair(.x9, .x11, .x10, 0),
+        A64.store64Pair(.x9, .x11, .zero_or_sp, 64),
+        A64.load64Pair(.x9, .x11, .x10, 16),
+        A64.store64Pair(.x9, .x11, .zero_or_sp, 80),
+    };
+    var found: usize = 0;
+    var offset: usize = 0;
+    while (offset + 4 <= image.code.len and found < expected.len) : (offset += 4) {
+        const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+        if (word == expected[found]) found += 1;
+    }
+    try std.testing.expectEqual(expected.len, found);
+}
+
+test "keep register-resident aggregate parameter leaves out of paired stack transfers" {
+    const registers = [_]?u5{
+        @intFromEnum(Register.x19),
+        @intFromEnum(Register.x20),
+        null,
+        null,
+    };
+    const parameter: Machine.Span = .{ .start = 0, .width = 4 };
+    const function: Machine.Function = .{
+        .name = "resident_aggregate_parameter",
+        .parameter_count = 1,
+        .parameters = &.{parameter},
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = try Machine.frameSize(4),
+        .register_slots = &registers,
+        .instructions = &.{.return_void},
+    };
+    try std.testing.expect(!pairAggregateParameterLeaves(function, parameter, 0));
+    try std.testing.expect(pairAggregateParameterLeaves(function, parameter, 2));
 }
 
 test "recognize a comparison-only while header at its back edge" {

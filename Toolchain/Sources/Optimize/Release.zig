@@ -41,14 +41,176 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
 
 pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_count: u16) !Ir.Program {
     const prepared = try optimizeWithoutInliningWithWorkers(allocator, program, worker_count);
+    const borrowed_prepared = try borrowDirectAggregateArguments(allocator, prepared);
     // Simplify constructors before cloning them into branching callers:
     // otherwise each field assignment carries its whole aggregate along.
-    const scalar_prepared = try replaceScalarAggregatesWithWorkers(allocator, prepared, worker_count);
+    const scalar_prepared = try replaceScalarAggregatesWithWorkers(allocator, borrowed_prepared, worker_count);
     const intrinsic_prepared = try replaceScalarMathCalls(allocator, scalar_prepared);
     const inlined = try InlineValues.optimize(allocator, intrinsic_prepared);
     const control_flow_inlined = try InlineControlFlow.optimize(allocator, inlined);
     const scalarized = try replaceScalarAggregatesWithWorkers(allocator, control_flow_inlined, worker_count);
     return optimizeWithoutInliningWithWorkers(allocator, scalarized, worker_count);
+}
+
+// Direct calls may borrow a checked collection element when the callee only
+// projects fields from that aggregate parameter. The checked load and the
+// call are kept at the same program point, with no intervening mutation, so
+// value semantics and diagnostics are unchanged while the caller and callee
+// avoid two full aggregate copies.
+fn borrowDirectAggregateArguments(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    const eligible = try allocator.alloc([]?usize, program.functions.len);
+    const call_counts = try allocator.alloc([]usize, program.functions.len);
+    for (program.functions, 0..) |function, function_index| {
+        eligible[function_index] = try allocator.alloc(?usize, function.parameter_types.len);
+        @memset(eligible[function_index], null);
+        call_counts[function_index] = try allocator.alloc(usize, function.parameter_types.len);
+        @memset(call_counts[function_index], 0);
+        if (function.capture_types.len != 0 or !referencesStableAcrossBlocks(function)) continue;
+        const uses = try allocator.alloc(usize, function.value_types.len);
+        @memset(uses, 0);
+        for (function.blocks) |block| {
+            for (block.instructions) |instruction| countUses(instruction, uses);
+            countTerminatorUses(block.terminator, uses);
+        }
+        const projections = try allocator.alloc(usize, function.parameter_types.len);
+        @memset(projections, 0);
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .field_load => |load| if (load.base < function.parameter_types.len) {
+                projections[load.base] += 1;
+            },
+            else => {},
+        };
+        for (function.parameter_types, 0..) |parameter_type, parameter| {
+            const structure_index = parameter_type.structureIndex() orelse continue;
+            if (!flatScalarStructure(program, structure_index)) continue;
+            if (projections[parameter] != 0 and uses[parameter] == projections[parameter]) {
+                eligible[function_index][parameter] = structure_index;
+            }
+        }
+    }
+
+    for (program.functions) |caller| for (caller.blocks, 0..) |block, block_index| for (block.instructions, 0..) |instruction, instruction_index| switch (instruction) {
+        .function_reference => |reference| if (reference.function < eligible.len) {
+            @memset(eligible[reference.function], null);
+        },
+        .call => |call| if (call.function < eligible.len) {
+            for (eligible[call.function], 0..) |structure, parameter| if (structure != null) {
+                if (parameter >= call.arguments.len or !directAggregateLoadAtCall(
+                    allocator,
+                    caller,
+                    call.arguments[parameter],
+                    block_index,
+                    instruction_index,
+                )) {
+                    eligible[call.function][parameter] = null;
+                } else call_counts[call.function][parameter] += 1;
+            };
+        },
+        else => {},
+    };
+    for (eligible, 0..) |parameters, function_index| for (parameters, 0..) |*structure, parameter| {
+        if (call_counts[function_index][parameter] == 0) structure.* = null;
+    };
+
+    const functions = try allocator.alloc(Ir.Function, program.functions.len);
+    for (program.functions, 0..) |function, function_index| {
+        var value_types: std.ArrayList(Ir.Type) = .empty;
+        try value_types.appendSlice(allocator, function.value_types);
+        const parameter_types = try allocator.dupe(Ir.Type, function.parameter_types);
+        for (eligible[function_index], 0..) |structure, parameter| if (structure != null) {
+            parameter_types[parameter] = .address;
+            value_types.items[parameter] = .address;
+        };
+        const borrowed_values = try allocator.alloc(bool, function.value_types.len);
+        @memset(borrowed_values, false);
+        for (function.blocks) |block| for (block.instructions) |instruction| if (instruction == .call) {
+            const call = instruction.call;
+            if (call.function >= eligible.len) continue;
+            for (eligible[call.function], 0..) |structure, parameter| if (structure != null and parameter < call.arguments.len) {
+                borrowed_values[call.arguments[parameter]] = true;
+                value_types.items[call.arguments[parameter]] = .address;
+            };
+        };
+        const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+        for (function.blocks, 0..) |block, block_index| {
+            var instructions: std.ArrayList(Ir.Instruction) = .empty;
+            for (block.instructions) |instruction| switch (instruction) {
+                .collection_load => |load| if (borrowed_values[load.result]) {
+                    try instructions.append(allocator, .{ .collection_reference = .{
+                        .result = load.result,
+                        .collection = load.collection,
+                        .reference = null,
+                        .index = load.index,
+                        .checked = load.checked,
+                        .position = load.position,
+                    } });
+                } else try instructions.append(allocator, instruction),
+                .field_load => |load| if (load.base < eligible[function_index].len and eligible[function_index][load.base] != null) {
+                    const reference = value_types.items.len;
+                    try value_types.append(allocator, .address);
+                    try instructions.append(allocator, .{ .reference_field = .{
+                        .result = reference,
+                        .reference = load.base,
+                        .structure = eligible[function_index][load.base].?,
+                        .field = load.field,
+                    } });
+                    try instructions.append(allocator, .{ .reference_load = .{
+                        .result = load.result,
+                        .reference = reference,
+                    } });
+                } else try instructions.append(allocator, instruction),
+                else => try instructions.append(allocator, instruction),
+            };
+            blocks[block_index] = .{ .instructions = try instructions.toOwnedSlice(allocator), .terminator = block.terminator };
+        }
+        functions[function_index] = function;
+        functions[function_index].parameter_types = parameter_types;
+        functions[function_index].value_types = try value_types.toOwnedSlice(allocator);
+        functions[function_index].blocks = blocks;
+    }
+    var result = program;
+    result.functions = functions;
+    return result;
+}
+
+fn flatScalarStructure(program: Ir.Program, structure_index: usize) bool {
+    if (structure_index >= program.structures.len) return false;
+    const structure = program.structures[structure_index];
+    if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null) return false;
+    for (structure.fields) |field| if (!field.type.isNumeric() and field.type != .bool) return false;
+    return true;
+}
+
+fn directAggregateLoadAtCall(
+    allocator: Allocator,
+    function: Ir.Function,
+    argument: Ir.ValueId,
+    call_block: usize,
+    call_index: usize,
+) bool {
+    var definition_block: ?usize = null;
+    var definition_index: ?usize = null;
+    var definitions: usize = 0;
+    const uses = allocator.alloc(usize, function.value_types.len) catch return false;
+    defer allocator.free(uses);
+    @memset(uses, 0);
+    for (function.blocks, 0..) |block, block_index| {
+        for (block.instructions, 0..) |instruction, instruction_index| {
+            if (instructionResult(instruction)) |result| if (result == argument) {
+                definitions += 1;
+                if (instruction == .collection_load) {
+                    definition_block = block_index;
+                    definition_index = instruction_index;
+                }
+            };
+            countUses(instruction, uses);
+        }
+        countTerminatorUses(block.terminator, uses);
+    }
+    if (definitions != 1 or uses[argument] != 1 or definition_block != call_block) return false;
+    const start = definition_index orelse return false;
+    if (start >= call_index) return false;
+    return collectionAddressStable(function.blocks[call_block].instructions[start + 1 .. call_index]);
 }
 
 fn replaceScalarMathCalls(allocator: Allocator, program: Ir.Program) !Ir.Program {
@@ -293,7 +455,8 @@ const ScalarWorker = struct {
 };
 
 fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, input: Ir.Function) !Ir.Function {
-    const input_function = try AggregateStores.optimize(allocator, program, input);
+    const split_locals = try splitFlatAggregateLocals(allocator, program, input);
+    const input_function = try AggregateStores.optimize(allocator, program, split_locals);
     const definitions = try allocator.alloc(usize, input_function.value_types.len);
     @memset(definitions, 0);
     for (0..input_function.capture_types.len + input_function.parameter_types.len) |parameter| definitions[parameter] = 1;
@@ -421,6 +584,226 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, in
     return AggregateLoads.optimize(allocator, program, result, definitions, uses);
 }
 
+// Mutable value-structure fields are represented by functional aggregate
+// reconstruction in portable IR. Split an unaddressed flat scalar local into
+// scalar field locals before alias propagation. A reconstructed store then
+// writes only the fields that differ from the current local snapshot, while a
+// load materializes the aggregate at the original observation point.
+fn splitFlatAggregateLocals(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
+    if (function.local_types.len == 0) return function;
+    const structures = try allocator.alloc(?usize, function.local_types.len);
+    @memset(structures, null);
+    for (function.local_types, 0..) |local_type, local| {
+        const structure_index = local_type.structureIndex() orelse continue;
+        if (structure_index >= program.structures.len) continue;
+        const structure = program.structures[structure_index];
+        if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null) continue;
+        for (structure.fields) |field| {
+            if (!field.type.isNumeric() and field.type != .bool) break;
+        } else structures[local] = structure_index;
+    }
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .local_address => |address| structures[address.local] = null,
+        else => {},
+    };
+    var any = false;
+    for (structures) |structure| if (structure != null) {
+        any = true;
+        break;
+    };
+    if (!any) return function;
+
+    const local_remap = try allocator.alloc(?Ir.LocalId, function.local_types.len);
+    const field_locals = try allocator.alloc(?[]const Ir.LocalId, function.local_types.len);
+    @memset(field_locals, null);
+    var local_types: std.ArrayList(Ir.Type) = .empty;
+    for (function.local_types, 0..) |local_type, local| if (structures[local]) |structure_index| {
+        local_remap[local] = null;
+        const structure = program.structures[structure_index];
+        const fields = try allocator.alloc(Ir.LocalId, structure.fields.len);
+        for (structure.fields, 0..) |field, field_index| {
+            fields[field_index] = local_types.items.len;
+            try local_types.append(allocator, field.type);
+        }
+        field_locals[local] = fields;
+    } else {
+        local_remap[local] = local_types.items.len;
+        try local_types.append(allocator, local_type);
+    };
+
+    var value_types: std.ArrayList(Ir.Type) = .empty;
+    try value_types.appendSlice(allocator, function.value_types);
+    var maximum_value_count = function.value_types.len;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .local_load => |load| if (structures[load.local]) |structure_index| {
+            maximum_value_count += program.structures[structure_index].fields.len;
+        },
+        .local_store => |store| if (structures[store.local]) |structure_index| {
+            maximum_value_count += program.structures[structure_index].fields.len;
+        },
+        else => {},
+    };
+    const definitions = try allocator.alloc(?Ir.Instruction, maximum_value_count);
+    const loaded_local = try allocator.alloc(?Ir.LocalId, maximum_value_count);
+    const loaded_epoch = try allocator.alloc(usize, maximum_value_count);
+    const local_epochs = try allocator.alloc(usize, function.local_types.len);
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    for (function.blocks, 0..) |block, block_index| {
+        @memset(definitions, null);
+        @memset(loaded_local, null);
+        @memset(loaded_epoch, 0);
+        @memset(local_epochs, 0);
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions) |original| {
+            switch (original) {
+                .local_load => |load| if (structures[load.local]) |structure_index| {
+                    const structure = program.structures[structure_index];
+                    const values = try allocator.alloc(Ir.ValueId, structure.fields.len);
+                    for (structure.fields, 0..) |field, field_index| {
+                        values[field_index] = value_types.items.len;
+                        try value_types.append(allocator, field.type);
+                        try instructions.append(allocator, .{ .local_load = .{
+                            .result = values[field_index],
+                            .local = field_locals[load.local].?[field_index],
+                        } });
+                    }
+                    const initialization: Ir.Instruction = .{ .structure_init = .{
+                        .result = load.result,
+                        .structure = structure_index,
+                        .fields = values,
+                    } };
+                    try instructions.append(allocator, initialization);
+                    definitions[load.result] = initialization;
+                    loaded_local[load.result] = load.local;
+                    loaded_epoch[load.result] = local_epochs[load.local];
+                    continue;
+                } else {
+                    const rewritten: Ir.Instruction = .{ .local_load = .{
+                        .result = load.result,
+                        .local = local_remap[load.local].?,
+                    } };
+                    try instructions.append(allocator, rewritten);
+                    definitions[load.result] = rewritten;
+                    continue;
+                },
+                .local_store => |store| if (structures[store.local]) |structure_index| {
+                    const structure = program.structures[structure_index];
+                    const initialization = if (definitions[store.operand]) |definition|
+                        if (definition == .structure_init and definition.structure_init.structure == structure_index)
+                            definition.structure_init
+                        else
+                            null
+                    else
+                        null;
+                    if (initialization) |value| {
+                        for (value.fields, 0..) |field, field_index| {
+                            if (unchangedLocalField(
+                                definitions,
+                                loaded_local,
+                                loaded_epoch,
+                                field,
+                                store.local,
+                                local_epochs[store.local],
+                                field_index,
+                            )) continue;
+                            try instructions.append(allocator, .{ .local_store = .{
+                                .local = field_locals[store.local].?[field_index],
+                                .operand = field,
+                            } });
+                        }
+                    } else {
+                        for (structure.fields, 0..) |field, field_index| {
+                            const extracted = value_types.items.len;
+                            try value_types.append(allocator, field.type);
+                            const load: Ir.Instruction = .{ .field_load = .{
+                                .result = extracted,
+                                .base = store.operand,
+                                .field = field_index,
+                            } };
+                            try instructions.append(allocator, load);
+                            definitions[extracted] = load;
+                            try instructions.append(allocator, .{ .local_store = .{
+                                .local = field_locals[store.local].?[field_index],
+                                .operand = extracted,
+                            } });
+                        }
+                    }
+                    local_epochs[store.local] += 1;
+                    continue;
+                } else {
+                    try instructions.append(allocator, .{ .local_store = .{
+                        .local = local_remap[store.local].?,
+                        .operand = store.operand,
+                    } });
+                    continue;
+                },
+                .local_address => |address| {
+                    try instructions.append(allocator, .{ .local_address = .{
+                        .result = address.result,
+                        .local = local_remap[address.local].?,
+                    } });
+                    definitions[address.result] = instructions.items[instructions.items.len - 1];
+                    continue;
+                },
+                else => {},
+            }
+            try instructions.append(allocator, original);
+            if (instructionResult(original)) |result| definitions[result] = original;
+        }
+        blocks[block_index] = .{
+            .instructions = try instructions.toOwnedSlice(allocator),
+            .terminator = block.terminator,
+        };
+    }
+    var result = function;
+    result.value_types = try value_types.toOwnedSlice(allocator);
+    result.local_types = try local_types.toOwnedSlice(allocator);
+    result.blocks = blocks;
+    return result;
+}
+
+fn unchangedLocalField(
+    definitions: []const ?Ir.Instruction,
+    loaded_local: []const ?Ir.LocalId,
+    loaded_epoch: []const usize,
+    value: Ir.ValueId,
+    local: Ir.LocalId,
+    epoch: usize,
+    field_index: usize,
+) bool {
+    const definition = definitions[value] orelse return false;
+    if (definition != .field_load or definition.field_load.field != field_index) return false;
+    const base = definition.field_load.base;
+    return loaded_local[base] == local and loaded_epoch[base] == epoch;
+}
+
+fn instructionResult(instruction: Ir.Instruction) ?Ir.ValueId {
+    return switch (instruction) {
+        .class_retain,
+        .class_drop,
+        .list_retain,
+        .list_drop,
+        .string_retain,
+        .string_drop,
+        .global_store,
+        .local_store,
+        .address_store,
+        .reference_store,
+        .print,
+        .assert,
+        .mutex_lock,
+        .mutex_unlock,
+        => null,
+        .list_edit => |value| value.result,
+        .call => |value| value.result,
+        .indirect_call => |value| value.result,
+        .boundary_call => |value| value.result,
+        .boundary_indirect_call => |value| value.result,
+        .dynamic_call => |value| value.result,
+        inline else => |value| value.result,
+    };
+}
+
 fn scalarStructure(program: Ir.Program, structure_index: usize, depth: usize) bool {
     if (depth > 8 or structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
@@ -454,6 +837,15 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
             switch (instruction) {
                 .copy => |copy| {
                     if (function.value_types[copy.result] == function.value_types[copy.operand]) {
+                        aliases[copy.result] = canonical(aliases, copy.operand);
+                        continue;
+                    }
+                },
+                .deep_copy => |copy| {
+                    const value_type = function.value_types[copy.result];
+                    if ((value_type.isNumeric() or value_type == .bool) and
+                        value_type == function.value_types[copy.operand])
+                    {
                         aliases[copy.result] = canonical(aliases, copy.operand);
                         continue;
                     }
@@ -515,6 +907,16 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                 .copy => |copy| {
                     if (definitions[copy.result] == 1 and
                         function.value_types[copy.result] == function.value_types[copy.operand])
+                    {
+                        aliases[copy.result] = canonical(aliases, copy.operand);
+                        continue;
+                    }
+                },
+                .deep_copy => |copy| {
+                    const value_type = function.value_types[copy.result];
+                    if (definitions[copy.result] == 1 and
+                        (value_type.isNumeric() or value_type == .bool) and
+                        value_type == function.value_types[copy.operand])
                     {
                         aliases[copy.result] = canonical(aliases, copy.operand);
                         continue;
@@ -815,6 +1217,17 @@ fn collectionCheckProven(
     load_index: usize,
     load: Ir.Instruction.CollectionLoad,
 ) bool {
+    for (instructions[load_index + 1 ..], load_index + 1..) |instruction, replacement_index| {
+        const replacement = switch (instruction) {
+            .collection_replace => |value| value,
+            else => continue,
+        };
+        if (!std.meta.eql(replacement.position, load.position)) continue;
+        const exact_values = replacement.collection == load.collection and replacement.index == load.index;
+        if (!exact_values and (!sameStableLocalValue(function, replacement.collection, load.collection) or
+            !sameStableLocalValue(function, replacement.index, load.index))) continue;
+        if (collectionCheckOrderStable(instructions[load_index + 1 .. replacement_index])) return true;
+    }
     for (instructions, 0..) |instruction, reference_index| {
         const reference = switch (instruction) {
             .collection_reference => |value| value,

@@ -13,13 +13,14 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
         const result: Ir.ValueId = switch (instruction) {
             .reference_load => |load| load.result,
             .collection_load => |load| view: {
-                // Proven bounded loads already have a cheaper native path,
-                // including SIMD seeds. A collection reference would add a
-                // check again and lose that representation on X64.
-                if (!load.checked) continue;
                 const owner = function.value_types[load.collection].structureIndex() orelse continue;
                 const collection = program.structures[owner].collection orelse continue;
                 if (!collection.view) continue;
+                const structure = function.value_types[load.result].structureIndex() orelse continue;
+                // A small bounded aggregate already lowers as one compact
+                // native copy and can seed SLP lanes. Scalar references are
+                // profitable for larger payloads where the copy dominates.
+                if (!load.checked and program.structures[structure].fields.len <= 8) continue;
                 break :view load.result;
             },
             else => continue,
@@ -96,6 +97,7 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
                                 .collection = load.collection,
                                 .reference = null,
                                 .index = load.index,
+                                .checked = load.checked,
                                 .position = load.position,
                             } });
                             break :ref address;

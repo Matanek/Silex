@@ -146,6 +146,45 @@ test "release preserves effects and observable execution" {
     try std.testing.expectEqualStrings(reference.stderr, release.stderr);
 }
 
+test "release removes a redundant aggregate read before indexed replacement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Sample {
+        \\    var first:float
+        \\    var second:float
+        \\    var third:float
+        \\}
+        \\func make(index:int) Sample {
+        \\    return Sample(first:index as float, second:2.0, third:3.0)
+        \\}
+        \\func overwrite(values:&Sample[..]) {
+        \\    var index = 0
+        \\    while index < values.count() {
+        \\        values[index] = make(index)
+        \\        index++
+        \\    }
+        \\}
+        \\func main() {
+        \\    var values:Sample[] = [Sample(), Sample()]
+        \\    overwrite(&values[0:values.count()])
+        \\    print(values[1].first, " ", values[1].second, " ", values[1].third)
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    const overwrite_start = std.mem.indexOf(u8, text, "func @overwrite") orelse return error.TestUnexpectedResult;
+    const main_start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
+    const overwrite = text[overwrite_start..main_start];
+    try std.testing.expect(std.mem.indexOf(u8, overwrite, "collection.load") == null);
+    try std.testing.expect(std.mem.indexOf(u8, overwrite, "collection.replace") != null);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("1.0 2.0 3.0\n", result.stdout);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+}
+
 test "release preserves floating branches and loops" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -337,6 +376,107 @@ test "release scalarizes immutable aggregates across control flow" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
     const reference = try Interpreter.runCapture(allocator, compilation.ir);
     const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+}
+
+test "release splits flat mutable aggregate locals across control flow" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct State { var a:float; var b:float; var c:float; var d:float }
+        \\func prepare(seed:float, alternate:bool) State {
+        \\    var state = State()
+        \\    state.a = seed + 1.0
+        \\    if alternate { state.b = seed * 2.0 }
+        \\    state.c = state.a + 3.0
+        \\    state.d = seed - 4.0
+        \\    return state
+        \\}
+        \\func main() {
+        \\    let first = prepare(5.0, true)
+        \\    let second = prepare(5.0, false)
+        \\    print(first.a); print(first.b); print(first.c); print(first.d)
+        \\    print(second.a); print(second.b); print(second.c); print(second.d)
+        \\}
+    );
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const optimized = try optimize(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("6.0\n10.0\n9.0\n1.0\n6.0\n0.0\n9.0\n1.0\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @prepare") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    const body = tail[0..end];
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, "struct.init @State"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "store $0:structure"));
+}
+
+test "release borrows direct aggregate collection arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:float; var y:float }
+        \\func sum(value:@Pair) float { return value.x + value.y }
+        \\func total(values:@Pair[..]) float {
+        \\    var result = 0.0
+        \\    var index = 0
+        \\    while index < values.count() {
+        \\        result += sum(values[index])
+        \\        index++
+        \\    }
+        \\    return result
+        \\}
+        \\func main() {
+        \\    let values:Pair[] = [Pair(x:1.0, y:2.0), Pair(x:3.0, y:4.0)]
+        \\    print(total(@values[0:values.count()]))
+        \\}
+    );
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const optimized = try optimize(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("10.0\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+    const text = try Ir.writeText(allocator, optimized);
+    const sum_start = std.mem.indexOf(u8, text, "func @sum") orelse return error.TestUnexpectedResult;
+    const total_start = std.mem.indexOf(u8, text, "func @total") orelse return error.TestUnexpectedResult;
+    const main_start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
+    const sum_body = text[sum_start..total_start];
+    const total_body = text[total_start..main_start];
+    try std.testing.expect(std.mem.containsAtLeast(u8, sum_body, 1, "%0:internal address"));
+    try std.testing.expect(std.mem.count(u8, sum_body, "reference.load") >= 2);
+    try std.testing.expect(std.mem.containsAtLeast(u8, total_body, 1, "collection.reference"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, total_body, 1, "collection.load"));
+}
+
+test "release removes scalar deep copies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func copiedFloat(value:float) float { return copy value }
+        \\func copiedBool(value:bool) bool { return copy value }
+        \\func main() { print(copiedFloat(3.0)); print(copiedBool(true)) }
+    );
+    const original_text = try Ir.writeText(allocator, compilation.ir);
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    try std.testing.expect(std.mem.count(u8, text, "deep_copy") < std.mem.count(u8, original_text, "deep_copy"));
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("3.0\ntrue\n", reference.stdout);
     try std.testing.expectEqual(reference.exit_code, release.exit_code);
     try std.testing.expectEqualStrings(reference.stdout, release.stdout);
     try std.testing.expectEqualStrings(reference.stderr, release.stderr);
