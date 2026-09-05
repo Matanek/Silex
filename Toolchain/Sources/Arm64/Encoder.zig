@@ -155,11 +155,90 @@ pub fn encodeLinux(allocator: Allocator, program: Machine.Program, entry: Entry)
     return encodeForPlatform(allocator, program, entry, .linux);
 }
 
+fn findInfallibleFunctions(allocator: Allocator, program: Machine.Program) Allocator.Error![]bool {
+    const infallible = try allocator.alloc(bool, program.functions.len);
+    @memset(infallible, true);
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (program.functions, 0..) |function, function_id| {
+            if (!infallible[function_id]) continue;
+            for (function.instructions) |instruction| if (!instructionCannotFail(instruction, infallible)) {
+                infallible[function_id] = false;
+                changed = true;
+                break;
+            };
+        }
+    }
+    return infallible;
+}
+
+fn instructionCannotFail(instruction: Machine.Instruction, infallible_functions: []const bool) bool {
+    return switch (instruction) {
+        .constant_int,
+        .constant_bool,
+        .constant_str,
+        .constant_float32,
+        .constant_float64,
+        .optional_null,
+        .optional_some,
+        .optional_unwrap,
+        .copy,
+        .copy_range,
+        .global_load,
+        .global_store,
+        .local_address,
+        .reference_load,
+        .address_load,
+        .address_store,
+        .reference_store,
+        .reference_offset,
+        .reference_indirect_offset,
+        .storage_init,
+        .aggregate_init,
+        .protocol_init,
+        .protocol_test,
+        .protocol_extract,
+        .class_load,
+        .class_store,
+        .class_retain,
+        .enum_init,
+        .enum_test,
+        .collection_count,
+        .string_count,
+        .string_byte_count,
+        .string_byte_at,
+        .function_address,
+        .return_value,
+        .return_void,
+        .jump,
+        .branch,
+        => true,
+        .unary => |unary| unary.type.isFloat(),
+        .binary => |binary| binaryCannotFail(binary),
+        .convert => |conversion| !conversion.checked and
+            !(conversion.source.isFloat() and conversion.target.isInteger()),
+        .call => |call| call.function < infallible_functions.len and infallible_functions[call.function],
+        else => false,
+    };
+}
+
+fn binaryCannotFail(binary: Machine.Instruction.Binary) bool {
+    if (binary.type.isFloat()) return true;
+    return switch (binary.operator) {
+        .add, .subtract => !binary.checked,
+        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal, .bit_and, .bit_xor => true,
+        else => false,
+    };
+}
+
 fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entry, platform: Platform) Error!Image {
     _ = FloatRuntime.object_bytes;
     _ = DeepCopyRuntime.object_bytes;
     _ = CycleRuntime.object_bytes;
     try Machine.validate(program);
+    const infallible_functions = try findInfallibleFunctions(allocator, program);
+    defer allocator.free(infallible_functions);
     var words: std.ArrayList(u32) = .empty;
     const offsets = try allocator.alloc(u32, program.functions.len);
     var calls: std.ArrayList(CallFixup) = .empty;
@@ -175,7 +254,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
-        try encodeFunction(allocator, &words, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &external_call_sites, &debug_locations, platform, program, function);
+        try encodeFunction(allocator, &words, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &external_call_sites, &debug_locations, platform, program, infallible_functions, function);
     }
 
     const entry_offset: ?u32 = switch (entry) {
@@ -758,6 +837,7 @@ fn encodeFunction(
     debug_locations: *std.ArrayList(DebugLocation),
     platform: Platform,
     program: Machine.Program,
+    infallible_functions: []const bool,
     function: Machine.Function,
 ) Error!void {
     var fixups: FunctionFixups = .{};
@@ -1634,7 +1714,9 @@ fn encodeFunction(
                 try calls.append(allocator, .{ .at = words.items.len, .function = call.function });
                 try words.append(allocator, branchLink());
                 try emitStackAdjustment(allocator, words, outgoing_stack_size, true);
-                try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
+                if (!infallible_functions[call.function]) {
+                    try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
+                }
                 if (call.result) |result| if (!result.aggregate) {
                     if (floatResidence(function, result.start) != null) {
                         try words.append(allocator, moveGeneralToFloat(.x9, .x0, false));
@@ -1733,12 +1815,16 @@ fn encodeFunction(
                     try words.append(allocator, moveFloatToGeneral(.x0, .x9, function.return_type == .float64));
                 } else try loadValue(allocator, words, function, .x0, value.start);
                 try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.success)));
-                try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
+                if (instruction_index + 1 != function.instructions.len) {
+                    try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
+                }
             },
             .return_void => {
                 try words.append(allocator, moveWideZero32(.x0, 0));
                 try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.success)));
-                try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
+                if (instruction_index + 1 != function.instructions.len) {
+                    try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
+                }
             },
             .jump => |target| {
                 if (collection_cursor) |cursor| if (cursor.entry_jump == instruction_index) {
@@ -1941,16 +2027,6 @@ fn encodeFunction(
         }
     }
 
-    const overflow_label = words.items.len;
-    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.integer_overflow)));
-    const overflow_to_epilogue = words.items.len;
-    try words.append(allocator, branch());
-
-    const division_label = words.items.len;
-    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.division_by_zero)));
-    const division_to_epilogue = words.items.len;
-    try words.append(allocator, branch());
-
     const epilogue_label = words.items.len;
     saved_register_index = 0;
     for (callee_saved_registers) |register| if (shouldSaveRegister(function, register, extended_frame)) {
@@ -1977,6 +2053,16 @@ fn encodeFunction(
     try emitStackAdjustment(allocator, words, encoded_frame_size, true);
     try words.append(allocator, restoreFrame());
     try words.append(allocator, returnInstruction());
+
+    const overflow_label = words.items.len;
+    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.integer_overflow)));
+    const overflow_to_epilogue = words.items.len;
+    try words.append(allocator, branch());
+
+    const division_label = words.items.len;
+    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.division_by_zero)));
+    const division_to_epilogue = words.items.len;
+    try words.append(allocator, branch());
 
     for (fixups.overflow.items) |fixup| try patchLocal(words.items, fixup, overflow_label);
     for (fixups.division_by_zero.items) |fixup| try patchLocal(words.items, fixup, division_label);
@@ -4864,6 +4950,68 @@ test "resolve calls and append a native test entry" {
     try std.testing.expectEqual(expected, encoded_call);
     try std.testing.expectEqual(moveRegister(.x1, .x8), status_word);
     try std.testing.expectEqual(moveRegister(.x0, .x8), linux_status_word);
+}
+
+test "omit status checks only for proven infallible direct callees" {
+    const functions = [_]Machine.Function{
+        .{
+            .name = "safe",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 0,
+            .frame_size = try Machine.frameSize(0),
+            .instructions = &.{.return_void},
+        },
+        .{
+            .name = "checked",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 3,
+            .frame_size = try Machine.frameSize(3),
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 0, .bits = std.math.maxInt(u64) >> 1 } },
+                .{ .constant_int = .{ .result = 1, .bits = 1 } },
+                .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
+                .return_void,
+            },
+        },
+        .{
+            .name = "safe_caller",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 0,
+            .frame_size = try Machine.frameSize(0),
+            .instructions = &.{
+                .{ .call = .{ .result = null, .function = 0, .arguments = &.{} } },
+                .return_void,
+            },
+        },
+        .{
+            .name = "checked_caller",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 0,
+            .frame_size = try Machine.frameSize(0),
+            .instructions = &.{
+                .{ .call = .{ .result = null, .function = 1, .arguments = &.{} } },
+                .return_void,
+            },
+        },
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const infallible = try findInfallibleFunctions(allocator, .{ .functions = &functions });
+    try std.testing.expectEqualSlices(bool, &.{ true, false, true, false }, infallible);
+
+    const image = try encode(allocator, .{ .functions = &functions }, .none);
+    var status_checks: usize = 0;
+    var offset: usize = 0;
+    while (offset + @sizeOf(u32) <= image.code.len) : (offset += @sizeOf(u32)) {
+        const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+        status_checks += @intFromBool((word & 0xff00001f) == compareBranchNonZero(.x8));
+    }
+    try std.testing.expectEqual(@as(usize, 1), status_checks);
 }
 
 test "copy stack-resident aggregate parameters with paired transfers" {
