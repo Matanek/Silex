@@ -146,15 +146,16 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             try float_intervals.append(allocator, interval);
         } else try integer_intervals.append(allocator, interval);
     }
+    if (!has_calls) precolorCallFreeParameters(function, residences, forced, float_slots);
     const integer_registers: []const u5 = if (has_calls)
         (if (function.slot_count >= Machine.direct_stack_slots)
             &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27 }
         else
             &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 })
     else if (function.slot_count >= Machine.direct_stack_slots)
-        &[_]u5{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8 }
+        &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27 }
     else
-        &[_]u5{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+        &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
     try allocateGraph(
         allocator,
         residences,
@@ -197,6 +198,33 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         .float_lane_residences = float_lane_residences,
         .frame_size = function.frame_size,
     };
+}
+
+fn precolorCallFreeParameters(
+    function: Machine.Function,
+    residences: []?u5,
+    forced: []const bool,
+    float_slots: []const bool,
+) void {
+    const ordinary = [_]u5{ 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
+    const extended = [_]u5{ 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27 };
+    const registers: []const u5 = if (function.slot_count >= Machine.direct_stack_slots) &extended else &ordinary;
+    var register_index: usize = 0;
+    for (function.parameters) |parameter| {
+        if (isCollectionParameter(function, parameter)) {
+            for (0..parameter.width) |leaf| {
+                const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+                if (forced[slot] or float_slots[slot] or register_index >= registers.len) continue;
+                residences[slot] = registers[register_index];
+                register_index += 1;
+            }
+        } else if (!parameter.aggregate and parameter.width == 1 and !forced[parameter.start] and
+            !float_slots[parameter.start] and register_index < registers.len)
+        {
+            residences[parameter.start] = registers[register_index];
+            register_index += 1;
+        }
+    }
 }
 
 fn isCollectionParameter(function: Machine.Function, parameter: Machine.Span) bool {
@@ -276,8 +304,13 @@ fn allocateGraph(
 
     std.mem.sort(Interval, intervals, {}, heavierThan);
     for (intervals) |interval| {
-        if (residences[interval.slot] != null) continue;
         const root = alias_roots[interval.slot];
+        if (componentResidence(root, residences, alias_roots)) |precolored| {
+            if (!componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals)) {
+                assignComponentResidence(root, precolored, residences, alias_roots, intervals);
+            }
+            continue;
+        }
         if (preferredComponentResidence(root, residences, alias_roots, instructions)) |preferred| {
             if (!componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals)) {
                 assignComponentResidence(root, preferred, residences, alias_roots, intervals);
@@ -291,6 +324,13 @@ fn allocateGraph(
             }
         }
     }
+}
+
+fn componentResidence(root: Machine.Slot, residences: []const ?u5, roots: []const Machine.Slot) ?u5 {
+    for (roots, residences) |candidate_root, residence| {
+        if (candidate_root == root and residence != null) return residence;
+    }
+    return null;
 }
 
 fn preferredComponentResidence(
@@ -1066,7 +1106,7 @@ fn lessThan(_: void, left: Interval, right: Interval) bool {
     return left.first < right.first or (left.first == right.first and left.slot < right.slot);
 }
 
-test "graph allocation coalesces a dead arithmetic operand with its result" {
+test "call-free graph allocation uses volatile registers and coalesces a dead arithmetic operand" {
     const instructions = [_]Machine.Instruction{
         .{ .constant_int = .{ .result = 0, .bits = 20 } },
         .{ .constant_int = .{ .result = 1, .bits = 22 } },
@@ -1085,8 +1125,8 @@ test "graph allocation coalesces a dead arithmetic operand with its result" {
     defer std.testing.allocator.free(result.residences);
     defer std.testing.allocator.free(result.float_residences);
     defer std.testing.allocator.free(result.float_lane_residences);
-    try std.testing.expectEqual(@as(?u5, 19), result.residences[0]);
-    try std.testing.expectEqual(@as(?u5, 20), result.residences[1]);
+    try std.testing.expectEqual(@as(?u5, 0), result.residences[0]);
+    try std.testing.expectEqual(@as(?u5, 1), result.residences[1]);
     try std.testing.expectEqual(result.residences[0], result.residences[2]);
     try std.testing.expectEqual(function.frame_size, result.frame_size);
 }
@@ -1108,7 +1148,7 @@ test "aggregate construction exposes leaf copy affinity" {
     try std.testing.expectEqual(@as(?Machine.Slot, null), aggregateOperandForResult(initialization, 10));
 }
 
-test "repeated memory uses keep a reference parameter in a preserved register" {
+test "repeated memory uses keep a call-free reference parameter in a volatile register" {
     var instructions: std.ArrayList(Machine.Instruction) = .empty;
     defer instructions.deinit(std.testing.allocator);
 
@@ -1148,7 +1188,7 @@ test "repeated memory uses keep a reference parameter in a preserved register" {
     defer std.testing.allocator.free(result.float_residences);
     defer std.testing.allocator.free(result.float_lane_residences);
 
-    try std.testing.expectEqual(@as(?u5, 19), result.residences[0]);
+    try std.testing.expectEqual(@as(?u5, 16), result.residences[0]);
 }
 
 test "linear scan keeps operands distinct at their shared instruction" {
