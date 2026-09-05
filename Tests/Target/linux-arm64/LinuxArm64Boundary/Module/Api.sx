@@ -1,0 +1,39 @@
+use Interop.C
+use Interop.Boundary
+
+let native_answer = C.function<func() int32>(
+    library:Boundary.Native,
+    name:"boundary_answer"
+)
+let native_sum_ten = C.function<func(
+    int32, int32, int32, int32, int32,
+    int32, int32, int32, int32, int32
+) int32>(library:Boundary.Native, name:"boundary_sum_ten")
+let native_scale = C.function<func(float64) float64>(
+    library:Boundary.Native,
+    name:"boundary_scale"
+)
+let native_invoke = C.function<func(uint, int32, int32) int32>(
+    library:Boundary.Native,
+    name:"boundary_invoke"
+)
+
+func add(left:int32, right:int32) int32 {
+    return left + right
+}
+
+public func answer() int32 {
+    return native_answer()
+}
+
+public func sum_ten() int32 {
+    return native_sum_ten(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+}
+
+public func scale(value:float64) float64 {
+    return native_scale(value)
+}
+
+public func invoke(left:int32, right:int32) int32 {
+    return native_invoke(C.function_address(add), left, right)
+}

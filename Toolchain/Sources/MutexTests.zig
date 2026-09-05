@@ -124,7 +124,14 @@ test "every native target encoder accepts mutex" {
     defer windows_x64.deinit(allocator);
     var windows_arm64 = try Arm64Encoder.encodeWindows(allocator, machine, .{ .executable_main = 1 });
     defer windows_arm64.deinit(allocator);
+    var windows_arm64_test = try Arm64Encoder.encodeWindows(allocator, machine, .{ .test_function = 0 });
+    defer windows_arm64_test.deinit(allocator);
     try std.testing.expect(linux.code.len != 0);
     try std.testing.expect(windows_x64.windows_import_sites.len >= 3);
     try std.testing.expect(windows_arm64.external_call_sites.len >= 3);
+    var initializes_test_mutex = false;
+    for (windows_arm64_test.external_call_sites) |site| {
+        if (site.windows_symbol == .initialize_critical_section) initializes_test_mutex = true;
+    }
+    try std.testing.expect(initializes_test_mutex);
 }

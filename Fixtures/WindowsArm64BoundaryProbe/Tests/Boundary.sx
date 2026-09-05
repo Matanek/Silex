@@ -1,0 +1,9 @@
+use WindowsArm64BoundaryProbe.Api
+
+test "call an ARM64 package Boundary" {
+    assert(Api.answer() == 42)
+}
+
+test "round-trip a callback through the Windows ARM64 ABI" {
+    assert(Api.callback_answer() == 42)
+}

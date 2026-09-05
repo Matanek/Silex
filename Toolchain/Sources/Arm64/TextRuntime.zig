@@ -3,6 +3,8 @@ const Machine = @import("Machine.zig");
 const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
 const StringRuntime = @import("StringRuntime.zig");
+const Allocation = @import("Allocation.zig");
+const ExternalCalls = @import("ExternalCalls.zig");
 
 const Allocator = std.mem.Allocator;
 const Register = A64.Register;
@@ -15,9 +17,6 @@ const dynamic_flag: u64 = 1 << 63;
 const integer_scratch_size = 64;
 const float_scratch_size = 384;
 const float_output_offset = 16;
-const macos_mmap = 197;
-const protection_read_write = 3;
-const map_private_anonymous = 0x1002;
 
 pub fn emitFormat(
     allocator: Allocator,
@@ -25,16 +24,20 @@ pub fn emitFormat(
     float_calls: *std.ArrayList(usize),
     data_fixups: *std.ArrayList(Fixups.Data),
     epilogue_fixups: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     format: Machine.Instruction.FormatValue,
 ) Error!void {
     switch (format.kind) {
-        .signed_integer => try emitInteger(allocator, words, epilogue_fixups, format.operand, format.result, true),
-        .unsigned_integer => try emitInteger(allocator, words, epilogue_fixups, format.operand, format.result, false),
+        .signed_integer => try emitInteger(allocator, words, epilogue_fixups, sites, platform, format.operand, format.result, true),
+        .unsigned_integer => try emitInteger(allocator, words, epilogue_fixups, sites, platform, format.operand, format.result, false),
         .float32, .float64 => try emitFloat(
             allocator,
             words,
             float_calls,
             epilogue_fixups,
+            sites,
+            platform,
             format.operand,
             format.result,
             format.kind == .float64,
@@ -69,6 +72,8 @@ fn emitInteger(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     epilogue_fixups: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     operand: Machine.Slot,
     result: Machine.Slot,
     signed: bool,
@@ -123,7 +128,7 @@ fn emitInteger(
         try Fixups.patch19(words.items, unsigned, words.items.len);
     }
     try Fixups.patch26(words.items, zero_finished, words.items.len);
-    try allocateDescriptor(allocator, words, epilogue_fixups, result, integer_scratch_size);
+    try allocateDescriptor(allocator, words, epilogue_fixups, sites, platform, result, integer_scratch_size);
 }
 
 fn prependByte(allocator: Allocator, words: *std.ArrayList(u32), byte: u8) Allocator.Error!void {
@@ -138,6 +143,8 @@ fn emitFloat(
     words: *std.ArrayList(u32),
     float_calls: *std.ArrayList(usize),
     epilogue_fixups: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     operand: Machine.Slot,
     result: Machine.Slot,
     double: bool,
@@ -148,15 +155,18 @@ fn emitFloat(
     try words.append(allocator, A64.moveWideZero32(.x2, @intFromBool(double)));
     try float_calls.append(allocator, words.items.len);
     try words.append(allocator, A64.branchLink());
+    try words.append(allocator, A64.moveWideZero32(.x8, 0));
     try words.append(allocator, A64.addSubtractImmediate(.x11, .zero_or_sp, float_output_offset, true));
     try words.append(allocator, A64.moveRegister(.x12, .x0));
-    try allocateDescriptor(allocator, words, epilogue_fixups, result, float_scratch_size);
+    try allocateDescriptor(allocator, words, epilogue_fixups, sites, platform, result, float_scratch_size);
 }
 
 fn allocateDescriptor(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     epilogue_fixups: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     result: Machine.Slot,
     scratch_size: u12,
 ) Error!void {
@@ -168,15 +178,9 @@ fn allocateDescriptor(
         descriptor_header_size + dynamic_prefix_size,
         true,
     ));
-    try words.append(allocator, A64.moveWideZero32(.x0, 0));
-    try words.append(allocator, A64.moveWideZero32(.x2, protection_read_write));
-    try words.append(allocator, A64.moveWideZero32(.x3, map_private_anonymous));
-    try emitImmediate64(allocator, words, .x4, std.math.maxInt(u64));
-    try words.append(allocator, A64.moveWideZero32(.x5, 0));
-    try words.append(allocator, A64.moveWideZero32(.x16, macos_mmap));
-    try words.append(allocator, A64.serviceCall());
+    try Allocation.emit(allocator, words, sites, platform);
     const mmap_failed = words.items.len;
-    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, Allocation.failureBranch(platform));
 
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x11, .zero_or_sp, 0));

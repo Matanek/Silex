@@ -26,18 +26,26 @@ reference interpreter, and `--emit-ir`.
 
 ## Recognize targets
 
-Package composition recognizes `macos-arm64`, `linux-x64`, `windows-x64`,
-and `windows-arm64`. It combines common modules with an OS-level
-`Platform/<OS>/Module/` root and an optional exact `Target/<target>/Module/`
-root. Recognizing and analyzing a target does not claim that its native
-backend is implemented.
+Package composition recognizes `macos-arm64`, `macos-x64`, `linux-arm64`,
+`linux-x64`, `windows-arm64`, and `windows-x64`. It combines common modules
+with an OS-level `Platform/<OS>/Module/` root and an optional exact
+`Target/<target>/Module/` root. Recognizing and analyzing a target does not
+claim that its native backend is implemented.
 
-| Target | Current status |
-| --- | --- |
-| `macos-arm64` | verified and distributed |
-| `linux-x64` | verified and distributed |
-| `windows-x64` | verified and distributed |
-| `windows-arm64` | emitted and structurally tested, but not verified or distributed |
+| Target | Machine backend | Native status |
+| --- | --- | --- |
+| `macos-arm64` | ARM64 | verified and distributed |
+| `macos-x64` | X64 | verified and distributed by the native Intel release job |
+| `linux-arm64` | ARM64 | verified and distributed by the native ARM64 release job |
+| `linux-x64` | X64 | verified and distributed |
+| `windows-arm64` | ARM64 | verified and distributed by the native Windows ARM64 release job |
+| `windows-x64` | X64 | verified and distributed |
+
+The target model records machine, system ABI, object, executable, runtime, and
+boundary-linking capabilities separately. Sharing an ARM64 or X64 instruction
+encoder therefore never makes another OS/architecture pair executable by
+implication. `silex targets` lists recognized composition targets; native
+commands still reject a target whose executable capability is incomplete.
 
 ## Emit macOS ARM64 programs
 
@@ -73,10 +81,35 @@ Debug emits the same machine code through the relocatable-object path so the
 bootstrap linker can preserve its Silex source symbols. Neither path invokes
 an assembler or `codesign`.
 
+## Emit macOS X64 programs
+
+The macOS X64 backend shares the X64 instruction encoder with Linux and
+Windows while selecting a Darwin runtime and the System V register and stack
+rules required by the Apple C ABI. Internal Silex calls remain private to the
+backend; named and indirect package boundaries are lowered separately to C
+calls, including integer and floating-point arguments beyond the available
+registers.
+
+Release programs without a native package boundary are written directly as
+x86_64 Mach-O executables with `LC_MAIN`, a macOS 13 minimum version, separate
+text and data segments, and an ad-hoc SHA-256 code signature. Debug programs
+and builds that reference a package archive use x86_64 Mach-O objects,
+PC-relative data and branch relocations, and the bootstrap Zig linker. The
+embedded float formatting, deep-copy, and cycle-collection helpers are built
+as x86_64 Mach-O runtime inputs rather than reusing their ELF images.
+
+The `macos-15-intel` native-portability job builds the compiler with the
+official x86_64 Zig archive, installs the private linker and universal
+Shadercross asset into a clean home, verifies the asset's x86_64 slice, and
+executes `setup`, `compile`, `run`, `test`, direct emission, linked emission,
+and a package boundary on an Intel host. Rosetta executions are useful local
+diagnostics but are not the target's native verification gate.
+
 ## Link native package boundaries
 
 For a referenced package-private provider, the compiler writes a relocatable
-object for the selected target: ARM64 Mach-O, x64 ELF, or x64/ARM64 COFF. It
+object for the selected target: ARM64 or X64 Mach-O, x64 or AArch64 ELF, or
+x64/ARM64 COFF. It
 then invokes the bootstrap linker with only the resolved package archives,
 declared Apple frameworks, and named system libraries. This path does not
 compile foreign sources and does not define a stable Silex object format or
@@ -104,6 +137,31 @@ Mutable globals are currently appended to the bootstrap image, so its single
 load segment is temporarily executable and writable. A dedicated writable
 data segment is required before the X64 container is hardened.
 
+## Emit Linux ARM64 programs
+
+The Linux ARM64 backend shares the private ARM64 machine convention while
+owning a distinct AArch64 system boundary. Direct builds write an `EM_AARCH64`
+ELF64 executable; package Boundary builds write an AArch64 relocatable ELF
+object with `CALL26`, page, and low-page relocations before invoking the native
+Zig linker. Linux service calls use `x8` and `svc #0`, including output,
+mapping, unmapping, time, random seed, process identity, exit, and the internal
+recursive mutex.
+
+The float formatting, deep-copy, and cycle-collection runtimes are embedded as
+linked AArch64 ELF payloads. Deep-copy receives AAPCS64 allocation and release
+callbacks emitted by the Linux backend, so its memory boundary uses the same
+checked system-call stubs as generated Silex code. The payloads' complete
+relative load-segment layout and page congruence are preserved inside the
+generated image, so their internal PC-relative references do not leak into the
+Silex machine IR or enclosing object format.
+
+`silex setup` installs the native AArch64 Zig linker on this host. Shadercross
+has no upstream native Linux ARM64 archive yet and is deliberately not replaced
+with an emulated X64 tool; full GFX support remains outside this backend slice.
+The `ubuntu-24.04-arm` portability job verifies the real host architecture,
+Debug and Release against the interpreter, the common native corpus, package
+Boundary calls and the clean-home setup path.
+
 ## Emit Windows programs
 
 The Windows emitters write PE32+ for X64 and ARM64, including deterministic
@@ -117,9 +175,15 @@ imported Win32/UCRT functions.
 Package-boundary builds use COFF objects, Win64 or Windows ARM64 C ABI calls,
 and the bootstrap linker with the selected archives and system libraries.
 The X64 bootstrap image likewise keeps its combined code/global section
-writable until PE emission gains a distinct data section. Windows X64 is
-verified by the native portability workflow; Windows ARM64 remains limited to
-structural emission tests.
+writable until PE emission gains a distinct data section. Windows X64 and
+Windows ARM64 are verified by the native portability workflow. A Linux X64
+support job cross-builds the ARM64 compiler and Boundary provider as an
+ephemeral workflow artifact. The `windows-11-arm` job checks their PE/COFF
+machine `0xaa64`, executes the compiler and every Debug and Release program
+natively, and verifies the declared Windows X64 setup tools under the system
+compatibility layer. The Boundary callback crosses the Windows ARM64 C ABI.
+Windows ARM64 does not become a distributed target until the release archive
+and installer are added by the distribution slice.
 
 ## Lower the built-in macOS boundary
 
