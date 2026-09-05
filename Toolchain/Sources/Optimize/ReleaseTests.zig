@@ -486,6 +486,54 @@ test "release removes only collection bounds proven by zero-origin loops" {
     try boundedCollectionLoops(optimize);
 }
 
+test "release removes only the first proven induction overflow check" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func single(limit:int) int {
+        \\    var index = 0
+        \\    while index < limit { index++ }
+        \\    return index
+        \\}
+        \\func doubled(limit:int) int {
+        \\    var index = 0
+        \\    while index < limit { index++; index++ }
+        \\    return index
+        \\}
+        \\func main() { print(single(3)); print(doubled(3)) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    var single_checked: usize = 0;
+    var single_unchecked: usize = 0;
+    var doubled_checked: usize = 0;
+    var doubled_unchecked: usize = 0;
+    for (optimized.functions) |function| {
+        const is_single = std.mem.eql(u8, function.name, "single");
+        const is_doubled = std.mem.eql(u8, function.name, "doubled");
+        if (!is_single and !is_doubled) continue;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .binary => |binary| if (binary.operator == .add) {
+                if (is_single) {
+                    if (binary.checked) single_checked += 1 else single_unchecked += 1;
+                } else {
+                    if (binary.checked) doubled_checked += 1 else doubled_unchecked += 1;
+                }
+            },
+            else => {},
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 0), single_checked);
+    try std.testing.expectEqual(@as(usize, 1), single_unchecked);
+    try std.testing.expectEqual(@as(usize, 1), doubled_checked);
+    try std.testing.expectEqual(@as(usize, 1), doubled_unchecked);
+
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("3\n4\n", result.stdout);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+}
+
 test "release reuses checked mutable view references across sibling field writes" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

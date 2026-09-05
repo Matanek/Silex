@@ -38,9 +38,23 @@ pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
             .local_load => |value| value,
             else => continue,
         };
-        const counted_collection = (try resolveCollectionCount(allocator, function, comparison.right, header_id)) orelse continue;
         const loop_blocks = (try naturalLoopBlocks(allocator, blocks, header_id, branch.then_block)) orelse continue;
         if (!(try provenZeroOriginInduction(allocator, function, loop_blocks, header_id, induction.local))) continue;
+
+        // Entering the loop body proves induction < bound. Since `bound` is
+        // representable by the same integer type, the first unit
+        // increment on every path cannot overflow. Keep later increments
+        // checked: the header comparison no longer constrains them.
+        if (try removeProvenFirstIncrementChecks(
+            allocator,
+            function,
+            blocks,
+            loop_blocks,
+            header_id,
+            induction.local,
+        )) changed = true;
+
+        const counted_collection = (try resolveCollectionCount(allocator, function, comparison.right, header_id)) orelse continue;
 
         for (blocks, 0..) |block, block_id| {
             if (!loop_blocks[block_id] or block_id == header_id) continue;
@@ -104,6 +118,54 @@ pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
     var result = function;
     result.blocks = blocks;
     return result;
+}
+
+fn removeProvenFirstIncrementChecks(
+    allocator: Allocator,
+    function: Ir.Function,
+    blocks: []Ir.Block,
+    loop_blocks: []const bool,
+    header: Ir.BlockId,
+    local: Ir.LocalId,
+) !bool {
+    var changed = false;
+    for (function.blocks, 0..) |block, block_id| {
+        if (!loop_blocks[block_id] or block_id == header) continue;
+        var rewritten: ?[]Ir.Instruction = null;
+        for (block.instructions, 0..) |instruction, instruction_index| {
+            const binary = switch (instruction) {
+                .binary => |value| value,
+                else => continue,
+            };
+            if (!binary.checked or !isUnitIncrement(function, binary.result, local) or
+                !storedIntoLocal(function, binary.result, local)) continue;
+            if (try incrementCanReachLoad(
+                allocator,
+                function,
+                loop_blocks,
+                header,
+                local,
+                block_id,
+                instruction_index,
+            )) continue;
+
+            if (rewritten == null) rewritten = try allocator.dupe(Ir.Instruction, blocks[block_id].instructions);
+            var proven = binary;
+            proven.checked = false;
+            rewritten.?[instruction_index] = .{ .binary = proven };
+            changed = true;
+        }
+        if (rewritten) |instructions| blocks[block_id].instructions = instructions;
+    }
+    return changed;
+}
+
+fn storedIntoLocal(function: Ir.Function, value: Ir.ValueId, local: Ir.LocalId) bool {
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .local_store => |store| if (store.local == local and store.operand == value) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn sameStableLocalValue(function: Ir.Function, left: Ir.ValueId, right: Ir.ValueId) bool {
