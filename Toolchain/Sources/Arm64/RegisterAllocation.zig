@@ -192,12 +192,53 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     for (float_lane_residences, 0..) |lane, slot| if (lane != null) {
         float_residences[slot] = null;
     };
+    const frame_size = if (fully_compatible and !has_calls)
+        try residentFrameSize(function, residences, float_residences, float_lane_residences)
+    else
+        function.frame_size;
     return .{
         .residences = residences,
         .float_residences = float_residences,
         .float_lane_residences = float_lane_residences,
-        .frame_size = function.frame_size,
+        .frame_size = frame_size,
     };
+}
+
+/// A call-free function needs no local frame when every materialized value has
+/// a general, scalar-float, or lane residence. Any participating spill keeps
+/// the complete deterministic frame and its original slot offsets.
+fn residentFrameSize(
+    function: Machine.Function,
+    residences: []const ?u5,
+    float_residences: []const ?u5,
+    float_lane_residences: []const ?Machine.FloatLaneResidence,
+) Machine.Error!u32 {
+    if (function.parameters.len > Machine.max_register_arguments) return function.frame_size;
+    for (0..function.slot_count) |slot| {
+        if (residences[slot] != null or float_residences[slot] != null or
+            float_lane_residences[slot] != null) continue;
+        if (!slotParticipates(function, slot)) continue;
+        return function.frame_size;
+    }
+    return 0;
+}
+
+fn slotParticipates(function: Machine.Function, slot: usize) bool {
+    if (function.hidden_return_slot) |hidden| if (hidden == slot) return true;
+    for (function.parameters) |parameter| if (spanContains(parameter, slot)) return true;
+    for (function.capture_parameters) |capture| if (spanContains(capture, slot)) return true;
+    for (function.instructions) |instruction| if (instructionUses(instruction, slot)) return true;
+    for (function.instructions) |instruction| {
+        if (!instructionDefines(instruction, slot)) continue;
+        switch (instruction) {
+            // The encoder omits individually unused leaves of borrowed
+            // aggregate loads. Their virtual definitions need no stack home.
+            .reference_load => |load| if (load.result.width > 1) continue,
+            else => {},
+        }
+        return true;
+    }
+    return false;
 }
 
 fn precolorCallFreeParameters(
@@ -1128,7 +1169,60 @@ test "call-free graph allocation uses volatile registers and coalesces a dead ar
     try std.testing.expectEqual(@as(?u5, 0), result.residences[0]);
     try std.testing.expectEqual(@as(?u5, 1), result.residences[1]);
     try std.testing.expectEqual(result.residences[0], result.residences[2]);
-    try std.testing.expectEqual(function.frame_size, result.frame_size);
+    try std.testing.expectEqual(@as(u32, 0), result.frame_size);
+}
+
+test "resident frame keeps the complete frame when one participant spills" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 20 } },
+        .{ .constant_int = .{ .result = 1, .bits = 22 } },
+        .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
+        .{ .return_value = .{ .start = 2, .width = 1 } },
+    };
+    const function: Machine.Function = .{
+        .name = "spilled_answer",
+        .parameter_count = 0,
+        .return_type = .int,
+        .slot_count = 3,
+        .frame_size = try Machine.frameSize(3),
+        .instructions = &instructions,
+    };
+    try std.testing.expectEqual(
+        try Machine.frameSize(3),
+        try residentFrameSize(
+            function,
+            &.{ 0, 1, null },
+            &.{ null, null, null },
+            &.{ null, null, null },
+        ),
+    );
+}
+
+test "unused borrowed aggregate leaves need no frame home" {
+    const function: Machine.Function = .{
+        .name = "borrowed_fields",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = try Machine.frameSize(4),
+        .instructions = &.{
+            .{ .reference_load = .{
+                .result = .{ .start = 1, .width = 3, .aggregate = true },
+                .reference = 0,
+            } },
+            .return_void,
+        },
+    };
+    try std.testing.expectEqual(
+        @as(u32, 0),
+        try residentFrameSize(
+            function,
+            &.{ 16, null, null, null },
+            &.{ null, null, null, null },
+            &.{ null, null, null, null },
+        ),
+    );
 }
 
 test "aggregate construction exposes leaf copy affinity" {

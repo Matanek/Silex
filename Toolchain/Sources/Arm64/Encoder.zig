@@ -850,16 +850,19 @@ fn encodeFunction(
         const load = function.instructions[cursor.load_index].collection_load;
         if (eagerCollectionWidth(function, cursor.load_index, load) != 2) collection_cursor = null;
     }
-    const runtime_frame_size: u32 = if (enable_cycle_collector) 16 else 0;
-    const extended_frame = function.slot_count >= Machine.direct_stack_slots;
+    const runtime_frame_size: u32 = if (enable_cycle_collector and functionUsesCycleContext(function)) 16 else 0;
+    const extended_frame = function.frame_size > Machine.direct_stack_slots * Machine.slot_size;
     const saved_register_count = calleeSavedRegisterCount(function, extended_frame);
     const saved_register_size: u32 = @intCast(std.mem.alignForward(usize, saved_register_count * Machine.slot_size, 16));
     const local_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
     const encoded_frame_size = std.math.add(u32, local_frame_size, saved_register_size) catch return error.InvalidMachineProgram;
     const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
-    try words.append(allocator, saveFrame());
-    try words.append(allocator, moveFramePointer());
-    try emitFrameAllocation(allocator, words, platform, encoded_frame_size);
+    const frameless = function.register_slots.len != 0 and encoded_frame_size == 0;
+    if (!frameless) {
+        try words.append(allocator, saveFrame());
+        try words.append(allocator, moveFramePointer());
+        try emitFrameAllocation(allocator, words, platform, encoded_frame_size);
+    }
     var saved_register_index: usize = 0;
     for (callee_saved_registers) |register| if (shouldSaveRegister(function, register, extended_frame)) {
         try emitStoreAtOffset(
@@ -2050,8 +2053,10 @@ fn encodeFunction(
         try words.append(allocator, moveGeneralToFloat(register, .x9, true));
         saved_register_index += 1;
     };
-    try emitStackAdjustment(allocator, words, encoded_frame_size, true);
-    try words.append(allocator, restoreFrame());
+    if (!frameless) {
+        try emitStackAdjustment(allocator, words, encoded_frame_size, true);
+        try words.append(allocator, restoreFrame());
+    }
     try words.append(allocator, returnInstruction());
 
     const overflow_label = words.items.len;
@@ -2159,6 +2164,11 @@ fn calleeSavedRegisterCount(function: Machine.Function, extended_frame: bool) us
 fn shouldSaveRegister(function: Machine.Function, register: Register, extended_frame: bool) bool {
     return functionUsesRegister(function, register) or
         (extended_frame and register == .x28);
+}
+
+fn functionUsesCycleContext(function: Machine.Function) bool {
+    for (function.instructions) |instruction| if (instruction == .class_drop) return true;
+    return false;
 }
 
 fn functionUsesFloatRegister(function: Machine.Function, register: Register) bool {
@@ -5012,6 +5022,34 @@ test "omit status checks only for proven infallible direct callees" {
         status_checks += @intFromBool((word & 0xff00001f) == compareBranchNonZero(.x8));
     }
     try std.testing.expectEqual(@as(usize, 1), status_checks);
+}
+
+test "fully resident leaf function omits its frame" {
+    const function: Machine.Function = .{
+        .name = "resident_leaf",
+        .parameter_count = 0,
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 1,
+        .frame_size = 0,
+        .register_slots = &.{0},
+        .float_register_slots = &.{null},
+        .instructions = &.{
+            .{ .constant_int = .{ .result = 0, .bits = 42 } },
+            .{ .return_value = .{ .start = 0, .width = 1 } },
+        },
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const image = try encode(arena.allocator(), .{ .functions = &.{function} }, .none);
+    var found_return = false;
+    for (0..@min(image.code.len / 4, 4)) |index| {
+        const word = std.mem.readInt(u32, image.code[index * 4 ..][0..4], .little);
+        try std.testing.expect(word != saveFrame());
+        try std.testing.expect(word != restoreFrame());
+        found_return = found_return or word == returnInstruction();
+    }
+    try std.testing.expect(found_return);
 }
 
 test "copy stack-resident aggregate parameters with paired transfers" {
