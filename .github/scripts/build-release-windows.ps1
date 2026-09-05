@@ -49,7 +49,7 @@ Expand-Archive $zigArchive -DestinationPath $env:RUNNER_TEMP
 $env:PATH = "$(Join-Path $env:RUNNER_TEMP $ZigDirectory);$env:PATH"
 
 $buildPrefix = Join-Path $env:RUNNER_TEMP "silex-prefix"
-zig build -Dtarget=$zigTarget -Doptimize=ReleaseFast -Dcpu=baseline `
+zig build "-Dtarget=$zigTarget" -Doptimize=ReleaseFast -Dcpu=baseline `
     --prefix $buildPrefix `
     --build-file Toolchain/build.zig
 

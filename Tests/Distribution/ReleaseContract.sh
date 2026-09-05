@@ -5,15 +5,17 @@ set -eu
 repository_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 workflow="$repository_root/.github/workflows/release.yml"
 installer_workflow="$repository_root/.github/workflows/install-smoke.yml"
+windows_builder="$repository_root/.github/scripts/build-release-windows.ps1"
 
 "$repository_root/Tests/Distribution/InstallerUnixContract.sh"
 
-python3 - "$workflow" "$installer_workflow" <<'PYTHON'
+python3 - "$workflow" "$installer_workflow" "$windows_builder" <<'PYTHON'
 import re
 import sys
 
 workflow = open(sys.argv[1], encoding="utf-8").read()
 installer_workflow = open(sys.argv[2], encoding="utf-8").read()
+windows_builder = open(sys.argv[3], encoding="utf-8").read()
 targets = (
     "macos-arm64",
     "macos-x64",
@@ -60,6 +62,9 @@ for target in targets:
 actual_files = [line.strip() for line in match.group(1).splitlines() if line.strip()]
 if actual_files != expected_files:
     raise SystemExit("release set differs from the twelve target files")
+
+if 'zig build "-Dtarget=$zigTarget"' not in windows_builder:
+    raise SystemExit("Windows release build target must be an interpolated PowerShell argument")
 
 print("Release workflow contract passed")
 PYTHON
