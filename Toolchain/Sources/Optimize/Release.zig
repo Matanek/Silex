@@ -922,6 +922,12 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
     const definitions = try allocator.alloc(usize, function.value_types.len);
     @memset(definitions, 0);
     for (function.blocks) |block| for (block.instructions) |instruction| countDefinitions(instruction, definitions);
+    const uses = try allocator.alloc(usize, function.value_types.len);
+    @memset(uses, 0);
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| countUses(instruction, uses);
+        countTerminatorUses(block.terminator, uses);
+    }
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     const constants = try allocator.alloc(Constant, function.value_types.len);
     @memset(constants, .unknown);
@@ -934,6 +940,10 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
         references_stable_across_blocks and locals_cannot_alias,
     );
     for (function.blocks, 0..) |block, block_index| {
+        const block_uses = try allocator.alloc(usize, function.value_types.len);
+        @memset(block_uses, 0);
+        for (block.instructions) |instruction| countUses(instruction, block_uses);
+        countTerminatorUses(block.terminator, block_uses);
         const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
         for (aliases, 0..) |*alias, value| alias.* = value;
         const local_values = try allocator.alloc(?Ir.ValueId, function.local_types.len);
@@ -947,6 +957,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
             switch (instruction) {
                 .copy => |copy| {
                     if (definitions[copy.result] == 1 and
+                        uses[copy.result] == block_uses[copy.result] and
                         function.value_types[copy.result] == function.value_types[copy.operand])
                     {
                         aliases[copy.result] = canonical(aliases, copy.operand);
@@ -956,6 +967,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                 .deep_copy => |copy| {
                     const value_type = function.value_types[copy.result];
                     if (definitions[copy.result] == 1 and
+                        uses[copy.result] == block_uses[copy.result] and
                         (value_type.isNumeric() or value_type == .bool) and
                         value_type == function.value_types[copy.operand])
                     {

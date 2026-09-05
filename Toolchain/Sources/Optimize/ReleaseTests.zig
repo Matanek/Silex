@@ -264,6 +264,89 @@ test "release materializes referenced aggregates used by direct calls" {
     try std.testing.expectEqual(@as(i64, 0), native.value);
 }
 
+test "release preserves promoted loop cursors used by successor blocks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Usage { let resource:int }
+        \\struct Pass { let usages:Usage[] }
+        \\struct Record { var first:int; var last:int }
+        \\class Graph {
+        \\    var plan:int[]
+        \\    var passes:Pass[]
+        \\    var resources:Record[]
+        \\    init() {
+        \\        self.plan = [0]
+        \\        self.passes = [Pass(usages:[Usage(resource:0)])]
+        \\        self.resources = [Record(first:-1, last:-1)]
+        \\    }
+        \\    func compile_lifetimes() {
+        \\        var execution_index = 0
+        \\        while execution_index < self.plan.count() {
+        \\            let current = self.passes[self.plan[execution_index]]
+        \\            for usage in current.usages {
+        \\                let resource_index = usage.resource
+        \\                if self.resources[resource_index].first < 0 {
+        \\                    self.resources[resource_index].first = execution_index
+        \\                }
+        \\                self.resources[resource_index].last = execution_index
+        \\            }
+        \\            execution_index++
+        \\        }
+        \\    }
+        \\    func answer() int {
+        \\        self.compile_lifetimes()
+        \\        return self.resources[0].first + self.resources[0].last
+        \\    }
+        \\}
+        \\func answer() int {
+        \\    var graph = Graph()
+        \\    return graph.answer()
+        \\}
+        \\func main() {}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    var answer: ?usize = null;
+    for (optimized.functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, "answer")) answer = index;
+    }
+    const native = try Runner.invoke(allocator, machine, answer orelse return error.TestUnexpectedResult, &.{});
+    try std.testing.expectEqual(Machine.Status.success, native.status);
+    try std.testing.expectEqual(@as(i64, 0), native.value);
+}
+
+test "release preserves a live leading leaf in partially read aggregates" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Item {
+        \\    let value:int
+        \\    let first:int
+        \\    let second:int
+        \\    let selected:bool
+        \\}
+        \\func answer() int {
+        \\    let items:Item[] = [Item(value:42, first:1, second:2, selected:true)]
+        \\    return items[0].value
+        \\}
+        \\func main() {}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    var answer: ?usize = null;
+    for (optimized.functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, "answer")) answer = index;
+    }
+    const native = try Runner.invoke(allocator, machine, answer orelse return error.TestUnexpectedResult, &.{});
+    try std.testing.expectEqual(Machine.Status.success, native.status);
+    try std.testing.expectEqual(@as(i64, 42), native.value);
+}
+
 test "release preserves helper mutations of class-owned list elements" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

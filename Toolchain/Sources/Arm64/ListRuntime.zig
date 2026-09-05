@@ -6,6 +6,7 @@ const Fixups = @import("Fixups.zig");
 const StringRuntime = @import("StringRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Allocation = @import("Allocation.zig");
+const ResidenceLiveness = @import("ResidenceLiveness.zig");
 
 const Allocator = std.mem.Allocator;
 pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
@@ -783,18 +784,24 @@ pub fn emitLoad(
                 leaf = try emitResidentFloatLoads(allocator, words, function, value.result, .x10, 0, leaf_count, stride);
             } else while (leaf < leaf_count) : (leaf += 1) {
                 const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+                if (!slotHasUse(function.instructions, slot)) continue;
                 try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
                 try storeValue(allocator, words, function, .x12, slot);
             }
         } else if (allFloatResident(function, value.result)) {
             leaf = try emitResidentFloatLoads(allocator, words, function, value.result, .x10, 0, leaf_count, stride);
         } else while (leaf < leaf_count) : (leaf += 1) {
+            const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+            if (!slotHasUse(function.instructions, slot)) continue;
             try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
-            try storeValue(allocator, words, function, .x12, @intCast(@as(usize, value.result.start) + leaf));
+            try storeValue(allocator, words, function, .x12, slot);
         }
         if (leaf < leaf_count) {
-            try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
-            try storeValue(allocator, words, function, .x12, @intCast(@as(usize, value.result.start) + leaf));
+            const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+            if (slotHasUse(function.instructions, slot)) {
+                try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+                try storeValue(allocator, words, function, .x12, slot);
+            }
         }
         return;
     }
@@ -809,10 +816,11 @@ pub fn emitLoad(
         const stride = elementStride(value.result.width, value.element_stride);
         try addElementOffset(allocator, words, .x10, .x9, stride);
         for (0..leaf_count) |leaf| {
+            const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+            if (!slotHasUse(function.instructions, slot)) continue;
             if (stride == @as(u64, value.result.width) * 4) {
                 try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
             } else try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
-            const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
             if (function.float_register_slots.len != 0 and function.float_register_slots[slot] != null) {
                 try words.append(allocator, A64.moveGeneralToFloat(@enumFromInt(function.float_register_slots[slot].?), .x12, true));
             } else try storeValue(allocator, words, function, .x12, slot);
@@ -878,11 +886,17 @@ pub fn emitCursorLoad(
 fn allFloatResident(function: Machine.Function, span: Machine.Span) bool {
     for (0..span.width) |leaf| {
         const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+        if (!slotHasUse(function.instructions, slot)) return false;
         const scalar = function.float_register_slots.len != 0 and function.float_register_slots[slot] != null;
         const lane = function.float_lane_slots.len != 0 and function.float_lane_slots[slot] != null;
         if (!scalar and !lane) return false;
     }
     return true;
+}
+
+fn slotHasUse(instructions: []const Machine.Instruction, slot: Machine.Slot) bool {
+    for (instructions) |instruction| if (ResidenceLiveness.instructionUses(instruction, slot)) return true;
+    return false;
 }
 
 pub fn emitDeferredLoad(
