@@ -615,6 +615,7 @@ pub const ExternalFunction = struct {
     pub const Signature = struct {
         arguments: []const AbiValue,
         result: ?AbiValue,
+        result_signed_32: bool = false,
     };
 };
 
@@ -647,6 +648,11 @@ pub fn slotOffset(slot: Slot) u32 {
 pub fn validate(program: Program) Error!void {
     for (program.globals) |global| {
         if (global.width == 0 or global.extra_bits.len + 1 > global.width) return error.InvalidMachineProgram;
+    }
+    for (program.external_functions) |external| {
+        if (external.signature.result_signed_32 and external.signature.result != .int32) {
+            return error.InvalidMachineProgram;
+        }
     }
     for (program.functions) |function| {
         if (function.register_slots.len == 0 and function.float_register_slots.len == 0) {
@@ -979,7 +985,8 @@ pub fn validate(program: Program) Error!void {
                 .external_indirect_call => |call| {
                     try requireSlot(function, call.callee);
                     if (call.arguments.len > max_external_arguments or
-                        call.arguments.len != call.signature.arguments.len)
+                        call.arguments.len != call.signature.arguments.len or
+                        (call.signature.result_signed_32 and call.signature.result != .int32))
                     {
                         return error.InvalidMachineProgram;
                     }

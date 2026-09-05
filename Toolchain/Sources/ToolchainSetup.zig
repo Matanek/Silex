@@ -3,17 +3,18 @@ const Artifacts = @import("Artifacts.zig");
 const TargetModule = @import("Target.zig");
 
 const release = "https://github.com/Matanek/Silex-Toolchain-Assets/releases/download/shadercross-3.0.0-e55cf5e-silex.1/";
+const portability_release = "https://github.com/Matanek/Silex-Toolchain-Assets/releases/download/shadercross-3.0.0-e55cf5e-silex.3/";
 const zig_release = "https://ziglang.org/download/0.16.0/";
 
 pub fn shadercross(host: TargetModule.Target) Artifacts.ToolSpec {
-    if (host.eql(.macos_arm64)) return .{
+    if (host.eql(.macos_arm64) or host.eql(.macos_x64)) return .{
         .name = "Shadercross",
         .path = "downloads/Shadercross-3.0.0-e55cf5e-macos-universal.tar.gz",
         .url = release ++ "Shadercross-3.0.0-e55cf5e-macos-universal.tar.gz",
         .sha256 = "a92bfbbdf10c3065976fb41d1b561a82f5c6f78203f9805aabf00b12dd517c2b",
         .archive = .{
             .format = .tar_gz,
-            .into = "shadercross/3.0.0/macos-arm64",
+            .into = if (host.eql(.macos_arm64)) "shadercross/3.0.0/macos-arm64" else "shadercross/3.0.0/macos-x64",
             .provides = "bin/shadercross",
             .strip_components = 1,
         },
@@ -26,6 +27,18 @@ pub fn shadercross(host: TargetModule.Target) Artifacts.ToolSpec {
         .archive = .{
             .format = .tar_gz,
             .into = "shadercross/3.0.0/linux-x64",
+            .provides = "bin/shadercross",
+            .strip_components = 1,
+        },
+    };
+    if (host.eql(.linux_arm64)) return .{
+        .name = "Shadercross",
+        .path = "downloads/Shadercross-3.0.0-e55cf5e-linux-arm64.tar.gz",
+        .url = portability_release ++ "Shadercross-3.0.0-e55cf5e-linux-arm64.tar.gz",
+        .sha256 = "0b1fab54e52b22f055831b7e6e5e613e1fb21c0cc38d20057d9dd065b442cfbb",
+        .archive = .{
+            .format = .tar_gz,
+            .into = "shadercross/3.0.0/linux-arm64",
             .provides = "bin/shadercross",
             .strip_components = 1,
         },
@@ -63,6 +76,18 @@ pub fn linker(host: TargetModule.Target) Artifacts.ToolSpec {
             .strip_components = 1,
         },
     };
+    if (host.eql(.macos_x64)) return .{
+        .name = "Native linker",
+        .path = "downloads/zig-x86_64-macos-0.16.0.tar.xz",
+        .url = zig_release ++ "zig-x86_64-macos-0.16.0.tar.xz",
+        .sha256 = "0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7",
+        .archive = .{
+            .format = .tar_xz,
+            .into = "zig/0.16.0/macos-x64",
+            .provides = "zig",
+            .strip_components = 1,
+        },
+    };
     if (host.eql(.linux_x64)) return .{
         .name = "Native linker",
         .path = "downloads/zig-x86_64-linux-0.16.0.tar.xz",
@@ -71,6 +96,18 @@ pub fn linker(host: TargetModule.Target) Artifacts.ToolSpec {
         .archive = .{
             .format = .tar_xz,
             .into = "zig/0.16.0/linux-x64",
+            .provides = "zig",
+            .strip_components = 1,
+        },
+    };
+    if (host.eql(.linux_arm64)) return .{
+        .name = "Native linker",
+        .path = "downloads/zig-aarch64-linux-0.16.0.tar.xz",
+        .url = zig_release ++ "zig-aarch64-linux-0.16.0.tar.xz",
+        .sha256 = "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17",
+        .archive = .{
+            .format = .tar_xz,
+            .into = "zig/0.16.0/linux-arm64",
             .provides = "zig",
             .strip_components = 1,
         },
@@ -113,16 +150,34 @@ test "Shadercross belongs to the host toolchain" {
     const macos = shadercross(.macos_arm64);
     try std.testing.expectEqualStrings("shadercross/3.0.0/macos-arm64", macos.archive.into);
     try std.testing.expectEqualStrings("bin/shadercross", macos.archive.provides);
+    const macos_x64 = shadercross(.macos_x64);
+    try std.testing.expectEqualStrings("shadercross/3.0.0/macos-x64", macos_x64.archive.into);
+    try std.testing.expectEqualStrings(macos.url, macos_x64.url);
 
     const windows_arm64 = shadercross(.windows_arm64);
     try std.testing.expectEqualStrings("shadercross/3.0.0/windows-arm64", windows_arm64.archive.into);
     try std.testing.expect(std.mem.endsWith(u8, windows_arm64.url, "windows-x64.zip"));
 
+    const linux_arm64 = shadercross(.linux_arm64);
+    try std.testing.expectEqualStrings("shadercross/3.0.0/linux-arm64", linux_arm64.archive.into);
+    try std.testing.expectEqualStrings("bin/shadercross", linux_arm64.archive.provides);
+    try std.testing.expect(std.mem.endsWith(u8, linux_arm64.url, "linux-arm64.tar.gz"));
+
     const linux_linker = linker(.linux_x64);
     try std.testing.expectEqual(.tar_xz, linux_linker.archive.format);
     try std.testing.expectEqualStrings("zig", linux_linker.archive.provides);
+    const macos_x64_linker = linker(.macos_x64);
+    try std.testing.expect(std.mem.endsWith(u8, macos_x64_linker.url, "zig-x86_64-macos-0.16.0.tar.xz"));
+
+    const linux_arm64_linker = linker(.linux_arm64);
+    try std.testing.expectEqualStrings("zig/0.16.0/linux-arm64", linux_arm64_linker.archive.into);
+    try std.testing.expect(std.mem.endsWith(u8, linux_arm64_linker.url, "zig-aarch64-linux-0.16.0.tar.xz"));
 
     const windows_linker = linker(.windows_x64);
     try std.testing.expectEqual(.zip, windows_linker.archive.format);
     try std.testing.expect(std.mem.endsWith(u8, windows_linker.archive.provides, "zig.exe"));
+
+    const windows_arm64_linker = linker(.windows_arm64);
+    try std.testing.expectEqualStrings("zig/0.16.0/windows-x64", windows_arm64_linker.archive.into);
+    try std.testing.expect(std.mem.endsWith(u8, windows_arm64_linker.url, "zig-x86_64-windows-0.16.0.zip"));
 }

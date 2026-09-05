@@ -1,0 +1,6 @@
+use MacOSX64Boundary.Api
+
+func main() {
+    Api.verify()
+    print("macos x64 boundary ready")
+}

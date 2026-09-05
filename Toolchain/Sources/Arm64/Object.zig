@@ -1,6 +1,7 @@
 const std = @import("std");
 const Encoder = @import("Encoder.zig");
 const Instructions = @import("Instructions.zig");
+const LinuxObject = @import("../Linux/Object.zig");
 const Machine = @import("Machine.zig");
 
 const Allocator = std.mem.Allocator;
@@ -12,9 +13,78 @@ const image_file_machine_arm64: u16 = 0xaa64;
 const image_rel_arm64_branch26: u16 = 0x0003;
 const image_rel_arm64_pagebase_rel21: u16 = 0x0004;
 const image_rel_arm64_pageoffset_12a: u16 = 0x0006;
+const image_rel_arm64_pageoffset_12l: u16 = 0x0007;
+
+pub fn emitLinux(allocator: Allocator, program: Machine.Program) Error![]u8 {
+    var image = try Encoder.encodeLinux(allocator, program, .{ .executable_main = try findMain(program) });
+    defer image.deinit(allocator);
+    return emitLinuxImage(allocator, program, &image);
+}
+
+pub fn emitLinuxFunction(allocator: Allocator, program: Machine.Program, function: Machine.FunctionId) Error![]u8 {
+    var image = try Encoder.encodeLinux(allocator, program, .{ .test_function = function });
+    defer image.deinit(allocator);
+    return emitLinuxImage(allocator, program, &image);
+}
+
+fn emitLinuxImage(allocator: Allocator, program: Machine.Program, image: *Encoder.Image) Error![]u8 {
+    const entry_offset = image.entry_offset orelse return error.InvalidImage;
+    var relocations: std.ArrayList(LinuxObject.Relocation) = .empty;
+    defer relocations.deinit(allocator);
+
+    for (image.external_call_sites) |site| {
+        if (site.windows_symbol != null or site.function >= program.external_functions.len or
+            @as(usize, site.instruction_offset) + 12 > image.code.len) return error.InvalidImage;
+        std.mem.writeInt(u32, image.code[site.instruction_offset..][0..4], Instructions.branchLink(), .little);
+        std.mem.writeInt(u32, image.code[site.instruction_offset + 4 ..][0..4], no_operation, .little);
+        std.mem.writeInt(u32, image.code[site.instruction_offset + 8 ..][0..4], no_operation, .little);
+        try relocations.append(allocator, .{
+            .offset = site.instruction_offset,
+            .kind = .arm64_call26,
+            .target = .{ .external = program.external_functions[site.function].source_name },
+        });
+    }
+    for (image.address_sites) |site| {
+        if (@as(usize, site.instruction_offset) + 8 > image.code.len or site.target_offset >= image.code.len) {
+            return error.InvalidImage;
+        }
+        var page = std.mem.readInt(u32, image.code[site.instruction_offset..][0..4], .little);
+        page &= 0x9f00001f;
+        std.mem.writeInt(u32, image.code[site.instruction_offset..][0..4], page, .little);
+        var offset = std.mem.readInt(u32, image.code[site.instruction_offset + 4 ..][0..4], .little);
+        if ((offset & 0xffc00000) != 0x91000000) return error.InvalidImage;
+        offset &= ~@as(u32, 0x003ffc00);
+        std.mem.writeInt(u32, image.code[site.instruction_offset + 4 ..][0..4], offset, .little);
+        try relocations.appendSlice(allocator, &.{
+            .{
+                .offset = site.instruction_offset,
+                .kind = .arm64_page21,
+                .target = .text,
+                .addend = site.target_offset,
+            },
+            .{
+                .offset = site.instruction_offset + 4,
+                .kind = .arm64_pageoff12_add,
+                .target = .text,
+                .addend = site.target_offset,
+            },
+        });
+    }
+    return LinuxObject.emit(allocator, .arm64, image.code, entry_offset, relocations.items);
+}
 
 pub fn emitWindows(allocator: Allocator, program: Machine.Program) Error![]u8 {
     var image = try Encoder.encodeWindows(allocator, program, .{ .executable_main = try findMain(program) });
+    defer image.deinit(allocator);
+    return emitWindowsImage(allocator, program, &image);
+}
+
+pub fn emitWindowsFunction(
+    allocator: Allocator,
+    program: Machine.Program,
+    function: Machine.FunctionId,
+) Error![]u8 {
+    var image = try Encoder.encodeWindows(allocator, program, .{ .test_function = function });
     defer image.deinit(allocator);
     return emitWindowsImage(allocator, program, &image);
 }
@@ -93,7 +163,13 @@ fn emitWindowsImage(allocator: Allocator, program: Machine.Program, image: *Enco
     for (image.address_sites, 0..) |site, index| {
         const symbol: u32 = @intCast(1 + index);
         try appendRelocation(allocator, &bytes, site.instruction_offset, symbol, image_rel_arm64_pagebase_rel21);
-        try appendRelocation(allocator, &bytes, site.instruction_offset + 4, symbol, image_rel_arm64_pageoffset_12a);
+        try appendRelocation(
+            allocator,
+            &bytes,
+            site.instruction_offset + 4,
+            symbol,
+            try pageOffsetRelocation(image.code, site.instruction_offset + 4),
+        );
     }
     for (image.external_call_sites, 0..) |site, index| {
         try appendRelocation(allocator, &bytes, site.instruction_offset, external_symbol_for_site[index], image_rel_arm64_branch26);
@@ -125,6 +201,14 @@ fn appendRelocation(allocator: Allocator, bytes: *std.ArrayList(u8), offset: u32
     try appendInt(allocator, bytes, u32, offset);
     try appendInt(allocator, bytes, u32, symbol);
     try appendInt(allocator, bytes, u16, kind);
+}
+
+fn pageOffsetRelocation(code: []const u8, instruction_offset: u32) Error!u16 {
+    if (@as(usize, instruction_offset) + 4 > code.len) return error.InvalidImage;
+    const instruction = std.mem.readInt(u32, code[instruction_offset..][0..4], .little);
+    if (instruction & 0x1f000000 == 0x11000000) return image_rel_arm64_pageoffset_12a;
+    if (instruction & 0x3b000000 == 0x39000000) return image_rel_arm64_pageoffset_12l;
+    return error.InvalidImage;
 }
 
 fn appendSymbol(
@@ -163,7 +247,7 @@ fn appendInt(allocator: Allocator, bytes: *std.ArrayList(u8), comptime T: type, 
     try bytes.appendSlice(allocator, &storage);
 }
 
-test "emit builds an ARM64 COFF object" {
+test "emit builds ARM64 ELF and COFF objects" {
     const Frontend = @import("../Frontend.zig");
     const Lower = @import("Lower.zig");
 
@@ -173,8 +257,90 @@ test "emit builds an ARM64 COFF object" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile("func main() {}");
     const machine = try Lower.lower(allocator, compilation.ir);
+
+    const elf = try emitLinux(allocator, machine);
+    try std.testing.expectEqualStrings("\x7fELF", elf[0..4]);
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, elf[16..18], .little));
+    try std.testing.expectEqual(@as(u16, 183), std.mem.readInt(u16, elf[18..20], .little));
+
     const bytes = try emitWindows(allocator, machine);
 
     try std.testing.expectEqual(image_file_machine_arm64, std.mem.readInt(u16, bytes[0..2], .little));
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, bytes[2..4], .little));
+}
+
+test "emit exposes an ARM64 test entry as a COFF main symbol" {
+    const Frontend = @import("../Frontend.zig");
+    const Lower = @import("Lower.zig");
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compileTests("test \"answer\" { assert(40 + 2 == 42) }");
+    const machine = try Lower.lower(allocator, compilation.ir);
+    const bytes = try emitWindowsFunction(allocator, machine, 0);
+
+    try std.testing.expectEqual(image_file_machine_arm64, std.mem.readInt(u16, bytes[0..2], .little));
+    const symbol_offset = std.mem.readInt(u32, bytes[8..12], .little);
+    try std.testing.expectEqualStrings("main", std.mem.sliceTo(bytes[symbol_offset..][0..8], 0));
+}
+
+test "emit uses the COFF page-offset relocation matching the low instruction" {
+    var add_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &add_bytes, 0x91000000, .little);
+    try std.testing.expectEqual(image_rel_arm64_pageoffset_12a, try pageOffsetRelocation(&add_bytes, 0));
+
+    var load_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &load_bytes, 0x3dc00000, .little);
+    try std.testing.expectEqual(image_rel_arm64_pageoffset_12l, try pageOffsetRelocation(&load_bytes, 0));
+}
+
+test "emit page-aligns an embedded Linux ARM64 deep-copy runtime" {
+    const Frontend = @import("../Frontend.zig");
+    const Lower = @import("Lower.zig");
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = frontend.compileTests(
+        \\class State {
+        \\    var value:int
+        \\}
+        \\struct Pair {
+        \\    var first:State
+        \\    var again:State
+        \\}
+        \\test "copy" {
+        \\    var state = State(value:5)
+        \\    var source = Pair(first:state, again:state)
+        \\    var detached = copy source
+        \\    assert(detached.first == detached.again)
+        \\}
+    ) catch |err| {
+        std.debug.print("deep-copy fixture compilation failed: {t}\n", .{err});
+        return err;
+    };
+    const machine = Lower.lower(allocator, compilation.ir) catch |err| {
+        std.debug.print("deep-copy fixture lowering failed: {t}\n", .{err});
+        return err;
+    };
+    var test_function: ?Machine.FunctionId = null;
+    for (compilation.ast.functions, 0..) |function, function_id| {
+        if (function.is_test_entry) test_function = function_id;
+    }
+
+    const object = emitLinuxFunction(allocator, machine, test_function orelse return error.TestUnexpectedResult) catch |err| {
+        std.debug.print("deep-copy object emission failed: {t}\n", .{err});
+        return err;
+    };
+    try std.testing.expectEqualStrings("\x7fELF", object[0..4]);
+    try std.testing.expectEqual(@as(u16, 183), std.mem.readInt(u16, object[18..20], .little));
+    const section_offset: usize = @intCast(std.mem.readInt(u64, object[40..48], .little));
+    const text_section = section_offset + 64;
+    try std.testing.expectEqual(@as(u64, 4096), std.mem.readInt(u64, object[text_section + 48 ..][0..8], .little));
+    const relocation_section = section_offset + 2 * 64;
+    const relocation_size = std.mem.readInt(u64, object[relocation_section + 32 ..][0..8], .little);
+    try std.testing.expect(relocation_size >= 2 * 24);
 }

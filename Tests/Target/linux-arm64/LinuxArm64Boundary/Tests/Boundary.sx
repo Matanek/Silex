@@ -1,0 +1,17 @@
+use LinuxArm64Boundary.Api
+
+func verify_boundary() {
+    assert(Api.answer() == 42)
+    assert(Api.sum_ten() == 55)
+    assert(Api.scale(21.0) == 42.0)
+    assert(Api.invoke(19, 23) == 42)
+}
+
+test "call a Linux ARM64 Boundary through AAPCS64" {
+    verify_boundary()
+}
+
+func main() {
+    verify_boundary()
+    print("linux arm64 boundary ready")
+}

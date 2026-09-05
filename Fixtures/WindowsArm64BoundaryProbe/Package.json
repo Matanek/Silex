@@ -1,0 +1,13 @@
+{
+  "name": "WindowsArm64BoundaryProbe",
+  "version": "1.0.0",
+  "boundary": {
+    "windows-arm64": {
+      "providers": {
+        "Native": {
+          "archive": "Boundary/windows-arm64/BoundaryProbe.lib"
+        }
+      }
+    }
+  }
+}

@@ -247,6 +247,10 @@ pub fn serviceCall() u32 {
     return 0xd4001001;
 }
 
+pub fn linuxServiceCall() u32 {
+    return 0xd4000001;
+}
+
 pub fn loadAcquireExclusive64(destination: Register, base: Register) u32 {
     return 0xc85ffc00 | (registerBits(base) << 5) | registerBits(destination);
 }

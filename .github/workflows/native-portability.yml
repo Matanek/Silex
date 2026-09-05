@@ -12,7 +12,10 @@ on:
         default: all
         options:
           - all
+          - macos-x64
+          - linux-arm64
           - linux-x64
+          - windows-arm64
           - windows-x64
 
 permissions:
@@ -23,6 +26,163 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  macos-x64:
+    if: inputs.target == 'all' || inputs.target == 'macos-x64'
+    runs-on: macos-15-intel
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-macos-0.16.0.tar.xz -o "$archive"
+          echo "0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7  $archive" | shasum -a 256 -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Build and validate Silex on macOS X64
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/silex-prefix" \
+            --build-file Toolchain/build.zig
+          silex="$RUNNER_TEMP/silex-prefix/bin/silex"
+          "$silex" --version
+          "$silex" targets | grep -F 'macos-x64'
+          "$silex" setup
+          shadercross="$HOME/.silex/toolchain/shadercross/3.0.0/macos-x64/bin/shadercross"
+          file "$shadercross" | grep -F 'x86_64'
+          "$shadercross" --help >/dev/null 2>&1
+          boundary_root="$GITHUB_WORKSPACE/Toolchain/Fixtures/MacOSX64Boundary/Boundary/macos-x64"
+          zig cc -target x86_64-macos -c "$boundary_root/Provider.c" -o "$boundary_root/Provider.o"
+          zig ar rcs "$boundary_root/libMacOSX64Boundary.a" "$boundary_root/Provider.o"
+          boundary_consumer="$GITHUB_WORKSPACE/Toolchain/Fixtures/MacOSX64BoundaryConsumer"
+          "$silex" link "$GITHUB_WORKSPACE/Toolchain/Fixtures/MacOSX64Boundary" \
+            --workspace "$boundary_consumer" --target macos-x64
+          "$silex" packages resolve "$boundary_consumer"
+          "$silex" compile "$boundary_consumer/Main.sx" \
+            --release -o "$RUNNER_TEMP/macos-x64-boundary"
+          test "$("$RUNNER_TEMP/macos-x64-boundary")" = "macos x64 boundary ready"
+          "$silex" test "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
+          run_distribution() {
+            executable="$1"
+            stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
+            set +e
+            output=$("$executable" 2>"$stderr")
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              cat "$stderr"
+              lldb --batch -o 'run' \
+                -k 'thread backtrace all' \
+                -k 'register read' \
+                -k 'image lookup -a $pc' \
+                -k 'disassemble -p' \
+                -- "$executable" || true
+              return "$status"
+            fi
+            test "$output" = "silex distribution ready"
+          }
+          distribution="$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx"
+          "$silex" compile "$distribution" \
+            -o "$RUNNER_TEMP/distribution-smoke-debug"
+          run_distribution "$RUNNER_TEMP/distribution-smoke-debug"
+          "$silex" compile "$distribution" \
+            --release -o "$RUNNER_TEMP/distribution-smoke-release"
+          run_distribution "$RUNNER_TEMP/distribution-smoke-release"
+          test "$("$silex" run "$distribution" --release)" = "silex distribution ready"
+          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \
+            --release -o "$RUNNER_TEMP/native-portability"
+          file "$RUNNER_TEMP/native-portability" | grep -F 'x86_64'
+          portability_output=$("$RUNNER_TEMP/native-portability")
+          printf '%s\n' "$portability_output"
+          cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')
+          test "$cycle_drops" -eq 6
+
+  linux-arm64:
+    if: inputs.target == 'all' || inputs.target == 'linux-arm64'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Verify native ARM64 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            aarch64|arm64) ;;
+            *) echo "expected a native ARM64 runner, got $(uname -m)" >&2; exit 1 ;;
+          esac
+
+      - name: Install Zig 0.16.0 for Linux ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz -o "$archive"
+          echo "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-aarch64-linux-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Build and validate Silex on Linux ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+
+          boundary="$GITHUB_WORKSPACE/Tests/Target/linux-arm64/LinuxArm64Boundary"
+          mkdir -p "$boundary/Boundary/linux-arm64"
+          zig cc -target aarch64-linux-gnu -O2 -c "$boundary/provider.c" \
+            -o "$boundary/Boundary/linux-arm64/provider.o"
+          zig ar rcs "$boundary/Boundary/linux-arm64/libProvider.a" \
+            "$boundary/Boundary/linux-arm64/provider.o"
+
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/silex-prefix" \
+            --build-file Toolchain/build.zig
+
+          silex="$RUNNER_TEMP/silex-prefix/bin/silex"
+          "$silex" setup
+          managed_zig="$HOME/.silex/toolchain/zig/0.16.0/linux-arm64/zig"
+          test -x "$managed_zig"
+          file "$managed_zig" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64)'
+
+          source="$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
+          "$silex" interpret "$source" > "$RUNNER_TEMP/interpreted.txt"
+          "$silex" compile "$source" --debug -o "$RUNNER_TEMP/native-debug"
+          "$RUNNER_TEMP/native-debug" > "$RUNNER_TEMP/debug.txt"
+          cmp "$RUNNER_TEMP/interpreted.txt" "$RUNNER_TEMP/debug.txt"
+          "$silex" compile "$source" --release -o "$RUNNER_TEMP/native-release"
+          "$RUNNER_TEMP/native-release" > "$RUNNER_TEMP/release.txt"
+          cmp "$RUNNER_TEMP/interpreted.txt" "$RUNNER_TEMP/release.txt"
+          file "$RUNNER_TEMP/native-release" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64)'
+          readelf -h "$RUNNER_TEMP/native-release" | grep -E 'Machine:.*AArch64'
+
+          "$silex" run "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" --debug
+          "$silex" test "$source"
+
+          "$managed_zig" cc -target aarch64-linux-gnu -O2 -c "$boundary/provider.c" \
+            -o "$boundary/Boundary/linux-arm64/provider.o"
+          "$managed_zig" ar rcs "$boundary/Boundary/linux-arm64/libProvider.a" \
+            "$boundary/Boundary/linux-arm64/provider.o"
+          "$silex" test "$boundary/Tests/Boundary.sx"
+          "$silex" compile "$boundary/Tests/Boundary.sx" --release \
+            -o "$RUNNER_TEMP/boundary"
+          test "$("$RUNNER_TEMP/boundary")" = "linux arm64 boundary ready"
+
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
     runs-on: ubuntu-24.04
@@ -56,12 +216,12 @@ jobs:
           "$silex" setup
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx"
-          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx" \
-            --release -o "$RUNNER_TEMP/x64-portability"
-          portability_output=$("$RUNNER_TEMP/x64-portability")
+          "$silex" test "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
+          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \
+            --release -o "$RUNNER_TEMP/native-portability"
+          portability_output=$("$RUNNER_TEMP/native-portability")
           printf '%s\n' "$portability_output"
-          cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^x64 cycle drop$')
+          cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')
           test "$cycle_drops" -eq 6
           "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" \
             --release -o "$RUNNER_TEMP/distribution-smoke"
@@ -107,15 +267,15 @@ jobs:
           & $silex setup
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx")
-          $portability = Join-Path $env:RUNNER_TEMP "x64-portability.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx") `
+          & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx")
+          $portability = Join-Path $env:RUNNER_TEMP "native-portability.exe"
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx") `
             --release -o $portability
           $portabilityOutput = @(& $portability)
           $portabilityOutput | ForEach-Object { Write-Output $_ }
-          $cycleDrops = @($portabilityOutput | Where-Object { $_ -eq "x64 cycle drop" }).Count
+          $cycleDrops = @($portabilityOutput | Where-Object { $_ -eq "native cycle drop" }).Count
           if ($cycleDrops -ne 6) {
-            throw "expected 6 X64 cycle finalizers, got $cycleDrops"
+            throw "expected 6 native cycle finalizers, got $cycleDrops"
           }
           $smoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx") `
@@ -123,4 +283,267 @@ jobs:
           $smokeOutput = @(& $smoke)
           if ($LASTEXITCODE -ne 0 -or $smokeOutput.Count -ne 1 -or $smokeOutput[0] -ne "silex distribution ready") {
             throw "standalone distribution smoke failed"
+          }
+
+  windows-arm64-build:
+    if: inputs.target == 'all' || inputs.target == 'windows-arm64'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Cross-build the Windows ARM64 bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/windows-arm64-bootstrap"
+          mkdir -p "$stage/boundary"
+          zig build -Dtarget=aarch64-windows -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$stage/silex" \
+            --build-file Toolchain/build.zig
+          zig build-lib Fixtures/WindowsArm64BoundaryProbe/Provider.zig \
+            -O ReleaseSmall \
+            -target aarch64-windows \
+            -femit-bin="$stage/boundary/BoundaryProbe.lib"
+          test "$(head -c 8 "$stage/boundary/BoundaryProbe.lib")" = "!<arch>"
+
+      - name: Transfer the Windows ARM64 bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-bootstrap
+          path: ${{ runner.temp }}/windows-arm64-bootstrap
+          retention-days: 1
+          if-no-files-found: error
+
+  windows-arm64:
+    if: inputs.target == 'all' || inputs.target == 'windows-arm64'
+    needs: windows-arm64-build
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Download the Windows ARM64 bootstrap
+        uses: actions/download-artifact@v5
+        with:
+          name: windows-arm64-bootstrap
+          path: ${{ runner.temp }}/windows-arm64-bootstrap
+
+      - name: Build and validate Silex natively on Windows ARM64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          function Get-PeMachine([string] $Path) {
+            $bytes = [System.IO.File]::ReadAllBytes($Path)
+            if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+              throw "not a PE executable: $Path"
+            }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length -or
+                $bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45) {
+              throw "invalid PE header: $Path"
+            }
+            return [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          }
+
+          function Assert-Arm64Pe([string] $Path) {
+            $machine = Get-PeMachine $Path
+            if ($machine -ne 0xaa64) {
+              throw "expected ARM64 PE machine 0xaa64 for $Path, got 0x$($machine.ToString('x4'))"
+            }
+          }
+
+          function Assert-Arm64CoffArchive([string] $Path) {
+            $bytes = [System.IO.File]::ReadAllBytes($Path)
+            $signature = [System.Text.Encoding]::ASCII.GetString($bytes, 0, 8)
+            if ($signature -ne "!<arch>`n") {
+              throw "not an archive: $Path"
+            }
+            $offset = 8
+            while ($offset + 60 -le $bytes.Length) {
+              $sizeText = [System.Text.Encoding]::ASCII.GetString($bytes, $offset + 48, 10).Trim()
+              $size = 0L
+              if (-not [long]::TryParse($sizeText, [ref] $size)) {
+                throw "invalid archive member size in $Path"
+              }
+              $dataOffset = $offset + 60
+              if ($size -ge 2 -and $dataOffset + $size -le $bytes.Length -and
+                  $bytes[$dataOffset] -eq 0x64 -and $bytes[$dataOffset + 1] -eq 0xaa) {
+                return
+              }
+              $offset = $dataOffset + $size
+              if (($offset % 2) -ne 0) {
+                $offset++
+              }
+            }
+            throw "archive contains no Windows ARM64 COFF member: $Path"
+          }
+
+          function Assert-PortabilityOutput([string[]] $Output, [string] $Mode) {
+            $cycleDrops = @($Output | Where-Object { $_ -eq "native cycle drop" }).Count
+            $copyDrops = @($Output | Where-Object { $_ -eq "copy state drop" }).Count
+            if ($cycleDrops -ne 6 -or $copyDrops -ne 2) {
+              throw "$Mode portability output has $cycleDrops cycle drops and $copyDrops copy drops"
+            }
+          }
+
+          function Invoke-NativeCapture([string] $Path, [string[]] $Arguments = @()) {
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $Path
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw "failed to start native command: $Path"
+            }
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) {
+              throw "native command failed with exit code $($process.ExitCode): $Path`n$stderr"
+            }
+            return @($stdout -split "`r?`n" | Where-Object { $_.Length -ne 0 })
+          }
+
+          $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          if ($env:PROCESSOR_ARCHITECTURE -ne "ARM64" -or $architecture -ne "Arm64") {
+            throw "expected a native Windows ARM64 runner, got PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE OSArchitecture=$architecture"
+          }
+
+          $bootstrapRoot = Join-Path $env:RUNNER_TEMP "windows-arm64-bootstrap"
+          $buildPrefix = Join-Path $bootstrapRoot "silex"
+          $builtSilex = Join-Path $buildPrefix "bin/silex.exe"
+          Assert-Arm64Pe $builtSilex
+
+          $probeRoot = Join-Path $env:GITHUB_WORKSPACE "Fixtures/WindowsArm64BoundaryProbe"
+          $boundaryDirectory = Join-Path $probeRoot "Boundary/windows-arm64"
+          $boundaryArchive = Join-Path $boundaryDirectory "BoundaryProbe.lib"
+          New-Item -ItemType Directory -Force $boundaryDirectory | Out-Null
+          Copy-Item (Join-Path $bootstrapRoot "boundary/BoundaryProbe.lib") $boundaryArchive
+          Assert-Arm64CoffArchive $boundaryArchive
+
+          $distributionArchive = Join-Path $env:RUNNER_TEMP "silex-windows-arm64.zip"
+          Compress-Archive -Path (Join-Path $buildPrefix "*") -DestinationPath $distributionArchive
+          Write-Output "distribution sha256=$((Get-FileHash $distributionArchive -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Remove-Item -Recurse -Force $buildPrefix
+          $installRoot = Join-Path $env:RUNNER_TEMP "silex-install"
+          Expand-Archive $distributionArchive -DestinationPath $installRoot
+          $silex = Join-Path $installRoot "bin/silex.exe"
+          Assert-Arm64Pe $silex
+
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
+          $env:HOME = $env:USERPROFILE
+          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
+          & $silex --version
+          $targets = @(& $silex targets)
+          if ($targets -notcontains "windows-arm64 (host)") {
+            throw "windows-arm64 is not reported as the native host"
+          }
+          & $silex setup
+
+          $managedZig = Join-Path $env:USERPROFILE ".silex/toolchain/zig/0.16.0/windows-x64/zig-x86_64-windows-0.16.0/zig.exe"
+          $shadercross = Join-Path $env:USERPROFILE ".silex/toolchain/shadercross/3.0.0/windows-arm64/SDL3_shadercross-3.0.0-windows-VC-x64/bin/shadercross.exe"
+          $managedZigMachine = Get-PeMachine $managedZig
+          if ($managedZigMachine -ne 0x8664) {
+            throw "expected the declared X64 managed linker, got machine 0x$($managedZigMachine.ToString('x4'))"
+          }
+          $shaderMachine = Get-PeMachine $shadercross
+          if ($shaderMachine -ne 0x8664) {
+            throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"
+          }
+          & $managedZig version
+          & $shadercross --help | Select-Object -First 1
+
+          $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
+
+          $portabilitySource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx"
+          # Preserve and inspect independently linked tests if native execution
+          # fails before PowerShell can report the full NTSTATUS.
+          $PSNativeCommandUseErrorActionPreference = $false
+          & $silex test $portabilitySource --nocache
+          $testExitCode = $LASTEXITCODE
+          if ($testExitCode -ne 0) {
+            $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"
+            $cdb = Get-ChildItem $debuggersRoot -Filter cdb.exe -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '[\\/]arm64[\\/]' } |
+              Select-Object -First 1
+            $failedTests = @(Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE ".silex/test") `
+              -Filter "NativePortability-*.exe" -File)
+            if ($null -ne $cdb) {
+              foreach ($failedTest in $failedTests) {
+                Assert-Arm64Pe $failedTest.FullName
+                Write-Output "debugging retained ARM64 test $($failedTest.Name) with $($cdb.FullName)"
+                & $cdb.FullName -lines -c "g; .ecxr; !analyze -v; r; kv; ub @pc L10; u @pc L40; q" $failedTest.FullName
+              }
+            }
+            throw "Windows ARM64 native test slice failed with exit code $testExitCode"
+          }
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $portabilityDebug = Join-Path $env:RUNNER_TEMP "native-portability-debug.exe"
+          $portabilityRelease = Join-Path $env:RUNNER_TEMP "native-portability-release.exe"
+          & $silex compile $portabilitySource --debug --nocache -o $portabilityDebug
+          & $silex compile $portabilitySource --release --nocache -o $portabilityRelease
+          Assert-Arm64Pe $portabilityDebug
+          Assert-Arm64Pe $portabilityRelease
+          $debugOutput = @(Invoke-NativeCapture $portabilityDebug)
+          $releaseOutput = @(Invoke-NativeCapture $portabilityRelease)
+          Assert-PortabilityOutput $debugOutput "Debug"
+          Assert-PortabilityOutput $releaseOutput "Release"
+          if (@(Compare-Object $debugOutput $releaseOutput -SyncWindow 0).Count -ne 0) {
+            throw "Debug and Release portability outputs differ"
+          }
+
+          & $silex test $portabilitySource --nocache
+
+          $smokeSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx"
+          $debugSmoke = @(Invoke-NativeCapture -Path $silex -Arguments @("run", $smokeSource, "--debug", "--nocache"))
+          $releaseSmoke = @(Invoke-NativeCapture -Path $silex -Arguments @("run", $smokeSource, "--release", "--nocache"))
+          if ($debugSmoke.Count -ne 1 -or $debugSmoke[0] -ne "silex distribution ready" -or
+              $releaseSmoke.Count -ne 1 -or $releaseSmoke[0] -ne "silex distribution ready") {
+            throw "distribution run smoke failed"
+          }
+          $standaloneSmoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
+          & $silex compile $smokeSource --release --nocache -o $standaloneSmoke
+          Assert-Arm64Pe $standaloneSmoke
+          $standaloneOutput = @(Invoke-NativeCapture $standaloneSmoke)
+          if ($standaloneOutput.Count -ne 1 -or $standaloneOutput[0] -ne "silex distribution ready") {
+            throw "standalone distribution smoke failed"
+          }
+
+          $boundaryTest = Join-Path $probeRoot "Tests/Boundary.sx"
+          $boundaryMain = Join-Path $probeRoot "Tests/BoundaryMain.sx"
+          & $silex test $boundaryTest --nocache
+          $boundaryDebug = Join-Path $env:RUNNER_TEMP "boundary-debug.exe"
+          $boundaryRelease = Join-Path $env:RUNNER_TEMP "boundary-release.exe"
+          & $silex compile $boundaryMain --debug --nocache -o $boundaryDebug
+          & $silex compile $boundaryMain --release --nocache -o $boundaryRelease
+          Assert-Arm64Pe $boundaryDebug
+          Assert-Arm64Pe $boundaryRelease
+          $boundaryDebugOutput = @(Invoke-NativeCapture $boundaryDebug)
+          $boundaryReleaseOutput = @(Invoke-NativeCapture $boundaryRelease)
+          if ($boundaryDebugOutput.Count -ne 1 -or $boundaryDebugOutput[0] -ne "windows arm64 boundary ready" -or
+              $boundaryReleaseOutput.Count -ne 1 -or $boundaryReleaseOutput[0] -ne "windows arm64 boundary ready") {
+            throw "Windows ARM64 Boundary smoke failed"
           }

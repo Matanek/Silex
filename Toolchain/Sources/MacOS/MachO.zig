@@ -52,9 +52,9 @@ fn emitEncoded(
     const entry_command_size = @sizeOf(macho.entry_point_command);
     const signature_command_size = @sizeOf(macho.linkedit_data_command);
     const got_command_size: usize = if (dynamic) @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64) else 0;
-    const dyld_info_command_size: usize = if (dynamic) @sizeOf(macho.dyld_info_command) else 0;
-    const symtab_command_size: usize = if (dynamic) @sizeOf(macho.symtab_command) else 0;
-    const dysymtab_command_size: usize = if (dynamic) @sizeOf(macho.dysymtab_command) else 0;
+    const dyld_info_command_size = @sizeOf(macho.dyld_info_command);
+    const symtab_command_size = @sizeOf(macho.symtab_command);
+    const dysymtab_command_size = @sizeOf(macho.dysymtab_command);
     const dylib_command_size = if (dynamic)
         std.mem.alignForward(usize, @sizeOf(macho.dylib_command) + DynamicLink.library_path.len, @alignOf(u64))
     else
@@ -93,7 +93,7 @@ fn emitEncoded(
         .cputype = macho.CPU_TYPE_ARM64,
         .cpusubtype = 0,
         .filetype = macho.MH_EXECUTE,
-        .ncmds = @intCast((if (encoded.data_offset != null) @as(usize, 8) else 7) + (if (dynamic) @as(usize, 5) else 0)),
+        .ncmds = @intCast((if (encoded.data_offset != null) @as(usize, 11) else 10) + (if (dynamic) @as(usize, 2) else 0)),
         .sizeofcmds = @intCast(load_commands_size),
         .flags = macho.MH_NOUNDEFS | macho.MH_DYLDLINK | macho.MH_TWOLEVEL | macho.MH_PIE,
         .reserved = 0,
@@ -244,24 +244,42 @@ fn emitEncoded(
     };
     try appendStruct(allocator, &bytes, &build_version);
 
-    if (dynamic) {
-        var dyld_info: macho.dyld_info_command = .{
+    var dyld_info: macho.dyld_info_command = if (dynamic)
+        .{
             .bind_off = @intCast(bind_offset),
             .bind_size = @intCast(bind_info.len),
+        }
+    else
+        .{
+            .rebase_off = @intCast(linkedit_offset),
+            .bind_off = @intCast(linkedit_offset),
+            .weak_bind_off = @intCast(linkedit_offset),
+            .lazy_bind_off = @intCast(linkedit_offset),
+            .export_off = @intCast(linkedit_offset),
         };
-        try appendStruct(allocator, &bytes, &dyld_info);
-        var symtab: macho.symtab_command = .{
+    try appendStruct(allocator, &bytes, &dyld_info);
+    var symtab: macho.symtab_command = if (dynamic)
+        .{
             .symoff = @intCast(symbol_offset),
             .nsyms = @intCast(program.external_functions.len),
             .stroff = @intCast(string_offset),
             .strsize = @intCast(string_table.len),
+        }
+    else
+        .{
+            .symoff = @intCast(linkedit_offset),
+            .stroff = @intCast(linkedit_offset),
         };
-        try appendStruct(allocator, &bytes, &symtab);
-        var dysymtab: macho.dysymtab_command = .{
+    try appendStruct(allocator, &bytes, &symtab);
+    var dysymtab: macho.dysymtab_command = if (dynamic)
+        .{
             .iundefsym = 0,
             .nundefsym = @intCast(program.external_functions.len),
-        };
-        try appendStruct(allocator, &bytes, &dysymtab);
+        }
+    else
+        .{ .locreloff = @intCast(linkedit_offset) };
+    try appendStruct(allocator, &bytes, &dysymtab);
+    if (dynamic) {
         var dylib: macho.dylib_command = .{
             .cmd = .LOAD_DYLIB,
             .cmdsize = @intCast(dylib_command_size),
@@ -375,7 +393,7 @@ test "emit builds an arm64 Mach-O executable with an LC_MAIN entry" {
 
     try std.testing.expectEqual(@as(u32, macho.MH_MAGIC_64), std.mem.readInt(u32, bytes[0..4], .little));
     try std.testing.expectEqual(@as(u32, @bitCast(macho.CPU_TYPE_ARM64)), std.mem.readInt(u32, bytes[4..8], .little));
-    try std.testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, bytes[16..20], .little));
+    try std.testing.expectEqual(@as(u32, 11), std.mem.readInt(u32, bytes[16..20], .little));
 
     const main_command_offset = @sizeOf(macho.mach_header_64) +
         @sizeOf(macho.segment_command_64) +
@@ -383,12 +401,36 @@ test "emit builds an arm64 Mach-O executable with an LC_MAIN entry" {
         @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64) +
         @sizeOf(macho.segment_command_64) +
         std.mem.alignForward(usize, @sizeOf(macho.dylinker_command) + "/usr/lib/dyld\x00".len, @alignOf(u64)) +
-        @sizeOf(macho.build_version_command);
+        @sizeOf(macho.build_version_command) +
+        @sizeOf(macho.dyld_info_command) +
+        @sizeOf(macho.symtab_command) +
+        @sizeOf(macho.dysymtab_command);
     try std.testing.expectEqual(
         @as(u32, @intFromEnum(macho.LC.MAIN)),
         std.mem.readInt(u32, bytes[main_command_offset..][0..4], .little),
     );
     try std.testing.expect(std.mem.readInt(u64, bytes[main_command_offset + 8 ..][0..8], .little) >= text_offset);
+
+    const dynamic_commands_offset = main_command_offset -
+        @sizeOf(macho.dyld_info_command) -
+        @sizeOf(macho.symtab_command) -
+        @sizeOf(macho.dysymtab_command);
+    try std.testing.expectEqual(
+        @as(u32, @intFromEnum(macho.LC.DYLD_INFO_ONLY)),
+        std.mem.readInt(u32, bytes[dynamic_commands_offset..][0..4], .little),
+    );
+    try std.testing.expectEqual(
+        @as(u32, @intFromEnum(macho.LC.SYMTAB)),
+        std.mem.readInt(u32, bytes[dynamic_commands_offset + @sizeOf(macho.dyld_info_command) ..][0..4], .little),
+    );
+    try std.testing.expectEqual(
+        @as(u32, @intFromEnum(macho.LC.DYSYMTAB)),
+        std.mem.readInt(
+            u32,
+            bytes[dynamic_commands_offset + @sizeOf(macho.dyld_info_command) + @sizeOf(macho.symtab_command) ..][0..4],
+            .little,
+        ),
+    );
 
     const signature_command_offset = main_command_offset + @sizeOf(macho.entry_point_command);
     try std.testing.expectEqual(

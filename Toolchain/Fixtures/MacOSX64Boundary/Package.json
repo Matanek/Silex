@@ -1,0 +1,16 @@
+{
+  "name": "MacOSX64Boundary",
+  "version": "1.0.0",
+  "requires": {
+    "silex": ">=0.0.0"
+  },
+  "boundary": {
+    "macos-x64": {
+      "providers": {
+        "Native": {
+          "archive": "Boundary/macos-x64/libMacOSX64Boundary.a"
+        }
+      }
+    }
+  }
+}

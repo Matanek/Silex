@@ -6,7 +6,7 @@ const WindowsImports = @import("../Windows/Imports.zig");
 const Allocator = std.mem.Allocator;
 const Register = enum(u4) { rax = 0, rcx = 1, rdx = 2, rbx = 3, rsp = 4, rbp = 5, rsi = 6, rdi = 7, r8 = 8, r9 = 9, r10 = 10, r11 = 11, r12 = 12, r13 = 13, r14 = 14, r15 = 15 };
 
-pub const Platform = enum { linux, windows };
+pub const Platform = enum { darwin, linux, windows };
 pub const Error = Machine.Error || Allocator.Error || error{UnsupportedInstruction};
 pub const Site = struct { displacement_offset: u32, function: usize };
 
@@ -26,6 +26,9 @@ pub fn emit(
         return emitBoundaryCall(allocator, bytes, external_sites, platform, external, call);
     }
     switch (platform) {
+        .darwin => {
+            return emitBoundaryCall(allocator, bytes, external_sites, platform, external, call);
+        },
         .linux => {
             if (!std.mem.eql(u8, external.provider, "Linux.kernel")) {
                 std.debug.print("x64 unsupported Linux boundary: {s}.{s}\n", .{ external.provider, external.source_name });
@@ -431,7 +434,14 @@ pub fn emit(
             } else return unsupported("Windows external boundary");
         },
     }
-    if (call.result) |result| try emitStoreStack(allocator, bytes, .rax, result);
+    if (call.result) |result| {
+        if (external.signature.result == .uint8) {
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
+        } else if (external.signature.result_signed_32) {
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
+        }
+        try emitStoreStack(allocator, bytes, .rax, result);
+    }
     _ = function;
 }
 
@@ -447,7 +457,7 @@ pub fn emitIndirect(
         return error.InvalidMachineProgram;
     }
     switch (platform) {
-        .linux => try emitLinuxBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
+        .darwin, .linux => try emitSystemVBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
         .windows => try emitWindowsBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
     }
     try emitLoadStack(allocator, bytes, .rax, call.callee);
@@ -462,6 +472,8 @@ pub fn emitIndirect(
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
             } else if (kind == .uint8) {
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
+            } else if (call.signature.result_signed_32) {
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
             }
         }
         try emitStoreStack(allocator, bytes, .rax, result);
@@ -586,7 +598,7 @@ fn emitBoundaryCall(
         return error.InvalidMachineProgram;
     }
     switch (platform) {
-        .linux => try emitLinuxBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
+        .darwin, .linux => try emitSystemVBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
         .windows => try emitWindowsBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
     }
     try bytes.append(allocator, 0xe8);
@@ -603,19 +615,21 @@ fn emitBoundaryCall(
                 try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
             } else if (kind == .uint8) {
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
+            } else if (external.signature.result_signed_32) {
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
             }
         }
         try emitStoreStack(allocator, bytes, .rax, result);
     }
 }
 
-fn emitLinuxBoundaryArguments(
+fn emitSystemVBoundaryArguments(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
     kinds: []const Machine.AbiValue,
     arguments: []const Machine.Slot,
 ) Allocator.Error!void {
-    const stack_size = boundaryStackSize(.linux, kinds);
+    const stack_size = boundaryStackSize(.darwin, kinds);
     if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, stack_size });
     const integer_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9 };
     var integer_index: usize = 0;
@@ -666,7 +680,7 @@ fn emitWindowsBoundaryArguments(
 fn boundaryStackSize(platform: Platform, kinds: []const Machine.AbiValue) u8 {
     var count: usize = 0;
     switch (platform) {
-        .linux => {
+        .darwin, .linux => {
             var integers: usize = 0;
             var floats: usize = 0;
             for (kinds) |kind| if (isFloat(kind)) {
@@ -800,4 +814,77 @@ test "encode syscall immediates in extended registers" {
     defer bytes.deinit(std.testing.allocator);
     try emitImmediate(std.testing.allocator, &bytes, .r9, 4);
     try std.testing.expectEqualSlices(u8, &.{ 0x49, 0xb9, 4, 0, 0, 0, 0, 0, 0, 0 }, bytes.items);
+}
+
+test "x64 boundary calls sign extend int32 results before storing them" {
+    const external_functions = [_]Machine.ExternalFunction{.{
+        .provider = "Boundary.Native",
+        .source_name = "signed_result",
+        .signature = .{ .arguments = &.{}, .result = .int32, .result_signed_32 = true },
+    }};
+    const function: Machine.Function = .{
+        .name = "test",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 1,
+        .frame_size = try Machine.frameSize(1),
+        .instructions = &.{},
+    };
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    var imports: std.ArrayList(WindowsImports.X64Site) = .empty;
+    defer imports.deinit(std.testing.allocator);
+    var sites: std.ArrayList(Site) = .empty;
+    defer sites.deinit(std.testing.allocator);
+
+    try emit(
+        std.testing.allocator,
+        &bytes,
+        &imports,
+        &sites,
+        .darwin,
+        .{ .functions = &.{function}, .external_functions = &external_functions },
+        function,
+        .{ .result = 0, .function = 0, .arguments = &.{} },
+    );
+
+    try std.testing.expectEqual(@as(usize, 1), sites.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0x63, 0xc0 }) != null);
+}
+
+test "Windows x64 imports sign extend int32 results before storing them" {
+    const argument_types = [_]Machine.AbiValue{ .read_address, .int32, .int32 };
+    const external_functions = [_]Machine.ExternalFunction{.{
+        .provider = "Windows.ucrtbase",
+        .source_name = "_wopen",
+        .signature = .{ .arguments = &argument_types, .result = .int32, .result_signed_32 = true },
+    }};
+    const function: Machine.Function = .{
+        .name = "test",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = try Machine.frameSize(4),
+        .instructions = &.{},
+    };
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    var imports: std.ArrayList(WindowsImports.X64Site) = .empty;
+    defer imports.deinit(std.testing.allocator);
+    var sites: std.ArrayList(Site) = .empty;
+    defer sites.deinit(std.testing.allocator);
+
+    try emit(
+        std.testing.allocator,
+        &bytes,
+        &imports,
+        &sites,
+        .windows,
+        .{ .functions = &.{function}, .external_functions = &external_functions },
+        function,
+        .{ .result = 3, .function = 0, .arguments = &.{ 0, 1, 2 } },
+    );
+
+    try std.testing.expectEqual(@as(usize, 1), imports.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0x63, 0xc0 }) != null);
 }

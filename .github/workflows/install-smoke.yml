@@ -16,7 +16,11 @@ on:
         default: all
         options:
           - all
+          - macos-arm64
+          - macos-x64
+          - linux-arm64
           - linux-x64
+          - windows-arm64
           - windows-x64
 
 permissions:
@@ -27,57 +31,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  macos-arm64:
+    if: inputs.target == 'all' || inputs.target == 'macos-arm64'
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - shell: bash
+        run: .github/scripts/smoke-public-unix.sh macos-arm64 '${{ inputs.version }}'
+
+  macos-x64:
+    if: inputs.target == 'all' || inputs.target == 'macos-x64'
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - shell: bash
+        run: .github/scripts/smoke-public-unix.sh macos-x64 '${{ inputs.version }}'
+
+  linux-arm64:
+    if: inputs.target == 'all' || inputs.target == 'linux-arm64'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - shell: bash
+        run: .github/scripts/smoke-public-unix.sh linux-arm64 '${{ inputs.version }}'
+
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
+    timeout-minutes: 20
     steps:
-      - name: Check out the owned consumer smoke
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+      - shell: bash
+        run: .github/scripts/smoke-public-unix.sh linux-x64 '${{ inputs.version }}'
 
-      - name: Install and execute the published compiler
-        shell: bash
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          export HOME="$RUNNER_TEMP/home"
-          export SILEX_INSTALL_DIR="$RUNNER_TEMP/bin"
-          export SILEX_VERSION="$REQUESTED_VERSION"
-          mkdir -p "$HOME"
-          curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
-          "$SILEX_INSTALL_DIR/silex" --version
-          "$SILEX_INSTALL_DIR/silex" setup
-          output=$("$SILEX_INSTALL_DIR/silex" run Tests/Native/DistributionSmoke.sx --release)
-          test "$output" = "silex distribution ready"
+  windows-arm64:
+    if: inputs.target == 'all' || inputs.target == 'windows-arm64'
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - shell: pwsh
+        run: .github/scripts/smoke-public-windows.ps1 -Target windows-arm64 -Version '${{ inputs.version }}'
 
   windows-x64:
     if: inputs.target == 'all' || inputs.target == 'windows-x64'
     runs-on: windows-2025
-    timeout-minutes: 15
-
+    timeout-minutes: 20
     steps:
-      - name: Check out the owned consumer smoke
-        uses: actions/checkout@v6
-
-      - name: Install and execute the published compiler
-        shell: pwsh
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
-          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
-          $env:HOME = $env:USERPROFILE
-          $env:SILEX_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "bin"
-          $env:SILEX_VERSION = $env:REQUESTED_VERSION
-          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
-          Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1)
-          $silex = Join-Path $env:SILEX_INSTALL_DIR "silex.exe"
-          & $silex --version
-          & $silex setup
-          $output = @(& $silex run Tests/Native/DistributionSmoke.sx --release)
-          if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1 -or $output[0] -ne "silex distribution ready") {
-            throw "published installer smoke failed"
-          }
+      - uses: actions/checkout@v6
+      - shell: pwsh
+        run: .github/scripts/smoke-public-windows.ps1 -Target windows-x64 -Version '${{ inputs.version }}'

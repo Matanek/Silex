@@ -34,8 +34,10 @@ native, serialization, and editor work that remains.
   for the structurally emitted non-host targets are not implemented yet. The
   backend also has no general dynamic-library model, public source-level
   external declarations, or ABI stability guarantee. Besides the closed
-  system contracts, `macos-arm64` supports typed C ABI calls owned privately by
-  a package that declares its static provider.
+  system contracts, `macos-arm64` and `linux-arm64` support typed C ABI calls
+  owned privately by a package that declares its static provider. Linux ARM64
+  verifies its AAPCS64 boundary through an AArch64 relocatable ELF and the
+  native bootstrap linker.
 - Interfaces, IR and package graphs are in-memory structures and have no stable
   serialized format yet.
 

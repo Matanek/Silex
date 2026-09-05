@@ -1,0 +1,13 @@
+{
+  "name": "LinuxArm64Boundary",
+  "version": "1.0.0",
+  "boundary": {
+    "linux-arm64": {
+      "providers": {
+        "Native": {
+          "archive": "Boundary/linux-arm64/libProvider.a"
+        }
+      }
+    }
+  }
+}

@@ -156,6 +156,7 @@ fn lowerInternal(
             .signature = .{
                 .arguments = arguments,
                 .result = if (external.return_type == .void) null else try lowerExternalType(external.return_type),
+                .result_signed_32 = external.return_type == .int32,
             },
         };
     }
@@ -979,6 +980,7 @@ fn lowerInstruction(
                 .signature = .{
                     .arguments = argument_types,
                     .result = if (signature.return_type == .void) null else try lowerExternalType(signature.return_type),
+                    .result_signed_32 = signature.return_type == .int32,
                 },
                 .arguments = arguments,
             } };

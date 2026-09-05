@@ -1,0 +1,19 @@
+use Interop.C
+use Interop.Boundary
+
+let native_answer = C.function<func() int32>(
+    library:Boundary.Native,
+    name:"silex_boundary_answer"
+)
+let native_apply = C.function<func(int32, uint) int32>(
+    library:Boundary.Native,
+    name:"silex_boundary_apply"
+)
+
+func add_two(value:int32) int32 { return value + 2 }
+
+public func answer() int32 { return native_answer() }
+
+public func callback_answer() int32 {
+    return native_apply(40, C.function_address(add_two))
+}

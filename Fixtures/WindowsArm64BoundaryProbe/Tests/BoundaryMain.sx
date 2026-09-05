@@ -1,0 +1,8 @@
+use WindowsArm64BoundaryProbe.Api
+
+func main() {
+    if Api.answer() != 42 || Api.callback_answer() != 42 {
+        panic("Windows ARM64 Boundary failure")
+    }
+    print("windows arm64 boundary ready")
+}

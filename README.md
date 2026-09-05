@@ -20,15 +20,15 @@ and its limits.
 
 ## Install
 
-The standalone compiler supports macOS on Apple Silicon, Linux x64, and
-Windows x64 without requiring Zig or Git on the developer's machine:
+The standalone compiler supports macOS, Linux, and Windows on ARM64 and x64
+without requiring Zig or Git on the developer's machine:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
 silex --version
 ```
 
-On Windows x64, run from PowerShell:
+On Windows ARM64 or x64, run from PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1 | iex

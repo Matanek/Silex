@@ -8,9 +8,11 @@ silex_machine=$(uname -m)
 
 case "$silex_system:$silex_machine" in
     Darwin:arm64) silex_platform="macos-arm64" ;;
+    Darwin:x86_64|Darwin:amd64) silex_platform="macos-x64" ;;
+    Linux:aarch64|Linux:arm64) silex_platform="linux-arm64" ;;
     Linux:x86_64|Linux:amd64) silex_platform="linux-x64" ;;
     *)
-        echo "silex: unsupported host $silex_system $silex_machine; expected macOS ARM64 or Linux x64" >&2
+        echo "silex: unsupported host $silex_system $silex_machine; expected macOS or Linux on ARM64 or x64" >&2
         exit 1
         ;;
 esac
@@ -25,7 +27,9 @@ silex_release=${SILEX_VERSION:-latest}
 silex_asset="silex-$silex_platform.tar.gz"
 silex_checksum="$silex_asset.sha256"
 
-if [ "$silex_release" = "latest" ]; then
+if [ -n "${SILEX_RELEASE_URL:-}" ]; then
+    silex_release_url=${SILEX_RELEASE_URL%/}
+elif [ "$silex_release" = "latest" ]; then
     silex_release_url="https://github.com/$silex_repository/releases/latest/download"
 else
     case "$silex_release" in

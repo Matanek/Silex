@@ -88,6 +88,17 @@ export fn silex_cycle_x64(
     return cycle(operation, value, model, type_value, allocate_function, release_function);
 }
 
+export fn silex_cycle_arm64(
+    operation: u64,
+    value: u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) callconv(.c) u64 {
+    return cycle(operation, value, model, type_value, allocate_function, release_function);
+}
+
 fn cycle(
     operation: u64,
     value: u64,
@@ -369,12 +380,22 @@ fn grow(context: *Context) bool {
     const new_capacity = new_byte_count / @sizeOf(Node);
     const mapping = context.allocate(new_byte_count) orelse return false;
     const nodes: [*]Node = @ptrCast(@alignCast(mapping));
-    for (context.nodes[0..context.count], 0..) |node, index| nodes[index] = node;
+    for (context.nodes[0..context.count], 0..) |node, index| copyNode(&nodes[index], node);
     context.release(@ptrCast(context.nodes), context.node_byte_count);
     context.nodes = nodes;
     context.capacity = new_capacity;
     context.node_byte_count = new_byte_count;
     return true;
+}
+
+fn copyNode(destination: *Node, source: Node) void {
+    destination.address = source.address;
+    destination.type_value = source.type_value;
+    destination.byte_count = source.byte_count;
+    destination.internal = source.internal;
+    destination.feedback_internal = source.feedback_internal;
+    destination.active = source.active;
+    destination.kind = source.kind;
 }
 
 fn traceValue(context: *Context, value: [*]u64, type_value: u64) bool {
@@ -509,30 +530,52 @@ fn classBytes(object: [*]u64, data: [*]const u64) ?usize {
 }
 
 fn systemAllocate(byte_count: usize) callconv(.c) ?[*]u64 {
-    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) return null;
+    if (comptime builtin.cpu.arch != .aarch64 or (builtin.os.tag != .macos and builtin.os.tag != .linux)) return null;
     var result: usize = 0;
-    asm volatile ("svc #0x80"
-        : [result] "={x0}" (result),
-        : [address] "{x0}" (@as(usize, 0)),
-          [size] "{x1}" (byte_count),
-          [protection] "{x2}" (@as(usize, 3)),
-          [flags] "{x3}" (@as(usize, 0x1002)),
-          [descriptor] "{x4}" (~@as(usize, 0)),
-          [offset] "{x5}" (@as(usize, 0)),
-          [number] "{x16}" (@as(usize, 197)),
-        : .{ .memory = true });
+    if (comptime builtin.os.tag == .macos) {
+        asm volatile ("svc #0x80"
+            : [result] "={x0}" (result),
+            : [address] "{x0}" (@as(usize, 0)),
+              [size] "{x1}" (byte_count),
+              [protection] "{x2}" (@as(usize, 3)),
+              [flags] "{x3}" (@as(usize, 0x1002)),
+              [descriptor] "{x4}" (~@as(usize, 0)),
+              [offset] "{x5}" (@as(usize, 0)),
+              [number] "{x16}" (@as(usize, 197)),
+            : .{ .memory = true });
+    } else {
+        asm volatile ("svc #0"
+            : [result] "={x0}" (result),
+            : [address] "{x0}" (@as(usize, 0)),
+              [size] "{x1}" (byte_count),
+              [protection] "{x2}" (@as(usize, 3)),
+              [flags] "{x3}" (@as(usize, 0x22)),
+              [descriptor] "{x4}" (~@as(usize, 0)),
+              [offset] "{x5}" (@as(usize, 0)),
+              [number] "{x8}" (@as(usize, 222)),
+            : .{ .memory = true });
+    }
     if (@as(isize, @bitCast(result)) < 0) return null;
     return @ptrFromInt(result);
 }
 
 fn systemRelease(address: [*]u8, byte_count: usize) callconv(.c) void {
-    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) return;
-    _ = asm volatile ("svc #0x80"
-        : [result] "={x0}" (-> usize),
-        : [address] "{x0}" (@intFromPtr(address)),
-          [size] "{x1}" (byte_count),
-          [number] "{x16}" (@as(usize, 73)),
-        : .{ .memory = true });
+    if (comptime builtin.cpu.arch != .aarch64 or (builtin.os.tag != .macos and builtin.os.tag != .linux)) return;
+    if (comptime builtin.os.tag == .macos) {
+        _ = asm volatile ("svc #0x80"
+            : [result] "={x0}" (-> usize),
+            : [address] "{x0}" (@intFromPtr(address)),
+              [size] "{x1}" (byte_count),
+              [number] "{x16}" (@as(usize, 73)),
+            : .{ .memory = true });
+    } else {
+        _ = asm volatile ("svc #0"
+            : [result] "={x0}" (-> usize),
+            : [address] "{x0}" (@intFromPtr(address)),
+              [size] "{x1}" (byte_count),
+              [number] "{x8}" (@as(usize, 215)),
+            : .{ .memory = true });
+    }
 }
 
 fn testAllocate(byte_count: usize) callconv(.c) ?[*]u64 {

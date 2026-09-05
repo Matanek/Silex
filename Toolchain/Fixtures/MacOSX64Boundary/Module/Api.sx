@@ -1,0 +1,37 @@
+use Interop.Boundary
+use Interop.C
+
+let boundary_integer_sum = C.function<
+    func(int, int, int, int, int, int, int, int, int, int) int
+>(library:Boundary.Native, name:"silex_boundary_integer_sum")
+
+let boundary_float_sum = C.function<
+    func(float64, float64, float64, float64, float64, float64, float64, float64, float64, float64) float64
+>(library:Boundary.Native, name:"silex_boundary_float_sum")
+
+let boundary_float = C.function<
+    func(int) float64
+>(library:Boundary.Native, name:"silex_boundary_float")
+
+let boundary_call = C.function<
+    func(uint, int) int
+>(library:Boundary.Native, name:"silex_boundary_call")
+
+func increment(value:int) int { return value + 1 }
+
+public func verify() {
+    assert(boundary_integer_sum(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
+    assert(boundary_float_sum(
+        boundary_float(1),
+        boundary_float(2),
+        boundary_float(3),
+        boundary_float(4),
+        boundary_float(5),
+        boundary_float(6),
+        boundary_float(7),
+        boundary_float(8),
+        boundary_float(9),
+        boundary_float(10)
+    ) == boundary_float(55))
+    assert(boundary_call(C.function_address(increment), 41) == 42)
+}
