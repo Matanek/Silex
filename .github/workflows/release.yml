@@ -189,9 +189,9 @@ jobs:
         run: >-
           .github/scripts/build-release-windows.ps1
           -Target windows-arm64
-          -ZigUrl https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip
-          -ZigSha256 68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e
-          -ZigDirectory zig-x86_64-windows-0.16.0
+          -ZigUrl https://ziglang.org/download/0.16.0/zig-aarch64-windows-0.16.0.zip
+          -ZigSha256 aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef
+          -ZigDirectory zig-aarch64-windows-0.16.0
       - uses: actions/upload-artifact@v7
         with:
           name: silex-windows-arm64

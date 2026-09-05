@@ -66,5 +66,15 @@ if actual_files != expected_files:
 if 'zig build "-Dtarget=$zigTarget"' not in windows_builder:
     raise SystemExit("Windows release build target must be an interpolated PowerShell argument")
 
+windows_arm64_job = re.search(
+    r"^  windows-arm64:\n(.*?)(?=^  windows-x64:)", workflow, re.MULTILINE | re.DOTALL
+)
+if windows_arm64_job is None:
+    raise SystemExit("missing Windows ARM64 release job")
+if "zig-aarch64-windows-0.16.0.zip" not in windows_arm64_job.group(1):
+    raise SystemExit("Windows ARM64 release must use the native Zig archive")
+if "aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef" not in windows_arm64_job.group(1):
+    raise SystemExit("Windows ARM64 release must pin the native Zig archive checksum")
+
 print("Release workflow contract passed")
 PYTHON
