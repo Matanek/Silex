@@ -177,10 +177,18 @@ fn borrowDirectAggregateArguments(allocator: Allocator, program: Ir.Program) !Ir
 
 fn flatScalarStructure(program: Ir.Program, structure_index: usize) bool {
     if (structure_index >= program.structures.len) return false;
+    if (isEnumerationStructure(program, structure_index)) return false;
     const structure = program.structures[structure_index];
     if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null) return false;
     for (structure.fields) |field| if (!field.type.isNumeric() and field.type != .bool) return false;
     return true;
+}
+
+fn isEnumerationStructure(program: Ir.Program, structure_index: usize) bool {
+    for (program.enums) |enumeration| {
+        if (enumeration.type_index == structure_index) return true;
+    }
+    return false;
 }
 
 fn directAggregateLoadAtCall(
@@ -607,6 +615,7 @@ fn splitFlatAggregateLocals(allocator: Allocator, program: Ir.Program, function:
     for (function.local_types, 0..) |local_type, local| {
         const structure_index = local_type.structureIndex() orelse continue;
         if (structure_index >= program.structures.len) continue;
+        if (isEnumerationStructure(program, structure_index)) continue;
         const structure = program.structures[structure_index];
         if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null) continue;
         for (structure.fields) |field| {

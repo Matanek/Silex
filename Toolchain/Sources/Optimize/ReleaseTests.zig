@@ -222,6 +222,48 @@ test "release preserves floating branches and loops" {
     try std.testing.expectEqual(@as(i64, 0), native.value);
 }
 
+test "release materializes referenced aggregates used by direct calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Mesh {
+        \\    var vertices:int[]
+        \\    var indices:int[]
+        \\    init() {
+        \\        self.vertices = []
+        \\        self.indices = []
+        \\    }
+        \\    func clear_storage() {
+        \\        self.vertices.clear()
+        \\        self.indices.clear()
+        \\    }
+        \\    func count() int {
+        \\        return self.vertices.count() + self.indices.count()
+        \\    }
+        \\}
+        \\func update_mesh(mesh:&Mesh) {
+        \\    mesh.clear_storage()
+        \\}
+        \\func answer() int {
+        \\    var mesh = Mesh()
+        \\    update_mesh(mesh)
+        \\    return mesh.count()
+        \\}
+        \\func main() {}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    var answer: ?usize = null;
+    for (optimized.functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, "answer")) answer = index;
+    }
+    const native = try Runner.invoke(allocator, machine, answer orelse return error.TestUnexpectedResult, &.{});
+    try std.testing.expectEqual(Machine.Status.success, native.status);
+    try std.testing.expectEqual(@as(i64, 0), native.value);
+}
+
 test "release preserves helper mutations of class-owned list elements" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -417,6 +459,33 @@ test "release splits flat mutable aggregate locals across control flow" {
     const body = tail[0..end];
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, "struct.init @State"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "store $0:structure"));
+}
+
+test "release preserves enum locals used by payload matches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Face { init() {} }
+        \\struct LoadError { let detail:str }
+        \\func decoded(result:Result<Face, LoadError>) Face {
+        \\    match result {
+        \\        failure(error) => { panic("load failed: " + error.detail) }
+        \\        success(face) => { return face }
+        \\    }
+        \\}
+        \\func main() {}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @decoded") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    const body = tail[0..end];
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "store $0:structure"));
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    try Machine.validate(machine);
 }
 
 test "release borrows direct aggregate collection arguments" {

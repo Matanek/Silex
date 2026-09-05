@@ -15,6 +15,7 @@ const CycleRuntime = @import("CycleRuntime.zig");
 const System = @import("System.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const MemoryResidence = @import("MemoryResidence.zig");
+const ResidenceLiveness = @import("ResidenceLiveness.zig");
 const Allocation = @import("Allocation.zig");
 const Pairing = @import("Pairing.zig");
 const LoopCursor = @import("LoopCursor.zig");
@@ -3426,21 +3427,7 @@ fn isComparison(operator: Machine.BinaryOperator) bool {
 }
 
 fn instructionUsesSlot(instruction: Machine.Instruction, slot: Machine.Slot) bool {
-    return switch (instruction) {
-        .copy => |value| value.operand == slot,
-        .copy_range => |value| spanContainsSlot(value.operand, slot),
-        .aggregate_init => |value| for (value.fields) |field| {
-            if (spanContainsSlot(field, slot)) break true;
-        } else false,
-        .unary => |value| value.operand == slot,
-        .binary => |value| value.left == slot or value.right == slot,
-        .convert => |value| value.operand == slot,
-        .collection_load => |value| value.index == slot or spanContainsSlot(value.collection, slot),
-        .collection_count => |value| spanContainsSlot(value.collection, slot),
-        .return_value => |value| spanContainsSlot(value, slot),
-        .branch => |value| value.condition == slot,
-        else => MemoryResidence.uses(instruction, slot),
-    };
+    return ResidenceLiveness.instructionUses(instruction, slot);
 }
 
 fn eagerCollectionWidth(
