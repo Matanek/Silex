@@ -981,6 +981,20 @@ fn visit(
             }
         },
         .collection_count => |value| touch(value.result, index, first, last, weights, weight),
+        .reference_load,
+        .reference_store,
+        .reference_offset,
+        .reference_indirect_offset,
+        .local_address,
+        .address_load,
+        .address_store,
+        .collection_reference,
+        .collection_replace,
+        => for (0..first.len) |slot| {
+            if (instructionUses(instruction, slot) or instructionDefines(instruction, slot)) {
+                touch(@intCast(slot), index, first, last, weights, weight);
+            }
+        },
         .call => |call| {
             for (call.arguments) |argument| if (!argument.aggregate) touch(argument.start, index, first, last, weights, weight);
             if (call.result) |result| if (!result.aggregate) touch(result.start, index, first, last, weights, weight);
@@ -1092,6 +1106,49 @@ test "aggregate construction exposes leaf copy affinity" {
     try std.testing.expectEqual(@as(?Machine.Slot, 0), aggregateOperandForResult(initialization, 9));
     try std.testing.expectEqual(@as(?Machine.Slot, null), aggregateOperandForResult(initialization, 5));
     try std.testing.expectEqual(@as(?Machine.Slot, null), aggregateOperandForResult(initialization, 10));
+}
+
+test "repeated memory uses keep a reference parameter in a preserved register" {
+    var instructions: std.ArrayList(Machine.Instruction) = .empty;
+    defer instructions.deinit(std.testing.allocator);
+
+    for (0..13) |offset| try instructions.append(std.testing.allocator, .{ .constant_int = .{
+        .result = @intCast(1 + offset),
+        .bits = offset + 1,
+    } });
+    for (0..13) |offset| try instructions.append(std.testing.allocator, .{ .reference_load = .{
+        .result = .{ .start = @intCast(14 + offset), .width = 1 },
+        .reference = 0,
+    } });
+    var accumulator: Machine.Slot = 1;
+    for (2..14) |operand| {
+        const result: Machine.Slot = @intCast(26 + operand);
+        try instructions.append(std.testing.allocator, .{ .binary = .{
+            .result = result,
+            .operator = .add,
+            .left = accumulator,
+            .right = @intCast(operand),
+        } });
+        accumulator = result;
+    }
+    try instructions.append(std.testing.allocator, .{ .return_value = .{ .start = accumulator, .width = 1 } });
+
+    const function: Machine.Function = .{
+        .name = "memory_parameter",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 40,
+        .frame_size = try Machine.frameSize(40),
+        .instructions = instructions.items,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    try std.testing.expectEqual(@as(?u5, 19), result.residences[0]);
 }
 
 test "linear scan keeps operands distinct at their shared instruction" {

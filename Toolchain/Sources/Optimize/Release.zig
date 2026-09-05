@@ -42,7 +42,7 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
 }
 
 pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_count: u16) !Ir.Program {
-    const prepared = try optimizeWithoutInliningWithWorkers(allocator, program, worker_count);
+    const prepared = try optimizeWithoutInliningWithWorkers(allocator, program, worker_count, false);
     const borrowed_prepared = try borrowDirectAggregateArguments(allocator, prepared);
     // Simplify constructors before cloning them into branching callers:
     // otherwise each field assignment carries its whole aggregate along.
@@ -51,7 +51,7 @@ pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_cou
     const inlined = try InlineValues.optimize(allocator, intrinsic_prepared);
     const control_flow_inlined = try InlineControlFlow.optimize(allocator, inlined);
     const scalarized = try replaceScalarAggregatesWithWorkers(allocator, control_flow_inlined, worker_count);
-    return optimizeWithoutInliningWithWorkers(allocator, scalarized, worker_count);
+    return optimizeWithoutInliningWithWorkers(allocator, scalarized, worker_count, true);
 }
 
 // Direct calls may borrow a checked collection element when the callee only
@@ -262,10 +262,15 @@ fn scalarMathCall(program: Ir.Program, caller: Ir.Function, instruction: Ir.Inst
 }
 
 pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Program {
-    return optimizeWithoutInliningWithWorkers(allocator, program, 1);
+    return optimizeWithoutInliningWithWorkers(allocator, program, 1, true);
 }
 
-fn optimizeWithoutInliningWithWorkers(allocator: Allocator, program: Ir.Program, requested_worker_count: u16) !Ir.Program {
+fn optimizeWithoutInliningWithWorkers(
+    allocator: Allocator,
+    program: Ir.Program,
+    requested_worker_count: u16,
+    promote_floats: bool,
+) !Ir.Program {
     const summaries = try allocator.alloc(GlobalSummary, program.functions.len);
     for (program.functions, 0..) |function, index| summaries[index] = summarize(function);
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
@@ -290,7 +295,10 @@ fn optimizeWithoutInliningWithWorkers(allocator: Allocator, program: Ir.Program,
     }
     var result = program;
     result.functions = functions;
-    result = try SsaPromotion.optimize(allocator, result);
+    result = if (promote_floats)
+        try SsaPromotion.optimize(allocator, result)
+    else
+        try SsaPromotion.optimizeIntegerAndBooleanLocals(allocator, result);
     const validated = try Ir.writeText(allocator, result);
     allocator.free(validated);
     return result;

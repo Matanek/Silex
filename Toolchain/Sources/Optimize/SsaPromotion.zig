@@ -7,16 +7,24 @@ const Allocator = std.mem.Allocator;
 /// built as SSA phi nodes internally, then lowered to parallel copies on CFG
 /// edges so the portable IR and every native backend keep a single contract.
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeTypes(allocator, program, true);
+}
+
+pub fn optimizeIntegerAndBooleanLocals(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeTypes(allocator, program, false);
+}
+
+fn optimizeTypes(allocator: Allocator, program: Ir.Program, promote_floats: bool) !Ir.Program {
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
-        functions[index] = try promoteFunction(allocator, function);
+        functions[index] = try promoteFunction(allocator, function, promote_floats);
     }
     var result = program;
     result.functions = functions;
     return result;
 }
 
-fn promoteFunction(allocator: Allocator, original: Ir.Function) !Ir.Function {
+fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: bool) !Ir.Function {
     if (original.blocks.len == 0 or original.local_types.len == 0) return original;
 
     const function = try reachableFunction(allocator, original);
@@ -24,10 +32,8 @@ fn promoteFunction(allocator: Allocator, original: Ir.Function) !Ir.Function {
     const local_count = function.local_types.len;
     const promoted = try allocator.alloc(bool, local_count);
     for (function.local_types, 0..) |local_type, local| {
-        // Float recurrences already receive global scalar/SIMD residences in
-        // native backends. Preserve their local identity until lane affinity
-        // can be carried explicitly through SSA phi nodes.
-        promoted[local] = local_type.isInteger() or local_type == .bool;
+        promoted[local] = local_type.isInteger() or local_type == .bool or
+            (promote_floats and (local_type == .float32 or local_type == .float64));
     }
     for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
         .local_address => |address| promoted[address.local] = false,

@@ -46,6 +46,14 @@ pub const regressions = [_]RegressionEntry{
         .concern = "immutable aggregate projections across branches and loops preserve snapshots and joined returns",
     },
     .{
+        .name = "Regressions/FloatSsaDiamond.sx",
+        .concern = "float32 and float64 local values preserve both incoming edges of an SSA diamond",
+    },
+    .{
+        .name = "Regressions/FloatSsaLoop.sx",
+        .concern = "float32 and float64 local recurrences preserve entry and back-edge values",
+    },
+    .{
         .name = "Regressions/BooleanSharedChain.sx",
         .concern = "shared boolean-chain blocks and reused branch values",
         .contract = .{ .reduces_blocks = "hot_chain" },

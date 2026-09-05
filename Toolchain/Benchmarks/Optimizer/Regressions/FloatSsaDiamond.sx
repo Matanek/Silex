@@ -1,0 +1,120 @@
+func choose_float32(positive:bool) float32 {
+    var value:float32 = 1.0
+    if positive { value = 7.0 } else { value = -3.0 }
+    return value
+}
+func choose_float64(positive:bool) float64 {
+    var value:float64 = 2.0
+    if positive { value = 11.0 } else { value = -5.0 }
+    return value
+}
+
+func joined_scales(separation:float32, use_bias:bool) float32 {
+    var bias:float32 = 0.0
+    var mass_scale:float32 = 1.0
+    var impulse_scale:float32 = 0.0
+    if separation > 0.0 {
+        bias = separation * 4.0
+    } else if use_bias {
+        bias = separation * 2.0
+        mass_scale = 0.75
+        impulse_scale = 0.25
+    }
+    return bias + mass_scale * 10.0 + impulse_scale * 100.0
+}
+
+struct PhiState {
+    let px:float32
+    let py:float32
+    let c:float32
+    let s:float32
+}
+
+struct PhiConstraint {
+    let first:int
+    let second:int
+    let nx:float32
+    let ny:float32
+    let ax:float32
+    let ay:float32
+    let bx:float32
+    let by:float32
+    let separation:float32
+    let bias_rate:float32
+    let mass_scale:float32
+    let impulse_scale:float32
+}
+
+func structured_joined_scales(
+    states:@PhiState[..],
+    constraint:@PhiConstraint,
+    use_bias:bool,
+) float32 {
+    let a = copy states[constraint.first]
+    let b = copy states[constraint.second]
+    var carried_a_px = a.px
+    var carried_a_py = a.py
+    var carried_a_c = a.c
+    var carried_a_s = a.s
+    var carried_b_px = b.px
+    var carried_b_py = b.py
+    let dx = (b.px - a.px) +
+        ((b.c * constraint.bx - b.s * constraint.by) -
+        (a.c * constraint.ax - a.s * constraint.ay))
+    let dy = (b.py - a.py) +
+        ((b.s * constraint.bx + b.c * constraint.by) -
+        (a.s * constraint.ax + a.c * constraint.ay))
+    let separation = constraint.separation + (dx * constraint.nx + dy * constraint.ny)
+    var bias:float32 = 0.0
+    var mass_scale:float32 = 1.0
+    var impulse_scale:float32 = 0.0
+    if separation > 0.0 {
+        bias = separation * 240.0
+    } else if use_bias {
+        bias = constraint.bias_rate * separation
+        if bias < -3.0 { bias = -3.0 }
+        mass_scale = constraint.mass_scale
+        impulse_scale = constraint.impulse_scale
+    }
+    carried_a_px += bias
+    carried_a_py += mass_scale
+    carried_a_c += impulse_scale
+    carried_a_s += carried_a_px
+    carried_b_px += carried_a_py
+    carried_b_py += carried_a_c
+    return carried_a_px + carried_a_py + carried_a_c + carried_a_s +
+        carried_b_px + carried_b_py + mass_scale * 10.0 + impulse_scale * 100.0
+}
+
+func main() {
+    assert(choose_float32(true) == 7.0)
+    assert(choose_float32(false) == -3.0)
+    assert(choose_float64(true) == 11.0)
+    assert(choose_float64(false) == -5.0)
+    assert(joined_scales(2.0, false) == 18.0)
+    assert(joined_scales(-2.0, true) == 28.5)
+    assert(joined_scales(-2.0, false) == 10.0)
+
+    let states:PhiState[] = [
+        PhiState(px:0.0, py:0.0, c:1.0, s:0.0),
+        PhiState(px:0.00390625, py:-0.0078125, c:0.6, s:0.8),
+    ]
+    let constraint = PhiConstraint(
+        first:0,
+        second:1,
+        nx:0.6,
+        ny:0.8,
+        ax:0.125,
+        ay:-0.0625,
+        bx:-0.125,
+        by:0.0625,
+        separation:-0.25,
+        bias_rate:12.0,
+        mass_scale:0.75,
+        impulse_scale:0.25,
+    )
+    let state_view = @states[0:states.count()]
+    assert(structured_joined_scales(state_view, constraint, true) == 30.496094)
+    assert(structured_joined_scales(state_view, constraint, false) == 13.996094)
+    print("float SSA diamonds preserved")
+}

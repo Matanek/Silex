@@ -1,0 +1,27 @@
+func accumulate_float32(rounds:int) float32 {
+    var value:float32 = 1.0
+    var index = 0
+    while index < rounds {
+        value = value * 1.5 + 0.25
+        index++
+    }
+    return value
+}
+
+func accumulate_float64(rounds:int) float64 {
+    var value:float64 = 2.0
+    var index = 0
+    while index < rounds {
+        value = value * 2.0 - 0.5
+        index++
+    }
+    return value
+}
+
+func main() {
+    assert(accumulate_float32(0) == 1.0)
+    assert(accumulate_float32(3) == 4.5625)
+    assert(accumulate_float64(0) == 2.0)
+    assert(accumulate_float64(3) == 12.5)
+    print("float SSA loop preserved")
+}
