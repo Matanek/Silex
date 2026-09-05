@@ -16,6 +16,8 @@ const Constant = union(enum) {
     unknown,
     integer: u64,
     boolean: bool,
+    float32: u32,
+    float64: u64,
 };
 
 const GlobalSummary = union(enum) {
@@ -304,7 +306,8 @@ fn optimizeFunctionRange(
     end: usize,
 ) !void {
     for (start..end) |index| {
-        const localized = try optimizeDenseBlocks(allocator, program, source[index]);
+        const folded = try foldBlockConstants(allocator, source[index]);
+        const localized = try optimizeDenseBlocks(allocator, program, folded);
         const optimized = try optimizeFunction(allocator, localized, summaries);
         const simplified = try simplifyBooleanDiamonds(allocator, optimized);
         const bounded = try Bounds.optimize(allocator, simplified);
@@ -816,8 +819,29 @@ fn scalarStructure(program: Ir.Program, structure_index: usize, depth: usize) bo
     return true;
 }
 
+fn foldBlockConstants(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    const constants = try allocator.alloc(Constant, function.value_types.len);
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    for (function.blocks, 0..) |block, block_index| {
+        @memset(constants, .unknown);
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions) |original| {
+            const instruction = foldInstruction(function, original, constants);
+            recordConstant(instruction, constants);
+            try instructions.append(allocator, instruction);
+        }
+        blocks[block_index] = .{
+            .instructions = try instructions.toOwnedSlice(allocator),
+            .terminator = block.terminator,
+        };
+    }
+    var result = function;
+    result.blocks = blocks;
+    return result;
+}
+
 fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []const GlobalSummary) !Ir.Function {
-    // Global alias and constant propagation stays restricted to a single
+    // Global alias and local-value propagation stays restricted to a single
     // block until the optimizer models dominance and control-flow joins.
     if (function.blocks.len != 1) return function;
 
@@ -1760,12 +1784,26 @@ fn foldInstruction(function: Ir.Function, instruction: Ir.Instruction, constants
 }
 
 fn foldUnary(function: Ir.Function, value: Ir.Instruction.Unary, constants: []const Constant) ?Ir.Instruction {
+    const type_value = function.value_types[value.result];
+    if (type_value == .float32) {
+        const bits = switch (constants[value.operand]) {
+            .float32 => |bits| bits,
+            else => return null,
+        };
+        return .{ .constant_float32 = .{ .result = value.result, .bits = bits ^ 0x80000000 } };
+    }
+    if (type_value == .float64) {
+        const bits = switch (constants[value.operand]) {
+            .float64 => |bits| bits,
+            else => return null,
+        };
+        return .{ .constant_float64 = .{ .result = value.result, .bits = bits ^ 0x8000000000000000 } };
+    }
+    if (!type_value.isSignedInteger()) return null;
     const bits = switch (constants[value.operand]) {
         .integer => |bits| bits,
         else => return null,
     };
-    const type_value = function.value_types[value.result];
-    if (!type_value.isSignedInteger()) return null;
     const operand = signedValue(bits, type_value.bitWidth());
     const result = -operand;
     if (!fitsSigned(result, type_value.bitWidth())) return null;
@@ -1773,6 +1811,29 @@ fn foldUnary(function: Ir.Function, value: Ir.Instruction.Unary, constants: []co
 }
 
 fn foldBinary(function: Ir.Function, value: Ir.Instruction.Binary, constants: []const Constant) ?Ir.Instruction {
+    const operand_type = function.value_types[value.left];
+    if (operand_type == .float32) {
+        const left = switch (constants[value.left]) {
+            .float32 => |bits| bits,
+            else => return null,
+        };
+        const right = switch (constants[value.right]) {
+            .float32 => |bits| bits,
+            else => return null,
+        };
+        return foldFloat32(value, left, right);
+    }
+    if (operand_type == .float64) {
+        const left = switch (constants[value.left]) {
+            .float64 => |bits| bits,
+            else => return null,
+        };
+        const right = switch (constants[value.right]) {
+            .float64 => |bits| bits,
+            else => return null,
+        };
+        return foldFloat64(value, left, right);
+    }
     const left_bits = switch (constants[value.left]) {
         .integer => |bits| bits,
         else => return null,
@@ -1781,7 +1842,6 @@ fn foldBinary(function: Ir.Function, value: Ir.Instruction.Binary, constants: []
         .integer => |bits| bits,
         else => return null,
     };
-    const operand_type = function.value_types[value.left];
     if (!operand_type.isInteger()) return null;
     if (isComparison(value.operator)) {
         const result = compareIntegers(value.operator, operand_type, left_bits, right_bits);
@@ -1789,6 +1849,44 @@ fn foldBinary(function: Ir.Function, value: Ir.Instruction.Binary, constants: []
     }
     const bits = foldInteger(value.operator, operand_type, left_bits, right_bits) orelse return null;
     return .{ .constant_int = .{ .result = value.result, .bits = bits } };
+}
+
+fn foldFloat32(value: Ir.Instruction.Binary, left_bits: u32, right_bits: u32) ?Ir.Instruction {
+    const left: f32 = @bitCast(left_bits);
+    const right: f32 = @bitCast(right_bits);
+    if (!std.math.isFinite(left) or !std.math.isFinite(right)) return null;
+    if (isComparison(value.operator)) {
+        return .{ .constant_bool = .{ .result = value.result, .value = compare(value.operator, left, right) } };
+    }
+    if (value.operator == .divide and right == 0) return null;
+    const result: f32 = switch (value.operator) {
+        .add => left + right,
+        .subtract => left - right,
+        .multiply => left * right,
+        .divide => left / right,
+        else => return null,
+    };
+    if (!std.math.isFinite(result)) return null;
+    return .{ .constant_float32 = .{ .result = value.result, .bits = @bitCast(result) } };
+}
+
+fn foldFloat64(value: Ir.Instruction.Binary, left_bits: u64, right_bits: u64) ?Ir.Instruction {
+    const left: f64 = @bitCast(left_bits);
+    const right: f64 = @bitCast(right_bits);
+    if (!std.math.isFinite(left) or !std.math.isFinite(right)) return null;
+    if (isComparison(value.operator)) {
+        return .{ .constant_bool = .{ .result = value.result, .value = compare(value.operator, left, right) } };
+    }
+    if (value.operator == .divide and right == 0) return null;
+    const result: f64 = switch (value.operator) {
+        .add => left + right,
+        .subtract => left - right,
+        .multiply => left * right,
+        .divide => left / right,
+        else => return null,
+    };
+    if (!std.math.isFinite(result)) return null;
+    return .{ .constant_float64 = .{ .result = value.result, .bits = @bitCast(result) } };
 }
 
 fn foldInteger(operator: Ir.BinaryOperator, type_value: Ir.Type, left_bits: u64, right_bits: u64) ?u64 {
@@ -1857,9 +1955,12 @@ fn isComparison(operator: Ir.BinaryOperator) bool {
 }
 
 fn recordConstant(instruction: Ir.Instruction, constants: []Constant) void {
+    if (instructionResult(instruction)) |result| constants[result] = .unknown;
     switch (instruction) {
         .constant_int => |value| constants[value.result] = .{ .integer = value.bits },
         .constant_bool => |value| constants[value.result] = .{ .boolean = value.value },
+        .constant_float32 => |value| constants[value.result] = .{ .float32 = value.bits },
+        .constant_float64 => |value| constants[value.result] = .{ .float64 = value.bits },
         else => {},
     }
 }
@@ -2196,6 +2297,49 @@ test "release folds constants and propagates copies in straight-line code" {
     const text = try Ir.writeText(allocator, optimized);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 42"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
+}
+
+test "release folds finite float constants inside branching functions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const value_types = [_]Ir.Type{ .float32, .float32, .float32 };
+    const entry_instructions = [_]Ir.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 1.0)) } },
+        .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 240.0)) } },
+        .{ .binary = .{ .result = 2, .operator = .divide, .left = 0, .right = 1 } },
+    };
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &entry_instructions, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{}, .terminator = .{ .return_value = 2 } },
+    };
+    const function: Ir.Function = .{
+        .name = "step",
+        .parameter_types = &.{},
+        .return_type = .float32,
+        .value_types = &value_types,
+        .blocks = &blocks,
+    };
+    const optimized = try foldBlockConstants(allocator, function);
+    try std.testing.expectEqual(@as(usize, 2), optimized.blocks.len);
+    try std.testing.expectEqual(@as(usize, 3), optimized.blocks[0].instructions.len);
+    const folded = optimized.blocks[0].instructions[2].constant_float32;
+    try std.testing.expectEqual(@as(Ir.ValueId, 2), folded.result);
+    try std.testing.expectEqual(
+        @as(u32, @bitCast(@as(f32, 1.0) / @as(f32, 240.0))),
+        folded.bits,
+    );
+}
+
+test "release leaves exceptional float arithmetic explicit" {
+    const divide: Ir.Instruction.Binary = .{ .result = 2, .operator = .divide, .left = 0, .right = 1 };
+    const one: u32 = @bitCast(@as(f32, 1.0));
+    const zero: u32 = @bitCast(@as(f32, 0.0));
+    const infinity: u32 = @bitCast(std.math.inf(f32));
+    const nan: u32 = @bitCast(std.math.nan(f32));
+    try std.testing.expect(foldFloat32(divide, one, zero) == null);
+    try std.testing.expect(foldFloat32(divide, infinity, one) == null);
+    try std.testing.expect(foldFloat32(divide, nan, one) == null);
 }
 
 test "release replaces only exact scalar STD Math minimum and maximum calls" {
