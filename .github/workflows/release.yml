@@ -174,24 +174,62 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  windows-arm64:
+  windows-arm64-build:
     needs: preflight
     if: inputs.target == 'all' || inputs.target == 'windows-arm64'
-    runs-on: windows-11-arm
-    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      - name: Cross-build and package Windows ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          export PATH="$RUNNER_TEMP/zig-x86_64-linux-0.16.0:$PATH"
+
+          build_prefix="$RUNNER_TEMP/silex-prefix"
+          root="$RUNNER_TEMP/silex-windows-arm64"
+          zig build -Dtarget=aarch64-windows -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$build_prefix" \
+            --build-file Toolchain/build.zig
+          mkdir -p "$root/bin"
+          cp "$build_prefix/bin/silex.exe" "$root/bin/silex.exe"
+          cp LICENSE NOTICE README.md "$root/"
+          file "$root/bin/silex.exe" | grep -E 'PE32\+ executable.*(Aarch64|ARM64)'
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/silex-windows-arm64.zip" silex-windows-arm64)
+          sha256sum silex-windows-arm64.zip > silex-windows-arm64.zip.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-arm64-release-candidate
+          path: |
+            silex-windows-arm64.zip
+            silex-windows-arm64.zip.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  windows-arm64:
+    needs:
+      - preflight
+      - windows-arm64-build
+    if: inputs.target == 'all' || inputs.target == 'windows-arm64'
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-arm64-release-candidate
+          path: .
       - name: Verify Windows installer target selection
         shell: pwsh
         run: Tests/Distribution/InstallerWindowsContract.ps1
-      - name: Build, package, install and smoke-test Windows ARM64
+      - name: Install and smoke-test Windows ARM64
         shell: pwsh
-        run: >-
-          .github/scripts/build-release-windows.ps1
-          -Target windows-arm64
-          -ZigUrl https://ziglang.org/download/0.16.0/zig-aarch64-windows-0.16.0.zip
-          -ZigSha256 aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef
-          -ZigDirectory zig-aarch64-windows-0.16.0
+        run: .github/scripts/smoke-release-windows.ps1 -Target windows-arm64
       - uses: actions/upload-artifact@v7
         with:
           name: silex-windows-arm64

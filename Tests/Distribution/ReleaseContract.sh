@@ -6,16 +6,18 @@ repository_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 workflow="$repository_root/.github/workflows/release.yml"
 installer_workflow="$repository_root/.github/workflows/install-smoke.yml"
 windows_builder="$repository_root/.github/scripts/build-release-windows.ps1"
+windows_smoke="$repository_root/.github/scripts/smoke-release-windows.ps1"
 
 "$repository_root/Tests/Distribution/InstallerUnixContract.sh"
 
-python3 - "$workflow" "$installer_workflow" "$windows_builder" <<'PYTHON'
+python3 - "$workflow" "$installer_workflow" "$windows_builder" "$windows_smoke" <<'PYTHON'
 import re
 import sys
 
 workflow = open(sys.argv[1], encoding="utf-8").read()
 installer_workflow = open(sys.argv[2], encoding="utf-8").read()
 windows_builder = open(sys.argv[3], encoding="utf-8").read()
+windows_smoke = open(sys.argv[4], encoding="utf-8").read()
 targets = (
     "macos-arm64",
     "macos-x64",
@@ -66,15 +68,17 @@ if actual_files != expected_files:
 if 'zig build "-Dtarget=$zigTarget"' not in windows_builder:
     raise SystemExit("Windows release build target must be an interpolated PowerShell argument")
 
-windows_arm64_job = re.search(
-    r"^  windows-arm64:\n(.*?)(?=^  windows-x64:)", workflow, re.MULTILINE | re.DOTALL
+windows_arm64_build = re.search(
+    r"^  windows-arm64-build:\n(.*?)(?=^  windows-arm64:)", workflow, re.MULTILINE | re.DOTALL
 )
-if windows_arm64_job is None:
-    raise SystemExit("missing Windows ARM64 release job")
-if "zig-aarch64-windows-0.16.0.zip" not in windows_arm64_job.group(1):
-    raise SystemExit("Windows ARM64 release must use the native Zig archive")
-if "aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef" not in windows_arm64_job.group(1):
-    raise SystemExit("Windows ARM64 release must pin the native Zig archive checksum")
+if windows_arm64_build is None:
+    raise SystemExit("missing Windows ARM64 cross-build job")
+if "zig build -Dtarget=aarch64-windows" not in windows_arm64_build.group(1):
+    raise SystemExit("Windows ARM64 release must be cross-built for aarch64-windows")
+if "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00" not in windows_arm64_build.group(1):
+    raise SystemExit("Windows ARM64 cross-build must pin the Linux Zig archive checksum")
+if 'release target $Target does not match host $osArchitecture' not in windows_smoke:
+    raise SystemExit("Windows release smoke must reject a mismatched native host")
 
 print("Release workflow contract passed")
 PYTHON
