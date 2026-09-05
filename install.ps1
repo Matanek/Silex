@@ -9,9 +9,19 @@ if ($env:SILEX_UPDATE_PID) {
 }
 
 $silexRepository = "Matanek/Silex"
-$architecture = $env:PROCESSOR_ARCHITECTURE
-if ($architecture -ne "AMD64" -and $env:PROCESSOR_ARCHITEW6432 -ne "AMD64") {
-    throw "silex: the published Windows installer currently supports x64"
+$processArchitecture = $env:PROCESSOR_ARCHITECTURE
+$nativeArchitecture = if ($env:PROCESSOR_ARCHITEW6432) {
+    $env:PROCESSOR_ARCHITEW6432
+} else {
+    $processArchitecture
+}
+
+switch ($nativeArchitecture.ToUpperInvariant()) {
+    "ARM64" { $platform = "windows-arm64" }
+    "AMD64" { $platform = "windows-x64" }
+    default {
+        throw "silex: unsupported Windows host architecture $nativeArchitecture; expected ARM64 or AMD64"
+    }
 }
 
 if ($env:SILEX_INSTALL_DIR) {
@@ -25,9 +35,11 @@ if ($env:SILEX_INSTALL_DIR) {
 }
 
 $release = if ($env:SILEX_VERSION) { $env:SILEX_VERSION } else { "latest" }
-$asset = "silex-windows-x64.zip"
+$asset = "silex-$platform.zip"
 $checksum = "$asset.sha256"
-if ($release -eq "latest") {
+if ($env:SILEX_RELEASE_URL) {
+    $releaseUrl = $env:SILEX_RELEASE_URL.TrimEnd('/')
+} elseif ($release -eq "latest") {
     $releaseUrl = "https://github.com/$silexRepository/releases/latest/download"
 } else {
     $tag = if ($release.StartsWith("v")) { $release } else { "v$release" }
@@ -51,7 +63,7 @@ try {
     }
 
     Expand-Archive -LiteralPath $archivePath -DestinationPath $temporary
-    $source = Join-Path $temporary "silex-windows-x64\bin\silex.exe"
+    $source = Join-Path $temporary "silex-$platform\bin\silex.exe"
     New-Item -ItemType Directory -Force $installDirectory | Out-Null
     Copy-Item -LiteralPath $source -Destination $staged
     Move-Item -LiteralPath $staged -Destination (Join-Path $installDirectory "silex.exe") -Force

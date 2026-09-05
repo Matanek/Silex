@@ -7,3 +7,7 @@ func main() {
     if answer() != 42 { panic("standalone compiler returned an invalid result") }
     print("silex distribution ready")
 }
+
+test "standalone compiler evaluates the distribution fixture" {
+    assert(answer() == 42)
+}

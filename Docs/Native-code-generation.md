@@ -15,10 +15,10 @@ claim that its native backend is implemented.
 | Target | Machine backend | Native status |
 | --- | --- | --- |
 | `macos-arm64` | ARM64 | verified and distributed |
-| `macos-x64` | X64 | implemented; native Intel validation is owned by the `macos-15-intel` portability job |
-| `linux-arm64` | ARM64 | implemented; native ARM64 workflow is the verification and distribution gate |
+| `macos-x64` | X64 | verified and distributed by the native Intel release job |
+| `linux-arm64` | ARM64 | verified and distributed by the native ARM64 release job |
 | `linux-x64` | X64 | verified and distributed |
-| `windows-arm64` | ARM64 | verified by the native Windows ARM64 workflow; not distributed yet |
+| `windows-arm64` | ARM64 | verified and distributed by the native Windows ARM64 release job |
 | `windows-x64` | X64 | verified and distributed |
 
 The target model records machine, system ABI, object, executable, runtime, and
