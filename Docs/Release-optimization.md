@@ -84,6 +84,12 @@ value constructors. Immutable, single-definition aggregate projections can
 be reused across blocks; joins and escaping or addressable values retain
 their storage. This keeps a constructor's intermediate field assignments
 from becoming repeated whole-structure copies in a branching caller.
+Nested constructors form the same scalar dependency graph: a child passed only
+to a non-escaping parent can disappear with that parent, while an escaping
+parent keeps every aggregate child needed to materialize its value. Nested
+projections follow those child roots instead of leaving loads from an eliminated
+parent. Each scalar leaf retains its declared width, including `float`,
+`float64`, and fixed-width integers.
 Within one block, loads of non-addressed scalar-structure locals reuse their
 last single-definition snapshot. Intermediate stores overwritten in the same
 block are removed when no remaining load observes them and the local is never

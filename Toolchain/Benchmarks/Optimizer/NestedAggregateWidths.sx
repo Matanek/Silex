@@ -1,0 +1,32 @@
+struct Lanes {
+    var narrow:float
+    var wide:float64
+}
+
+struct Packet {
+    var lanes:Lanes
+    var tag:int32
+}
+
+func revise(value:Packet, narrow_delta:float, wide_delta:float64) Packet {
+    let snapshot = value
+    var changed = value
+    changed.lanes.narrow += narrow_delta
+    changed.lanes.wide += wide_delta
+    changed.tag += 1
+    return Packet(
+        lanes:Lanes(
+            narrow:changed.lanes.narrow + snapshot.lanes.narrow,
+            wide:changed.lanes.wide,
+        ),
+        tag:changed.tag,
+    )
+}
+
+func main() {
+    let value = Packet(lanes:Lanes(narrow:1.5, wide:2.25), tag:3)
+    let changed = revise(value, 0.5, 0.5)
+    print(changed.lanes.narrow == 3.5)
+    print(changed.lanes.wide == 2.75)
+    print(changed.tag == 4)
+}

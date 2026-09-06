@@ -2,7 +2,26 @@ const Ir = @import("../Ir.zig");
 
 pub fn isEligible(function: Ir.Function) bool {
     if (containsCalls(function)) return false;
-    return hasRepeatedCollectionRead(function) or hasMultipleCollectionReferences(function);
+    return hasRepeatedFieldRead(function) or hasRepeatedCollectionRead(function) or hasMultipleCollectionReferences(function);
+}
+
+fn hasRepeatedFieldRead(function: Ir.Function) bool {
+    for (function.blocks) |block| {
+        for (block.instructions, 0..) |instruction, index| {
+            const candidate = switch (instruction) {
+                .field_load => |load| load,
+                else => continue,
+            };
+            for (block.instructions[0..index]) |previous_instruction| {
+                const previous = switch (previous_instruction) {
+                    .field_load => |load| load,
+                    else => continue,
+                };
+                if (previous.base == candidate.base and previous.field == candidate.field) return true;
+            }
+        }
+    }
+    return false;
 }
 
 fn hasMultipleCollectionReferences(function: Ir.Function) bool {
@@ -97,4 +116,22 @@ fn localLoadProducing(instructions: []const Ir.Instruction, value: Ir.ValueId) ?
         else => {},
     };
     return null;
+}
+
+test "dense blocks include repeated aggregate field reads" {
+    const function: Ir.Function = .{
+        .name = "fields",
+        .parameter_types = &.{Ir.Type.structure(0)},
+        .return_type = .int,
+        .value_types = &.{ Ir.Type.structure(0), .int, .int, .int },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .field_load = .{ .result = 1, .base = 0, .field = 0 } },
+                .{ .field_load = .{ .result = 2, .base = 0, .field = 0 } },
+                .{ .binary = .{ .result = 3, .operator = .add, .left = 1, .right = 2 } },
+            },
+            .terminator = .{ .return_value = 3 },
+        }},
+    };
+    try @import("std").testing.expect(isEligible(function));
 }

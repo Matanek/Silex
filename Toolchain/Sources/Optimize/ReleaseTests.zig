@@ -6,6 +6,7 @@ const Lower = @import("../Arm64/Lower.zig");
 const Machine = @import("../Arm64/Machine.zig");
 const Release = @import("Release.zig");
 const Runner = @import("../Arm64/Runner.zig");
+const Verifier = @import("Verifier.zig");
 
 const optimize = Release.optimize;
 
@@ -656,6 +657,71 @@ test "release scalarizes non escaping value structures" {
     const body = tail[0..end];
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @add"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
+}
+
+test "release scalarizes nested aggregates only when their parent does not escape" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Inner { var x:int; var y:int }
+        \\struct Outer { var inner:Inner; var tag:int }
+        \\func revise(value:Outer, delta:int) Outer {
+        \\    let inner = Inner(x:value.inner.x + delta, y:value.inner.y + delta)
+        \\    return Outer(inner:inner, tag:value.tag + 1)
+        \\}
+        \\func main() {
+        \\    let value = Outer(inner:Inner(x:1, y:2), tag:3)
+        \\    let result = revise(value, 4)
+        \\    print(result.inner.x + result.inner.y + result.tag)
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+
+    var revised_initializers: usize = 0;
+    var main_aggregate_operations: usize = 0;
+    for (optimized.functions) |function| {
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (std.mem.eql(u8, function.name, "revise") and instruction == .structure_init)
+                revised_initializers += 1;
+            if (std.mem.eql(u8, function.name, "main") and
+                (instruction == .structure_init or instruction == .field_load))
+                main_aggregate_operations += 1;
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 2), revised_initializers);
+    try std.testing.expectEqual(@as(usize, 0), main_aggregate_operations);
+}
+
+test "release preserves definitions through nested aggregate projections" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Inner { var x:int; var y:int }
+        \\struct Outer { var inner:Inner; var tag:int }
+        \\func main() {
+        \\    let value = Outer(inner:Inner(x:1, y:2), tag:3)
+        \\    print(value.inner.x + value.inner.y + value.tag)
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    try Verifier.verify(allocator, optimized);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+
+    for (optimized.functions[0].blocks) |block| for (block.instructions) |instruction| {
+        try std.testing.expect(instruction != .structure_init);
+        try std.testing.expect(instruction != .field_load);
+    };
 }
 
 test "release scalarizes immutable aggregates across control flow" {

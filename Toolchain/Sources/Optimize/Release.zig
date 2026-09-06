@@ -654,6 +654,18 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, in
                 roots[value.result] = roots[value.operand];
                 changed = true;
             },
+            .field_load => |value| if (definitions[value.result] == 1 and roots[value.result] == null) {
+                const parent = roots[value.base] orelse continue;
+                const parent_fields = fields[parent] orelse continue;
+                if (value.field >= parent_fields.len) return error.InvalidProgram;
+                const projected = parent_fields[value.field];
+                if (roots[projected]) |child| {
+                    if (function.value_types[value.result] == function.value_types[projected]) {
+                        roots[value.result] = child;
+                        changed = true;
+                    }
+                }
+            },
             else => {},
         };
     }
@@ -666,12 +678,20 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, in
     }
     const allowed = try allocator.alloc(usize, function.value_types.len);
     @memset(allowed, 0);
+    const AggregateDependency = struct { child: Ir.ValueId, parent: Ir.ValueId };
+    var aggregate_dependencies: std.ArrayList(AggregateDependency) = .empty;
     for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
         .copy => |value| if (roots[value.operand] != null and roots[value.result] == roots[value.operand]) {
             allowed[value.operand] += 1;
         },
         .field_load => |value| if (roots[value.base] != null and definitions[value.result] == 1) {
             allowed[value.base] += 1;
+        },
+        .structure_init => |value| if (roots[value.result]) |parent| {
+            for (value.fields) |field| if (roots[field]) |child| {
+                allowed[field] += 1;
+                try aggregate_dependencies.append(allocator, .{ .child = child, .parent = parent });
+            };
         },
         else => {},
     };
@@ -685,6 +705,16 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, in
             escaped[root] = true;
         };
     };
+    changed = true;
+    while (changed) {
+        changed = false;
+        for (aggregate_dependencies.items) |dependency| {
+            if (escaped[dependency.parent] and !escaped[dependency.child]) {
+                escaped[dependency.child] = true;
+                changed = true;
+            }
+        }
+    }
 
     const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
     for (aliases, 0..) |*alias, value| alias.* = value;
