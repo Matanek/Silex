@@ -126,13 +126,13 @@ pub fn analyze(
     );
 
     const llvm_safety_removed = llvm.matched.safety_removed;
-    const silex_checks_removed = removed(raw_silex.checked_operations, optimized_silex.checked_operations);
+    const silex_checks_removed = removed(raw_silex.safety_guards, optimized_silex.safety_guards);
     if (llvm_safety_removed != 0 and llvm_safety_removed > silex_checks_removed) try append(
         allocator,
         &findings,
         .safety_check_elision,
         score(86, llvm_safety_removed, 2),
-        "LLVM proves and removes {d} safety guard(s); Silex removes {d} checked operation(s).",
+        "LLVM proves and removes {d} safety guard(s); Silex removes {d} safety guard(s).",
         .{ llvm_safety_removed, silex_checks_removed },
     );
 
@@ -284,7 +284,7 @@ test "advisor ranks SSA promotion and safety proof from concrete deltas" {
     var raw_silex: IrStats.Profile = .{};
     raw_silex.local_loads = 4;
     raw_silex.local_stores = 3;
-    raw_silex.checked_operations = 4;
+    raw_silex.safety_guards = 4;
     raw_silex.loop_back_edges = 1;
     const optimized_silex = raw_silex;
     var raw_llvm: LlvmStats.Profile = .{};

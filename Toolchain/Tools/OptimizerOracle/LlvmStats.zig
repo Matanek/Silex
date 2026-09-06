@@ -39,8 +39,8 @@ pub const Profile = struct {
         return self.allocas + self.loads + self.stores;
     }
 
-    pub fn safetyOperations(self: Profile) usize {
-        return self.overflow_intrinsics + self.trap_calls + self.trap_branches;
+    pub fn safetyGuards(self: Profile) usize {
+        return self.trap_branches;
     }
 
     pub fn computationalOperations(self: Profile) usize {
@@ -91,7 +91,7 @@ pub fn compare(raw_text: []const u8, optimized_text: []const u8, silex_function_
         const optimized_function = profileNamed(optimized_text, name);
         result.matched.memory_removed += removed(raw_function.memoryOperations(), optimized_function.memoryOperations());
         result.matched.phis_added += added(raw_function.phis, optimized_function.phis);
-        result.matched.safety_removed += removed(raw_function.safetyOperations(), optimized_function.safetyOperations());
+        result.matched.safety_removed += removed(raw_function.safetyGuards(), optimized_function.safetyGuards());
         result.matched.internal_calls_removed += removed(raw_function.internal_calls, optimized_function.internal_calls);
         result.matched.compute_removed += removed(raw_function.computationalOperations(), optimized_function.computationalOperations());
         result.matched.blocks_removed += removed(raw_function.blocks, optimized_function.blocks);
@@ -281,6 +281,8 @@ test "profile recognizes memory promotion in optimized LLVM IR" {
     try std.testing.expectEqual(@as(usize, 1), optimized.shifts);
     try std.testing.expectEqual(@as(usize, 1), raw.trap_calls);
     try std.testing.expectEqual(@as(usize, 0), optimized.trap_calls);
+    try std.testing.expectEqual(@as(usize, 1), raw.safetyGuards());
+    try std.testing.expectEqual(@as(usize, 0), optimized.safetyGuards());
 }
 
 test "matched comparison ignores blocks duplicated into callers by inlining" {

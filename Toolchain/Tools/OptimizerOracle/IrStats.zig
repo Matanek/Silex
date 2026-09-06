@@ -28,6 +28,7 @@ pub const Profile = struct {
     collections: usize = 0,
     strings: usize = 0,
     checked_operations: usize = 0,
+    safety_guards: usize = 0,
     branches: usize = 0,
     jumps: usize = 0,
     returns: usize = 0,
@@ -56,7 +57,7 @@ pub fn profile(program: Silex.Ir.Program) Profile {
         result.counts.locals += function.local_types.len;
         for (function.blocks, 0..) |block, block_index| {
             result.counts.instructions += block.instructions.len;
-            for (block.instructions) |instruction| profileInstruction(&result, instruction);
+            for (block.instructions) |instruction| profileInstruction(&result, instruction, function.value_types);
             switch (block.terminator) {
                 .jump => |target| {
                     result.jumps += 1;
@@ -75,7 +76,7 @@ pub fn profile(program: Silex.Ir.Program) Profile {
     return result;
 }
 
-fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction) void {
+fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value_types: []const Silex.Ir.Type) void {
     switch (instruction) {
         .constant_int, .constant_bool, .constant_bytes, .constant_float32, .constant_float64, .optional_null => result.constants += 1,
         .copy, .deep_copy, .class_cast => result.copies += 1,
@@ -84,11 +85,15 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction) void 
         .global_load, .field_load, .reference_load, .address_load => result.other_loads += 1,
         .collection_load => |load| {
             result.other_loads += 1;
-            if (load.checked) result.checked_operations += 1;
+            if (load.checked) {
+                result.checked_operations += 1;
+                result.safety_guards += 1;
+            }
         },
         .global_store, .field_store, .collection_replace, .reference_store, .address_store => result.other_stores += 1,
         .binary => |binary| {
             if (binary.checked) result.checked_operations += 1;
+            if (binaryHasSafetyGuard(binary, value_types)) result.safety_guards += 1;
             switch (binary.operator) {
                 .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => result.comparisons += 1,
                 .multiply => {
@@ -110,10 +115,16 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction) void 
                 else => result.arithmetic += 1,
             }
         },
-        .unary => result.arithmetic += 1,
+        .unary => |unary| {
+            result.arithmetic += 1;
+            if (value_types[unary.operand].isInteger()) result.safety_guards += 1;
+        },
         .convert => |conversion| {
             result.conversions += 1;
-            if (conversion.checked) result.checked_operations += 1;
+            if (conversion.checked) {
+                result.checked_operations += 1;
+                result.safety_guards += 1;
+            }
         },
         .call, .indirect_call, .boundary_call, .dynamic_call => result.calls += 1,
         .structure_init, .protocol_init, .protocol_test, .protocol_extract, .enum_init, .enum_test, .enum_payload, .enum_raw => result.aggregates += 1,
@@ -123,6 +134,15 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction) void 
         .assert => result.panics += 1,
         else => {},
     }
+}
+
+fn binaryHasSafetyGuard(binary: Silex.Ir.Instruction.Binary, value_types: []const Silex.Ir.Type) bool {
+    if (!value_types[binary.left].isInteger()) return false;
+    return switch (binary.operator) {
+        .add, .subtract, .multiply => binary.checked,
+        .divide, .remainder, .shift_left, .shift_right => true,
+        else => false,
+    };
 }
 
 pub fn countFunction(program: Silex.Ir.Program, name: []const u8) ?Counts {
@@ -161,4 +181,26 @@ test "IR counts aggregate all functions and blocks" {
     const function = countFunction(program, "main").?;
     try @import("std").testing.expectEqual(@as(usize, 1), function.blocks);
     try @import("std").testing.expect(countFunction(program, "missing") == null);
+}
+
+test "IR safety guards exclude comparisons and floating arithmetic" {
+    const program: Silex.Ir.Program = .{ .functions = &.{.{
+        .name = "main",
+        .parameter_types = &.{},
+        .return_type = .void,
+        .value_types = &.{ .int, .int, .bool, .float64, .float64, .int, .int },
+        .local_types = &.{},
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .binary = .{ .result = 2, .operator = .less, .left = 0, .right = 1 } },
+                .{ .binary = .{ .result = 4, .operator = .add, .left = 3, .right = 3 } },
+                .{ .binary = .{ .result = 5, .operator = .add, .left = 0, .right = 1, .checked = false } },
+                .{ .binary = .{ .result = 6, .operator = .multiply, .left = 0, .right = 1 } },
+                .{ .unary = .{ .result = 5, .operator = .negate, .operand = 0 } },
+            },
+            .terminator = .return_void,
+        }},
+    }} };
+    const result = profile(program);
+    try @import("std").testing.expectEqual(@as(usize, 2), result.safety_guards);
 }
