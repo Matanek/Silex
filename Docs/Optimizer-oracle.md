@@ -81,6 +81,18 @@ Plain value structures are emitted as typed LLVM aggregates. Their residual
 construction, projection, copy, parameter, and return operations are compared
 separately from LLVM's internal `{result, overflow}` intrinsic pairs, so those
 pairs cannot hide a missing Silex scalar-replacement transformation.
+Mutable references to those structures are emitted as LLVM pointers with typed
+field addresses, loads, and stores. The advisor conservatively compares Silex
+reference traffic with all remaining LLVM loads and stores: this can hide an
+opportunity but cannot invent one by assuming two references are disjoint.
+Unused Silex reference reads are removable, while reads separated by a write
+through a possibly aliasing reference remain observable and are preserved.
+
+When LLVM removes local memory or aggregate operations only in callers whose
+calls it also inlined, the advisor attributes that causal difference to
+interprocedural specialization instead of reporting duplicate memory and
+aggregate findings. The independent callee remains available for direct
+reference-memory comparison.
 
 Timing remains separate from correctness. The comparison runner builds each
 candidate once, alternates execution order, and reports median, MAD, p10-p90,

@@ -44,6 +44,7 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "IntegerWidths.sx", .timing = false },
     .{ .name = "UnsignedBitwise.sx", .timing = false },
     .{ .name = "AggregateScalarization.sx", .timing = false },
+    .{ .name = "ReferenceAliasing.sx", .timing = false },
 };
 
 pub const regressions = [_]RegressionEntry{

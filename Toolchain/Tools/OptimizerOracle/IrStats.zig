@@ -14,6 +14,8 @@ pub const Profile = struct {
     copies: usize = 0,
     local_loads: usize = 0,
     local_stores: usize = 0,
+    reference_loads: usize = 0,
+    reference_stores: usize = 0,
     other_loads: usize = 0,
     other_stores: usize = 0,
     arithmetic: usize = 0,
@@ -153,7 +155,11 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
         .class_cast => result.copies += 1,
         .local_load => result.local_loads += 1,
         .local_store => result.local_stores += 1,
-        .global_load, .reference_load, .address_load => result.other_loads += 1,
+        .reference_load => {
+            result.reference_loads += 1;
+            result.other_loads += 1;
+        },
+        .global_load, .address_load => result.other_loads += 1,
         .field_load => {
             result.other_loads += 1;
             result.value_aggregate_operations += 1;
@@ -165,7 +171,11 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
                 result.safety_guards += 1;
             }
         },
-        .global_store, .collection_replace, .reference_store, .address_store => result.other_stores += 1,
+        .reference_store => {
+            result.reference_stores += 1;
+            result.other_stores += 1;
+        },
+        .global_store, .collection_replace, .address_store => result.other_stores += 1,
         .field_store => {
             result.other_stores += 1;
             result.value_aggregate_operations += 1;
@@ -308,6 +318,28 @@ test "IR safety guards exclude comparisons and floating arithmetic" {
     }} };
     const result = profile(program);
     try @import("std").testing.expectEqual(@as(usize, 2), result.safety_guards);
+}
+
+test "IR profiles reference traffic separately from other memory" {
+    const program: Silex.Ir.Program = .{ .functions = &.{.{
+        .name = "touch",
+        .parameter_types = &.{.address},
+        .return_type = .void,
+        .value_types = &.{ .address, .int },
+        .local_types = &.{},
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .reference_load = .{ .result = 1, .reference = 0 } },
+                .{ .reference_store = .{ .reference = 0, .operand = 1 } },
+            },
+            .terminator = .return_void,
+        }},
+    }} };
+    const result = profile(program);
+    try @import("std").testing.expectEqual(@as(usize, 1), result.reference_loads);
+    try @import("std").testing.expectEqual(@as(usize, 1), result.reference_stores);
+    try @import("std").testing.expectEqual(@as(usize, 1), result.other_loads);
+    try @import("std").testing.expectEqual(@as(usize, 1), result.other_stores);
 }
 
 test "matched safety deltas ignore checks duplicated into a caller" {

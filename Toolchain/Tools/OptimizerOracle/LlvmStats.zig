@@ -206,7 +206,8 @@ fn classifyComputation(result: *Profile, opcode: []const u8, line: []const u8) v
     }
     if (oneOf(opcode, &.{ "extractvalue", "insertvalue", "getelementptr" })) {
         result.aggregate_operations += 1;
-        if (std.mem.indexOf(u8, line, "%sx.type.") != null) result.value_aggregate_operations += 1;
+        if (oneOf(opcode, &.{ "extractvalue", "insertvalue" }) and std.mem.indexOf(u8, line, "%sx.type.") != null)
+            result.value_aggregate_operations += 1;
     }
 }
 

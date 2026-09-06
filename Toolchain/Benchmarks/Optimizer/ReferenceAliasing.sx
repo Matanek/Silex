@@ -1,0 +1,27 @@
+struct Pair {
+    var x:int
+    var y:int
+}
+
+func touch(left:&Pair, right:&Pair, delta:int) int {
+    let before = left.x
+    right.x += delta
+    let after = left.x
+    return before + after + right.y
+}
+
+func distinct(seed:int) int {
+    var left = Pair(x:seed, y:3)
+    var right = Pair(x:10, y:5)
+    return touch(left, right, 2) + left.x + right.x
+}
+
+func shared(seed:int) int {
+    var value = Pair(x:seed, y:4)
+    return touch(value, value, 2) + value.x
+}
+
+func main() {
+    print(distinct(7))
+    print(shared(7))
+}

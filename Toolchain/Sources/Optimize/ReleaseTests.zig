@@ -187,6 +187,50 @@ test "release removes a redundant aggregate read before indexed replacement" {
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
 }
 
+test "release removes dead aggregate reference reads without forwarding across aliases" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func touch(left:&Pair, right:&Pair, delta:int) int {
+        \\    let before = left.x
+        \\    right.x += delta
+        \\    let after = left.x
+        \\    return before + after + right.y
+        \\}
+        \\func main() {
+        \\    var value = Pair(x:7, y:4)
+        \\    print(touch(value, value, 2))
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+
+    var found = false;
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "touch")) continue;
+        found = true;
+        var scalar_reads: usize = 0;
+        var writes: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .reference_load => |load| {
+                try std.testing.expect(function.value_types[load.result].structureIndex() == null);
+                scalar_reads += 1;
+            },
+            .reference_store => writes += 1,
+            else => {},
+        };
+        try std.testing.expectEqual(@as(usize, 4), scalar_reads);
+        try std.testing.expectEqual(@as(usize, 1), writes);
+    }
+    try std.testing.expect(found);
+}
+
 test "release preserves floating branches and loops" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

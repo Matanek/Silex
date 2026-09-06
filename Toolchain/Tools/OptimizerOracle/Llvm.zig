@@ -144,6 +144,10 @@ const FunctionEmitter = struct {
                 "  store {s} %v{d}, ptr %local{d}\n",
                 .{ try llvmType(self.allocator, self.program, try self.valueType(value.operand)), value.operand, value.local },
             ),
+            .local_address => |value| try self.emitLocalAddress(value),
+            .reference_load => |value| try self.emitReferenceLoad(value),
+            .reference_store => |value| try self.emitReferenceStore(value),
+            .reference_field => |value| try self.emitReferenceField(value),
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
             .convert => |value| try self.emitConvert(block_id, value),
@@ -210,6 +214,50 @@ const FunctionEmitter = struct {
             value.result,
             try llvmType(self.allocator, self.program, base_type),
             value.base,
+            value.field,
+        });
+    }
+
+    fn emitLocalAddress(self: *FunctionEmitter, value: Ir.Instruction.LocalAddress) Error!void {
+        if (value.local >= self.function.local_types.len or try self.valueType(value.result) != .address)
+            return error.InvalidProgram;
+        try self.write("  %v{d} = getelementptr {s}, ptr %local{d}, i32 0\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, self.function.local_types[value.local]),
+            value.local,
+        });
+    }
+
+    fn emitReferenceLoad(self: *FunctionEmitter, value: Ir.Instruction.ReferenceLoad) Error!void {
+        if (try self.valueType(value.reference) != .address) return error.InvalidProgram;
+        try self.write("  %v{d} = load {s}, ptr %v{d}\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, try self.valueType(value.result)),
+            value.reference,
+        });
+    }
+
+    fn emitReferenceStore(self: *FunctionEmitter, value: Ir.Instruction.ReferenceStore) Error!void {
+        if (try self.valueType(value.reference) != .address) return error.InvalidProgram;
+        try self.write("  store {s} %v{d}, ptr %v{d}\n", .{
+            try llvmType(self.allocator, self.program, try self.valueType(value.operand)),
+            value.operand,
+            value.reference,
+        });
+    }
+
+    fn emitReferenceField(self: *FunctionEmitter, value: Ir.Instruction.ReferenceField) Error!void {
+        if (value.structure >= self.program.structures.len or
+            value.field >= self.program.structures[value.structure].fields.len or
+            try self.valueType(value.reference) != .address or
+            try self.valueType(value.result) != .address)
+        {
+            return error.InvalidProgram;
+        }
+        try self.write("  %v{d} = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, Ir.Type.structure(value.structure)),
+            value.reference,
             value.field,
         });
     }
@@ -697,4 +745,20 @@ test "LLVM emitter supports plain value aggregates" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "%sx.type.0 = type { i64, i64 }"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "insertvalue %sx.type.0"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "extractvalue %sx.type.0"));
+}
+
+test "LLVM emitter supports mutable references to plain aggregates" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Silex.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func increment(pair:&Pair) { pair.x += 1 }
+        \\func main() { var pair = Pair(x:3, y:5); increment(pair); print(pair.x) }
+    );
+    const text = try emit(allocator, compilation.ir);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "getelementptr %sx.type.0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "load %sx.type.0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "store %sx.type.0"));
 }

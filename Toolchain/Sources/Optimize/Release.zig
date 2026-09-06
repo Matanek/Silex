@@ -2613,6 +2613,7 @@ fn removableResult(instruction: Ir.Instruction) ?Ir.ValueId {
         .collection_load => |value| if (!value.checked) value.result else null,
         .collection_count => |value| value.result,
         .local_load => |value| value.result,
+        .reference_load => |value| value.result,
         .reference_field => |value| value.result,
         .reference_optional => |value| value.result,
         .collection_reference => |value| value.result,
