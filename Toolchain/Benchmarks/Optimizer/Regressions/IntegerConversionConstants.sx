@@ -1,0 +1,14 @@
+func joined(flag:bool) int16 {
+    var narrow = -8 as int8
+    if flag {
+        narrow = -8 as int8
+    } else {
+        narrow = -8 as int8
+    }
+    let wide = narrow as int16
+    return wide * (3 as int16)
+}
+
+func main() {
+    print(joined(true))
+}

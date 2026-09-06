@@ -56,8 +56,11 @@ of block serialization order. A constant may cross a join only when every
 reachable definition proves the same type and bit pattern; divergent PHI
 inputs remain unknown. The resulting facts fold safe arithmetic, replace
 constant branches, prune unreachable blocks, and remove newly dead copies to a
-fixed point. Checked integer operations fold only when the result fits, while
-non-finite floating-point arithmetic and division by zero remain explicit.
+fixed point. Representable constant integer conversions contribute a constant
+of the target width, exposing dependent arithmetic to the same fixed point.
+Checked integer operations and conversions fold only when the result fits,
+while non-finite floating-point arithmetic and division by zero remain
+explicit.
 
 When the closed program contains at least 256 functions, the optimizer applies
 its independent per-function simplification and scalar aggregate replacement

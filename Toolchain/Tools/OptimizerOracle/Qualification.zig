@@ -30,6 +30,13 @@ pub const Evidence = union(enum) {
         raw_arithmetic: usize,
         optimized_arithmetic: usize,
     },
+    integer_conversions: struct {
+        function: []const u8,
+        raw_conversions: usize,
+        optimized_conversions: usize,
+        raw_arithmetic: usize,
+        optimized_arithmetic: usize,
+    },
     critical_edge: struct {
         function: []const u8,
         raw_local_operations: usize,
@@ -64,6 +71,14 @@ pub const SsaValueCounter = struct {
     disabled_arithmetic: usize,
 };
 
+pub const IntegerConversionCounter = struct {
+    function: []const u8,
+    enabled_conversions: usize,
+    disabled_conversions: usize,
+    enabled_arithmetic: usize,
+    disabled_arithmetic: usize,
+};
+
 pub const SsaPromotionCounter = struct {
     function: []const u8,
     enabled_local_operations: usize,
@@ -93,6 +108,7 @@ pub fn verifyContract(
         .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .coalesces_forwarded_phi => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .promotes_distinct_phis => |function_name| verifyCriticalEdgePromotion(function_name, differential),
+        .folds_integer_conversions => |function_name| verifyIntegerConversionFolding(function_name, differential),
         .proves_integer_ranges => |requirement| verifyIntegerRanges(requirement, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,
@@ -102,6 +118,65 @@ pub fn verifyContract(
             differential.optimized_ir,
         ),
     };
+}
+
+const IntegerConversionProfile = struct {
+    conversions: usize = 0,
+    arithmetic: usize = 0,
+};
+
+fn verifyIntegerConversionFolding(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw_function = findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const optimized_function = findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const raw = integerConversionProfile(raw_function);
+    const optimized = integerConversionProfile(optimized_function);
+    if (raw.conversions == 0 or optimized.conversions >= raw.conversions)
+        return error.ExpectedIntegerConversionReductionMissing;
+    if (raw.arithmetic == 0 or optimized.arithmetic >= raw.arithmetic)
+        return error.ExpectedConvertedArithmeticReductionMissing;
+    return .{ .integer_conversions = .{
+        .function = function_name,
+        .raw_conversions = raw.conversions,
+        .optimized_conversions = optimized.conversions,
+        .raw_arithmetic = raw.arithmetic,
+        .optimized_arithmetic = optimized.arithmetic,
+    } };
+}
+
+pub fn verifyIntegerConversionCounter(
+    function_name: []const u8,
+    enabled: Differential.Result,
+    disabled: Differential.Result,
+) !IntegerConversionCounter {
+    const enabled_function = findFunction(enabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const disabled_function = findFunction(disabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const enabled_profile = integerConversionProfile(enabled_function);
+    const disabled_profile = integerConversionProfile(disabled_function);
+    if (enabled_profile.conversions >= disabled_profile.conversions)
+        return error.ExpectedIntegerConversionCounterEvidenceMissing;
+    if (enabled_profile.arithmetic >= disabled_profile.arithmetic)
+        return error.ExpectedConvertedArithmeticCounterEvidenceMissing;
+    return .{
+        .function = function_name,
+        .enabled_conversions = enabled_profile.conversions,
+        .disabled_conversions = disabled_profile.conversions,
+        .enabled_arithmetic = enabled_profile.arithmetic,
+        .disabled_arithmetic = disabled_profile.arithmetic,
+    };
+}
+
+fn integerConversionProfile(function: Silex.Ir.Function) IntegerConversionProfile {
+    var result: IntegerConversionProfile = .{};
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .convert => result.conversions += 1,
+        .binary, .unary => result.arithmetic += 1,
+        else => {},
+    };
+    return result;
 }
 
 fn verifyIntegerRanges(requirement: anytype, differential: Differential.Result) !Evidence {

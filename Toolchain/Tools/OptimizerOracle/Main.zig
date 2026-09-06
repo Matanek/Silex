@@ -179,6 +179,18 @@ fn qualifyNative(
                 without,
             );
         }
+        var conversion_counter: ?Qualification.IntegerConversionCounter = null;
+        if (entry.contract == .folds_integer_conversions) {
+            const without = try Differential.verifyWithOptions(allocator, source, .{
+                .verify_each_pass = true,
+                .disabled = .ssa_value_simplification,
+            });
+            conversion_counter = try Qualification.verifyIntegerConversionCounter(
+                entry.contract.folds_integer_conversions,
+                differential,
+                without,
+            );
+        }
         var promotion_counter: ?Qualification.SsaPromotionCounter = null;
         const promotion_function: ?[]const u8 = switch (entry.contract) {
             .promotes_critical_edge => |function_name| function_name,
@@ -236,6 +248,19 @@ fn qualifyNative(
                     counter.disabled_branches,
                     counter.disabled_arithmetic,
                     counter.enabled_branches,
+                    counter.enabled_arithmetic,
+                },
+            );
+        }
+        if (conversion_counter) |counter| {
+            try Report.line(
+                io,
+                allocator,
+                "    counter: disabling ssa_value_simplification retains {d} conversions and {d} arithmetic operation(s), versus {d} and {d}",
+                .{
+                    counter.disabled_conversions,
+                    counter.disabled_arithmetic,
+                    counter.enabled_conversions,
                     counter.enabled_arithmetic,
                 },
             );
@@ -361,6 +386,18 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 ssa.optimized_branches,
                 ssa.raw_arithmetic,
                 ssa.optimized_arithmetic,
+            },
+        ),
+        .integer_conversions => |conversion| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} conversions {d} -> {d}, arithmetic {d} -> {d}",
+            .{
+                conversion.function,
+                conversion.raw_conversions,
+                conversion.optimized_conversions,
+                conversion.raw_arithmetic,
+                conversion.optimized_arithmetic,
             },
         ),
         .critical_edge => |edge| try Report.line(

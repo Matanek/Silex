@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const Source = @import("../Source.zig");
 const Bounds = @import("Bounds.zig");
 const DenseBlocks = @import("DenseBlocks.zig");
 const InlineControlFlow = @import("InlineControlFlow.zig");
@@ -1201,6 +1202,12 @@ fn definitionConstant(
             const folded = foldBinary(function, rewritten, facts) orelse break :binary null;
             break :binary instructionConstant(folded);
         },
+        .convert => |value| conversion: {
+            var rewritten = value;
+            rewritten.operand = canonical(aliases, value.operand);
+            const folded = foldConvert(rewritten, facts) orelse break :conversion null;
+            break :conversion instructionConstant(folded);
+        },
         else => null,
     };
 }
@@ -2163,8 +2170,30 @@ fn foldInstruction(function: Ir.Function, instruction: Ir.Instruction, constants
     return switch (instruction) {
         .unary => |value| foldUnary(function, value, constants) orelse instruction,
         .binary => |value| foldBinary(function, value, constants) orelse instruction,
+        .convert => |value| foldConvert(value, constants) orelse instruction,
         else => instruction,
     };
+}
+
+fn foldConvert(value: Ir.Instruction.Convert, constants: []const Constant) ?Ir.Instruction {
+    if (!value.source.isInteger() or !value.target.isInteger()) return null;
+    const bits = switch (constants[value.operand]) {
+        .integer => |bits| bits,
+        else => return null,
+    };
+    const number: i128 = if (value.source.isSignedInteger())
+        signedValue(bits, value.source.bitWidth())
+    else
+        @intCast(masked(bits, value.source.bitWidth()));
+    if (value.target.isSignedInteger()) {
+        if (!fitsSigned(number, value.target.bitWidth())) return null;
+    } else {
+        if (number < 0 or @as(u128, @intCast(number)) > unsignedMaximum(value.target.bitWidth())) return null;
+    }
+    return .{ .constant_int = .{
+        .result = value.result,
+        .bits = integerBits(number, value.target.bitWidth()),
+    } };
 }
 
 fn foldUnary(function: Ir.Function, value: Ir.Instruction.Unary, constants: []const Constant) ?Ir.Instruction {
@@ -2770,6 +2799,61 @@ test "SSA value simplification preserves checked integer overflow" {
     const instruction = optimized.functions[0].blocks[0].instructions[2].binary;
     try std.testing.expectEqual(Ir.BinaryOperator.add, instruction.operator);
     try std.testing.expect(instruction.checked);
+}
+
+test "SSA value simplification folds representable integer conversions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const position = Source.Position{ .offset = 0, .line = 1, .column = 1 };
+    const blocks = [_]Ir.Block{.{ .instructions = &.{
+        .{ .constant_int = .{ .result = 0, .bits = 0xf8 } },
+        .{ .convert = .{
+            .result = 1,
+            .operand = 0,
+            .source = .int8,
+            .target = .int16,
+            .position = position,
+            .checked = true,
+        } },
+        .{ .constant_int = .{ .result = 2, .bits = 42 } },
+        .{ .convert = .{
+            .result = 3,
+            .operand = 2,
+            .source = .uint8,
+            .target = .int16,
+            .position = position,
+            .checked = true,
+        } },
+        .{ .constant_int = .{ .result = 4, .bits = 3 } },
+        .{ .binary = .{ .result = 5, .operator = .multiply, .left = 1, .right = 4 } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 3 } },
+    }, .terminator = .{ .return_value = 6 } }};
+    const optimized = try simplifySsaValues(allocator, .{ .functions = &.{.{
+        .name = "constant_conversions",
+        .parameter_types = &.{},
+        .return_type = .int16,
+        .value_types = &.{ .int8, .int16, .uint8, .int16, .int16, .int16, .int16 },
+        .blocks = &blocks,
+    }} });
+    const text = try Ir.writeText(allocator, optimized);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 18"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "convert"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "mul"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "add"));
+}
+
+test "constant folding preserves failing integer conversions" {
+    const position = Source.Position{ .offset = 0, .line = 1, .column = 1 };
+    const facts = [_]Constant{.{ .integer = 300 }};
+    try std.testing.expect(foldConvert(.{
+        .result = 1,
+        .operand = 0,
+        .source = .int16,
+        .target = .uint8,
+        .position = position,
+        .checked = true,
+    }, &facts) == null);
 }
 
 test "release folds finite float constants inside branching functions" {
