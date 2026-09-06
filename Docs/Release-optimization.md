@@ -27,6 +27,14 @@ remain candidates for the native global allocator instead. Floating-point
 recurrences retain their local identity for scalar and SLP lane allocation.
 These decisions are automatic and require no source annotation.
 
+Before constructing edge definitions, SSA promotion redirects empty jump-only
+blocks to their effective target. A scalar join reached directly from a branch
+can therefore place its parallel copies in that predecessor instead of
+splitting the critical edge and adding a native jump. This applies uniformly
+to integers, booleans, float32, and float64. Locals spanning several live joins
+remain in the native global-allocation domain until their overlapping PHI
+residences can be coalesced without increasing the control-flow graph.
+
 After final SSA promotion, Release recomputes exact scalar facts independently
 of block serialization order. A constant may cross a join only when every
 reachable definition proves the same type and bit pattern; divergent PHI

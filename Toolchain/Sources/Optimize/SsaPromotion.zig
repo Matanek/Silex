@@ -27,7 +27,8 @@ fn optimizeTypes(allocator: Allocator, program: Ir.Program, promote_floats: bool
 fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: bool) !Ir.Function {
     if (original.blocks.len == 0 or original.local_types.len == 0) return original;
 
-    const function = try reachableFunction(allocator, original);
+    const reachable = try reachableFunction(allocator, original);
+    const function = try reachableFunction(allocator, try bypassEmptyJumpBlocks(allocator, reachable));
     const block_count = function.blocks.len;
     const local_count = function.local_types.len;
     const promoted = try allocator.alloc(bool, local_count);
@@ -105,23 +106,14 @@ fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: 
             }
         };
     }
-    // Lowering a live phi on a branch predecessor requires a critical-edge
-    // block. Keep that local in the backend's global allocation domain until
-    // the machine IR can represent parallel edge transfers directly; an
-    // otherwise empty block would add a branch to every hot iteration.
+    // A single live join can be lowered directly in each predecessor, even
+    // when one predecessor branches to another successor. Keep multi-join
+    // webs in the backend allocation domain until their overlapping phi
+    // residences can be coalesced without introducing an extra CFG block.
     const active_phi_count = try allocator.alloc(usize, local_count);
     @memset(active_phi_count, 0);
     for (0..block_count) |block| for (0..local_count) |local| {
-        const index = at(local_count, block, local);
-        if (!phi_active[index]) continue;
-        active_phi_count[local] += 1;
-        for (predecessors[block].items) |predecessor| switch (function.blocks[predecessor].terminator) {
-            .branch => {
-                promoted[local] = false;
-                break;
-            },
-            else => {},
-        };
+        if (phi_active[at(local_count, block, local)]) active_phi_count[local] += 1;
     };
     for (active_phi_count, 0..) |count, local| {
         if (count > 1) promoted[local] = false;
@@ -207,7 +199,7 @@ fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: 
     }
 
     for (0..block_count) |predecessor| {
-        var terminator = blocks.items[predecessor].terminator;
+        const terminator = blocks.items[predecessor].terminator;
         switch (terminator) {
             .jump => |target| {
                 const copies = try edgeCopies(
@@ -228,29 +220,26 @@ fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: 
                 }
             },
             .branch => |branch| {
-                terminator.branch.then_block = try splitEdge(
+                const targets = if (branch.then_block == branch.else_block)
+                    &[_]Ir.BlockId{branch.then_block}
+                else
+                    &[_]Ir.BlockId{ branch.then_block, branch.else_block };
+                const copies = try edgeCopiesForTargets(
                     allocator,
                     function,
                     predecessor,
-                    branch.then_block,
+                    targets,
                     phi_values,
                     phi_active,
                     outgoing,
                     &value_types,
-                    &blocks,
                 );
-                terminator.branch.else_block = try splitEdge(
-                    allocator,
-                    function,
-                    predecessor,
-                    branch.else_block,
-                    phi_values,
-                    phi_active,
-                    outgoing,
-                    &value_types,
-                    &blocks,
-                );
-                blocks.items[predecessor].terminator = terminator;
+                if (copies.len != 0) {
+                    var instructions: std.ArrayList(Ir.Instruction) = .empty;
+                    try instructions.appendSlice(allocator, blocks.items[predecessor].instructions);
+                    try instructions.appendSlice(allocator, copies);
+                    blocks.items[predecessor].instructions = try instructions.toOwnedSlice(allocator);
+                }
             },
             else => {},
         }
@@ -297,6 +286,35 @@ fn reachableFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
     var result = function;
     result.blocks = blocks;
     return result;
+}
+
+fn bypassEmptyJumpBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    const blocks = try allocator.dupe(Ir.Block, function.blocks);
+    for (blocks) |*block| block.terminator = switch (block.terminator) {
+        .jump => |target| .{ .jump = resolveEmptyJump(function.blocks, target) },
+        .branch => |branch| .{ .branch = .{
+            .condition = branch.condition,
+            .then_block = resolveEmptyJump(function.blocks, branch.then_block),
+            .else_block = resolveEmptyJump(function.blocks, branch.else_block),
+        } },
+        else => block.terminator,
+    };
+    var result = function;
+    result.blocks = blocks;
+    return result;
+}
+
+fn resolveEmptyJump(blocks: []const Ir.Block, initial: Ir.BlockId) Ir.BlockId {
+    var current = initial;
+    var traversed: usize = 0;
+    while (current < blocks.len and blocks[current].instructions.len == 0 and traversed < blocks.len) : (traversed += 1) {
+        current = switch (blocks[current].terminator) {
+            .jump => |target| target,
+            else => break,
+        };
+        if (current == initial) return initial;
+    }
+    return current;
 }
 
 fn remapTerminator(terminator: Ir.Terminator, remap: []const Ir.BlockId) Ir.Terminator {
@@ -415,24 +433,6 @@ fn entryValues(
     return result;
 }
 
-fn splitEdge(
-    allocator: Allocator,
-    function: Ir.Function,
-    predecessor: Ir.BlockId,
-    target: Ir.BlockId,
-    phi_values: []const ?Ir.ValueId,
-    phi_active: []const bool,
-    outgoing: []const ?Ir.ValueId,
-    value_types: *std.ArrayList(Ir.Type),
-    blocks: *std.ArrayList(Ir.Block),
-) !Ir.BlockId {
-    const copies = try edgeCopies(allocator, function, predecessor, target, phi_values, phi_active, outgoing, value_types);
-    if (copies.len == 0) return target;
-    const edge = blocks.items.len;
-    try blocks.append(allocator, .{ .instructions = copies, .terminator = .{ .jump = target } });
-    return edge;
-}
-
 fn edgeCopies(
     allocator: Allocator,
     function: Ir.Function,
@@ -443,18 +443,40 @@ fn edgeCopies(
     outgoing: []const ?Ir.ValueId,
     value_types: *std.ArrayList(Ir.Type),
 ) ![]const Ir.Instruction {
+    return edgeCopiesForTargets(
+        allocator,
+        function,
+        predecessor,
+        &.{target},
+        phi_values,
+        phi_active,
+        outgoing,
+        value_types,
+    );
+}
+
+fn edgeCopiesForTargets(
+    allocator: Allocator,
+    function: Ir.Function,
+    predecessor: Ir.BlockId,
+    targets: []const Ir.BlockId,
+    phi_values: []const ?Ir.ValueId,
+    phi_active: []const bool,
+    outgoing: []const ?Ir.ValueId,
+    value_types: *std.ArrayList(Ir.Type),
+) ![]const Ir.Instruction {
     const local_count = function.local_types.len;
     var destinations: std.ArrayList(Ir.ValueId) = .empty;
     var sources: std.ArrayList(Ir.ValueId) = .empty;
     var types: std.ArrayList(Ir.Type) = .empty;
-    for (0..local_count) |local| if (phi_active[at(local_count, target, local)]) {
-        const destination = phi_values[at(local_count, target, local)].?;
-        const source = outgoing[at(local_count, predecessor, local)] orelse return error.InvalidProgram;
-        if (source == destination) continue;
-        try destinations.append(allocator, destination);
-        try sources.append(allocator, source);
-        try types.append(allocator, function.local_types[local]);
-    };
+    for (targets) |target| for (0..local_count) |local| if (phi_active[at(local_count, target, local)]) {
+            const destination = phi_values[at(local_count, target, local)].?;
+            const source = outgoing[at(local_count, predecessor, local)] orelse return error.InvalidProgram;
+            if (source == destination) continue;
+            try destinations.append(allocator, destination);
+            try sources.append(allocator, source);
+            try types.append(allocator, function.local_types[local]);
+        };
     var output: std.ArrayList(Ir.Instruction) = .empty;
     while (destinations.items.len != 0) {
         var safe: ?usize = null;
@@ -537,7 +559,7 @@ test "promote scalar locals through a loop and lower the phi to edge copies" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "copy"));
 }
 
-test "keep a multi-join loop recurrence in the global allocation domain" {
+test "collapse an empty join before promoting its loop recurrence" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -569,5 +591,39 @@ test "keep a multi-join loop recurrence in the global allocation domain" {
         .blocks = &blocks,
     }} };
     const optimized = try optimize(allocator, program);
-    try std.testing.expectEqualSlices(Ir.Type, &.{.int}, optimized.functions[0].local_types);
+    try std.testing.expectEqual(@as(usize, 0), optimized.functions[0].local_types.len);
+    const text = try Ir.writeText(allocator, optimized);
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "local.load"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "local.store"));
+}
+
+test "promote a scalar local across a critical edge without splitting it" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &.{
+            .{ .constant_int = .{ .result = 1, .bits = 10 } },
+            .{ .local_store = .{ .local = 0, .operand = 1 } },
+        }, .terminator = .{ .branch = .{ .condition = 0, .then_block = 1, .else_block = 2 } } },
+        .{ .instructions = &.{
+            .{ .constant_int = .{ .result = 2, .bits = 20 } },
+            .{ .local_store = .{ .local = 0, .operand = 2 } },
+        }, .terminator = .{ .jump = 2 } },
+        .{ .instructions = &.{.{ .local_load = .{ .result = 3, .local = 0 } }}, .terminator = .{ .return_value = 3 } },
+    };
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "critical_edge",
+        .parameter_types = &.{.bool},
+        .return_type = .int,
+        .value_types = &.{ .bool, .int, .int, .int },
+        .local_types = &.{.int},
+        .blocks = &blocks,
+    }} };
+    const optimized = try optimize(allocator, program);
+    try std.testing.expectEqual(@as(usize, 0), optimized.functions[0].local_types.len);
+    try std.testing.expectEqual(@as(usize, blocks.len), optimized.functions[0].blocks.len);
+    const text = try Ir.writeText(allocator, optimized);
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "local.load"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "local.store"));
 }

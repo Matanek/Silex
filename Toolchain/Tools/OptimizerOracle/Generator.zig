@@ -11,6 +11,7 @@ pub const StructuralContract = union(enum) {
     removes_collection_bounds: []const u8,
     scalarizes_dense_loop: []const u8,
     simplifies_ssa_values: []const u8,
+    promotes_critical_edge: []const u8,
     slp_width: struct {
         function: []const u8,
         minimum: u3,
@@ -63,6 +64,11 @@ pub const regressions = [_]RegressionEntry{
         .name = "Regressions/SsaValueFacts.sx",
         .concern = "unanimous SSA joins propagate exact constants while divergent joins retain their control",
         .contract = .{ .simplifies_ssa_values = "unanimous" },
+    },
+    .{
+        .name = "Regressions/SsaCriticalEdge.sx",
+        .concern = "float32 and float64 locals cross a critical edge without memory traffic or a synthetic block",
+        .contract = .{ .promotes_critical_edge = "choose64" },
     },
     .{
         .name = "Regressions/ArrayStorageAccess.sx",

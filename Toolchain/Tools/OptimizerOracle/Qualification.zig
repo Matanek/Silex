@@ -30,6 +30,13 @@ pub const Evidence = union(enum) {
         raw_arithmetic: usize,
         optimized_arithmetic: usize,
     },
+    critical_edge: struct {
+        function: []const u8,
+        raw_local_operations: usize,
+        optimized_local_operations: usize,
+        raw_blocks: usize,
+        optimized_blocks: usize,
+    },
     slp: struct {
         function: []const u8,
         required: u3,
@@ -48,6 +55,14 @@ pub const SsaValueCounter = struct {
     disabled_arithmetic: usize,
 };
 
+pub const SsaPromotionCounter = struct {
+    function: []const u8,
+    enabled_local_operations: usize,
+    disabled_local_operations: usize,
+    enabled_blocks: usize,
+    disabled_blocks: usize,
+};
+
 pub fn verifyContract(
     allocator: std.mem.Allocator,
     contract: Generator.StructuralContract,
@@ -59,6 +74,7 @@ pub fn verifyContract(
         .removes_collection_bounds => |function_name| verifyCollectionBounds(function_name, differential),
         .scalarizes_dense_loop => |function_name| verifyDenseScalarLoop(function_name, differential),
         .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
+        .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -67,6 +83,66 @@ pub fn verifyContract(
             differential.optimized_ir,
         ),
     };
+}
+
+fn verifyCriticalEdgePromotion(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw_function = findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const optimized_function = findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const raw = IrStats.countFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const optimized = IrStats.countFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const raw_local_operations = localOperationCount(raw_function);
+    const optimized_local_operations = localOperationCount(optimized_function);
+    if (raw_local_operations == 0 or optimized_local_operations >= raw_local_operations)
+        return error.ExpectedCriticalEdgePromotionMissing;
+    if (optimized.blocks > raw.blocks) return error.UnprofitableCriticalEdgeSplit;
+    return .{ .critical_edge = .{
+        .function = function_name,
+        .raw_local_operations = raw_local_operations,
+        .optimized_local_operations = optimized_local_operations,
+        .raw_blocks = raw.blocks,
+        .optimized_blocks = optimized.blocks,
+    } };
+}
+
+pub fn verifySsaPromotionCounter(
+    function_name: []const u8,
+    enabled: Differential.Result,
+    disabled: Differential.Result,
+) !SsaPromotionCounter {
+    const enabled_function = findFunction(enabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const disabled_function = findFunction(disabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const enabled_profile = IrStats.countFunction(enabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const disabled_profile = IrStats.countFunction(disabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const enabled_local_operations = localOperationCount(enabled_function);
+    const disabled_local_operations = localOperationCount(disabled_function);
+    if (enabled_local_operations >= disabled_local_operations)
+        return error.ExpectedCriticalEdgeCounterEvidenceMissing;
+    if (enabled_profile.blocks > disabled_profile.blocks)
+        return error.UnprofitableCriticalEdgeSplit;
+    return .{
+        .function = function_name,
+        .enabled_local_operations = enabled_local_operations,
+        .disabled_local_operations = disabled_local_operations,
+        .enabled_blocks = enabled_profile.blocks,
+        .disabled_blocks = disabled_profile.blocks,
+    };
+}
+
+fn localOperationCount(function: Silex.Ir.Function) usize {
+    var count: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .local_load, .local_store => count += 1,
+        else => {},
+    };
+    return count;
 }
 
 const SsaValueProfile = struct {

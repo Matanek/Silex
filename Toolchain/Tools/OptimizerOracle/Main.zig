@@ -179,6 +179,18 @@ fn qualifyNative(
                 without,
             );
         }
+        var promotion_counter: ?Qualification.SsaPromotionCounter = null;
+        if (entry.contract == .promotes_critical_edge) {
+            const without = try Differential.verifyWithOptions(allocator, source, .{
+                .verify_each_pass = true,
+                .disabled = .ssa_promotion_post,
+            });
+            promotion_counter = try Qualification.verifySsaPromotionCounter(
+                entry.contract.promotes_critical_edge,
+                differential,
+                without,
+            );
+        }
         const stem = std.fs.path.stem(entry.name);
         const artifact_stem = try std.fmt.allocPrint(
             allocator,
@@ -207,6 +219,19 @@ fn qualifyNative(
                     counter.disabled_arithmetic,
                     counter.enabled_branches,
                     counter.enabled_arithmetic,
+                },
+            );
+        }
+        if (promotion_counter) |counter| {
+            try Report.line(
+                io,
+                allocator,
+                "    counter: disabling ssa_promotion_post retains {d} local operation(s) versus {d}, with blocks {d} versus {d}",
+                .{
+                    counter.disabled_local_operations,
+                    counter.enabled_local_operations,
+                    counter.disabled_blocks,
+                    counter.enabled_blocks,
                 },
             );
         }
@@ -305,6 +330,18 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 ssa.optimized_branches,
                 ssa.raw_arithmetic,
                 ssa.optimized_arithmetic,
+            },
+        ),
+        .critical_edge => |edge| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} local operations {d} -> {d}, blocks {d} -> {d}",
+            .{
+                edge.function,
+                edge.raw_local_operations,
+                edge.optimized_local_operations,
+                edge.raw_blocks,
+                edge.optimized_blocks,
             },
         ),
         .slp => |slp| try Report.line(
