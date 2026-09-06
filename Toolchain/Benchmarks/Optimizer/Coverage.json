@@ -46,14 +46,14 @@
       "value": "observed Silex 79.922104 FPS; never replaces the accepted baseline"
     },
     {
-      "id": "boids-part01-single-process-smoke",
+      "id": "boids-part01-candidate",
       "status": "candidate",
-      "repository": "Silex",
-      "revision": "94fd92f3a0c81256c82af182fb12bb4b241d22d5",
-      "source": "Silex-Benchmarks/Sources/Boids2D/Silex.sx at 8790c1fbc44b3fa1303c73340b45e105d287b7f7c13ccf9f7c8c93e24262a99b",
-      "command": "compiled Release --nocache and executed once with 4000",
-      "metric": "single five-second diagnostic process; not an accepted timing campaign",
-      "value": "binary SHA-256 0b35fd6531d67ddf6815f6ba2c5988aa1b7872dbda5806fa1e690d58496e4064, 37175192 bytes, 84.33471 FPS"
+      "repository": "Silex-Benchmarks",
+      "revision": "f20fad5b8e0e54a1090af7ef6b56859908b244ee",
+      "source": "Sources/Boids2D/Baselines/2026-09-06-131427-arm64-boids.log",
+      "command": "Part 01 worktree Sources/Boids2D/RunComparison.sh --wait",
+      "metric": "4000 boids, one warm-up, seven rotated five-second processes on Silex bb18abfe1ff940d975cacf0a209e10dd889d3dd0",
+      "value": "Silex median 82.779430 FPS, MAD 0.2772%, -6.67% versus architectural C++, -4.51% versus direct C++; log SHA-256 9c2105c753e6061117b97c7048e42435b30af1e6c2807267d10c8e40b650985d"
     },
     {
       "id": "physics-contact-kernel-2026-09-03",
