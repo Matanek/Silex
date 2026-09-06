@@ -96,10 +96,14 @@ memory effects, and block boundaries invalidate both transformations.
 Scalar read-only collection views are emitted to LLVM as `{data, count}`
 values. The oracle models list literals with non-owning stack storage, view
 construction, signed negative-index normalization, and checked element loads.
-Ownership-sensitive forms such as retained lists remain unsupported instead of
-being approximated with different lifetime semantics. Consequently, the LLVM
-coverage recorded for collections is evidence for scalar views and bounds only;
-collection ownership and copy-on-write behavior remain a gap.
+For owning scalar lists, retains and drops have no LLVM-side lifetime effect;
+instead, each functional owning replacement allocates and copies its input
+storage before the checked write. This deliberately models Silex copy-on-write
+value semantics rather than its reference-count implementation. A source list
+and its updated result therefore remain independent, while LLVM can eliminate
+the allocation and copy when their observable scalar values make that legal.
+Resource-bearing elements and ownership edges remain unsupported rather than
+being approximated with different lifetime semantics.
 
 Mutable scalar views use the same `{data, count}` representation, but
 `collection_replace` becomes a checked store through `data`. On an exact

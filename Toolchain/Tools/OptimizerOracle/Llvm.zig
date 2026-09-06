@@ -24,6 +24,8 @@ pub fn emit(allocator: Allocator, program: Ir.Program) Error![]u8 {
         \\@.false = private constant [6 x i8] c"false\00"
         \\
         \\declare i32 @printf(ptr, ...)
+        \\declare ptr @malloc(i64)
+        \\declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
         \\declare void @llvm.trap()
         \\
     );
@@ -137,10 +139,11 @@ const FunctionEmitter = struct {
                 "  %v{d} = bitcast i64 {d} to double\n",
                 .{ value.result, value.bits },
             ),
-            .copy, .deep_copy => |value| try self.copyValue(value.result, value.operand),
+            .copy => |value| try self.copyValue(value.result, value.operand),
+            .deep_copy => |value| try self.emitDeepCopy(value.result, value.operand),
             .structure_init => |value| try self.emitStructureInit(value),
             .list_init => |value| try self.emitListInit(value),
-            .list_drop => {},
+            .list_retain, .list_drop => {},
             .field_load => |value| try self.emitFieldLoad(value),
             .collection_load => |value| try self.emitCollectionLoad(block_id, value),
             .collection_replace => |value| try self.emitCollectionReplace(block_id, value),
@@ -175,6 +178,37 @@ const FunctionEmitter = struct {
             operand,
             type_name,
             operand,
+        });
+    }
+
+    fn emitDeepCopy(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
+        const type_value = try self.valueType(result);
+        if (type_value != try self.valueType(operand)) return error.InvalidProgram;
+        const collection = self.collectionInfo(type_value) catch return self.copyValue(result, operand);
+        if (collection.view or (!collection.element.isNumeric() and collection.element != .bool))
+            return error.UnsupportedType;
+
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, type_value);
+        const element_bytes = scalarByteWidth(collection.element) orelse return error.UnsupportedType;
+        try self.write("  %t{d}.source = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, operand });
+        try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, operand });
+        try self.write("  %t{d}.bytes = mul i64 %t{d}.count, {d}\n", .{ serial, serial, element_bytes });
+        try self.write("  %t{d}.storage = call ptr @malloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+        try self.write(
+            "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.source, i64 %t{d}.bytes, i1 false)\n",
+            .{ serial, serial, serial },
+        );
+        try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{
+            serial,
+            type_name,
+            serial,
+        });
+        try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{
+            result,
+            type_name,
+            serial,
+            serial,
         });
     }
 
@@ -302,7 +336,7 @@ const FunctionEmitter = struct {
     fn emitCollectionReplace(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionReplace) Error!void {
         const collection_type = try self.valueType(value.collection);
         const collection = try self.collectionInfo(collection_type);
-        if (!collection.view or value.ownership != .root or
+        if (value.ownership != .root or
             try self.valueType(value.result) != collection_type or
             try self.valueType(value.index) != .int or
             try self.valueType(value.replacement) != collection.element or
@@ -313,6 +347,7 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, collection_type);
         const element_name = try llvmType(self.allocator, self.program, collection.element);
+        const element_bytes = scalarByteWidth(collection.element) orelse return error.UnsupportedType;
         try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
         try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
         try self.emitNormalizedIndex(serial, "index", value.index);
@@ -321,14 +356,37 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
         try self.write("  br i1 %t{d}.index.invalid, label %trap, label %b{d}.cont{d}\n", .{ serial, block_id, serial });
         try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
-        try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.index\n", .{
+        if (!collection.view) {
+            try self.write("  %t{d}.bytes = mul i64 %t{d}.count, {d}\n", .{ serial, serial, element_bytes });
+            try self.write("  %t{d}.copy = call ptr @malloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+            try self.write(
+                "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.copy, ptr %t{d}.data, i64 %t{d}.bytes, i1 false)\n",
+                .{ serial, serial, serial },
+            );
+        }
+        try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.{s}, i64 %t{d}.index\n", .{
             serial,
             element_name,
             serial,
+            if (collection.view) "data" else "copy",
             serial,
         });
         try self.write("  store {s} %v{d}, ptr %t{d}.element\n", .{ element_name, value.replacement, serial });
-        try self.copyValue(value.result, value.collection);
+        if (collection.view) {
+            try self.copyValue(value.result, value.collection);
+        } else {
+            try self.write("  %t{d}.updated = insertvalue {s} poison, ptr %t{d}.copy, 0\n", .{
+                serial,
+                type_name,
+                serial,
+            });
+            try self.write("  %v{d} = insertvalue {s} %t{d}.updated, i64 %t{d}.count, 1\n", .{
+                value.result,
+                type_name,
+                serial,
+                serial,
+            });
+        }
     }
 
     fn emitCollectionView(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionSlice) Error!void {
@@ -846,6 +904,12 @@ const CollectionInfo = struct {
     view: bool,
 };
 
+fn scalarByteWidth(type_value: Ir.Type) ?usize {
+    if (type_value == .bool) return 1;
+    if (!type_value.isNumeric()) return null;
+    return std.math.divCeil(usize, type_value.bitWidth(), 8) catch unreachable;
+}
+
 fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;
@@ -979,5 +1043,24 @@ test "LLVM emitter supports mutable scalar collection views" {
     );
     const text = try emit(allocator, compilation.ir);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".source = load %sx.type."));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "store i64 %v"));
+}
+
+test "LLVM emitter preserves owning scalar collection copies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Silex.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func main() {
+        \\    let original:int[] = [3, 5, 8]
+        \\    var changed = original
+        \\    changed[1] = 13
+        \\    print(original[1] == 5)
+        \\    print(changed[1] == 13)
+        \\}
+    );
+    const text = try emit(allocator, compilation.ir);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "call void @llvm.memcpy.p0.p0.i64"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "store i64 %v"));
 }

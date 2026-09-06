@@ -49,6 +49,7 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "ReadonlyViewMemory.sx", .timing = false },
     .{ .name = "MutableViewMemory.sx", .timing = false },
     .{ .name = "NestedAggregateWidths.sx", .timing = false },
+    .{ .name = "OwningCollectionCopy.sx", .timing = false },
 };
 
 pub const regressions = [_]RegressionEntry{

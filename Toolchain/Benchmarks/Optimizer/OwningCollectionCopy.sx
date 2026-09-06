@@ -1,0 +1,7 @@
+func main() {
+    let original:int[] = [3, 5, 8]
+    var changed = original
+    changed[1] = 13
+    print(original[1] == 5)
+    print(changed[1] == 13)
+}
