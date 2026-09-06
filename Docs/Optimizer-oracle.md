@@ -77,6 +77,10 @@ portable Silex functions. They exclude the generated ABI `main` wrapper and do
 not compare how much work two differently shaped raw frontends happened to
 remove. Loop block differences accompanied by LLVM PHI creation are attributed
 to loop rotation and induction analysis rather than generic CFG cleanup.
+Plain value structures are emitted as typed LLVM aggregates. Their residual
+construction, projection, copy, parameter, and return operations are compared
+separately from LLVM's internal `{result, overflow}` intrinsic pairs, so those
+pairs cannot hide a missing Silex scalar-replacement transformation.
 
 Timing remains separate from correctness. The comparison runner builds each
 candidate once, alternates execution order, and reports median, MAD, p10-p90,

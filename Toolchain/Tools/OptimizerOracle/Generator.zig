@@ -43,6 +43,7 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "IntegerControlFlow.sx", .timing = false },
     .{ .name = "IntegerWidths.sx", .timing = false },
     .{ .name = "UnsignedBitwise.sx", .timing = false },
+    .{ .name = "AggregateScalarization.sx", .timing = false },
 };
 
 pub const regressions = [_]RegressionEntry{

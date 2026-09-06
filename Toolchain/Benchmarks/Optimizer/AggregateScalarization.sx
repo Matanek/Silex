@@ -1,0 +1,29 @@
+struct Pair {
+    var x:int
+    var y:int
+}
+
+func update(value:Pair, delta:int, positive:bool) Pair {
+    var result = value
+    result.x += delta
+    if positive {
+        result.y += result.x
+    } else {
+        result.y -= result.x
+    }
+    return result
+}
+
+func score(seed:int, positive:bool) int {
+    var pair = Pair(x:seed, y:2)
+    let snapshot = pair
+    pair.x += 1
+    pair.y = snapshot.x + pair.x
+    let updated = update(pair, 3, positive)
+    return updated.x + updated.y + snapshot.y
+}
+
+func main() {
+    print(score(7, true))
+    print(score(7, false))
+}

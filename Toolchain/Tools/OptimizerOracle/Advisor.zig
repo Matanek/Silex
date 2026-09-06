@@ -4,6 +4,7 @@ const LlvmStats = @import("LlvmStats.zig");
 
 pub const Kind = enum {
     stack_to_ssa,
+    aggregate_scalarization,
     loop_induction_ssa,
     safety_check_elision,
     interprocedural_specialization,
@@ -17,6 +18,7 @@ pub const Kind = enum {
     pub fn label(self: Kind) []const u8 {
         return switch (self) {
             .stack_to_ssa => "promotion of local variables to SSA",
+            .aggregate_scalarization => "scalar replacement of value aggregates",
             .loop_induction_ssa => "loop induction variables and PHI nodes",
             .safety_check_elision => "proven safety-check elimination",
             .interprocedural_specialization => "interprocedural specialization and inlining",
@@ -32,6 +34,7 @@ pub const Kind = enum {
     pub fn action(self: Kind) []const u8 {
         return switch (self) {
             .stack_to_ssa => "Promote non-escaping locals to SSA, then remove redundant loads and stores.",
+            .aggregate_scalarization => "Decompose non-escaping value aggregates into scalar leaves while preserving snapshots and observable copies.",
             .loop_induction_ssa => "Recognize induction variables and represent them with PHI nodes to expose loop invariants.",
             .safety_check_elision => "Use range and dominance proofs to remove only checks already implied by control flow.",
             .interprocedural_specialization => "Specialize small calls for known arguments before inlining and dead-code elimination.",
@@ -111,6 +114,15 @@ pub fn analyze(
         score(88, silex_local_remaining - llvm_memory_remaining, 2),
         "LLVM retains {d} local-memory operation(s); Silex retains {d}.",
         .{ llvm_memory_remaining, silex_local_remaining },
+    );
+
+    if (optimized_silex.value_aggregate_operations > optimized_llvm.value_aggregate_operations) try append(
+        allocator,
+        &findings,
+        .aggregate_scalarization,
+        score(84, optimized_silex.value_aggregate_operations - optimized_llvm.value_aggregate_operations, 1),
+        "LLVM retains {d} value-aggregate operation(s); Silex retains {d}.",
+        .{ optimized_llvm.value_aggregate_operations, optimized_silex.value_aggregate_operations },
     );
 
     const llvm_safety_remaining = optimized_llvm.safetyGuards();
@@ -246,6 +258,7 @@ fn initialSummary() [kind_count]SummaryEntry {
 test "advisor guidance uses stable English labels" {
     const expected_labels = [_][]const u8{
         "promotion of local variables to SSA",
+        "scalar replacement of value aggregates",
         "loop induction variables and PHI nodes",
         "proven safety-check elimination",
         "interprocedural specialization and inlining",
@@ -262,6 +275,32 @@ test "advisor guidance uses stable English labels" {
         try std.testing.expectEqualStrings(expected, kind.label());
         for (kind.action()) |byte| try std.testing.expect(byte < 0x80);
     }
+}
+
+test "advisor reports only excess value aggregate residues" {
+    var optimized_silex: IrStats.Profile = .{};
+    optimized_silex.value_aggregate_operations = 4;
+    var optimized_llvm: LlvmStats.Profile = .{};
+    optimized_llvm.value_aggregate_operations = 2;
+    const analysis = try analyze(std.testing.allocator, .{
+        .raw = .{},
+        .optimized = optimized_silex,
+        .matched = .{},
+    }, .{
+        .raw = .{},
+        .optimized = optimized_llvm,
+        .matched = .{},
+    });
+    defer {
+        for (analysis.findings) |finding| std.testing.allocator.free(finding.evidence);
+        std.testing.allocator.free(analysis.findings);
+    }
+    try std.testing.expectEqual(@as(usize, 1), analysis.findings.len);
+    try std.testing.expectEqual(Kind.aggregate_scalarization, analysis.findings[0].kind);
+    try std.testing.expectEqualStrings(
+        "LLVM retains 2 value-aggregate operation(s); Silex retains 4.",
+        analysis.findings[0].evidence,
+    );
 }
 
 test "advisor ranks optimized SSA and safety residues" {

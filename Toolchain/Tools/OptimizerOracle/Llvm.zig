@@ -38,6 +38,17 @@ pub fn emit(allocator: Allocator, program: Ir.Program) Error![]u8 {
         }
     }
     try output.append(allocator, '\n');
+    for (program.structures, 0..) |structure, structure_index| {
+        if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null)
+            return error.UnsupportedType;
+        try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ", .{structure_index});
+        for (structure.fields, 0..) |field, field_index| {
+            if (field_index != 0) try output.appendSlice(allocator, ", ");
+            try output.appendSlice(allocator, try llvmType(allocator, program, field.type));
+        }
+        try output.appendSlice(allocator, " }\n");
+    }
+    if (program.structures.len != 0) try output.append(allocator, '\n');
 
     var main_function: ?usize = null;
     for (program.functions, 0..) |function, function_id| {
@@ -78,17 +89,17 @@ const FunctionEmitter = struct {
 
     fn emit(self: *FunctionEmitter) Error!void {
         if (self.function.capture_types.len != 0) return error.UnsupportedInstruction;
-        try self.write("define {s} @sx_{d}(", .{ try llvmType(self.function.return_type), self.function_id });
+        try self.write("define {s} @sx_{d}(", .{ try llvmType(self.allocator, self.program, self.function.return_type), self.function_id });
         for (self.function.parameter_types, 0..) |type_value, index| {
             if (index != 0) try self.output.appendSlice(self.allocator, ", ");
-            try self.write("{s} %v{d}", .{ try llvmType(type_value), index });
+            try self.write("{s} %v{d}", .{ try llvmType(self.allocator, self.program, type_value), index });
         }
         try self.output.appendSlice(self.allocator, ") {\n");
         for (self.function.blocks, 0..) |block, block_id| {
             try self.write("b{d}:\n", .{block_id});
             if (block_id == 0) {
                 for (self.function.local_types, 0..) |type_value, local| {
-                    try self.write("  %local{d} = alloca {s}\n", .{ local, try llvmType(type_value) });
+                    try self.write("  %local{d} = alloca {s}\n", .{ local, try llvmType(self.allocator, self.program, type_value) });
                 }
             }
             for (block.instructions) |instruction| try self.emitInstruction(block_id, instruction);
@@ -108,7 +119,7 @@ const FunctionEmitter = struct {
             .constant_int => |value| {
                 const type_value = try self.valueType(value.result);
                 const bits = normalize(value.bits, type_value);
-                try self.write("  %v{d} = add {s} 0, {d}\n", .{ value.result, try llvmType(type_value), bits });
+                try self.write("  %v{d} = add {s} 0, {d}\n", .{ value.result, try llvmType(self.allocator, self.program, type_value), bits });
             },
             .constant_bool => |value| try self.write(
                 "  %v{d} = xor i1 false, {s}\n",
@@ -122,14 +133,16 @@ const FunctionEmitter = struct {
                 "  %v{d} = bitcast i64 {d} to double\n",
                 .{ value.result, value.bits },
             ),
-            .copy => |value| try self.copyValue(value.result, value.operand),
+            .copy, .deep_copy => |value| try self.copyValue(value.result, value.operand),
+            .structure_init => |value| try self.emitStructureInit(value),
+            .field_load => |value| try self.emitFieldLoad(value),
             .local_load => |value| try self.write(
                 "  %v{d} = load {s}, ptr %local{d}\n",
-                .{ value.result, try llvmType(try self.valueType(value.result)), value.local },
+                .{ value.result, try llvmType(self.allocator, self.program, try self.valueType(value.result)), value.local },
             ),
             .local_store => |value| try self.write(
                 "  store {s} %v{d}, ptr %local{d}\n",
-                .{ try llvmType(try self.valueType(value.operand)), value.operand, value.local },
+                .{ try llvmType(self.allocator, self.program, try self.valueType(value.operand)), value.operand, value.local },
             ),
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
@@ -141,7 +154,7 @@ const FunctionEmitter = struct {
     }
 
     fn copyValue(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
-        const type_name = try llvmType(try self.valueType(result));
+        const type_name = try llvmType(self.allocator, self.program, try self.valueType(result));
         try self.write("  %v{d} = select i1 true, {s} %v{d}, {s} %v{d}\n", .{
             result,
             type_name,
@@ -151,12 +164,62 @@ const FunctionEmitter = struct {
         });
     }
 
+    fn emitStructureInit(self: *FunctionEmitter, value: Ir.Instruction.StructureInit) Error!void {
+        if (value.structure >= self.program.structures.len) return error.InvalidProgram;
+        const structure = self.program.structures[value.structure];
+        if (value.fields.len != structure.fields.len or try self.valueType(value.result) != Ir.Type.structure(value.structure))
+            return error.InvalidProgram;
+        const type_name = try llvmType(self.allocator, self.program, Ir.Type.structure(value.structure));
+        if (value.fields.len == 0) {
+            try self.write("  %v{d} = freeze {s} poison\n", .{ value.result, type_name });
+            return;
+        }
+        const serial = self.nextTemporary();
+        for (value.fields, 0..) |field, field_index| {
+            if (try self.valueType(field) != structure.fields[field_index].type) return error.InvalidProgram;
+            if (field_index + 1 == value.fields.len)
+                try self.write("  %v{d} = insertvalue {s} {s}, {s} %v{d}, {d}\n", .{
+                    value.result,
+                    type_name,
+                    if (field_index == 0) "poison" else try std.fmt.allocPrint(self.allocator, "%t{d}.aggregate{d}", .{ serial, field_index - 1 }),
+                    try llvmType(self.allocator, self.program, structure.fields[field_index].type),
+                    field,
+                    field_index,
+                })
+            else
+                try self.write("  %t{d}.aggregate{d} = insertvalue {s} {s}, {s} %v{d}, {d}\n", .{
+                    serial,
+                    field_index,
+                    type_name,
+                    if (field_index == 0) "poison" else try std.fmt.allocPrint(self.allocator, "%t{d}.aggregate{d}", .{ serial, field_index - 1 }),
+                    try llvmType(self.allocator, self.program, structure.fields[field_index].type),
+                    field,
+                    field_index,
+                });
+        }
+    }
+
+    fn emitFieldLoad(self: *FunctionEmitter, value: Ir.Instruction.FieldLoad) Error!void {
+        const base_type = try self.valueType(value.base);
+        const structure_index = base_type.structureIndex() orelse return error.InvalidProgram;
+        if (structure_index >= self.program.structures.len or value.field >= self.program.structures[structure_index].fields.len)
+            return error.InvalidProgram;
+        if (try self.valueType(value.result) != self.program.structures[structure_index].fields[value.field].type)
+            return error.InvalidProgram;
+        try self.write("  %v{d} = extractvalue {s} %v{d}, {d}\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, base_type),
+            value.base,
+            value.field,
+        });
+    }
+
     fn emitNegate(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Unary) Error!void {
         const type_value = try self.valueType(value.operand);
         if (value.operator != .negate) return error.UnsupportedInstruction;
         if (type_value.isFloat()) return self.write("  %v{d} = fneg {s} %v{d}\n", .{
             value.result,
-            try llvmType(type_value),
+            try llvmType(self.allocator, self.program, type_value),
             value.operand,
         });
         if (!type_value.isInteger()) return error.UnsupportedInstruction;
@@ -173,7 +236,7 @@ const FunctionEmitter = struct {
 
     fn emitBinary(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Binary) Error!void {
         const left_type = try self.valueType(value.left);
-        const type_name = try llvmType(left_type);
+        const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
             .add, .subtract, .multiply => {
                 if (left_type.isFloat()) return self.write("  %v{d} = {s} {s} %v{d}, %v{d}\n", .{
@@ -271,7 +334,7 @@ const FunctionEmitter = struct {
     ) Error!void {
         if (!type_value.isFloat()) return error.UnsupportedInstruction;
         const serial = self.nextTemporary();
-        const type_name = try llvmType(type_value);
+        const type_name = try llvmType(self.allocator, self.program, type_value);
         const integer_name = if (type_value == .float32) "i32" else "i64";
         try self.write("  %t{d}.left_nan = fcmp uno {s} %v{d}, %v{d}\n", .{
             serial, type_name, value.left, value.left,
@@ -352,7 +415,7 @@ const FunctionEmitter = struct {
     ) Error!void {
         if (!type_value.isInteger()) return error.UnsupportedInstruction;
         const serial = self.nextTemporary();
-        const type_name = try llvmType(type_value);
+        const type_name = try llvmType(self.allocator, self.program, type_value);
         try self.write("  %t{d}.zero = icmp eq {s} %v{d}, 0\n", .{ serial, type_name, value.right });
         if (type_value.isSignedInteger()) {
             try self.write("  %t{d}.minimum = icmp eq {s} %v{d}, {d}\n", .{
@@ -391,7 +454,7 @@ const FunctionEmitter = struct {
         const right_type = try self.valueType(value.right);
         if (!right_type.isInteger()) return error.UnsupportedInstruction;
         const serial = self.nextTemporary();
-        const right_name = try llvmType(right_type);
+        const right_name = try llvmType(self.allocator, self.program, right_type);
         if (right_type.isSignedInteger()) {
             try self.write("  %t{d}.negative = icmp slt {s} %v{d}, 0\n", .{ serial, right_name, value.right });
         } else {
@@ -406,7 +469,7 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.invalid = or i1 %t{d}.negative, %t{d}.large\n", .{ serial, serial, serial });
         try self.write("  br i1 %t{d}.invalid, label %trap, label %b{d}.cont{d}\n", .{ serial, block_id, serial });
         try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
-        const left_name = try llvmType(left_type);
+        const left_name = try llvmType(self.allocator, self.program, left_type);
         if (right_type.bitWidth() < left_type.bitWidth()) {
             try self.write("  %t{d}.count = zext {s} %v{d} to {s}\n", .{ serial, right_name, value.right, left_name });
         } else if (right_type.bitWidth() > left_type.bitWidth()) {
@@ -433,7 +496,7 @@ const FunctionEmitter = struct {
         if (!value.source.isInteger() or !value.target.isInteger()) return error.UnsupportedInstruction;
         if (value.source == value.target) return self.copyValue(value.result, value.operand);
         const serial = self.nextTemporary();
-        const source_name = try llvmType(value.source);
+        const source_name = try llvmType(self.allocator, self.program, value.source);
         try self.write("  %t{d}.wide = {s} {s} %v{d} to i128\n", .{
             serial,
             if (value.source.isSignedInteger()) "sext" else "zext",
@@ -456,7 +519,7 @@ const FunctionEmitter = struct {
         try self.write("  %v{d} = trunc i128 %t{d}.wide to {s}\n", .{
             value.result,
             serial,
-            try llvmType(value.target),
+            try llvmType(self.allocator, self.program, value.target),
         });
     }
 
@@ -466,10 +529,10 @@ const FunctionEmitter = struct {
         if (callee.parameter_types.len != value.arguments.len) return error.InvalidProgram;
         try self.output.appendSlice(self.allocator, "  ");
         if (value.result) |result| try self.write("%v{d} = ", .{result});
-        try self.write("call {s} @sx_{d}(", .{ try llvmType(callee.return_type), value.function });
+        try self.write("call {s} @sx_{d}(", .{ try llvmType(self.allocator, self.program, callee.return_type), value.function });
         for (value.arguments, 0..) |argument, index| {
             if (index != 0) try self.output.appendSlice(self.allocator, ", ");
-            try self.write("{s} %v{d}", .{ try llvmType(callee.parameter_types[index]), argument });
+            try self.write("{s} %v{d}", .{ try llvmType(self.allocator, self.program, callee.parameter_types[index]), argument });
         }
         try self.output.appendSlice(self.allocator, ")\n");
     }
@@ -487,7 +550,7 @@ const FunctionEmitter = struct {
             return;
         }
         if (!type_value.isInteger()) return error.UnsupportedType;
-        const type_name = try llvmType(type_value);
+        const type_name = try llvmType(self.allocator, self.program, type_value);
         if (type_value.bitWidth() < 64) {
             try self.write("  %t{d}.wide = {s} {s} %v{d} to i64\n", .{
                 serial,
@@ -521,7 +584,7 @@ const FunctionEmitter = struct {
                 branch.else_block,
             }),
             .return_value => |value| try self.write("  ret {s} %v{d}\n", .{
-                try llvmType(self.function.return_type),
+                try llvmType(self.allocator, self.program, self.function.return_type),
                 value,
             }),
             .return_void => try self.output.appendSlice(self.allocator, "  ret void\n"),
@@ -545,7 +608,11 @@ const FunctionEmitter = struct {
     }
 };
 
-fn llvmType(type_value: Ir.Type) Error![]const u8 {
+fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
+    if (type_value.structureIndex()) |structure_index| {
+        if (structure_index >= program.structures.len) return error.InvalidProgram;
+        return std.fmt.allocPrint(allocator, "%sx.type.{d}", .{structure_index});
+    }
     return switch (type_value) {
         .void => "void",
         .bool => "i1",
@@ -555,6 +622,7 @@ fn llvmType(type_value: Ir.Type) Error![]const u8 {
         .int, .uint => "i64",
         .float32 => "float",
         .float64 => "double",
+        .address => "ptr",
         else => error.UnsupportedType,
     };
 }
@@ -613,4 +681,20 @@ test "LLVM emitter supports scalar floating-point loops and comparisons" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "fmul float"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "fadd float"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "fcmp ogt float"));
+}
+
+test "LLVM emitter supports plain value aggregates" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Silex.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func sum(pair:Pair) int { return pair.x + pair.y }
+        \\func main() { let pair = Pair(x:3, y:5); print(sum(pair)) }
+    );
+    const text = try emit(allocator, compilation.ir);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "%sx.type.0 = type { i64, i64 }"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "insertvalue %sx.type.0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "extractvalue %sx.type.0"));
 }

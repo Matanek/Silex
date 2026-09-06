@@ -28,6 +28,7 @@ pub const Profile = struct {
     calls: usize = 0,
     internal_calls: usize = 0,
     aggregates: usize = 0,
+    value_aggregate_operations: usize = 0,
     collections: usize = 0,
     strings: usize = 0,
     checked_operations: usize = 0,
@@ -145,10 +146,18 @@ fn removed(before: usize, after: usize) usize {
 fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value_types: []const Silex.Ir.Type) void {
     switch (instruction) {
         .constant_int, .constant_bool, .constant_bytes, .constant_float32, .constant_float64, .optional_null => result.constants += 1,
-        .copy, .deep_copy, .class_cast => result.copies += 1,
+        .copy, .deep_copy => |copy| {
+            result.copies += 1;
+            if (value_types[copy.operand].structureIndex() != null) result.value_aggregate_operations += 1;
+        },
+        .class_cast => result.copies += 1,
         .local_load => result.local_loads += 1,
         .local_store => result.local_stores += 1,
-        .global_load, .field_load, .reference_load, .address_load => result.other_loads += 1,
+        .global_load, .reference_load, .address_load => result.other_loads += 1,
+        .field_load => {
+            result.other_loads += 1;
+            result.value_aggregate_operations += 1;
+        },
         .collection_load => |load| {
             result.other_loads += 1;
             if (load.checked) {
@@ -156,7 +165,11 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
                 result.safety_guards += 1;
             }
         },
-        .global_store, .field_store, .collection_replace, .reference_store, .address_store => result.other_stores += 1,
+        .global_store, .collection_replace, .reference_store, .address_store => result.other_stores += 1,
+        .field_store => {
+            result.other_stores += 1;
+            result.value_aggregate_operations += 1;
+        },
         .binary => |binary| {
             if (binary.checked) result.checked_operations += 1;
             if (binaryHasSafetyGuard(binary, value_types)) result.safety_guards += 1;
@@ -201,7 +214,11 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
             result.internal_calls += 1;
         },
         .indirect_call, .boundary_call, .dynamic_call => result.calls += 1,
-        .structure_init, .protocol_init, .protocol_test, .protocol_extract, .enum_init, .enum_test, .enum_payload, .enum_raw => result.aggregates += 1,
+        .structure_init => {
+            result.aggregates += 1;
+            result.value_aggregate_operations += 1;
+        },
+        .protocol_init, .protocol_test, .protocol_extract, .enum_init, .enum_test, .enum_payload, .enum_raw => result.aggregates += 1,
         .list_init, .collection_reference, .collection_count, .list_edit, .collection_slice, .collection_view => result.collections += 1,
         .constant_str, .string_address, .string_byte_count, .string_byte_at, .string_from_bytes, .format_value, .string_concat, .string_count => result.strings += 1,
         .print => result.prints += 1,

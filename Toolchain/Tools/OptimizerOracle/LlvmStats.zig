@@ -26,6 +26,7 @@ pub const Profile = struct {
     comparisons: usize = 0,
     conversions: usize = 0,
     aggregate_operations: usize = 0,
+    value_aggregate_operations: usize = 0,
     vector_operations: usize = 0,
     overflow_intrinsics: usize = 0,
     trap_calls: usize = 0,
@@ -203,8 +204,10 @@ fn classifyComputation(result: *Profile, opcode: []const u8, line: []const u8) v
         result.conversions += 1;
         return;
     }
-    if (oneOf(opcode, &.{ "extractvalue", "insertvalue", "getelementptr" }))
+    if (oneOf(opcode, &.{ "extractvalue", "insertvalue", "getelementptr" })) {
         result.aggregate_operations += 1;
+        if (std.mem.indexOf(u8, line, "%sx.type.") != null) result.value_aggregate_operations += 1;
+    }
 }
 
 fn isBlockLabel(line: []const u8) bool {
@@ -291,6 +294,20 @@ test "profile recognizes memory promotion in optimized LLVM IR" {
     try std.testing.expectEqual(@as(usize, 0), optimized.trap_calls);
     try std.testing.expectEqual(@as(usize, 1), raw.safetyGuards());
     try std.testing.expectEqual(@as(usize, 0), optimized.safetyGuards());
+}
+
+test "profile separates user value aggregates from overflow pairs" {
+    const result = profile(
+        \\define %sx.type.0 @sx_0(%sx.type.0 %v0, { i64, i1 } %overflow) {
+        \\b0:
+        \\  %x = extractvalue %sx.type.0 %v0, 0
+        \\  %checked = extractvalue { i64, i1 } %overflow, 0
+        \\  %result = insertvalue %sx.type.0 %v0, i64 %checked, 1
+        \\  ret %sx.type.0 %result
+        \\}
+    );
+    try std.testing.expectEqual(@as(usize, 3), result.aggregate_operations);
+    try std.testing.expectEqual(@as(usize, 2), result.value_aggregate_operations);
 }
 
 test "matched comparison ignores blocks duplicated into callers by inlining" {
