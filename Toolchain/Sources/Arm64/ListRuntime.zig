@@ -1205,10 +1205,15 @@ pub fn emitReplace(
 ) Error!void {
     const stride = elementStride(value.replacement.width, value.element_stride);
     const compact_float32 = stride == @as(u64, value.replacement.width) * 4;
-    const bounds = if (value.view)
-        try boundsView(allocator, words, value.collection, value.index)
-    else
-        try boundsDynamic(allocator, words, value.collection.start, value.index);
+    const bounds: ?Bounds = if (value.view) view: {
+        try loadAndNormalizeViewIndex(allocator, words, value.collection, value.index);
+        break :view if (value.checked) try boundsWithNormalizedIndex(allocator, words) else null;
+    } else dynamic: {
+        try words.append(allocator, A64.loadStack(.x10, value.collection.start));
+        try words.append(allocator, A64.load64(.x13, .x10, 0));
+        try normalizeWithLoadedCollection(allocator, words, value.index);
+        break :dynamic if (value.checked) try boundsWithNormalizedIndex(allocator, words) else null;
+    };
     if (value.view) {
         try immediate(allocator, words, .x11, stride);
         try words.append(allocator, A64.multiply(.x9, .x9, .x11));
@@ -1218,11 +1223,12 @@ pub fn emitReplace(
             try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.collection.start) + slot)));
             try words.append(allocator, A64.storeStack(.x12, @intCast(@as(usize, value.result.start) + slot)));
         }
+        if (bounds == null) return;
         const complete = words.items.len;
         try words.append(allocator, A64.branch());
         const failure = words.items.len;
-        try Fixups.patch19(words.items, bounds.negative, failure);
-        try Fixups.patch19(words.items, bounds.upper, failure);
+        try Fixups.patch19(words.items, bounds.?.negative, failure);
+        try Fixups.patch19(words.items, bounds.?.upper, failure);
         try words.append(allocator, A64.storeStack(.x13, value.result.start));
         try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
         try emitPrintInteger(allocator, words, sites, platform, value.index, 2, false);
@@ -1317,9 +1323,14 @@ pub fn emitReplace(
     try fail(allocator, words, epilogue);
     try Fixups.patch19(words.items, mmap_failed, scratch_failure);
 
+    if (bounds == null) {
+        try Fixups.patch26(words.items, complete, words.items.len);
+        return;
+    }
+
     const bounds_failure = words.items.len;
-    try Fixups.patch19(words.items, bounds.negative, bounds_failure);
-    try Fixups.patch19(words.items, bounds.upper, bounds_failure);
+    try Fixups.patch19(words.items, bounds.?.negative, bounds_failure);
+    try Fixups.patch19(words.items, bounds.?.upper, bounds_failure);
     try words.append(allocator, A64.storeStack(.x13, value.result.start));
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
     try emitPrintInteger(allocator, words, sites, platform, value.index, 2, false);

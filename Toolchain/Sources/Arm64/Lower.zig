@@ -693,6 +693,7 @@ fn lowerInstruction(
                 .count = count,
                 .dynamic = collection.length == null,
                 .view = collection.view,
+                .checked = replacement.checked,
                 .element_stride = try collectionElementStride(
                     program,
                     collection.element,

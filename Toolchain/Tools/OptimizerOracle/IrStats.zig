@@ -175,10 +175,12 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
             result.reference_stores += 1;
             result.other_stores += 1;
         },
-        .collection_replace => {
+        .collection_replace => |replacement| {
             result.other_stores += 1;
-            result.checked_operations += 1;
-            result.safety_guards += 1;
+            if (replacement.checked) {
+                result.checked_operations += 1;
+                result.safety_guards += 1;
+            }
         },
         .global_store, .address_store => result.other_stores += 1,
         .field_store => {

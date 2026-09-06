@@ -2151,11 +2151,13 @@ fn emitViewReplace(
     try emitLoadStack(allocator, bytes, .rcx, @intCast(@as(usize, value.collection.start) + 1));
     try emitLoadStack(allocator, bytes, .rax, value.index);
     try emitNormalizeCollectionIndex(allocator, bytes, .rax, .rcx);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
-    const in_bounds = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try emitRuntimeFailure(allocator, bytes, epilogue);
-    try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    if (value.checked) {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
+        const in_bounds = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try emitRuntimeFailure(allocator, bytes, epilogue);
+        try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    }
     try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
     try appendInt(allocator, bytes, u32, @as(u32, value.replacement.width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc3 });
@@ -2178,11 +2180,13 @@ fn emitDynamicReplace(
     try emitLoadMemory(allocator, bytes, .r12, .rbx, 0);
     try emitLoadStack(allocator, bytes, .r13, value.index);
     try emitNormalizeCollectionIndex(allocator, bytes, .r13, .r12);
-    try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, 0x82 });
-    const in_bounds = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try emitRuntimeFailure(allocator, bytes, epilogue);
-    try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    if (value.checked) {
+        try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, 0x82 });
+        const in_bounds = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try emitRuntimeFailure(allocator, bytes, epilogue);
+        try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    }
 
     // A unique list can be updated directly. Shared storage still takes the
     // allocation path below so aliases keep copy-on-write value semantics.
@@ -2259,11 +2263,13 @@ fn emitFixedReplace(
     try emitLoadStack(allocator, bytes, .r13, value.index);
     try emitImmediate(allocator, bytes, .r12, value.count);
     try emitNormalizeCollectionIndex(allocator, bytes, .r13, .r12);
-    try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, 0x82 });
-    const in_bounds = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try emitRuntimeFailure(allocator, bytes, epilogue);
-    try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    if (value.checked) {
+        try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, 0x82 });
+        const in_bounds = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try emitRuntimeFailure(allocator, bytes, epilogue);
+        try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    }
     try emitCopyRange(allocator, bytes, value.result, value.collection);
     try emitAddressStack(allocator, bytes, .r14, value.result.start);
     try emitMoveRegister(allocator, bytes, .rax, .r13);

@@ -2752,7 +2752,12 @@ fn encodeCollectionReplace(
     program: Machine.Program,
     replacement: Machine.Instruction.CollectionReplace,
 ) Error!void {
-    const bounds = try emitCollectionBounds(allocator, words, replacement.index, replacement.count);
+    const bounds: ?CollectionBounds = if (replacement.checked)
+        try emitCollectionBounds(allocator, words, replacement.index, replacement.count)
+    else unchecked: {
+        try emitNormalizedCollectionIndex(allocator, words, replacement.index, replacement.count);
+        break :unchecked null;
+    };
     try words.append(allocator, moveRegister(.x13, .x9));
     try emitSpanCopy(allocator, words, replacement.result, replacement.collection);
     try emitStackAddress(allocator, words, .x10, replacement.result.start);
@@ -2763,11 +2768,12 @@ fn encodeCollectionReplace(
         try words.append(allocator, loadStack(.x12, @intCast(@as(usize, replacement.replacement.start) + leaf)));
         try emitStoreAtOffset(allocator, words, .x12, .x10, leaf * Machine.slot_size);
     }
+    if (bounds == null) return;
     const complete = words.items.len;
     try words.append(allocator, branch());
     const failure = words.items.len;
-    try patch19(words.items, bounds.negative, failure);
-    try patch19(words.items, bounds.upper, failure);
+    try patch19(words.items, bounds.?.negative, failure);
+    try patch19(words.items, bounds.?.upper, failure);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement.header, 2);
     try emitPrintInteger(allocator, words, external_call_sites, platform, replacement.index, 2, false);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement.tail, 2);

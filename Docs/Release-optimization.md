@@ -102,11 +102,14 @@ from a still-current snapshot of that exact destination. Calls, unknown
 effects, and block boundaries end this proof. Owning collection replacement,
 stale snapshots, and structures with owned fields keep their value semantics.
 An owning scalar collection replacement remains explicit so its copy-on-write
-detach, bounds failure, and lifetime effects are preserved. A later load may
-still resolve to a scalar list-literal element or to the exact replacement
-value when the collection lineage and both normalized constant indices are
-known. This forwards values across the functional update without treating the
-input and result storage as aliases or removing the update itself.
+detach and lifetime effects are preserved. Its bounds failure also remains
+unless a fixed length or traced list literal and a normalized constant index
+prove the write in range. That proof is carried by the portable instruction
+through ARM64 and X64 lowering, so both backends omit only the proven guard. A
+later load may still resolve to a scalar list-literal element or to the exact
+replacement value when the collection lineage and both normalized constant
+indices are known. This forwards values across the functional update without
+treating the input and result storage as aliases or removing the update itself.
 Unaddressed mutable locals of the same flat scalar form are represented as
 independent field locals before aggregate propagation. A load reconstructs the
 value at its original observation point, while a reconstruction stored in the

@@ -315,6 +315,7 @@ pub const Instruction = union(enum) {
         collection: ValueId,
         index: ValueId,
         replacement: ValueId,
+        checked: bool = true,
         ownership: Ownership = .root,
         position: Source.Position,
     };
@@ -1023,6 +1024,7 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, replacement.index);
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, replacement.replacement);
+            if (!replacement.checked) try output.appendSlice(allocator, " bounded");
             if (replacement.ownership == .edge) try output.appendSlice(allocator, ", edge");
         },
         .collection_count => |count| {

@@ -34,6 +34,18 @@ fn forwardKnownCollectionLoads(
         for (instructions) |*instruction| {
             const load = switch (instruction.*) {
                 .collection_load => |value| value,
+                .collection_replace => |replacement| {
+                    const count = knownCollectionCount(
+                        program,
+                        function,
+                        definitions,
+                        replacement.collection,
+                        definitions.len,
+                    ) orelse continue;
+                    if (knownNormalizedIndex(function, definitions, replacement.index, count) != null)
+                        instruction.collection_replace.checked = false;
+                    continue;
+                },
                 else => continue,
             };
             const replacement = knownCollectionElement(
@@ -618,4 +630,40 @@ test "owning collection values forward known literal and replacement elements" {
     try std.testing.expect(instructions[8] == .copy);
     try std.testing.expectEqual(@as(Ir.ValueId, 5), instructions[8].copy.operand);
     try std.testing.expect(instructions[6] == .collection_replace);
+    try std.testing.expect(!instructions[6].collection_replace.checked);
+}
+
+test "owning collection replacement retains an unproved bounds failure" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const position: @import("../Source.zig").Position = .{ .offset = 0, .line = 1, .column = 1 };
+    const list_type = Ir.Type.structure(0);
+    const function: Ir.Function = .{
+        .name = "invalid_replace",
+        .parameter_types = &.{},
+        .return_type = list_type,
+        .value_types = &.{ .int, .int, .int, list_type, .int, .int, list_type },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 0, .bits = 3 } },
+                .{ .constant_int = .{ .result = 1, .bits = 5 } },
+                .{ .constant_int = .{ .result = 2, .bits = 8 } },
+                .{ .list_init = .{ .result = 3, .values = &.{ 0, 1, 2 } } },
+                .{ .constant_int = .{ .result = 4, .bits = @bitCast(@as(i64, -4)) } },
+                .{ .constant_int = .{ .result = 5, .bits = 13 } },
+                .{ .collection_replace = .{ .result = 6, .collection = 3, .index = 4, .replacement = 5, .position = position } },
+            },
+            .terminator = .{ .return_value = 6 },
+        }},
+    };
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "int[]",
+            .fields = &.{},
+            .collection = .{ .element = .int, .length = null, .view = false },
+        }},
+        .functions = &.{function},
+    };
+    const result = try optimize(arena.allocator(), program);
+    try std.testing.expect(result.functions[0].blocks[0].instructions[6].collection_replace.checked);
 }

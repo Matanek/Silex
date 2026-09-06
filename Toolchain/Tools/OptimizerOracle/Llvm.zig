@@ -351,11 +351,13 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
         try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
         try self.emitNormalizedIndex(serial, "index", value.index);
-        try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
-        try self.write("  %t{d}.index.high = icmp sge i64 %t{d}.index, %t{d}.count\n", .{ serial, serial, serial });
-        try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
-        try self.write("  br i1 %t{d}.index.invalid, label %trap, label %b{d}.cont{d}\n", .{ serial, block_id, serial });
-        try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
+        if (value.checked) {
+            try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
+            try self.write("  %t{d}.index.high = icmp sge i64 %t{d}.index, %t{d}.count\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
+            try self.write("  br i1 %t{d}.index.invalid, label %trap, label %b{d}.cont{d}\n", .{ serial, block_id, serial });
+            try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
+        }
         if (!collection.view) {
             try self.write("  %t{d}.bytes = mul i64 %t{d}.count, {d}\n", .{ serial, serial, element_bytes });
             try self.write("  %t{d}.copy = call ptr @malloc(i64 %t{d}.bytes)\n", .{ serial, serial });

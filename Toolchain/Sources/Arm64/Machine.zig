@@ -368,6 +368,7 @@ pub const Instruction = union(enum) {
         count: u32,
         dynamic: bool = false,
         view: bool = false,
+        checked: bool = true,
         element_stride: u12 = 0,
         header: usize,
         tail: usize,
