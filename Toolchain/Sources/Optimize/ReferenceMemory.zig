@@ -18,7 +18,137 @@ fn optimizeFunction(allocator: std.mem.Allocator, program: Ir.Program, function:
     const definitions = try collectDefinitions(allocator, function);
     const pruned = try removeOverwrittenStores(allocator, function, definitions);
     const forwarded = try forwardStoredValues(allocator, pruned, definitions);
-    return simplifyExactViewStores(allocator, program, forwarded);
+    const views = try simplifyExactViewStores(allocator, program, forwarded);
+    return forwardKnownCollectionLoads(allocator, program, views);
+}
+
+fn forwardKnownCollectionLoads(
+    allocator: std.mem.Allocator,
+    program: Ir.Program,
+    function: Ir.Function,
+) !Ir.Function {
+    const definitions = try collectDefinitions(allocator, function);
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    for (function.blocks, 0..) |block, block_index| {
+        const instructions = try allocator.dupe(Ir.Instruction, block.instructions);
+        for (instructions) |*instruction| {
+            const load = switch (instruction.*) {
+                .collection_load => |value| value,
+                else => continue,
+            };
+            const replacement = knownCollectionElement(
+                program,
+                function,
+                definitions,
+                load.collection,
+                load.index,
+                definitions.len,
+            ) orelse continue;
+            if (function.value_types[load.result] != function.value_types[replacement]) continue;
+            instruction.* = .{ .copy = .{ .result = load.result, .operand = replacement } };
+        }
+        blocks[block_index] = .{
+            .instructions = instructions,
+            .instruction_positions = block.instruction_positions,
+            .terminator = block.terminator,
+            .terminator_position = block.terminator_position,
+        };
+    }
+    var result = function;
+    result.blocks = blocks;
+    return result;
+}
+
+fn knownCollectionElement(
+    program: Ir.Program,
+    function: Ir.Function,
+    definitions: []const Definition,
+    collection_value: Ir.ValueId,
+    index_value: Ir.ValueId,
+    remaining: usize,
+) ?Ir.ValueId {
+    if (remaining == 0) return null;
+    const count = knownCollectionCount(program, function, definitions, collection_value, remaining - 1) orelse return null;
+    const index = knownNormalizedIndex(function, definitions, index_value, count) orelse return null;
+    const definition = uniqueDefinition(definitions, collection_value) orelse return null;
+    return switch (definition) {
+        .list_init => |list| if (index < list.values.len) list.values[index] else null,
+        .copy, .deep_copy => |copy| knownCollectionElement(
+            program,
+            function,
+            definitions,
+            copy.operand,
+            index_value,
+            remaining - 1,
+        ),
+        .collection_replace => |replacement| updated: {
+            const replacement_count = knownCollectionCount(
+                program,
+                function,
+                definitions,
+                replacement.collection,
+                remaining - 1,
+            ) orelse break :updated null;
+            const replaced_index = knownNormalizedIndex(function, definitions, replacement.index, replacement_count) orelse
+                break :updated null;
+            if (index == replaced_index) break :updated replacement.replacement;
+            break :updated knownCollectionElement(
+                program,
+                function,
+                definitions,
+                replacement.collection,
+                index_value,
+                remaining - 1,
+            );
+        },
+        else => null,
+    };
+}
+
+fn knownCollectionCount(
+    program: Ir.Program,
+    function: Ir.Function,
+    definitions: []const Definition,
+    value: Ir.ValueId,
+    remaining: usize,
+) ?usize {
+    if (remaining == 0 or value >= function.value_types.len) return null;
+    const structure = function.value_types[value].structureIndex() orelse return null;
+    if (structure >= program.structures.len) return null;
+    const collection = program.structures[structure].collection orelse return null;
+    if (collection.length) |length| return length;
+    const definition = uniqueDefinition(definitions, value) orelse return null;
+    return switch (definition) {
+        .list_init => |list| list.values.len,
+        .copy, .deep_copy => |copy| knownCollectionCount(program, function, definitions, copy.operand, remaining - 1),
+        .collection_replace => |replacement| knownCollectionCount(
+            program,
+            function,
+            definitions,
+            replacement.collection,
+            remaining - 1,
+        ),
+        else => null,
+    };
+}
+
+fn knownNormalizedIndex(
+    function: Ir.Function,
+    definitions: []const Definition,
+    value: Ir.ValueId,
+    count: usize,
+) ?usize {
+    if (value >= function.value_types.len or function.value_types[value] != .int) return null;
+    const definition = uniqueDefinition(definitions, value) orelse return null;
+    const constant = switch (definition) {
+        .constant_int => |item| item,
+        else => return null,
+    };
+    const signed: i64 = @bitCast(constant.bits);
+    const wide_count: i128 = @intCast(count);
+    const normalized: i128 = if (signed < 0) @as(i128, signed) + wide_count else signed;
+    if (normalized < 0 or normalized >= wide_count) return null;
+    return @intCast(normalized);
 }
 
 const ViewStore = struct {
@@ -445,4 +575,47 @@ test "view memory does not coalesce owning collection replacements" {
     try std.testing.expect(instructions[0] == .collection_replace);
     try std.testing.expect(instructions[1] == .collection_replace);
     try std.testing.expect(instructions[2] == .collection_load);
+}
+
+test "owning collection values forward known literal and replacement elements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const position: @import("../Source.zig").Position = .{ .offset = 0, .line = 1, .column = 1 };
+    const list_type = Ir.Type.structure(0);
+    const function: Ir.Function = .{
+        .name = "known_values",
+        .parameter_types = &.{},
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .int, list_type, .int, .int, list_type, .int, .int, .int },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 0, .bits = 3 } },
+                .{ .constant_int = .{ .result = 1, .bits = 5 } },
+                .{ .constant_int = .{ .result = 2, .bits = 8 } },
+                .{ .list_init = .{ .result = 3, .values = &.{ 0, 1, 2 } } },
+                .{ .constant_int = .{ .result = 4, .bits = 1 } },
+                .{ .constant_int = .{ .result = 5, .bits = 13 } },
+                .{ .collection_replace = .{ .result = 6, .collection = 3, .index = 4, .replacement = 5, .position = position } },
+                .{ .collection_load = .{ .result = 7, .collection = 3, .index = 4, .position = position } },
+                .{ .collection_load = .{ .result = 8, .collection = 6, .index = 4, .position = position } },
+                .{ .binary = .{ .result = 9, .operator = .add, .left = 7, .right = 8 } },
+            },
+            .terminator = .{ .return_value = 9 },
+        }},
+    };
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "int[]",
+            .fields = &.{},
+            .collection = .{ .element = .int, .length = null, .view = false },
+        }},
+        .functions = &.{function},
+    };
+    const result = try optimize(arena.allocator(), program);
+    const instructions = result.functions[0].blocks[0].instructions;
+    try std.testing.expect(instructions[7] == .copy);
+    try std.testing.expectEqual(@as(Ir.ValueId, 1), instructions[7].copy.operand);
+    try std.testing.expect(instructions[8] == .copy);
+    try std.testing.expectEqual(@as(Ir.ValueId, 5), instructions[8].copy.operand);
+    try std.testing.expect(instructions[6] == .collection_replace);
 }
