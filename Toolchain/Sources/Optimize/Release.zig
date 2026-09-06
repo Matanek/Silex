@@ -1686,15 +1686,16 @@ fn instructionProducing(function: Ir.Function, value: Ir.ValueId) ?Ir.Instructio
 }
 
 fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    const dominated = try elideDominatedLastElementChecks(allocator, function);
     const uses = try allocator.alloc(usize, function.value_types.len);
     @memset(uses, 0);
-    for (function.blocks) |block| {
+    for (dominated.blocks) |block| {
         for (block.instructions) |instruction| countUses(instruction, uses);
         countTerminatorUses(block.terminator, uses);
     }
-    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    const blocks = try allocator.alloc(Ir.Block, dominated.blocks.len);
     var changed = false;
-    for (function.blocks, 0..) |block, block_index| {
+    for (dominated.blocks, 0..) |block, block_index| {
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
         for (block.instructions, 0..) |instruction, instruction_index| {
             if (instruction == .collection_load) {
@@ -1713,10 +1714,81 @@ fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) 
             .terminator = block.terminator,
         };
     }
-    if (!changed) return function;
-    var result = function;
+    if (!changed) return dominated;
+    var result = dominated;
     result.blocks = blocks;
     return result;
+}
+
+fn elideDominatedLastElementChecks(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    var value_types: std.ArrayList(Ir.Type) = .empty;
+    try value_types.appendSlice(allocator, function.value_types);
+    var changed = false;
+    for (function.blocks, 0..) |block, block_index| {
+        const constants = try allocator.alloc(?u64, function.value_types.len);
+        @memset(constants, null);
+        var nonempty: std.ArrayList(Ir.ValueId) = .empty;
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions) |instruction| {
+            var rewritten = instruction;
+            switch (instruction) {
+                .constant_int => |value| constants[value.result] = value.bits,
+                .collection_load => |value| {
+                    if (value.checked and isLastElement(constants, value.index) and containsValue(nonempty.items, value.collection)) {
+                        const count = value_types.items.len;
+                        try value_types.append(allocator, .int);
+                        try instructions.append(allocator, .{ .collection_count = .{
+                            .result = count,
+                            .collection = value.collection,
+                        } });
+                        const one = value_types.items.len;
+                        try value_types.append(allocator, .int);
+                        try instructions.append(allocator, .{ .constant_int = .{
+                            .result = one,
+                            .bits = 1,
+                        } });
+                        const normalized = value_types.items.len;
+                        try value_types.append(allocator, .int);
+                        try instructions.append(allocator, .{ .binary = .{
+                            .result = normalized,
+                            .operator = .subtract,
+                            .left = count,
+                            .right = one,
+                            .checked = false,
+                        } });
+                        var load = value;
+                        load.index = normalized;
+                        load.checked = false;
+                        rewritten = .{ .collection_load = load };
+                        changed = true;
+                    }
+                    if (value.checked and !containsValue(nonempty.items, value.collection))
+                        try nonempty.append(allocator, value.collection);
+                },
+                else => if (!collectionAddressStable(&.{instruction})) nonempty.clearRetainingCapacity(),
+            }
+            try instructions.append(allocator, rewritten);
+        }
+        blocks[block_index] = .{
+            .instructions = try instructions.toOwnedSlice(allocator),
+            .terminator = block.terminator,
+        };
+    }
+    if (!changed) return function;
+    var result = function;
+    result.value_types = try value_types.toOwnedSlice(allocator);
+    result.blocks = blocks;
+    return result;
+}
+
+fn isLastElement(constants: []const ?u64, index: Ir.ValueId) bool {
+    return index < constants.len and constants[index] != null and constants[index].? == std.math.maxInt(u64);
+}
+
+fn containsValue(values: []const Ir.ValueId, candidate: Ir.ValueId) bool {
+    for (values) |value| if (value == candidate) return true;
+    return false;
 }
 
 fn collectionCheckProven(

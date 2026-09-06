@@ -289,6 +289,42 @@ test "release removes exact overwritten reference stores" {
     try std.testing.expect(found_observed);
 }
 
+test "release uses a dominating collection access to prove the last element" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func select(values:@int[..], index:int) int {
+        \\    return values[index] + values[-1]
+        \\}
+        \\func main() {
+        \\    let values:int[] = [3, 5, 8, 13]
+        \\    let view = @values[0:values.count()]
+        \\    print(select(view, 1))
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "select")) continue;
+        var checked: usize = 0;
+        var unchecked: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction != .collection_load) continue;
+            if (instruction.collection_load.checked) checked += 1 else unchecked += 1;
+        };
+        try std.testing.expectEqual(@as(usize, 1), checked);
+        try std.testing.expectEqual(@as(usize, 1), unchecked);
+        return;
+    }
+    return error.TestUnexpectedResult;
+}
+
 test "release preserves floating branches and loops" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -46,6 +46,7 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "AggregateScalarization.sx", .timing = false },
     .{ .name = "ReferenceAliasing.sx", .timing = false },
     .{ .name = "ReferenceDeadStores.sx", .timing = false },
+    .{ .name = "ReadonlyViewMemory.sx", .timing = false },
 };
 
 pub const regressions = [_]RegressionEntry{

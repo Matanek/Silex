@@ -93,6 +93,20 @@ forward an exact post-store load. A different reference root is never assumed
 disjoint: a read through it invalidates dead-store evidence, and calls, unknown
 memory effects, and block boundaries invalidate both transformations.
 
+Scalar read-only collection views are emitted to LLVM as `{data, count}`
+values. The oracle models list literals with non-owning stack storage, view
+construction, signed negative-index normalization, and checked element loads.
+Ownership-sensitive forms such as retained lists remain unsupported instead of
+being approximated with different lifetime semantics. Consequently, the LLVM
+coverage recorded for collections is evidence for scalar read-only views and
+bounds only; collection ownership and copy-on-write behavior remain a gap.
+
+Within one block, a successful checked load from an unchanged collection proves
+that the collection is non-empty. Release optimization uses that fact for a
+later `[-1]` access to materialize `count - 1` in portable IR before marking the
+load unchecked. The explicit normalized index is required by the native backend
+contract; merely clearing the checked flag would change program semantics.
+
 When LLVM removes local memory or aggregate operations only in callers whose
 calls it also inlined, the advisor attributes that causal difference to
 interprocedural specialization instead of reporting duplicate memory and

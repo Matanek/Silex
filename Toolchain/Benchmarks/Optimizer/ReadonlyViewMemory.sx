@@ -1,0 +1,9 @@
+func select(values:@int[..], index:int) int {
+    return values[index] + values[-1]
+}
+
+func main() {
+    let values:int[] = [3, 5, 8, 13]
+    let view = @values[0:values.count()]
+    print(select(view, 1))
+}
