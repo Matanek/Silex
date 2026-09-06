@@ -1,0 +1,31 @@
+func increment(value:int8) int8 {
+    if value < 100 {
+        return value + 1
+    }
+    return value
+}
+
+func decrement(value:uint8) uint8 {
+    if value > 0 {
+        return value - 1
+    }
+    return value
+}
+
+func widen_unsigned(value:uint8) int16 {
+    return value as int16
+}
+
+func risky(value:int8) int8 {
+    return value + 1
+}
+
+func main() {
+    assert(increment(99) == 100)
+    assert(increment(100) == 100)
+    assert(decrement(1) == 0)
+    assert(decrement(0) == 0)
+    assert(widen_unsigned(255) == 255)
+    assert(risky(1) == 2)
+    print("integer range checks preserved")
+}

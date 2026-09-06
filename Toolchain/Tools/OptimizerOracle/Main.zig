@@ -191,6 +191,18 @@ fn qualifyNative(
                 without,
             );
         }
+        var range_counter: ?Qualification.IntegerRangeCounter = null;
+        if (entry.contract == .proves_integer_ranges) {
+            const without = try Differential.verifyWithOptions(allocator, source, .{
+                .verify_each_pass = true,
+                .disabled = .value_range_analysis,
+            });
+            range_counter = try Qualification.verifyIntegerRangeCounter(
+                entry.contract.proves_integer_ranges,
+                differential,
+                without,
+            );
+        }
         const stem = std.fs.path.stem(entry.name);
         const artifact_stem = try std.fmt.allocPrint(
             allocator,
@@ -232,6 +244,19 @@ fn qualifyNative(
                     counter.enabled_local_operations,
                     counter.disabled_blocks,
                     counter.enabled_blocks,
+                },
+            );
+        }
+        if (range_counter) |counter| {
+            try Report.line(
+                io,
+                allocator,
+                "    counter: disabling value_range_analysis retains {d} proven check(s) versus {d}; unproven checks remain {d}/{d}",
+                .{
+                    counter.disabled_proven_checks,
+                    counter.enabled_proven_checks,
+                    counter.disabled_unproven_checks,
+                    counter.enabled_unproven_checks,
                 },
             );
         }
@@ -342,6 +367,19 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 edge.optimized_local_operations,
                 edge.raw_blocks,
                 edge.optimized_blocks,
+            },
+        ),
+        .integer_ranges => |ranges| try Report.line(
+            io,
+            allocator,
+            "    contract: {s}, {s}, {s} proven checks {d} -> {d}; {d} unproven check(s) retained",
+            .{
+                ranges.bounded_add,
+                ranges.bounded_subtract,
+                ranges.bounded_conversion,
+                ranges.raw_proven_checks,
+                ranges.optimized_proven_checks,
+                ranges.optimized_unproven_checks,
             },
         ),
         .slp => |slp| try Report.line(

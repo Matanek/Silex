@@ -35,6 +35,14 @@ to integers, booleans, float32, and float64. Locals spanning several live joins
 remain in the native global-allocation domain until their overlapping PHI
 residences can be coalesced without increasing the control-flow graph.
 
+The following value-range pass propagates signed and unsigned integer
+intervals through the verified CFG. True and false comparison edges refine
+their operands; joins take a conservative hull, and cyclic growth widens to
+the declared type range so analysis always terminates. Release removes an
+integer add, subtract, multiply, or conversion check only when the complete
+mathematical interval fits its result type. Unproved operations keep their
+observable overflow or conversion failure.
+
 After final SSA promotion, Release recomputes exact scalar facts independently
 of block serialization order. A constant may cross a join only when every
 reachable definition proves the same type and bit pattern; divergent PHI

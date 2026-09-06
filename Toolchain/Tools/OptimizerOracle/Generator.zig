@@ -12,6 +12,12 @@ pub const StructuralContract = union(enum) {
     scalarizes_dense_loop: []const u8,
     simplifies_ssa_values: []const u8,
     promotes_critical_edge: []const u8,
+    proves_integer_ranges: struct {
+        bounded_add: []const u8,
+        bounded_subtract: []const u8,
+        bounded_conversion: []const u8,
+        unproven_add: []const u8,
+    },
     slp_width: struct {
         function: []const u8,
         minimum: u3,
@@ -69,6 +75,16 @@ pub const regressions = [_]RegressionEntry{
         .name = "Regressions/SsaCriticalEdge.sx",
         .concern = "float32 and float64 locals cross a critical edge without memory traffic or a synthetic block",
         .contract = .{ .promotes_critical_edge = "choose64" },
+    },
+    .{
+        .name = "Regressions/IntegerRangeChecks.sx",
+        .concern = "dominating signed and unsigned bounds remove only proven overflow and conversion checks",
+        .contract = .{ .proves_integer_ranges = .{
+            .bounded_add = "increment",
+            .bounded_subtract = "decrement",
+            .bounded_conversion = "widen_unsigned",
+            .unproven_add = "risky",
+        } },
     },
     .{
         .name = "Regressions/ArrayStorageAccess.sx",

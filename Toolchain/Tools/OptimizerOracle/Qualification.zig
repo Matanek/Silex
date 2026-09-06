@@ -37,6 +37,14 @@ pub const Evidence = union(enum) {
         raw_blocks: usize,
         optimized_blocks: usize,
     },
+    integer_ranges: struct {
+        bounded_add: []const u8,
+        bounded_subtract: []const u8,
+        bounded_conversion: []const u8,
+        raw_proven_checks: usize,
+        optimized_proven_checks: usize,
+        optimized_unproven_checks: usize,
+    },
     slp: struct {
         function: []const u8,
         required: u3,
@@ -63,6 +71,13 @@ pub const SsaPromotionCounter = struct {
     disabled_blocks: usize,
 };
 
+pub const IntegerRangeCounter = struct {
+    enabled_proven_checks: usize,
+    disabled_proven_checks: usize,
+    enabled_unproven_checks: usize,
+    disabled_unproven_checks: usize,
+};
+
 pub fn verifyContract(
     allocator: std.mem.Allocator,
     contract: Generator.StructuralContract,
@@ -75,6 +90,7 @@ pub fn verifyContract(
         .scalarizes_dense_loop => |function_name| verifyDenseScalarLoop(function_name, differential),
         .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
         .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
+        .proves_integer_ranges => |requirement| verifyIntegerRanges(requirement, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -83,6 +99,76 @@ pub fn verifyContract(
             differential.optimized_ir,
         ),
     };
+}
+
+fn verifyIntegerRanges(requirement: anytype, differential: Differential.Result) !Evidence {
+    const raw_add = findFunction(differential.raw_ir, requirement.bounded_add) orelse
+        return error.ContractFunctionMissing;
+    const raw_subtract = findFunction(differential.raw_ir, requirement.bounded_subtract) orelse
+        return error.ContractFunctionMissing;
+    const raw_conversion = findFunction(differential.raw_ir, requirement.bounded_conversion) orelse
+        return error.ContractFunctionMissing;
+    const optimized_add = findFunction(differential.optimized_ir, requirement.bounded_add) orelse
+        return error.ContractFunctionMissing;
+    const optimized_subtract = findFunction(differential.optimized_ir, requirement.bounded_subtract) orelse
+        return error.ContractFunctionMissing;
+    const optimized_conversion = findFunction(differential.optimized_ir, requirement.bounded_conversion) orelse
+        return error.ContractFunctionMissing;
+    const optimized_unproven = findFunction(differential.optimized_ir, requirement.unproven_add) orelse
+        return error.ContractFunctionMissing;
+    const raw_proven = checkedOperationCount(raw_add) + checkedOperationCount(raw_subtract) +
+        checkedOperationCount(raw_conversion);
+    const optimized_proven = checkedOperationCount(optimized_add) + checkedOperationCount(optimized_subtract) +
+        checkedOperationCount(optimized_conversion);
+    const unproven = checkedOperationCount(optimized_unproven);
+    if (raw_proven < 3 or optimized_proven != 0) return error.ExpectedRangeProofMissing;
+    if (unproven == 0) return error.UnprovenOverflowCheckRemoved;
+    return .{ .integer_ranges = .{
+        .bounded_add = requirement.bounded_add,
+        .bounded_subtract = requirement.bounded_subtract,
+        .bounded_conversion = requirement.bounded_conversion,
+        .raw_proven_checks = raw_proven,
+        .optimized_proven_checks = optimized_proven,
+        .optimized_unproven_checks = unproven,
+    } };
+}
+
+pub fn verifyIntegerRangeCounter(
+    requirement: anytype,
+    enabled: Differential.Result,
+    disabled: Differential.Result,
+) !IntegerRangeCounter {
+    const enabled_proven = try rangeProofChecks(requirement, enabled.optimized_ir);
+    const disabled_proven = try rangeProofChecks(requirement, disabled.optimized_ir);
+    const enabled_unproven = checkedOperationCount(findFunction(enabled.optimized_ir, requirement.unproven_add) orelse
+        return error.ContractFunctionMissing);
+    const disabled_unproven = checkedOperationCount(findFunction(disabled.optimized_ir, requirement.unproven_add) orelse
+        return error.ContractFunctionMissing);
+    if (enabled_proven >= disabled_proven) return error.ExpectedRangeCounterEvidenceMissing;
+    if (enabled_unproven == 0 or disabled_unproven == 0) return error.UnprovenOverflowCheckRemoved;
+    return .{
+        .enabled_proven_checks = enabled_proven,
+        .disabled_proven_checks = disabled_proven,
+        .enabled_unproven_checks = enabled_unproven,
+        .disabled_unproven_checks = disabled_unproven,
+    };
+}
+
+fn rangeProofChecks(requirement: anytype, program: Silex.Ir.Program) !usize {
+    const add = findFunction(program, requirement.bounded_add) orelse return error.ContractFunctionMissing;
+    const subtract = findFunction(program, requirement.bounded_subtract) orelse return error.ContractFunctionMissing;
+    const conversion = findFunction(program, requirement.bounded_conversion) orelse return error.ContractFunctionMissing;
+    return checkedOperationCount(add) + checkedOperationCount(subtract) + checkedOperationCount(conversion);
+}
+
+fn checkedOperationCount(function: Silex.Ir.Function) usize {
+    var count: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .binary => |binary| count += @intFromBool(binary.checked and (binary.operator == .add or binary.operator == .subtract or binary.operator == .multiply)),
+        .convert => |conversion| count += @intFromBool(conversion.checked),
+        else => {},
+    };
+    return count;
 }
 
 fn verifyCriticalEdgePromotion(function_name: []const u8, differential: Differential.Result) !Evidence {
