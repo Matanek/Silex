@@ -258,7 +258,7 @@ fn checkedOperationCount(function: Silex.Ir.Function) usize {
     var count: usize = 0;
     for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
         .binary => |binary| count += @intFromBool(binary.checked and switch (binary.operator) {
-            .add, .subtract, .multiply, .shift_left, .shift_right => true,
+            .add, .subtract, .multiply, .divide, .remainder, .shift_left, .shift_right => true,
             else => false,
         }),
         .convert => |conversion| count += @intFromBool(conversion.checked),

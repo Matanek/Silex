@@ -227,7 +227,7 @@ fn instructionCannotFail(instruction: Machine.Instruction, infallible_functions:
 fn binaryCannotFail(binary: Machine.Instruction.Binary) bool {
     if (binary.type.isFloat()) return true;
     return switch (binary.operator) {
-        .add, .subtract, .multiply, .shift_left, .shift_right => !binary.checked,
+        .add, .subtract, .multiply, .divide, .remainder, .shift_left, .shift_right => !binary.checked,
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal, .bit_and, .bit_xor => true,
         else => false,
     };
@@ -2908,31 +2908,35 @@ fn encodeBinary(
             try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .divide => {
-            try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(right), .imm19);
-            if (signed) {
-                try emitImmediate64(allocator, words, .x11, @bitCast(Numeric.integerMin(binary.type)));
-                try words.append(allocator, compareRegisters(left, .x11));
-                const not_minimum = words.items.len;
-                try words.append(allocator, conditionalBranch(.not_equal));
-                try emitImmediate64(allocator, words, .x12, @bitCast(@as(i64, -1)));
-                try words.append(allocator, compareRegisters(right, .x12));
-                try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.equal), .imm19);
-                try patch19(words.items, not_minimum, words.items.len);
+            if (binary.checked) {
+                try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(right), .imm19);
+                if (signed) {
+                    try emitImmediate64(allocator, words, .x11, @bitCast(Numeric.integerMin(binary.type)));
+                    try words.append(allocator, compareRegisters(left, .x11));
+                    const not_minimum = words.items.len;
+                    try words.append(allocator, conditionalBranch(.not_equal));
+                    try emitImmediate64(allocator, words, .x12, @bitCast(@as(i64, -1)));
+                    try words.append(allocator, compareRegisters(right, .x12));
+                    try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.equal), .imm19);
+                    try patch19(words.items, not_minimum, words.items.len);
+                }
             }
             try words.append(allocator, if (signed) signedDivide(destination, left, right) else unsignedDivide(destination, left, right));
             try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .remainder => {
-            try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(right), .imm19);
-            if (signed) {
-                try emitImmediate64(allocator, words, .x11, @bitCast(Numeric.integerMin(binary.type)));
-                try words.append(allocator, compareRegisters(left, .x11));
-                const not_minimum = words.items.len;
-                try words.append(allocator, conditionalBranch(.not_equal));
-                try emitImmediate64(allocator, words, .x12, @bitCast(@as(i64, -1)));
-                try words.append(allocator, compareRegisters(right, .x12));
-                try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.equal), .imm19);
-                try patch19(words.items, not_minimum, words.items.len);
+            if (binary.checked) {
+                try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(right), .imm19);
+                if (signed) {
+                    try emitImmediate64(allocator, words, .x11, @bitCast(Numeric.integerMin(binary.type)));
+                    try words.append(allocator, compareRegisters(left, .x11));
+                    const not_minimum = words.items.len;
+                    try words.append(allocator, conditionalBranch(.not_equal));
+                    try emitImmediate64(allocator, words, .x12, @bitCast(@as(i64, -1)));
+                    try words.append(allocator, compareRegisters(right, .x12));
+                    try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.equal), .imm19);
+                    try patch19(words.items, not_minimum, words.items.len);
+                }
             }
             try words.append(allocator, if (signed) signedDivide(.x11, left, right) else unsignedDivide(.x11, left, right));
             try words.append(allocator, multiplySubtract(destination, .x11, right, left));
@@ -5264,6 +5268,41 @@ test "omit ARM64 width guard for a proven unchecked shift" {
         .type = .uint32,
         .checked = true,
     });
+    try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
+    try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
+}
+
+test "omit ARM64 failure guards for a proven unchecked remainder" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var unchecked_words: std.ArrayList(u32) = .empty;
+    var unchecked_fixups: FunctionFixups = .{};
+    var unchecked_cache: ScalarCache = .{ .enabled = false };
+    try encodeBinary(allocator, &unchecked_words, &unchecked_fixups, null, &unchecked_cache, .{
+        .result = 2,
+        .operator = .remainder,
+        .left = 0,
+        .right = 1,
+        .type = .int,
+        .checked = false,
+    });
+    try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.division_by_zero.items.len);
+    try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.overflow.items.len);
+
+    var checked_words: std.ArrayList(u32) = .empty;
+    var checked_fixups: FunctionFixups = .{};
+    var checked_cache: ScalarCache = .{ .enabled = false };
+    try encodeBinary(allocator, &checked_words, &checked_fixups, null, &checked_cache, .{
+        .result = 2,
+        .operator = .remainder,
+        .left = 0,
+        .right = 1,
+        .type = .int,
+        .checked = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), checked_fixups.division_by_zero.items.len);
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
     try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
 }

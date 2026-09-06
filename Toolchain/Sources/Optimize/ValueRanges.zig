@@ -262,6 +262,11 @@ fn rewriteInstruction(function: Ir.Function, facts: []const Fact, instruction: I
                 unchecked.checked = false;
                 break :rewrite .{ .binary = unchecked };
             }
+            if (binary.checked and divisionFits(function, facts, binary)) {
+                var unchecked = binary;
+                unchecked.checked = false;
+                break :rewrite .{ .binary = unchecked };
+            }
             break :rewrite instruction;
         },
         .convert => |conversion| rewrite: {
@@ -282,6 +287,21 @@ fn shiftCountFits(function: Ir.Function, facts: []const Fact, binary: Ir.Instruc
     if (!function.value_types[binary.left].isInteger() or facts[binary.right] != .interval) return false;
     const count = facts[binary.right].interval;
     return count.minimum >= 0 and count.maximum < function.value_types[binary.left].bitWidth();
+}
+
+fn divisionFits(function: Ir.Function, facts: []const Fact, binary: Ir.Instruction.Binary) bool {
+    if (binary.operator != .divide and binary.operator != .remainder) return false;
+    const type_value = function.value_types[binary.left];
+    if (!type_value.isInteger() or facts[binary.left] != .interval or facts[binary.right] != .interval)
+        return false;
+    const left = facts[binary.left].interval;
+    const right = facts[binary.right].interval;
+    if (right.minimum <= 0 and right.maximum >= 0) return false;
+    if (!type_value.isSignedInteger()) return true;
+    const includes_negative_one = right.minimum <= -1 and right.maximum >= -1;
+    const includes_minimum = left.minimum <= Numeric.integerMin(type_value) and
+        left.maximum >= Numeric.integerMin(type_value);
+    return !includes_negative_one or !includes_minimum;
 }
 
 fn arithmeticFits(function: Ir.Function, facts: []const Fact, binary: Ir.Instruction.Binary) bool {
@@ -616,7 +636,7 @@ test "constant remainder bounds prove dependent arithmetic" {
         }},
     }} };
     const optimized = try optimize(allocator, program);
-    try std.testing.expect(optimized.functions[0].blocks[0].instructions[1].binary.checked);
+    try std.testing.expect(!optimized.functions[0].blocks[0].instructions[1].binary.checked);
     try std.testing.expect(!optimized.functions[0].blocks[0].instructions[3].binary.checked);
 }
 
@@ -641,4 +661,30 @@ test "constant shift counts remove only proven width checks" {
     const optimized = try optimize(allocator, program);
     try std.testing.expect(!optimized.functions[0].blocks[0].instructions[1].binary.checked);
     try std.testing.expect(optimized.functions[0].blocks[0].instructions[2].binary.checked);
+}
+
+test "constant divisors remove only proven division checks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "bounded_division",
+        .parameter_types = &.{.int},
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .int, .int, .int, .int },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 1, .bits = 3 } },
+                .{ .binary = .{ .result = 2, .operator = .divide, .left = 0, .right = 1 } },
+                .{ .constant_int = .{ .result = 3, .bits = @bitCast(@as(i64, -1)) } },
+                .{ .binary = .{ .result = 4, .operator = .remainder, .left = 0, .right = 3 } },
+                .{ .binary = .{ .result = 5, .operator = .divide, .left = 0, .right = 0 } },
+            },
+            .terminator = .{ .return_value = 2 },
+        }},
+    }} };
+    const optimized = try optimize(allocator, program);
+    try std.testing.expect(!optimized.functions[0].blocks[0].instructions[1].binary.checked);
+    try std.testing.expect(optimized.functions[0].blocks[0].instructions[3].binary.checked);
+    try std.testing.expect(optimized.functions[0].blocks[0].instructions[4].binary.checked);
 }

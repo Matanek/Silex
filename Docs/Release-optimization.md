@@ -65,6 +65,11 @@ guard. Invalid or unproved counts remain observable. Checked integer
 operations and conversions fold only when the result fits, while non-finite
 floating-point arithmetic and division by zero remain explicit.
 
+Division and remainder become unchecked only when the divisor interval excludes
+zero and, for signed integers, either the divisor excludes `-1` or the dividend
+excludes the type minimum. ARM64 then omits both the zero and signed-overflow
+guards. Every unresolved divisor retains both observable failures.
+
 When the closed program contains at least 256 functions, the optimizer applies
 its independent per-function simplification and scalar aggregate replacement
 through at most four fixed worker ranges. Global summaries are complete before
