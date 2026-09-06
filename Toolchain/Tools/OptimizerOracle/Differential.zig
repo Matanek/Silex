@@ -15,10 +15,20 @@ pub const Execution = union(enum) {
 };
 
 pub fn verify(allocator: std.mem.Allocator, source: []const u8) !Result {
+    return verifyWithOptions(allocator, source, .{ .verify_each_pass = true });
+}
+
+pub fn verifyWithOptions(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    options: Silex.ReleaseOptimizer.Options,
+) !Result {
     var frontend = Silex.Frontend.init(allocator);
     const compilation = try frontend.compile(source);
+    try Silex.ReleaseVerifier.verify(allocator, compilation.ir);
     const raw = execute(allocator, compilation.ir);
-    const optimized_ir = try Silex.ReleaseOptimizer.optimize(allocator, compilation.ir);
+    const optimized_ir = try Silex.ReleaseOptimizer.optimizeWithOptions(allocator, compilation.ir, options);
+    try Silex.ReleaseVerifier.verify(allocator, optimized_ir);
     const optimized = execute(allocator, optimized_ir);
     if (!equal(raw, optimized)) return error.SemanticMismatch;
     return .{

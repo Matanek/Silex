@@ -4,6 +4,18 @@ After native program closure, Release mode applies semantics-preserving
 transformations first to the retained portable IR, then to the target's machine
 representation.
 
+The optimizer exposes a stable development-only pass registry. Each entry
+records its precondition, postcondition, and preserved invariants. The
+optimizer oracle can stop after one registered pass or disable exactly one
+pass for attribution and bisection; these controls are not part of the public
+`silex` command line or language. In qualification mode, the portable verifier
+runs on the input and after every registered pass. It checks typed operation
+contracts, direct and indirect call signatures, ownership-operation domains,
+native-width memory operations, control targets, definitions and uses,
+dominance, and complete edge-copy lowering of join values. A malformed program
+therefore fails at the pass that produced it instead of surfacing only in a
+later native benchmark.
+
 ## Simplify portable IR
 
 Release propagates constants and copies across the control-flow graph. It

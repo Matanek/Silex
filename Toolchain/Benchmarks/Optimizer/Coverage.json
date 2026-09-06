@@ -1,0 +1,233 @@
+{
+  "schema_version": 1,
+  "oracle": {
+    "executable": "clang",
+    "version_line": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "source_repository": "https://github.com/llvm/llvm-project.git",
+    "source_tag": "llvmorg-21.1.0",
+    "source_revision": "3623fe661ae35c6c80ac221f14d85be76aa870f1",
+    "target_triple": "arm64-apple-darwin25.6.0",
+    "cpu": "apple-m1",
+    "features": "+v8.6a,+bf16,+bti,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+i8mm,+jsconv,+lse,+neon,+pauth,+predres,+ras,+rcpc,+rdm,+sb,+ssbs",
+    "optimization": "-O3",
+    "floating_point": "strict Silex-equivalent operations; no fast-math; fp-contract=on",
+    "linker": "Apple ld 1267 through the pinned Xcode clang driver",
+    "libraries": ["libSystem"]
+  },
+  "baselines": [
+    {
+      "id": "optimizer-oracle-initial",
+      "status": "accepted",
+      "repository": "Silex",
+      "revision": "94fd92f3a0c81256c82af182fb12bb4b241d22d5",
+      "source": "Toolchain/Benchmarks/Optimizer",
+      "command": "zig build optimizer-gate",
+      "metric": "semantic, native, structural and LLVM differential gate",
+      "value": "green on macOS arm64 before Part 01 changes"
+    },
+    {
+      "id": "boids-2026-08-30",
+      "status": "accepted",
+      "repository": "Silex-Benchmarks",
+      "revision": "dd2438ee21c84a393d9a9399a58a0ac954184e6d",
+      "source": "Sources/Boids2D/Baselines/2026-08-30-124208-arm64-boids.log",
+      "command": "Sources/Boids2D/RunComparison.sh --wait",
+      "metric": "4000 boids, one warm-up, seven rotated five-second processes",
+      "value": "Silex median 87.289474 FPS, MAD 0.9834%, -2.19% versus architectural C++"
+    },
+    {
+      "id": "boids-post-physics-diagnostic",
+      "status": "diagnostic-red",
+      "repository": "Silex",
+      "revision": "94fd92f3a0c81256c82af182fb12bb4b241d22d5",
+      "source": "Spec Silex-LLVM-Optimization-Parity initial diagnosis",
+      "command": "Sources/Boids2D/RunComparison.sh --wait",
+      "metric": "same Boids protocol pending fresh Part 01 capture",
+      "value": "observed Silex 79.922104 FPS; never replaces the accepted baseline"
+    },
+    {
+      "id": "boids-part01-single-process-smoke",
+      "status": "candidate",
+      "repository": "Silex",
+      "revision": "94fd92f3a0c81256c82af182fb12bb4b241d22d5",
+      "source": "Silex-Benchmarks/Sources/Boids2D/Silex.sx at 8790c1fbc44b3fa1303c73340b45e105d287b7f7c13ccf9f7c8c93e24262a99b",
+      "command": "compiled Release --nocache and executed once with 4000",
+      "metric": "single five-second diagnostic process; not an accepted timing campaign",
+      "value": "binary SHA-256 0b35fd6531d67ddf6815f6ba2c5988aa1b7872dbda5806fa1e690d58496e4064, 37175192 bytes, 84.33471 FPS"
+    },
+    {
+      "id": "physics-contact-kernel-2026-09-03",
+      "status": "accepted",
+      "repository": "Packages/GFX.Physics",
+      "revision": "f1a10061a377c8fc489e47d39245c86d7907aaf9",
+      "source": "Benchmarks/Baselines/2026-09-03-spec15-contact-kernel.json",
+      "command": "Benchmarks/Oracle2D/RunContactKernel.py with one warm-up and seven rotated processes",
+      "metric": "normal, friction and rolling constraint kernel at identical slots8 layout",
+      "value": "Silex/Clang median ratio 9.0783; accepted historical measurement, compiler parity red"
+    },
+    {
+      "id": "physics-integration-kernel-2026-09-03",
+      "status": "accepted",
+      "repository": "Packages/GFX.Physics",
+      "revision": "f1a10061a377c8fc489e47d39245c86d7907aaf9",
+      "source": "Benchmarks/Baselines/2026-09-03-spec16-integration.json",
+      "command": "Benchmarks/Oracle2D/RunStageKernels.py --stage integration --require-parity",
+      "metric": "velocity and position integration at identical slots8 layout",
+      "value": "Silex/Clang median ratio 45.3167; accepted historical measurement, compiler parity red"
+    },
+    {
+      "id": "physics-preparation-kernel-2026-09-03",
+      "status": "accepted",
+      "repository": "Packages/GFX.Physics",
+      "revision": "f1a10061a377c8fc489e47d39245c86d7907aaf9",
+      "source": "Benchmarks/Baselines/2026-09-03-spec16-preparation.json",
+      "command": "Benchmarks/Oracle2D/RunStageKernels.py --stage preparation --require-parity",
+      "metric": "one-point constraint preparation at identical slots8 layout",
+      "value": "Silex/Clang median ratio 25.1739; accepted historical measurement, compiler parity red"
+    }
+  ],
+  "workspace_baseline": [
+    {"repository": "Silex", "revision": "94fd92f3a0c81256c82af182fb12bb4b241d22d5", "role": "compiler"},
+    {"repository": "Silex-Benchmarks", "revision": "90680ca16020bbd027c3e2a7adee6c6a84b4871e", "role": "sentinels"},
+    {"repository": "Packages/GFX", "revision": "f0c9123df8f2cf2224eaa27f8619991e4acea900", "role": "boids-closure"},
+    {"repository": "Packages/STD", "revision": "997ce443190e7b093e257f7c2df62fac33a0859f", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Assets", "revision": "50bc47c68b33a9a8fb7e17f110820e9cb3b73f37", "role": "boids-closure"},
+    {"repository": "Packages/JSON", "revision": "046f6411f8146eeae1c51dac5f590918997b8541", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Canvas", "revision": "a09608ec0267f5678bd7dab6a852f14623f34040", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Font", "revision": "5689a4fc62ceadb51555176302ef8c757c4e00ab", "role": "boids-closure"},
+    {"repository": "Packages/GFX.ECS", "revision": "0fb019cf2f5bf0fc56078ba0a01618fca868fd87", "role": "boids-closure"},
+    {"repository": "Packages/GFX.GPU", "revision": "8d2fa380e88a551fb3503fe7e830f9c4fef83eda", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Physics", "revision": "f1a10061a377c8fc489e47d39245c86d7907aaf9", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Application", "revision": "e7cfa74773af23361542a1f92ad9b5da3ceee29d", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Scene2D", "revision": "4e85614a3239cd3941e1f1810fbe545eca7ec2fa", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Rendering", "revision": "913d77ba7680bc8d2fc3940f4adae0515b7864a1", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Scene3D", "revision": "b3ec2f8b165b6c8823fed48dedbcfe27efbfd27d", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Stats", "revision": "2ce7377b97aa838301378c0f19c2628908927815", "role": "boids-closure"},
+    {"repository": "Packages/GFX.UI", "revision": "1cccec6dab86063e530ae121b5cb32f7f7cc7e3b", "role": "boids-closure"},
+    {"repository": "Packages/GFX.UI.Terminal", "revision": "14989cd9f316d86ae369b844376ca0508c368e98", "role": "boids-closure"},
+    {"repository": "Packages/GFX.Viewer", "revision": "16b2d2edc1bf03cae5a2009b6612a76a53576ebe", "role": "boids-closure"},
+    {"repository": "Packages/GFX.WebView", "revision": "78329e6b31307238762752559a404adada1eb7b0", "role": "boids-closure"},
+    {"repository": "Packages/Sync", "revision": "123b73ec70464b90ec9b4848d9bbf19dffb88db6", "role": "boids-closure"}
+  ],
+  "portable_ir": [
+    {
+      "family": "constants-and-optionals",
+      "operations": ["constant_int", "constant_bool", "constant_str", "constant_bytes", "constant_float32", "constant_float64", "optional_null", "optional_some", "optional_unwrap"]
+    },
+    {
+      "family": "ownership-and-copies",
+      "operations": ["copy", "deep_copy", "class_cast", "class_retain", "class_drop", "list_retain", "list_drop", "string_retain", "string_drop"]
+    },
+    {
+      "family": "globals-and-aggregates",
+      "operations": ["global_load", "global_store", "storage_init", "structure_init", "protocol_init", "protocol_test", "protocol_extract", "list_init", "enum_init", "enum_test", "enum_payload", "enum_raw", "field_load", "field_store"]
+    },
+    {
+      "family": "collections-and-references",
+      "operations": ["collection_load", "collection_reference", "collection_replace", "collection_count", "list_edit", "collection_slice", "collection_view", "string_address", "string_byte_count", "string_byte_at", "string_from_bytes", "function_reference", "local_load", "local_store", "local_address", "reference_load", "address_load", "address_store", "reference_store", "reference_field", "reference_optional"]
+    },
+    {
+      "family": "scalar-text-and-effects",
+      "operations": ["convert", "format_value", "string_concat", "string_count", "unary", "binary", "call", "indirect_call", "boundary_call", "boundary_indirect_call", "dynamic_call", "print", "assert", "mutex_lock", "mutex_unlock"]
+    }
+  ],
+  "terminators": ["jump", "branch", "return_value", "return_void", "panic"],
+  "types": ["void", "int8", "int16", "int32", "int", "uint8", "uint16", "uint32", "uint", "bool", "float32", "float64", "str", "address"],
+  "machine_ir": [
+    {
+      "family": "constants-optionals-and-copies",
+      "operations": ["constant_int", "constant_bool", "constant_str", "constant_bytes", "constant_float32", "constant_float64", "optional_null", "optional_some", "optional_unwrap", "copy", "copy_range", "deep_copy"]
+    },
+    {
+      "family": "memory-references-and-aggregates",
+      "operations": ["global_load", "global_store", "local_address", "reference_load", "address_load", "address_store", "reference_store", "reference_offset", "reference_indirect_offset", "storage_init", "aggregate_init", "protocol_init", "protocol_test", "protocol_extract", "class_init", "class_load", "class_store", "class_retain", "class_drop", "list_retain", "list_drop", "string_retain", "string_drop"]
+    },
+    {
+      "family": "collections-and-text",
+      "operations": ["list_init", "enum_init", "enum_test", "collection_load", "collection_reference", "collection_replace", "collection_count", "list_edit", "collection_slice", "collection_view", "aggregate_equal", "convert", "format_value", "string_concat", "string_count", "string_byte_count", "string_byte_at", "string_from_bytes"]
+    },
+    {
+      "family": "scalar-calls-effects-and-control",
+      "operations": ["unary", "binary", "function_address", "call", "indirect_call", "external_call", "external_indirect_call", "dynamic_call", "print", "assert", "mutex_lock", "mutex_unlock", "panic", "return_value", "return_void", "jump", "branch"]
+    }
+  ],
+  "passes": [
+    {"id": "local_simplification_pre", "families": ["scalars", "control", "bounds", "dead-code"]},
+    {"id": "ssa_promotion_pre", "families": ["locals", "ssa", "phi", "control"]},
+    {"id": "aggregate_argument_borrow", "families": ["aggregates", "references", "calls", "bounds"]},
+    {"id": "aggregate_scalarization_pre", "families": ["aggregates", "copies", "alias"]},
+    {"id": "scalar_math_intrinsics", "families": ["floating-point", "calls"]},
+    {"id": "value_inlining", "families": ["calls", "constants", "dead-code"]},
+    {"id": "control_flow_inlining", "families": ["calls", "control", "loops", "phi"]},
+    {"id": "aggregate_scalarization_post", "families": ["aggregates", "copies", "alias"]},
+    {"id": "local_simplification_post", "families": ["scalars", "control", "bounds", "dead-code"]},
+    {"id": "ssa_promotion_post", "families": ["locals", "ssa", "phi", "control"]}
+  ],
+  "coverage": [
+    {"id": "scalar-integers", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerArithmetic.sx", "IntegerWidths.sx", "UnsignedBitwise.sx"]},
+    {"id": "scalar-floating-point", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["FloatArithmetic.sx", "Regressions/FloatSsaDiamond.sx", "Regressions/FloatSsaLoop.sx"]},
+    {"id": "branches-diamonds-and-phi", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerControlFlow.sx", "Regressions/BooleanSharedChain.sx"]},
+    {"id": "loops-inductions-and-ranges", "state": "gap", "owner_part": "silex-llvm-opt-05", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["BranchingLoop.sx", "Regressions/BoundedCollectionLoop.sx"]},
+    {"id": "references-and-alias", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/CheckedMemoryLanes.sx"]},
+    {"id": "aggregates-copies-and-returns", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/AggregateFieldStores.sx", "Regressions/AggregateControlFlow.sx"]},
+    {"id": "collections-ownership-and-bounds", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/ArrayStorageAccess.sx", "Regressions/DenseScalarLoop.sx"]},
+    {"id": "calls-closure-and-inlining", "state": "gap", "owner_part": "silex-llvm-opt-04", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerArithmetic.sx", "Regressions/DenseScalarLoop.sx"]},
+    {"id": "errors-and-overflow", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Differential.zig mutation and failure tests"]},
+    {"id": "simd-and-vectorization", "state": "gap", "owner_part": "silex-llvm-opt-05", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/FloatLaneXYZ.sx", "Regressions/BoidsKernel.sx"]},
+    {"id": "runtime-effects-and-text", "state": "gap", "owner_part": "silex-llvm-opt-04", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/TextOutputIntegrity.sx"]},
+    {"id": "registers-spills-and-stack", "state": "gap", "owner_part": "silex-llvm-opt-06", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/FloatLaneXYZ.sx", "Regressions/BoidsKernel.sx"]},
+    {"id": "packages-and-real-consumers", "state": "gap", "owner_part": "silex-llvm-opt-07", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": false, "targets": ["macos-arm64"], "evidence": ["Silex-Benchmarks/Sources/Boids2D", "Silex-Benchmarks/Sources/FallingBodies2D", "Silex-Benchmarks/Sources/FontRasterization"]}
+  ],
+  "hot_functions": [
+    {
+      "id": "boids-steering-macos-arm64",
+      "repository": "Silex-Benchmarks",
+      "revision": "90680ca16020bbd027c3e2a7adee6c6a84b4871e",
+      "source": "Sources/Boids2D/Silex.sx",
+      "source_sha256": "8790c1fbc44b3fa1303c73340b45e105d287b7f7c13ccf9f7c8c93e24262a99b",
+      "function": "Boids2D.Silex.steering",
+      "state": "candidate",
+      "owner_part": "silex-llvm-opt-01",
+      "evidence": "zig build --build-file Silex/Toolchain/build.zig optimizer-oracle -- hot-budget Silex-Benchmarks/Sources/Boids2D/Silex.sx Boids2D.Silex.steering",
+      "budgets": [
+        {"metric": "ir_field_loads", "direction": "max", "limit": 10, "observed": 10, "unit": "instructions"},
+        {"metric": "ir_checked_operations", "direction": "max", "limit": 39, "observed": 39, "unit": "instructions"},
+        {"metric": "machine_collection_loads", "direction": "max", "limit": 1, "observed": 1, "unit": "instructions"},
+        {"metric": "machine_calls", "direction": "max", "limit": 0, "observed": 0, "unit": "instructions"},
+        {"metric": "machine_branches", "direction": "max", "limit": 16, "observed": 16, "unit": "instructions"},
+        {"metric": "machine_stack_slots", "direction": "max", "limit": 11, "observed": 11, "unit": "slots"},
+        {"metric": "machine_frame_bytes", "direction": "max", "limit": 1056, "observed": 1056, "unit": "bytes"},
+        {"metric": "machine_simd_xy_pairs", "direction": "min", "limit": 7, "observed": 7, "unit": "pairs"}
+      ]
+    }
+  ],
+  "interactions": {
+    "pairwise_seed": 7640891576956012809,
+    "triplet_seed": 13503953896175478587,
+    "axes": ["type", "control", "memory", "alias", "call", "loop", "error", "package", "target"],
+    "risk_triplets": ["alias+call+loop", "aggregate+branch+return", "collection+bounds+ownership", "float+simd+spill", "package+runtime+target"]
+  },
+  "metamorphic_axes": ["direct-or-helper", "scalar-or-aggregate", "local-or-package", "while-or-for", "branch-or-conditional-expression", "declaration-order"],
+  "qualification_corpus": [
+    {"id": "falling-bodies-2d", "repository": "Silex-Benchmarks", "revision": "90680ca16020bbd027c3e2a7adee6c6a84b4871e", "path": "Sources/FallingBodies2D/Main.sx", "sha256": "44dcda7932351039358670858146c4855ac0a3e290d9212899ad952c72e58a1f", "sealed": true},
+    {"id": "font-rasterization-retained", "repository": "Silex-Benchmarks", "revision": "90680ca16020bbd027c3e2a7adee6c6a84b4871e", "path": "Sources/FontRasterization/Main.sx", "sha256": "2b1747965cc5d9fe33d0d43a4adabaa964a5f71a78e76d6d5e4afda7b87cddec", "sealed": true},
+    {"id": "font-rasterization-direct", "repository": "Silex-Benchmarks", "revision": "90680ca16020bbd027c3e2a7adee6c6a84b4871e", "path": "Sources/FontRasterization/Direct.sx", "sha256": "c8864fe2efc561f113e52ebb6236a53f854c8abe6a15f13fd8ed1bec7e0e8cad", "sealed": true}
+  ],
+  "transposition": [
+    {"family": "new-pass-manager-and-analysis-invalidation", "verdict": "adapted", "owner_part": "silex-llvm-opt-01", "source": "llvm/lib/Passes/PassBuilderPipelines.cpp", "proof": "stable Silex pass registry plus verifier barriers"},
+    {"family": "instcombine-and-simplifycfg", "verdict": "gap", "owner_part": "silex-llvm-opt-02", "source": "llvm/lib/Transforms/InstCombine and llvm/lib/Transforms/Scalar/SimplifyCFGPass.cpp", "proof": "scalar and CFG corpus with structural budgets"},
+    {"family": "mem2reg-sroa-and-early-cse", "verdict": "gap", "owner_part": "silex-llvm-opt-02", "source": "llvm/lib/Transforms/Utils/PromoteMemoryToRegister.cpp and llvm/lib/Transforms/Scalar/SROA.cpp", "proof": "SSA, PHI and aggregate promotion matrix"},
+    {"family": "lazy-value-info-and-correlated-propagation", "verdict": "gap", "owner_part": "silex-llvm-opt-02", "source": "llvm/lib/Analysis/LazyValueInfo.cpp", "proof": "range, signedness and safety-check corpus"},
+    {"family": "basic-aa-memoryssa-and-dse", "verdict": "gap", "owner_part": "silex-llvm-opt-03", "source": "llvm/lib/Analysis/BasicAliasAnalysis.cpp and llvm/lib/Analysis/MemorySSA.cpp", "proof": "alias mutation and dead-store matrix"},
+    {"family": "global-value-numbering", "verdict": "gap", "owner_part": "silex-llvm-opt-03", "source": "llvm/lib/Transforms/Scalar/NewGVN.cpp", "proof": "load and expression equivalence across control flow"},
+    {"family": "ipsccp-attributor-and-function-attrs", "verdict": "gap", "owner_part": "silex-llvm-opt-04", "source": "llvm/lib/Transforms/IPO/SCCP.cpp and llvm/lib/Transforms/IPO/Attributor.cpp", "proof": "infallibility, effect and call-summary matrix"},
+    {"family": "inline-cost-and-cgscc", "verdict": "gap", "owner_part": "silex-llvm-opt-04", "source": "llvm/lib/Analysis/InlineCost.cpp and llvm/lib/Transforms/IPO/Inliner.cpp", "proof": "metamorphic helper and package call variants"},
+    {"family": "loop-simplify-indvars-licm-and-rotate", "verdict": "gap", "owner_part": "silex-llvm-opt-05", "source": "llvm/lib/Transforms/Scalar/LoopPassManager.cpp", "proof": "loop canonicalization, range and invariant motion corpus"},
+    {"family": "loop-vectorize-and-slp-vectorizer", "verdict": "gap", "owner_part": "silex-llvm-opt-05", "source": "llvm/lib/Transforms/Vectorize/LoopVectorize.cpp and SLPVectorizer.cpp", "proof": "portable lanes plus ARM64 and X64 realization"},
+    {"family": "target-transform-info", "verdict": "gap", "owner_part": "silex-llvm-opt-05", "source": "llvm/include/llvm/Analysis/TargetTransformInfo.h", "proof": "per-target cost decisions with counterexamples"},
+    {"family": "selectiondag-globalisel-and-combiner", "verdict": "gap", "owner_part": "silex-llvm-opt-06", "source": "llvm/lib/CodeGen/SelectionDAG and llvm/lib/CodeGen/GlobalISel", "proof": "instruction selection and combination budgets"},
+    {"family": "machine-scheduler", "verdict": "gap", "owner_part": "silex-llvm-opt-06", "source": "llvm/lib/CodeGen/MachineScheduler.cpp", "proof": "dependency-preserving ARM64 and X64 schedules"},
+    {"family": "greedy-register-allocation-and-spill-placement", "verdict": "gap", "owner_part": "silex-llvm-opt-06", "source": "llvm/lib/CodeGen/RegAllocGreedy.cpp", "proof": "liveness, spill and stack budgets per architecture"},
+    {"family": "lit-filecheck-and-differential-testing", "verdict": "adapted", "owner_part": "silex-llvm-opt-01", "source": "llvm/utils/lit and llvm/test", "proof": "structural contracts, mutation tests, deterministic fuzz and machine reports"}
+  ]
+}

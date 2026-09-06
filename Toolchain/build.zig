@@ -323,9 +323,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    optimizer_oracle_module.addAnonymousImport("silex_optimizer_api", .{
+    const optimizer_api_module = b.createModule(.{
         .root_source_file = b.path("Sources/OptimizerOracleApi.zig"),
+        .target = target,
+        .optimize = optimize,
     });
+    optimizer_api_module.addOptions("build_options", build_options);
+    optimizer_oracle_module.addImport("silex_optimizer_api", optimizer_api_module);
     const optimizer_oracle = b.addExecutable(.{
         .name = "silex-optimizer-oracle",
         .root_module = optimizer_oracle_module,

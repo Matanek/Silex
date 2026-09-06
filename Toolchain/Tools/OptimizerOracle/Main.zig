@@ -1,14 +1,18 @@
 const std = @import("std");
+const Silex = @import("silex_optimizer_api");
 const Advisor = @import("Advisor.zig");
 const Benchmark = @import("Benchmark.zig");
 const Differential = @import("Differential.zig");
 const Generator = @import("Generator.zig");
+const HotBudget = @import("HotBudget.zig");
 const IrStats = @import("IrStats.zig");
 const Llvm = @import("Llvm.zig");
 const LlvmStats = @import("LlvmStats.zig");
+const Metamorphic = @import("Metamorphic.zig");
 const Native = @import("Native.zig");
 const NativeGenerator = @import("NativeGenerator.zig");
 const Qualification = @import("Qualification.zig");
+const Registry = @import("Registry.zig");
 const Reducer = @import("Reducer.zig");
 const Report = @import("Report.zig");
 
@@ -16,7 +20,15 @@ const usage =
     \\Usage: zig build optimizer-oracle -- <command> [options]
     \\
     \\Commands:
+    \\  audit               Validate coverage, baselines, passes and LLVM pins
     \\  verify              Compare raw and Release IR through the interpreter
+    \\  passes              List the stable Release pass registry
+    \\  verify-prefix PASS  Verify the corpus through one Release pass
+    \\  verify-without PASS Verify the corpus with exactly one pass disabled
+    \\  cache-proof         Compare cold, primed and warm Release artifacts
+    \\  metamorphic        Qualify equivalent source-shape variants
+    \\  hot-budget SOURCE FUNCTION
+    \\                      Profile one real Release function through ARM64 lowering
     \\  compare [samples]   Compare Silex Release with LLVM -O3 (default: 11)
     \\  fuzz [count] [seed] Generate deterministic typed numeric programs
     \\  fuzz-llvm [count] [seed]
@@ -49,15 +61,54 @@ fn run(init: std.process.Init) !u8 {
     const silex_binary = arguments[1];
     const corpus_directory = arguments[2];
     const command = arguments[3];
+    const registry = try Registry.load(allocator, init.io, corpus_directory);
+    try Registry.audit(registry);
+    if (std.mem.eql(u8, command, "audit")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
+        try reportRegistry(init.io, allocator, registry);
+        return 0;
+    }
     if (std.mem.eql(u8, command, "verify")) {
         if (arguments.len != 4) return error.InvalidArguments;
         try verifyCorpus(init.io, allocator, corpus_directory);
         return 0;
     }
+    if (std.mem.eql(u8, command, "passes")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try reportPasses(init.io, allocator);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "verify-prefix") or std.mem.eql(u8, command, "verify-without")) {
+        if (arguments.len != 5) return error.InvalidArguments;
+        const pass = Silex.ReleaseOptimizer.PassId.parse(arguments[4]) orelse return error.InvalidPass;
+        const options: Silex.ReleaseOptimizer.Options = if (std.mem.eql(u8, command, "verify-prefix"))
+            .{ .verify_each_pass = true, .stop_after = pass }
+        else
+            .{ .verify_each_pass = true, .disabled = pass };
+        try verifyCorpusWithOptions(init.io, allocator, corpus_directory, options);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "cache-proof")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try verifyCacheReproducibility(init.io, allocator, silex_binary, corpus_directory);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "metamorphic")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try qualifyMetamorphic(init.io, allocator, silex_binary);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "hot-budget")) {
+        if (arguments.len != 6) return error.InvalidArguments;
+        try HotBudget.run(init.io, allocator, init.environ_map, registry, arguments[4], arguments[5]);
+        return 0;
+    }
     if (std.mem.eql(u8, command, "compare")) {
         const samples = if (arguments.len == 5) try std.fmt.parseInt(usize, arguments[4], 10) else 11;
         if (arguments.len > 5 or samples < 5 or samples % 2 == 0) return error.InvalidArguments;
-        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, samples);
+        try Registry.validateOracleEnvironment(allocator, init.io, registry.oracle);
+        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, registry.oracle, samples);
         return 0;
     }
     if (std.mem.eql(u8, command, "fuzz")) {
@@ -71,7 +122,8 @@ fn run(init: std.process.Init) !u8 {
         const count = if (arguments.len >= 5) try std.fmt.parseInt(usize, arguments[4], 10) else 16;
         const seed = if (arguments.len >= 6) try std.fmt.parseInt(u64, arguments[5], 0) else 1;
         if (arguments.len > 6 or count == 0) return error.InvalidArguments;
-        try fuzzLlvm(init.io, allocator, count, seed);
+        try Registry.validateOracleEnvironment(allocator, init.io, registry.oracle);
+        try fuzzLlvm(init.io, allocator, registry.oracle, count, seed);
         return 0;
     }
     if (std.mem.eql(u8, command, "qualify")) {
@@ -83,11 +135,16 @@ fn run(init: std.process.Init) !u8 {
     }
     if (std.mem.eql(u8, command, "gate")) {
         if (arguments.len != 4) return error.InvalidArguments;
+        try Registry.validateOracleEnvironment(allocator, init.io, registry.oracle);
+        try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
+        try reportRegistry(init.io, allocator, registry);
         try verifyCorpus(init.io, allocator, corpus_directory);
+        try verifyCacheReproducibility(init.io, allocator, silex_binary, corpus_directory);
+        try qualifyMetamorphic(init.io, allocator, silex_binary);
         try qualifyNative(init.io, allocator, silex_binary, corpus_directory, 8, 1);
         try fuzz(init.io, allocator, 128, 1);
-        try fuzzLlvm(init.io, allocator, 32, 1);
-        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, 5);
+        try fuzzLlvm(init.io, allocator, registry.oracle, 32, 1);
+        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, registry.oracle, 5);
         try Report.heading(init.io, allocator, "optimizer qualification gate passed");
         return 0;
     }
@@ -230,11 +287,20 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
 }
 
 fn verifyCorpus(io: std.Io, allocator: std.mem.Allocator, corpus_directory: []const u8) !void {
+    return verifyCorpusWithOptions(io, allocator, corpus_directory, .{ .verify_each_pass = true });
+}
+
+fn verifyCorpusWithOptions(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    corpus_directory: []const u8,
+    options: Silex.ReleaseOptimizer.Options,
+) !void {
     try Report.heading(io, allocator, "semantic verification");
     for (Generator.corpus) |entry| {
         const path = try std.fs.path.join(allocator, &.{ corpus_directory, entry.name });
         const source = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
-        const result = try Differential.verify(allocator, source);
+        const result = try Differential.verifyWithOptions(allocator, source, options);
         switch (result.execution) {
             .completed => |outcome| try Report.line(io, allocator, "  PASS {s} ({d} bytes output)", .{
                 entry.name,
@@ -244,6 +310,158 @@ fn verifyCorpus(io: std.Io, allocator: std.mem.Allocator, corpus_directory: []co
         }
     }
     try Report.line(io, allocator, "verified: {d} corpus programs", .{Generator.corpus.len});
+}
+
+fn reportPasses(io: std.Io, allocator: std.mem.Allocator) !void {
+    try Report.heading(io, allocator, "stable Release pass registry");
+    for (Silex.ReleaseOptimizer.pass_descriptors, 0..) |pass, index| {
+        try Report.line(io, allocator, "  {d}. {s}", .{ index + 1, @tagName(pass.id) });
+        try Report.line(io, allocator, "     requires: {s}", .{pass.precondition});
+        try Report.line(io, allocator, "     ensures: {s}", .{pass.postcondition});
+        try Report.line(io, allocator, "     preserves: {s}", .{pass.preserves});
+    }
+}
+
+fn verifyCacheReproducibility(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    silex_binary: []const u8,
+    corpus_directory: []const u8,
+) !void {
+    const cases = [_][]const u8{
+        "IntegerArithmetic.sx",
+        "BranchingLoop.sx",
+        "Regressions/AggregateFieldStores.sx",
+        "Regressions/DenseScalarLoop.sx",
+    };
+    try std.Io.Dir.cwd().createDirPath(io, output_directory ++ "/cache-proof");
+    var report: std.Io.Writer.Allocating = .init(allocator);
+    errdefer report.deinit();
+    try report.writer.writeAll("workload\tcold_sha256\tprimed_sha256\twarm_sha256\toutput_sha256\n");
+    try Report.heading(io, allocator, "cold and warm cache reproducibility");
+    for (cases) |name| {
+        const source_path = try std.fs.path.join(allocator, &.{ corpus_directory, name });
+        const stem = std.fs.path.stem(name);
+        const cold_path = try std.fmt.allocPrint(allocator, "{s}/cache-proof/{s}-cold", .{ output_directory, stem });
+        const primed_path = try std.fmt.allocPrint(allocator, "{s}/cache-proof/{s}-primed", .{ output_directory, stem });
+        const warm_path = try std.fmt.allocPrint(allocator, "{s}/cache-proof/{s}-warm", .{ output_directory, stem });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-n", "-o", cold_path });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-o", primed_path });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-o", warm_path });
+        const cold_hash = try fileSha256(allocator, io, cold_path);
+        const primed_hash = try fileSha256(allocator, io, primed_path);
+        const warm_hash = try fileSha256(allocator, io, warm_path);
+        if (!std.mem.eql(u8, cold_hash, primed_hash) or !std.mem.eql(u8, cold_hash, warm_hash))
+            return error.CacheArtifactMismatch;
+        const cold_run = try successfulCommand(allocator, io, &.{cold_path});
+        const primed_run = try successfulCommand(allocator, io, &.{primed_path});
+        const warm_run = try successfulCommand(allocator, io, &.{warm_path});
+        if (!std.mem.eql(u8, cold_run.stdout, primed_run.stdout) or
+            !std.mem.eql(u8, cold_run.stdout, warm_run.stdout) or
+            !std.mem.eql(u8, cold_run.stderr, primed_run.stderr) or
+            !std.mem.eql(u8, cold_run.stderr, warm_run.stderr))
+        {
+            return error.CacheExecutionMismatch;
+        }
+        var output_digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(cold_run.stdout, &output_digest, .{});
+        const output_hash = std.fmt.bytesToHex(output_digest, .lower);
+        try report.writer.print("{s}\t{s}\t{s}\t{s}\t{s}\n", .{
+            name,
+            cold_hash,
+            primed_hash,
+            warm_hash,
+            &output_hash,
+        });
+        try Report.line(io, allocator, "  PASS {s}: {s}", .{ name, cold_hash });
+    }
+    const path = output_directory ++ "/cache-proof.tsv";
+    try writeFile(io, path, try report.toOwnedSlice());
+    try Report.line(io, allocator, "cache proof: {s}", .{path});
+}
+
+fn qualifyMetamorphic(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    silex_binary: []const u8,
+) !void {
+    const directory = output_directory ++ "/SilexOptimizerMetamorphic";
+    try std.Io.Dir.cwd().createDirPath(io, directory ++ "/Module");
+    try writeFile(io, directory ++ "/Package.json",
+        \\{"name":"SilexOptimizerMetamorphic","version":"0.0.0"}
+    );
+    var report: std.Io.Writer.Allocating = .init(allocator);
+    errdefer report.deinit();
+    try report.writer.writeAll("case\taxis\tleft_sha256\tright_sha256\tleft_instructions\tright_instructions\tleft_blocks\tright_blocks\tleft_calls\tright_calls\tstructural_class\n");
+    try Report.heading(io, allocator, "metamorphic qualification");
+    for (Metamorphic.pairs, 0..) |pair, pair_index| {
+        const left_path = try std.fmt.allocPrint(allocator, "{s}/Case{d}Left.sx", .{ directory, pair_index });
+        const right_path = try std.fmt.allocPrint(allocator, "{s}/Case{d}Right.sx", .{ directory, pair_index });
+        try writeFile(io, left_path, pair.left);
+        try writeFile(io, right_path, pair.right);
+        const left = try Differential.verify(allocator, pair.left);
+        const right = try Differential.verify(allocator, pair.right);
+        if (!executionEqual(left.execution, right.execution)) return error.MetamorphicSemanticMismatch;
+        _ = try Native.verify(allocator, io, silex_binary, left_path, left.execution, try std.fmt.allocPrint(
+            allocator,
+            "{s}/{s}-left",
+            .{ directory, pair.id },
+        ), true);
+        _ = try Native.verify(allocator, io, silex_binary, right_path, right.execution, try std.fmt.allocPrint(
+            allocator,
+            "{s}/{s}-right",
+            .{ directory, pair.id },
+        ), true);
+        const left_profile = IrStats.profile(left.optimized_ir);
+        const right_profile = IrStats.profile(right.optimized_ir);
+        const structural_equivalent = left_profile.counts.instructions == right_profile.counts.instructions and
+            left_profile.counts.blocks == right_profile.counts.blocks and
+            left_profile.calls == right_profile.calls and
+            left_profile.local_loads + left_profile.local_stores == right_profile.local_loads + right_profile.local_stores;
+        const left_hash = sourceSha256(pair.left);
+        const right_hash = sourceSha256(pair.right);
+        try report.writer.print("{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{s}\n", .{
+            pair.id,
+            pair.axis,
+            &left_hash,
+            &right_hash,
+            left_profile.counts.instructions,
+            right_profile.counts.instructions,
+            left_profile.counts.blocks,
+            right_profile.counts.blocks,
+            left_profile.calls,
+            right_profile.calls,
+            if (structural_equivalent) "equivalent" else "gap",
+        });
+        try Report.line(io, allocator, "  PASS {s}: semantics and native modes agree, structure {s}", .{
+            pair.id,
+            if (structural_equivalent) "equivalent" else "records a gap",
+        });
+    }
+    const path = output_directory ++ "/metamorphic.tsv";
+    try writeFile(io, path, try report.toOwnedSlice());
+    try Report.line(io, allocator, "metamorphic report: {s}", .{path});
+}
+
+fn executionEqual(left: Differential.Execution, right: Differential.Execution) bool {
+    return switch (left) {
+        .failed => |left_error| switch (right) {
+            .failed => |right_error| left_error == right_error,
+            .completed => false,
+        },
+        .completed => |left_result| switch (right) {
+            .failed => false,
+            .completed => |right_result| left_result.exit_code == right_result.exit_code and
+                std.mem.eql(u8, left_result.stdout, right_result.stdout) and
+                std.mem.eql(u8, left_result.stderr, right_result.stderr),
+        },
+    };
+}
+
+fn sourceSha256(source: []const u8) [64]u8 {
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(source, &digest, .{});
+    return std.fmt.bytesToHex(digest, .lower);
 }
 
 fn fuzz(io: std.Io, allocator: std.mem.Allocator, count: usize, initial_seed: u64) !void {
@@ -271,7 +489,13 @@ fn fuzz(io: std.Io, allocator: std.mem.Allocator, count: usize, initial_seed: u6
     });
 }
 
-fn fuzzLlvm(io: std.Io, allocator: std.mem.Allocator, count: usize, initial_seed: u64) !void {
+fn fuzzLlvm(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    oracle: Registry.Oracle,
+    count: usize,
+    initial_seed: u64,
+) !void {
     try std.Io.Dir.cwd().createDirPath(io, output_directory);
     try Report.heading(io, allocator, "LLVM differential fuzzing");
     const llvm_path = output_directory ++ "/fuzz.ll";
@@ -285,7 +509,11 @@ fn fuzzLlvm(io: std.Io, allocator: std.mem.Allocator, count: usize, initial_seed
             .failed => return error.UnexpectedRuntimeFailure,
         };
         try writeFile(io, llvm_path, try Llvm.emit(allocator, differential.raw_ir));
-        _ = try successfulCommand(allocator, io, &.{ "clang", "-O3", llvm_path, "-o", executable_path });
+        const cpu_argument = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{oracle.cpu});
+        _ = try successfulCommand(allocator, io, &.{
+            oracle.executable, oracle.optimization, "-target", oracle.target_triple,
+            cpu_argument,      llvm_path,           "-o",      executable_path,
+        });
         const actual = try successfulCommand(allocator, io, &.{executable_path});
         if (!std.mem.eql(u8, expected.stdout, actual.stdout) or
             !std.mem.eql(u8, expected.stderr, actual.stderr))
@@ -312,6 +540,7 @@ fn compareCorpus(
     allocator: std.mem.Allocator,
     silex_binary: []const u8,
     corpus_directory: []const u8,
+    oracle: Registry.Oracle,
     samples: usize,
 ) !void {
     try std.Io.Dir.cwd().createDirPath(io, output_directory);
@@ -320,7 +549,7 @@ fn compareCorpus(
     var machine_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer machine_report.deinit();
     try machine_report.writer.writeAll(
-        "workload\tsource_sha256\traw_ir_instructions\toptimized_ir_instructions\tbackend\tsamples\tbatch\tminimum_ns\tp10_ns\tmedian_ns\tp90_ns\tmaximum_ns\tmad_ns\tmad_ppm\tbinary_bytes\n",
+        "workload\tsource_sha256\traw_ir_instructions\toptimized_ir_instructions\tbackend\toracle_revision\ttarget\tcpu\tbinary_sha256\tsamples\tbatch\tminimum_ns\tp10_ns\tmedian_ns\tp90_ns\tmaximum_ns\tmad_ns\tmad_ppm\tbinary_bytes\n",
     );
     var opportunity_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer opportunity_report.deinit();
@@ -348,8 +577,11 @@ fn compareCorpus(
         const silex_llvm = try Llvm.emit(allocator, differential.optimized_ir);
         try writeFile(io, raw_llvm_path, raw_llvm);
         try writeFile(io, silex_llvm_path, silex_llvm);
+        const cpu_argument = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{oracle.cpu});
         _ = try successfulCommand(allocator, io, &.{
-            "clang", "-S", "-emit-llvm", "-O3", raw_llvm_path, "-o", optimized_llvm_path,
+            oracle.executable, "-S",                 "-emit-llvm", oracle.optimization,
+            "-target",         oracle.target_triple, cpu_argument, raw_llvm_path,
+            "-o",              optimized_llvm_path,
         });
         const optimized_llvm = try std.Io.Dir.cwd().readFileAlloc(
             io,
@@ -357,7 +589,10 @@ fn compareCorpus(
             allocator,
             .limited(16 * 1024 * 1024),
         );
-        _ = try successfulCommand(allocator, io, &.{ "clang", "-O3", optimized_llvm_path, "-o", llvm_binary_path });
+        _ = try successfulCommand(allocator, io, &.{
+            oracle.executable, oracle.optimization, "-target", oracle.target_triple,
+            cpu_argument,      optimized_llvm_path, "-o",      llvm_binary_path,
+        });
         _ = try successfulCommand(allocator, io, &.{
             silex_binary, "compile", source_path, "-r", "-n", "-o", native_binary_path,
         });
@@ -374,6 +609,8 @@ fn compareCorpus(
 
         const native_size = (try std.Io.Dir.cwd().statFile(io, native_binary_path, .{})).size;
         const llvm_size = (try std.Io.Dir.cwd().statFile(io, llvm_binary_path, .{})).size;
+        const native_hash = try fileSha256(allocator, io, native_binary_path);
+        const llvm_hash = try fileSha256(allocator, io, llvm_binary_path);
         const raw_stats = IrStats.count(differential.raw_ir);
         const optimized_stats = IrStats.count(differential.optimized_ir);
         const llvm_comparison = LlvmStats.compare(raw_llvm, optimized_llvm, differential.raw_ir.functions.len);
@@ -428,6 +665,8 @@ fn compareCorpus(
             raw_stats,
             optimized_stats,
             "silex-release",
+            oracle,
+            native_hash,
             measurements.left,
             native_size,
         );
@@ -438,6 +677,8 @@ fn compareCorpus(
             raw_stats,
             optimized_stats,
             "llvm-o3",
+            oracle,
+            llvm_hash,
             measurements.right,
             llvm_size,
         );
@@ -518,17 +759,23 @@ fn appendMachineRow(
     raw: IrStats.Counts,
     optimized: IrStats.Counts,
     backend: []const u8,
+    oracle: Registry.Oracle,
+    binary_hash: []const u8,
     summary: Benchmark.Summary,
     binary_size: u64,
 ) !void {
     try writer.print(
-        "{s}\t{s}\t{d}\t{d}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n",
+        "{s}\t{s}\t{d}\t{d}\t{s}\t{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n",
         .{
             workload,
             source_hash,
             raw.instructions,
             optimized.instructions,
             backend,
+            oracle.source_revision,
+            oracle.target_triple,
+            oracle.cpu,
+            binary_hash,
             summary.samples,
             summary.batch,
             summary.minimum_ns,
@@ -541,6 +788,44 @@ fn appendMachineRow(
             binary_size,
         },
     );
+}
+
+fn reportRegistry(io: std.Io, allocator: std.mem.Allocator, registry: Registry.Manifest) !void {
+    try std.Io.Dir.cwd().createDirPath(io, output_directory);
+    try Report.heading(io, allocator, "optimization coverage registry");
+    try Report.line(io, allocator, "  schema: {d}", .{registry.schema_version});
+    try Report.line(io, allocator, "  LLVM executable: {s}", .{registry.oracle.version_line});
+    try Report.line(io, allocator, "  LLVM sources: {s} ({s})", .{
+        registry.oracle.source_revision,
+        registry.oracle.source_tag,
+    });
+    try Report.line(io, allocator, "  target: {s}, CPU {s}, {s}", .{
+        registry.oracle.target_triple,
+        registry.oracle.cpu,
+        registry.oracle.optimization,
+    });
+    try Report.line(io, allocator, "  coverage: {d} families, {d} baselines, {d} hot functions, {d} workspace repositories, {d} sealed qualification projects", .{
+        registry.coverage.len,
+        registry.baselines.len,
+        registry.hot_functions.len,
+        registry.workspace_baseline.len,
+        registry.qualification_corpus.len,
+    });
+    const plan_path = output_directory ++ "/coverage-plan.tsv";
+    const plan = try Registry.writeCoveragePlan(allocator, io, registry, plan_path);
+    try Report.line(io, allocator, "  interactions: {d} pairwise cases, {d} risk triplets, SHA-256 {s}", .{
+        plan.pairwise_cases,
+        plan.risk_triplets,
+        &plan.sha256,
+    });
+    try Report.line(io, allocator, "  plan: {s}", .{plan_path});
+}
+
+fn fileSha256(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(128 * 1024 * 1024));
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    return std.fmt.allocPrint(allocator, "{s}", .{std.fmt.bytesToHex(digest, .lower)});
 }
 
 fn successfulCommand(
@@ -586,11 +871,14 @@ test {
     _ = Benchmark;
     _ = Differential;
     _ = Generator;
+    _ = HotBudget;
     _ = IrStats;
     _ = Llvm;
     _ = LlvmStats;
+    _ = Metamorphic;
     _ = Native;
     _ = NativeGenerator;
     _ = Qualification;
+    _ = Registry;
     _ = Reducer;
 }

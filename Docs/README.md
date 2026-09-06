@@ -90,7 +90,11 @@ Choose the subsystem that matches the question you are investigating:
 - [Command-line compilation](Command-line-compilation.md): `run`, `interpret`,
   `compile`, Debug diagnostics, and interactive progress.
 - [Release optimization](Release-optimization.md): portable IR simplification,
-  inlining, bounds analysis, register allocation, and SIMD selection.
+  pass verification, inlining, bounds analysis, register allocation, and SIMD
+  selection.
+- [Optimizer oracle and coverage registry](Optimizer-oracle.md): pinned LLVM
+  comparison, exhaustive inventories, pass bisection, reproducibility, and
+  machine reports.
 - [Cache and editor tooling](Cache-and-editor-tooling.md): reusable compilation
   artifacts and the LSP boundary.
 - [Implementation status](Implementation-status.md): portable coverage and the

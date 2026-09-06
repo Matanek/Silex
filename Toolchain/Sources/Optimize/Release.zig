@@ -9,8 +9,56 @@ const Workers = @import("../Workers.zig");
 const UnusedLocals = @import("UnusedLocals.zig");
 const AggregateStores = @import("AggregateStores.zig");
 const AggregateLoads = @import("AggregateLoads.zig");
+const Verifier = @import("Verifier.zig");
 
 const Allocator = std.mem.Allocator;
+
+pub const PassId = enum {
+    local_simplification_pre,
+    ssa_promotion_pre,
+    aggregate_argument_borrow,
+    aggregate_scalarization_pre,
+    scalar_math_intrinsics,
+    value_inlining,
+    control_flow_inlining,
+    aggregate_scalarization_post,
+    local_simplification_post,
+    ssa_promotion_post,
+
+    pub fn parse(name: []const u8) ?PassId {
+        inline for (@typeInfo(PassId).@"enum".fields) |field| {
+            if (std.mem.eql(u8, name, field.name)) return @enumFromInt(field.value);
+        }
+        return null;
+    }
+};
+
+pub const PassDescriptor = struct {
+    id: PassId,
+    precondition: []const u8,
+    postcondition: []const u8,
+    preserves: []const u8,
+};
+
+pub const pass_descriptors = [_]PassDescriptor{
+    .{ .id = .local_simplification_pre, .precondition = "typed closed portable IR", .postcondition = "per-function constants, dense blocks, checks and dead values simplified", .preserves = "types, effects, ownership, diagnostics and control targets" },
+    .{ .id = .ssa_promotion_pre, .precondition = "simplified typed portable IR", .postcondition = "profitable integer and boolean locals promoted with complete edge transfers", .preserves = "dominance, incoming values, types and observable storage" },
+    .{ .id = .aggregate_argument_borrow, .precondition = "direct single-use aggregate arguments with stable addresses", .postcondition = "eligible aggregate values borrowed at their original checked load", .preserves = "bounds diagnostics, observation order, alias and value semantics" },
+    .{ .id = .aggregate_scalarization_pre, .precondition = "typed aggregates before cloning", .postcondition = "eligible scalar fields exposed before inlining", .preserves = "field values, ownership, aliases and aggregate layout" },
+    .{ .id = .scalar_math_intrinsics, .precondition = "exact STD.Math min or max scalar signature", .postcondition = "eligible calls represented by portable scalar operations", .preserves = "NaN, signed zero, infinity and provider identity rules" },
+    .{ .id = .value_inlining, .precondition = "closed direct call graph", .postcondition = "bounded straight-line and constant-result callees specialized", .preserves = "call effects, argument order, return values and diagnostics" },
+    .{ .id = .control_flow_inlining, .precondition = "closed direct call graph with typed CFG", .postcondition = "eligible branching and loop callees cloned into callers", .preserves = "CFG validity, returns, effects, ownership and diagnostics" },
+    .{ .id = .aggregate_scalarization_post, .precondition = "combined caller and callee graphs", .postcondition = "newly exposed aggregate copies and snapshots simplified", .preserves = "field values, ownership, aliases and aggregate layout" },
+    .{ .id = .local_simplification_post, .precondition = "inlined typed portable IR", .postcondition = "combined per-function constants, blocks, checks and dead values simplified", .preserves = "types, effects, ownership, diagnostics and control targets" },
+    .{ .id = .ssa_promotion_post, .precondition = "final simplified typed portable IR", .postcondition = "remaining profitable scalar locals promoted with complete edge transfers", .preserves = "dominance, incoming values, types and observable storage" },
+};
+
+pub const Options = struct {
+    worker_count: u16 = 1,
+    verify_each_pass: bool = false,
+    stop_after: ?PassId = null,
+    disabled: ?PassId = null,
+};
 
 const Constant = union(enum) {
     unknown,
@@ -38,20 +86,86 @@ const BinarySummary = struct {
 };
 
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
-    return optimizeWithWorkers(allocator, program, 1);
+    return optimizeWithOptions(allocator, program, .{});
 }
 
 pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_count: u16) !Ir.Program {
-    const prepared = try optimizeWithoutInliningWithWorkers(allocator, program, worker_count, false);
-    const borrowed_prepared = try borrowDirectAggregateArguments(allocator, prepared);
+    return optimizeWithOptions(allocator, program, .{ .worker_count = worker_count });
+}
+
+/// Oracle-only controls make pass attribution and prefix bisection
+/// reproducible without exposing optimizer switches through the Silex CLI.
+pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: Options) !Ir.Program {
+    var current = program;
+    if (options.verify_each_pass) try Verifier.verify(allocator, current);
+
+    if (options.disabled != .local_simplification_pre) {
+        current = try optimizeFunctionsWithWorkers(allocator, current, options.worker_count);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .local_simplification_pre) return current;
+
+    if (options.disabled != .ssa_promotion_pre) {
+        current = try SsaPromotion.optimizeIntegerAndBooleanLocals(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .ssa_promotion_pre) return current;
+
+    if (options.disabled != .aggregate_argument_borrow) {
+        current = try borrowDirectAggregateArguments(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .aggregate_argument_borrow) return current;
+
     // Simplify constructors before cloning them into branching callers:
     // otherwise each field assignment carries its whole aggregate along.
-    const scalar_prepared = try replaceScalarAggregatesWithWorkers(allocator, borrowed_prepared, worker_count);
-    const intrinsic_prepared = try replaceScalarMathCalls(allocator, scalar_prepared);
-    const inlined = try InlineValues.optimize(allocator, intrinsic_prepared);
-    const control_flow_inlined = try InlineControlFlow.optimize(allocator, inlined);
-    const scalarized = try replaceScalarAggregatesWithWorkers(allocator, control_flow_inlined, worker_count);
-    return optimizeWithoutInliningWithWorkers(allocator, scalarized, worker_count, true);
+    if (options.disabled != .aggregate_scalarization_pre) {
+        current = try replaceScalarAggregatesWithWorkers(allocator, current, options.worker_count);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .aggregate_scalarization_pre) return current;
+
+    if (options.disabled != .scalar_math_intrinsics) {
+        current = try replaceScalarMathCalls(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .scalar_math_intrinsics) return current;
+
+    if (options.disabled != .value_inlining) {
+        current = try InlineValues.optimize(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .value_inlining) return current;
+
+    if (options.disabled != .control_flow_inlining) {
+        current = try InlineControlFlow.optimize(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .control_flow_inlining) return current;
+
+    if (options.disabled != .aggregate_scalarization_post) {
+        current = try replaceScalarAggregatesWithWorkers(allocator, current, options.worker_count);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .aggregate_scalarization_post) return current;
+
+    if (options.disabled != .local_simplification_post) {
+        current = try optimizeFunctionsWithWorkers(allocator, current, options.worker_count);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .local_simplification_post) return current;
+
+    if (options.disabled != .ssa_promotion_post) {
+        current = try SsaPromotion.optimize(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    const validated = try Ir.writeText(allocator, current);
+    allocator.free(validated);
+    return current;
+}
+
+fn verifyAfterPass(allocator: Allocator, program: Ir.Program, options: Options) !void {
+    if (options.verify_each_pass) try Verifier.verify(allocator, program);
 }
 
 // Direct calls may borrow a checked collection element when the callee only
@@ -270,14 +384,17 @@ fn scalarMathCall(program: Ir.Program, caller: Ir.Function, instruction: Ir.Inst
 }
 
 pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Program {
-    return optimizeWithoutInliningWithWorkers(allocator, program, 1, true);
+    var result = try optimizeFunctionsWithWorkers(allocator, program, 1);
+    result = try SsaPromotion.optimize(allocator, result);
+    const validated = try Ir.writeText(allocator, result);
+    allocator.free(validated);
+    return result;
 }
 
-fn optimizeWithoutInliningWithWorkers(
+fn optimizeFunctionsWithWorkers(
     allocator: Allocator,
     program: Ir.Program,
     requested_worker_count: u16,
-    promote_floats: bool,
 ) !Ir.Program {
     const summaries = try allocator.alloc(GlobalSummary, program.functions.len);
     for (program.functions, 0..) |function, index| summaries[index] = summarize(function);
@@ -303,12 +420,6 @@ fn optimizeWithoutInliningWithWorkers(
     }
     var result = program;
     result.functions = functions;
-    result = if (promote_floats)
-        try SsaPromotion.optimize(allocator, result)
-    else
-        try SsaPromotion.optimizeIntegerAndBooleanLocals(allocator, result);
-    const validated = try Ir.writeText(allocator, result);
-    allocator.free(validated);
     return result;
 }
 
