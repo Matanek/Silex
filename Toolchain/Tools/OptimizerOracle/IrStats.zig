@@ -20,10 +20,13 @@ pub const Profile = struct {
     multiplies: usize = 0,
     divisions: usize = 0,
     remainders: usize = 0,
+    signed_remainders: usize = 0,
+    unsigned_remainders: usize = 0,
     shifts: usize = 0,
     comparisons: usize = 0,
     conversions: usize = 0,
     calls: usize = 0,
+    internal_calls: usize = 0,
     aggregates: usize = 0,
     collections: usize = 0,
     strings: usize = 0,
@@ -34,6 +37,7 @@ pub const Profile = struct {
     returns: usize = 0,
     panics: usize = 0,
     prints: usize = 0,
+    constant_prints: usize = 0,
     loop_back_edges: usize = 0,
 };
 
@@ -71,7 +75,11 @@ pub fn profile(program: Silex.Ir.Program) Profile {
         result.counts.locals += function.local_types.len;
         for (function.blocks, 0..) |block, block_index| {
             result.counts.instructions += block.instructions.len;
-            for (block.instructions) |instruction| profileInstruction(&result, instruction, function.value_types);
+            for (block.instructions) |instruction| {
+                profileInstruction(&result, instruction, function.value_types);
+                if (instruction == .print and valueIsDirectConstant(function, instruction.print.value))
+                    result.constant_prints += 1;
+            }
             switch (block.terminator) {
                 .jump => |target| {
                     result.jumps += 1;
@@ -165,6 +173,10 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
                 .remainder => {
                     result.arithmetic += 1;
                     result.remainders += 1;
+                    if (value_types[binary.left].isSignedInteger())
+                        result.signed_remainders += 1
+                    else
+                        result.unsigned_remainders += 1;
                 },
                 .shift_left, .shift_right => {
                     result.arithmetic += 1;
@@ -184,7 +196,11 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
                 result.safety_guards += 1;
             }
         },
-        .call, .indirect_call, .boundary_call, .dynamic_call => result.calls += 1,
+        .call => {
+            result.calls += 1;
+            result.internal_calls += 1;
+        },
+        .indirect_call, .boundary_call, .dynamic_call => result.calls += 1,
         .structure_init, .protocol_init, .protocol_test, .protocol_extract, .enum_init, .enum_test, .enum_payload, .enum_raw => result.aggregates += 1,
         .list_init, .collection_reference, .collection_count, .list_edit, .collection_slice, .collection_view => result.collections += 1,
         .constant_str, .string_address, .string_byte_count, .string_byte_at, .string_from_bytes, .format_value, .string_concat, .string_count => result.strings += 1,
@@ -192,6 +208,19 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
         .assert => result.panics += 1,
         else => {},
     }
+}
+
+fn valueIsDirectConstant(function: Silex.Ir.Function, value: Silex.Ir.ValueId) bool {
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .constant_int => |constant| if (constant.result == value) return true,
+        .constant_bool => |constant| if (constant.result == value) return true,
+        .constant_str => |constant| if (constant.result == value) return true,
+        .constant_bytes => |constant| if (constant.result == value) return true,
+        .constant_float32 => |constant| if (constant.result == value) return true,
+        .constant_float64 => |constant| if (constant.result == value) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn binaryHasSafetyGuard(binary: Silex.Ir.Instruction.Binary, value_types: []const Silex.Ir.Type) bool {

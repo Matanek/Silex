@@ -526,10 +526,20 @@ fn successfulCommand(allocator: Allocator, io: std.Io, arguments: []const []cons
         .stdout_limit = .limited(1024 * 1024),
         .stderr_limit = .limited(1024 * 1024),
     });
-    return switch (result.term) {
-        .exited => |code| if (code == 0) result else error.CommandFailed,
-        else => error.CommandFailed,
+    const success = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
     };
+    if (success) return result;
+
+    std.debug.print("optimizer registry command failed ({any}):", .{result.term});
+    for (arguments) |argument| std.debug.print(" {s}", .{argument});
+    std.debug.print("\n", .{});
+    const output = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (output.len != 0) std.debug.print("stdout:\n{s}\n", .{output});
+    const detail = std.mem.trim(u8, result.stderr, " \t\r\n");
+    if (detail.len != 0) std.debug.print("stderr:\n{s}\n", .{detail});
+    return error.CommandFailed;
 }
 
 test "the checked-in optimization registry covers every current IR operation and pass" {

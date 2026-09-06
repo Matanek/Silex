@@ -724,6 +724,8 @@ fn compareCorpus(
             .failed => return error.UnexpectedRuntimeFailure,
         };
         const stem = std.fs.path.stem(name);
+        const raw_silex_path = try artifactPath(allocator, stem, "raw.sir");
+        const optimized_silex_path = try artifactPath(allocator, stem, "silex.sir");
         const raw_llvm_path = try artifactPath(allocator, stem, "raw.ll");
         const silex_llvm_path = try artifactPath(allocator, stem, "silex.ll");
         const optimized_llvm_path = try artifactPath(allocator, stem, "llvm.ll");
@@ -732,6 +734,8 @@ fn compareCorpus(
 
         const raw_llvm = try Llvm.emit(allocator, differential.raw_ir);
         const silex_llvm = try Llvm.emit(allocator, differential.optimized_ir);
+        try writeFile(io, raw_silex_path, try Silex.Ir.writeText(allocator, differential.raw_ir));
+        try writeFile(io, optimized_silex_path, try Silex.Ir.writeText(allocator, differential.optimized_ir));
         try writeFile(io, raw_llvm_path, raw_llvm);
         try writeFile(io, silex_llvm_path, silex_llvm);
         const cpu_argument = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{oracle.cpu});
@@ -999,8 +1003,13 @@ fn successfulCommand(
         else => false,
     };
     if (!success) {
+        std.debug.print("optimizer oracle command failed ({any}):", .{result.term});
+        for (arguments) |argument| std.debug.print(" {s}", .{argument});
+        std.debug.print("\n", .{});
+        const output = std.mem.trim(u8, result.stdout, " \t\r\n");
+        if (output.len != 0) std.debug.print("stdout:\n{s}\n", .{output});
         const detail = std.mem.trim(u8, result.stderr, " \t\r\n");
-        if (detail.len != 0) std.debug.print("{s}\n", .{detail});
+        if (detail.len != 0) std.debug.print("stderr:\n{s}\n", .{detail});
         return error.CommandFailed;
     }
     return result;

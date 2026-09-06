@@ -66,9 +66,17 @@ Generated evidence is recreated under `.zig-cache/optimizer-oracle/`:
 - `metamorphic.tsv` records the structural class of equivalent source forms;
 - `hot-budget.tsv` records the selected real function's Release IR and ARM64
   machine budget against its exact source hash;
+- `*-raw.sir` and `*-silex.sir` preserve the deterministic portable IR before
+  and after Release optimization for direct attribution of every reported gap;
 - `report.tsv` includes source and executable hashes, LLVM source revision,
   target, CPU, robust timing statistics, and binary size;
 - `opportunities.tsv` ranks measured structural gaps against LLVM.
+
+Opportunity profiles compare only the optimized functions corresponding to
+portable Silex functions. They exclude the generated ABI `main` wrapper and do
+not compare how much work two differently shaped raw frontends happened to
+remove. Loop block differences accompanied by LLVM PHI creation are attributed
+to loop rotation and induction analysis rather than generic CFG cleanup.
 
 Timing remains separate from correctness. The comparison runner builds each
 candidate once, alternates execution order, and reports median, MAD, p10-p90,

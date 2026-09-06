@@ -80,8 +80,8 @@ pub fn profileNamed(text: []const u8, name: []const u8) Profile {
 
 pub fn compare(raw_text: []const u8, optimized_text: []const u8, silex_function_count: usize) Comparison {
     var result: Comparison = .{
-        .raw = profile(raw_text),
-        .optimized = profile(optimized_text),
+        .raw = .{},
+        .optimized = .{},
         .matched = .{},
     };
     var name_buffer: [64]u8 = undefined;
@@ -89,6 +89,8 @@ pub fn compare(raw_text: []const u8, optimized_text: []const u8, silex_function_
         const name = std.fmt.bufPrint(&name_buffer, "sx_{d}", .{index}) catch unreachable;
         const raw_function = profileNamed(raw_text, name);
         const optimized_function = profileNamed(optimized_text, name);
+        addProfile(&result.raw, raw_function);
+        addProfile(&result.optimized, optimized_function);
         result.matched.memory_removed += removed(raw_function.memoryOperations(), optimized_function.memoryOperations());
         result.matched.phis_added += added(raw_function.phis, optimized_function.phis);
         result.matched.safety_removed += removed(raw_function.safetyGuards(), optimized_function.safetyGuards());
@@ -104,6 +106,12 @@ pub fn compare(raw_text: []const u8, optimized_text: []const u8, silex_function_
         result.matched.range_attributes_added += added(raw_function.range_attributes, optimized_function.range_attributes);
     }
     return result;
+}
+
+fn addProfile(destination: *Profile, source: Profile) void {
+    inline for (@typeInfo(Profile).@"struct".fields) |field| {
+        @field(destination.*, field.name) += @field(source, field.name);
+    }
 }
 
 fn profileFiltered(text: []const u8, selected_name: ?[]const u8) Profile {
@@ -318,6 +326,24 @@ test "matched comparison ignores blocks duplicated into callers by inlining" {
     try std.testing.expectEqual(@as(usize, 3), result.matched.memory_removed);
     try std.testing.expectEqual(@as(usize, 1), result.matched.blocks_removed);
     try std.testing.expectEqual(@as(usize, 1), result.matched.internal_calls_removed);
+}
+
+test "comparison profiles exclude the generated ABI main wrapper" {
+    const text =
+        \\define void @sx_0() {
+        \\b0:
+        \\  ret void
+        \\}
+        \\define i32 @main() {
+        \\entry:
+        \\  %printed = call i32 (ptr, ...) @printf(ptr @.fmt.signed, i64 7)
+        \\  ret i32 0
+        \\}
+    ;
+    const result = compare(text, text, 1);
+    try std.testing.expectEqual(@as(usize, 1), result.optimized.functions);
+    try std.testing.expectEqual(@as(usize, 1), result.optimized.blocks);
+    try std.testing.expectEqual(@as(usize, 0), result.optimized.constant_prints);
 }
 
 test "named profiles recognize LLVM range attributes before a function name" {

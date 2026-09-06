@@ -101,74 +101,71 @@ pub fn analyze(
     var findings: std.ArrayList(Finding) = .empty;
     const raw_silex = silex.raw;
     const optimized_silex = silex.optimized;
-    const raw_llvm = llvm.raw;
     const optimized_llvm = llvm.optimized;
-    const llvm_memory_removed = llvm.matched.memory_removed;
-    const silex_local_removed = silex.matched.local_memory_removed;
-    if (llvm_memory_removed >= 2 and llvm_memory_removed > silex_local_removed) try append(
+    const llvm_memory_remaining = optimized_llvm.memoryOperations();
+    const silex_local_remaining = optimized_silex.local_loads + optimized_silex.local_stores;
+    if (silex_local_remaining > llvm_memory_remaining) try append(
         allocator,
         &findings,
         .stack_to_ssa,
-        score(88, llvm_memory_removed, 2),
-        "LLVM removes {d} local-memory operations ({d} -> {d}); Silex removes {d}.",
-        .{ llvm_memory_removed, raw_llvm.memoryOperations(), optimized_llvm.memoryOperations(), silex_local_removed },
+        score(88, silex_local_remaining - llvm_memory_remaining, 2),
+        "LLVM retains {d} local-memory operation(s); Silex retains {d}.",
+        .{ llvm_memory_remaining, silex_local_remaining },
     );
 
-    if (raw_silex.loop_back_edges != 0 and llvm.matched.phis_added != 0) try append(
-        allocator,
-        &findings,
-        .loop_induction_ssa,
-        score(82, llvm.matched.phis_added, 1),
-        "LLVM introduces {d} additional PHI nodes in a program with {d} Silex loop back edge(s).",
-        .{ llvm.matched.phis_added, raw_silex.loop_back_edges },
-    );
-
-    const llvm_safety_removed = llvm.matched.safety_removed;
-    const silex_checks_removed = silex.matched.safety_removed;
-    if (llvm_safety_removed != 0 and llvm_safety_removed > silex_checks_removed) try append(
+    const llvm_safety_remaining = optimized_llvm.safetyGuards();
+    const silex_safety_remaining = optimized_silex.safety_guards;
+    if (silex_safety_remaining > llvm_safety_remaining) try append(
         allocator,
         &findings,
         .safety_check_elision,
-        score(86, llvm_safety_removed, 2),
-        "LLVM proves and removes {d} safety guard(s); Silex removes {d} safety guard(s).",
-        .{ llvm_safety_removed, silex_checks_removed },
+        score(86, silex_safety_remaining - llvm_safety_remaining, 2),
+        "LLVM retains {d} safety guard(s); Silex retains {d}.",
+        .{ llvm_safety_remaining, silex_safety_remaining },
     );
 
-    const internal_calls_removed = llvm.matched.internal_calls_removed;
-    if (internal_calls_removed != 0) try append(
+    if (optimized_silex.internal_calls > optimized_llvm.internal_calls) try append(
         allocator,
         &findings,
         .interprocedural_specialization,
-        score(76, internal_calls_removed, 1),
-        "LLVM eliminates {d} internal Silex call(s) ({d} -> {d}) through specialization and inlining.",
-        .{ internal_calls_removed, raw_llvm.internal_calls, optimized_llvm.internal_calls },
+        score(76, optimized_silex.internal_calls - optimized_llvm.internal_calls, 1),
+        "LLVM retains {d} internal call(s); Silex retains {d}.",
+        .{ optimized_llvm.internal_calls, optimized_silex.internal_calls },
     );
 
-    const llvm_compute_removed = llvm.matched.compute_removed;
-    const silex_compute_removed = silex.matched.compute_removed;
-    if ((optimized_llvm.constant_prints > raw_llvm.constant_prints or llvm_compute_removed >= 3) and
-        llvm_compute_removed > silex_compute_removed)
-    {
+    if (optimized_llvm.constant_prints > optimized_silex.constant_prints) {
         try append(
             allocator,
             &findings,
             .constant_propagation,
-            score(80, llvm_compute_removed, 3),
-            "LLVM removes {d} computation(s) and produces {d} constant print operation(s); Silex removes {d} computation(s).",
-            .{ llvm_compute_removed, optimized_llvm.constant_prints, silex_compute_removed },
+            score(80, optimized_llvm.constant_prints - optimized_silex.constant_prints, 1),
+            "LLVM produces {d} constant print operation(s); Silex produces {d}.",
+            .{ optimized_llvm.constant_prints, optimized_silex.constant_prints },
         );
     }
 
-    const llvm_blocks_removed = llvm.matched.blocks_removed;
-    const silex_blocks_removed = silex.matched.blocks_removed;
-    if (llvm_blocks_removed != 0 and llvm_blocks_removed > silex_blocks_removed) try append(
-        allocator,
-        &findings,
-        .control_flow_simplification,
-        score(72, llvm_blocks_removed, 1),
-        "LLVM removes {d} block(s) from the same functions; Silex removes {d}.",
-        .{ llvm_blocks_removed, silex_blocks_removed },
-    );
+    if (optimized_silex.counts.blocks > optimized_llvm.blocks) {
+        const excess = optimized_silex.counts.blocks - optimized_llvm.blocks;
+        if (raw_silex.loop_back_edges != 0 and llvm.matched.phis_added != 0) {
+            try append(
+                allocator,
+                &findings,
+                .loop_induction_ssa,
+                score(82, excess, 1),
+                "LLVM rotates the loop and retains {d} block(s) with {d} added PHI node(s); Silex retains {d} block(s).",
+                .{ optimized_llvm.blocks, llvm.matched.phis_added, optimized_silex.counts.blocks },
+            );
+        } else {
+            try append(
+                allocator,
+                &findings,
+                .control_flow_simplification,
+                score(72, excess, 1),
+                "LLVM retains {d} block(s); Silex retains {d}.",
+                .{ optimized_llvm.blocks, optimized_silex.counts.blocks },
+            );
+        }
+    }
 
     const multiplies_removed = llvm.matched.multiplies_removed;
     const shifts_added = llvm.matched.shifts_added;
@@ -181,30 +178,26 @@ pub fn analyze(
         .{ multiplies_removed, shifts_added },
     );
 
-    const signed_remainders_removed = llvm.matched.signed_remainders_removed;
-    const unsigned_remainders_added = llvm.matched.unsigned_remainders_added;
-    if ((signed_remainders_removed != 0 and unsigned_remainders_added != 0) or
-        llvm.matched.range_attributes_added != 0)
+    if (optimized_silex.signed_remainders > optimized_llvm.signed_remainders and
+        optimized_llvm.unsigned_remainders > optimized_silex.unsigned_remainders)
     {
         try append(
             allocator,
             &findings,
             .range_analysis,
             70,
-            "LLVM derives {d} new range attribute(s) and converts {d} signed remainder operation(s) to unsigned.",
-            .{ llvm.matched.range_attributes_added, unsigned_remainders_added },
+            "LLVM retains {d} signed and {d} unsigned remainder operation(s); Silex retains {d} signed and {d} unsigned.",
+            .{ optimized_llvm.signed_remainders, optimized_llvm.unsigned_remainders, optimized_silex.signed_remainders, optimized_silex.unsigned_remainders },
         );
     }
 
-    const llvm_conversions_removed = llvm.matched.conversions_removed;
-    const silex_conversions_removed = silex.matched.conversions_removed;
-    if (llvm_conversions_removed != 0 and llvm_conversions_removed > silex_conversions_removed) try append(
+    if (optimized_silex.conversions > optimized_llvm.conversions) try append(
         allocator,
         &findings,
         .conversion_elision,
-        score(68, llvm_conversions_removed, 1),
-        "LLVM removes {d} conversion(s); Silex removes {d}.",
-        .{ llvm_conversions_removed, silex_conversions_removed },
+        score(68, optimized_silex.conversions - optimized_llvm.conversions, 1),
+        "LLVM retains {d} conversion(s); Silex retains {d}.",
+        .{ optimized_llvm.conversions, optimized_silex.conversions },
     );
 
     const vector_operations_added = llvm.matched.vector_operations_added;
@@ -240,10 +233,6 @@ fn append(
     });
 }
 
-fn removed(before: usize, after: usize) usize {
-    return before -| after;
-}
-
 fn score(base: u8, evidence: usize, unit: usize) u8 {
     return @min(100, base + @as(u8, @intCast(@min(12, evidence / unit))));
 }
@@ -275,7 +264,7 @@ test "advisor guidance uses stable English labels" {
     }
 }
 
-test "advisor ranks SSA promotion and safety proof from concrete deltas" {
+test "advisor ranks optimized SSA and safety residues" {
     var raw_silex: IrStats.Profile = .{};
     raw_silex.local_loads = 4;
     raw_silex.local_stores = 3;
@@ -307,10 +296,55 @@ test "advisor ranks SSA promotion and safety proof from concrete deltas" {
         for (analysis.findings) |finding| std.testing.allocator.free(finding.evidence);
         std.testing.allocator.free(analysis.findings);
     }
-    try std.testing.expect(analysis.findings.len >= 3);
+    try std.testing.expectEqual(@as(usize, 2), analysis.findings.len);
     try std.testing.expectEqual(Kind.stack_to_ssa, analysis.findings[0].kind);
     try std.testing.expectEqualStrings(
-        "LLVM removes 9 local-memory operations (9 -> 0); Silex removes 0.",
+        "LLVM retains 0 local-memory operation(s); Silex retains 7.",
         analysis.findings[0].evidence,
     );
+}
+
+test "advisor attributes rotated loop blocks to induction analysis" {
+    var raw_silex: IrStats.Profile = .{};
+    raw_silex.loop_back_edges = 1;
+    var optimized_silex: IrStats.Profile = .{};
+    optimized_silex.counts.blocks = 8;
+    var optimized_llvm: LlvmStats.Profile = .{};
+    optimized_llvm.blocks = 6;
+    const analysis = try analyze(std.testing.allocator, .{
+        .raw = raw_silex,
+        .optimized = optimized_silex,
+        .matched = .{},
+    }, .{
+        .raw = .{},
+        .optimized = optimized_llvm,
+        .matched = .{ .phis_added = 4 },
+    });
+    defer {
+        for (analysis.findings) |finding| std.testing.allocator.free(finding.evidence);
+        std.testing.allocator.free(analysis.findings);
+    }
+    try std.testing.expectEqual(@as(usize, 1), analysis.findings.len);
+    try std.testing.expectEqual(Kind.loop_induction_ssa, analysis.findings[0].kind);
+}
+
+test "advisor compares optimized residues instead of incompatible raw deltas" {
+    var raw_silex: IrStats.Profile = .{};
+    raw_silex.local_loads = 5;
+    raw_silex.local_stores = 4;
+    var raw_llvm: LlvmStats.Profile = .{};
+    raw_llvm.allocas = 2;
+    raw_llvm.loads = 5;
+    raw_llvm.stores = 4;
+    const analysis = try analyze(std.testing.allocator, .{
+        .raw = raw_silex,
+        .optimized = .{},
+        .matched = .{ .local_memory_removed = 9 },
+    }, .{
+        .raw = raw_llvm,
+        .optimized = .{},
+        .matched = .{ .memory_removed = 11 },
+    });
+    defer std.testing.allocator.free(analysis.findings);
+    try std.testing.expectEqual(@as(usize, 0), analysis.findings.len);
 }
