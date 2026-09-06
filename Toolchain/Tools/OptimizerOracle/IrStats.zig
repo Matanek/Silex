@@ -37,6 +37,20 @@ pub const Profile = struct {
     loop_back_edges: usize = 0,
 };
 
+pub const MatchedDeltas = struct {
+    local_memory_removed: usize = 0,
+    safety_removed: usize = 0,
+    compute_removed: usize = 0,
+    blocks_removed: usize = 0,
+    conversions_removed: usize = 0,
+};
+
+pub const Comparison = struct {
+    raw: Profile,
+    optimized: Profile,
+    matched: MatchedDeltas,
+};
+
 pub fn count(program: Silex.Ir.Program) Counts {
     var result: Counts = .{ .functions = program.functions.len };
     for (program.functions) |function| {
@@ -74,6 +88,50 @@ pub fn profile(program: Silex.Ir.Program) Profile {
         }
     }
     return result;
+}
+
+pub fn compare(raw: Silex.Ir.Program, optimized: Silex.Ir.Program) Comparison {
+    var result: Comparison = .{
+        .raw = profile(raw),
+        .optimized = profile(optimized),
+        .matched = .{},
+    };
+    for (raw.functions, 0..) |raw_function, function_index| {
+        if (function_index >= optimized.functions.len) continue;
+        const optimized_function = optimized.functions[function_index];
+        if (!@import("std").mem.eql(u8, raw_function.name, optimized_function.name)) continue;
+        const raw_function_profile = profile(.{ .functions = &.{raw_function} });
+        const optimized_function_profile = profile(.{ .functions = &.{optimized_function} });
+        result.matched.local_memory_removed += removed(
+            raw_function_profile.local_loads + raw_function_profile.local_stores,
+            optimized_function_profile.local_loads + optimized_function_profile.local_stores,
+        );
+        result.matched.safety_removed += removed(
+            raw_function_profile.safety_guards,
+            optimized_function_profile.safety_guards,
+        );
+        result.matched.compute_removed += removed(
+            computationCount(raw_function_profile),
+            computationCount(optimized_function_profile),
+        );
+        result.matched.blocks_removed += removed(
+            raw_function_profile.counts.blocks,
+            optimized_function_profile.counts.blocks,
+        );
+        result.matched.conversions_removed += removed(
+            raw_function_profile.conversions,
+            optimized_function_profile.conversions,
+        );
+    }
+    return result;
+}
+
+fn computationCount(value: Profile) usize {
+    return value.arithmetic + value.comparisons + value.conversions;
+}
+
+fn removed(before: usize, after: usize) usize {
+    return before -| after;
 }
 
 fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value_types: []const Silex.Ir.Type) void {
@@ -203,4 +261,56 @@ test "IR safety guards exclude comparisons and floating arithmetic" {
     }} };
     const result = profile(program);
     try @import("std").testing.expectEqual(@as(usize, 2), result.safety_guards);
+}
+
+test "matched safety deltas ignore checks duplicated into a caller" {
+    const raw: Silex.Ir.Program = .{ .functions = &.{
+        .{
+            .name = "worker",
+            .parameter_types = &.{ .int, .int },
+            .return_type = .int,
+            .value_types = &.{ .int, .int, .int },
+            .local_types = &.{},
+            .blocks = &.{.{
+                .instructions = &.{.{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } }},
+                .terminator = .{ .return_value = 2 },
+            }},
+        },
+        .{
+            .name = "caller",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{},
+            .local_types = &.{},
+            .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+        },
+    } };
+    const optimized: Silex.Ir.Program = .{ .functions = &.{
+        .{
+            .name = "worker",
+            .parameter_types = &.{ .int, .int },
+            .return_type = .int,
+            .value_types = &.{ .int, .int, .int },
+            .local_types = &.{},
+            .blocks = &.{.{
+                .instructions = &.{.{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1, .checked = false } }},
+                .terminator = .{ .return_value = 2 },
+            }},
+        },
+        .{
+            .name = "caller",
+            .parameter_types = &.{ .int, .int },
+            .return_type = .int,
+            .value_types = &.{ .int, .int, .int },
+            .local_types = &.{},
+            .blocks = &.{.{
+                .instructions = &.{.{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } }},
+                .terminator = .{ .return_value = 2 },
+            }},
+        },
+    } };
+    const result = compare(raw, optimized);
+    try @import("std").testing.expectEqual(@as(usize, 1), result.raw.safety_guards);
+    try @import("std").testing.expectEqual(@as(usize, 1), result.optimized.safety_guards);
+    try @import("std").testing.expectEqual(@as(usize, 1), result.matched.safety_removed);
 }

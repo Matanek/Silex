@@ -95,18 +95,16 @@ pub const Summary = struct {
 
 pub fn analyze(
     allocator: std.mem.Allocator,
-    raw_silex: IrStats.Profile,
-    optimized_silex: IrStats.Profile,
+    silex: IrStats.Comparison,
     llvm: LlvmStats.Comparison,
 ) !Analysis {
     var findings: std.ArrayList(Finding) = .empty;
+    const raw_silex = silex.raw;
+    const optimized_silex = silex.optimized;
     const raw_llvm = llvm.raw;
     const optimized_llvm = llvm.optimized;
     const llvm_memory_removed = llvm.matched.memory_removed;
-    const silex_local_removed = removed(
-        raw_silex.local_loads + raw_silex.local_stores,
-        optimized_silex.local_loads + optimized_silex.local_stores,
-    );
+    const silex_local_removed = silex.matched.local_memory_removed;
     if (llvm_memory_removed >= 2 and llvm_memory_removed > silex_local_removed) try append(
         allocator,
         &findings,
@@ -126,7 +124,7 @@ pub fn analyze(
     );
 
     const llvm_safety_removed = llvm.matched.safety_removed;
-    const silex_checks_removed = removed(raw_silex.safety_guards, optimized_silex.safety_guards);
+    const silex_checks_removed = silex.matched.safety_removed;
     if (llvm_safety_removed != 0 and llvm_safety_removed > silex_checks_removed) try append(
         allocator,
         &findings,
@@ -147,10 +145,7 @@ pub fn analyze(
     );
 
     const llvm_compute_removed = llvm.matched.compute_removed;
-    const silex_compute_removed = removed(
-        raw_silex.arithmetic + raw_silex.comparisons + raw_silex.conversions,
-        optimized_silex.arithmetic + optimized_silex.comparisons + optimized_silex.conversions,
-    );
+    const silex_compute_removed = silex.matched.compute_removed;
     if ((optimized_llvm.constant_prints > raw_llvm.constant_prints or llvm_compute_removed >= 3) and
         llvm_compute_removed > silex_compute_removed)
     {
@@ -165,7 +160,7 @@ pub fn analyze(
     }
 
     const llvm_blocks_removed = llvm.matched.blocks_removed;
-    const silex_blocks_removed = removed(raw_silex.counts.blocks, optimized_silex.counts.blocks);
+    const silex_blocks_removed = silex.matched.blocks_removed;
     if (llvm_blocks_removed != 0 and llvm_blocks_removed > silex_blocks_removed) try append(
         allocator,
         &findings,
@@ -202,7 +197,7 @@ pub fn analyze(
     }
 
     const llvm_conversions_removed = llvm.matched.conversions_removed;
-    const silex_conversions_removed = removed(raw_silex.conversions, optimized_silex.conversions);
+    const silex_conversions_removed = silex.matched.conversions_removed;
     if (llvm_conversions_removed != 0 and llvm_conversions_removed > silex_conversions_removed) try append(
         allocator,
         &findings,
@@ -295,7 +290,11 @@ test "advisor ranks SSA promotion and safety proof from concrete deltas" {
     raw_llvm.trap_branches = 4;
     var optimized_llvm: LlvmStats.Profile = .{};
     optimized_llvm.phis = 2;
-    const analysis = try analyze(std.testing.allocator, raw_silex, optimized_silex, .{
+    const analysis = try analyze(std.testing.allocator, .{
+        .raw = raw_silex,
+        .optimized = optimized_silex,
+        .matched = .{},
+    }, .{
         .raw = raw_llvm,
         .optimized = optimized_llvm,
         .matched = .{

@@ -735,8 +735,7 @@ fn compareCorpus(
         const llvm_comparison = LlvmStats.compare(raw_llvm, optimized_llvm, differential.raw_ir.functions.len);
         const advice = try Advisor.analyze(
             allocator,
-            IrStats.profile(differential.raw_ir),
-            IrStats.profile(differential.optimized_ir),
+            IrStats.compare(differential.raw_ir, differential.optimized_ir),
             llvm_comparison,
         );
         opportunity_summary.add(advice);
