@@ -168,22 +168,23 @@ Replacing an ordinary slot-width aggregate in a collection similarly forms
 the source stack address once and uses paired 64-bit transfers where their
 offsets are encodable. Compact float32 storage and larger replacements retain
 the scalar copy path.
-Before allocation, compatible ARM64 memory kernels may reorder independent
-single-definition arithmetic trees inside a pure region to make their lanes
-adjacent. Memory accesses, calls, control-flow entries and potentially trapping
-operations remain barriers; expression trees and source positions are preserved.
+Before allocation, fully residence-compatible ARM64 functions may reorder
+independent single-definition arithmetic trees inside a pure region to make
+their lanes adjacent. This includes pure or read-only loops as well as mutable
+memory kernels. Memory accesses, calls, control-flow entries and potentially
+trapping operations remain barriers; expression trees and source positions are
+preserved.
 Constructed aggregates can seed those lanes by copying each leaf at its original
 construction point, without requiring the input leaves to be packed already.
 Scalar aggregate construction also contributes ordinary copy affinity per
 leaf. When liveness proves the source dead at that construction, the source,
 constructed field and later aggregate copies may share one register; live
 siblings and repeated source fields still interfere normally.
-Arithmetic dependencies are selected before competing copy-only affinities
-in these memory kernels; safety and operand-residency checks still apply. A
-memory kernel keeps an isolated pair scalar when its final values must be
-extracted before separate scalar stores. Chained arithmetic and aggregate
-returns can retain their lanes, where the setup cost is amortized or the
-result remains grouped.
+Arithmetic dependencies are selected before competing copy-only affinities in
+these scheduled regions; safety and operand-residency checks still apply. An
+isolated pair remains scalar when its final values must be extracted before
+separate scalar stores. Chained arithmetic and aggregate returns can retain
+their lanes, where the setup cost is amortized or the result remains grouped.
 In these leaf functions, a borrowed aggregate read materializes only the fields
 used by the function. Those fields are still loaded at the original read,
 not at a later projection that could follow an aliasing write.

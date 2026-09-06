@@ -239,6 +239,30 @@ test "memory arithmetic schedule preserves independent trees before scalar store
     try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -6))), @as(u32, @truncate(values[1])));
 }
 
+test "arithmetic schedule also applies without mutable memory operations" {
+    const MemoryResidence = @import("MemoryResidence.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const instructions = [_]Machine.Instruction{
+        fixture_instructions[0],
+        fixture_instructions[1],
+        fixture_instructions[2],
+        fixture_instructions[3],
+        fixture_instructions[4],
+        fixture_instructions[5],
+        .return_void,
+    };
+    var function = fixture(&instructions);
+    function.slot_count = 10;
+    try std.testing.expect(!MemoryResidence.required(function));
+    const scheduled = try optimize(arena.allocator(), function);
+    try std.testing.expectEqual(@as(Machine.Slot, 7), scheduled.instructions[1].copy.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 5), scheduled.instructions[2].binary.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 8), scheduled.instructions[3].binary.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 6), scheduled.instructions[4].binary.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 9), scheduled.instructions[5].binary.result);
+}
+
 test "memory arithmetic schedule never crosses stores entries or reused operands" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

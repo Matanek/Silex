@@ -901,7 +901,9 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
 }
 
 pub fn supportsMemoryScheduling(function: Machine.Function, externals: []const Machine.ExternalFunction) bool {
-    return MemoryResidence.required(function) and isCompatibleFunction(function, true, externals) and
+    // Pure read-only loops need the same lane-tree adjacency as mutable memory
+    // kernels; scheduling safety comes from full residence compatibility.
+    return isCompatibleFunction(function, true, externals) and
         isFullyResidenceCompatible(function, externals);
 }
 
