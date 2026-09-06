@@ -116,26 +116,6 @@ fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: 
         phi_active,
         value_aliases,
     );
-    // A single residence can be lowered directly in each predecessor, even
-    // when it spans several forwarding joins. Keep genuinely overlapping phi
-    // webs in the backend allocation domain until interference is modeled.
-    const active_phi_residence = try allocator.alloc(?Ir.ValueId, local_count);
-    @memset(active_phi_residence, null);
-    for (0..block_count) |block| for (0..local_count) |local| {
-        const phi_index = at(local_count, block, local);
-        if (!phi_active[phi_index]) continue;
-        const residence = canonical(value_aliases, phi_values[phi_index].?);
-        if (active_phi_residence[local]) |existing| {
-            if (existing != residence) promoted[local] = false;
-        } else active_phi_residence[local] = residence;
-    };
-    for (0..block_count) |block| for (0..local_count) |local| {
-        if (promoted[local]) continue;
-        const index = at(local_count, block, local);
-        phi_active[index] = false;
-        phi_values[index] = null;
-    };
-    if (!containsValue(bool, promoted, true)) return function;
     for (phi_values) |*phi| {
         if (phi.*) |value| phi.* = canonical(value_aliases, value);
     }

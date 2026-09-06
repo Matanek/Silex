@@ -183,6 +183,7 @@ fn qualifyNative(
         const promotion_function: ?[]const u8 = switch (entry.contract) {
             .promotes_critical_edge => |function_name| function_name,
             .coalesces_forwarded_phi => |function_name| function_name,
+            .promotes_distinct_phis => |function_name| function_name,
             else => null,
         };
         if (promotion_function) |function_name| {

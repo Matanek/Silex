@@ -21,11 +21,12 @@ later native benchmark.
 Release propagates constants and copies across the control-flow graph. It
 promotes profitable, non-addressed integer and boolean locals to SSA values,
 constructs join values, removes trivial joins, lowers the remaining parallel
-edge transfers, and prunes unreachable blocks. Promotion is deliberately
-skipped when several live joins would add control-flow work; those locals
-remain candidates for the native global allocator instead. Floating-point
-recurrences retain their local identity for scalar and SLP lane allocation.
-These decisions are automatic and require no source annotation.
+edge transfers, and prunes unreachable blocks. Distinct live joins retain
+distinct typed SSA residences, so promotion does not need to manufacture
+control-flow blocks merely to share storage. Floating-point recurrences remain
+eligible for the later promotion pass, after loop simplification has exposed
+their complete edge transfers. These decisions are automatic and require no
+source annotation.
 
 Before constructing edge definitions, SSA promotion redirects empty jump-only
 blocks to their effective target. A scalar join reached directly from a branch
@@ -33,9 +34,9 @@ can therefore place its parallel copies in that predecessor instead of
 splitting the critical edge and adding a native jump. This applies uniformly
 to integers, booleans, float32, and float64. Locals spanning several live joins
 share one residence when an intermediate PHI only forwards its incoming value
-to a unique successor PHI and has no read of its own. Genuinely overlapping or
-sibling-edge PHI webs remain in the native global-allocation domain rather than
-introducing speculative copies or increasing the control-flow graph.
+to a unique successor PHI and has no read of its own. Distinct live joins keep
+distinct typed residences and lower complete parallel edge transfers; sibling
+branch targets are never coalesced when they require different incoming values.
 
 The following value-range pass propagates signed and unsigned integer
 intervals through the verified CFG. True and false comparison edges refine

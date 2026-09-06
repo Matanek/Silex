@@ -91,6 +91,7 @@ pub fn verifyContract(
         .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
         .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .coalesces_forwarded_phi => |function_name| verifyCriticalEdgePromotion(function_name, differential),
+        .promotes_distinct_phis => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .proves_integer_ranges => |requirement| verifyIntegerRanges(requirement, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,

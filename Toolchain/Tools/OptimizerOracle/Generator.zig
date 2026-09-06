@@ -13,6 +13,7 @@ pub const StructuralContract = union(enum) {
     simplifies_ssa_values: []const u8,
     promotes_critical_edge: []const u8,
     coalesces_forwarded_phi: []const u8,
+    promotes_distinct_phis: []const u8,
     proves_integer_ranges: struct {
         bounded_add: []const u8,
         bounded_subtract: []const u8,
@@ -81,6 +82,11 @@ pub const regressions = [_]RegressionEntry{
         .name = "Regressions/SsaForwardedPhiLoop.sx",
         .concern = "a loop-carried float value crosses an inner forwarding join without falling back to local storage",
         .contract = .{ .coalesces_forwarded_phi = "accumulate" },
+    },
+    .{
+        .name = "Regressions/SsaDistinctPhiLoop.sx",
+        .concern = "a float recurrence keeps distinct loop and branch joins without falling back to local storage",
+        .contract = .{ .promotes_distinct_phis = "accumulate" },
     },
     .{
         .name = "Regressions/IntegerRangeChecks.sx",
