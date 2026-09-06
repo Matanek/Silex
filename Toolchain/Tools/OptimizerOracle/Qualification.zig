@@ -41,6 +41,7 @@ pub const Evidence = union(enum) {
         bounded_add: []const u8,
         bounded_subtract: []const u8,
         bounded_conversion: []const u8,
+        bounded_loop: []const u8,
         raw_proven_checks: usize,
         optimized_proven_checks: usize,
         optimized_unproven_checks: usize,
@@ -110,25 +111,30 @@ fn verifyIntegerRanges(requirement: anytype, differential: Differential.Result) 
         return error.ContractFunctionMissing;
     const raw_conversion = findFunction(differential.raw_ir, requirement.bounded_conversion) orelse
         return error.ContractFunctionMissing;
+    const raw_loop = findFunction(differential.raw_ir, requirement.bounded_loop) orelse
+        return error.ContractFunctionMissing;
     const optimized_add = findFunction(differential.optimized_ir, requirement.bounded_add) orelse
         return error.ContractFunctionMissing;
     const optimized_subtract = findFunction(differential.optimized_ir, requirement.bounded_subtract) orelse
         return error.ContractFunctionMissing;
     const optimized_conversion = findFunction(differential.optimized_ir, requirement.bounded_conversion) orelse
         return error.ContractFunctionMissing;
+    const optimized_loop = findFunction(differential.optimized_ir, requirement.bounded_loop) orelse
+        return error.ContractFunctionMissing;
     const optimized_unproven = findFunction(differential.optimized_ir, requirement.unproven_add) orelse
         return error.ContractFunctionMissing;
     const raw_proven = checkedOperationCount(raw_add) + checkedOperationCount(raw_subtract) +
-        checkedOperationCount(raw_conversion);
+        checkedOperationCount(raw_conversion) + checkedOperationCount(raw_loop);
     const optimized_proven = checkedOperationCount(optimized_add) + checkedOperationCount(optimized_subtract) +
-        checkedOperationCount(optimized_conversion);
+        checkedOperationCount(optimized_conversion) + checkedOperationCount(optimized_loop);
     const unproven = checkedOperationCount(optimized_unproven);
-    if (raw_proven < 3 or optimized_proven != 0) return error.ExpectedRangeProofMissing;
+    if (raw_proven < 6 or optimized_proven != 0) return error.ExpectedRangeProofMissing;
     if (unproven == 0) return error.UnprovenOverflowCheckRemoved;
     return .{ .integer_ranges = .{
         .bounded_add = requirement.bounded_add,
         .bounded_subtract = requirement.bounded_subtract,
         .bounded_conversion = requirement.bounded_conversion,
+        .bounded_loop = requirement.bounded_loop,
         .raw_proven_checks = raw_proven,
         .optimized_proven_checks = optimized_proven,
         .optimized_unproven_checks = unproven,
@@ -160,7 +166,9 @@ fn rangeProofChecks(requirement: anytype, program: Silex.Ir.Program) !usize {
     const add = findFunction(program, requirement.bounded_add) orelse return error.ContractFunctionMissing;
     const subtract = findFunction(program, requirement.bounded_subtract) orelse return error.ContractFunctionMissing;
     const conversion = findFunction(program, requirement.bounded_conversion) orelse return error.ContractFunctionMissing;
-    return checkedOperationCount(add) + checkedOperationCount(subtract) + checkedOperationCount(conversion);
+    const loop = findFunction(program, requirement.bounded_loop) orelse return error.ContractFunctionMissing;
+    return checkedOperationCount(add) + checkedOperationCount(subtract) + checkedOperationCount(conversion) +
+        checkedOperationCount(loop);
 }
 
 fn checkedOperationCount(function: Silex.Ir.Function) usize {

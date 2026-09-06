@@ -20,6 +20,21 @@ func risky(value:int8) int8 {
     return value + 1
 }
 
+func accumulate(rounds:int) int {
+    var value = 0
+    var index = 0
+    while index < rounds {
+        if index % 2 == 0 {
+            value += index % 97
+        } else {
+            value -= index % 31
+        }
+        value %= 1000003
+        index++
+    }
+    return value
+}
+
 func main() {
     assert(increment(99) == 100)
     assert(increment(100) == 100)
@@ -27,5 +42,7 @@ func main() {
     assert(decrement(0) == 0)
     assert(widen_unsigned(255) == 255)
     assert(risky(1) == 2)
+    assert(accumulate(0) == 0)
+    assert(accumulate(4) == -2)
     print("integer range checks preserved")
 }

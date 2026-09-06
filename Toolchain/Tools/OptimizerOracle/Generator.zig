@@ -18,6 +18,7 @@ pub const StructuralContract = union(enum) {
         bounded_add: []const u8,
         bounded_subtract: []const u8,
         bounded_conversion: []const u8,
+        bounded_loop: []const u8,
         unproven_add: []const u8,
     },
     slp_width: struct {
@@ -90,11 +91,12 @@ pub const regressions = [_]RegressionEntry{
     },
     .{
         .name = "Regressions/IntegerRangeChecks.sx",
-        .concern = "dominating signed and unsigned bounds remove only proven overflow and conversion checks",
+        .concern = "dominating and loop-carried bounds remove only proven overflow and conversion checks",
         .contract = .{ .proves_integer_ranges = .{
             .bounded_add = "increment",
             .bounded_subtract = "decrement",
             .bounded_conversion = "widen_unsigned",
+            .bounded_loop = "accumulate",
             .unproven_add = "risky",
         } },
     },

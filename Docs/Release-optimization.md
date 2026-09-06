@@ -40,11 +40,13 @@ branch targets are never coalesced when they require different incoming values.
 
 The following value-range pass propagates signed and unsigned integer
 intervals through the verified CFG. True and false comparison edges refine
-their operands; joins take a conservative hull, and cyclic growth widens to
-the declared type range so analysis always terminates. Release removes an
-integer add, subtract, multiply, or conversion check only when the complete
-mathematical interval fits its result type. Unproved operations keep their
-observable overflow or conversion failure.
+their operands; joins take a conservative hull, and cyclic growth widens only
+at loop headers so a dominating body condition remains available. Remainders
+by a proven constant nonzero divisor contribute their signed or unsigned result
+interval without removing the divisor check. Release removes an integer add,
+subtract, multiply, or conversion check only when the complete mathematical
+interval fits its result type. Unproved operations keep their observable
+overflow or conversion failure.
 
 After final SSA promotion, Release recomputes exact scalar facts independently
 of block serialization order. A constant may cross a join only when every

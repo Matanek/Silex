@@ -62,7 +62,10 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
                 entry_reachable[block_id] = true;
                 changed = true;
             }
-            const widen = iteration >= block_count;
+            // Widen only where a backward edge merges into a loop header.
+            // Widening every block in the cyclic region would erase bounds
+            // established by a dominating branch before its loop body.
+            const widen = iteration >= block_count and hasBackwardPredecessor(predecessors[block_id].items, block_id);
             for (0..value_count) |value| {
                 if (accumulate(
                     &entry[at(value_count, block_id, value)],
@@ -325,11 +328,23 @@ fn binaryResultInterval(type_value: Ir.Type, facts: []const Fact, binary: Ir.Ins
     const right = facts[binary.right].interval;
     const mathematical = switch (binary.operator) {
         .add, .subtract, .multiply => arithmeticInterval(binary.operator, left, right),
+        .remainder => remainderInterval(type_value, left, right),
         .minimum => Interval{ .minimum = @min(left.minimum, right.minimum), .maximum = @min(left.maximum, right.maximum) },
         .maximum => Interval{ .minimum = @max(left.minimum, right.minimum), .maximum = @max(left.maximum, right.maximum) },
         else => null,
     } orelse return .{ .interval = typeInterval(type_value) };
     return .{ .interval = intersectOrFull(mathematical, typeInterval(type_value)) };
+}
+
+fn remainderInterval(type_value: Ir.Type, dividend: Interval, divisor: Interval) ?Interval {
+    if (!type_value.isInteger() or divisor.minimum != divisor.maximum or divisor.minimum == 0) return null;
+    const magnitude = if (divisor.minimum < 0) -divisor.minimum else divisor.minimum;
+    const maximum_remainder = magnitude - 1;
+    if (!type_value.isSignedInteger()) return .{ .minimum = 0, .maximum = maximum_remainder };
+    return .{
+        .minimum = if (dividend.minimum < 0) -maximum_remainder else 0,
+        .maximum = if (dividend.maximum > 0) maximum_remainder else 0,
+    };
 }
 
 fn arithmeticInterval(operator: Ir.BinaryOperator, left: Interval, right: Interval) ?Interval {
@@ -456,6 +471,11 @@ fn buildPredecessors(allocator: Allocator, blocks: []const Ir.Block) ![]std.Arra
     return result;
 }
 
+fn hasBackwardPredecessor(predecessors: []const Ir.BlockId, block: Ir.BlockId) bool {
+    for (predecessors) |predecessor| if (predecessor >= block) return true;
+    return false;
+}
+
 fn swappedComparison(operator: Ir.BinaryOperator) Ir.BinaryOperator {
     return switch (operator) {
         .less => .greater,
@@ -532,4 +552,58 @@ test "dominant integer bounds remove only proven overflow checks" {
     const optimized = try optimize(allocator, program);
     try std.testing.expect(!optimized.functions[0].blocks[1].instructions[1].binary.checked);
     try std.testing.expect(optimized.functions[0].blocks[2].instructions[1].binary.checked);
+}
+
+test "loop exit bound proves induction increment" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &.{
+            .{ .constant_int = .{ .result = 1, .bits = 0 } },
+            .{ .copy = .{ .result = 5, .operand = 1 } },
+        }, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{
+            .{ .binary = .{ .result = 2, .operator = .less, .left = 5, .right = 0 } },
+        }, .terminator = .{ .branch = .{ .condition = 2, .then_block = 2, .else_block = 3 } } },
+        .{ .instructions = &.{
+            .{ .constant_int = .{ .result = 3, .bits = 1 } },
+            .{ .binary = .{ .result = 4, .operator = .add, .left = 5, .right = 3, .checked = true } },
+            .{ .copy = .{ .result = 5, .operand = 4 } },
+        }, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{}, .terminator = .{ .return_value = 5 } },
+    };
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "bounded_loop",
+        .parameter_types = &.{.int},
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .bool, .int, .int, .int },
+        .blocks = &blocks,
+    }} };
+    const optimized = try optimize(allocator, program);
+    try std.testing.expect(!optimized.functions[0].blocks[2].instructions[1].binary.checked);
+}
+
+test "constant remainder bounds prove dependent arithmetic" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "bounded_remainder",
+        .parameter_types = &.{.int},
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .int, .int, .int },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 1, .bits = 97 } },
+                .{ .binary = .{ .result = 2, .operator = .remainder, .left = 0, .right = 1 } },
+                .{ .constant_int = .{ .result = 3, .bits = 1 } },
+                .{ .binary = .{ .result = 4, .operator = .add, .left = 2, .right = 3, .checked = true } },
+            },
+            .terminator = .{ .return_value = 4 },
+        }},
+    }} };
+    const optimized = try optimize(allocator, program);
+    try std.testing.expect(optimized.functions[0].blocks[0].instructions[1].binary.checked);
+    try std.testing.expect(!optimized.functions[0].blocks[0].instructions[3].binary.checked);
 }
