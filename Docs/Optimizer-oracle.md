@@ -87,6 +87,11 @@ reference traffic with all remaining LLVM loads and stores: this can hide an
 opportunity but cannot invent one by assuming two references are disjoint.
 Unused Silex reference reads are removable, while reads separated by a write
 through a possibly aliasing reference remain observable and are preserved.
+After local dead-read cleanup, `reference_memory_elision` follows explicit
+same-block address derivations to remove an exactly overwritten store or
+forward an exact post-store load. A different reference root is never assumed
+disjoint: a read through it invalidates dead-store evidence, and calls, unknown
+memory effects, and block boundaries invalidate both transformations.
 
 When LLVM removes local memory or aggregate operations only in callers whose
 calls it also inlined, the advisor attributes that causal difference to

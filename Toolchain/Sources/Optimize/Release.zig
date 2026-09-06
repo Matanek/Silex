@@ -5,6 +5,7 @@ const Bounds = @import("Bounds.zig");
 const DenseBlocks = @import("DenseBlocks.zig");
 const InlineControlFlow = @import("InlineControlFlow.zig");
 const InlineValues = @import("InlineValues.zig");
+const ReferenceMemory = @import("ReferenceMemory.zig");
 const SsaPromotion = @import("SsaPromotion.zig");
 const ValueRanges = @import("ValueRanges.zig");
 const Workers = @import("../Workers.zig");
@@ -25,6 +26,7 @@ pub const PassId = enum {
     control_flow_inlining,
     aggregate_scalarization_post,
     local_simplification_post,
+    reference_memory_elision,
     ssa_promotion_post,
     value_range_analysis,
     ssa_value_simplification,
@@ -54,6 +56,7 @@ pub const pass_descriptors = [_]PassDescriptor{
     .{ .id = .control_flow_inlining, .precondition = "closed direct call graph with typed CFG", .postcondition = "eligible branching and loop callees cloned into callers", .preserves = "CFG validity, returns, effects, ownership and diagnostics" },
     .{ .id = .aggregate_scalarization_post, .precondition = "combined caller and callee graphs", .postcondition = "newly exposed aggregate copies and snapshots simplified", .preserves = "field values, ownership, aliases and aggregate layout" },
     .{ .id = .local_simplification_post, .precondition = "inlined typed portable IR", .postcondition = "combined per-function constants, blocks, checks and dead values simplified", .preserves = "types, effects, ownership, diagnostics and control targets" },
+    .{ .id = .reference_memory_elision, .precondition = "dead pure reads removed and explicit same-block reference derivations available", .postcondition = "exact overwritten stores removed and exact post-store loads forwarded", .preserves = "possible alias observations, calls, block boundaries, ownership and diagnostics" },
     .{ .id = .ssa_promotion_post, .precondition = "final simplified typed portable IR", .postcondition = "remaining profitable scalar locals promoted with complete edge transfers", .preserves = "dominance, incoming values, types and observable storage" },
     .{ .id = .value_range_analysis, .precondition = "verified typed CFG with final SSA edge definitions", .postcondition = "dominating integer intervals simplify proven comparisons, conversions and overflow checks", .preserves = "integer failures, signedness, widths, dominance, effects and control targets" },
     .{ .id = .ssa_value_simplification, .precondition = "verified SSA edge definitions and typed control flow", .postcondition = "inter-block copies, constants, branches and unreachable blocks simplified to a fixed point", .preserves = "dominance, overflow and floating-point semantics, effects and diagnostics" },
@@ -160,6 +163,12 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
         try verifyAfterPass(allocator, current, options);
     }
     if (options.stop_after == .local_simplification_post) return current;
+
+    if (options.disabled != .reference_memory_elision) {
+        current = try ReferenceMemory.optimize(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .reference_memory_elision) return current;
 
     if (options.disabled != .ssa_promotion_post) {
         current = try SsaPromotion.optimize(allocator, current);

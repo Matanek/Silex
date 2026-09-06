@@ -231,6 +231,64 @@ test "release removes dead aggregate reference reads without forwarding across a
     try std.testing.expect(found);
 }
 
+test "release removes exact overwritten reference stores" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func overwrite(value:&Pair, first:int, second:int) {
+        \\    value.x = first
+        \\    value.x = second
+        \\}
+        \\func observed(left:&Pair, right:&Pair, first:int, second:int) int {
+        \\    left.x = first
+        \\    let seen = right.x
+        \\    left.x = second
+        \\    return seen + left.x
+        \\}
+        \\func main() {
+        \\    var value = Pair(x:3, y:4)
+        \\    overwrite(value, 10, 11)
+        \\    print(value.x)
+        \\    var shared = Pair(x:5, y:6)
+        \\    print(observed(shared, shared, 20, 21))
+        \\    print(shared.x)
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+
+    var found_overwrite = false;
+    var found_observed = false;
+    for (optimized.functions) |function| {
+        if (std.mem.eql(u8, function.name, "overwrite")) {
+            found_overwrite = true;
+            var stores: usize = 0;
+            for (function.blocks) |block| for (block.instructions) |instruction| {
+                if (instruction == .reference_store) stores += 1;
+            };
+            try std.testing.expectEqual(@as(usize, 1), stores);
+        }
+        if (!std.mem.eql(u8, function.name, "observed")) continue;
+        found_observed = true;
+        var stores: usize = 0;
+        var loads: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction == .reference_store) stores += 1;
+            if (instruction == .reference_load) loads += 1;
+        };
+        try std.testing.expectEqual(@as(usize, 2), stores);
+        try std.testing.expectEqual(@as(usize, 1), loads);
+    }
+    try std.testing.expect(found_overwrite);
+    try std.testing.expect(found_observed);
+}
+
 test "release preserves floating branches and loops" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
