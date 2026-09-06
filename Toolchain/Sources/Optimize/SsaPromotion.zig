@@ -106,18 +106,29 @@ fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: 
             }
         };
     }
-    // A single live join can be lowered directly in each predecessor, even
-    // when one predecessor branches to another successor. Keep multi-join
-    // webs in the backend allocation domain until their overlapping phi
-    // residences can be coalesced without introducing an extra CFG block.
-    const active_phi_count = try allocator.alloc(usize, local_count);
-    @memset(active_phi_count, 0);
+    try coalesceForwardedPhis(
+        allocator,
+        function,
+        promoted,
+        predecessors,
+        outgoing,
+        phi_values,
+        phi_active,
+        value_aliases,
+    );
+    // A single residence can be lowered directly in each predecessor, even
+    // when it spans several forwarding joins. Keep genuinely overlapping phi
+    // webs in the backend allocation domain until interference is modeled.
+    const active_phi_residence = try allocator.alloc(?Ir.ValueId, local_count);
+    @memset(active_phi_residence, null);
     for (0..block_count) |block| for (0..local_count) |local| {
-        if (phi_active[at(local_count, block, local)]) active_phi_count[local] += 1;
+        const phi_index = at(local_count, block, local);
+        if (!phi_active[phi_index]) continue;
+        const residence = canonical(value_aliases, phi_values[phi_index].?);
+        if (active_phi_residence[local]) |existing| {
+            if (existing != residence) promoted[local] = false;
+        } else active_phi_residence[local] = residence;
     };
-    for (active_phi_count, 0..) |count, local| {
-        if (count > 1) promoted[local] = false;
-    }
     for (0..block_count) |block| for (0..local_count) |local| {
         if (promoted[local]) continue;
         const index = at(local_count, block, local);
@@ -433,6 +444,85 @@ fn entryValues(
     return result;
 }
 
+fn coalesceForwardedPhis(
+    allocator: Allocator,
+    function: Ir.Function,
+    promoted: []const bool,
+    predecessors: []const std.ArrayList(Ir.BlockId),
+    outgoing: []const ?Ir.ValueId,
+    phi_values: []?Ir.ValueId,
+    phi_active: []const bool,
+    aliases: []Ir.ValueId,
+) !void {
+    const local_count = function.local_types.len;
+    const load_uses = try allocator.alloc(usize, aliases.len);
+    @memset(load_uses, 0);
+    for (0..function.blocks.len) |block| {
+        var current = try entryValues(allocator, local_count, block, predecessors, phi_values, outgoing);
+        defer allocator.free(current);
+        for (function.blocks[block].instructions) |instruction| switch (instruction) {
+            .local_load => |load| if (promoted[load.local]) {
+                if (current[load.local]) |value| load_uses[canonical(aliases, value)] += 1;
+            },
+            .local_store => |store| if (promoted[store.local]) {
+                current[store.local] = canonical(aliases, store.operand);
+            },
+            else => {},
+        };
+    }
+
+    const destination = try allocator.alloc(?Ir.ValueId, aliases.len);
+    const conflicting = try allocator.alloc(bool, aliases.len);
+    @memset(destination, null);
+    @memset(conflicting, false);
+    for (0..function.blocks.len) |target| for (0..local_count) |local| {
+        const phi_index = at(local_count, target, local);
+        if (!phi_active[phi_index]) continue;
+        const target_value = canonical(aliases, phi_values[phi_index].?);
+        for (predecessors[target].items) |predecessor| {
+            const source = canonical(aliases, outgoing[at(local_count, predecessor, local)] orelse continue);
+            if (source == target_value or source < function.value_types.len) continue;
+            if (destination[source]) |existing| {
+                if (existing != target_value) conflicting[source] = true;
+            } else destination[source] = target_value;
+        }
+    };
+
+    for (phi_values, 0..) |phi, phi_index| {
+        if (!phi_active[phi_index]) continue;
+        const source = canonical(aliases, phi.?);
+        const target = destination[source] orelse continue;
+        if (source == target or load_uses[source] != 0 or conflicting[source]) continue;
+        if (canonical(aliases, target) == source) continue;
+        const source_block = phi_index / local_count;
+        const target_block = findActivePhiBlock(local_count, phi_values, phi_active, target) orelse continue;
+        if (siblingBranchTargets(function.blocks, source_block, target_block)) continue;
+        aliases[source] = target;
+        phi_values[phi_index] = target;
+    }
+}
+
+fn findActivePhiBlock(
+    local_count: usize,
+    phi_values: []const ?Ir.ValueId,
+    phi_active: []const bool,
+    value: Ir.ValueId,
+) ?Ir.BlockId {
+    for (phi_values, 0..) |phi, phi_index| {
+        if (phi_active[phi_index] and phi != null and phi.? == value) return phi_index / local_count;
+    }
+    return null;
+}
+
+fn siblingBranchTargets(blocks: []const Ir.Block, left: Ir.BlockId, right: Ir.BlockId) bool {
+    for (blocks) |block| switch (block.terminator) {
+        .branch => |branch| if ((branch.then_block == left and branch.else_block == right) or
+            (branch.then_block == right and branch.else_block == left)) return true,
+        else => {},
+    };
+    return false;
+}
+
 fn edgeCopies(
     allocator: Allocator,
     function: Ir.Function,
@@ -470,13 +560,13 @@ fn edgeCopiesForTargets(
     var sources: std.ArrayList(Ir.ValueId) = .empty;
     var types: std.ArrayList(Ir.Type) = .empty;
     for (targets) |target| for (0..local_count) |local| if (phi_active[at(local_count, target, local)]) {
-            const destination = phi_values[at(local_count, target, local)].?;
-            const source = outgoing[at(local_count, predecessor, local)] orelse return error.InvalidProgram;
-            if (source == destination) continue;
-            try destinations.append(allocator, destination);
-            try sources.append(allocator, source);
-            try types.append(allocator, function.local_types[local]);
-        };
+        const destination = phi_values[at(local_count, target, local)].?;
+        const source = outgoing[at(local_count, predecessor, local)] orelse return error.InvalidProgram;
+        if (source == destination) continue;
+        try destinations.append(allocator, destination);
+        try sources.append(allocator, source);
+        try types.append(allocator, function.local_types[local]);
+    };
     var output: std.ArrayList(Ir.Instruction) = .empty;
     while (destinations.items.len != 0) {
         var safe: ?usize = null;
@@ -559,7 +649,7 @@ test "promote scalar locals through a loop and lower the phi to edge copies" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "copy"));
 }
 
-test "collapse an empty join before promoting its loop recurrence" {
+test "coalesce a forwarding join before promoting its loop recurrence" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -579,14 +669,14 @@ test "collapse an empty join before promoting its loop recurrence" {
             .{ .binary = .{ .result = 6, .operator = .add, .left = 1, .right = 5 } },
             .{ .local_store = .{ .local = 0, .operand = 6 } },
         }, .terminator = .{ .jump = 4 } },
-        .{ .instructions = &.{}, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{.{ .constant_bool = .{ .result = 8, .value = false } }}, .terminator = .{ .jump = 1 } },
         .{ .instructions = &.{.{ .local_load = .{ .result = 7, .local = 0 } }}, .terminator = .{ .return_value = 7 } },
     };
     const program: Ir.Program = .{ .functions = &.{.{
         .name = "conditional_count",
         .parameter_types = &.{},
         .return_type = .int,
-        .value_types = &.{ .int, .int, .int, .bool, .bool, .int, .int, .int },
+        .value_types = &.{ .int, .int, .int, .bool, .bool, .int, .int, .int, .bool },
         .local_types = &.{.int},
         .blocks = &blocks,
     }} };

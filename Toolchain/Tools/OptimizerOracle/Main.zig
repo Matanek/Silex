@@ -180,13 +180,18 @@ fn qualifyNative(
             );
         }
         var promotion_counter: ?Qualification.SsaPromotionCounter = null;
-        if (entry.contract == .promotes_critical_edge) {
+        const promotion_function: ?[]const u8 = switch (entry.contract) {
+            .promotes_critical_edge => |function_name| function_name,
+            .coalesces_forwarded_phi => |function_name| function_name,
+            else => null,
+        };
+        if (promotion_function) |function_name| {
             const without = try Differential.verifyWithOptions(allocator, source, .{
                 .verify_each_pass = true,
                 .disabled = .ssa_promotion_post,
             });
             promotion_counter = try Qualification.verifySsaPromotionCounter(
-                entry.contract.promotes_critical_edge,
+                function_name,
                 differential,
                 without,
             );

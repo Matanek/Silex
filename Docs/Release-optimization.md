@@ -32,8 +32,10 @@ blocks to their effective target. A scalar join reached directly from a branch
 can therefore place its parallel copies in that predecessor instead of
 splitting the critical edge and adding a native jump. This applies uniformly
 to integers, booleans, float32, and float64. Locals spanning several live joins
-remain in the native global-allocation domain until their overlapping PHI
-residences can be coalesced without increasing the control-flow graph.
+share one residence when an intermediate PHI only forwards its incoming value
+to a unique successor PHI and has no read of its own. Genuinely overlapping or
+sibling-edge PHI webs remain in the native global-allocation domain rather than
+introducing speculative copies or increasing the control-flow graph.
 
 The following value-range pass propagates signed and unsigned integer
 intervals through the verified CFG. True and false comparison edges refine

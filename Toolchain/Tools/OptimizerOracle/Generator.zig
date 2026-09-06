@@ -12,6 +12,7 @@ pub const StructuralContract = union(enum) {
     scalarizes_dense_loop: []const u8,
     simplifies_ssa_values: []const u8,
     promotes_critical_edge: []const u8,
+    coalesces_forwarded_phi: []const u8,
     proves_integer_ranges: struct {
         bounded_add: []const u8,
         bounded_subtract: []const u8,
@@ -75,6 +76,11 @@ pub const regressions = [_]RegressionEntry{
         .name = "Regressions/SsaCriticalEdge.sx",
         .concern = "float32 and float64 locals cross a critical edge without memory traffic or a synthetic block",
         .contract = .{ .promotes_critical_edge = "choose64" },
+    },
+    .{
+        .name = "Regressions/SsaForwardedPhiLoop.sx",
+        .concern = "a loop-carried float value crosses an inner forwarding join without falling back to local storage",
+        .contract = .{ .coalesces_forwarded_phi = "accumulate" },
     },
     .{
         .name = "Regressions/IntegerRangeChecks.sx",
