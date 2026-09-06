@@ -1,0 +1,32 @@
+func unanimous(condition:bool) int {
+    var accepted = false
+    var value = 0
+    if condition {
+        accepted = true
+        value = 20
+    } else {
+        accepted = true
+        value = 20
+    }
+    if accepted {
+        return value + 22
+    }
+    return 0
+}
+
+func divergent(condition:bool) int {
+    var accepted = false
+    if condition {
+        accepted = true
+    }
+    if accepted { return 1 }
+    return 2
+}
+
+func main() {
+    assert(unanimous(true) == 42)
+    assert(unanimous(false) == 42)
+    assert(divergent(true) == 1)
+    assert(divergent(false) == 2)
+    print("SSA value facts preserved")
+}

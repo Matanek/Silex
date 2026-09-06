@@ -167,6 +167,18 @@ fn qualifyNative(
         const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
         const differential = try Differential.verify(allocator, source);
         const evidence = try Qualification.verifyContract(allocator, entry.contract, differential);
+        var ssa_counter: ?Qualification.SsaValueCounter = null;
+        if (entry.contract == .simplifies_ssa_values) {
+            const without = try Differential.verifyWithOptions(allocator, source, .{
+                .verify_each_pass = true,
+                .disabled = .ssa_value_simplification,
+            });
+            ssa_counter = try Qualification.verifySsaValueCounter(
+                entry.contract.simplifies_ssa_values,
+                differential,
+                without,
+            );
+        }
         const stem = std.fs.path.stem(entry.name);
         const artifact_stem = try std.fmt.allocPrint(
             allocator,
@@ -185,6 +197,19 @@ fn qualifyNative(
         try Report.line(io, allocator, "  PASS {s}", .{entry.name});
         try Report.line(io, allocator, "    protects: {s}", .{entry.concern});
         try reportEvidence(io, allocator, evidence);
+        if (ssa_counter) |counter| {
+            try Report.line(
+                io,
+                allocator,
+                "    counter: disabling ssa_value_simplification retains {d} branches and {d} arithmetic operation(s), versus {d} and {d}",
+                .{
+                    counter.disabled_branches,
+                    counter.disabled_arithmetic,
+                    counter.enabled_branches,
+                    counter.enabled_arithmetic,
+                },
+            );
+        }
         try Report.line(io, allocator, "    binaries: Debug {d} bytes, Release {d} bytes", .{
             native.debug_size.?,
             native.release_size,
@@ -268,6 +293,18 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 scalar.optimized_collection_loads,
                 scalar.raw_calls,
                 scalar.optimized_calls,
+            },
+        ),
+        .ssa_values => |ssa| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} branches {d} -> {d}, arithmetic {d} -> {d}",
+            .{
+                ssa.function,
+                ssa.raw_branches,
+                ssa.optimized_branches,
+                ssa.raw_arithmetic,
+                ssa.optimized_arithmetic,
             },
         ),
         .slp => |slp| try Report.line(

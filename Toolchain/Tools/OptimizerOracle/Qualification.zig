@@ -23,6 +23,13 @@ pub const Evidence = union(enum) {
         raw_calls: usize,
         optimized_calls: usize,
     },
+    ssa_values: struct {
+        function: []const u8,
+        raw_branches: usize,
+        optimized_branches: usize,
+        raw_arithmetic: usize,
+        optimized_arithmetic: usize,
+    },
     slp: struct {
         function: []const u8,
         required: u3,
@@ -31,6 +38,14 @@ pub const Evidence = union(enum) {
         arm64_pairs: usize,
         x64_pairs: usize,
     },
+};
+
+pub const SsaValueCounter = struct {
+    function: []const u8,
+    enabled_branches: usize,
+    disabled_branches: usize,
+    enabled_arithmetic: usize,
+    disabled_arithmetic: usize,
 };
 
 pub fn verifyContract(
@@ -43,6 +58,7 @@ pub fn verifyContract(
         .reduces_blocks => |function_name| verifyBlockReduction(function_name, differential),
         .removes_collection_bounds => |function_name| verifyCollectionBounds(function_name, differential),
         .scalarizes_dense_loop => |function_name| verifyDenseScalarLoop(function_name, differential),
+        .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -51,6 +67,66 @@ pub fn verifyContract(
             differential.optimized_ir,
         ),
     };
+}
+
+const SsaValueProfile = struct {
+    branches: usize = 0,
+    arithmetic: usize = 0,
+};
+
+fn verifySsaValueSimplification(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw_function = findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const optimized_function = findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const raw = ssaValueProfile(raw_function);
+    const optimized = ssaValueProfile(optimized_function);
+    if (raw.branches == 0 or optimized.branches >= raw.branches)
+        return error.ExpectedSsaBranchReductionMissing;
+    if (raw.arithmetic == 0 or optimized.arithmetic >= raw.arithmetic)
+        return error.ExpectedSsaArithmeticReductionMissing;
+    return .{ .ssa_values = .{
+        .function = function_name,
+        .raw_branches = raw.branches,
+        .optimized_branches = optimized.branches,
+        .raw_arithmetic = raw.arithmetic,
+        .optimized_arithmetic = optimized.arithmetic,
+    } };
+}
+
+pub fn verifySsaValueCounter(
+    function_name: []const u8,
+    enabled: Differential.Result,
+    disabled: Differential.Result,
+) !SsaValueCounter {
+    const enabled_function = findFunction(enabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const disabled_function = findFunction(disabled.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const enabled_profile = ssaValueProfile(enabled_function);
+    const disabled_profile = ssaValueProfile(disabled_function);
+    if (enabled_profile.branches >= disabled_profile.branches)
+        return error.ExpectedSsaBranchCounterEvidenceMissing;
+    if (enabled_profile.arithmetic >= disabled_profile.arithmetic)
+        return error.ExpectedSsaArithmeticCounterEvidenceMissing;
+    return .{
+        .function = function_name,
+        .enabled_branches = enabled_profile.branches,
+        .disabled_branches = disabled_profile.branches,
+        .enabled_arithmetic = enabled_profile.arithmetic,
+        .disabled_arithmetic = disabled_profile.arithmetic,
+    };
+}
+
+fn ssaValueProfile(function: Silex.Ir.Function) SsaValueProfile {
+    var result: SsaValueProfile = .{};
+    for (function.blocks) |block| {
+        if (block.terminator == .branch) result.branches += 1;
+        for (block.instructions) |instruction| if (instruction == .binary) {
+            result.arithmetic += 1;
+        };
+    }
+    return result;
 }
 
 const ScalarLoopProfile = struct {

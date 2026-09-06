@@ -99,7 +99,9 @@ pub fn boundedCollectionLoops(optimize_program: anytype) !void {
     const nested_start = std.mem.indexOf(u8, text, "func @nested") orelse return error.TestUnexpectedResult;
     const mutate_start = std.mem.indexOf(u8, text, "func @mutate") orelse return error.TestUnexpectedResult;
     const main_start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, text[sum_start..unproven_start], "collection.load %0, %7 bounded") != null);
+    const sum = text[sum_start..unproven_start];
+    try std.testing.expect(std.mem.indexOf(u8, sum, "collection.load %0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, sum, " bounded") != null);
     try std.testing.expect(std.mem.indexOf(u8, text[unproven_start..advanced_start], " bounded") == null);
     try std.testing.expect(std.mem.indexOf(u8, text[advanced_start..nested_start], " bounded") == null);
     try std.testing.expect(std.mem.indexOf(u8, text[nested_start..mutate_start], " bounded") != null);

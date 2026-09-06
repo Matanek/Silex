@@ -10,6 +10,7 @@ pub const StructuralContract = union(enum) {
     reduces_blocks: []const u8,
     removes_collection_bounds: []const u8,
     scalarizes_dense_loop: []const u8,
+    simplifies_ssa_values: []const u8,
     slp_width: struct {
         function: []const u8,
         minimum: u3,
@@ -57,6 +58,11 @@ pub const regressions = [_]RegressionEntry{
         .name = "Regressions/BooleanSharedChain.sx",
         .concern = "shared boolean-chain blocks and reused branch values",
         .contract = .{ .reduces_blocks = "hot_chain" },
+    },
+    .{
+        .name = "Regressions/SsaValueFacts.sx",
+        .concern = "unanimous SSA joins propagate exact constants while divergent joins retain their control",
+        .contract = .{ .simplifies_ssa_values = "unanimous" },
     },
     .{
         .name = "Regressions/ArrayStorageAccess.sx",

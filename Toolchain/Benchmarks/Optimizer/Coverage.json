@@ -161,12 +161,13 @@
     {"id": "control_flow_inlining", "families": ["calls", "control", "loops", "phi"]},
     {"id": "aggregate_scalarization_post", "families": ["aggregates", "copies", "alias"]},
     {"id": "local_simplification_post", "families": ["scalars", "control", "bounds", "dead-code"]},
-    {"id": "ssa_promotion_post", "families": ["locals", "ssa", "phi", "control"]}
+    {"id": "ssa_promotion_post", "families": ["locals", "ssa", "phi", "control"]},
+    {"id": "ssa_value_simplification", "families": ["ssa", "constants", "copies", "control", "dead-code"]}
   ],
   "coverage": [
     {"id": "scalar-integers", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerArithmetic.sx", "IntegerWidths.sx", "UnsignedBitwise.sx"]},
     {"id": "scalar-floating-point", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["FloatArithmetic.sx", "Regressions/FloatSsaDiamond.sx", "Regressions/FloatSsaLoop.sx"]},
-    {"id": "branches-diamonds-and-phi", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerControlFlow.sx", "Regressions/BooleanSharedChain.sx"]},
+    {"id": "branches-diamonds-and-phi", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerControlFlow.sx", "Regressions/BooleanSharedChain.sx", "Regressions/SsaValueFacts.sx"]},
     {"id": "loops-inductions-and-ranges", "state": "gap", "owner_part": "silex-llvm-opt-05", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["BranchingLoop.sx", "Regressions/BoundedCollectionLoop.sx"]},
     {"id": "references-and-alias", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/CheckedMemoryLanes.sx"]},
     {"id": "aggregates-copies-and-returns", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/AggregateFieldStores.sx", "Regressions/AggregateControlFlow.sx"]},

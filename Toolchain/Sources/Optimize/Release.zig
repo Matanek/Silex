@@ -24,6 +24,7 @@ pub const PassId = enum {
     aggregate_scalarization_post,
     local_simplification_post,
     ssa_promotion_post,
+    ssa_value_simplification,
 
     pub fn parse(name: []const u8) ?PassId {
         inline for (@typeInfo(PassId).@"enum".fields) |field| {
@@ -51,6 +52,7 @@ pub const pass_descriptors = [_]PassDescriptor{
     .{ .id = .aggregate_scalarization_post, .precondition = "combined caller and callee graphs", .postcondition = "newly exposed aggregate copies and snapshots simplified", .preserves = "field values, ownership, aliases and aggregate layout" },
     .{ .id = .local_simplification_post, .precondition = "inlined typed portable IR", .postcondition = "combined per-function constants, blocks, checks and dead values simplified", .preserves = "types, effects, ownership, diagnostics and control targets" },
     .{ .id = .ssa_promotion_post, .precondition = "final simplified typed portable IR", .postcondition = "remaining profitable scalar locals promoted with complete edge transfers", .preserves = "dominance, incoming values, types and observable storage" },
+    .{ .id = .ssa_value_simplification, .precondition = "verified SSA edge definitions and typed control flow", .postcondition = "inter-block copies, constants, branches and unreachable blocks simplified to a fixed point", .preserves = "dominance, overflow and floating-point semantics, effects and diagnostics" },
 };
 
 pub const Options = struct {
@@ -157,6 +159,12 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
 
     if (options.disabled != .ssa_promotion_post) {
         current = try SsaPromotion.optimize(allocator, current);
+        try verifyAfterPass(allocator, current, options);
+    }
+    if (options.stop_after == .ssa_promotion_post) return current;
+
+    if (options.disabled != .ssa_value_simplification) {
+        current = try simplifySsaValues(allocator, current);
         try verifyAfterPass(allocator, current, options);
     }
     const validated = try Ir.writeText(allocator, current);
@@ -386,6 +394,7 @@ fn scalarMathCall(program: Ir.Program, caller: Ir.Function, instruction: Ir.Inst
 pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Program {
     var result = try optimizeFunctionsWithWorkers(allocator, program, 1);
     result = try SsaPromotion.optimize(allocator, result);
+    result = try simplifySsaValues(allocator, result);
     const validated = try Ir.writeText(allocator, result);
     allocator.free(validated);
     return result;
@@ -1024,6 +1033,231 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
     result.blocks = try removeUnreachableBlocks(allocator, blocks);
     result.blocks = try removeDeadConstants(allocator, result);
     return result;
+}
+
+/// Propagates facts exposed by SSA promotion across basic-block boundaries.
+/// Values produced on several predecessor edges are treated as phi values: a
+/// fact is usable only when every reachable definition proves the exact same
+/// bit pattern. This keeps the analysis independent from block serialization
+/// order and makes branch pruning feed another analysis iteration.
+fn simplifySsaValues(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    const functions = try allocator.alloc(Ir.Function, program.functions.len);
+    for (program.functions, 0..) |function, index| {
+        functions[index] = try simplifySsaFunction(allocator, function);
+    }
+    var result = program;
+    result.functions = functions;
+    return result;
+}
+
+fn simplifySsaFunction(allocator: Allocator, original: Ir.Function) !Ir.Function {
+    var current = original;
+    var iteration: usize = 0;
+    while (iteration <= original.blocks.len) : (iteration += 1) {
+        const previous_blocks = current.blocks.len;
+        const previous_instructions = instructionCount(current.blocks);
+        const next = try simplifySsaFunctionOnce(allocator, current);
+        const changed = next.blocks.len != previous_blocks or
+            instructionCount(next.blocks) != previous_instructions or
+            !terminatorsEqual(current.blocks, next.blocks);
+        current = next;
+        if (!changed) break;
+    }
+    return current;
+}
+
+fn simplifySsaFunctionOnce(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    if (function.blocks.len == 0 or function.value_types.len == 0) return function;
+
+    const definitions = try allocator.alloc(usize, function.value_types.len);
+    @memset(definitions, 0);
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        countDefinitions(instruction, definitions);
+    };
+
+    const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
+    for (aliases, 0..) |*alias, value| alias.* = value;
+    var aliases_changed = true;
+    while (aliases_changed) {
+        aliases_changed = false;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            const copy = switch (instruction) {
+                .copy => |value| value,
+                .deep_copy => |value| value,
+                else => continue,
+            };
+            if (definitions[copy.result] != 1 or
+                function.value_types[copy.result] != function.value_types[copy.operand]) continue;
+            const value_type = function.value_types[copy.result];
+            // Dynamic floating copies still carry lane provenance consumed by
+            // the SLP planner. Constant facts may cross them, but removing the
+            // copies here would shrink already-qualified vector groups.
+            if (!value_type.isInteger() and value_type != .bool) continue;
+            const source = canonical(aliases, copy.operand);
+            if (aliases[copy.result] != source) {
+                aliases[copy.result] = source;
+                aliases_changed = true;
+            }
+        };
+    }
+
+    const facts = try allocator.alloc(Constant, function.value_types.len);
+    @memset(facts, .unknown);
+    var facts_changed = true;
+    while (facts_changed) {
+        facts_changed = false;
+        const candidates = try allocator.alloc(Constant, function.value_types.len);
+        const seen = try allocator.alloc(usize, function.value_types.len);
+        const compatible = try allocator.alloc(bool, function.value_types.len);
+        @memset(candidates, .unknown);
+        @memset(seen, 0);
+        @memset(compatible, true);
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            const result = instructionResult(instruction) orelse continue;
+            seen[result] += 1;
+            const fact = definitionConstant(function, instruction, aliases, facts) orelse {
+                compatible[result] = false;
+                continue;
+            };
+            if (candidates[result] == .unknown) {
+                candidates[result] = fact;
+            } else if (!constantEqual(candidates[result], fact)) {
+                compatible[result] = false;
+            }
+        };
+        for (facts, 0..) |*fact, value| {
+            if (fact.* != .unknown or !compatible[value] or seen[value] != definitions[value] or seen[value] == 0) continue;
+            if (candidates[value] == .unknown) continue;
+            fact.* = candidates[value];
+            facts_changed = true;
+        }
+    }
+
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    for (function.blocks, 0..) |block, block_index| {
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions) |original| {
+            if (instructionResult(original)) |result| {
+                if (aliases[result] != result) continue;
+            }
+            var instruction = try rewriteInstruction(allocator, original, aliases);
+            if (instructionResult(instruction)) |result| {
+                if (constantInstruction(result, facts[result])) |constant| instruction = constant;
+            }
+            try instructions.append(allocator, instruction);
+        }
+        blocks[block_index] = .{
+            .instructions = try instructions.toOwnedSlice(allocator),
+            .terminator = rewriteTerminator(block.terminator, aliases, facts),
+        };
+    }
+
+    var result = function;
+    result.blocks = try removeUnreachableBlocks(allocator, blocks);
+    result.blocks = try removeDeadConstants(allocator, result);
+    result.blocks = try bypassEmptyJumps(allocator, result.blocks);
+    result.blocks = try removeUnreachableBlocks(allocator, result.blocks);
+    return result;
+}
+
+fn definitionConstant(
+    function: Ir.Function,
+    instruction: Ir.Instruction,
+    aliases: []const Ir.ValueId,
+    facts: []const Constant,
+) ?Constant {
+    return switch (instruction) {
+        .constant_int => |value| .{ .integer = value.bits },
+        .constant_bool => |value| .{ .boolean = value.value },
+        .constant_float32 => |value| .{ .float32 = value.bits },
+        .constant_float64 => |value| .{ .float64 = value.bits },
+        .copy, .deep_copy => |value| copy: {
+            if (function.value_types[value.result] != function.value_types[value.operand]) break :copy null;
+            const value_type = function.value_types[value.result];
+            if (instruction == .deep_copy and !value_type.isNumeric() and value_type != .bool) break :copy null;
+            const fact = facts[canonical(aliases, value.operand)];
+            break :copy if (fact == .unknown) null else fact;
+        },
+        .unary => |value| unary: {
+            var rewritten = value;
+            rewritten.operand = canonical(aliases, value.operand);
+            const folded = foldUnary(function, rewritten, facts) orelse break :unary null;
+            break :unary instructionConstant(folded);
+        },
+        .binary => |value| binary: {
+            var rewritten = value;
+            rewritten.left = canonical(aliases, value.left);
+            rewritten.right = canonical(aliases, value.right);
+            const folded = foldBinary(function, rewritten, facts) orelse break :binary null;
+            break :binary instructionConstant(folded);
+        },
+        else => null,
+    };
+}
+
+fn instructionConstant(instruction: Ir.Instruction) ?Constant {
+    return switch (instruction) {
+        .constant_int => |value| .{ .integer = value.bits },
+        .constant_bool => |value| .{ .boolean = value.value },
+        .constant_float32 => |value| .{ .float32 = value.bits },
+        .constant_float64 => |value| .{ .float64 = value.bits },
+        else => null,
+    };
+}
+
+fn constantInstruction(result: Ir.ValueId, fact: Constant) ?Ir.Instruction {
+    return switch (fact) {
+        .unknown => null,
+        .integer => |bits| .{ .constant_int = .{ .result = result, .bits = bits } },
+        .boolean => |value| .{ .constant_bool = .{ .result = result, .value = value } },
+        .float32 => |bits| .{ .constant_float32 = .{ .result = result, .bits = bits } },
+        .float64 => |bits| .{ .constant_float64 = .{ .result = result, .bits = bits } },
+    };
+}
+
+fn constantEqual(left: Constant, right: Constant) bool {
+    return std.meta.eql(left, right);
+}
+
+fn bypassEmptyJumps(allocator: Allocator, blocks: []const Ir.Block) ![]const Ir.Block {
+    const result = try allocator.dupe(Ir.Block, blocks);
+    for (result) |*block| block.terminator = switch (block.terminator) {
+        .jump => |target| .{ .jump = resolveEmptyJump(blocks, target) },
+        .branch => |branch| .{ .branch = .{
+            .condition = branch.condition,
+            .then_block = resolveEmptyJump(blocks, branch.then_block),
+            .else_block = resolveEmptyJump(blocks, branch.else_block),
+        } },
+        else => block.terminator,
+    };
+    return result;
+}
+
+fn resolveEmptyJump(blocks: []const Ir.Block, initial: Ir.BlockId) Ir.BlockId {
+    var current = initial;
+    var traversed: usize = 0;
+    while (current < blocks.len and blocks[current].instructions.len == 0 and traversed < blocks.len) : (traversed += 1) {
+        current = switch (blocks[current].terminator) {
+            .jump => |target| target,
+            else => break,
+        };
+        if (current == initial) return initial;
+    }
+    return current;
+}
+
+fn instructionCount(blocks: []const Ir.Block) usize {
+    var count: usize = 0;
+    for (blocks) |block| count += block.instructions.len;
+    return count;
+}
+
+fn terminatorsEqual(left: []const Ir.Block, right: []const Ir.Block) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_block, right_block| {
+        if (!std.meta.eql(left_block.terminator, right_block.terminator)) return false;
+    }
+    return true;
 }
 
 fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
@@ -2437,6 +2671,95 @@ test "release folds constants and propagates copies in straight-line code" {
     const text = try Ir.writeText(allocator, optimized);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 42"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
+}
+
+test "SSA value simplification propagates constants and copies across blocks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &.{.{ .constant_int = .{ .result = 0, .bits = 20 } }}, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{
+            .{ .copy = .{ .result = 1, .operand = 0 } },
+            .{ .constant_int = .{ .result = 2, .bits = 22 } },
+            .{ .binary = .{ .result = 3, .operator = .add, .left = 1, .right = 2, .checked = true } },
+            .{ .constant_bool = .{ .result = 4, .value = true } },
+        }, .terminator = .{ .branch = .{ .condition = 4, .then_block = 2, .else_block = 3 } } },
+        .{ .instructions = &.{}, .terminator = .{ .return_value = 3 } },
+        .{ .instructions = &.{.{ .constant_int = .{ .result = 5, .bits = 0 } }}, .terminator = .{ .return_value = 5 } },
+    };
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "inter_block",
+        .parameter_types = &.{},
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .int, .int, .bool, .int },
+        .blocks = &blocks,
+    }} };
+    const optimized = try simplifySsaValues(allocator, program);
+    const text = try Ir.writeText(allocator, optimized);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 42"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "add"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "branch"));
+}
+
+test "SSA value simplification accepts only unanimous phi constants" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const equal_blocks = [_]Ir.Block{
+        .{ .instructions = &.{}, .terminator = .{ .branch = .{ .condition = 0, .then_block = 1, .else_block = 2 } } },
+        .{ .instructions = &.{.{ .constant_int = .{ .result = 1, .bits = 7 } }}, .terminator = .{ .jump = 3 } },
+        .{ .instructions = &.{.{ .constant_int = .{ .result = 1, .bits = 7 } }}, .terminator = .{ .jump = 3 } },
+        .{ .instructions = &.{
+            .{ .constant_int = .{ .result = 2, .bits = 1 } },
+            .{ .binary = .{ .result = 3, .operator = .add, .left = 1, .right = 2, .checked = true } },
+        }, .terminator = .{ .return_value = 3 } },
+    };
+    const different_blocks = [_]Ir.Block{
+        equal_blocks[0],
+        equal_blocks[1],
+        .{ .instructions = &.{.{ .constant_int = .{ .result = 1, .bits = 8 } }}, .terminator = .{ .jump = 3 } },
+        equal_blocks[3],
+    };
+    const template: Ir.Function = .{
+        .name = "phi_constant",
+        .parameter_types = &.{.bool},
+        .return_type = .int,
+        .value_types = &.{ .bool, .int, .int, .int },
+        .blocks = &equal_blocks,
+    };
+    const equal = try simplifySsaValues(allocator, .{ .functions = &.{template} });
+    const equal_text = try Ir.writeText(allocator, equal);
+    try std.testing.expect(std.mem.containsAtLeast(u8, equal_text, 1, "const 8"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, equal_text, 1, "add"));
+
+    var different = template;
+    different.blocks = &different_blocks;
+    const retained = try simplifySsaValues(allocator, .{ .functions = &.{different} });
+    const retained_text = try Ir.writeText(allocator, retained);
+    try std.testing.expect(std.mem.containsAtLeast(u8, retained_text, 1, "add"));
+}
+
+test "SSA value simplification preserves checked integer overflow" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const blocks = [_]Ir.Block{.{ .instructions = &.{
+        .{ .constant_int = .{ .result = 0, .bits = @as(u64, @bitCast(@as(i64, std.math.maxInt(i64)))) } },
+        .{ .constant_int = .{ .result = 1, .bits = 1 } },
+        .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1, .checked = true } },
+    }, .terminator = .{ .return_value = 2 } }};
+    const optimized = try simplifySsaValues(allocator, .{ .functions = &.{.{
+        .name = "checked_overflow",
+        .parameter_types = &.{},
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .int },
+        .blocks = &blocks,
+    }} });
+    const instruction = optimized.functions[0].blocks[0].instructions[2].binary;
+    try std.testing.expectEqual(Ir.BinaryOperator.add, instruction.operator);
+    try std.testing.expect(instruction.checked);
 }
 
 test "release folds finite float constants inside branching functions" {
