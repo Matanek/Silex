@@ -2893,16 +2893,18 @@ fn encodeBinary(
         },
         .multiply => {
             try words.append(allocator, multiply(destination, left, right));
-            if (signed) {
-                try words.append(allocator, signedMultiplyHigh(.x12, left, right));
-                try words.append(allocator, arithmeticShiftRight63(.x13, destination));
-                try words.append(allocator, compareRegisters(.x12, .x13));
-                try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.not_equal), .imm19);
-            } else {
-                try words.append(allocator, unsignedMultiplyHigh(.x12, left, right));
-                try appendFixup(allocator, words, &fixups.overflow, compareBranchNonZero64(.x12), .imm19);
+            if (binary.checked) {
+                if (signed) {
+                    try words.append(allocator, signedMultiplyHigh(.x12, left, right));
+                    try words.append(allocator, arithmeticShiftRight63(.x13, destination));
+                    try words.append(allocator, compareRegisters(.x12, .x13));
+                    try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.not_equal), .imm19);
+                } else {
+                    try words.append(allocator, unsignedMultiplyHigh(.x12, left, right));
+                    try appendFixup(allocator, words, &fixups.overflow, compareBranchNonZero64(.x12), .imm19);
+                }
+                try emitIntegerRangeCheck(allocator, words, fixups, binary.type, destination);
             }
-            try emitIntegerRangeCheck(allocator, words, fixups, binary.type, destination);
             try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .divide => {
@@ -5196,4 +5198,37 @@ test "recognize a comparison-only while header at its back edge" {
     try std.testing.expectEqual(@as(usize, 2), backedge.branch_index);
     try std.testing.expectEqual(@as(usize, 3), backedge.body);
     try std.testing.expect(backedge.body_on_true);
+}
+
+test "omit ARM64 overflow work for a proven unchecked multiply" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var unchecked_words: std.ArrayList(u32) = .empty;
+    var unchecked_fixups: FunctionFixups = .{};
+    var unchecked_cache: ScalarCache = .{ .enabled = false };
+    try encodeBinary(allocator, &unchecked_words, &unchecked_fixups, null, &unchecked_cache, .{
+        .result = 2,
+        .operator = .multiply,
+        .left = 0,
+        .right = 1,
+        .type = .int,
+        .checked = false,
+    });
+    try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.overflow.items.len);
+
+    var checked_words: std.ArrayList(u32) = .empty;
+    var checked_fixups: FunctionFixups = .{};
+    var checked_cache: ScalarCache = .{ .enabled = false };
+    try encodeBinary(allocator, &checked_words, &checked_fixups, null, &checked_cache, .{
+        .result = 2,
+        .operator = .multiply,
+        .left = 0,
+        .right = 1,
+        .type = .int,
+        .checked = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
+    try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
 }

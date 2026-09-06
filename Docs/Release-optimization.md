@@ -46,7 +46,10 @@ by a proven constant nonzero divisor contribute their signed or unsigned result
 interval without removing the divisor check. Release removes an integer add,
 subtract, multiply, or conversion check only when the complete mathematical
 interval fits its result type. Unproved operations keep their observable
-overflow or conversion failure.
+overflow or conversion failure. ARM64 lowering consumes the resulting checked
+flag uniformly for addition, subtraction, and multiplication; a proven
+unchecked multiply emits neither high-half overflow work nor an overflow
+branch.
 
 After final SSA promotion, Release recomputes exact scalar facts independently
 of block serialization order. A constant may cross a join only when every
