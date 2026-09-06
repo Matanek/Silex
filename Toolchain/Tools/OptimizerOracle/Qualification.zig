@@ -23,6 +23,34 @@ pub const Evidence = union(enum) {
         raw_calls: usize,
         optimized_calls: usize,
     },
+    aggregate_scalarization: struct {
+        function: []const u8,
+        raw_operations: usize,
+        optimized_operations: usize,
+    },
+    reference_memory: struct {
+        overwritten: []const u8,
+        observed: []const u8,
+        raw_overwritten_stores: usize,
+        optimized_overwritten_stores: usize,
+        optimized_observed_loads: usize,
+        optimized_observed_stores: usize,
+    },
+    view_memory: struct {
+        function: []const u8,
+        raw_loads: usize,
+        optimized_loads: usize,
+        raw_stores: usize,
+        optimized_stores: usize,
+        optimized_guards: usize,
+    },
+    owning_collection: struct {
+        function: []const u8,
+        raw_loads: usize,
+        optimized_loads: usize,
+        optimized_stores: usize,
+        optimized_guards: usize,
+    },
     ssa_values: struct {
         function: []const u8,
         raw_branches: usize,
@@ -95,6 +123,14 @@ pub const IntegerRangeCounter = struct {
     disabled_unproven_checks: usize,
 };
 
+pub const MemoryCounter = struct {
+    function: []const u8,
+    enabled_operations: usize,
+    disabled_operations: usize,
+    enabled_guards: usize,
+    disabled_guards: usize,
+};
+
 pub fn verifyContract(
     allocator: std.mem.Allocator,
     contract: Generator.StructuralContract,
@@ -105,6 +141,10 @@ pub fn verifyContract(
         .reduces_blocks => |function_name| verifyBlockReduction(function_name, differential),
         .removes_collection_bounds => |function_name| verifyCollectionBounds(function_name, differential),
         .scalarizes_dense_loop => |function_name| verifyDenseScalarLoop(function_name, differential),
+        .scalarizes_aggregate => |function_name| verifyAggregateScalarization(function_name, differential),
+        .elides_reference_memory => |requirement| verifyReferenceMemory(requirement, differential),
+        .coalesces_view_memory => |function_name| verifyViewMemory(function_name, differential),
+        .forwards_owning_collection => |function_name| verifyOwningCollection(function_name, differential),
         .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
         .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .coalesces_forwarded_phi => |function_name| verifyCriticalEdgePromotion(function_name, differential),
@@ -118,6 +158,114 @@ pub fn verifyContract(
             requirement.native_pair,
             differential.optimized_ir,
         ),
+    };
+}
+
+fn verifyAggregateScalarization(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    if (raw.value_aggregate_operations == 0 or
+        optimized.value_aggregate_operations >= raw.value_aggregate_operations)
+        return error.ExpectedAggregateScalarizationMissing;
+    return .{ .aggregate_scalarization = .{
+        .function = function_name,
+        .raw_operations = raw.value_aggregate_operations,
+        .optimized_operations = optimized.value_aggregate_operations,
+    } };
+}
+
+fn verifyReferenceMemory(requirement: anytype, differential: Differential.Result) !Evidence {
+    const raw_overwritten = IrStats.profile(.{ .functions = &.{findFunction(
+        differential.raw_ir,
+        requirement.overwritten,
+    ) orelse return error.ContractFunctionMissing} });
+    const optimized_overwritten = IrStats.profile(.{ .functions = &.{findFunction(
+        differential.optimized_ir,
+        requirement.overwritten,
+    ) orelse return error.ContractFunctionMissing} });
+    const optimized_observed = IrStats.profile(.{ .functions = &.{findFunction(
+        differential.optimized_ir,
+        requirement.observed,
+    ) orelse return error.ContractFunctionMissing} });
+    if (raw_overwritten.reference_stores < 2 or
+        optimized_overwritten.reference_stores >= raw_overwritten.reference_stores)
+        return error.ExpectedReferenceDeadStoreElisionMissing;
+    if (optimized_observed.reference_loads == 0 or optimized_observed.reference_stores < 2)
+        return error.PossiblyAliasingReferenceObservationRemoved;
+    return .{ .reference_memory = .{
+        .overwritten = requirement.overwritten,
+        .observed = requirement.observed,
+        .raw_overwritten_stores = raw_overwritten.reference_stores,
+        .optimized_overwritten_stores = optimized_overwritten.reference_stores,
+        .optimized_observed_loads = optimized_observed.reference_loads,
+        .optimized_observed_stores = optimized_observed.reference_stores,
+    } };
+}
+
+fn verifyViewMemory(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    if (raw.other_loads == 0 or optimized.other_loads >= raw.other_loads or
+        raw.other_stores < 2 or optimized.other_stores >= raw.other_stores)
+        return error.ExpectedViewMemoryCoalescingMissing;
+    if (optimized.other_stores == 0 or optimized.safety_guards == 0)
+        return error.ObservableViewMutationOrBoundsGuardRemoved;
+    return .{ .view_memory = .{
+        .function = function_name,
+        .raw_loads = raw.other_loads,
+        .optimized_loads = optimized.other_loads,
+        .raw_stores = raw.other_stores,
+        .optimized_stores = optimized.other_stores,
+        .optimized_guards = optimized.safety_guards,
+    } };
+}
+
+fn verifyOwningCollection(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    if (raw.other_loads < 2 or optimized.other_loads != 0)
+        return error.ExpectedOwningCollectionForwardingMissing;
+    if (optimized.other_stores != 1 or optimized.safety_guards != 0)
+        return error.OwningCollectionMutationContractChanged;
+    return .{ .owning_collection = .{
+        .function = function_name,
+        .raw_loads = raw.other_loads,
+        .optimized_loads = optimized.other_loads,
+        .optimized_stores = optimized.other_stores,
+        .optimized_guards = optimized.safety_guards,
+    } };
+}
+
+pub fn verifyMemoryCounter(
+    function_name: []const u8,
+    enabled: Differential.Result,
+    disabled: Differential.Result,
+) !MemoryCounter {
+    const enabled_profile = IrStats.profile(.{ .functions = &.{findFunction(
+        enabled.optimized_ir,
+        function_name,
+    ) orelse return error.ContractFunctionMissing} });
+    const disabled_profile = IrStats.profile(.{ .functions = &.{findFunction(
+        disabled.optimized_ir,
+        function_name,
+    ) orelse return error.ContractFunctionMissing} });
+    const enabled_operations = enabled_profile.other_loads + enabled_profile.other_stores;
+    const disabled_operations = disabled_profile.other_loads + disabled_profile.other_stores;
+    if (enabled_operations >= disabled_operations) return error.ExpectedMemoryCounterEvidenceMissing;
+    if (enabled_profile.safety_guards > disabled_profile.safety_guards)
+        return error.MemoryOptimizationIntroducedSafetyGuard;
+    return .{
+        .function = function_name,
+        .enabled_operations = enabled_operations,
+        .disabled_operations = disabled_operations,
+        .enabled_guards = enabled_profile.safety_guards,
+        .disabled_guards = disabled_profile.safety_guards,
     };
 }
 

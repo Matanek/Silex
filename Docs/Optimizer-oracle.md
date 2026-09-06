@@ -13,8 +13,11 @@ workspace closure, every portable and machine IR operation, Release pass
 descriptors, coverage verdicts, interaction seeds, metamorphic axes, sealed
 qualification projects, and the LLVM technique-transposition map.
 Real-consumer hot functions have source hashes and directional structural
-budgets; the initial Boids `steering` budget covers its field and collection
-loads, checks, calls, branches, stack residence, frame size, and SIMD pairs.
+budgets. Alongside the initial Boids `steering` sentinel, the registry covers
+the Physics contact and preparation kernels and two independent font-raster
+functions. These budgets measure field and collection loads, checks, calls,
+branches, stack residence, frame size, and SIMD pairs without executing or
+timing the complete consumer.
 
 The registry audit fails when an IR operation, terminator, named type, machine
 operation, or Release pass is missing or duplicated. An `equivalent` coverage
@@ -48,7 +51,12 @@ LLVM commands additionally refuse a different Clang version or host triple.
 a warm hit, then compares executable hashes and outputs. `metamorphic` executes
 equivalent source-shape pairs through the interpreter and both native modes;
 its report records structural equivalence or a named gap without hiding the
-semantic result.
+semantic result. Fixed qualification cases also carry deterministic structural
+contracts for aggregate scalarization, reference dead-store elimination,
+mutable-view forwarding, and owning-list copy-on-write. The qualification gate
+reruns the reference and view contracts with `reference_memory_elision`
+disabled, proving that their measured memory reduction is attributable to the
+registered pass while negative alias observations remain intact.
 
 Profile a real package consumer from the root of its closed Spec worktree so
 the command resolves that worktree's package links:
@@ -113,6 +121,16 @@ exact load from the surviving store.
 Any access through another view is treated as possibly aliasing and ends the
 proof. The oracle counts checks attached to collection replacement and element
 references as safety guards, not only checks attached to collection loads.
+Generated qualification also combines a nested scalar aggregate, an owning
+copy-on-write snapshot, a temporary mutable view, a loop, and a branch in one
+program. This interaction case is compiled and executed through the same
+semantic and structural matrix as the sealed corpus.
+
+Hot-function analysis closes the selected function over its exact transitive
+program scope before Release optimization and native lowering. Function
+identities therefore remain stable for direct callees such as scalar math
+helpers, while unrelated unreachable generic or backend variants cannot affect
+the selected budget.
 
 Within one block, a successful checked load from an unchanged collection proves
 that the collection is non-empty. Release optimization uses that fact for a

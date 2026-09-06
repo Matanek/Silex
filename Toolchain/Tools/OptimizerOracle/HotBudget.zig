@@ -38,14 +38,18 @@ pub fn run(
         }
         return err;
     };
-    const raw_function = findIrFunction(compilation.ir, function_name) orelse return error.ContractFunctionMissing;
-    var hot_program = compilation.ir;
-    hot_program.functions = &.{raw_function};
-    const optimized = Silex.ReleaseOptimizer.optimizeWithOptions(allocator, hot_program, .{
+    const root = findIrFunctionId(compilation.ir, function_name) orelse return error.ContractFunctionMissing;
+    // Keep the selected function's transitive closure intact while optimizing.
+    // Direct-call operands are function indices, so extracting one caller
+    // invalidates retained calls. Optimizing the complete parsed package graph
+    // is also incorrect because it contains deliberately unreachable generic
+    // and backend variants that executable closure normally removes.
+    const scope = try Silex.ProgramScope.close(allocator, compilation.ir, &.{root});
+    const optimized = Silex.ReleaseOptimizer.optimizeWithOptions(allocator, scope.program, .{
         .verify_each_pass = true,
     }) catch |err| {
         try Report.line(io, allocator, "hot-budget optimizer rejected the selected function: {t}", .{err});
-        try diagnoseVerifierFailure(io, allocator, hot_program);
+        try diagnoseVerifierFailure(io, allocator, scope.program);
         return err;
     };
     const function = findIrFunction(optimized, function_name) orelse return error.ContractFunctionMissing;
@@ -207,6 +211,13 @@ fn profileMachineFunction(function: Silex.Arm64Machine.Function) MachineProfile 
 
 fn findIrFunction(program: Silex.Ir.Program, name: []const u8) ?Silex.Ir.Function {
     for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) return function;
+    return null;
+}
+
+fn findIrFunctionId(program: Silex.Ir.Program, name: []const u8) ?Silex.Ir.FunctionId {
+    for (program.functions, 0..) |function, function_id| {
+        if (std.mem.eql(u8, function.name, name)) return function_id;
+    }
     return null;
 }
 

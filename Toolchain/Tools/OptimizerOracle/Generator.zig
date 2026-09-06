@@ -10,6 +10,13 @@ pub const StructuralContract = union(enum) {
     reduces_blocks: []const u8,
     removes_collection_bounds: []const u8,
     scalarizes_dense_loop: []const u8,
+    scalarizes_aggregate: []const u8,
+    elides_reference_memory: struct {
+        overwritten: []const u8,
+        observed: []const u8,
+    },
+    coalesces_view_memory: []const u8,
+    forwards_owning_collection: []const u8,
     simplifies_ssa_values: []const u8,
     promotes_critical_edge: []const u8,
     coalesces_forwarded_phi: []const u8,
@@ -53,6 +60,29 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{
+        .name = "AggregateScalarization.sx",
+        .concern = "value aggregate copies, field updates and returns reduce to scalar leaves",
+        .contract = .{ .scalarizes_aggregate = "update" },
+    },
+    .{
+        .name = "ReferenceDeadStores.sx",
+        .concern = "exact reference stores are eliminated while a possibly aliasing observation remains",
+        .contract = .{ .elides_reference_memory = .{
+            .overwritten = "overwrite",
+            .observed = "observed",
+        } },
+    },
+    .{
+        .name = "MutableViewMemory.sx",
+        .concern = "exact mutable-view stores and loads coalesce without removing the surviving bounds guard",
+        .contract = .{ .coalesces_view_memory = "rewrite" },
+    },
+    .{
+        .name = "OwningCollectionCopy.sx",
+        .concern = "known owning-list values forward while copy-on-write mutation remains explicit",
+        .contract = .{ .forwards_owning_collection = "main" },
+    },
     .{
         .name = "Regressions/AggregateFieldStores.sx",
         .concern = "scalar field reads and writes preserve snapshots, alias mutations across calls and loops, and owning collection copies",

@@ -4,6 +4,7 @@ pub const Arm64Machine = @import("Arm64/Machine.zig");
 pub const Interpreter = @import("Interpreter.zig");
 pub const Ir = @import("Ir.zig");
 pub const Project = @import("Project.zig");
+pub const ProgramScope = @import("ProgramScope.zig");
 pub const ReleaseOptimizer = @import("Optimize/Release.zig");
 pub const ReleaseVerifier = @import("Optimize/Verifier.zig");
 pub const Slp = @import("Optimize/Slp.zig");

@@ -14,8 +14,9 @@ const Generator = struct {
 };
 
 /// Generate a deterministic cross-feature scenario. It deliberately combines
-/// a reused short-circuit result, collection stores, and text output so one
-/// native execution checks several optimizer/backend boundaries together.
+/// a reused short-circuit result, aggregate snapshots, owning copy-on-write,
+/// mutable views, a direct call, a loop, and text output so one native
+/// execution checks several optimizer/backend boundaries together.
 pub fn source(allocator: std.mem.Allocator, seed: u64) ![]u8 {
     var generator: Generator = .{ .state = seed };
     const first = generator.value();
@@ -26,15 +27,27 @@ pub fn source(allocator: std.mem.Allocator, seed: u64) ![]u8 {
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.print(
+        \\struct Pair {{ var x:int; var y:int }}
+        \\func adjust(values:&Pair[..], index:int, replacement:int) int {{
+        \\    let snapshot = copy values[index]
+        \\    values[index].x = replacement
+        \\    return snapshot.x + values[index].x + snapshot.y
+        \\}}
         \\func scenario(a:bool, b:bool, c:bool, offset:int) {{
-        \\    var values:int[] = [{d}, {d}, {d}]
+        \\    var values:Pair[] = [
+        \\        Pair(x:{d}, y:1), Pair(x:{d}, y:2), Pair(x:{d}, y:3)
+        \\    ]
+        \\    let original = values
         \\    let accepted = a && b && c
-        \\    values[{d}] = {d} + offset
-        \\    if accepted {{ print("accepted:", values[{d}]) }}
-        \\    else {{ print("rejected:", values[{d}]) }}
+        \\    let score = adjust(&values[0:values.count()], {d}, {d} + offset)
+        \\    var total = 0
+        \\    var item = 0
+        \\    while item < values.count() {{ total += values[item].y; item++ }}
+        \\    if accepted {{ print("accepted:", score) }}
+        \\    else {{ print("rejected:", score) }}
         \\    if accepted {{ print("draw:text") }}
         \\    else {{ print("hide:text") }}
-        \\    print(values[0], " ", values[1], " ", values[2])
+        \\    print(original[{d}].x, "->", values[{d}].x, " total=", total)
         \\}}
         \\func main() {{
         \\    scenario(true, true, true, {d})
@@ -64,6 +77,9 @@ test "native scenarios are deterministic and combine regression families" {
     defer std.testing.allocator.free(repeated);
     try std.testing.expectEqualStrings(generated, repeated);
     try std.testing.expect(std.mem.indexOf(u8, generated, "a && b && c") != null);
-    try std.testing.expect(std.mem.indexOf(u8, generated, "values[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, generated, "struct Pair") != null);
+    try std.testing.expect(std.mem.indexOf(u8, generated, "let original = values") != null);
+    try std.testing.expect(std.mem.indexOf(u8, generated, "adjust(&values[0:values.count()]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, generated, "while item < values.count()") != null);
     try std.testing.expect(std.mem.indexOf(u8, generated, "draw:text") != null);
 }

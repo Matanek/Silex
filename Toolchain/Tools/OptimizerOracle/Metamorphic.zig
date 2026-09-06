@@ -61,6 +61,29 @@ pub const pairs = [_]Pair{
         \\}
         ,
     },
+    .{
+        .id = "scalar-or-aggregate-branch",
+        .axis = "scalar-or-aggregate",
+        .left =
+        \\func main() {
+        \\    let positive = true
+        \\    var x = 3
+        \\    var y = 5
+        \\    if positive { x += 2; y += x } else { x -= 2; y -= x }
+        \\    print(x + y)
+        \\}
+        ,
+        .right =
+        \\struct Pair { var x:int; var y:int }
+        \\func main() {
+        \\    let positive = true
+        \\    var pair = Pair(x:3, y:5)
+        \\    if positive { pair.x += 2; pair.y += pair.x }
+        \\    else { pair.x -= 2; pair.y -= pair.x }
+        \\    print(pair.x + pair.y)
+        \\}
+        ,
+    },
 };
 
 test "metamorphic sources and axes remain deterministic" {

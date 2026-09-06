@@ -171,9 +171,9 @@
     {"id": "scalar-floating-point", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["FloatArithmetic.sx", "Regressions/FloatSsaDiamond.sx", "Regressions/FloatSsaLoop.sx", "Regressions/SsaCriticalEdge.sx", "Regressions/SsaForwardedPhiLoop.sx", "Regressions/SsaDistinctPhiLoop.sx"]},
     {"id": "branches-diamonds-and-phi", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerControlFlow.sx", "Regressions/BooleanSharedChain.sx", "Regressions/SsaValueFacts.sx", "Regressions/SsaCriticalEdge.sx", "Regressions/SsaForwardedPhiLoop.sx", "Regressions/SsaDistinctPhiLoop.sx"]},
     {"id": "loops-inductions-and-ranges", "state": "gap", "owner_part": "silex-llvm-opt-05", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["BranchingLoop.sx", "Regressions/BoundedCollectionLoop.sx"]},
-    {"id": "references-and-alias", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["ReferenceAliasing.sx", "ReferenceDeadStores.sx", "Regressions/CheckedMemoryLanes.sx"]},
-    {"id": "aggregates-copies-and-returns", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["AggregateScalarization.sx", "NestedAggregateWidths.sx", "Regressions/AggregateFieldStores.sx", "Regressions/AggregateControlFlow.sx"]},
-    {"id": "collections-ownership-and-bounds", "state": "gap", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["ReadonlyViewMemory.sx", "MutableViewMemory.sx", "OwningCollectionCopy.sx", "Regressions/ArrayStorageAccess.sx", "Regressions/DenseScalarLoop.sx"]},
+    {"id": "references-and-alias", "state": "equivalent", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": true, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["ReferenceAliasing.sx", "ReferenceDeadStores.sx:overwrite/observed structural contracts", "Regressions/CheckedMemoryLanes.sx", "reference_memory_elision pass-disabled counterproof"]},
+    {"id": "aggregates-copies-and-returns", "state": "equivalent", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": true, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["AggregateScalarization.sx:update structural contract", "NestedAggregateWidths.sx", "Regressions/AggregateFieldStores.sx", "Regressions/AggregateControlFlow.sx", "scalar-or-aggregate-branch metamorphic pair"]},
+    {"id": "collections-ownership-and-bounds", "state": "equivalent", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": true, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["ReadonlyViewMemory.sx", "MutableViewMemory.sx:rewrite structural contract", "OwningCollectionCopy.sx:main structural contract", "Regressions/ArrayStorageAccess.sx", "Regressions/DenseScalarLoop.sx", "generated aggregate+COW+mutable-view interaction"]},
     {"id": "calls-closure-and-inlining", "state": "gap", "owner_part": "silex-llvm-opt-04", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["IntegerArithmetic.sx", "Regressions/DenseScalarLoop.sx"]},
     {"id": "errors-and-overflow", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Differential.zig mutation and failure tests", "Regressions/IntegerRangeChecks.sx"]},
     {"id": "simd-and-vectorization", "state": "gap", "owner_part": "silex-llvm-opt-05", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/FloatLaneXYZ.sx", "Regressions/BoidsKernel.sx"]},
@@ -202,6 +202,282 @@
         {"metric": "machine_frame_bytes", "direction": "max", "limit": 1056, "observed": 1056, "unit": "bytes"},
         {"metric": "machine_simd_xy_pairs", "direction": "min", "limit": 7, "observed": 7, "unit": "pairs"}
       ]
+    },
+    {
+      "id": "physics-preparation-kernel-macos-arm64",
+      "repository": "Packages/GFX.Physics",
+      "revision": "f1a10061a377c8fc489e47d39245c86d7907aaf9",
+      "source": "Benchmarks/PreparationKernel2D.sx",
+      "source_sha256": "9b358e4f91f971203302a7d8c63f271b765485dd8a65e85d5386a0fb6c552088",
+      "function": "GFX.Physics.Benchmarks.PreparationKernel2D.prepare",
+      "state": "candidate",
+      "owner_part": "silex-llvm-opt-03",
+      "evidence": "zig build --build-file Silex/Toolchain/build.zig optimizer-oracle -- hot-budget Packages/GFX.Physics/Benchmarks/PreparationKernel2D.sx GFX.Physics.Benchmarks.PreparationKernel2D.prepare",
+      "budgets": [
+        {
+          "metric": "ir_field_loads",
+          "direction": "max",
+          "limit": 56,
+          "observed": 56,
+          "unit": "instructions"
+        },
+        {
+          "metric": "ir_checked_operations",
+          "direction": "max",
+          "limit": 59,
+          "observed": 59,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_collection_loads",
+          "direction": "max",
+          "limit": 0,
+          "observed": 0,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_calls",
+          "direction": "max",
+          "limit": 0,
+          "observed": 0,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_branches",
+          "direction": "max",
+          "limit": 17,
+          "observed": 17,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_stack_slots",
+          "direction": "max",
+          "limit": 50,
+          "observed": 50,
+          "unit": "slots"
+        },
+        {
+          "metric": "machine_frame_bytes",
+          "direction": "max",
+          "limit": 1936,
+          "observed": 1936,
+          "unit": "bytes"
+        },
+        {
+          "metric": "machine_simd_xy_pairs",
+          "direction": "min",
+          "limit": 3,
+          "observed": 3,
+          "unit": "pairs"
+        }
+      ]
+    },
+    {
+      "id": "physics-contact-kernel-macos-arm64",
+      "repository": "Packages/GFX.Physics",
+      "revision": "f1a10061a377c8fc489e47d39245c86d7907aaf9",
+      "source": "Benchmarks/ContactKernel2D.sx",
+      "source_sha256": "a53e717faa68d7963390ce9df582a87f88ff93846bbd28fb889893343ee5f797",
+      "function": "GFX.Physics.Benchmarks.ContactKernel2D.solve_contact",
+      "state": "candidate",
+      "owner_part": "silex-llvm-opt-03",
+      "evidence": "zig build --build-file Silex/Toolchain/build.zig optimizer-oracle -- hot-budget Packages/GFX.Physics/Benchmarks/ContactKernel2D.sx GFX.Physics.Benchmarks.ContactKernel2D.solve_contact",
+      "budgets": [
+        {
+          "metric": "ir_field_loads",
+          "direction": "max",
+          "limit": 30,
+          "observed": 30,
+          "unit": "instructions"
+        },
+        {
+          "metric": "ir_checked_operations",
+          "direction": "max",
+          "limit": 115,
+          "observed": 115,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_collection_loads",
+          "direction": "max",
+          "limit": 0,
+          "observed": 0,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_calls",
+          "direction": "max",
+          "limit": 0,
+          "observed": 0,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_branches",
+          "direction": "max",
+          "limit": 4,
+          "observed": 4,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_stack_slots",
+          "direction": "max",
+          "limit": 24,
+          "observed": 24,
+          "unit": "slots"
+        },
+        {
+          "metric": "machine_frame_bytes",
+          "direction": "max",
+          "limit": 2112,
+          "observed": 2112,
+          "unit": "bytes"
+        },
+        {
+          "metric": "machine_simd_xy_pairs",
+          "direction": "min",
+          "limit": 0,
+          "observed": 0,
+          "unit": "pairs"
+        }
+      ]
+    },
+    {
+      "id": "font-raster-image-signature-macos-arm64",
+      "repository": "Silex-Benchmarks",
+      "revision": "90680ca16020bbd027c3e2a7adee6c6a84b4871e",
+      "source": "Sources/FontRasterization/Main.sx",
+      "source_sha256": "2b1747965cc5d9fe33d0d43a4adabaa964a5f71a78e76d6d5e4afda7b87cddec",
+      "function": "FontRasterization.Main.image_signature",
+      "state": "candidate",
+      "owner_part": "silex-llvm-opt-03",
+      "evidence": "zig build --build-file Silex/Toolchain/build.zig optimizer-oracle -- hot-budget Silex-Benchmarks/Sources/FontRasterization/Main.sx FontRasterization.Main.image_signature",
+      "budgets": [
+        {
+          "metric": "ir_field_loads",
+          "direction": "max",
+          "limit": 2,
+          "observed": 2,
+          "unit": "instructions"
+        },
+        {
+          "metric": "ir_checked_operations",
+          "direction": "max",
+          "limit": 8,
+          "observed": 8,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_collection_loads",
+          "direction": "max",
+          "limit": 0,
+          "observed": 0,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_calls",
+          "direction": "max",
+          "limit": 1,
+          "observed": 1,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_branches",
+          "direction": "max",
+          "limit": 5,
+          "observed": 5,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_stack_slots",
+          "direction": "max",
+          "limit": 36,
+          "observed": 36,
+          "unit": "slots"
+        },
+        {
+          "metric": "machine_frame_bytes",
+          "direction": "max",
+          "limit": 288,
+          "observed": 288,
+          "unit": "bytes"
+        },
+        {
+          "metric": "machine_simd_xy_pairs",
+          "direction": "min",
+          "limit": 0,
+          "observed": 0,
+          "unit": "pairs"
+        }
+      ]
+    },
+    {
+      "id": "font-direct-glyph-result-macos-arm64",
+      "repository": "Silex-Benchmarks",
+      "revision": "90680ca16020bbd027c3e2a7adee6c6a84b4871e",
+      "source": "Sources/FontRasterization/Direct.sx",
+      "source_sha256": "c8864fe2efc561f113e52ebb6236a53f854c8abe6a15f13fd8ed1bec7e0e8cad",
+      "function": "FontRasterization.Direct.require_glyph",
+      "state": "candidate",
+      "owner_part": "silex-llvm-opt-03",
+      "evidence": "zig build --build-file Silex/Toolchain/build.zig optimizer-oracle -- hot-budget Silex-Benchmarks/Sources/FontRasterization/Direct.sx FontRasterization.Direct.require_glyph",
+      "budgets": [
+        {
+          "metric": "ir_field_loads",
+          "direction": "max",
+          "limit": 6,
+          "observed": 6,
+          "unit": "instructions"
+        },
+        {
+          "metric": "ir_checked_operations",
+          "direction": "max",
+          "limit": 4,
+          "observed": 4,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_collection_loads",
+          "direction": "max",
+          "limit": 0,
+          "observed": 0,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_calls",
+          "direction": "max",
+          "limit": 0,
+          "observed": 0,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_branches",
+          "direction": "max",
+          "limit": 12,
+          "observed": 12,
+          "unit": "instructions"
+        },
+        {
+          "metric": "machine_stack_slots",
+          "direction": "max",
+          "limit": 130,
+          "observed": 130,
+          "unit": "slots"
+        },
+        {
+          "metric": "machine_frame_bytes",
+          "direction": "max",
+          "limit": 1040,
+          "observed": 1040,
+          "unit": "bytes"
+        },
+        {
+          "metric": "machine_simd_xy_pairs",
+          "direction": "min",
+          "limit": 0,
+          "observed": 0,
+          "unit": "pairs"
+        }
+      ]
     }
   ],
   "interactions": {
@@ -221,8 +497,8 @@
     {"family": "instcombine-and-simplifycfg", "verdict": "gap", "owner_part": "silex-llvm-opt-02", "source": "llvm/lib/Transforms/InstCombine and llvm/lib/Transforms/Scalar/SimplifyCFGPass.cpp", "proof": "scalar and CFG corpus with structural budgets"},
     {"family": "mem2reg-sroa-and-early-cse", "verdict": "gap", "owner_part": "silex-llvm-opt-02", "source": "llvm/lib/Transforms/Utils/PromoteMemoryToRegister.cpp and llvm/lib/Transforms/Scalar/SROA.cpp", "proof": "SSA, PHI and aggregate promotion matrix"},
     {"family": "lazy-value-info-and-correlated-propagation", "verdict": "gap", "owner_part": "silex-llvm-opt-02", "source": "llvm/lib/Analysis/LazyValueInfo.cpp", "proof": "range, signedness and safety-check corpus"},
-    {"family": "basic-aa-memoryssa-and-dse", "verdict": "gap", "owner_part": "silex-llvm-opt-03", "source": "llvm/lib/Analysis/BasicAliasAnalysis.cpp and llvm/lib/Analysis/MemorySSA.cpp", "proof": "alias mutation and dead-store matrix"},
-    {"family": "global-value-numbering", "verdict": "gap", "owner_part": "silex-llvm-opt-03", "source": "llvm/lib/Transforms/Scalar/NewGVN.cpp", "proof": "load and expression equivalence across control flow"},
+    {"family": "basic-aa-memoryssa-and-dse", "verdict": "adapted", "owner_part": "silex-llvm-opt-03", "source": "llvm/lib/Analysis/BasicAliasAnalysis.cpp and llvm/lib/Analysis/MemorySSA.cpp", "proof": "exact-address lineage removes overwritten stores and forwards post-store loads; distinct roots, calls, unknown effects, and block boundaries conservatively invalidate the proof; pass-disabled contracts cover references, mutable views, and owning collections"},
+    {"family": "global-value-numbering", "verdict": "adapted", "owner_part": "silex-llvm-opt-03", "source": "llvm/lib/Transforms/Scalar/NewGVN.cpp", "proof": "typed scalar aggregate leaves and exact collection/reference values are reused only while their snapshot lineage remains current; joins, escapes, mutations, calls, and aliasing observations end equivalence; the LLVM advisor reports no residual Part 03 memory or aggregate opportunity"},
     {"family": "ipsccp-attributor-and-function-attrs", "verdict": "gap", "owner_part": "silex-llvm-opt-04", "source": "llvm/lib/Transforms/IPO/SCCP.cpp and llvm/lib/Transforms/IPO/Attributor.cpp", "proof": "infallibility, effect and call-summary matrix"},
     {"family": "inline-cost-and-cgscc", "verdict": "gap", "owner_part": "silex-llvm-opt-04", "source": "llvm/lib/Analysis/InlineCost.cpp and llvm/lib/Transforms/IPO/Inliner.cpp", "proof": "metamorphic helper and package call variants"},
     {"family": "loop-simplify-indvars-licm-and-rotate", "verdict": "gap", "owner_part": "silex-llvm-opt-05", "source": "llvm/lib/Transforms/Scalar/LoopPassManager.cpp", "proof": "loop canonicalization, range and invariant motion corpus"},

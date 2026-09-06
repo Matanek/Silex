@@ -221,6 +221,20 @@ fn qualifyNative(
                 without,
             );
         }
+        var memory_counter: ?Qualification.MemoryCounter = null;
+        const memory_function: ?[]const u8 = switch (entry.contract) {
+            .elides_reference_memory => |requirement| requirement.overwritten,
+            .coalesces_view_memory => |function_name| function_name,
+            .forwards_owning_collection => |function_name| function_name,
+            else => null,
+        };
+        if (memory_function) |function_name| {
+            const without = try Differential.verifyWithOptions(allocator, source, .{
+                .verify_each_pass = true,
+                .disabled = .reference_memory_elision,
+            });
+            memory_counter = try Qualification.verifyMemoryCounter(function_name, differential, without);
+        }
         const stem = std.fs.path.stem(entry.name);
         const artifact_stem = try std.fmt.allocPrint(
             allocator,
@@ -288,6 +302,20 @@ fn qualifyNative(
                     counter.enabled_proven_checks,
                     counter.disabled_unproven_checks,
                     counter.enabled_unproven_checks,
+                },
+            );
+        }
+        if (memory_counter) |counter| {
+            try Report.line(
+                io,
+                allocator,
+                "    counter: disabling reference_memory_elision retains {d} memory operation(s) versus {d} in {s}; guards {d}/{d}",
+                .{
+                    counter.disabled_operations,
+                    counter.enabled_operations,
+                    counter.function,
+                    counter.disabled_guards,
+                    counter.enabled_guards,
                 },
             );
         }
@@ -374,6 +402,50 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 scalar.optimized_collection_loads,
                 scalar.raw_calls,
                 scalar.optimized_calls,
+            },
+        ),
+        .aggregate_scalarization => |aggregate| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} value-aggregate operations {d} -> {d}",
+            .{ aggregate.function, aggregate.raw_operations, aggregate.optimized_operations },
+        ),
+        .reference_memory => |memory| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} reference stores {d} -> {d}; {s} retains {d} load(s) and {d} store(s)",
+            .{
+                memory.overwritten,
+                memory.raw_overwritten_stores,
+                memory.optimized_overwritten_stores,
+                memory.observed,
+                memory.optimized_observed_loads,
+                memory.optimized_observed_stores,
+            },
+        ),
+        .view_memory => |memory| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} view loads {d} -> {d}, stores {d} -> {d}, {d} guard(s) retained",
+            .{
+                memory.function,
+                memory.raw_loads,
+                memory.optimized_loads,
+                memory.raw_stores,
+                memory.optimized_stores,
+                memory.optimized_guards,
+            },
+        ),
+        .owning_collection => |memory| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} owning loads {d} -> {d}, {d} mutation(s) and {d} guard(s) retained",
+            .{
+                memory.function,
+                memory.raw_loads,
+                memory.optimized_loads,
+                memory.optimized_stores,
+                memory.optimized_guards,
             },
         ),
         .ssa_values => |ssa| try Report.line(

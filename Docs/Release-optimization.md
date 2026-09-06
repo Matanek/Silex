@@ -96,6 +96,14 @@ block are removed when no remaining load observes them and the local is never
 addressed. The last store remains available to successor blocks;
 redefined sources and addressed locals are not forwarded.
 
+The registered `reference_memory_elision` pass tracks explicit same-block
+address derivations. It removes an exactly overwritten reference or
+mutable-view store and forwards an exact load after the surviving store. A
+read through another root is conservatively considered possibly aliasing;
+calls, unknown memory effects, and block boundaries invalidate both proofs.
+The pass never removes the final observable mutation or an unproved bounds
+failure.
+
 For flat numeric or boolean value structures, a reconstructed reference or
 mutable-view store writes only the changed fields when the other fields come
 from a still-current snapshot of that exact destination. Calls, unknown
