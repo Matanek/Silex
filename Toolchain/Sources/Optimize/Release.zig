@@ -1168,6 +1168,7 @@ fn simplifySsaFunctionOnce(allocator: Allocator, function: Ir.Function) !Ir.Func
     result.blocks = try removeDeadConstants(allocator, result);
     result.blocks = try bypassEmptyJumps(allocator, result.blocks);
     result.blocks = try removeUnreachableBlocks(allocator, result.blocks);
+    result.blocks = try mergeLinearBlocks(allocator, result.blocks);
     return result;
 }
 
@@ -1248,6 +1249,89 @@ fn bypassEmptyJumps(allocator: Allocator, blocks: []const Ir.Block) ![]const Ir.
         else => block.terminator,
     };
     return result;
+}
+
+fn mergeLinearBlocks(allocator: Allocator, initial: []const Ir.Block) ![]const Ir.Block {
+    var current = initial;
+    while (current.len > 1) {
+        const predecessors = try allocator.alloc(usize, current.len);
+        @memset(predecessors, 0);
+        for (current) |block| switch (block.terminator) {
+            .jump => |target| predecessors[target] += 1,
+            .branch => |branch| {
+                predecessors[branch.then_block] += 1;
+                if (branch.else_block != branch.then_block) predecessors[branch.else_block] += 1;
+            },
+            else => {},
+        };
+
+        var source_id: ?Ir.BlockId = null;
+        var target_id: Ir.BlockId = undefined;
+        for (current, 0..) |block, block_id| {
+            const target = switch (block.terminator) {
+                .jump => |value| value,
+                else => continue,
+            };
+            if (target == block_id or target == 0 or predecessors[target] != 1) continue;
+            if (terminatorTargets(current[target].terminator, block_id)) continue;
+            if (definitionsOverlap(block.instructions, current[target].instructions)) continue;
+            source_id = block_id;
+            target_id = target;
+            break;
+        }
+        const source = source_id orelse return current;
+
+        const remap = try allocator.alloc(Ir.BlockId, current.len);
+        var next_id: Ir.BlockId = 0;
+        for (0..current.len) |old| {
+            if (old == target_id) continue;
+            remap[old] = next_id;
+            next_id += 1;
+        }
+        remap[target_id] = remap[source];
+
+        const merged = try allocator.alloc(Ir.Block, current.len - 1);
+        var next: usize = 0;
+        for (current, 0..) |block, old| {
+            if (old == target_id) continue;
+            if (old == source) {
+                var instructions: std.ArrayList(Ir.Instruction) = .empty;
+                try instructions.appendSlice(allocator, block.instructions);
+                try instructions.appendSlice(allocator, current[target_id].instructions);
+                merged[next] = .{
+                    .instructions = try instructions.toOwnedSlice(allocator),
+                    .terminator = remapTerminator(current[target_id].terminator, remap),
+                };
+            } else {
+                merged[next] = .{
+                    .instructions = block.instructions,
+                    .terminator = remapTerminator(block.terminator, remap),
+                };
+            }
+            next += 1;
+        }
+        current = merged;
+    }
+    return current;
+}
+
+fn terminatorTargets(terminator: Ir.Terminator, target: Ir.BlockId) bool {
+    return switch (terminator) {
+        .jump => |destination| destination == target,
+        .branch => |branch| branch.then_block == target or branch.else_block == target,
+        else => false,
+    };
+}
+
+fn definitionsOverlap(left: []const Ir.Instruction, right: []const Ir.Instruction) bool {
+    for (left) |left_instruction| {
+        const left_result = instructionResult(left_instruction) orelse continue;
+        for (right) |right_instruction| {
+            const right_result = instructionResult(right_instruction) orelse continue;
+            if (left_result == right_result) return true;
+        }
+    }
+    return false;
 }
 
 fn resolveEmptyJump(blocks: []const Ir.Block, initial: Ir.BlockId) Ir.BlockId {
@@ -2769,6 +2853,32 @@ test "SSA value simplification propagates constants and copies across blocks" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "add"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "branch"));
+}
+
+test "SSA value simplification merges linear blocks after propagation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const blocks = [_]Ir.Block{
+        .{
+            .instructions = &.{.{ .constant_int = .{ .result = 0, .bits = 7 } }},
+            .terminator = .{ .jump = 1 },
+        },
+        .{
+            .instructions = &.{.{ .print = .{ .value = 0, .newline = true } }},
+            .terminator = .return_void,
+        },
+    };
+    const optimized = try simplifySsaValues(allocator, .{ .functions = &.{.{
+        .name = "linear",
+        .parameter_types = &.{},
+        .return_type = .void,
+        .value_types = &.{.int},
+        .blocks = &blocks,
+    }} });
+    try std.testing.expectEqual(@as(usize, 1), optimized.functions[0].blocks.len);
+    try std.testing.expectEqual(@as(usize, 2), optimized.functions[0].blocks[0].instructions.len);
+    try std.testing.expectEqual(Ir.Terminator.return_void, optimized.functions[0].blocks[0].terminator);
 }
 
 test "SSA value simplification accepts only unanimous phi constants" {
