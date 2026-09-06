@@ -1,0 +1,22 @@
+func shifted(flag:bool) uint32 {
+    var value = 0x12345678 as uint32
+    var count = 5 as uint8
+    var enabled = false
+    if flag {
+        value = 0x12345678 as uint32
+        count = 5 as uint8
+        enabled = true
+    } else {
+        value = 0x12345678 as uint32
+        count = 5 as uint8
+        enabled = true
+    }
+    if enabled {
+        return (value << count) ^ (value >> (7 as uint8))
+    }
+    return 0 as uint32
+}
+
+func main() {
+    print(shifted(true))
+}

@@ -2225,6 +2225,9 @@ fn foldUnary(function: Ir.Function, value: Ir.Instruction.Unary, constants: []co
 
 fn foldBinary(function: Ir.Function, value: Ir.Instruction.Binary, constants: []const Constant) ?Ir.Instruction {
     const operand_type = function.value_types[value.left];
+    if (value.operator == .shift_left or value.operator == .shift_right) {
+        return foldIntegerShift(function, value, constants);
+    }
     if (operand_type == .float32) {
         const left = switch (constants[value.left]) {
             .float32 => |bits| bits,
@@ -2262,6 +2265,32 @@ fn foldBinary(function: Ir.Function, value: Ir.Instruction.Binary, constants: []
     }
     const bits = foldInteger(value.operator, operand_type, left_bits, right_bits) orelse return null;
     return .{ .constant_int = .{ .result = value.result, .bits = bits } };
+}
+
+fn foldIntegerShift(function: Ir.Function, value: Ir.Instruction.Binary, constants: []const Constant) ?Ir.Instruction {
+    const type_value = function.value_types[value.left];
+    const count_type = function.value_types[value.right];
+    if (!type_value.isInteger() or !count_type.isInteger()) return null;
+    const left = switch (constants[value.left]) {
+        .integer => |bits| masked(bits, type_value.bitWidth()),
+        else => return null,
+    };
+    const right = switch (constants[value.right]) {
+        .integer => |bits| bits,
+        else => return null,
+    };
+    const count: u64 = if (count_type.isSignedInteger()) count: {
+        const signed = signedValue(right, count_type.bitWidth());
+        if (signed < 0) return null;
+        break :count @intCast(signed);
+    } else masked(right, count_type.bitWidth());
+    if (count >= type_value.bitWidth()) return null;
+    const shift: u6 = @intCast(count);
+    const result = if (value.operator == .shift_left) left << shift else left >> shift;
+    return .{ .constant_int = .{
+        .result = value.result,
+        .bits = masked(result, type_value.bitWidth()),
+    } };
 }
 
 fn foldFloat32(value: Ir.Instruction.Binary, left_bits: u32, right_bits: u32) ?Ir.Instruction {
@@ -2854,6 +2883,40 @@ test "constant folding preserves failing integer conversions" {
         .position = position,
         .checked = true,
     }, &facts) == null);
+}
+
+test "constant shift folding honors operand and count widths" {
+    const function: Ir.Function = .{
+        .name = "constant_shift",
+        .parameter_types = &.{},
+        .return_type = .int8,
+        .value_types = &.{ .int8, .int8, .int8 },
+        .blocks = &.{},
+    };
+    const valid = [_]Constant{ .{ .integer = 0xfe }, .{ .integer = 1 } };
+    const folded = foldIntegerShift(function, .{
+        .result = 2,
+        .operator = .shift_right,
+        .left = 0,
+        .right = 1,
+    }, &valid).?;
+    try std.testing.expectEqual(@as(u64, 0x7f), folded.constant_int.bits);
+
+    const negative = [_]Constant{ .{ .integer = 0xfe }, .{ .integer = 0xff } };
+    try std.testing.expect(foldIntegerShift(function, .{
+        .result = 2,
+        .operator = .shift_left,
+        .left = 0,
+        .right = 1,
+    }, &negative) == null);
+
+    const too_wide = [_]Constant{ .{ .integer = 0xfe }, .{ .integer = 8 } };
+    try std.testing.expect(foldIntegerShift(function, .{
+        .result = 2,
+        .operator = .shift_left,
+        .left = 0,
+        .right = 1,
+    }, &too_wide) == null);
 }
 
 test "release folds finite float constants inside branching functions" {

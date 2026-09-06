@@ -96,6 +96,11 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .folds_integer_conversions = "joined" },
     },
     .{
+        .name = "Regressions/IntegerShiftConstants.sx",
+        .concern = "unanimous integer and count facts fold valid shifts while invalid counts preserve their failure",
+        .contract = .{ .simplifies_ssa_values = "shifted" },
+    },
+    .{
         .name = "Regressions/IntegerRangeChecks.sx",
         .concern = "dominating and loop-carried bounds remove only proven overflow and conversion checks",
         .contract = .{ .proves_integer_ranges = .{
