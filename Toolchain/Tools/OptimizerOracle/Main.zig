@@ -415,11 +415,12 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
         .integer_ranges => |ranges| try Report.line(
             io,
             allocator,
-            "    contract: {s}, {s}, {s}, {s} proven checks {d} -> {d}; {d} unproven check(s) retained",
+            "    contract: {s}, {s}, {s}, {s}, {s} proven checks {d} -> {d}; {d} unproven check(s) retained",
             .{
                 ranges.bounded_add,
                 ranges.bounded_subtract,
                 ranges.bounded_conversion,
+                ranges.bounded_shift,
                 ranges.bounded_loop,
                 ranges.raw_proven_checks,
                 ranges.optimized_proven_checks,

@@ -59,7 +59,9 @@ constant branches, prune unreachable blocks, and remove newly dead copies to a
 fixed point. Representable constant integer conversions contribute a constant
 of the target width, exposing dependent arithmetic to the same fixed point.
 Constant shifts fold only when their signed or unsigned count is inside the
-left operand width; invalid counts remain observable. Checked integer
+left operand width. Range analysis also marks dynamic shifts unchecked when
+the complete count interval proves that condition; ARM64 then omits the width
+guard. Invalid or unproved counts remain observable. Checked integer
 operations and conversions fold only when the result fits, while non-finite
 floating-point arithmetic and division by zero remain explicit.
 

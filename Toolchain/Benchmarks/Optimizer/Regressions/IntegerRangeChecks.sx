@@ -16,6 +16,10 @@ func widen_unsigned(value:uint8) int16 {
     return value as int16
 }
 
+func shift_bounded(value:uint32) uint32 {
+    return value << (5 as uint8)
+}
+
 func risky(value:int8) int8 {
     return value + 1
 }
@@ -41,6 +45,7 @@ func main() {
     assert(decrement(1) == 0)
     assert(decrement(0) == 0)
     assert(widen_unsigned(255) == 255)
+    assert(shift_bounded(3) == 96)
     assert(risky(1) == 2)
     assert(accumulate(0) == 0)
     assert(accumulate(4) == -2)

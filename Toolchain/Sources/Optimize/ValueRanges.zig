@@ -257,6 +257,11 @@ fn rewriteInstruction(function: Ir.Function, facts: []const Fact, instruction: I
                 unchecked.checked = false;
                 break :rewrite .{ .binary = unchecked };
             }
+            if (binary.checked and shiftCountFits(function, facts, binary)) {
+                var unchecked = binary;
+                unchecked.checked = false;
+                break :rewrite .{ .binary = unchecked };
+            }
             break :rewrite instruction;
         },
         .convert => |conversion| rewrite: {
@@ -270,6 +275,13 @@ fn rewriteInstruction(function: Ir.Function, facts: []const Fact, instruction: I
         },
         else => instruction,
     };
+}
+
+fn shiftCountFits(function: Ir.Function, facts: []const Fact, binary: Ir.Instruction.Binary) bool {
+    if (binary.operator != .shift_left and binary.operator != .shift_right) return false;
+    if (!function.value_types[binary.left].isInteger() or facts[binary.right] != .interval) return false;
+    const count = facts[binary.right].interval;
+    return count.minimum >= 0 and count.maximum < function.value_types[binary.left].bitWidth();
 }
 
 fn arithmeticFits(function: Ir.Function, facts: []const Fact, binary: Ir.Instruction.Binary) bool {
@@ -606,4 +618,27 @@ test "constant remainder bounds prove dependent arithmetic" {
     const optimized = try optimize(allocator, program);
     try std.testing.expect(optimized.functions[0].blocks[0].instructions[1].binary.checked);
     try std.testing.expect(!optimized.functions[0].blocks[0].instructions[3].binary.checked);
+}
+
+test "constant shift counts remove only proven width checks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "bounded_shift",
+        .parameter_types = &.{ .uint32, .int8 },
+        .return_type = .uint32,
+        .value_types = &.{ .uint32, .int8, .uint8, .uint32, .uint32 },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 2, .bits = 5 } },
+                .{ .binary = .{ .result = 3, .operator = .shift_left, .left = 0, .right = 2 } },
+                .{ .binary = .{ .result = 4, .operator = .shift_right, .left = 0, .right = 1 } },
+            },
+            .terminator = .{ .return_value = 3 },
+        }},
+    }} };
+    const optimized = try optimize(allocator, program);
+    try std.testing.expect(!optimized.functions[0].blocks[0].instructions[1].binary.checked);
+    try std.testing.expect(optimized.functions[0].blocks[0].instructions[2].binary.checked);
 }

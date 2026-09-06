@@ -198,7 +198,8 @@ fn binaryHasSafetyGuard(binary: Silex.Ir.Instruction.Binary, value_types: []cons
     if (!value_types[binary.left].isInteger()) return false;
     return switch (binary.operator) {
         .add, .subtract, .multiply => binary.checked,
-        .divide, .remainder, .shift_left, .shift_right => true,
+        .divide, .remainder => true,
+        .shift_left, .shift_right => binary.checked,
         else => false,
     };
 }

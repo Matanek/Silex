@@ -227,7 +227,7 @@ fn instructionCannotFail(instruction: Machine.Instruction, infallible_functions:
 fn binaryCannotFail(binary: Machine.Instruction.Binary) bool {
     if (binary.type.isFloat()) return true;
     return switch (binary.operator) {
-        .add, .subtract => !binary.checked,
+        .add, .subtract, .multiply, .shift_left, .shift_right => !binary.checked,
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal, .bit_and, .bit_xor => true,
         else => false,
     };
@@ -2957,9 +2957,11 @@ fn encodeBinary(
             try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .shift_left, .shift_right => {
-            try emitImmediate64(allocator, words, .x11, binary.type.bitWidth());
-            try words.append(allocator, compareRegisters(right, .x11));
-            try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.greater_equal), .imm19);
+            if (binary.checked) {
+                try emitImmediate64(allocator, words, .x11, binary.type.bitWidth());
+                try words.append(allocator, compareRegisters(right, .x11));
+                try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.greater_equal), .imm19);
+            }
             try words.append(allocator, if (binary.operator == .shift_left)
                 logicalShiftLeftVariable(destination, left, right)
             else
@@ -5227,6 +5229,39 @@ test "omit ARM64 overflow work for a proven unchecked multiply" {
         .left = 0,
         .right = 1,
         .type = .int,
+        .checked = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
+    try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
+}
+
+test "omit ARM64 width guard for a proven unchecked shift" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var unchecked_words: std.ArrayList(u32) = .empty;
+    var unchecked_fixups: FunctionFixups = .{};
+    var unchecked_cache: ScalarCache = .{ .enabled = false };
+    try encodeBinary(allocator, &unchecked_words, &unchecked_fixups, null, &unchecked_cache, .{
+        .result = 2,
+        .operator = .shift_left,
+        .left = 0,
+        .right = 1,
+        .type = .uint32,
+        .checked = false,
+    });
+    try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.overflow.items.len);
+
+    var checked_words: std.ArrayList(u32) = .empty;
+    var checked_fixups: FunctionFixups = .{};
+    var checked_cache: ScalarCache = .{ .enabled = false };
+    try encodeBinary(allocator, &checked_words, &checked_fixups, null, &checked_cache, .{
+        .result = 2,
+        .operator = .shift_left,
+        .left = 0,
+        .right = 1,
+        .type = .uint32,
         .checked = true,
     });
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
