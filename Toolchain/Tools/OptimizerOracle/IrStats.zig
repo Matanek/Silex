@@ -175,7 +175,12 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
             result.reference_stores += 1;
             result.other_stores += 1;
         },
-        .global_store, .collection_replace, .address_store => result.other_stores += 1,
+        .collection_replace => {
+            result.other_stores += 1;
+            result.checked_operations += 1;
+            result.safety_guards += 1;
+        },
+        .global_store, .address_store => result.other_stores += 1,
         .field_store => {
             result.other_stores += 1;
             result.value_aggregate_operations += 1;
@@ -229,7 +234,14 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction, value
             result.value_aggregate_operations += 1;
         },
         .protocol_init, .protocol_test, .protocol_extract, .enum_init, .enum_test, .enum_payload, .enum_raw => result.aggregates += 1,
-        .list_init, .collection_reference, .collection_count, .list_edit, .collection_slice, .collection_view => result.collections += 1,
+        .collection_reference => |reference| {
+            result.collections += 1;
+            if (reference.checked) {
+                result.checked_operations += 1;
+                result.safety_guards += 1;
+            }
+        },
+        .list_init, .collection_count, .list_edit, .collection_slice, .collection_view => result.collections += 1,
         .constant_str, .string_address, .string_byte_count, .string_byte_at, .string_from_bytes, .format_value, .string_concat, .string_count => result.strings += 1,
         .print => result.prints += 1,
         .assert => result.panics += 1,
@@ -340,6 +352,26 @@ test "IR profiles reference traffic separately from other memory" {
     try @import("std").testing.expectEqual(@as(usize, 1), result.reference_stores);
     try @import("std").testing.expectEqual(@as(usize, 1), result.other_loads);
     try @import("std").testing.expectEqual(@as(usize, 1), result.other_stores);
+}
+
+test "IR counts checked collection mutations and references as safety guards" {
+    const collection = Silex.Ir.Type.structure(0);
+    const program: Silex.Ir.Program = .{ .functions = &.{.{
+        .name = "mutate",
+        .parameter_types = &.{ collection, .int, .int },
+        .return_type = .void,
+        .value_types = &.{ collection, .int, .int, collection, .address },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .collection_replace = .{ .result = 3, .collection = 0, .index = 1, .replacement = 2, .position = .{ .offset = 0, .line = 1, .column = 1 } } },
+                .{ .collection_reference = .{ .result = 4, .collection = 3, .reference = null, .index = 1, .position = .{ .offset = 0, .line = 1, .column = 1 } } },
+            },
+            .terminator = .return_void,
+        }},
+    }} };
+    const result = profile(program);
+    try @import("std").testing.expectEqual(@as(usize, 2), result.checked_operations);
+    try @import("std").testing.expectEqual(@as(usize, 2), result.safety_guards);
 }
 
 test "matched safety deltas ignore checks duplicated into a caller" {

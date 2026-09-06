@@ -143,6 +143,7 @@ const FunctionEmitter = struct {
             .list_drop => {},
             .field_load => |value| try self.emitFieldLoad(value),
             .collection_load => |value| try self.emitCollectionLoad(block_id, value),
+            .collection_replace => |value| try self.emitCollectionReplace(block_id, value),
             .collection_count => |value| try self.emitCollectionCount(value),
             .collection_view => |value| try self.emitCollectionView(block_id, value),
             .local_load => |value| try self.write(
@@ -298,8 +299,39 @@ const FunctionEmitter = struct {
         try self.write("  %v{d} = load {s}, ptr %t{d}.element\n", .{ value.result, element_name, serial });
     }
 
+    fn emitCollectionReplace(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionReplace) Error!void {
+        const collection_type = try self.valueType(value.collection);
+        const collection = try self.collectionInfo(collection_type);
+        if (!collection.view or value.ownership != .root or
+            try self.valueType(value.result) != collection_type or
+            try self.valueType(value.index) != .int or
+            try self.valueType(value.replacement) != collection.element or
+            (!collection.element.isNumeric() and collection.element != .bool))
+        {
+            return error.UnsupportedInstruction;
+        }
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, collection_type);
+        const element_name = try llvmType(self.allocator, self.program, collection.element);
+        try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
+        try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
+        try self.emitNormalizedIndex(serial, "index", value.index);
+        try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
+        try self.write("  %t{d}.index.high = icmp sge i64 %t{d}.index, %t{d}.count\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
+        try self.write("  br i1 %t{d}.index.invalid, label %trap, label %b{d}.cont{d}\n", .{ serial, block_id, serial });
+        try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
+        try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.index\n", .{
+            serial,
+            element_name,
+            serial,
+            serial,
+        });
+        try self.write("  store {s} %v{d}, ptr %t{d}.element\n", .{ element_name, value.replacement, serial });
+        try self.copyValue(value.result, value.collection);
+    }
+
     fn emitCollectionView(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionSlice) Error!void {
-        if (value.reference != null) return error.UnsupportedInstruction;
         const source_type = try self.valueType(value.collection);
         const result_type = try self.valueType(value.result);
         const source = try self.collectionInfo(source_type);
@@ -311,8 +343,15 @@ const FunctionEmitter = struct {
         const source_name = try llvmType(self.allocator, self.program, source_type);
         const result_name = try llvmType(self.allocator, self.program, result_type);
         const element_name = try llvmType(self.allocator, self.program, source.element);
-        try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, source_name, value.collection });
-        try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, source_name, value.collection });
+        if (value.reference) |reference| {
+            if (try self.valueType(reference) != .address) return error.InvalidProgram;
+            try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, source_name, reference });
+            try self.write("  %t{d}.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, source_name, serial });
+            try self.write("  %t{d}.count = extractvalue {s} %t{d}.source, 1\n", .{ serial, source_name, serial });
+        } else {
+            try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, source_name, value.collection });
+            try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, source_name, value.collection });
+        }
         try self.emitNormalizedIndex(serial, "start", value.start);
         try self.emitNormalizedIndex(serial, "end", value.end);
         try self.write("  %t{d}.start.low = icmp slt i64 %t{d}.start, 0\n", .{ serial, serial });
@@ -927,4 +966,18 @@ test "LLVM emitter supports read-only collection views and negative indices" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "type { ptr, i64 }"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".index.negative = icmp slt i64"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".bounds.invalid = or i1"));
+}
+
+test "LLVM emitter supports mutable scalar collection views" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Silex.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func rewrite(values:&int[..], index:int, first:int, second:int) int { values[index] = first; values[index] = second; return values[index] }
+        \\func main() { var values:int[] = [3, 5, 8]; print(rewrite(&values[0:values.count()], 1, 13, 21)) }
+    );
+    const text = try emit(allocator, compilation.ir);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".source = load %sx.type."));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "store i64 %v"));
 }

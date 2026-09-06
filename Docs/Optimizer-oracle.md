@@ -98,8 +98,17 @@ values. The oracle models list literals with non-owning stack storage, view
 construction, signed negative-index normalization, and checked element loads.
 Ownership-sensitive forms such as retained lists remain unsupported instead of
 being approximated with different lifetime semantics. Consequently, the LLVM
-coverage recorded for collections is evidence for scalar read-only views and
-bounds only; collection ownership and copy-on-write behavior remain a gap.
+coverage recorded for collections is evidence for scalar views and bounds only;
+collection ownership and copy-on-write behavior remain a gap.
+
+Mutable scalar views use the same `{data, count}` representation, but
+`collection_replace` becomes a checked store through `data`. On an exact
+same-view, same-index chain with no intervening observable or possibly aliasing
+instruction, Release may discard an overwritten store and forward a following
+exact load from the surviving store.
+Any access through another view is treated as possibly aliasing and ends the
+proof. The oracle counts checks attached to collection replacement and element
+references as safety guards, not only checks attached to collection loads.
 
 Within one block, a successful checked load from an unchanged collection proves
 that the collection is non-empty. Release optimization uses that fact for a

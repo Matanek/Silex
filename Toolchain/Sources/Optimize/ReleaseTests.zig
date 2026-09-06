@@ -325,6 +325,47 @@ test "release uses a dominating collection access to prove the last element" {
     return error.TestUnexpectedResult;
 }
 
+test "release coalesces exact scalar stores through a mutable view" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func rewrite(values:&int[..], index:int, first:int, second:int) int {
+        \\    values[index] = first
+        \\    values[index] = second
+        \\    return values[index]
+        \\}
+        \\func main() {
+        \\    var values:int[] = [3, 5, 8]
+        \\    print(rewrite(&values[0:values.count()], 1, 13, 21))
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "rewrite")) continue;
+        var replacements: usize = 0;
+        var loads: usize = 0;
+        var copies: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .collection_replace => replacements += 1,
+            .collection_load => loads += 1,
+            .copy => copies += 1,
+            else => {},
+        };
+        try std.testing.expectEqual(@as(usize, 1), replacements);
+        try std.testing.expectEqual(@as(usize, 0), loads);
+        try std.testing.expectEqual(@as(usize, 0), copies);
+        return;
+    }
+    return error.TestUnexpectedResult;
+}
+
 test "release preserves floating branches and loops" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

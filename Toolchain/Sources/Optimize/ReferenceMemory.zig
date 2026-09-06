@@ -8,16 +8,112 @@ const Definition = struct {
 
 pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program) !Ir.Program {
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
-    for (program.functions, 0..) |function, index| functions[index] = try optimizeFunction(allocator, function);
+    for (program.functions, 0..) |function, index| functions[index] = try optimizeFunction(allocator, program, function);
     var result = program;
     result.functions = functions;
     return result;
 }
 
-fn optimizeFunction(allocator: std.mem.Allocator, function: Ir.Function) !Ir.Function {
+fn optimizeFunction(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
     const definitions = try collectDefinitions(allocator, function);
     const pruned = try removeOverwrittenStores(allocator, function, definitions);
-    return forwardStoredValues(allocator, pruned, definitions);
+    const forwarded = try forwardStoredValues(allocator, pruned, definitions);
+    return simplifyExactViewStores(allocator, program, forwarded);
+}
+
+const ViewStore = struct {
+    instruction: usize,
+    collection: Ir.ValueId,
+    index: Ir.ValueId,
+    replacement: Ir.ValueId,
+};
+
+fn simplifyExactViewStores(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    for (function.blocks, 0..) |block, block_index| {
+        const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
+        for (aliases, 0..) |*alias, value| alias.* = value;
+        const instructions = try allocator.dupe(Ir.Instruction, block.instructions);
+        var available: ?ViewStore = null;
+        for (instructions, 0..) |*instruction, instruction_index| switch (instruction.*) {
+            .collection_replace => |replacement| {
+                if (!isScalarViewStore(program, function, replacement)) {
+                    available = null;
+                    continue;
+                }
+                const collection = canonical(aliases, replacement.collection);
+                const index = canonical(aliases, replacement.index);
+                instruction.collection_replace.collection = collection;
+                instruction.collection_replace.index = index;
+                if (available) |previous| {
+                    if (previous.collection == collection and previous.index == index) {
+                        const overwritten = instructions[previous.instruction].collection_replace;
+                        instructions[previous.instruction] = .{ .copy = .{
+                            .result = overwritten.result,
+                            .operand = overwritten.collection,
+                        } };
+                    }
+                }
+                aliases[replacement.result] = collection;
+                available = .{
+                    .instruction = instruction_index,
+                    .collection = collection,
+                    .index = index,
+                    .replacement = canonical(aliases, replacement.replacement),
+                };
+            },
+            .collection_load => |load| {
+                const store = available orelse continue;
+                if (canonical(aliases, load.collection) != store.collection or
+                    canonical(aliases, load.index) != store.index or
+                    function.value_types[load.result] != function.value_types[store.replacement])
+                {
+                    available = null;
+                    continue;
+                }
+                instruction.* = .{ .copy = .{ .result = load.result, .operand = store.replacement } };
+                aliases[load.result] = store.replacement;
+            },
+            else => available = null,
+        };
+        blocks[block_index] = .{
+            .instructions = instructions,
+            .instruction_positions = block.instruction_positions,
+            .terminator = block.terminator,
+            .terminator_position = block.terminator_position,
+        };
+    }
+    var result = function;
+    result.blocks = blocks;
+    return result;
+}
+
+fn isScalarViewStore(program: Ir.Program, function: Ir.Function, replacement: Ir.Instruction.CollectionReplace) bool {
+    if (replacement.ownership != .root or
+        replacement.collection >= function.value_types.len or
+        replacement.result >= function.value_types.len or
+        replacement.index >= function.value_types.len or
+        replacement.replacement >= function.value_types.len)
+    {
+        return false;
+    }
+    const collection_type = function.value_types[replacement.collection];
+    const element_type = function.value_types[replacement.replacement];
+    const structure = collection_type.structureIndex() orelse return false;
+    if (structure >= program.structures.len) return false;
+    const collection = program.structures[structure].collection orelse return false;
+    return collection_type == function.value_types[replacement.result] and
+        function.value_types[replacement.index] == .int and
+        collection.view and collection.element == element_type and
+        (element_type.isNumeric() or element_type == .bool);
+}
+
+fn canonical(aliases: []const Ir.ValueId, initial: Ir.ValueId) Ir.ValueId {
+    if (initial >= aliases.len) return initial;
+    var value = initial;
+    var remaining = aliases.len;
+    while (aliases[value] != value and remaining != 0) : (remaining -= 1) value = aliases[value];
+    return value;
 }
 
 fn collectDefinitions(allocator: std.mem.Allocator, function: Ir.Function) ![]Definition {
@@ -276,4 +372,77 @@ test "reference memory removes an exact overwritten store" {
     try std.testing.expectEqual(@as(usize, 3), instructions.len);
     try std.testing.expect(instructions[2] == .reference_store);
     try std.testing.expectEqual(@as(Ir.ValueId, 2), instructions[2].reference_store.operand);
+}
+
+test "view memory preserves a store observed through a possibly aliasing view" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const position: @import("../Source.zig").Position = .{ .offset = 0, .line = 1, .column = 1 };
+    const view_type = Ir.Type.structure(0);
+    const function: Ir.Function = .{
+        .name = "observed_view",
+        .parameter_types = &.{ view_type, view_type, .int, .int, .int },
+        .return_type = .int,
+        .value_types = &.{ view_type, view_type, .int, .int, .int, view_type, .int, view_type, .int, .int },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .collection_replace = .{ .result = 5, .collection = 0, .index = 2, .replacement = 3, .position = position } },
+                .{ .collection_load = .{ .result = 6, .collection = 1, .index = 2, .position = position } },
+                .{ .collection_replace = .{ .result = 7, .collection = 5, .index = 2, .replacement = 4, .position = position } },
+                .{ .collection_load = .{ .result = 8, .collection = 7, .index = 2, .position = position } },
+                .{ .binary = .{ .result = 9, .operator = .add, .left = 6, .right = 8 } },
+            },
+            .terminator = .{ .return_value = 9 },
+        }},
+    };
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "int[..]",
+            .fields = &.{},
+            .collection = .{ .element = .int, .length = null, .view = true },
+        }},
+        .functions = &.{function},
+    };
+    const result = try optimize(arena.allocator(), program);
+    const instructions = result.functions[0].blocks[0].instructions;
+    try std.testing.expect(instructions[0] == .collection_replace);
+    try std.testing.expect(instructions[1] == .collection_load);
+    try std.testing.expect(instructions[2] == .collection_replace);
+    try std.testing.expect(instructions[3] == .copy);
+    try std.testing.expectEqual(@as(Ir.ValueId, 4), instructions[3].copy.operand);
+}
+
+test "view memory does not coalesce owning collection replacements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const position: @import("../Source.zig").Position = .{ .offset = 0, .line = 1, .column = 1 };
+    const list_type = Ir.Type.structure(0);
+    const function: Ir.Function = .{
+        .name = "owning_values",
+        .parameter_types = &.{ list_type, .int, .int, .int },
+        .return_type = .int,
+        .value_types = &.{ list_type, .int, .int, .int, list_type, list_type, .int },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .collection_replace = .{ .result = 4, .collection = 0, .index = 1, .replacement = 2, .position = position } },
+                .{ .collection_replace = .{ .result = 5, .collection = 4, .index = 1, .replacement = 3, .position = position } },
+                .{ .collection_load = .{ .result = 6, .collection = 5, .index = 1, .position = position } },
+            },
+            .terminator = .{ .return_value = 6 },
+        }},
+    };
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "int[]",
+            .fields = &.{},
+            .collection = .{ .element = .int, .length = null, .view = false },
+        }},
+        .functions = &.{function},
+    };
+    const result = try optimize(arena.allocator(), program);
+    const instructions = result.functions[0].blocks[0].instructions;
+    try std.testing.expectEqual(@as(usize, 3), instructions.len);
+    try std.testing.expect(instructions[0] == .collection_replace);
+    try std.testing.expect(instructions[1] == .collection_replace);
+    try std.testing.expect(instructions[2] == .collection_load);
 }

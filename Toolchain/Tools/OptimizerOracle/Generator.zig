@@ -47,6 +47,7 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "ReferenceAliasing.sx", .timing = false },
     .{ .name = "ReferenceDeadStores.sx", .timing = false },
     .{ .name = "ReadonlyViewMemory.sx", .timing = false },
+    .{ .name = "MutableViewMemory.sx", .timing = false },
 };
 
 pub const regressions = [_]RegressionEntry{

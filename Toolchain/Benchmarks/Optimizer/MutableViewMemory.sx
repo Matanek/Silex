@@ -1,0 +1,10 @@
+func rewrite(values:&int[..], index:int, first:int, second:int) int {
+    values[index] = first
+    values[index] = second
+    return values[index]
+}
+
+func main() {
+    var values:int[] = [3, 5, 8]
+    print(rewrite(&values[0:values.count()], 1, 13, 21))
+}
