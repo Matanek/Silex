@@ -277,6 +277,10 @@ contiguous floating-point operations, so its setup is amortized. Every
 unsupported instruction is a hard barrier: its complete uses and definitions,
 and every interval live across it, remain stack-resident. Mixed aggregate
 loads and aggregate calls inside loops retain the whole-function spill path.
+The same barrier model admits a repeated scalar loop with at least four
+compatible arithmetic operations even when an output or another stack effect
+follows the loop. Values confined to the loop can then remain in registers;
+values live across the effect retain their deterministic stack homes.
 The regional path does not use paired SIMD residences or memory scheduling.
 Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.

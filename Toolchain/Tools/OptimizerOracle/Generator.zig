@@ -43,6 +43,10 @@ pub const StructuralContract = union(enum) {
         function: []const u8,
         pointer_terminated: bool = true,
     },
+    arm64_loop_residence: struct {
+        function: []const u8,
+        minimum: u16,
+    },
 };
 
 pub const RegressionEntry = struct {
@@ -71,6 +75,11 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{
+        .name = "IntegerArithmetic.sx",
+        .concern = "a hot scalar loop retains ARM64 registers across a terminal output barrier",
+        .contract = .{ .arm64_loop_residence = .{ .function = "main", .minimum = 10 } },
+    },
     .{
         .name = "AggregateScalarization.sx",
         .concern = "value aggregate copies, field updates and returns reduce to scalar leaves",

@@ -558,6 +558,12 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 if (cursor.pointer_terminated) "yes" else "no",
             },
         ),
+        .loop_residence => |residence| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} ARM64 scalar residences {d}/{d}",
+            .{ residence.function, residence.resident, residence.total },
+        ),
     }
 }
 

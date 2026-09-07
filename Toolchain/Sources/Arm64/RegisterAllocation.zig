@@ -924,6 +924,8 @@ fn isFullyResidenceCompatible(function: Machine.Function, externals: []const Mac
 }
 
 fn hasProfitableScalarRegion(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+    if (hasProfitableLoopRegion(instructions, externals)) return true;
+
     const has_wide_float_candidate = for (instructions) |instruction| {
         if (instruction == .collection_load and instruction.collection_load.result.width >= 16) break true;
     } else false;
@@ -944,6 +946,34 @@ fn hasProfitableScalarRegion(instructions: []const Machine.Instruction, external
         if (arithmetic >= 32) return true;
     }
     return false;
+}
+
+fn hasProfitableLoopRegion(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+    for (instructions, 0..) |instruction, source| switch (instruction) {
+        .jump => |target| if (target <= source and profitableLoopRange(instructions[target .. source + 1], externals)) return true,
+        .branch => |branch| {
+            if (branch.then_instruction <= source and
+                profitableLoopRange(instructions[branch.then_instruction .. source + 1], externals)) return true;
+            if (branch.else_instruction <= source and
+                profitableLoopRange(instructions[branch.else_instruction .. source + 1], externals)) return true;
+        },
+        else => {},
+    };
+    return false;
+}
+
+fn profitableLoopRange(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+    var arithmetic: usize = 0;
+    for (instructions) |instruction| {
+        if (!isResidenceCompatibleInstruction(instruction, externals)) return false;
+        arithmetic += switch (instruction) {
+            .binary => |value| @intFromBool(value.type != .str),
+            .unary => 1,
+            .convert => 1,
+            else => 0,
+        };
+    }
+    return arithmetic >= 4;
 }
 
 fn isResidenceCompatibleInstruction(instruction: Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
@@ -1704,4 +1734,49 @@ test "profitable wide float regions stop at unsupported instructions" {
     try std.testing.expectEqual(@as(?u5, null), result.float_residences[51]);
     try std.testing.expect(result.float_residences[53] != null);
     try std.testing.expectEqual(@as(?u5, null), result.residences[52]);
+}
+
+test "hot scalar loops retain registers across a terminal print barrier" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 12345 } },
+        .{ .constant_int = .{ .result = 1, .bits = 5_000_000 } },
+        .{ .constant_int = .{ .result = 2, .bits = 0 } },
+        .{ .copy = .{ .result = 11, .operand = 0 } },
+        .{ .copy = .{ .result = 12, .operand = 2 } },
+        .{ .jump = 6 },
+        .{ .binary = .{ .result = 3, .operator = .less, .left = 12, .right = 1 } },
+        .{ .branch = .{ .condition = 3, .then_instruction = 8, .else_instruction = 18 } },
+        .{ .constant_int = .{ .result = 4, .bits = 17 } },
+        .{ .binary = .{ .result = 5, .operator = .multiply, .left = 11, .right = 4, .checked = false } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 12 } },
+        .{ .constant_int = .{ .result = 7, .bits = 1_000_003 } },
+        .{ .binary = .{ .result = 8, .operator = .remainder, .left = 6, .right = 7, .checked = false } },
+        .{ .constant_int = .{ .result = 9, .bits = 1 } },
+        .{ .binary = .{ .result = 10, .operator = .add, .left = 12, .right = 9, .checked = false } },
+        .{ .copy = .{ .result = 11, .operand = 8 } },
+        .{ .copy = .{ .result = 12, .operand = 10 } },
+        .{ .jump = 6 },
+        .{ .print = .{ .value = 11, .kind = .signed_integer, .newline = true } },
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "integer_loop_with_print",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 13,
+        .frame_size = try Machine.frameSize(13),
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    try std.testing.expectEqual(@as(usize, 13), result.residences.len);
+    try std.testing.expect(result.residences[12] != null);
+    try std.testing.expect(result.residences[5] != null);
+    try std.testing.expect(result.residences[6] != null);
+    try std.testing.expect(result.residences[8] != null);
+    try std.testing.expect(result.residences[10] != null);
+    try std.testing.expectEqual(@as(?u5, null), result.residences[11]);
 }

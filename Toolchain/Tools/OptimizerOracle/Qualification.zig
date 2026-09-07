@@ -103,6 +103,11 @@ pub const Evidence = union(enum) {
         postindexed: bool,
         pointer_terminated: bool,
     },
+    loop_residence: struct {
+        function: []const u8,
+        resident: usize,
+        total: usize,
+    },
 };
 
 pub const SsaValueCounter = struct {
@@ -183,6 +188,12 @@ pub fn verifyContract(
             allocator,
             requirement.function,
             requirement.pointer_terminated,
+            differential.optimized_ir,
+        ),
+        .arm64_loop_residence => |requirement| try verifyArm64LoopResidence(
+            allocator,
+            requirement.function,
+            requirement.minimum,
             differential.optimized_ir,
         ),
     };
@@ -740,6 +751,25 @@ fn verifyArm64LoopCursor(
         .function = function_name,
         .postindexed = true,
         .pointer_terminated = pointer_terminated,
+    } };
+}
+
+fn verifyArm64LoopResidence(
+    allocator: std.mem.Allocator,
+    function_name: []const u8,
+    minimum: u16,
+    program: Silex.Ir.Program,
+) !Evidence {
+    const arm64_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
+    const function = findMachineFunction(arm64_program, function_name) orelse
+        return error.ContractFunctionMissing;
+    var resident: usize = 0;
+    for (function.register_slots) |residence| resident += @intFromBool(residence != null);
+    if (resident < minimum) return error.ExpectedArm64LoopResidenceMissing;
+    return .{ .loop_residence = .{
+        .function = function_name,
+        .resident = resident,
+        .total = function.slot_count,
     } };
 }
 
