@@ -382,6 +382,10 @@ Checked division or remainder by `-1` retains the ordinary path and its minimum
 value overflow guard; an earlier range proof may make the same operation
 eligible once it is unchecked. Debug and constants not covered by either
 recipe retain the ordinary hardware division path.
+The LLVM advisor reports a strength-reduction opportunity only while the
+optimized Silex program still contains a reachable multiplication. An LLVM
+shift introduced in a helper that the final Silex caller has specialized away
+is therefore not classified as a backend selection gap.
 On ARM64, a field offset used exactly once by the immediately following
 reference load or store is folded into that memory access. A control-flow entry
 at the transfer, an additional use or an indirect class field keeps the explicit

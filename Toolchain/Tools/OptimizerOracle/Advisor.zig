@@ -209,14 +209,18 @@ pub fn analyzeWithCapabilities(
 
     const multiplies_removed = llvm.matched.multiplies_removed;
     const shifts_added = llvm.matched.shifts_added;
-    if (multiplies_removed != 0 and shifts_added != 0 and optimized_silex.shifts <= raw_silex.shifts) try append(
-        allocator,
-        &findings,
-        .strength_reduction,
-        72,
-        "LLVM replaces at least {d} multiplication(s) with {d} additional shift(s); Silex adds no shifts.",
-        .{ multiplies_removed, shifts_added },
-    );
+    if (multiplies_removed != 0 and
+        shifts_added != 0 and
+        optimized_silex.multiplies != 0 and
+        optimized_silex.shifts <= raw_silex.shifts)
+        try append(
+            allocator,
+            &findings,
+            .strength_reduction,
+            72,
+            "LLVM replaces at least {d} multiplication(s) with {d} additional shift(s); Silex retains {d} reachable multiplication(s) and adds no shifts.",
+            .{ multiplies_removed, shifts_added, optimized_silex.multiplies },
+        );
 
     if (optimized_silex.signed_remainders > optimized_llvm.signed_remainders and
         optimized_llvm.unsigned_remainders > optimized_silex.unsigned_remainders)
@@ -461,6 +465,54 @@ test "advisor compares optimized residues instead of incompatible raw deltas" {
     });
     defer std.testing.allocator.free(analysis.findings);
     try std.testing.expectEqual(@as(usize, 0), analysis.findings.len);
+}
+
+test "advisor ignores strength reduction in an unreachable LLVM helper" {
+    var raw_silex: IrStats.Profile = .{};
+    raw_silex.multiplies = 1;
+    const analysis = try analyze(std.testing.allocator, .{
+        .raw = raw_silex,
+        .optimized = .{},
+        .matched = .{},
+    }, .{
+        .raw = .{},
+        .optimized = .{},
+        .matched = .{
+            .multiplies_removed = 1,
+            .shifts_added = 1,
+        },
+    });
+    defer std.testing.allocator.free(analysis.findings);
+    try std.testing.expectEqual(@as(usize, 0), analysis.findings.len);
+}
+
+test "advisor reports strength reduction when a reachable multiply remains" {
+    var raw_silex: IrStats.Profile = .{};
+    raw_silex.multiplies = 2;
+    var optimized_silex: IrStats.Profile = .{};
+    optimized_silex.multiplies = 1;
+    const analysis = try analyze(std.testing.allocator, .{
+        .raw = raw_silex,
+        .optimized = optimized_silex,
+        .matched = .{},
+    }, .{
+        .raw = .{},
+        .optimized = .{},
+        .matched = .{
+            .multiplies_removed = 1,
+            .shifts_added = 1,
+        },
+    });
+    defer {
+        for (analysis.findings) |finding| std.testing.allocator.free(finding.evidence);
+        std.testing.allocator.free(analysis.findings);
+    }
+    try std.testing.expectEqual(@as(usize, 1), analysis.findings.len);
+    try std.testing.expectEqual(Kind.strength_reduction, analysis.findings[0].kind);
+    try std.testing.expectEqualStrings(
+        "LLVM replaces at least 1 multiplication(s) with 1 additional shift(s); Silex retains 1 reachable multiplication(s) and adds no shifts.",
+        analysis.findings[0].evidence,
+    );
 }
 
 test "advisor does not report an LLVM vector gap already realized by the native backend" {
