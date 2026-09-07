@@ -30,10 +30,23 @@ pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocato
             .x64,
             &float_lane_registers,
         );
+        functions[index].stack_slot_base = residentStackPrefix(function, functions[index].register_slots);
+        functions[index].frame_size = try Machine.frameSize(function.slot_count - functions[index].stack_slot_base);
     }
     result.functions = functions;
     try Machine.validate(result);
     return result;
+}
+
+fn residentStackPrefix(function: Machine.Function, residences: []const ?u5) Machine.Slot {
+    // Keeping the virtual offsets unchanged is safe only while every skipped
+    // slot is backed by a register. The first stack home anchors the physical
+    // suffix of the frame.
+    if (residences.len != function.slot_count) return 0;
+    for (residences, 0..) |residence, slot| {
+        if (residence == null) return @intCast(slot);
+    }
+    return function.slot_count;
 }
 
 pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Error![]const ?u5 {
@@ -575,6 +588,9 @@ test "hot X64 scalar loops retain registers before a terminal print barrier" {
 }
 
 test "hot X64 scalar loops retain registers before aggregate and call barriers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const fields = [_]Machine.Span{
         .{ .start = 11, .width = 1 },
         .{ .start = 12, .width = 1 },
@@ -606,15 +622,30 @@ test "hot X64 scalar loops retain registers before aggregate and call barriers" 
         .{ .call = .{ .result = null, .function = 1, .arguments = &arguments } },
         .return_void,
     };
-    const residences = try allocate(std.testing.allocator, .{
-        .name = "integer_loop_with_aggregate_call",
-        .parameter_count = 0,
-        .return_type = .void,
-        .slot_count = 15,
-        .frame_size = try Machine.frameSize(15),
-        .instructions = &instructions,
-    });
-    defer std.testing.allocator.free(residences);
+    const callee_parameters = [_]Machine.Span{.{ .start = 0, .width = 2, .aggregate = true }};
+    const callee_instructions = [_]Machine.Instruction{.return_void};
+    const functions = [_]Machine.Function{
+        .{
+            .name = "integer_loop_with_aggregate_call",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 15,
+            .frame_size = try Machine.frameSize(15),
+            .instructions = &instructions,
+        },
+        .{
+            .name = "consume_pair",
+            .parameter_count = 1,
+            .parameters = &callee_parameters,
+            .return_type = .void,
+            .slot_count = 2,
+            .frame_size = try Machine.frameSize(2),
+            .instructions = &callee_instructions,
+        },
+    };
+    const allocated = try allocateProgram(allocator, .{ .functions = &functions });
+    const function = allocated.functions[0];
+    const residences = function.register_slots;
 
     try std.testing.expectEqual(@as(usize, 15), residences.len);
     for ([_]usize{ 3, 4, 5, 6, 7, 8, 9, 10 }) |slot| {
@@ -623,4 +654,6 @@ test "hot X64 scalar loops retain registers before aggregate and call barriers" 
     for ([_]usize{ 11, 12, 13, 14 }) |slot| {
         try std.testing.expectEqual(@as(?u5, null), residences[slot]);
     }
+    try std.testing.expectEqual(@as(Machine.Slot, 11), function.stack_slot_base);
+    try std.testing.expectEqual(@as(u32, 32), function.frame_size);
 }

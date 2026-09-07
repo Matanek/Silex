@@ -353,6 +353,12 @@ Win64; complete call arguments, call results, aggregate spans, and every value
 live across a barrier retain their deterministic stack homes. Calls or
 aggregate operations inside the loop, strings, floating-point values,
 unsupported operations and short loops retain the whole-function spill path.
+When these X64 residences cover a contiguous prefix of virtual slots, Release
+omits that prefix from the physical value frame. A shifted frame base preserves
+the existing virtual offsets for every remaining stack home, the cycle context,
+and incoming stack arguments. The machine verifier accepts the contraction
+only when every omitted slot has a register residence and the remaining frame
+has the exact aligned suffix size. ARM64 keeps its ordinary frame base.
 On ARM64, an unchecked integer multiplication by an adjacent, single-use
 constant of the form `2^n + 1` selects one shifted `ADD`. Checked
 multiplications retain the ordinary multiply and overflow proof.

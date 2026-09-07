@@ -584,6 +584,10 @@ pub const Function = struct {
     /// Release-only residence map indexed by virtual slot. Null keeps the
     /// value in its deterministic stack slot.
     register_slots: []const ?u5 = &.{},
+    /// First virtual slot represented by the physical value frame. X64 may
+    /// omit an entirely register-resident prefix while preserving every
+    /// remaining slot offset relative to this shifted frame base.
+    stack_slot_base: Slot = 0,
     /// Release-only SIMD residence map for floating-point virtual slots.
     float_register_slots: []const ?u5 = &.{},
     /// Release-only SLP residence map. Two float32 slots may share the low
@@ -741,6 +745,17 @@ pub fn validate(program: Program) Error!void {
         }
     }
     for (program.functions) |function| {
+        if (function.stack_slot_base > function.slot_count) return error.InvalidMachineProgram;
+        if (function.stack_slot_base != 0) {
+            if (function.register_slots.len != function.slot_count or
+                function.frame_size != try frameSize(function.slot_count - function.stack_slot_base))
+            {
+                return error.InvalidMachineProgram;
+            }
+            for (function.register_slots[0..function.stack_slot_base]) |residence| {
+                if (residence == null) return error.InvalidMachineProgram;
+            }
+        }
         if (function.register_slots.len == 0 and function.float_register_slots.len == 0) {
             if (function.frame_size != try frameSize(function.slot_count)) return error.InvalidMachineProgram;
         } else if (function.frame_size > try frameSize(function.slot_count) or function.frame_size % 16 != 0) {

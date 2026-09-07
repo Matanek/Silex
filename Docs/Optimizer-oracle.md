@@ -32,6 +32,9 @@ survive portable optimization, then fixes the resulting X64 stack-slot and
 frame-byte counts while requiring the surrounding hot scalar region to retain
 register residence. These counts describe static homes and frame layout; they
 do not substitute for disassembly-based dynamic spill and reload inspection.
+Its frame-byte budget measures the contracted physical value frame: a
+contiguous register-resident prefix is excluded, while the reported stack-slot
+count still covers every virtual slot without a register residence.
 
 The registry audit fails when an IR operation, terminator, named type, machine
 operation, or Release pass is missing or duplicated. An `equivalent` coverage

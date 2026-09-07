@@ -765,6 +765,7 @@ fn encodeFunction(
     infallible_functions: []const bool,
     function: Machine.Function,
 ) Error!void {
+    if (function.stack_slot_base != 0) return error.InvalidMachineProgram;
     var fixups: FunctionFixups = .{};
     var control_fixups: std.ArrayList(ControlFixup) = .empty;
     var scalar_cache = ScalarCache{ .enabled = function.register_slots.len == 0 and function.float_register_slots.len == 0 };

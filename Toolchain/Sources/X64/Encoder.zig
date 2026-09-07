@@ -357,12 +357,19 @@ fn encodeFunction(
     const required_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
     const padded_frame_size = std.math.add(u32, required_frame_size, 15) catch return error.InvalidMachineProgram;
     const encoded_frame_size = padded_frame_size & ~@as(u32, 15);
+    const stack_slot_bias = std.math.mul(u32, function.stack_slot_base, Machine.slot_size) catch
+        return error.InvalidMachineProgram;
     try emitFrameAllocation(allocator, bytes, platform, encoded_frame_size);
     // Keep addressable scalar spans in the same increasing-memory order as
     // heap aggregates and the other native backends. RBP remains stable while
     // calls temporarily move RSP below this frame base.
     try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0xe5 });
-    const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
+    if (stack_slot_bias != 0) try emitSubtractImmediateRegister(allocator, bytes, .rbp, stack_slot_bias);
+    const cycle_context_slot = std.math.add(
+        Machine.Slot,
+        function.stack_slot_base,
+        @intCast(function.frame_size / Machine.slot_size),
+    ) catch return error.InvalidMachineProgram;
     const argument_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9, .r10, .r11 };
     if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
     if (function.hidden_return_slot) |slot| try emitStoreStack(allocator, bytes, .r15, slot);
@@ -376,7 +383,8 @@ fn encodeFunction(
         if (index >= argument_registers.len) {
             const incoming_displacement = std.math.cast(
                 i32,
-                @as(u64, encoded_frame_size) + 16 + (index - argument_registers.len) * Machine.slot_size,
+                @as(u64, stack_slot_bias) + encoded_frame_size + 16 +
+                    (index - argument_registers.len) * Machine.slot_size,
             ) orelse return error.InvalidMachineProgram;
             if (parameter.aggregate) {
                 try emitLoadMemory(allocator, bytes, .r14, .rbp, incoming_displacement);
@@ -882,7 +890,9 @@ fn encodeFunction(
     instruction_offsets[function.instructions.len] = bytes.items.len;
     const epilogue = bytes.items.len;
     try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0xec });
-    try emitStackAddition(allocator, bytes, encoded_frame_size);
+    const restored_frame_size = std.math.add(u32, encoded_frame_size, stack_slot_bias) catch
+        return error.InvalidMachineProgram;
+    try emitStackAddition(allocator, bytes, restored_frame_size);
     try bytes.appendSlice(allocator, &.{ 0x5d, 0xc3 });
     for (branches.items) |branch| {
         if (branch.instruction > function.instructions.len) return error.InvalidMachineProgram;
@@ -3835,7 +3845,10 @@ test "encode internal X64 arguments beyond the register window" {
         \\}
         \\func main() { total(1,2,3,4,5,6,7,8,9,10) }
     );
-    const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+    const stack_program = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+    const machine = try @import("RegisterAllocation.zig").allocateProgram(allocator, stack_program);
+    try std.testing.expect(machine.functions[0].stack_slot_base > 0);
+    try std.testing.expect(machine.functions[0].frame_size < stack_program.functions[0].frame_size);
 
     const linux = try encodeLinux(allocator, machine);
     defer linux.deinit(allocator);

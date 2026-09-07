@@ -192,7 +192,7 @@ pub const regressions = [_]RegressionEntry{
             .function = "integrate",
             .minimum_resident = 8,
             .stack_slots = 4,
-            .frame_bytes = 128,
+            .frame_bytes = 32,
         } },
     },
     .{
