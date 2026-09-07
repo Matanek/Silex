@@ -4,6 +4,7 @@ const MemoryResidence = @import("MemoryResidence.zig");
 const FloatPairs = @import("FloatPairs.zig");
 const LoopCursor = @import("LoopCursor.zig");
 const ResidenceLiveness = @import("ResidenceLiveness.zig");
+const VectorCost = @import("../Optimize/VectorCost.zig");
 const successorLive = ResidenceLiveness.successorLive;
 const instructionUses = ResidenceLiveness.instructionUses;
 const instructionDefines = ResidenceLiveness.instructionDefines;
@@ -30,6 +31,7 @@ pub const Result = struct {
 pub fn allocateFloatLanePairsFor(
     allocator: Allocator,
     function: Machine.Function,
+    target: VectorCost.Target,
     registers: []const u5,
 ) Allocator.Error![]const ?Machine.FloatLaneResidence {
     if (!isCompatibleFunction(function, false, &.{}) or registers.len == 0) return try allocator.alloc(?Machine.FloatLaneResidence, 0);
@@ -39,7 +41,7 @@ pub fn allocateFloatLanePairsFor(
     defer allocator.free(float_slots);
     @memset(float_slots, false);
     inferFloatSlots(function, float_slots);
-    try FloatPairs.allocate(allocator, function, float_slots, residences, registers);
+    try FloatPairs.allocate(allocator, function, target, float_slots, residences, registers);
     return residences;
 }
 
@@ -90,7 +92,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         4,  5,  6,  7,
     };
     const float_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
-    if (fully_compatible) try FloatPairs.allocate(allocator, function, float_slots, float_lane_residences, float_registers);
+    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, float_registers);
     var cursor_probe = function;
     cursor_probe.float_lane_slots = float_lane_residences;
     const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;

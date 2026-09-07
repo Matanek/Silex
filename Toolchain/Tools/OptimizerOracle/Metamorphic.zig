@@ -84,6 +84,27 @@ pub const pairs = [_]Pair{
         \\}
         ,
     },
+    .{
+        .id = "while-or-for-collection",
+        .axis = "while-or-for",
+        .left =
+        \\func sum(values:@int[..]) int {
+        \\    var total = 0
+        \\    var index = 0
+        \\    while index < values.count() { total += values[index]; index++ }
+        \\    return total
+        \\}
+        \\func main() { let values = [2, 3, 5, 7]; print(sum(@values[0:values.count()])) }
+        ,
+        .right =
+        \\func sum(values:@int[..]) int {
+        \\    var total = 0
+        \\    for value in values { total += value }
+        \\    return total
+        \\}
+        \\func main() { let values = [2, 3, 5, 7]; print(sum(@values[0:values.count()])) }
+        ,
+    },
 };
 
 test "metamorphic sources and axes remain deterministic" {

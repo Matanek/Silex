@@ -60,8 +60,8 @@ test "constructed memory arithmetic retains SIMD seeds" {
         .frame_size = 96,
         .float_lane_groups = &.{
             .{ .slots = .{ 4, 5, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
-            .{ .slots = .{ 6, 7, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
-            .{ .slots = .{ 8, 9, 0, 0 }, .width = 2, .priority = 1, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 6, 7, 0, 0 }, .width = 2, .priority = 9, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 8, 9, 0, 0 }, .width = 2, .priority = 17, .recurrence = false, .in_loop = false },
         },
         .instructions = &.{
             .{ .aggregate_init = .{ .result = .{ .start = 4, .width = 2, .aggregate = true }, .fields = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } } } },
@@ -413,7 +413,7 @@ test "checked leaf loads pin memory operands but retain arithmetic registers" {
     try std.testing.expect(result.float_residences[6] != null);
     try std.testing.expect(result.float_residences[4] != null);
     try std.testing.expect(result.float_residences[7] != null);
-    const shared_pairs = try RegisterAllocation.allocateFloatLanePairsFor(arena.allocator(), function, &.{ 0, 1 });
+    const shared_pairs = try RegisterAllocation.allocateFloatLanePairsFor(arena.allocator(), function, .arm64, &.{ 0, 1 });
     try std.testing.expectEqual(@as(usize, 0), shared_pairs.len);
 }
 
@@ -519,7 +519,7 @@ test "checked memory kernels retain arithmetic lanes without vectorizing memory 
         try std.testing.expect(allocation.float_lane_residences[slot] != null);
     }
     // The shared allocator used by X64 retains its prior eligibility contract.
-    const shared = try RegisterAllocation.allocateFloatLanePairsFor(allocator, function, &.{ 0, 1 });
+    const shared = try RegisterAllocation.allocateFloatLanePairsFor(allocator, function, .arm64, &.{ 0, 1 });
     try std.testing.expectEqual(@as(usize, 0), shared.len);
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
     var values = [_]u64{ @as(u32, @bitCast(@as(f32, 3))), @as(u32, @bitCast(@as(f32, -4))) };

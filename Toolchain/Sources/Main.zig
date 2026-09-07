@@ -2148,6 +2148,7 @@ test {
     _ = @import("Windows/PE.zig");
     _ = @import("Optimize/Release.zig");
     _ = @import("Optimize/Slp.zig");
+    _ = @import("Optimize/VectorCost.zig");
     _ = @import("Arm64/RegisterAllocation.zig");
     _ = @import("CompilationCache.zig");
     _ = @import("Composition.zig");

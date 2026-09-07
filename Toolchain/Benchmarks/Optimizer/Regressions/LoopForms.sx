@@ -1,0 +1,61 @@
+struct Sample {
+    let value:int
+    let weight:float32
+}
+
+func signed_control(limit:int) int {
+    var index = -2
+    var total = 0
+    while index < limit {
+        index++
+        if index < 0 { continue }
+        if index == 5 { break }
+        total += index
+    }
+    return total
+}
+
+func unsigned_control(limit:uint) uint {
+    var index:uint = 0
+    var total:uint = 0
+    while index < limit {
+        total += index
+        index++
+    }
+    return total
+}
+
+func nested_strided(values:@Sample[..], step:int) int {
+    var total = 0
+    var repetition = 0
+    while repetition < 2 {
+        var index = 0
+        while index < values.count() {
+            total += values[index].value
+            index += step
+        }
+        repetition++
+    }
+    return total
+}
+
+func contiguous_recurrence(values:@Sample[..]) float32 {
+    var sum:float32 = 0.0
+    for value in values { sum += value.weight }
+    return sum
+}
+
+func main() {
+    let values:Sample[] = [
+        Sample(value:1, weight:1.5),
+        Sample(value:2, weight:2.5),
+        Sample(value:3, weight:3.5),
+        Sample(value:4, weight:4.5),
+        Sample(value:5, weight:5.5)
+    ]
+    let view = @values[0:values.count()]
+    print(signed_control(8))
+    print(unsigned_control(6 as uint))
+    print(nested_strided(view, 2))
+    print(contiguous_recurrence(view))
+}

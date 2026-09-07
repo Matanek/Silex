@@ -68,6 +68,14 @@ Native regression contracts also inspect the allocated ARM64 machine function
 for a recognized post-indexed collection cursor and, when required, its direct
 pointer termination. This makes a reduced unit-stride loop an independent
 structural witness instead of inferring the mechanism from a consumer timing.
+The loop corpus additionally covers signed and unsigned inductions, nested
+loops, `break`, `continue`, dynamic bounds, strided accesses and contiguous
+floating recurrences. Its `while`/`for` metamorphic pair compares the hot-loop
+quality class—blocks, branches, backedges, checks, calls and memory traffic—so
+front-end iterator bookkeeping cannot either hide or invent a loop-quality
+regression. Target-cost unit counterexamples cover packing, extraction, spill,
+call and code-size cliffs; native SLP contracts then require both ARM64 and X64
+realization where the complete reduced kernel is profitable.
 
 Profile a real package consumer from the root of its closed Spec worktree so
 the command resolves that worktree's package links:

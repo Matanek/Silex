@@ -193,6 +193,10 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .arm64_loop_cursor = .{ .function = "accumulate" } },
     },
     .{
+        .name = "Regressions/LoopForms.sx",
+        .concern = "signed and unsigned inductions, nested control, break, continue, dynamic bounds, strided access and contiguous recurrence",
+    },
+    .{
         .name = "Regressions/CallEffectsInlining.sx",
         .concern = "small reference and checked-view callees inline into the final caller without losing their memory effects",
         .contract = .{ .specializes_effectful_calls = "main" },

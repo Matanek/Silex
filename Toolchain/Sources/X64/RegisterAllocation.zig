@@ -26,6 +26,7 @@ pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocato
         functions[index].float_lane_slots = try FloatLaneAllocation.allocateFloatLanePairsFor(
             allocator,
             function,
+            .x64,
             &float_lane_registers,
         );
     }
@@ -360,7 +361,7 @@ test "allocate portable float32 pairs in baseline X64 SIMD registers" {
         .width = 2,
         .priority = 8,
         .recurrence = false,
-        .in_loop = false,
+        .in_loop = true,
     }};
     const functions = [_]Machine.Function{.{
         .name = "main",

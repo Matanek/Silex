@@ -685,10 +685,7 @@ fn qualifyMetamorphic(
         ), true);
         const left_profile = IrStats.profile(left.optimized_ir);
         const right_profile = IrStats.profile(right.optimized_ir);
-        const structural_equivalent = left_profile.counts.instructions == right_profile.counts.instructions and
-            left_profile.counts.blocks == right_profile.counts.blocks and
-            left_profile.calls == right_profile.calls and
-            left_profile.local_loads + left_profile.local_stores == right_profile.local_loads + right_profile.local_stores;
+        const structural_equivalent = structurallyEquivalent(pair.axis, left_profile, right_profile);
         const left_hash = sourceSha256(pair.left);
         const right_hash = sourceSha256(pair.right);
         try report.writer.print("{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{s}\n", .{
@@ -712,6 +709,25 @@ fn qualifyMetamorphic(
     const path = output_directory ++ "/metamorphic.tsv";
     try writeFile(io, path, try report.toOwnedSlice());
     try Report.line(io, allocator, "metamorphic report: {s}", .{path});
+}
+
+fn structurallyEquivalent(axis: []const u8, left: IrStats.Profile, right: IrStats.Profile) bool {
+    if (std.mem.eql(u8, axis, "while-or-for")) {
+        // Iterator setup may use a different number of scalar bookkeeping
+        // operations. The loop quality class is the observable hot shape:
+        // control, backedges, checks, calls and memory operations.
+        return left.counts.blocks == right.counts.blocks and
+            left.branches == right.branches and
+            left.loop_back_edges == right.loop_back_edges and
+            left.calls == right.calls and
+            left.safety_guards == right.safety_guards and
+            left.other_loads == right.other_loads and
+            left.other_stores == right.other_stores;
+    }
+    return left.counts.instructions == right.counts.instructions and
+        left.counts.blocks == right.counts.blocks and
+        left.calls == right.calls and
+        left.local_loads + left.local_stores == right.local_loads + right.local_stores;
 }
 
 fn executionEqual(left: Differential.Execution, right: Differential.Execution) bool {

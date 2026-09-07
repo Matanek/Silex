@@ -221,7 +221,14 @@ independently selects the same portable pairs for baseline SSE on both
 System V and Win64, reserves only volatile XMM registers, and keeps their
 scalar stack slots synchronized as a correct fallback for unselected or
 unsupported operations. AVX is not selected until target features can prove
-it is legal. Addressable values, unsupported aggregates, and values that
+it is legal. A shared target-family cost model scores arithmetic, branches,
+loads, stores, shuffles, scalar extractions, spills, calls and code size. The
+portable SLP priority records useful isomorphic arithmetic depth; loop-local
+work is amortized, while a stand-alone SSE pair whose packing cancels its
+arithmetic saving remains scalar. Low-priority layout groups remain affinity
+facts for profitable descendants and are never counted as vector work by
+themselves. Exact machine legality, live ranges, memory barriers and scalar
+uses prune the admitted plan a second time. Addressable values, unsupported aggregates, and values that
 cross unsupported machine operations remain explicit spills. Empty SSA edge
 transfers are bypassed after allocation, and the ARM64 collection cursor
 recognizes both induction updates separated by independent SSA copies and

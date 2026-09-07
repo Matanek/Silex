@@ -2,6 +2,7 @@ const std = @import("std");
 const Machine = @import("Machine.zig");
 const MemoryResidence = @import("MemoryResidence.zig");
 const ResidenceLiveness = @import("ResidenceLiveness.zig");
+const VectorCost = @import("../Optimize/VectorCost.zig");
 const Allocator = std.mem.Allocator;
 const Interval = ResidenceLiveness.Interval;
 const successorLive = ResidenceLiveness.successorLive;
@@ -12,6 +13,7 @@ const heavierThan = ResidenceLiveness.heavierThan;
 pub fn allocate(
     allocator: Allocator,
     function: Machine.Function,
+    target: VectorCost.Target,
     float_slots: []const bool,
     residences: []?Machine.FloatLaneResidence,
     registers: []const u5,
@@ -34,7 +36,7 @@ pub fn allocate(
     defer allocator.free(eligible_recurrence_slots);
     @memset(eligible_recurrence_slots, false);
     for (function.float_lane_groups) |group| {
-        if (!group.recurrence or !group.in_loop or group.priority < 8) continue;
+        if (!group.recurrence or !VectorCost.admitsFloat32Pair(target, group.priority, true, group.in_loop)) continue;
         for (0..group.width) |lane| eligible_recurrence_slots[group.slots[lane]] = true;
     }
 
@@ -55,8 +57,7 @@ pub fn allocate(
     const rounds: usize = if (MemoryResidence.required(function)) 2 else 1;
     for (0..rounds) |round| {
         for (function.float_lane_groups) |group| {
-            if (group.priority == 0 or
-                (group.recurrence and (!group.in_loop or group.priority < 8))) continue;
+            if (!VectorCost.admitsFloat32Group(target, group.priority, group.recurrence, group.in_loop)) continue;
             var lane: usize = 0;
             while (lane + 1 < group.width) : (lane += 2) {
                 const first = group.slots[lane];
