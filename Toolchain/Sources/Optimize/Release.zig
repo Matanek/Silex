@@ -792,10 +792,64 @@ fn splitFlatAggregateLocals(allocator: Allocator, program: Ir.Program, function:
             if (!field.type.isNumeric() and field.type != .bool) break;
         } else structures[local] = structure_index;
     }
-    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
-        .local_address => |address| structures[address.local] = null,
-        else => {},
-    };
+    const ScalarFieldReference = struct { local: Ir.LocalId, field: usize };
+    const address_roots = try allocator.alloc(?Ir.LocalId, function.value_types.len);
+    const field_references = try allocator.alloc(?ScalarFieldReference, function.value_types.len);
+    const aggregate_reference_loads = try allocator.alloc(?Ir.LocalId, function.value_types.len);
+    @memset(address_roots, null);
+    @memset(field_references, null);
+    @memset(aggregate_reference_loads, null);
+    if (function.blocks.len == 1) {
+        const uses = try allocator.alloc(usize, function.value_types.len);
+        const accepted_uses = try allocator.alloc(usize, function.value_types.len);
+        @memset(uses, 0);
+        @memset(accepted_uses, 0);
+        const block = function.blocks[0];
+        for (block.instructions) |instruction| countUses(instruction, uses);
+        countTerminatorUses(block.terminator, uses);
+        for (block.instructions) |instruction| switch (instruction) {
+            .local_address => |address| if (structures[address.local] != null) {
+                address_roots[address.result] = address.local;
+            },
+            .copy => |copy| if (address_roots[copy.operand]) |local| {
+                accepted_uses[copy.operand] += 1;
+                address_roots[copy.result] = local;
+            } else if (field_references[copy.operand]) |field| {
+                accepted_uses[copy.operand] += 1;
+                field_references[copy.result] = field;
+            },
+            .reference_field => |reference| if (address_roots[reference.reference]) |local| {
+                const structure_index = structures[local] orelse continue;
+                if (reference.structure != structure_index or
+                    reference.field >= program.structures[structure_index].fields.len) continue;
+                accepted_uses[reference.reference] += 1;
+                field_references[reference.result] = .{ .local = local, .field = reference.field };
+            },
+            .reference_load => |load| if (field_references[load.reference] != null) {
+                accepted_uses[load.reference] += 1;
+            } else if (address_roots[load.reference]) |local| {
+                if (function.value_types[load.result] == function.local_types[local]) {
+                    accepted_uses[load.reference] += 1;
+                    aggregate_reference_loads[load.result] = local;
+                }
+            },
+            .reference_store => |store| if (field_references[store.reference] != null) {
+                accepted_uses[store.reference] += 1;
+            },
+            else => {},
+        };
+        for (address_roots, 0..) |root, value| if (root) |local| {
+            if (uses[value] != accepted_uses[value]) structures[local] = null;
+        };
+        for (field_references, 0..) |reference, value| if (reference) |field| {
+            if (uses[value] != accepted_uses[value]) structures[field.local] = null;
+        };
+    } else {
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .local_address => |address| structures[address.local] = null,
+            else => {},
+        };
+    }
     var any = false;
     for (structures) |structure| if (structure != null) {
         any = true;
@@ -846,6 +900,11 @@ fn splitFlatAggregateLocals(allocator: Allocator, program: Ir.Program, function:
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
         for (block.instructions) |original| {
             switch (original) {
+                .copy => |copy| if (address_roots[copy.result]) |local| {
+                    if (structures[local] != null) continue;
+                } else if (field_references[copy.result]) |field| {
+                    if (structures[field.local] != null) continue;
+                },
                 .local_load => |load| if (structures[load.local]) |structure_index| {
                     const structure = program.structures[structure_index];
                     const values = try allocator.alloc(Ir.ValueId, structure.fields.len);
@@ -928,12 +987,60 @@ fn splitFlatAggregateLocals(allocator: Allocator, program: Ir.Program, function:
                     continue;
                 },
                 .local_address => |address| {
+                    if (address_roots[address.result]) |local| if (structures[local] != null) {
+                        continue;
+                    };
                     try instructions.append(allocator, .{ .local_address = .{
                         .result = address.result,
                         .local = local_remap[address.local].?,
                     } });
                     definitions[address.result] = instructions.items[instructions.items.len - 1];
                     continue;
+                },
+                .reference_field => |reference| if (field_references[reference.result]) |field| {
+                    if (structures[field.local] != null) continue;
+                },
+                .reference_load => |load| if (field_references[load.reference]) |field| {
+                    if (structures[field.local] != null) {
+                        const rewritten: Ir.Instruction = .{ .local_load = .{
+                            .result = load.result,
+                            .local = field_locals[field.local].?[field.field],
+                        } };
+                        try instructions.append(allocator, rewritten);
+                        definitions[load.result] = rewritten;
+                        continue;
+                    }
+                } else if (aggregate_reference_loads[load.result]) |local| {
+                    if (structures[local]) |structure_index| {
+                        const structure = program.structures[structure_index];
+                        const values = try allocator.alloc(Ir.ValueId, structure.fields.len);
+                        for (structure.fields, 0..) |field, field_index| {
+                            values[field_index] = value_types.items.len;
+                            try value_types.append(allocator, field.type);
+                            try instructions.append(allocator, .{ .local_load = .{
+                                .result = values[field_index],
+                                .local = field_locals[local].?[field_index],
+                            } });
+                        }
+                        const initialization: Ir.Instruction = .{ .structure_init = .{
+                            .result = load.result,
+                            .structure = structure_index,
+                            .fields = values,
+                        } };
+                        try instructions.append(allocator, initialization);
+                        definitions[load.result] = initialization;
+                        continue;
+                    }
+                },
+                .reference_store => |store| if (field_references[store.reference]) |field| {
+                    if (structures[field.local] != null) {
+                        try instructions.append(allocator, .{ .local_store = .{
+                            .local = field_locals[field.local].?[field.field],
+                            .operand = store.operand,
+                        } });
+                        local_epochs[field.local] += 1;
+                        continue;
+                    }
                 },
                 else => {},
             }
@@ -965,6 +1072,48 @@ fn unchangedLocalField(
     if (definition != .field_load or definition.field_load.field != field_index) return false;
     const base = definition.field_load.base;
     return loaded_local[base] == local and loaded_epoch[base] == epoch;
+}
+
+test "split flat aggregate locals addressed only through exact field references" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const pair = Ir.Type.structure(0);
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "Pair",
+            .fields = &.{
+                .{ .name = "x", .type = .int, .mutable = true },
+                .{ .name = "y", .type = .int, .mutable = true },
+            },
+        }},
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{ .int, .int, pair, .address, .address, .int, pair, .int },
+            .local_types = &.{pair},
+            .blocks = &.{.{
+                .instructions = &.{
+                    .{ .constant_int = .{ .result = 0, .bits = 3 } },
+                    .{ .constant_int = .{ .result = 1, .bits = 4 } },
+                    .{ .structure_init = .{ .result = 2, .structure = 0, .fields = &.{ 0, 1 } } },
+                    .{ .local_store = .{ .local = 0, .operand = 2 } },
+                    .{ .local_address = .{ .result = 3, .local = 0 } },
+                    .{ .reference_field = .{ .result = 4, .reference = 3, .structure = 0, .field = 0 } },
+                    .{ .constant_int = .{ .result = 5, .bits = 9 } },
+                    .{ .reference_store = .{ .reference = 4, .operand = 5 } },
+                    .{ .local_load = .{ .result = 6, .local = 0 } },
+                    .{ .field_load = .{ .result = 7, .base = 6, .field = 0 } },
+                },
+                .terminator = .return_void,
+            }},
+        }},
+    };
+    const split = try splitFlatAggregateLocals(allocator, program, program.functions[0]);
+    const text = try Ir.writeText(allocator, .{ .structures = program.structures, .functions = &.{split} });
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "address $"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "reference."));
 }
 
 fn instructionResult(instruction: Ir.Instruction) ?Ir.ValueId {

@@ -222,8 +222,16 @@ pub fn validateHotMeasurement(
         if (!std.mem.eql(u8, entry.source_sha256, source_sha256) or
             !std.mem.eql(u8, entry.function, function)) continue;
         for (entry.budgets) |budget| {
-            try validateObservedBudget(budget, hotMeasurementValue(measurement, budget.metric) orelse
-                return error.InvalidStructuralBudget);
+            const observed = hotMeasurementValue(measurement, budget.metric) orelse
+                return error.InvalidStructuralBudget;
+            validateObservedBudget(budget, observed) catch |err| {
+                std.debug.print(
+                    "hot budget exceeded for {s}: observed {d}, expected {s} {d} {s}\n",
+                    .{ budget.metric, observed, budget.direction, budget.limit, budget.unit },
+                );
+                std.debug.print("hot measurement: {any}\n", .{measurement});
+                return err;
+            };
         }
         return;
     }

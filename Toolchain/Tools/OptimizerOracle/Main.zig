@@ -235,6 +235,18 @@ fn qualifyNative(
             });
             memory_counter = try Qualification.verifyMemoryCounter(function_name, differential, without);
         }
+        var call_counter: ?Qualification.CallCounter = null;
+        if (entry.contract == .specializes_effectful_calls) {
+            const without = try Differential.verifyWithOptions(allocator, source, .{
+                .verify_each_pass = true,
+                .disabled = .value_inlining,
+            });
+            call_counter = try Qualification.verifyCallCounter(
+                entry.contract.specializes_effectful_calls,
+                differential,
+                without,
+            );
+        }
         const stem = std.fs.path.stem(entry.name);
         const artifact_stem = try std.fmt.allocPrint(
             allocator,
@@ -317,6 +329,14 @@ fn qualifyNative(
                     counter.disabled_guards,
                     counter.enabled_guards,
                 },
+            );
+        }
+        if (call_counter) |counter| {
+            try Report.line(
+                io,
+                allocator,
+                "    counter: disabling value_inlining retains {d} call(s) versus {d} in {s}",
+                .{ counter.disabled_calls, counter.enabled_calls, counter.function },
             );
         }
         try Report.line(io, allocator, "    binaries: Debug {d} bytes, Release {d} bytes", .{
@@ -497,6 +517,18 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 ranges.raw_proven_checks,
                 ranges.optimized_proven_checks,
                 ranges.optimized_unproven_checks,
+            },
+        ),
+        .call_specialization => |calls| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} calls {d} -> {d}, reference stores {d} -> {d} after scalar replacement",
+            .{
+                calls.function,
+                calls.raw_calls,
+                calls.optimized_calls,
+                calls.raw_reference_stores,
+                calls.optimized_reference_stores,
             },
         ),
         .slp => |slp| try Report.line(
@@ -849,7 +881,7 @@ fn compareCorpus(
         const llvm_comparison = LlvmStats.compare(raw_llvm, optimized_llvm, differential.raw_ir.functions.len);
         const advice = try Advisor.analyze(
             allocator,
-            IrStats.compare(differential.raw_ir, differential.optimized_ir),
+            try IrStats.compare(allocator, differential.raw_ir, differential.optimized_ir),
             llvm_comparison,
         );
         opportunity_summary.add(advice);

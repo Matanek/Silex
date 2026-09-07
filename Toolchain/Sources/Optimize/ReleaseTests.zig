@@ -635,6 +635,38 @@ test "release inlines small value calculations and structure construction" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @calculate"));
 }
 
+test "release scalarizes local references after effectful calls inline" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int; var y:int }
+        \\func adjust(value:&Pair, delta:int) int {
+        \\    let before = value.x + 0
+        \\    value.x += delta
+        \\    let after = value.x
+        \\    return before + after + value.y
+        \\}
+        \\func main() {
+        \\    var value = Pair(x:7, y:4)
+        \\    let adjusted = adjust(value, 2)
+        \\    print(adjusted + value.x)
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
+    const body = text[start..];
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @adjust"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "address $"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "reference."));
+}
+
 test "release scalarizes non escaping value structures" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

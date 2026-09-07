@@ -156,89 +156,12 @@ pub fn encodeLinux(allocator: Allocator, program: Machine.Program, entry: Entry)
     return encodeForPlatform(allocator, program, entry, .linux);
 }
 
-fn findInfallibleFunctions(allocator: Allocator, program: Machine.Program) Allocator.Error![]bool {
-    const infallible = try allocator.alloc(bool, program.functions.len);
-    @memset(infallible, true);
-    var changed = true;
-    while (changed) {
-        changed = false;
-        for (program.functions, 0..) |function, function_id| {
-            if (!infallible[function_id]) continue;
-            for (function.instructions) |instruction| if (!instructionCannotFail(instruction, infallible)) {
-                infallible[function_id] = false;
-                changed = true;
-                break;
-            };
-        }
-    }
-    return infallible;
-}
-
-fn instructionCannotFail(instruction: Machine.Instruction, infallible_functions: []const bool) bool {
-    return switch (instruction) {
-        .constant_int,
-        .constant_bool,
-        .constant_str,
-        .constant_float32,
-        .constant_float64,
-        .optional_null,
-        .optional_some,
-        .optional_unwrap,
-        .copy,
-        .copy_range,
-        .global_load,
-        .global_store,
-        .local_address,
-        .reference_load,
-        .address_load,
-        .address_store,
-        .reference_store,
-        .reference_offset,
-        .reference_indirect_offset,
-        .storage_init,
-        .aggregate_init,
-        .protocol_init,
-        .protocol_test,
-        .protocol_extract,
-        .class_load,
-        .class_store,
-        .class_retain,
-        .enum_init,
-        .enum_test,
-        .collection_count,
-        .string_count,
-        .string_byte_count,
-        .string_byte_at,
-        .function_address,
-        .return_value,
-        .return_void,
-        .jump,
-        .branch,
-        => true,
-        .unary => |unary| unary.type.isFloat(),
-        .binary => |binary| binaryCannotFail(binary),
-        .convert => |conversion| !conversion.checked and
-            !(conversion.source.isFloat() and conversion.target.isInteger()),
-        .call => |call| call.function < infallible_functions.len and infallible_functions[call.function],
-        else => false,
-    };
-}
-
-fn binaryCannotFail(binary: Machine.Instruction.Binary) bool {
-    if (binary.type.isFloat()) return true;
-    return switch (binary.operator) {
-        .add, .subtract, .multiply, .divide, .remainder, .shift_left, .shift_right => !binary.checked,
-        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal, .bit_and, .bit_xor => true,
-        else => false,
-    };
-}
-
 fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entry, platform: Platform) Error!Image {
     _ = FloatRuntime.object_bytes;
     _ = DeepCopyRuntime.object_bytes;
     _ = CycleRuntime.object_bytes;
     try Machine.validate(program);
-    const infallible_functions = try findInfallibleFunctions(allocator, program);
+    const infallible_functions = try Machine.findInfallibleFunctions(allocator, program);
     defer allocator.free(infallible_functions);
     var words: std.ArrayList(u32) = .empty;
     const offsets = try allocator.alloc(u32, program.functions.len);
@@ -5012,7 +4935,7 @@ test "omit status checks only for proven infallible direct callees" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const infallible = try findInfallibleFunctions(allocator, .{ .functions = &functions });
+    const infallible = try Machine.findInfallibleFunctions(allocator, .{ .functions = &functions });
     try std.testing.expectEqualSlices(bool, &.{ true, false, true, false }, infallible);
 
     const image = try encode(allocator, .{ .functions = &functions }, .none);

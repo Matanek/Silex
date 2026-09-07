@@ -1,0 +1,24 @@
+struct Pair {
+    var x:int
+    var y:int
+}
+
+func adjust(value:&Pair, delta:int) int {
+    value.x += delta
+    return value.x + value.y
+}
+
+func select(values:@int[..], index:int) int {
+    return values[index]
+}
+
+func main() {
+    var pair = Pair(x:7, y:3)
+    let adjusted = adjust(pair, 2)
+    print(adjusted)
+    print(pair.x)
+
+    let values:int[] = [4, 8, 15]
+    let view = @values[0:values.count()]
+    print(select(view, 1))
+}

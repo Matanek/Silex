@@ -651,6 +651,86 @@ pub fn slotOffset(slot: Slot) u32 {
     return @as(u32, slot) * slot_size;
 }
 
+/// Computes a closed-program fixed point for the private Silex execution
+/// status. A direct caller is infallible only when every instruction and every
+/// direct callee in its transitive closure is proven unable to fail.
+pub fn findInfallibleFunctions(allocator: std.mem.Allocator, program: Program) std.mem.Allocator.Error![]bool {
+    const infallible = try allocator.alloc(bool, program.functions.len);
+    @memset(infallible, true);
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (program.functions, 0..) |function, function_id| {
+            if (!infallible[function_id]) continue;
+            for (function.instructions) |instruction| if (!instructionCannotFail(instruction, infallible)) {
+                infallible[function_id] = false;
+                changed = true;
+                break;
+            };
+        }
+    }
+    return infallible;
+}
+
+fn instructionCannotFail(instruction: Instruction, infallible_functions: []const bool) bool {
+    return switch (instruction) {
+        .constant_int,
+        .constant_bool,
+        .constant_str,
+        .constant_float32,
+        .constant_float64,
+        .optional_null,
+        .optional_some,
+        .optional_unwrap,
+        .copy,
+        .copy_range,
+        .global_load,
+        .global_store,
+        .local_address,
+        .reference_load,
+        .address_load,
+        .address_store,
+        .reference_store,
+        .reference_offset,
+        .reference_indirect_offset,
+        .storage_init,
+        .aggregate_init,
+        .protocol_init,
+        .protocol_test,
+        .protocol_extract,
+        .class_load,
+        .class_store,
+        .class_retain,
+        .enum_init,
+        .enum_test,
+        .collection_count,
+        .string_count,
+        .string_byte_count,
+        .string_byte_at,
+        .function_address,
+        .return_value,
+        .return_void,
+        .jump,
+        .branch,
+        => true,
+        .unary => |unary| unary.type.isFloat(),
+        .binary => |binary| binaryCannotFail(binary),
+        .convert => |conversion| !conversion.checked and
+            !(conversion.source.isFloat() and conversion.target.isInteger()),
+        .call => |call| call.function < infallible_functions.len and infallible_functions[call.function],
+        else => false,
+    };
+}
+
+fn binaryCannotFail(binary: Instruction.Binary) bool {
+    if (binary.type.isFloat()) return true;
+    return switch (binary.operator) {
+        .add, .subtract, .multiply, .divide, .remainder, .shift_left, .shift_right => !binary.checked,
+        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal, .bit_and, .bit_xor => true,
+        else => false,
+    };
+}
+
 pub fn validate(program: Program) Error!void {
     for (program.globals) |global| {
         if (global.width == 0 or global.extra_bits.len + 1 > global.width) return error.InvalidMachineProgram;

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const CallSummary = @import("CallSummary.zig");
 
 const Allocator = std.mem.Allocator;
 const maximum_cost = 128;
@@ -15,13 +16,14 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     const information = try allocator.alloc(Info, program.functions.len);
     @memset(information, .{});
     for (program.functions, 0..) |_, index| resolve(program, information, index);
+    const summaries = try CallSummary.analyze(allocator, program);
 
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
         var current = function;
         var expansions: usize = 0;
         while (expansions < 64) : (expansions += 1) {
-            const next = try inlineOnce(allocator, program, information, current, index);
+            const next = try inlineOnce(allocator, program, information, summaries, current, index);
             if (next == null) break;
             current = next.?;
         }
@@ -165,6 +167,7 @@ fn inlineOnce(
     allocator: Allocator,
     program: Ir.Program,
     information: []const Info,
+    summaries: []const CallSummary.Summary,
     function: Ir.Function,
     function_index: usize,
 ) !?Ir.Function {
@@ -174,7 +177,13 @@ fn inlineOnce(
             else => continue,
         };
         if (call.function == function_index or call.function >= information.len or
-            information[call.function].state != .eligible) continue;
+            information[call.function].state != .eligible or
+            !CallSummary.shouldInline(
+                summaries[call.function],
+                information[call.function].cost,
+                CallSummary.isHotBlock(function, block_index),
+                true,
+            )) continue;
         return try expandCall(allocator, program, function, block_index, instruction_index, call);
     };
     return null;

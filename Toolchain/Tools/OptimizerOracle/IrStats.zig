@@ -73,13 +73,72 @@ pub fn profile(program: Silex.Ir.Program) Profile {
     var result: Profile = .{};
     result.counts.functions = program.functions.len;
     for (program.functions) |function| {
+        profileFunction(&result, function);
+    }
+    return result;
+}
+
+/// Profiles the closed execution surface rooted at `main`. Inlining leaves
+/// the original callee definitions in portable IR, while native emission and
+/// LLVM both discard functions that are no longer reachable. Comparing the
+/// full table would therefore charge an inlined body twice instead of
+/// measuring the final caller.
+pub fn profileReachable(allocator: @import("std").mem.Allocator, program: Silex.Ir.Program) !Profile {
+    var main_index: ?usize = null;
+    for (program.functions, 0..) |function, index| if (@import("std").mem.eql(u8, function.name, "main")) {
+        main_index = index;
+        break;
+    };
+    if (main_index == null) return profile(program);
+
+    const reachable = try allocator.alloc(bool, program.functions.len);
+    defer allocator.free(reachable);
+    @memset(reachable, false);
+    reachable[main_index.?] = true;
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (program.functions, 0..) |function, index| {
+            if (!reachable[index]) continue;
+            for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+                .call => |call| markReachable(reachable, call.function, &changed),
+                .function_reference => |reference| markReachable(reachable, reference.function, &changed),
+                .dynamic_call => |call| {
+                    markReachable(reachable, call.function, &changed);
+                    for (call.implementations) |implementation| {
+                        markReachable(reachable, implementation.function, &changed);
+                    }
+                },
+                .class_drop => |drop| for (drop.plans) |plan| for (plan.functions) |finalizer| {
+                    markReachable(reachable, finalizer.function, &changed);
+                },
+                else => {},
+            };
+        }
+    }
+
+    var result: Profile = .{};
+    for (program.functions, 0..) |function, index| if (reachable[index]) {
+        result.counts.functions += 1;
+        profileFunction(&result, function);
+    };
+    return result;
+}
+
+fn markReachable(reachable: []bool, function: usize, changed: *bool) void {
+    if (function >= reachable.len or reachable[function]) return;
+    reachable[function] = true;
+    changed.* = true;
+}
+
+fn profileFunction(result: *Profile, function: Silex.Ir.Function) void {
         result.counts.blocks += function.blocks.len;
         result.counts.values += function.value_types.len;
         result.counts.locals += function.local_types.len;
         for (function.blocks, 0..) |block, block_index| {
             result.counts.instructions += block.instructions.len;
             for (block.instructions) |instruction| {
-                profileInstruction(&result, instruction, function.value_types);
+                profileInstruction(result, instruction, function.value_types);
                 if (instruction == .print and valueIsDirectConstant(function, instruction.print.value))
                     result.constant_prints += 1;
             }
@@ -97,14 +156,12 @@ pub fn profile(program: Silex.Ir.Program) Profile {
                 .panic => result.panics += 1,
             }
         }
-    }
-    return result;
 }
 
-pub fn compare(raw: Silex.Ir.Program, optimized: Silex.Ir.Program) Comparison {
+pub fn compare(allocator: @import("std").mem.Allocator, raw: Silex.Ir.Program, optimized: Silex.Ir.Program) !Comparison {
     var result: Comparison = .{
-        .raw = profile(raw),
-        .optimized = profile(optimized),
+        .raw = try profileReachable(allocator, raw),
+        .optimized = try profileReachable(allocator, optimized),
         .matched = .{},
     };
     for (raw.functions, 0..) |raw_function, function_index| {
@@ -422,8 +479,62 @@ test "matched safety deltas ignore checks duplicated into a caller" {
             }},
         },
     } };
-    const result = compare(raw, optimized);
+    const result = try compare(@import("std").testing.allocator, raw, optimized);
     try @import("std").testing.expectEqual(@as(usize, 1), result.raw.safety_guards);
     try @import("std").testing.expectEqual(@as(usize, 1), result.optimized.safety_guards);
     try @import("std").testing.expectEqual(@as(usize, 1), result.matched.safety_removed);
+}
+
+test "reachable profiles charge an inlined body only to its final caller" {
+    const program: Silex.Ir.Program = .{ .functions = &.{
+        .{
+            .name = "helper",
+            .parameter_types = &.{.int},
+            .return_type = .int,
+            .value_types = &.{ .int, .int },
+            .blocks = &.{.{
+                .instructions = &.{.{ .copy = .{ .result = 1, .operand = 0 } }},
+                .terminator = .{ .return_value = 1 },
+            }},
+        },
+        .{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{ .int, .int },
+            .blocks = &.{.{
+                .instructions = &.{
+                    .{ .constant_int = .{ .result = 0, .bits = 7 } },
+                    .{ .call = .{ .result = 1, .function = 0, .arguments = &.{0} } },
+                    .{ .print = .{ .value = 1, .newline = true } },
+                },
+                .terminator = .return_void,
+            }},
+        },
+    } };
+    const complete = profile(program);
+    const reachable = try profileReachable(@import("std").testing.allocator, program);
+    try @import("std").testing.expectEqual(@as(usize, 2), complete.counts.functions);
+    try @import("std").testing.expectEqual(@as(usize, 2), reachable.counts.functions);
+    try @import("std").testing.expectEqual(@as(usize, 1), reachable.internal_calls);
+
+    const optimized: Silex.Ir.Program = .{ .functions = &.{
+        program.functions[0],
+        .{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{.int},
+            .blocks = &.{.{
+                .instructions = &.{
+                    .{ .constant_int = .{ .result = 0, .bits = 7 } },
+                    .{ .print = .{ .value = 0, .newline = true } },
+                },
+                .terminator = .return_void,
+            }},
+        },
+    } };
+    const optimized_reachable = try profileReachable(@import("std").testing.allocator, optimized);
+    try @import("std").testing.expectEqual(@as(usize, 1), optimized_reachable.counts.functions);
+    try @import("std").testing.expectEqual(@as(usize, 0), optimized_reachable.internal_calls);
 }

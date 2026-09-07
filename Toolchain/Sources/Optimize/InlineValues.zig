@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const CallSummary = @import("CallSummary.zig");
 
 const Allocator = std.mem.Allocator;
 const maximum_cost = 128;
@@ -7,16 +8,18 @@ const maximum_cost = 128;
 const Info = struct {
     state: enum { unresolved, visiting, rejected, eligible } = .unresolved,
     cost: usize = 0,
+    previously_eligible: bool = false,
 };
 
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     const information = try allocator.alloc(Info, program.functions.len);
     @memset(information, .{});
     for (program.functions, 0..) |_, index| resolve(program, information, index);
+    const summaries = try CallSummary.analyze(allocator, program);
 
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
-        functions[index] = try inlineFunction(allocator, program, information, function, index);
+        functions[index] = try inlineFunction(allocator, program, information, summaries, function, index);
     }
     var result = program;
     result.functions = functions;
@@ -34,18 +37,25 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
         info.state = .rejected;
         return;
     }
-    for (function.parameter_types) |parameter_type| if (!isParameterType(program, parameter_type)) {
-        info.state = .rejected;
-        return;
-    };
+    var previously_eligible = true;
+    for (function.parameter_types) |parameter_type| {
+        if (!isParameterType(program, parameter_type)) {
+            info.state = .rejected;
+            return;
+        }
+        previously_eligible = previously_eligible and isPreviousParameterType(program, parameter_type);
+    }
     if (function.value_types.len < function.parameter_types.len) {
         info.state = .rejected;
         return;
     }
-    for (function.value_types[function.parameter_types.len..]) |value_type| if (!isInlineValueType(program, value_type)) {
-        info.state = .rejected;
-        return;
-    };
+    for (function.value_types[function.parameter_types.len..]) |value_type| {
+        if (!isInlineValueType(program, value_type)) {
+            info.state = .rejected;
+            return;
+        }
+        previously_eligible = previously_eligible and isPreviousInlineValueType(program, value_type);
+    }
     switch (function.blocks[0].terminator) {
         .return_value => if (function.return_type == .void) {
             info.state = .rejected;
@@ -64,7 +74,32 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
     var cost: usize = 0;
     for (function.blocks[0].instructions) |instruction| {
         switch (instruction) {
-            .constant_int, .constant_bool, .constant_float32, .constant_float64, .field_load, .collection_count, .structure_init, .unary, .binary, .convert, .address_load, .address_store => cost += 1,
+            .constant_int,
+            .constant_bool,
+            .constant_float32,
+            .constant_float64,
+            .field_load,
+            .collection_count,
+            .structure_init,
+            .unary,
+            .binary,
+            .convert,
+            .address_load,
+            .address_store,
+            => cost += 1,
+            .local_address,
+            .reference_load,
+            .reference_store,
+            .reference_field,
+            .reference_optional,
+            => {
+                previously_eligible = false;
+                cost += 1;
+            },
+            .collection_load, .collection_reference, .collection_replace => {
+                previously_eligible = false;
+                cost += 4;
+            },
             .boundary_call => |call| {
                 if (call.result == null) {
                     info.state = .rejected;
@@ -88,6 +123,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                     info.state = .rejected;
                     return;
                 }
+                if (callee.state == .eligible and !callee.previously_eligible) previously_eligible = false;
                 cost += if (callee.state == .eligible) callee.cost else 1;
             },
             else => {
@@ -101,10 +137,11 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
         }
     }
     info.cost = cost;
+    info.previously_eligible = previously_eligible;
     info.state = .eligible;
 }
 
-fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
+fn isPreviousParameterType(program: Ir.Program, value_type: Ir.Type) bool {
     if (isValueType(program, value_type, 0)) return true;
     const structure_index = value_type.structureIndex() orelse return false;
     if (structure_index >= program.structures.len) return false;
@@ -112,7 +149,24 @@ fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
     return !structure.is_static and (structure.is_class or structure.collection == null);
 }
 
+fn isPreviousInlineValueType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (isValueType(program, value_type, 0)) return true;
+    const structure_index = value_type.structureIndex() orelse return false;
+    return structure_index < program.structures.len and !program.structures[structure_index].is_static;
+}
+
+fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (value_type == .address) return true;
+    if (isValueType(program, value_type, 0)) return true;
+    const structure_index = value_type.structureIndex() orelse return false;
+    if (structure_index >= program.structures.len) return false;
+    const structure = program.structures[structure_index];
+    return !structure.is_static and
+        (structure.is_class or structure.collection == null or structure.collection.?.view);
+}
+
 fn isInlineValueType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (value_type == .address) return true;
     if (isValueType(program, value_type, 0)) return true;
     const structure_index = value_type.structureIndex() orelse return false;
     return structure_index < program.structures.len and !program.structures[structure_index].is_static;
@@ -133,11 +187,14 @@ fn inlineFunction(
     allocator: Allocator,
     program: Ir.Program,
     information: []const Info,
+    summaries: []const CallSummary.Summary,
     function: Ir.Function,
     function_index: usize,
 ) !Ir.Function {
     var value_types: std.ArrayList(Ir.Type) = .empty;
     try value_types.appendSlice(allocator, function.value_types);
+    var local_types: std.ArrayList(Ir.Type) = .empty;
+    try local_types.appendSlice(allocator, function.local_types);
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     for (function.blocks, 0..) |block, block_index| {
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
@@ -145,7 +202,13 @@ fn inlineFunction(
             if (instruction == .call) {
                 const call = instruction.call;
                 if (call.function < information.len and call.function != function_index and
-                    information[call.function].state == .eligible)
+                    information[call.function].state == .eligible and
+                    CallSummary.shouldInline(
+                        summaries[call.function],
+                        information[call.function].cost,
+                        CallSummary.isHotBlock(function, block_index),
+                        information[call.function].previously_eligible,
+                    ))
                 {
                     const returned = try emitCall(
                         allocator,
@@ -154,6 +217,7 @@ fn inlineFunction(
                         call.function,
                         call.arguments,
                         &value_types,
+                        &local_types,
                         &instructions,
                     );
                     if (call.result) |result| {
@@ -172,6 +236,7 @@ fn inlineFunction(
     }
     var result = function;
     result.value_types = try value_types.toOwnedSlice(allocator);
+    result.local_types = try local_types.toOwnedSlice(allocator);
     result.blocks = blocks;
     return result;
 }
@@ -183,14 +248,15 @@ fn emitCall(
     function_index: usize,
     arguments: []const Ir.ValueId,
     caller_types: *std.ArrayList(Ir.Type),
+    caller_locals: *std.ArrayList(Ir.Type),
     output: *std.ArrayList(Ir.Instruction),
 ) !?Ir.ValueId {
     const function = program.functions[function_index];
     const mapping = try allocator.alloc(?Ir.ValueId, function.value_types.len);
     @memset(mapping, null);
     for (arguments, 0..) |argument, index| mapping[index] = argument;
-    const locals = try allocator.alloc(?Ir.ValueId, function.local_types.len);
-    @memset(locals, null);
+    const local_start = caller_locals.items.len;
+    try caller_locals.appendSlice(allocator, function.local_types);
 
     for (function.blocks[0].instructions) |instruction| switch (instruction) {
         .constant_int => |value| try emitResult(allocator, function, mapping, caller_types, output, value.result, .{
@@ -206,8 +272,26 @@ fn emitCall(
             .constant_float64 = .{ .result = undefined, .bits = value.bits },
         }),
         .copy => |value| mapping[value.result] = mapped(mapping, value.operand),
-        .local_store => |value| locals[value.local] = mapped(mapping, value.operand),
-        .local_load => |value| mapping[value.result] = locals[value.local] orelse unreachable,
+        .local_store => |value| try output.append(allocator, .{ .local_store = .{
+            .local = local_start + value.local,
+            .operand = mapped(mapping, value.operand),
+        } }),
+        .local_load => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .local_load = .{
+                .result = result,
+                .local = local_start + value.local,
+            } });
+        },
+        .local_address => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .local_address = .{
+                .result = result,
+                .local = local_start + value.local,
+            } });
+        },
         .field_load => |value| {
             const result = try appendType(allocator, function, caller_types, value.result);
             mapping[value.result] = result;
@@ -223,6 +307,43 @@ fn emitCall(
             try output.append(allocator, .{ .collection_count = .{
                 .result = result,
                 .collection = mapped(mapping, value.collection),
+            } });
+        },
+        .collection_load => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .collection_load = .{
+                .result = result,
+                .collection = mapped(mapping, value.collection),
+                .index = mapped(mapping, value.index),
+                .checked = value.checked,
+                .position = value.position,
+            } });
+        },
+        .collection_reference => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .collection_reference = .{
+                .result = result,
+                .collection = mapped(mapping, value.collection),
+                .reference = if (value.reference) |reference| mapped(mapping, reference) else null,
+                .index = mapped(mapping, value.index),
+                .checked = value.checked,
+                .ownership = value.ownership,
+                .position = value.position,
+            } });
+        },
+        .collection_replace => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .collection_replace = .{
+                .result = result,
+                .collection = mapped(mapping, value.collection),
+                .index = mapped(mapping, value.index),
+                .replacement = mapped(mapping, value.replacement),
+                .checked = value.checked,
+                .ownership = value.ownership,
+                .position = value.position,
             } });
         },
         .address_load => |value| {
@@ -241,6 +362,36 @@ fn emitCall(
             .operand = mapped(mapping, value.operand),
             .type = value.type,
         } }),
+        .reference_load => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .reference_load = .{
+                .result = result,
+                .reference = mapped(mapping, value.reference),
+            } });
+        },
+        .reference_store => |value| try output.append(allocator, .{ .reference_store = .{
+            .reference = mapped(mapping, value.reference),
+            .operand = mapped(mapping, value.operand),
+        } }),
+        .reference_field => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .reference_field = .{
+                .result = result,
+                .reference = mapped(mapping, value.reference),
+                .structure = value.structure,
+                .field = value.field,
+            } });
+        },
+        .reference_optional => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .reference_optional = .{
+                .result = result,
+                .reference = mapped(mapping, value.reference),
+            } });
+        },
         .structure_init => |value| {
             const result = try appendType(allocator, function, caller_types, value.result);
             mapping[value.result] = result;
@@ -292,6 +443,7 @@ fn emitCall(
                     call.function,
                     call_arguments,
                     caller_types,
+                    caller_locals,
                     output,
                 );
                 if (call.result) |result| {
@@ -421,6 +573,60 @@ test "inline small void memory writers" {
     const body = text[start..];
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @write_float"));
     try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "boundary.store"));
+}
+
+test "preserve previous boundary inlining while gating new reference forms" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const previous_blocks = [_]Ir.Block{.{
+        .instructions = &.{.{ .boundary_call = .{ .result = 0, .function = 0, .arguments = &.{} } }},
+        .terminator = .{ .return_value = 0 },
+    }};
+    const extended_blocks = [_]Ir.Block{.{
+        .instructions = &.{
+            .{ .boundary_call = .{ .result = 1, .function = 0, .arguments = &.{} } },
+            .{ .reference_store = .{ .reference = 0, .operand = 1 } },
+        },
+        .terminator = .return_void,
+    }};
+    const main_blocks = [_]Ir.Block{.{
+        .instructions = &.{
+            .{ .call = .{ .result = 1, .function = 0, .arguments = &.{} } },
+            .{ .call = .{ .result = null, .function = 1, .arguments = &.{0} } },
+        },
+        .terminator = .{ .return_value = 1 },
+    }};
+    const program: Ir.Program = .{ .functions = &.{
+        .{
+            .name = "previous_boundary",
+            .parameter_types = &.{},
+            .return_type = .uint,
+            .value_types = &.{.uint},
+            .blocks = &previous_blocks,
+        },
+        .{
+            .name = "extended_boundary",
+            .parameter_types = &.{.address},
+            .return_type = .void,
+            .value_types = &.{ .address, .uint },
+            .blocks = &extended_blocks,
+        },
+        .{
+            .name = "main",
+            .parameter_types = &.{.address},
+            .return_type = .uint,
+            .value_types = &.{ .address, .uint },
+            .blocks = &main_blocks,
+        },
+    } };
+
+    const optimized = try optimize(allocator, program);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
+    const body = text[start..];
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @previous_boundary"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "call @extended_boundary"));
 }
 
 test "inline numeric reads from aggregates that contain resources" {

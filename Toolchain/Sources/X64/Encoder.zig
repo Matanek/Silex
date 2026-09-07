@@ -118,6 +118,8 @@ fn encode(
     if (main_id >= program.functions.len) return error.InvalidMachineProgram;
     const reachable = try Reachability.find(allocator, program, main_id);
     defer allocator.free(reachable);
+    const infallible_functions = try Machine.findInfallibleFunctions(allocator, program);
+    defer allocator.free(infallible_functions);
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
@@ -146,7 +148,7 @@ fn encode(
     for (program.functions, 0..) |function, function_id| {
         if (!reachable[function_id]) continue;
         offsets[function_id] = @intCast(bytes.items.len);
-        try encodeFunction(allocator, &bytes, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &global_fixups, &windows_import_sites, &external_call_sites, platform, program, function);
+        try encodeFunction(allocator, &bytes, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &global_fixups, &windows_import_sites, &external_call_sites, platform, program, infallible_functions, function);
     }
 
     const entry_offset: u32 = @intCast(bytes.items.len);
@@ -337,6 +339,7 @@ fn encodeFunction(
     external_call_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Platform,
     program: Machine.Program,
+    infallible_functions: []const bool,
     function: Machine.Function,
 ) Error!void {
     if (function.float_register_slots.len != 0) return unsupported("X64 scalar floating register allocation");
@@ -777,8 +780,10 @@ fn encodeFunction(
                 const outgoing_stack_size = try emitInternalCallArguments(allocator, bytes, call.arguments, &argument_registers);
                 try appendCall(allocator, bytes, calls, call.function);
                 try emitStackAddition(allocator, bytes, outgoing_stack_size);
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2 });
-                try appendConditionalEpilogue(allocator, bytes, &epilogue_fixups, 0x85);
+                if (!infallible_functions[call.function]) {
+                    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2 });
+                    try appendConditionalEpilogue(allocator, bytes, &epilogue_fixups, 0x85);
+                }
                 if (call.result) |result| {
                     if (!result.aggregate) {
                         if (result.width != 1) return error.InvalidMachineProgram;
@@ -3482,6 +3487,58 @@ test "encode a no-op Silex main for the X64 process and Mach-O entry contracts" 
     defer windows.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), windows.windows_import_sites.len);
     try std.testing.expectEqual(@as(u8, 0xc3), windows.code[windows.code.len - 1]);
+}
+
+test "omit X64 status checks only for proven infallible direct callees" {
+    const functions = [_]Machine.Function{
+        .{
+            .name = "safe",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 0,
+            .frame_size = try Machine.frameSize(0),
+            .instructions = &.{.return_void},
+        },
+        .{
+            .name = "checked",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 3,
+            .frame_size = try Machine.frameSize(3),
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 0, .bits = std.math.maxInt(u64) >> 1 } },
+                .{ .constant_int = .{ .result = 1, .bits = 1 } },
+                .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
+                .return_void,
+            },
+        },
+        .{
+            .name = "main",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 0,
+            .frame_size = try Machine.frameSize(0),
+            .instructions = &.{
+                .{ .call = .{ .result = null, .function = 0, .arguments = &.{} } },
+                .{ .call = .{ .result = null, .function = 1, .arguments = &.{} } },
+                .return_void,
+            },
+        },
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const infallible = try Machine.findInfallibleFunctions(allocator, .{ .functions = &functions });
+    try std.testing.expectEqualSlices(bool, &.{ true, false, false }, infallible);
+
+    const image = try encodeLinux(allocator, .{ .functions = &functions });
+    defer image.deinit(allocator);
+    var status_checks: usize = 0;
+    var offset: usize = 0;
+    while (offset + 5 <= image.code.len) : (offset += 1) {
+        status_checks += @intFromBool(std.mem.eql(u8, image.code[offset..][0..5], &.{ 0x48, 0x85, 0xd2, 0x0f, 0x85 }));
+    }
+    try std.testing.expectEqual(@as(usize, 1), status_checks);
 }
 
 test "encode X64 panic diagnostics for both process contracts" {

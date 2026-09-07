@@ -145,8 +145,24 @@ Eligible calls pass the element address at the original load point and the
 callee reads each field through it, avoiding the caller load and parameter
 copy while preserving the original bounds check and observation order.
 
-Release inlines direct callees under a bounded cost across branches, loops,
-and multiple returns, in addition to constant-result and small straight-line
+Before inlining, a closed-program summary reaches a fixed point over the
+direct-call graph. It records transitive memory, ownership, boundary,
+synchronization and output effects, whether any checked operation or callee
+can fail, local instruction and control cost, return count, scalar/aggregate
+pressure, and recursion. The inliner combines that summary with its bounded
+expanded cost and whether the call site lies in a loop. It rejects recursive
+cycles and, for newly supported IR forms, observable boundary, ownership,
+synchronization or output effects. Calls admitted by the previous bounded
+inliners remain a conservative compatibility floor; their established
+decisions cannot be revoked merely because a richer summary now recognizes an
+effect that was already present. Small reference and view callees remain
+eligible when their exact reads, writes and checked operations can be cloned at
+the original site. This keeps a single deterministic model for straight-line
+and control-flow inlining without turning a new profitability analysis into a
+semantic change for already-qualified callers.
+
+Release inlines eligible direct callees across branches, loops, and multiple
+returns, in addition to constant-result and small straight-line
 specialization. Before this inlining, exact scalar `STD.Math.min` and
 `STD.Math.max` calls become portable float32 or float64 operations. Native
 lowering emits them directly on ARM64 and X64 while preserving the library
@@ -162,6 +178,19 @@ dominated by the exact collection-count comparison and cannot advance before
 that access. Equivalent loads of the same unchanged collection and induction
 locals share this proof; every unproved access retains its runtime bounds
 diagnostic.
+
+After an effectful helper is inlined, a same-block address of a flat scalar
+local may be demoted back to independent field locals when every use is an
+exact field reference load or store. Any escaping address, unknown reference
+operation or control-flow boundary keeps the aggregate addressable. This
+post-inlining scalar replacement exposes the final caller without changing
+alias observations.
+
+At machine encoding, ARM64 and X64 compute the same transitive infallibility
+fixed point for the private Silex call convention. A direct call omits its
+status-register branch only when every instruction and direct callee in that
+closure is proven infallible. Checked arithmetic, bounds operations, indirect
+or external calls, allocation, assertions and panics retain the status path.
 
 An indexed argument passed to a mutable parameter addresses the collection
 element directly when its root and any enclosing fields are stable. The

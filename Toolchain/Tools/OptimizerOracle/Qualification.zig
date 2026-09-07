@@ -82,6 +82,13 @@ pub const Evidence = union(enum) {
         optimized_proven_checks: usize,
         optimized_unproven_checks: usize,
     },
+    call_specialization: struct {
+        function: []const u8,
+        raw_calls: usize,
+        optimized_calls: usize,
+        raw_reference_stores: usize,
+        optimized_reference_stores: usize,
+    },
     slp: struct {
         function: []const u8,
         required: u3,
@@ -131,6 +138,12 @@ pub const MemoryCounter = struct {
     disabled_guards: usize,
 };
 
+pub const CallCounter = struct {
+    function: []const u8,
+    enabled_calls: usize,
+    disabled_calls: usize,
+};
+
 pub fn verifyContract(
     allocator: std.mem.Allocator,
     contract: Generator.StructuralContract,
@@ -151,6 +164,7 @@ pub fn verifyContract(
         .promotes_distinct_phis => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .folds_integer_conversions => |function_name| verifyIntegerConversionFolding(function_name, differential),
         .proves_integer_ranges => |requirement| verifyIntegerRanges(requirement, differential),
+        .specializes_effectful_calls => |function_name| verifyCallSpecialization(function_name, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -158,6 +172,47 @@ pub fn verifyContract(
             requirement.native_pair,
             differential.optimized_ir,
         ),
+    };
+}
+
+fn verifyCallSpecialization(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const raw_closure = IrStats.profile(differential.raw_ir);
+    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    if (raw.internal_calls < 2 or optimized.internal_calls != 0)
+        return error.ExpectedEffectfulCallSpecializationMissing;
+    if (raw_closure.reference_stores == 0 or optimized.reference_stores != 0)
+        return error.InlinedReferenceEffectNotScalarized;
+    return .{ .call_specialization = .{
+        .function = function_name,
+        .raw_calls = raw.internal_calls,
+        .optimized_calls = optimized.internal_calls,
+        .raw_reference_stores = raw_closure.reference_stores,
+        .optimized_reference_stores = optimized.reference_stores,
+    } };
+}
+
+pub fn verifyCallCounter(
+    function_name: []const u8,
+    enabled: Differential.Result,
+    disabled: Differential.Result,
+) !CallCounter {
+    const enabled_profile = IrStats.profile(.{ .functions = &.{findFunction(
+        enabled.optimized_ir,
+        function_name,
+    ) orelse return error.ContractFunctionMissing} });
+    const disabled_profile = IrStats.profile(.{ .functions = &.{findFunction(
+        disabled.optimized_ir,
+        function_name,
+    ) orelse return error.ContractFunctionMissing} });
+    if (enabled_profile.internal_calls >= disabled_profile.internal_calls)
+        return error.ExpectedCallCounterEvidenceMissing;
+    return .{
+        .function = function_name,
+        .enabled_calls = enabled_profile.internal_calls,
+        .disabled_calls = disabled_profile.internal_calls,
     };
 }
 

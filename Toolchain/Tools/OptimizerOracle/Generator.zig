@@ -30,6 +30,7 @@ pub const StructuralContract = union(enum) {
         bounded_loop: []const u8,
         unproven_add: []const u8,
     },
+    specializes_effectful_calls: []const u8,
     slp_width: struct {
         function: []const u8,
         minimum: u3,
@@ -177,6 +178,11 @@ pub const regressions = [_]RegressionEntry{
         .name = "Regressions/BoidsKernel.sx",
         .concern = "boids-like arrays, shared boolean chains, and native XY/Z realization",
         .contract = .{ .slp_width = .{ .function = "steer", .minimum = 3, .native_pair = true } },
+    },
+    .{
+        .name = "Regressions/CallEffectsInlining.sx",
+        .concern = "small reference and checked-view callees inline into the final caller without losing their memory effects",
+        .contract = .{ .specializes_effectful_calls = "main" },
     },
 };
 
