@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: Native target to execute
+        description: Native target or campaign to execute
         required: true
         type: choice
         default: all
         options:
           - all
+          - optimizer-x64
           - macos-x64
           - linux-arm64
           - linux-x64
@@ -107,6 +108,75 @@ jobs:
           printf '%s\n' "$portability_output"
           cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')
           test "$cycle_drops" -eq 6
+
+  optimizer-x64:
+    if: inputs.target == 'optimizer-x64'
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: Toolchain
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-macos-0.16.0.tar.xz -o "$archive"
+          echo "0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7  $archive" | shasum -a 256 -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Record the native candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+          mkdir -p .zig-cache/optimizer-x64
+          {
+            echo "commit=$(git -C .. rev-parse HEAD)"
+            echo "system=$(uname -s)"
+            echo "architecture=$(uname -m)"
+            echo "os=$(sw_vers -productVersion)"
+            echo "cpu=$(sysctl -n machdep.cpu.brand_string)"
+            clang --version | sed -n '1p'
+          } | tee .zig-cache/optimizer-x64/environment.txt
+
+      - name: Qualify native optimizer regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          zig build optimizer-oracle -- qualify 8 1 2>&1 | tee .zig-cache/optimizer-x64/qualification.log
+
+      - name: Run the native X64 campaign
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          zig build benchmark-native 2>&1 | tee .zig-cache/optimizer-x64/benchmark-build.log
+          python3 Benchmarks/Native/campaign.py \
+            .zig-cache/benchmark-native \
+            .zig-cache/optimizer-x64/campaign.json \
+            --samples 11 \
+            --warmups 2
+          cat .zig-cache/optimizer-x64/campaign.json
+
+      - name: Upload X64 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: optimizer-x64-${{ github.sha }}
+          path: |
+            Toolchain/.zig-cache/optimizer-x64
+            Toolchain/.zig-cache/benchmark-native/report.txt
+          if-no-files-found: error
+          retention-days: 14
 
   linux-arm64:
     if: inputs.target == 'all' || inputs.target == 'linux-arm64'
