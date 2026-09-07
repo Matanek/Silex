@@ -94,6 +94,11 @@ Generated evidence is recreated under `.zig-cache/optimizer-oracle/`:
 - `hot-budget.tsv` records the selected real function's Release IR and ARM64
   machine budget against its exact source hash, including SIMD-pair and loop-
   cursor counts;
+- `hot-budget.sir` preserves the optimized closed program used by that real-
+  consumer measurement, and `hot-budget-machine.json` exposes the selected
+  ARM64 function, including its instructions and register residences. Both are
+  emitted before budget validation so a rejected candidate remains
+  attributable without weakening the budget;
 - `*-raw.sir` and `*-silex.sir` preserve the deterministic portable IR before
   and after Release optimization for direct attribution of every reported gap;
 - `report.tsv` includes source and executable hashes, LLVM source revision,

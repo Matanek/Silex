@@ -73,6 +73,17 @@ pub fn run(
         machine_profile.pointer_terminated_cursors = @intFromBool(cursor.termination != null);
     }
     const source_hash = try fileSha256(allocator, io, source_path);
+    try std.Io.Dir.cwd().createDirPath(io, output_directory);
+    try writeFile(
+        io,
+        output_directory ++ "/hot-budget.sir",
+        try Silex.Ir.writeText(allocator, optimized),
+    );
+    try writeFile(
+        io,
+        output_directory ++ "/hot-budget-machine.json",
+        try std.json.Stringify.valueAlloc(allocator, machine, .{ .whitespace = .indent_2 }),
+    );
     try Registry.validateHotMeasurement(registry, source_hash, function_name, .{
         .ir_field_loads = @intCast(field_loads),
         .ir_checked_operations = @intCast(portable.checked_operations),
@@ -85,7 +96,6 @@ pub fn run(
         .machine_postindexed_cursors = @intCast(machine_profile.postindexed_cursors),
         .machine_pointer_terminated_cursors = @intCast(machine_profile.pointer_terminated_cursors),
     });
-    try std.Io.Dir.cwd().createDirPath(io, output_directory);
     var report: std.Io.Writer.Allocating = .init(allocator);
     errdefer report.deinit();
     try report.writer.writeAll("source_sha256\tfunction\tir_instructions\tir_blocks\tir_local_loads\tir_local_stores\tir_other_loads\tir_field_loads\tir_other_stores\tir_calls\tir_branches\tir_checked\tmachine_instructions\tmachine_stack_slots\tmachine_frame_bytes\tmachine_calls\tmachine_branches\tmachine_collection_loads\tmachine_reference_loads\tmachine_simd_pairs\tmachine_postindexed_cursors\tmachine_pointer_terminated_cursors\n");

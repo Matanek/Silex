@@ -780,14 +780,15 @@ pub fn emitLoad(
         try emitElementAddress(allocator, words, .x10, base, index, stride);
         var leaf: usize = 0;
         if (stride == @as(u64, value.result.width) * 4) {
-            if (allFloatResident(function, value.result)) {
-                leaf = try emitResidentFloatLoads(allocator, words, function, value.result, .x10, 0, leaf_count, stride);
-            } else while (leaf < leaf_count) : (leaf += 1) {
-                const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
-                if (!slotHasUse(function.instructions, slot)) continue;
-                try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
-                try storeValue(allocator, words, function, .x12, slot);
-            }
+            leaf = try emitCompactFloatLoads(
+                allocator,
+                words,
+                function,
+                value.result,
+                .x10,
+                0,
+                leaf_count,
+            );
         } else if (allFloatResident(function, value.result)) {
             leaf = try emitResidentFloatLoads(allocator, words, function, value.result, .x10, 0, leaf_count, stride);
         } else while (leaf < leaf_count) : (leaf += 1) {
@@ -892,6 +893,57 @@ fn allFloatResident(function: Machine.Function, span: Machine.Span) bool {
         if (!scalar and !lane) return false;
     }
     return true;
+}
+
+fn emitCompactFloatLoads(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    span: Machine.Span,
+    base: A64.Register,
+    first_leaf: usize,
+    end_leaf: usize,
+) Error!usize {
+    var leaf = first_leaf;
+    while (leaf < end_leaf) {
+        const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+        if (!slotHasUse(function.instructions, slot)) {
+            leaf += 1;
+            continue;
+        }
+        if (leaf + 1 < end_leaf and function.float_lane_slots.len != 0) {
+            if (function.float_lane_slots[slot]) |first| {
+                const second_slot = slot + 1;
+                if (slotHasUse(function.instructions, second_slot)) {
+                    if (function.float_lane_slots[second_slot]) |second| {
+                        if (first.register == second.register and first.lane == 0 and second.lane == 1) {
+                            try emitVector64LoadAtOffset(
+                                allocator,
+                                words,
+                                @enumFromInt(first.register),
+                                base,
+                                leaf * 4,
+                            );
+                            leaf += 2;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        try words.append(allocator, A64.load32Offset(.x12, base, @intCast(leaf * 4)));
+        if (function.float_lane_slots.len != 0 and function.float_lane_slots[slot] != null) {
+            const residence = function.float_lane_slots[slot].?;
+            try words.append(allocator, A64.moveGeneralToFloat(.x9, .x12, false));
+            try words.append(allocator, A64.insertFloat32Lane(
+                @enumFromInt(residence.register),
+                .x9,
+                residence.lane,
+            ));
+        } else try storeValue(allocator, words, function, .x12, slot);
+        leaf += 1;
+    }
+    return leaf;
 }
 
 fn slotHasUse(instructions: []const Machine.Instruction, slot: Machine.Slot) bool {

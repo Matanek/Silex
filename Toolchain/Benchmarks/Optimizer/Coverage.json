@@ -198,9 +198,9 @@
         {"metric": "machine_collection_loads", "direction": "max", "limit": 1, "observed": 1, "unit": "instructions"},
         {"metric": "machine_calls", "direction": "max", "limit": 0, "observed": 0, "unit": "instructions"},
         {"metric": "machine_branches", "direction": "max", "limit": 16, "observed": 10, "unit": "instructions"},
-        {"metric": "machine_stack_slots", "direction": "max", "limit": 20, "observed": 19, "unit": "slots"},
+        {"metric": "machine_stack_slots", "direction": "max", "limit": 14, "observed": 13, "unit": "slots"},
         {"metric": "machine_frame_bytes", "direction": "max", "limit": 1056, "observed": 1008, "unit": "bytes"},
-        {"metric": "machine_simd_xy_pairs", "direction": "min", "limit": 7, "observed": 10, "unit": "pairs"},
+        {"metric": "machine_simd_xy_pairs", "direction": "min", "limit": 20, "observed": 22, "unit": "pairs"},
         {"metric": "machine_postindexed_cursors", "direction": "min", "limit": 1, "observed": 1, "unit": "cursors"},
         {"metric": "machine_pointer_terminated_cursors", "direction": "min", "limit": 1, "observed": 1, "unit": "cursors"}
       ]

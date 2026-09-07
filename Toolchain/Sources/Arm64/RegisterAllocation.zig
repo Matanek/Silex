@@ -1517,6 +1517,93 @@ test "hot loop recurrence chains use CFG-aware SIMD residences" {
     for (4..10) |slot| try std.testing.expect(result.float_lane_residences[slot] != null);
 }
 
+test "mutable float32 xy recurrences remain resident across loop transfers" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0 } },
+        .{ .copy = .{ .result = 4, .operand = 0 } },
+        .{ .copy = .{ .result = 5, .operand = 1 } },
+        .{ .branch = .{ .condition = 2, .then_instruction = 5, .else_instruction = 10 } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 4, .right = 0, .type = .float32 } },
+        .{ .binary = .{ .result = 7, .operator = .add, .left = 5, .right = 1, .type = .float32 } },
+        .{ .copy = .{ .result = 4, .operand = 6 } },
+        .{ .copy = .{ .result = 5, .operand = 7 } },
+        .{ .jump = 4 },
+        .{ .return_value = .{ .start = 4, .width = 2, .aggregate = true } },
+    };
+    const groups = [_]Machine.FloatLaneGroup{
+        .{ .slots = .{ 4, 5, 0, 0 }, .width = 2, .priority = 16, .recurrence = true, .in_loop = true },
+        .{ .slots = .{ 6, 7, 0, 0 }, .width = 2, .priority = 16, .recurrence = true, .in_loop = true },
+    };
+    const function: Machine.Function = .{
+        .name = "mutable_xy_recurrence",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 2, .width = 1 }},
+        .return_type = .float32,
+        .return_width = 2,
+        .return_aggregate = true,
+        .slot_count = 8,
+        .frame_size = try Machine.frameSize(8),
+        .float_lane_groups = &groups,
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    for (4..8) |slot| {
+        try std.testing.expect(result.float_lane_residences[slot] != null);
+    }
+    try std.testing.expectEqual(
+        result.float_lane_residences[4].?.register,
+        result.float_lane_residences[5].?.register,
+    );
+}
+
+test "paired snapshots stay resident when their first lane feeds a deferred pair" {
+    const fields = [_]Machine.Span{
+        .{ .start = 6, .width = 1 },
+        .{ .start = 7, .width = 1 },
+    };
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 2, .bits = 1065353216 } },
+        .{ .constant_float32 = .{ .result = 3, .bits = 1065353216 } },
+        .{ .copy = .{ .result = 4, .operand = 0 } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 4, .right = 2, .type = .float32 } },
+        .{ .copy = .{ .result = 5, .operand = 1 } },
+        .{ .binary = .{ .result = 7, .operator = .add, .left = 5, .right = 3, .type = .float32 } },
+        .{ .aggregate_init = .{ .result = .{ .start = 8, .width = 2, .aggregate = true }, .fields = &fields } },
+        .{ .return_value = .{ .start = 8, .width = 2, .aggregate = true } },
+    };
+    const groups = [_]Machine.FloatLaneGroup{
+        .{ .slots = .{ 6, 7, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = true },
+    };
+    const function: Machine.Function = .{
+        .name = "deferred_snapshot_pair",
+        .parameter_count = 0,
+        .return_type = .float32,
+        .return_width = 2,
+        .return_aggregate = true,
+        .slot_count = 10,
+        .frame_size = try Machine.frameSize(10),
+        .float_lane_groups = &groups,
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    for (4..8) |slot| try std.testing.expect(result.float_lane_residences[slot] != null);
+    try std.testing.expectEqual(
+        result.float_lane_residences[4].?.register,
+        result.float_lane_residences[5].?.register,
+    );
+}
+
 test "independent XYZ group keeps XY paired and Z scalar" {
     const instructions = [_]Machine.Instruction{
         .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },

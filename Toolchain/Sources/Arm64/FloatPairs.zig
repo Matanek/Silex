@@ -66,14 +66,23 @@ pub fn allocate(
                     ((partners[first] == null and partners[second] == null) or
                         (rounds == 2 and partners[first] == second and partners[second] == first)))
                 {
-                    const first_instruction = definingInstruction(function.instructions, first) orelse continue;
-                    const second_instruction = definingInstruction(function.instructions, second) orelse continue;
+                    const first_instruction = definingInstruction(function.instructions, first);
+                    const second_instruction = definingInstruction(function.instructions, second);
+                    if (first_instruction == null or second_instruction == null) {
+                        if (!group.recurrence or !recurrenceTransfersPairable(function.instructions, first, second)) continue;
+                        pairSlots(partners, first, second);
+                        if (group.in_loop and group.priority >= 8) {
+                            planned[first] = true;
+                            planned[second] = true;
+                        }
+                        continue;
+                    }
                     // In a memory kernel, establish arithmetic dependencies before
                     // copy-only affinities can reserve their operands differently.
                     if (rounds == 2 and round == 0 and
-                        (first_instruction != .binary or second_instruction != .binary or
-                            first_instruction.binary.type != .float32 or second_instruction.binary.type != .float32 or
-                            first_instruction.binary.operator != second_instruction.binary.operator)) continue;
+                        (first_instruction.? != .binary or second_instruction.? != .binary or
+                            first_instruction.?.binary.type != .float32 or second_instruction.?.binary.type != .float32 or
+                            first_instruction.?.binary.operator != second_instruction.?.binary.operator)) continue;
                     pairSlots(partners, first, second);
                     if (group.in_loop and group.priority >= 8) {
                         planned[first] = true;
@@ -84,8 +93,8 @@ pub fn allocate(
                         partners,
                         first,
                         second,
-                        first_instruction,
-                        second_instruction,
+                        first_instruction.?,
+                        second_instruction.?,
                     );
                 }
             }
@@ -212,6 +221,48 @@ pub fn allocate(
     try pruneUnprofitableFloatPairs(allocator, function.instructions, residences, planned, MemoryResidence.required(function));
 }
 
+fn recurrenceTransfersPairable(
+    instructions: []const Machine.Instruction,
+    first: Machine.Slot,
+    second: Machine.Slot,
+) bool {
+    var first_definitions: usize = 0;
+    var second_definitions: usize = 0;
+    var first_in_block = false;
+    var second_in_block = false;
+    for (instructions) |instruction| {
+        if (instructionDefines(instruction, first)) {
+            if (first_in_block or !isPureTransferDefinition(instruction, first)) return false;
+            first_in_block = true;
+            first_definitions += 1;
+        }
+        if (instructionDefines(instruction, second)) {
+            if (second_in_block or !isPureTransferDefinition(instruction, second)) return false;
+            second_in_block = true;
+            second_definitions += 1;
+        }
+        switch (instruction) {
+            .jump, .branch, .return_value, .return_void => {
+                if (first_in_block != second_in_block) return false;
+                first_in_block = false;
+                second_in_block = false;
+            },
+            else => {},
+        }
+    }
+    if (first_in_block != second_in_block) return false;
+    return first_definitions > 1 and first_definitions == second_definitions;
+}
+
+fn isPureTransferDefinition(instruction: Machine.Instruction, slot: Machine.Slot) bool {
+    return switch (instruction) {
+        .copy => |copy| copy.result == slot,
+        .copy_range => |copy| slot >= copy.result.start and
+            slot < @as(usize, copy.result.start) + copy.result.width,
+        else => false,
+    };
+}
+
 fn pruneEarlyUses(
     instructions: []const Machine.Instruction,
     partners: []?Machine.Slot,
@@ -244,11 +295,65 @@ fn pruneEarlyUses(
         // The encoder delays the leader until the follower. A checked load,
         // store or scalar use in between must not observe that uncomputed
         // result. Portable affinity alone does not prove this ordering.
-        if (first.? >= second.? or !instructionsCanPair(instructions, first.?, second.?, definition)) {
+        const definitions_can_pair = first.? < second.? and
+            (instructionsCanPair(instructions, first.?, second.?, definition) or
+                copySnapshotsFeedDeferredPair(instructions, partners, first.?, second.?, definition));
+        if (!definitions_can_pair) {
             partners[slot] = null;
             partners[partner] = null;
         }
     }
+}
+
+fn copySnapshotsFeedDeferredPair(
+    instructions: []const Machine.Instruction,
+    partners: []const ?Machine.Slot,
+    first_index: usize,
+    second_index: usize,
+    definition: Machine.Instruction,
+) bool {
+    const copy = switch (definition) {
+        .copy => |value| value,
+        else => return false,
+    };
+    for (instructions[first_index + 1 .. second_index], first_index + 1..) |instruction, index| {
+        switch (instruction) {
+            .jump, .branch, .return_value, .return_void => return false,
+            else => {},
+        }
+        if (instructionDefines(instruction, copy.operand) or instructionDefines(instruction, copy.result)) return false;
+        if (instructionUses(instruction, copy.result) and
+            !deferredPairLeaderUses(instructions, partners, index, second_index, copy.result)) return false;
+    }
+    return true;
+}
+
+fn deferredPairLeaderUses(
+    instructions: []const Machine.Instruction,
+    partners: []const ?Machine.Slot,
+    leader_index: usize,
+    after: usize,
+    slot: Machine.Slot,
+) bool {
+    const binary = switch (instructions[leader_index]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    if (!instructionUses(instructions[leader_index], slot)) return false;
+    const partner = partners[binary.result] orelse return false;
+    if (partner <= binary.result) return false;
+    const partner_index = definingInstructionIndex(instructions, partner) orelse return false;
+    return partner_index > after and
+        instructionsCanPair(instructions, leader_index, partner_index, instructions[leader_index]);
+}
+
+fn definingInstructionIndex(instructions: []const Machine.Instruction, slot: Machine.Slot) ?usize {
+    var result: ?usize = null;
+    for (instructions, 0..) |instruction, index| if (instructionDefines(instruction, slot)) {
+        if (result != null) return null;
+        result = index;
+    };
+    return result;
 }
 
 fn allocatePairGraph(
@@ -614,21 +719,25 @@ fn markPairDependencies(
     if (required[first_slot] and required[second_slot]) return;
     required[first_slot] = true;
     required[second_slot] = true;
-    const first = definingInstruction(instructions, first_slot) orelse return;
-    const second = definingInstruction(instructions, second_slot) orelse return;
-    switch (first) {
-        .binary => |left| switch (second) {
+    const first = definingInstruction(instructions, first_slot);
+    const second = definingInstruction(instructions, second_slot);
+    if (first == null or second == null) {
+        markTransferDependencies(instructions, residences, required, first_slot, second_slot);
+        return;
+    }
+    switch (first.?) {
+        .binary => |left| switch (second.?) {
             .binary => |right| {
                 markOperandDependency(instructions, residences, required, left.left, right.left);
                 markOperandDependency(instructions, residences, required, left.right, right.right);
             },
             else => {},
         },
-        .copy => |left| switch (second) {
+        .copy => |left| switch (second.?) {
             .copy => |right| markOperandDependency(instructions, residences, required, left.operand, right.operand),
             else => {},
         },
-        .copy_range => |left| switch (second) {
+        .copy_range => |left| switch (second.?) {
             .copy_range => |right| markOperandDependency(
                 instructions,
                 residences,
@@ -640,6 +749,45 @@ fn markPairDependencies(
         },
         else => {},
     }
+}
+
+fn markTransferDependencies(
+    instructions: []const Machine.Instruction,
+    residences: []const ?Machine.FloatLaneResidence,
+    required: []bool,
+    first_slot: Machine.Slot,
+    second_slot: Machine.Slot,
+) void {
+    var first_operand: ?Machine.Slot = null;
+    var second_operand: ?Machine.Slot = null;
+    for (instructions) |instruction| {
+        if (transferOperand(instruction, first_slot)) |operand| first_operand = operand;
+        if (transferOperand(instruction, second_slot)) |operand| second_operand = operand;
+        if (first_operand != null and second_operand != null) {
+            markOperandDependency(instructions, residences, required, first_operand.?, second_operand.?);
+            first_operand = null;
+            second_operand = null;
+        }
+        switch (instruction) {
+            .jump, .branch, .return_value, .return_void => {
+                first_operand = null;
+                second_operand = null;
+            },
+            else => {},
+        }
+    }
+}
+
+fn transferOperand(instruction: Machine.Instruction, slot: Machine.Slot) ?Machine.Slot {
+    return switch (instruction) {
+        .copy => |copy| if (copy.result == slot) copy.operand else null,
+        .copy_range => |copy| if (slot >= copy.result.start and
+            slot < @as(usize, copy.result.start) + copy.result.width)
+            copy.operand.start + slot - copy.result.start
+        else
+            null,
+        else => null,
+    };
 }
 
 fn markOperandDependency(
