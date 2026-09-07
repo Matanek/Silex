@@ -30,6 +30,22 @@ func unsigned64Remainder(value:uint) uint {
     return value % (1000003 as uint)
 }
 
+func signed16PowerRemainder(value:int16) int16 {
+    return value % (256 as int16)
+}
+
+func signed64PowerQuotient(value:int) int {
+    return value / -1024
+}
+
+func unsigned32PowerRemainder(value:uint32) uint32 {
+    return value % (65536 as uint32)
+}
+
+func unsigned64PowerQuotient(value:uint) uint {
+    return value / (1024 as uint)
+}
+
 func main() {
     let signed8:func(int8) int8 = signed8Quotient
     let signed16:func(int16) int16 = signed16Remainder
@@ -39,6 +55,10 @@ func main() {
     let unsigned16:func(uint16) uint16 = unsigned16Remainder
     let unsigned32:func(uint32) uint32 = unsigned32Quotient
     let unsigned64:func(uint) uint = unsigned64Remainder
+    let signed16Power:func(int16) int16 = signed16PowerRemainder
+    let signed64Power:func(int) int = signed64PowerQuotient
+    let unsigned32Power:func(uint32) uint32 = unsigned32PowerRemainder
+    let unsigned64Power:func(uint) uint = unsigned64PowerQuotient
 
     assert(signed8(-127 as int8) == (-18 as int8))
     assert(signed16(-32767 as int16) == (-128 as int16))
@@ -48,5 +68,9 @@ func main() {
     assert(unsigned16(65535 as uint16) == (0 as uint16))
     assert(unsigned32(4294967295 as uint32) == (65535 as uint32))
     assert(unsigned64(9000000000000000000 as uint) == (999760 as uint))
+    assert(signed16Power(-32767 as int16) == (-255 as int16))
+    assert(signed64Power(-9000000000000000000) == 8789062500000000)
+    assert(unsigned32Power(4294967295 as uint32) == (65535 as uint32))
+    assert(unsigned64Power(9000000000000000000 as uint) == (8789062500000000 as uint))
     print("constant division preserved")
 }

@@ -354,8 +354,14 @@ multiply-subtract sequence. This applies to every fixed integer width because
 signed operands are sign-extended and unsigned operands are zero-extended at
 the native boundary. Such a divisor cannot trigger division by zero or the
 signed minimum divided by `-1`, so the replacement also preserves checked
-division semantics. Debug and constants not covered by the reciprocal recipe
-retain the ordinary hardware division path.
+division semantics. Exact powers of two use a separate selection: unsigned
+quotients and remainders become a shift or mask, while signed quotients add the
+sign bias required for truncation toward zero before the arithmetic shift and
+signed remainders reuse that quotient. A negative divisor negates the quotient.
+Checked division or remainder by `-1` retains the ordinary path and its minimum
+value overflow guard; an earlier range proof may make the same operation
+eligible once it is unchecked. Debug and constants not covered by either
+recipe retain the ordinary hardware division path.
 On ARM64, a field offset used exactly once by the immediately following
 reference load or store is folded into that memory access. A control-flow entry
 at the transfer, an additional use or an indirect class field keeps the explicit

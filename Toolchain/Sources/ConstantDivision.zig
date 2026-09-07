@@ -18,9 +18,43 @@ pub const Unsigned = struct {
     add_dividend: bool,
 };
 
+pub const SignedPowerOfTwo = struct {
+    shift: u6,
+    mask: u64,
+    negative: bool,
+};
+
+pub const UnsignedPowerOfTwo = struct {
+    shift: u6,
+    mask: u64,
+};
+
+/// Describes truncating signed division by an exact power of two. Division by
+/// -1 remains a valid arithmetic recipe, but a checked backend must retain its
+/// minimum-value overflow guard unless an earlier proof removed that check.
+pub fn signedPowerOfTwo(divisor: i64) ?SignedPowerOfTwo {
+    if (divisor == 0) return null;
+    const bits: u64 = @bitCast(divisor);
+    const magnitude = if (divisor < 0) 0 -% bits else bits;
+    if (!std.math.isPowerOfTwo(magnitude)) return null;
+    return .{
+        .shift = @intCast(std.math.log2_int(u64, magnitude)),
+        .mask = magnitude - 1,
+        .negative = divisor < 0,
+    };
+}
+
+pub fn unsignedPowerOfTwo(divisor: u64) ?UnsignedPowerOfTwo {
+    if (divisor == 0 or !std.math.isPowerOfTwo(divisor)) return null;
+    return .{
+        .shift = @intCast(std.math.log2_int(u64, divisor)),
+        .mask = divisor - 1,
+    };
+}
+
 /// Computes the Hacker's Delight signed-division recipe used by LLVM's
-/// DivisionByConstantInfo. Zero, +/-1 and powers of two remain on the ordinary
-/// division path until their dedicated selections are qualified separately.
+/// DivisionByConstantInfo. The separate power-of-two recipe owns +/-1 and
+/// exact powers; zero retains the ordinary checked division path.
 pub fn signed(divisor: i64) ?Signed {
     if (divisor == 0 or divisor == 1 or divisor == -1 or divisor == std.math.minInt(i64)) return null;
     const absolute: u64 = if (divisor < 0) @bitCast(-%divisor) else @intCast(divisor);
@@ -70,8 +104,7 @@ pub fn signed(divisor: i64) ?Signed {
 }
 
 /// Computes the Hacker's Delight unsigned-division recipe used by LLVM's
-/// DivisionByConstantInfo. Powers of two remain on the ordinary division path
-/// until their direct-shift selection is qualified separately.
+/// DivisionByConstantInfo. The separate power-of-two recipe owns exact powers.
 pub fn unsigned(divisor: u64) ?Unsigned {
     if (divisor <= 1 or std.math.isPowerOfTwo(divisor)) return null;
 
@@ -136,6 +169,58 @@ fn applyUnsigned(dividend: u64, plan: Unsigned) u64 {
     var quotient: u64 = @intCast(product >> 64);
     if (plan.add_dividend) quotient = ((dividend -% quotient) >> 1) +% quotient;
     return quotient >> plan.shift;
+}
+
+fn applySignedPowerOfTwo(dividend: i64, plan: SignedPowerOfTwo) i64 {
+    var quotient = dividend;
+    if (plan.shift != 0) {
+        const sign: u64 = @bitCast(dividend >> 63);
+        quotient = (dividend +% @as(i64, @bitCast(sign & plan.mask))) >> plan.shift;
+    }
+    return if (plan.negative) 0 -% quotient else quotient;
+}
+
+fn applyUnsignedPowerOfTwo(dividend: u64, plan: UnsignedPowerOfTwo) u64 {
+    return dividend >> plan.shift;
+}
+
+test "power-of-two plans preserve truncating signed and unsigned division" {
+    try std.testing.expect(signedPowerOfTwo(0) == null);
+    try std.testing.expect(signedPowerOfTwo(3) == null);
+    try std.testing.expect(unsignedPowerOfTwo(0) == null);
+    try std.testing.expect(unsignedPowerOfTwo(3) == null);
+
+    const signed_divisors = [_]i64{ -256, -8, -2, -1, 1, 2, 8, 256 };
+    for (signed_divisors) |divisor| {
+        const plan = signedPowerOfTwo(divisor).?;
+        var dividend: i64 = std.math.minInt(i16);
+        while (dividend <= std.math.maxInt(i16)) : (dividend += 1) {
+            try std.testing.expectEqual(@divTrunc(dividend, divisor), applySignedPowerOfTwo(dividend, plan));
+        }
+    }
+
+    const minimum_plan = signedPowerOfTwo(std.math.minInt(i64)).?;
+    const signed_boundaries = [_]i64{
+        std.math.minInt(i64), std.math.minInt(i64) + 1, -1, 0, 1, std.math.maxInt(i64),
+    };
+    for (signed_boundaries) |dividend| {
+        try std.testing.expectEqual(
+            @divTrunc(dividend, std.math.minInt(i64)),
+            applySignedPowerOfTwo(dividend, minimum_plan),
+        );
+    }
+
+    const unsigned_divisors = [_]u64{ 1, 2, 8, 256, 65_536, @as(u64, 1) << 63 };
+    const unsigned_boundaries = [_]u64{
+        0,                       1,                 std.math.maxInt(u8),  std.math.maxInt(u16), std.math.maxInt(u32),
+        (@as(u64, 1) << 63) - 1, @as(u64, 1) << 63, std.math.maxInt(u64),
+    };
+    for (unsigned_divisors) |divisor| {
+        const plan = unsignedPowerOfTwo(divisor).?;
+        for (unsigned_boundaries) |dividend| {
+            try std.testing.expectEqual(dividend / divisor, applyUnsignedPowerOfTwo(dividend, plan));
+        }
+    }
 }
 
 test "signed reciprocal plan matches every narrow dividend and wide boundaries" {

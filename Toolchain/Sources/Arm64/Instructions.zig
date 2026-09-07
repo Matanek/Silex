@@ -647,6 +647,7 @@ test "encode reciprocal division arithmetic" {
     try std.testing.expectEqual(@as(u32, 0xd341fdae), logicalShiftRightImmediate(.x14, .x13, 1));
     try std.testing.expectEqual(@as(u32, 0x8b4dfdad), addLogicalShiftRightRegisters(.x13, .x13, .x13, 63));
     try std.testing.expectEqual(@as(u32, 0xcb0c01ae), subtractRegisters(.x14, .x13, .x12));
+    try std.testing.expectEqual(@as(u32, 0xcb0d03ed), subtractRegisters(.x13, .zero_or_sp, .x13));
 }
 
 test "encode compact 32-bit collection accesses" {

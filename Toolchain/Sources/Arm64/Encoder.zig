@@ -2794,9 +2794,13 @@ fn integerConstantFeedsNextDivision(
         !slotUsedOnlyAt(function.instructions, constant.result, index + 1)) return false;
     if (constant.type.isSignedInteger()) {
         const bits = Numeric.signExtend(constant.bits, constant.type.bitWidth());
-        return ConstantDivision.signed(@bitCast(bits)) != null;
+        const divisor: i64 = @bitCast(bits);
+        if (ConstantDivision.signed(divisor) != null) return true;
+        return ConstantDivision.signedPowerOfTwo(divisor) != null and
+            (divisor != -1 or !binary.checked);
     }
-    return ConstantDivision.unsigned(constant.bits) != null;
+    return ConstantDivision.unsigned(constant.bits) != null or
+        ConstantDivision.unsignedPowerOfTwo(constant.bits) != null;
 }
 
 fn constantDivisionConstant(
@@ -2855,29 +2859,57 @@ fn encodeConstantDivision(
         constant.bits;
 
     if (constant.type.isSignedInteger()) {
-        const plan = ConstantDivision.signed(@bitCast(divisor_bits)).?;
-        try emitImmediate64(allocator, words, .x12, @bitCast(plan.multiplier));
-        try words.append(allocator, A64.signedMultiplyHigh(.x13, left, .x12));
-        switch (plan.adjustment) {
-            .none => {},
-            .add_dividend => try words.append(allocator, A64.addRegisters(.x13, .x13, left)),
-            .subtract_dividend => try words.append(allocator, A64.subtractRegisters(.x13, .x13, left)),
+        const divisor: i64 = @bitCast(divisor_bits);
+        if (ConstantDivision.signed(divisor)) |plan| {
+            try emitImmediate64(allocator, words, .x12, @bitCast(plan.multiplier));
+            try words.append(allocator, A64.signedMultiplyHigh(.x13, left, .x12));
+            switch (plan.adjustment) {
+                .none => {},
+                .add_dividend => try words.append(allocator, A64.addRegisters(.x13, .x13, left)),
+                .subtract_dividend => try words.append(allocator, A64.subtractRegisters(.x13, .x13, left)),
+            }
+            if (plan.shift != 0) {
+                try words.append(allocator, A64.arithmeticShiftRightImmediate(.x13, .x13, plan.shift));
+            }
+            try words.append(allocator, A64.addLogicalShiftRightRegisters(.x13, .x13, .x13, 63));
+        } else {
+            const plan = ConstantDivision.signedPowerOfTwo(divisor).?;
+            if (plan.shift == 0) {
+                try words.append(allocator, A64.moveRegister(.x13, left));
+            } else {
+                try words.append(allocator, A64.arithmeticShiftRightImmediate(.x13, left, 63));
+                try emitImmediate64(allocator, words, .x12, plan.mask);
+                try words.append(allocator, A64.andRegisters(.x13, .x13, .x12));
+                try words.append(allocator, A64.addRegisters(.x13, left, .x13));
+                try words.append(allocator, A64.arithmeticShiftRightImmediate(.x13, .x13, plan.shift));
+            }
+            if (plan.negative) try words.append(allocator, A64.subtractRegisters(.x13, .zero_or_sp, .x13));
         }
-        if (plan.shift != 0) {
-            try words.append(allocator, A64.arithmeticShiftRightImmediate(.x13, .x13, plan.shift));
-        }
-        try words.append(allocator, A64.addLogicalShiftRightRegisters(.x13, .x13, .x13, 63));
     } else {
-        const plan = ConstantDivision.unsigned(divisor_bits).?;
-        try emitImmediate64(allocator, words, .x12, plan.multiplier);
-        try words.append(allocator, A64.unsignedMultiplyHigh(.x13, left, .x12));
-        if (plan.add_dividend) {
-            try words.append(allocator, A64.subtractRegisters(.x14, left, .x13));
-            try words.append(allocator, A64.logicalShiftRightImmediate(.x14, .x14, 1));
-            try words.append(allocator, A64.addRegisters(.x13, .x13, .x14));
-        }
-        if (plan.shift != 0) {
-            try words.append(allocator, A64.logicalShiftRightImmediate(.x13, .x13, plan.shift));
+        if (ConstantDivision.unsigned(divisor_bits)) |plan| {
+            try emitImmediate64(allocator, words, .x12, plan.multiplier);
+            try words.append(allocator, A64.unsignedMultiplyHigh(.x13, left, .x12));
+            if (plan.add_dividend) {
+                try words.append(allocator, A64.subtractRegisters(.x14, left, .x13));
+                try words.append(allocator, A64.logicalShiftRightImmediate(.x14, .x14, 1));
+                try words.append(allocator, A64.addRegisters(.x13, .x13, .x14));
+            }
+            if (plan.shift != 0) {
+                try words.append(allocator, A64.logicalShiftRightImmediate(.x13, .x13, plan.shift));
+            }
+        } else {
+            const plan = ConstantDivision.unsignedPowerOfTwo(divisor_bits).?;
+            if (binary.operator == .remainder) {
+                try emitImmediate64(allocator, words, .x12, plan.mask);
+                try words.append(allocator, A64.andRegisters(destination, left, .x12));
+                try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
+                return;
+            }
+            if (plan.shift == 0) {
+                try words.append(allocator, A64.moveRegister(.x13, left));
+            } else {
+                try words.append(allocator, A64.logicalShiftRightImmediate(.x13, left, plan.shift));
+            }
         }
     }
 
@@ -5448,6 +5480,48 @@ test "select ARM64 reciprocal division for adjacent signed and unsigned constant
     );
     try std.testing.expect(std.mem.indexOfScalar(u32, unsigned_words.items, A64.unsignedMultiplyHigh(.x13, .x0, .x12)) != null);
     try std.testing.expect(std.mem.indexOfScalar(u32, unsigned_words.items, A64.unsignedDivide(.x2, .x0, .x1)) == null);
+
+    var power_instructions = signed_instructions;
+    power_instructions[0].constant_int.bits = 0xffff_ffff_ffff_fff8;
+    power_instructions[1].binary.operator = .divide;
+    var power_function = signed_function;
+    power_function.instructions = &power_instructions;
+    var power_words: std.ArrayList(u32) = .empty;
+    try encodeConstantDivision(
+        allocator,
+        &power_words,
+        power_function,
+        &scalar_cache,
+        power_instructions[1].binary,
+        power_instructions[0].constant_int,
+    );
+    try std.testing.expect(std.mem.indexOfScalar(
+        u32,
+        power_words.items,
+        A64.arithmeticShiftRightImmediate(.x13, .x13, 3),
+    ) != null);
+    try std.testing.expect(std.mem.indexOfScalar(
+        u32,
+        power_words.items,
+        A64.subtractRegisters(.x13, .zero_or_sp, .x13),
+    ) != null);
+    try std.testing.expect(std.mem.indexOfScalar(u32, power_words.items, A64.signedDivide(.x2, .x0, .x1)) == null);
+
+    var minus_one_instructions = signed_instructions;
+    minus_one_instructions[0].constant_int.bits = std.math.maxInt(u64);
+    var minus_one_function = signed_function;
+    minus_one_function.instructions = &minus_one_instructions;
+    try std.testing.expect(!integerConstantFeedsNextDivision(
+        minus_one_function,
+        0,
+        minus_one_instructions[0].constant_int,
+    ));
+    minus_one_instructions[1].binary.checked = false;
+    try std.testing.expect(integerConstantFeedsNextDivision(
+        minus_one_function,
+        0,
+        minus_one_instructions[0].constant_int,
+    ));
 }
 
 test "omit ARM64 width guard for a proven unchecked shift" {
