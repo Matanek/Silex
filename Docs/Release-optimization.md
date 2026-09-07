@@ -299,14 +299,16 @@ Replacing an ordinary slot-width aggregate in a collection similarly forms
 the source stack address once and uses paired 64-bit transfers where their
 offsets are encodable. Compact float32 storage and larger replacements retain
 the scalar copy path.
-Before allocation, fully residence-compatible ARM64 functions may reorder
+Before allocation, fully residence-compatible native functions may reorder
 independent single-definition arithmetic trees inside a pure region to make
 their lanes adjacent. This includes pure or read-only loops as well as mutable
 memory kernels. Memory accesses, calls, control-flow entries and potentially
 trapping operations remain barriers; expression trees and source positions are
 preserved. Float32 division is nontrapping under Silex semantics and can move
 with its pure dependency tree; integer division remains a barrier because its
-failure behavior is observable.
+failure behavior is observable. The resulting order belongs to the shared
+machine program: ARM64 allocates it directly, while X64 preserves it before
+applying its integer and baseline-SSE allocation.
 Constructed aggregates can seed those lanes by copying each leaf at its original
 construction point, without requiring the input leaves to be packed already.
 Scalar aggregate construction also contributes ordinary copy affinity per

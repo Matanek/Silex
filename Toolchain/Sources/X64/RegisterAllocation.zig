@@ -1,6 +1,7 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const FloatLaneAllocation = @import("../Arm64/RegisterAllocation.zig");
+const MemorySchedule = @import("../Arm64/MemorySchedule.zig");
 
 const Allocator = std.mem.Allocator;
 // These registers are volatile in both the System V and Windows X64 ABIs.
@@ -594,6 +595,52 @@ test "allocate portable float32 pairs in baseline X64 SIMD registers" {
     try std.testing.expectEqual(first.register, second.register);
     try std.testing.expectEqual(@as(u1, 0), first.lane);
     try std.testing.expectEqual(@as(u1, 1), second.lane);
+}
+
+test "X64 allocation consumes the shared scheduled machine order" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const instructions = [_]Machine.Instruction{
+        .{ .copy = .{ .result = 3, .operand = 0 } },
+        .{ .binary = .{ .result = 4, .left = 3, .right = 2, .operator = .multiply, .type = .float32 } },
+        .{ .binary = .{ .result = 5, .left = 4, .right = 2, .operator = .add, .type = .float32 } },
+        .{ .copy = .{ .result = 6, .operand = 1 } },
+        .{ .binary = .{ .result = 7, .left = 6, .right = 2, .operator = .multiply, .type = .float32 } },
+        .{ .binary = .{ .result = 8, .left = 7, .right = 2, .operator = .add, .type = .float32 } },
+        .return_void,
+    };
+    const groups = [_]Machine.FloatLaneGroup{
+        .{ .slots = .{ 4, 7, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = false },
+        .{ .slots = .{ 5, 8, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = false },
+    };
+    const original: Machine.Function = .{
+        .name = "scheduled_x64_pairs",
+        .parameter_count = 3,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 9,
+        .frame_size = try Machine.frameSize(9),
+        .float_lane_groups = &groups,
+        .instructions = &instructions,
+    };
+    const scheduled = try MemorySchedule.optimize(allocator, original);
+    try std.testing.expectEqual(@as(Machine.Slot, 6), scheduled.instructions[1].copy.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 4), scheduled.instructions[2].binary.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 7), scheduled.instructions[3].binary.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 5), scheduled.instructions[4].binary.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 8), scheduled.instructions[5].binary.result);
+
+    const allocated = try allocateProgram(allocator, .{ .functions = &.{scheduled} });
+    const function = allocated.functions[0];
+    try std.testing.expectEqualDeep(scheduled.instructions, function.instructions);
+    for ([_][2]Machine.Slot{ .{ 4, 7 }, .{ 5, 8 } }) |pair| {
+        const first = function.float_lane_slots[pair[0]] orelse return error.TestUnexpectedResult;
+        const second = function.float_lane_slots[pair[1]] orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(first.register, second.register);
+        try std.testing.expectEqual(@as(u1, 0), first.lane);
+        try std.testing.expectEqual(@as(u1, 1), second.lane);
+    }
 }
 
 test "hot X64 scalar loops retain registers before a terminal print barrier" {
