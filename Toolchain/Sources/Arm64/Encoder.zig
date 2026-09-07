@@ -881,7 +881,8 @@ fn encodeFunction(
         switch (instruction) {
             .constant_int => |constant| {
                 if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
-                if (integerConstantFeedsNextArithmetic(function, instruction_index, constant)) continue;
+                if (integerConstantFeedsNextArithmetic(function, instruction_index, constant) or
+                    integerConstantFeedsNextShiftedMultiply(function, instruction_index, constant)) continue;
                 const bits = if (constant.type.isSignedInteger())
                     Numeric.signExtend(constant.bits, constant.type.bitWidth())
                 else
@@ -1610,6 +1611,8 @@ fn encodeFunction(
                 if (multiplyFeedsNextAdd(function, instruction_index, binary)) continue;
                 if (immediateArithmeticConstant(function, instruction_index, binary)) |constant| {
                     try encodeImmediateArithmetic(allocator, words, &fixups, function, &scalar_cache, binary, constant);
+                } else if (shiftedMultiplyConstant(function, instruction_index, binary)) |constant| {
+                    try encodeShiftedMultiply(allocator, words, function, &scalar_cache, binary, constant);
                 } else if (comparisonBranchIndex(function, instruction_index, binary) != null) {
                     try encodeComparisonFlags(allocator, words, function, instruction_index, binary);
                 } else if (fusedMultiplyForAdd(function, instruction_index)) |multiply_value| {
@@ -2737,6 +2740,63 @@ fn immediateArithmeticConstant(
     };
     return if (integerConstantFeedsNextArithmetic(function, index - 1, constant) and
         binary.right == constant.result) constant else null;
+}
+
+fn integerConstantFeedsNextShiftedMultiply(
+    function: Machine.Function,
+    index: usize,
+    constant: Machine.Instruction.ConstantInt,
+) bool {
+    if (index + 1 >= function.instructions.len or
+        controlTargetsInstruction(function.instructions, index + 1)) return false;
+    const binary = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return binary.type == constant.type and binary.operator == .multiply and
+        !binary.checked and binary.right == constant.result and
+        shiftForMultiplyAdd(constant.bits) != null and
+        slotUsedOnlyAt(function.instructions, constant.result, index + 1);
+}
+
+fn shiftedMultiplyConstant(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) ?Machine.Instruction.ConstantInt {
+    if (index == 0) return null;
+    const constant = switch (function.instructions[index - 1]) {
+        .constant_int => |value| value,
+        else => return null,
+    };
+    return if (integerConstantFeedsNextShiftedMultiply(function, index - 1, constant) and
+        binary.right == constant.result) constant else null;
+}
+
+fn shiftForMultiplyAdd(bits: u64) ?u6 {
+    if (bits <= 2) return null;
+    const power = bits - 1;
+    if (!std.math.isPowerOfTwo(power)) return null;
+    return @intCast(std.math.log2_int(u64, power));
+}
+
+fn encodeShiftedMultiply(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    scalar_cache: *ScalarCache,
+    binary: Machine.Instruction.Binary,
+    constant: Machine.Instruction.ConstantInt,
+) Allocator.Error!void {
+    const left = try prepareValueOperand(allocator, words, function, .x9, binary.left);
+    const destination = valueResultRegister(function, binary.result) orelse .x11;
+    try words.append(allocator, A64.addShiftedRegisters(
+        destination,
+        left,
+        left,
+        shiftForMultiplyAdd(constant.bits).?,
+    ));
+    try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
 }
 
 fn encodeImmediateArithmetic(
@@ -5169,6 +5229,59 @@ test "omit ARM64 overflow work for a proven unchecked multiply" {
     });
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
     try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
+}
+
+test "select one ARM64 add-shift for an unchecked multiply by a power plus one" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 1, .bits = 17 } },
+        .{ .binary = .{
+            .result = 2,
+            .operator = .multiply,
+            .left = 0,
+            .right = 1,
+            .type = .int,
+            .checked = false,
+        } },
+        .{ .return_value = .{ .start = 2, .width = 1 } },
+    };
+    const function: Machine.Function = .{
+        .name = "multiply_by_seventeen",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 3,
+        .frame_size = try Machine.frameSize(3),
+        .register_slots = &.{ 0, 1, 2 },
+        .instructions = &instructions,
+    };
+
+    try std.testing.expect(integerConstantFeedsNextShiftedMultiply(function, 0, instructions[0].constant_int));
+    try std.testing.expectEqual(@as(?u6, 4), shiftForMultiplyAdd(17));
+    try std.testing.expectEqual(@as(?u6, null), shiftForMultiplyAdd(15));
+
+    var words: std.ArrayList(u32) = .empty;
+    var scalar_cache: ScalarCache = .{ .enabled = false };
+    try encodeShiftedMultiply(
+        allocator,
+        &words,
+        function,
+        &scalar_cache,
+        instructions[1].binary,
+        instructions[0].constant_int,
+    );
+    try std.testing.expectEqual(@as(usize, 1), words.items.len);
+    try std.testing.expectEqual(A64.addShiftedRegisters(.x2, .x0, .x0, 4), words.items[0]);
+
+    var checked = instructions;
+    checked[1].binary.checked = true;
+    var checked_function = function;
+    checked_function.instructions = &checked;
+    try std.testing.expect(!integerConstantFeedsNextShiftedMultiply(checked_function, 0, checked[0].constant_int));
 }
 
 test "omit ARM64 width guard for a proven unchecked shift" {
