@@ -580,10 +580,12 @@ fn freeCursorRegister(
     // x15 has completed its only entry duty after the hidden result address is
     // saved, and these functions never use it again. Other volatile integer
     // colors can be borrowed when their allocated live ranges do not overlap
-    // the cursor lifetime. The x16/x17 scalar cache is disabled for allocated
-    // functions. Register allocation reserves x17 when the same structural
-    // proof identifies a cursor before integer coloring.
-    for ([_]u5{ 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17 }) |candidate| {
+    // the cursor lifetime. The encoder owns x5...x7 for cached floating-point
+    // literals, even though those values have no allocated machine slots.
+    // The x16/x17 scalar cache is disabled for allocated functions. Register
+    // allocation reserves x17 when the same structural proof identifies a
+    // cursor before integer coloring.
+    for ([_]u5{ 15, 0, 1, 2, 3, 4, 8, 16, 17 }) |candidate| {
         if (excluded != null and candidate == excluded.?) continue;
         var used = false;
         for (function.register_slots, 0..) |residence, slot| {
@@ -686,6 +688,39 @@ test "reuse a volatile register whose value dies before the cursor loop" {
     const cursor = (try find(std.testing.allocator, function)) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(u5, 2), cursor.register);
     try std.testing.expect(cursor.termination != null);
+}
+
+test "keep floating-point literal cache registers unavailable to cursors" {
+    const instructions = [_]Machine.Instruction{
+        .{ .copy = .{ .result = 6, .operand = 0 } },
+        .{ .copy = .{ .result = 7, .operand = 1 } },
+        .{ .copy = .{ .result = 8, .operand = 2 } },
+        .{ .copy = .{ .result = 9, .operand = 3 } },
+        .{ .copy = .{ .result = 10, .operand = 4 } },
+        .{ .copy = .{ .result = 11, .operand = 5 } },
+        .return_void,
+    };
+    const parameters = [_]Machine.Span{
+        .{ .start = 0, .width = 1 },
+        .{ .start = 1, .width = 1 },
+        .{ .start = 2, .width = 1 },
+        .{ .start = 3, .width = 1 },
+        .{ .start = 4, .width = 1 },
+        .{ .start = 5, .width = 1 },
+    };
+    const registers = [_]?u5{ 15, 0, 1, 2, 3, 4, null, null, null, null, null, null };
+    const function: Machine.Function = .{
+        .name = "literal_cache_reservation",
+        .parameter_count = parameters.len,
+        .parameters = &parameters,
+        .return_type = .void,
+        .slot_count = registers.len,
+        .frame_size = try Machine.frameSize(registers.len),
+        .register_slots = &registers,
+        .instructions = &instructions,
+    };
+
+    try std.testing.expectEqual(@as(?u5, 8), freeCursorRegister(function, null, 0, 5));
 }
 
 test "recognize a coalesced induction without header or increment copies" {

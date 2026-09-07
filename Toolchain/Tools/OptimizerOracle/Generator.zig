@@ -184,6 +184,10 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .slp_width = .{ .function = "steer", .minimum = 3, .native_pair = true } },
     },
     .{
+        .name = "Regressions/Boids2DSteering.sx",
+        .concern = "aggregate vector parameters keep pointer-terminated collection cursors disjoint from cached float literals",
+    },
+    .{
         .name = "Regressions/ReversedFloatRecurrence.sx",
         .concern = "reversed float recurrence copies preserve lane order and exact unaligned compact-field loads",
     },

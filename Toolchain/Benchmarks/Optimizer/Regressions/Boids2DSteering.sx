@@ -1,0 +1,73 @@
+struct Sample {
+    let position_x:float
+    let position_y:float
+    let velocity_x:float
+    let velocity_y:float
+}
+
+struct Vector2 {
+    let x:float
+    let y:float
+}
+
+struct Steering {
+    let x:float
+    let y:float
+}
+
+func steering(
+    position:Vector2,
+    velocity:Vector2,
+    snapshot:@Sample[..]
+) Steering {
+    var separation_x = 0.0
+    var separation_y = 0.0
+    var center_x = 0.0
+    var center_y = 0.0
+    var heading_x = 0.0
+    var heading_y = 0.0
+    var neighbors = 0
+
+    for other in snapshot {
+        let offset_x = position.x - other.position_x
+        let offset_y = position.y - other.position_y
+        let distance_squared = offset_x * offset_x + offset_y * offset_y
+        if distance_squared > 0.0 && distance_squared < 5184.0 {
+            center_x += other.position_x
+            center_y += other.position_y
+            heading_x += other.velocity_x
+            heading_y += other.velocity_y
+            neighbors++
+            if distance_squared < 784.0 {
+                var divisor = distance_squared
+                if divisor < 1.0 { divisor = 1.0 }
+                separation_x += offset_x / divisor
+                separation_y += offset_y / divisor
+            }
+        }
+    }
+    if neighbors == 0 { return Steering(x:0.0, y:0.0) }
+    let count = neighbors as float
+    return Steering(
+        x:(center_x / count - position.x) * 0.35 +
+            (heading_x / count - velocity.x) * 0.8 + separation_x * 1400.0,
+        y:(center_y / count - position.y) * 0.35 +
+            (heading_y / count - velocity.y) * 0.8 + separation_y * 1400.0
+    )
+}
+
+func main() {
+    let samples:Sample[] = [
+        Sample(position_x:10.0, position_y:20.0, velocity_x:55.0, velocity_y:0.0),
+        Sample(position_x:12.0, position_y:21.0, velocity_x:0.0, velocity_y:60.0),
+        Sample(position_x:-8.0, position_y:15.0, velocity_x:70.0, velocity_y:-20.0),
+        Sample(position_x:90.0, position_y:90.0, velocity_x:-10.0, velocity_y:15.0)
+    ]
+    let view = @samples[0:samples.count()]
+    let first = steering(Vector2(x:10.0, y:20.0), Vector2(x:55.0, y:0.0), view)
+    let second = steering(Vector2(x:-8.0, y:15.0), Vector2(x:70.0, y:-20.0), view)
+    print(first.x > -550.0)
+    print(first.y > -240.0)
+    print(second.x < -120.0)
+    print(second.y < 0.0)
+}

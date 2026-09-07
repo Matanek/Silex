@@ -234,7 +234,9 @@ transfers are bypassed after allocation, and the ARM64 collection cursor
 recognizes both induction updates separated by independent SSA copies and
 coalesced updates whose header and increment copies have disappeared. It
 borrows a volatile integer register only when that register's allocated live
-range does not overlap the loop, reserves the pointer-termination register
+range does not overlap the loop, excludes the encoder-owned floating-literal
+cache registers even though they have no allocated slots, reserves the
+pointer-termination register
 before integer coloring, and removes a per-iteration view-descriptor copy only
 when no body operation uses that copy. A qualifying unit-stride loop therefore
 uses a post-indexed data cursor and may compare that cursor directly with its
