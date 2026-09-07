@@ -48,6 +48,12 @@ pub const StructuralContract = union(enum) {
         arm64_minimum: u16,
         x64_minimum: u16,
     },
+    x64_regional_budget: struct {
+        function: []const u8,
+        minimum_resident: u16,
+        stack_slots: u16,
+        frame_bytes: u32,
+    },
 };
 
 pub const RegressionEntry = struct {
@@ -178,6 +184,16 @@ pub const regressions = [_]RegressionEntry{
     .{
         .name = "Regressions/ConstantDivision.sx",
         .concern = "signed and unsigned constant division, including powers of two, preserves all Silex integer widths on native backends",
+    },
+    .{
+        .name = "Regressions/X64RegionalBarriers.sx",
+        .concern = "a hot X64 scalar loop retains volatile registers while aggregate construction and a direct call remain stack barriers",
+        .contract = .{ .x64_regional_budget = .{
+            .function = "integrate",
+            .minimum_resident = 8,
+            .stack_slots = 4,
+            .frame_bytes = 128,
+        } },
     },
     .{
         .name = "Regressions/ArrayStorageAccess.sx",

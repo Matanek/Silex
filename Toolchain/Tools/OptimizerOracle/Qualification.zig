@@ -109,6 +109,15 @@ pub const Evidence = union(enum) {
         x64_resident: usize,
         total: usize,
     },
+    x64_regional_budget: struct {
+        function: []const u8,
+        resident: usize,
+        total: usize,
+        stack_slots: usize,
+        frame_bytes: u32,
+        calls: usize,
+        aggregate_barriers: usize,
+    },
 };
 
 pub const SsaValueCounter = struct {
@@ -196,6 +205,14 @@ pub fn verifyContract(
             requirement.function,
             requirement.arm64_minimum,
             requirement.x64_minimum,
+            differential.optimized_ir,
+        ),
+        .x64_regional_budget => |requirement| try verifyX64RegionalBudget(
+            allocator,
+            requirement.function,
+            requirement.minimum_resident,
+            requirement.stack_slots,
+            requirement.frame_bytes,
             differential.optimized_ir,
         ),
     };
@@ -783,6 +800,51 @@ fn verifyNativeLoopResidence(
         .arm64_resident = arm64_resident,
         .x64_resident = x64_resident,
         .total = arm64_function.slot_count,
+    } };
+}
+
+fn verifyX64RegionalBudget(
+    allocator: std.mem.Allocator,
+    function_name: []const u8,
+    minimum_resident: u16,
+    expected_stack_slots: u16,
+    expected_frame_bytes: u32,
+    program: Silex.Ir.Program,
+) !Evidence {
+    const stack_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .debug);
+    const x64_program = try Silex.X64RegisterAllocation.allocateProgram(allocator, stack_program);
+    const function = findMachineFunction(x64_program, function_name) orelse
+        return error.ContractFunctionMissing;
+    var resident: usize = 0;
+    for (function.register_slots) |residence| resident += @intFromBool(residence != null);
+    if (resident < minimum_resident) return error.ExpectedX64LoopResidenceMissing;
+
+    var calls: usize = 0;
+    var aggregate_barriers: usize = 0;
+    for (function.instructions) |instruction| switch (instruction) {
+        .call => calls += 1,
+        .copy_range, .aggregate_init => aggregate_barriers += 1,
+        else => {},
+    };
+    if (calls == 0) return error.ExpectedX64CallBarrierMissing;
+    if (aggregate_barriers == 0) return error.ExpectedX64AggregateBarrierMissing;
+
+    const stack_slots = @as(usize, function.slot_count) - resident;
+    if (stack_slots != expected_stack_slots or function.frame_size != expected_frame_bytes) {
+        std.debug.print(
+            "X64 regional budget mismatch for {s}: {d} resident/{d}, {d} stack slots, {d} frame bytes\n",
+            .{ function_name, resident, function.slot_count, stack_slots, function.frame_size },
+        );
+        return error.X64RegionalBudgetMismatch;
+    }
+    return .{ .x64_regional_budget = .{
+        .function = function_name,
+        .resident = resident,
+        .total = function.slot_count,
+        .stack_slots = stack_slots,
+        .frame_bytes = function.frame_size,
+        .calls = calls,
+        .aggregate_barriers = aggregate_barriers,
     } };
 }
 

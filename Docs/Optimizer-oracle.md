@@ -26,6 +26,13 @@ the last qualified real-consumer baseline, not an obsolete checked-in
 observation; the coverage entry keeps that remaining gap assigned to its
 owning Part.
 
+Fixed native regressions can also carry target-specific regional budgets.
+`X64RegionalBarriers.sx` requires its direct call and aggregate construction to
+survive portable optimization, then fixes the resulting X64 stack-slot and
+frame-byte counts while requiring the surrounding hot scalar region to retain
+register residence. These counts describe static homes and frame layout; they
+do not substitute for disassembly-based dynamic spill and reload inspection.
+
 The registry audit fails when an IR operation, terminator, named type, machine
 operation, or Release pass is missing or duplicated. An `equivalent` coverage
 entry must carry semantic, cost-model, Debug, Release, structural, and target

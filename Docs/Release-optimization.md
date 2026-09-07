@@ -345,12 +345,14 @@ register while retaining the same 64-bit payload transfer.
 Floating-point negation similarly reads its allocated operand and writes its
 allocated result directly; spilled endpoints retain the ordinary stack path.
 X64 applies a corresponding regional policy to scalar integer and boolean
-loops containing at least four compatible arithmetic operations when integer
-or boolean output barriers remain outside those loops. Values confined to the
-loop may use `r8` through `r11`, which are volatile in both System V and Win64;
-values used by or live across an output remain in their stack homes. Calls,
-aggregates, strings, floating-point values, unsupported loop operations and
-short loops retain the whole-function spill path.
+loops containing at least four compatible arithmetic operations. Integer and
+boolean output, direct calls, and pure aggregate construction or copies may
+remain outside those loops as hard barriers. Values confined to a scalar
+region may use `r8` through `r11`, which are volatile in both System V and
+Win64; complete call arguments, call results, aggregate spans, and every value
+live across a barrier retain their deterministic stack homes. Calls or
+aggregate operations inside the loop, strings, floating-point values,
+unsupported operations and short loops retain the whole-function spill path.
 On ARM64, an unchecked integer multiplication by an adjacent, single-use
 constant of the form `2^n + 1` selects one shifted `ADD`. Checked
 multiplications retain the ordinary multiply and overflow proof.

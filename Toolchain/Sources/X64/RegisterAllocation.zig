@@ -4,7 +4,8 @@ const FloatLaneAllocation = @import("../Arm64/RegisterAllocation.zig");
 
 const Allocator = std.mem.Allocator;
 // These registers are volatile in both the System V and Windows X64 ABIs.
-// Compatible functions are leaves, so no call can invalidate their contents.
+// Regional allocation pins every value used by or live across a call, so a
+// call can invalidate their contents only after the allocated interval ends.
 const registers = [_]u5{ 8, 9, 10, 11 };
 // XMM0...XMM5 are volatile in both System V and Win64. Keep XMM3...XMM5
 // reserved for pair packing and packed arithmetic scratch values.
@@ -100,6 +101,7 @@ fn regionallyCompatible(function: Machine.Function) bool {
                 .signed_integer, .unsigned_integer, .boolean => {},
                 .string, .float32, .float64 => return false,
             },
+            .copy_range, .aggregate_init, .call => {},
             else => return false,
         }
     }
@@ -146,7 +148,25 @@ fn visit(instruction: Machine.Instruction, index: usize, first: []usize, last: [
         .return_value => |value| touch(value.start, index, first, last, weights, weight),
         .branch => |value| touch(value.condition, index, first, last, weights, weight),
         .print => |value| touch(value.value, index, first, last, weights, weight),
+        .copy_range => |value| {
+            touchSpan(value.operand, index, first, last, weights, weight);
+            touchSpan(value.result, index, first, last, weights, weight);
+        },
+        .aggregate_init => |value| {
+            for (value.fields) |field| touchSpan(field, index, first, last, weights, weight);
+            touchSpan(value.result, index, first, last, weights, weight);
+        },
+        .call => |value| {
+            for (value.arguments) |argument| touchSpan(argument, index, first, last, weights, weight);
+            if (value.result) |result| touchSpan(result, index, first, last, weights, weight);
+        },
         else => {},
+    }
+}
+
+fn touchSpan(span: Machine.Span, index: usize, first: []usize, last: []usize, weights: []u64, weight: u64) void {
+    for (0..span.width) |leaf| {
+        touch(@intCast(@as(usize, span.start) + leaf), index, first, last, weights, weight);
     }
 }
 
@@ -552,4 +572,55 @@ test "hot X64 scalar loops retain registers before a terminal print barrier" {
         .instructions = &short_instructions,
     });
     try std.testing.expectEqual(@as(usize, 0), short.len);
+}
+
+test "hot X64 scalar loops retain registers before aggregate and call barriers" {
+    const fields = [_]Machine.Span{
+        .{ .start = 11, .width = 1 },
+        .{ .start = 12, .width = 1 },
+    };
+    const arguments = [_]Machine.Span{.{ .start = 13, .width = 2, .aggregate = true }};
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 12345 } },
+        .{ .constant_int = .{ .result = 1, .bits = 64 } },
+        .{ .constant_int = .{ .result = 2, .bits = 0 } },
+        .{ .copy = .{ .result = 11, .operand = 0 } },
+        .{ .copy = .{ .result = 12, .operand = 2 } },
+        .{ .jump = 6 },
+        .{ .binary = .{ .result = 3, .operator = .less, .left = 12, .right = 1 } },
+        .{ .branch = .{ .condition = 3, .then_instruction = 8, .else_instruction = 18 } },
+        .{ .constant_int = .{ .result = 4, .bits = 17 } },
+        .{ .binary = .{ .result = 5, .operator = .multiply, .left = 11, .right = 4, .checked = false } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 12 } },
+        .{ .constant_int = .{ .result = 7, .bits = 1_000_003 } },
+        .{ .binary = .{ .result = 8, .operator = .remainder, .left = 6, .right = 7, .checked = false } },
+        .{ .constant_int = .{ .result = 9, .bits = 1 } },
+        .{ .binary = .{ .result = 10, .operator = .add, .left = 12, .right = 9, .checked = false } },
+        .{ .copy = .{ .result = 11, .operand = 8 } },
+        .{ .copy = .{ .result = 12, .operand = 10 } },
+        .{ .jump = 6 },
+        .{ .aggregate_init = .{
+            .result = .{ .start = 13, .width = 2, .aggregate = true },
+            .fields = &fields,
+        } },
+        .{ .call = .{ .result = null, .function = 1, .arguments = &arguments } },
+        .return_void,
+    };
+    const residences = try allocate(std.testing.allocator, .{
+        .name = "integer_loop_with_aggregate_call",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 15,
+        .frame_size = try Machine.frameSize(15),
+        .instructions = &instructions,
+    });
+    defer std.testing.allocator.free(residences);
+
+    try std.testing.expectEqual(@as(usize, 15), residences.len);
+    for ([_]usize{ 3, 4, 5, 6, 7, 8, 9, 10 }) |slot| {
+        try std.testing.expect(residences[slot] != null);
+    }
+    for ([_]usize{ 11, 12, 13, 14 }) |slot| {
+        try std.testing.expectEqual(@as(?u5, null), residences[slot]);
+    }
 }

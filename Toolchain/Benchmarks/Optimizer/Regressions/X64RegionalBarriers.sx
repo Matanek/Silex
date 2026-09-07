@@ -1,0 +1,23 @@
+struct Snapshot {
+    let value:int
+    let index:int
+}
+
+func report(snapshot:Snapshot) {
+    print(snapshot.value + snapshot.index)
+}
+
+func integrate(seed:int, rounds:int) {
+    var value = seed
+    var index = 0
+    while index < rounds {
+        value = (value * 17 + index) % 1000003
+        index++
+    }
+    let snapshot = Snapshot(value:value, index:index)
+    report(snapshot)
+}
+
+func main() {
+    integrate(12345, 64)
+}

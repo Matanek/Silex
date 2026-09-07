@@ -570,6 +570,20 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 residence.total,
             },
         ),
+        .x64_regional_budget => |budget| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} X64 regional residence {d}/{d}, stack slots {d}, frame {d} bytes, barriers {d} call/{d} aggregate",
+            .{
+                budget.function,
+                budget.resident,
+                budget.total,
+                budget.stack_slots,
+                budget.frame_bytes,
+                budget.calls,
+                budget.aggregate_barriers,
+            },
+        ),
     }
 }
 
