@@ -285,6 +285,14 @@ pub fn addShiftedRegisters(destination: Register, left: Register, right: Registe
         registerBits(destination);
 }
 
+pub fn addLogicalShiftRightRegisters(destination: Register, left: Register, right: Register, shift: u6) u32 {
+    return 0x8b400000 |
+        (registerBits(right) << 16) |
+        (@as(u32, shift) << 10) |
+        (registerBits(left) << 5) |
+        registerBits(destination);
+}
+
 pub fn addressRelative(destination: Register) u32 {
     return 0x10000000 | registerBits(destination);
 }
@@ -325,6 +333,10 @@ pub fn subtractSetFlags(destination: Register, left: Register, right: Register) 
     return 0xeb000000 | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
 }
 
+pub fn subtractRegisters(destination: Register, left: Register, right: Register) u32 {
+    return 0xcb000000 | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
+}
+
 pub fn multiply(destination: Register, left: Register, right: Register) u32 {
     return 0x9b007c00 | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
 }
@@ -339,6 +351,14 @@ pub fn unsignedMultiplyHigh(destination: Register, left: Register, right: Regist
 
 pub fn arithmeticShiftRight63(destination: Register, source: Register) u32 {
     return 0x9340fc00 | (63 << 16) | (registerBits(source) << 5) | registerBits(destination);
+}
+
+pub fn arithmeticShiftRightImmediate(destination: Register, source: Register, shift: u6) u32 {
+    return 0x9340fc00 | (@as(u32, shift) << 16) | (registerBits(source) << 5) | registerBits(destination);
+}
+
+pub fn logicalShiftRightImmediate(destination: Register, source: Register, shift: u6) u32 {
+    return 0xd340fc00 | (@as(u32, shift) << 16) | (registerBits(source) << 5) | registerBits(destination);
 }
 
 pub fn signedDivide(destination: Register, left: Register, right: Register) u32 {
@@ -620,6 +640,13 @@ test "encode scalar floating-point immediates" {
 
 test "encode clear exclusive" {
     try std.testing.expectEqual(@as(u32, 0xd5033f5f), clearExclusive());
+}
+
+test "encode reciprocal division arithmetic" {
+    try std.testing.expectEqual(@as(u32, 0x9353fdae), arithmeticShiftRightImmediate(.x14, .x13, 19));
+    try std.testing.expectEqual(@as(u32, 0xd341fdae), logicalShiftRightImmediate(.x14, .x13, 1));
+    try std.testing.expectEqual(@as(u32, 0x8b4dfdad), addLogicalShiftRightRegisters(.x13, .x13, .x13, 63));
+    try std.testing.expectEqual(@as(u32, 0xcb0c01ae), subtractRegisters(.x14, .x13, .x12));
 }
 
 test "encode compact 32-bit collection accesses" {

@@ -1,5 +1,8 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
+const ResidenceLiveness = @import("../Arm64/ResidenceLiveness.zig");
+const Numeric = @import("../Numeric.zig");
+const ConstantDivision = @import("../ConstantDivision.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
 const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
@@ -413,7 +416,12 @@ fn encodeFunction(
         instruction_offsets[instruction_index] = bytes.items.len;
         switch (instruction) {
             .constant_int => |value| {
-                try emitImmediate(allocator, bytes, .rax, value.bits);
+                if (integerConstantFeedsNextDivision(function, instruction_index, value)) continue;
+                const bits = if (value.type.isSignedInteger())
+                    Numeric.signExtend(value.bits, value.type.bitWidth())
+                else
+                    value.bits;
+                try emitImmediate(allocator, bytes, .rax, bits);
                 try emitStoreValue(allocator, bytes, function.register_slots, .rax, value.result);
             },
             .constant_bool => |value| {
@@ -742,7 +750,9 @@ fn encodeFunction(
             },
             .binary => |binary| {
                 if (try FloatPairs.emit(allocator, bytes, function, binary)) continue;
-                try emitBinary(allocator, bytes, function.register_slots, binary);
+                if (constantDivisionConstant(function, instruction_index, binary)) |constant| {
+                    try emitConstantDivision(allocator, bytes, function, binary, constant);
+                } else try emitBinary(allocator, bytes, function.register_slots, binary);
             },
             .string_byte_at => |access| {
                 try emitLoadStack(allocator, bytes, .rax, access.operand);
@@ -922,6 +932,116 @@ fn emitProtocolExtract(
     for (0..value.result.width) |leaf| {
         try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, value.operand.start) + 1 + leaf));
         try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
+    }
+}
+
+fn integerConstantFeedsNextDivision(
+    function: Machine.Function,
+    index: usize,
+    constant: Machine.Instruction.ConstantInt,
+) bool {
+    if (index + 1 >= function.instructions.len or
+        controlTargetsInstruction(function.instructions, index + 1)) return false;
+    const binary = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    if (!constant.type.isInteger() or binary.type != constant.type or
+        (binary.operator != .divide and binary.operator != .remainder) or
+        binary.right != constant.result or
+        !slotUsedOnlyAt(function.instructions, constant.result, index + 1)) return false;
+    if (constant.type.isSignedInteger()) {
+        const bits = Numeric.signExtend(constant.bits, constant.type.bitWidth());
+        return ConstantDivision.signed(@bitCast(bits)) != null;
+    }
+    return ConstantDivision.unsigned(constant.bits) != null;
+}
+
+fn constantDivisionConstant(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) ?Machine.Instruction.ConstantInt {
+    if (index == 0) return null;
+    const constant = switch (function.instructions[index - 1]) {
+        .constant_int => |value| value,
+        else => return null,
+    };
+    return if (integerConstantFeedsNextDivision(function, index - 1, constant) and
+        binary.right == constant.result) constant else null;
+}
+
+fn slotUsedOnlyAt(instructions: []const Machine.Instruction, slot: Machine.Slot, allowed: usize) bool {
+    for (instructions, 0..) |instruction, index| {
+        if (index != allowed and ResidenceLiveness.instructionUses(instruction, slot)) return false;
+    }
+    return ResidenceLiveness.instructionUses(instructions[allowed], slot);
+}
+
+fn controlTargetsInstruction(instructions: []const Machine.Instruction, target: usize) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .jump => |value| if (value == target) return true,
+        .branch => |value| if (value.then_instruction == target or value.else_instruction == target) return true,
+        else => {},
+    };
+    return false;
+}
+
+fn emitConstantDivision(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    function: Machine.Function,
+    binary: Machine.Instruction.Binary,
+    constant: Machine.Instruction.ConstantInt,
+) Allocator.Error!void {
+    const divisor_bits = if (constant.type.isSignedInteger())
+        Numeric.signExtend(constant.bits, constant.type.bitWidth())
+    else
+        constant.bits;
+    try emitLoadValue(allocator, bytes, function.register_slots, .rax, binary.left);
+
+    if (constant.type.isSignedInteger()) {
+        const plan = ConstantDivision.signed(@bitCast(divisor_bits)).?;
+        try emitImmediate(allocator, bytes, .rcx, @bitCast(plan.multiplier));
+        try emitImplicitMultiplyHigh(allocator, bytes, .rcx, true);
+        switch (plan.adjustment) {
+            .none => {},
+            .add_dividend, .subtract_dividend => {
+                try emitLoadValue(allocator, bytes, function.register_slots, .rcx, binary.left);
+                try emitRegisterBinary(
+                    allocator,
+                    bytes,
+                    if (plan.adjustment == .add_dividend) 0x01 else 0x29,
+                    .rdx,
+                    .rcx,
+                );
+            },
+        }
+        if (plan.shift != 0) try emitShiftImmediate(allocator, bytes, .rdx, .arithmetic_right, plan.shift);
+        try emitMoveRegister(allocator, bytes, .rax, .rdx);
+        try emitShiftImmediate(allocator, bytes, .rax, .logical_right, 63);
+        try emitRegisterBinary(allocator, bytes, 0x01, .rdx, .rax);
+    } else {
+        const plan = ConstantDivision.unsigned(divisor_bits).?;
+        try emitImmediate(allocator, bytes, .rcx, plan.multiplier);
+        try emitImplicitMultiplyHigh(allocator, bytes, .rcx, false);
+        if (plan.add_dividend) {
+            try emitLoadValue(allocator, bytes, function.register_slots, .rcx, binary.left);
+            try emitRegisterBinary(allocator, bytes, 0x29, .rcx, .rdx);
+            try emitShiftImmediate(allocator, bytes, .rcx, .logical_right, 1);
+            try emitRegisterBinary(allocator, bytes, 0x01, .rdx, .rcx);
+        }
+        if (plan.shift != 0) try emitShiftImmediate(allocator, bytes, .rdx, .logical_right, plan.shift);
+    }
+
+    if (binary.operator == .remainder) {
+        try emitImmediate(allocator, bytes, .rax, divisor_bits);
+        try emitSignedMultiplyRegister(allocator, bytes, .rdx, .rax);
+        try emitLoadValue(allocator, bytes, function.register_slots, .rcx, binary.left);
+        try emitRegisterBinary(allocator, bytes, 0x29, .rcx, .rdx);
+        try emitStoreValue(allocator, bytes, function.register_slots, .rcx, binary.result);
+    } else {
+        try emitStoreValue(allocator, bytes, function.register_slots, .rdx, binary.result);
     }
 }
 
@@ -3405,6 +3525,58 @@ fn emitMoveRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination
     try bytes.append(allocator, 0xc0 | (@as(u8, @intFromEnum(source) & 7) << 3) | @as(u8, @intFromEnum(destination) & 7));
 }
 
+fn emitImplicitMultiplyHigh(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    source: Register,
+    signed: bool,
+) Allocator.Error!void {
+    const rex: u8 = 0x48 | @as(u8, @intFromBool(@intFromEnum(source) >= 8));
+    try bytes.appendSlice(allocator, &.{
+        rex,
+        0xf7,
+        0xc0 | ((if (signed) @as(u8, 5) else 4) << 3) | (@as(u8, @intFromEnum(source)) & 7),
+    });
+}
+
+fn emitSignedMultiplyRegister(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    destination: Register,
+    source: Register,
+) Allocator.Error!void {
+    const rex: u8 = 0x48 |
+        (@as(u8, @intFromBool(@intFromEnum(destination) >= 8)) << 2) |
+        @as(u8, @intFromBool(@intFromEnum(source) >= 8));
+    try bytes.appendSlice(allocator, &.{
+        rex,
+        0x0f,
+        0xaf,
+        0xc0 | ((@as(u8, @intFromEnum(destination)) & 7) << 3) | (@as(u8, @intFromEnum(source)) & 7),
+    });
+}
+
+const ShiftKind = enum(u3) {
+    logical_right = 5,
+    arithmetic_right = 7,
+};
+
+fn emitShiftImmediate(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    register: Register,
+    kind: ShiftKind,
+    amount: u6,
+) Allocator.Error!void {
+    const rex: u8 = 0x48 | @as(u8, @intFromBool(@intFromEnum(register) >= 8));
+    try bytes.appendSlice(allocator, &.{
+        rex,
+        0xc1,
+        0xc0 | (@as(u8, @intFromEnum(kind)) << 3) | (@as(u8, @intFromEnum(register)) & 7),
+        amount,
+    });
+}
+
 fn emitAndRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination: Register, source: Register) Allocator.Error!void {
     try emitRegisterBinary(allocator, bytes, 0x21, destination, source);
 }
@@ -3809,6 +3981,79 @@ test "X64 scalar allocation reduces leaf arithmetic code" {
     const register_image = try encodeLinux(allocator, register_program);
     defer register_image.deinit(allocator);
     try std.testing.expect(register_image.code.len < stack_image.code.len);
+}
+
+test "encode X64 reciprocal division primitives" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try emitImplicitMultiplyHigh(std.testing.allocator, &bytes, .rcx, true);
+    try emitImplicitMultiplyHigh(std.testing.allocator, &bytes, .rcx, false);
+    try emitShiftImmediate(std.testing.allocator, &bytes, .rdx, .arithmetic_right, 19);
+    try emitShiftImmediate(std.testing.allocator, &bytes, .rax, .logical_right, 63);
+    try emitSignedMultiplyRegister(std.testing.allocator, &bytes, .rdx, .rax);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x48, 0xf7, 0xe9,
+        0x48, 0xf7, 0xe1,
+        0x48, 0xc1, 0xfa,
+        0x13, 0x48, 0xc1,
+        0xe8, 0x3f, 0x48,
+        0x0f, 0xaf, 0xd0,
+    }, bytes.items);
+}
+
+test "sign extend narrow signed constants on X64" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 0xff, .type = .int8 } },
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 1,
+        .frame_size = try Machine.frameSize(1),
+        .instructions = &instructions,
+    };
+    const image = try encodeLinux(allocator, .{ .functions = &.{function} });
+    defer image.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{
+        0x48, 0xb8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    }) != null);
+}
+
+test "select X64 reciprocal remainder for an adjacent constant" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 12345, .type = .int } },
+        .{ .constant_int = .{ .result = 1, .bits = 1_000_003, .type = .int } },
+        .{ .binary = .{
+            .result = 2,
+            .operator = .remainder,
+            .left = 0,
+            .right = 1,
+            .type = .int,
+            .checked = true,
+        } },
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 3,
+        .frame_size = try Machine.frameSize(3),
+        .instructions = &instructions,
+    };
+    try std.testing.expect(integerConstantFeedsNextDivision(function, 1, instructions[1].constant_int));
+    const image = try encodeLinux(allocator, .{ .functions = &.{function} });
+    defer image.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x48, 0xf7, 0xe9 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x48, 0xf7, 0xf9 }) == null);
 }
 
 test "encode IEEE unordered float comparison results on X64" {

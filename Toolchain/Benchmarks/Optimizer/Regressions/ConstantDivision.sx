@@ -1,0 +1,52 @@
+func signed8Quotient(value:int8) int8 {
+    return value / (7 as int8)
+}
+
+func signed16Remainder(value:int16) int16 {
+    return value % (-257 as int16)
+}
+
+func signed32Quotient(value:int32) int32 {
+    return value / (-65537 as int32)
+}
+
+func signed64Remainder(value:int) int {
+    return value % 1000003
+}
+
+func unsigned8Quotient(value:uint8) uint8 {
+    return value / (7 as uint8)
+}
+
+func unsigned16Remainder(value:uint16) uint16 {
+    return value % (257 as uint16)
+}
+
+func unsigned32Quotient(value:uint32) uint32 {
+    return value / (65537 as uint32)
+}
+
+func unsigned64Remainder(value:uint) uint {
+    return value % (1000003 as uint)
+}
+
+func main() {
+    let signed8:func(int8) int8 = signed8Quotient
+    let signed16:func(int16) int16 = signed16Remainder
+    let signed32:func(int32) int32 = signed32Quotient
+    let signed64:func(int) int = signed64Remainder
+    let unsigned8:func(uint8) uint8 = unsigned8Quotient
+    let unsigned16:func(uint16) uint16 = unsigned16Remainder
+    let unsigned32:func(uint32) uint32 = unsigned32Quotient
+    let unsigned64:func(uint) uint = unsigned64Remainder
+
+    assert(signed8(-127 as int8) == (-18 as int8))
+    assert(signed16(-32767 as int16) == (-128 as int16))
+    assert(signed32(-2147483647 as int32) == (32767 as int32))
+    assert(signed64(-9000000000000000000) == -999760)
+    assert(unsigned8(255 as uint8) == (36 as uint8))
+    assert(unsigned16(65535 as uint16) == (0 as uint16))
+    assert(unsigned32(4294967295 as uint32) == (65535 as uint32))
+    assert(unsigned64(9000000000000000000 as uint) == (999760 as uint))
+    print("constant division preserved")
+}

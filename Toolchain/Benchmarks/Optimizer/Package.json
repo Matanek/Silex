@@ -1,0 +1,6 @@
+{
+  "sources": ".",
+  "requires": {
+    "silex": ">=0.40.0"
+  }
+}

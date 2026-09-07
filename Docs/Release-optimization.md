@@ -346,6 +346,16 @@ allocated result directly; spilled endpoints retain the ordinary stack path.
 On ARM64, an unchecked integer multiplication by an adjacent, single-use
 constant of the form `2^n + 1` selects one shifted `ADD`. Checked
 multiplications retain the ordinary multiply and overflow proof.
+In Release, an adjacent, single-use signed or unsigned divisor constant that
+is neither trivial nor a power of two selects a shared reciprocal recipe on
+ARM64 and X64. The backends realize the quotient with a high-half multiply,
+the required correction, and a shift; remainder reuses that quotient in a
+multiply-subtract sequence. This applies to every fixed integer width because
+signed operands are sign-extended and unsigned operands are zero-extended at
+the native boundary. Such a divisor cannot trigger division by zero or the
+signed minimum divided by `-1`, so the replacement also preserves checked
+division semantics. Debug and constants not covered by the reciprocal recipe
+retain the ordinary hardware division path.
 On ARM64, a field offset used exactly once by the immediately following
 reference load or store is folded into that memory access. A control-flow entry
 at the transfer, an additional use or an indirect class field keeps the explicit
