@@ -14,7 +14,7 @@ const Interval = struct {
     slot: Machine.Slot,
     first: usize,
     last: usize,
-    weight: usize,
+    weight: u64,
 };
 
 pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocator.Error || Machine.Error)!Machine.Program {
@@ -36,25 +36,44 @@ pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocato
 }
 
 pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Error![]const ?u5 {
-    if (!compatible(function)) return &.{};
+    const fully_compatible = compatible(function);
+    if (!fully_compatible and !regionallyCompatible(function)) return &.{};
     const residences = try allocator.alloc(?u5, function.slot_count);
     @memset(residences, null);
+    const forced = try allocator.alloc(bool, function.slot_count);
+    defer allocator.free(forced);
+    @memset(forced, false);
     const first = try allocator.alloc(usize, function.slot_count);
     defer allocator.free(first);
     const last = try allocator.alloc(usize, function.slot_count);
     defer allocator.free(last);
-    const weights = try allocator.alloc(usize, function.slot_count);
+    const weights = try allocator.alloc(u64, function.slot_count);
     defer allocator.free(weights);
+    const instruction_weights = try allocator.alloc(u64, function.instructions.len);
+    defer allocator.free(instruction_weights);
     @memset(first, std.math.maxInt(usize));
     @memset(last, 0);
     @memset(weights, 0);
+    @memset(instruction_weights, 1);
+    if (!fully_compatible) weightLoops(function.instructions, instruction_weights);
 
-    for (function.parameters) |parameter| touch(parameter.start, 0, first, last, weights);
-    for (function.instructions, 0..) |instruction, index| visit(instruction, index, first, last, weights);
+    for (function.parameters) |parameter| touch(parameter.start, 0, first, last, weights, 1);
+    for (function.instructions, 0..) |instruction, index| {
+        visit(instruction, index, first, last, weights, instruction_weights[index]);
+    }
+    if (!fully_compatible) {
+        extendLoopCarriedIntervals(function.instructions, first, last);
+        for (function.instructions, 0..) |instruction, index| {
+            // X64 output owns every volatile scratch register. Keep complete
+            // intervals crossing that barrier in their deterministic homes;
+            // registers are then used only by regions that end before it.
+            if (!compatibleInstruction(instruction)) pinIntervalsAt(index, first, last, forced);
+        }
+    }
 
     var intervals: std.ArrayList(Interval) = .empty;
     defer intervals.deinit(allocator);
-    for (first, 0..) |start, slot| if (start != std.math.maxInt(usize)) try intervals.append(allocator, .{
+    for (first, 0..) |start, slot| if (start != std.math.maxInt(usize) and !forced[slot]) try intervals.append(allocator, .{
         .slot = @intCast(slot),
         .first = start,
         .last = last[slot],
@@ -65,58 +84,145 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Erro
 }
 
 fn compatible(function: Machine.Function) bool {
-    if (function.reuses_slots or function.hidden_return_slot != null or function.capture_parameters.len != 0 or
-        function.float_register_slots.len != 0 or function.float_lane_slots.len != 0)
-    {
-        return false;
-    }
-    for (function.parameters) |parameter| if (parameter.aggregate or parameter.width != 1) return false;
+    if (!compatibleShape(function)) return false;
+    for (function.instructions) |instruction| if (!compatibleInstruction(instruction)) return false;
+    return true;
+}
+
+fn regionallyCompatible(function: Machine.Function) bool {
+    // Four arithmetic operations amortize the extra allocation machinery and
+    // match the target-independent scalar-loop threshold used by ARM64.
+    if (!compatibleShape(function) or !hasProfitableLoopRegion(function.instructions)) return false;
     for (function.instructions) |instruction| {
+        if (compatibleInstruction(instruction)) continue;
         switch (instruction) {
-            .constant_int, .constant_bool, .copy, .return_void, .jump, .branch => {},
-            .unary => |value| if (value.type.isFloat() or value.type == .str) return false,
-            .binary => |value| if (value.type.isFloat() or value.type == .str) return false,
-            .return_value => |value| if (value.aggregate or value.width != 1) return false,
+            .print => |value| switch (value.kind) {
+                .signed_integer, .unsigned_integer, .boolean => {},
+                .string, .float32, .float64 => return false,
+            },
             else => return false,
         }
     }
     return true;
 }
 
-fn visit(instruction: Machine.Instruction, index: usize, first: []usize, last: []usize, weights: []usize) void {
+fn compatibleShape(function: Machine.Function) bool {
+    if (function.reuses_slots or function.hidden_return_slot != null or function.capture_parameters.len != 0 or
+        function.float_register_slots.len != 0 or function.float_lane_slots.len != 0)
+    {
+        return false;
+    }
+    for (function.parameters) |parameter| if (parameter.aggregate or parameter.width != 1) return false;
+    return true;
+}
+
+fn compatibleInstruction(instruction: Machine.Instruction) bool {
+    return switch (instruction) {
+        .constant_int, .constant_bool, .copy, .return_void, .jump, .branch => true,
+        .unary => |value| !value.type.isFloat() and value.type != .str,
+        .binary => |value| !value.type.isFloat() and value.type != .str,
+        .return_value => |value| !value.aggregate and value.width == 1,
+        else => false,
+    };
+}
+
+fn visit(instruction: Machine.Instruction, index: usize, first: []usize, last: []usize, weights: []u64, weight: u64) void {
     switch (instruction) {
-        .constant_int => |value| touch(value.result, index, first, last, weights),
-        .constant_bool => |value| touch(value.result, index, first, last, weights),
+        .constant_int => |value| touch(value.result, index, first, last, weights, weight),
+        .constant_bool => |value| touch(value.result, index, first, last, weights, weight),
         .copy => |value| {
-            touch(value.operand, index, first, last, weights);
-            touch(value.result, index, first, last, weights);
+            touch(value.operand, index, first, last, weights, weight);
+            touch(value.result, index, first, last, weights, weight);
         },
         .unary => |value| {
-            touch(value.operand, index, first, last, weights);
-            touch(value.result, index, first, last, weights);
+            touch(value.operand, index, first, last, weights, weight);
+            touch(value.result, index, first, last, weights, weight);
         },
         .binary => |value| {
-            touch(value.left, index, first, last, weights);
-            touch(value.right, index, first, last, weights);
-            touch(value.result, index, first, last, weights);
+            touch(value.left, index, first, last, weights, weight);
+            touch(value.right, index, first, last, weights, weight);
+            touch(value.result, index, first, last, weights, weight);
         },
-        .return_value => |value| touch(value.start, index, first, last, weights),
-        .branch => |value| touch(value.condition, index, first, last, weights),
-        .return_void => {},
-        .jump => {},
-        else => unreachable,
+        .return_value => |value| touch(value.start, index, first, last, weights, weight),
+        .branch => |value| touch(value.condition, index, first, last, weights, weight),
+        .print => |value| touch(value.value, index, first, last, weights, weight),
+        else => {},
     }
 }
 
-fn touch(slot: Machine.Slot, index: usize, first: []usize, last: []usize, weights: []usize) void {
+fn touch(slot: Machine.Slot, index: usize, first: []usize, last: []usize, weights: []u64, weight: u64) void {
     first[slot] = @min(first[slot], index);
     last[slot] = @max(last[slot], index);
-    weights[slot] += 1;
+    weights[slot] = std.math.add(u64, weights[slot], weight) catch std.math.maxInt(u64);
 }
 
 fn heavierInterval(_: void, left: Interval, right: Interval) bool {
     if (left.weight != right.weight) return left.weight > right.weight;
     return left.slot < right.slot;
+}
+
+fn hasProfitableLoopRegion(instructions: []const Machine.Instruction) bool {
+    for (instructions, 0..) |instruction, source| switch (instruction) {
+        .jump => |target| if (target <= source and profitableLoopRange(instructions[target .. source + 1])) return true,
+        .branch => |branch| {
+            if (branch.then_instruction <= source and
+                profitableLoopRange(instructions[branch.then_instruction .. source + 1])) return true;
+            if (branch.else_instruction <= source and
+                profitableLoopRange(instructions[branch.else_instruction .. source + 1])) return true;
+        },
+        else => {},
+    };
+    return false;
+}
+
+fn profitableLoopRange(instructions: []const Machine.Instruction) bool {
+    var arithmetic: usize = 0;
+    for (instructions) |instruction| {
+        if (!compatibleInstruction(instruction)) return false;
+        arithmetic += switch (instruction) {
+            .binary, .unary => 1,
+            else => 0,
+        };
+    }
+    return arithmetic >= 4;
+}
+
+fn weightLoops(instructions: []const Machine.Instruction, weights: []u64) void {
+    for (instructions, 0..) |instruction, source| switch (instruction) {
+        .jump => |target| if (target <= source) weightRange(target, source, weights),
+        .branch => |branch| {
+            if (branch.then_instruction <= source) weightRange(branch.then_instruction, source, weights);
+            if (branch.else_instruction <= source) weightRange(branch.else_instruction, source, weights);
+        },
+        else => {},
+    };
+}
+
+fn weightRange(first: usize, last: usize, weights: []u64) void {
+    for (weights[first .. last + 1]) |*weight| weight.* = std.math.mul(u64, weight.*, 32) catch std.math.maxInt(u64);
+}
+
+fn extendLoopCarriedIntervals(instructions: []const Machine.Instruction, first: []const usize, last: []usize) void {
+    for (instructions, 0..) |instruction, source| switch (instruction) {
+        .jump => |target| if (target <= source) extendBackEdge(target, source, first, last),
+        .branch => |branch| {
+            if (branch.then_instruction <= source) extendBackEdge(branch.then_instruction, source, first, last);
+            if (branch.else_instruction <= source) extendBackEdge(branch.else_instruction, source, first, last);
+        },
+        else => {},
+    };
+}
+
+fn extendBackEdge(target: usize, source: usize, first: []const usize, last: []usize) void {
+    for (first, last) |start, *end| {
+        if (start < target and end.* >= target and end.* < source) end.* = source;
+    }
+}
+
+fn pinIntervalsAt(index: usize, first: []const usize, last: []const usize, forced: []bool) void {
+    for (first, last, forced) |start, end, *pinned| {
+        if (start != std.math.maxInt(usize) and start <= index and end >= index) pinned.* = true;
+    }
 }
 
 fn allocateGraph(
@@ -187,6 +293,7 @@ fn instructionUses(instruction: Machine.Instruction, slot: usize) bool {
         .binary => |value| value.left == slot or value.right == slot,
         .return_value => |value| value.start == slot,
         .branch => |value| value.condition == slot,
+        .print => |value| value.value == slot,
         else => false,
     };
 }
@@ -380,4 +487,69 @@ test "allocate portable float32 pairs in baseline X64 SIMD registers" {
     try std.testing.expectEqual(first.register, second.register);
     try std.testing.expectEqual(@as(u1, 0), first.lane);
     try std.testing.expectEqual(@as(u1, 1), second.lane);
+}
+
+test "hot X64 scalar loops retain registers before a terminal print barrier" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 12345 } },
+        .{ .constant_int = .{ .result = 1, .bits = 5_000_000 } },
+        .{ .constant_int = .{ .result = 2, .bits = 0 } },
+        .{ .copy = .{ .result = 11, .operand = 0 } },
+        .{ .copy = .{ .result = 12, .operand = 2 } },
+        .{ .jump = 6 },
+        .{ .binary = .{ .result = 3, .operator = .less, .left = 12, .right = 1 } },
+        .{ .branch = .{ .condition = 3, .then_instruction = 8, .else_instruction = 18 } },
+        .{ .constant_int = .{ .result = 4, .bits = 17 } },
+        .{ .binary = .{ .result = 5, .operator = .multiply, .left = 11, .right = 4, .checked = false } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 12 } },
+        .{ .constant_int = .{ .result = 7, .bits = 1_000_003 } },
+        .{ .binary = .{ .result = 8, .operator = .remainder, .left = 6, .right = 7, .checked = false } },
+        .{ .constant_int = .{ .result = 9, .bits = 1 } },
+        .{ .binary = .{ .result = 10, .operator = .add, .left = 12, .right = 9, .checked = false } },
+        .{ .copy = .{ .result = 11, .operand = 8 } },
+        .{ .copy = .{ .result = 12, .operand = 10 } },
+        .{ .jump = 6 },
+        .{ .print = .{ .value = 11, .kind = .signed_integer, .newline = true } },
+        .return_void,
+    };
+    const residences = try allocate(std.testing.allocator, .{
+        .name = "integer_loop_with_print",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 13,
+        .frame_size = try Machine.frameSize(13),
+        .instructions = &instructions,
+    });
+    defer std.testing.allocator.free(residences);
+
+    try std.testing.expectEqual(@as(usize, 13), residences.len);
+    try std.testing.expect(residences[12] != null);
+    try std.testing.expect(residences[5] != null);
+    try std.testing.expect(residences[6] != null);
+    try std.testing.expect(residences[8] != null);
+    try std.testing.expect(residences[10] != null);
+    try std.testing.expectEqual(@as(?u5, null), residences[11]);
+
+    const short_instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 0 } },
+        .{ .constant_int = .{ .result = 1, .bits = 1 } },
+        .{ .jump = 3 },
+        .{ .binary = .{ .result = 2, .operator = .less, .left = 0, .right = 1 } },
+        .{ .branch = .{ .condition = 2, .then_instruction = 5, .else_instruction = 9 } },
+        .{ .binary = .{ .result = 3, .operator = .add, .left = 0, .right = 1 } },
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 3, .right = 1 } },
+        .{ .copy = .{ .result = 0, .operand = 4 } },
+        .{ .jump = 3 },
+        .{ .print = .{ .value = 0, .kind = .signed_integer, .newline = true } },
+        .return_void,
+    };
+    const short = try allocate(std.testing.allocator, .{
+        .name = "short_loop_with_print",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &short_instructions,
+    });
+    try std.testing.expectEqual(@as(usize, 0), short.len);
 }

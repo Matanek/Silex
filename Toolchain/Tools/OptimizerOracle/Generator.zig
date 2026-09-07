@@ -43,9 +43,10 @@ pub const StructuralContract = union(enum) {
         function: []const u8,
         pointer_terminated: bool = true,
     },
-    arm64_loop_residence: struct {
+    native_loop_residence: struct {
         function: []const u8,
-        minimum: u16,
+        arm64_minimum: u16,
+        x64_minimum: u16,
     },
 };
 
@@ -77,8 +78,12 @@ pub const corpus = [_]CorpusEntry{
 pub const regressions = [_]RegressionEntry{
     .{
         .name = "IntegerArithmetic.sx",
-        .concern = "a hot scalar loop retains ARM64 registers across a terminal output barrier",
-        .contract = .{ .arm64_loop_residence = .{ .function = "main", .minimum = 10 } },
+        .concern = "a hot scalar loop retains target registers across a terminal output barrier",
+        .contract = .{ .native_loop_residence = .{
+            .function = "main",
+            .arm64_minimum = 10,
+            .x64_minimum = 10,
+        } },
     },
     .{
         .name = "AggregateScalarization.sx",

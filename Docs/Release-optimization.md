@@ -277,10 +277,11 @@ contiguous floating-point operations, so its setup is amortized. Every
 unsupported instruction is a hard barrier: its complete uses and definitions,
 and every interval live across it, remain stack-resident. Mixed aggregate
 loads and aggregate calls inside loops retain the whole-function spill path.
-The same barrier model admits a repeated scalar loop with at least four
-compatible arithmetic operations even when an output or another stack effect
-follows the loop. Values confined to the loop can then remain in registers;
-values live across the effect retain their deterministic stack homes.
+On ARM64, the same barrier model admits a repeated scalar loop with at least
+four compatible arithmetic operations even when an output or another stack
+effect follows the loop. Values confined to the loop can then remain in
+registers; values live across the effect retain their deterministic stack
+homes.
 The regional path does not use paired SIMD residences or memory scheduling.
 Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.
@@ -343,6 +344,13 @@ removes the otherwise redundant move through the floating-point scratch
 register while retaining the same 64-bit payload transfer.
 Floating-point negation similarly reads its allocated operand and writes its
 allocated result directly; spilled endpoints retain the ordinary stack path.
+X64 applies a corresponding regional policy to scalar integer and boolean
+loops containing at least four compatible arithmetic operations when integer
+or boolean output barriers remain outside those loops. Values confined to the
+loop may use `r8` through `r11`, which are volatile in both System V and Win64;
+values used by or live across an output remain in their stack homes. Calls,
+aggregates, strings, floating-point values, unsupported loop operations and
+short loops retain the whole-function spill path.
 On ARM64, an unchecked integer multiplication by an adjacent, single-use
 constant of the form `2^n + 1` selects one shifted `ADD`. Checked
 multiplications retain the ordinary multiply and overflow proof.

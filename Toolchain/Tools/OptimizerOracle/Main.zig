@@ -561,8 +561,14 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
         .loop_residence => |residence| try Report.line(
             io,
             allocator,
-            "    contract: {s} ARM64 scalar residences {d}/{d}",
-            .{ residence.function, residence.resident, residence.total },
+            "    contract: {s} scalar residences ARM64 {d}/{d}, X64 {d}/{d}",
+            .{
+                residence.function,
+                residence.arm64_resident,
+                residence.total,
+                residence.x64_resident,
+                residence.total,
+            },
         ),
     }
 }

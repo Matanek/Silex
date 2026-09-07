@@ -105,7 +105,8 @@ pub const Evidence = union(enum) {
     },
     loop_residence: struct {
         function: []const u8,
-        resident: usize,
+        arm64_resident: usize,
+        x64_resident: usize,
         total: usize,
     },
 };
@@ -190,10 +191,11 @@ pub fn verifyContract(
             requirement.pointer_terminated,
             differential.optimized_ir,
         ),
-        .arm64_loop_residence => |requirement| try verifyArm64LoopResidence(
+        .native_loop_residence => |requirement| try verifyNativeLoopResidence(
             allocator,
             requirement.function,
-            requirement.minimum,
+            requirement.arm64_minimum,
+            requirement.x64_minimum,
             differential.optimized_ir,
         ),
     };
@@ -754,22 +756,33 @@ fn verifyArm64LoopCursor(
     } };
 }
 
-fn verifyArm64LoopResidence(
+fn verifyNativeLoopResidence(
     allocator: std.mem.Allocator,
     function_name: []const u8,
-    minimum: u16,
+    arm64_minimum: u16,
+    x64_minimum: u16,
     program: Silex.Ir.Program,
 ) !Evidence {
     const arm64_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
-    const function = findMachineFunction(arm64_program, function_name) orelse
+    const arm64_function = findMachineFunction(arm64_program, function_name) orelse
         return error.ContractFunctionMissing;
-    var resident: usize = 0;
-    for (function.register_slots) |residence| resident += @intFromBool(residence != null);
-    if (resident < minimum) return error.ExpectedArm64LoopResidenceMissing;
+    var arm64_resident: usize = 0;
+    for (arm64_function.register_slots) |residence| arm64_resident += @intFromBool(residence != null);
+    if (arm64_resident < arm64_minimum) return error.ExpectedArm64LoopResidenceMissing;
+
+    const stack_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .debug);
+    const x64_program = try Silex.X64RegisterAllocation.allocateProgram(allocator, stack_program);
+    const x64_function = findMachineFunction(x64_program, function_name) orelse
+        return error.ContractFunctionMissing;
+    var x64_resident: usize = 0;
+    for (x64_function.register_slots) |residence| x64_resident += @intFromBool(residence != null);
+    if (x64_resident < x64_minimum) return error.ExpectedX64LoopResidenceMissing;
+
     return .{ .loop_residence = .{
         .function = function_name,
-        .resident = resident,
-        .total = function.slot_count,
+        .arm64_resident = arm64_resident,
+        .x64_resident = x64_resident,
+        .total = arm64_function.slot_count,
     } };
 }
 
