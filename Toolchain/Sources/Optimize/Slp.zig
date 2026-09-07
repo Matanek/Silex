@@ -144,7 +144,7 @@ fn compatiblePair(
                     .first = .{ .value = left.result },
                     .second = .{ .value = right.result },
                     .priority = pairPriority(pairs, .{ .local = left.local }, .{ .local = right.local }),
-                    .recurrence = pairRecurrence(pairs, .{ .local = left.local }, .{ .local = right.local }),
+                    .recurrence = in_loop and pairRecurrence(pairs, .{ .local = left.local }, .{ .local = right.local }),
                     .in_loop = in_loop,
                 }
             else
@@ -183,8 +183,8 @@ fn compatiblePair(
                 .{ .first = .{ .value = left.result }, .second = .{ .value = right.result }, .priority = @min(255, @as(u16, 8) + @max(
                     pairPriorityOrEqual(pairs, left.left, right.left),
                     pairPriorityOrEqual(pairs, left.right, right.right),
-                )), .recurrence = pairRecurrenceOrEqual(pairs, left.left, right.left) or
-                    pairRecurrenceOrEqual(pairs, left.right, right.right), .in_loop = in_loop }
+                )), .recurrence = in_loop and (pairRecurrenceOrEqual(pairs, left.left, right.left) or
+                    pairRecurrenceOrEqual(pairs, left.right, right.right)), .in_loop = in_loop }
             else
                 null,
             else => null,
@@ -213,8 +213,8 @@ fn compatibleCopyPair(
         .second = .{ .value = second.result },
         .priority = pairPriority(pairs, .{ .value = first.operand }, .{ .value = second.operand }),
         .recurrence = (hasMultipleCopyDefinitions(function, first.result) and
-            hasMultipleCopyDefinitions(function, second.result)) or
-            pairRecurrence(pairs, .{ .value = first.operand }, .{ .value = second.operand }),
+            hasMultipleCopyDefinitions(function, second.result)) or (in_loop and
+            pairRecurrence(pairs, .{ .value = first.operand }, .{ .value = second.operand })),
         .in_loop = in_loop,
     };
 }
@@ -400,4 +400,68 @@ test "SLP propagates canonical lane order through reversed copies" {
         found = true;
     };
     try std.testing.expect(found);
+}
+
+test "SLP snapshots stop carrying recurrence after loop exit" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const types = [_]Ir.Type{
+        .float32, .float32, .float32, .float32, .float32, .float32,
+        .bool,    .float32, .float32, .float32, .float32, .float32,
+    };
+    const entry = [_]Ir.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0 } },
+        .{ .copy = .{ .result = 2, .operand = 0 } },
+        .{ .copy = .{ .result = 3, .operand = 1 } },
+    };
+    const loop = [_]Ir.Instruction{
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 2, .right = 0 } },
+        .{ .binary = .{ .result = 5, .operator = .add, .left = 3, .right = 1 } },
+        .{ .copy = .{ .result = 2, .operand = 4 } },
+        .{ .copy = .{ .result = 3, .operand = 5 } },
+        .{ .constant_bool = .{ .result = 6, .value = false } },
+    };
+    const exit = [_]Ir.Instruction{
+        .{ .copy = .{ .result = 7, .operand = 2 } },
+        .{ .copy = .{ .result = 8, .operand = 3 } },
+        .{ .constant_float32 = .{ .result = 11, .bits = 0x3f800000 } },
+        .{ .binary = .{ .result = 9, .operator = .divide, .left = 7, .right = 11 } },
+        .{ .binary = .{ .result = 10, .operator = .divide, .left = 8, .right = 11 } },
+    };
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &entry, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &loop, .terminator = .{ .branch = .{ .condition = 6, .then_block = 1, .else_block = 2 } } },
+        .{ .instructions = &exit, .terminator = .{ .return_value = 9 } },
+    };
+    const function: Ir.Function = .{
+        .name = "loop_exit_snapshots",
+        .parameter_types = &.{},
+        .return_type = .float32,
+        .value_types = &types,
+        .blocks = &blocks,
+    };
+    const plan = try analyze(allocator, function);
+    var found_loop_pair = false;
+    var found_exit_pair = false;
+    for (plan.groups) |group| {
+        if (group.width != 2) continue;
+        if (std.meta.eql(group.lanes[0], Lane{ .value = 4 }) and
+            std.meta.eql(group.lanes[1], Lane{ .value = 5 }))
+        {
+            try std.testing.expect(group.recurrence);
+            try std.testing.expect(group.in_loop);
+            found_loop_pair = true;
+        }
+        if (std.meta.eql(group.lanes[0], Lane{ .value = 9 }) and
+            std.meta.eql(group.lanes[1], Lane{ .value = 10 }))
+        {
+            try std.testing.expect(!group.recurrence);
+            try std.testing.expect(!group.in_loop);
+            found_exit_pair = true;
+        }
+    }
+    try std.testing.expect(found_loop_pair);
+    try std.testing.expect(found_exit_pair);
 }

@@ -1,0 +1,40 @@
+struct Vec4 {
+    let x:float
+    let y:float
+    let z:float
+    let w:float
+}
+
+func finish(seed:Vec4, iterations:int) Vec4 {
+    var x = seed.x
+    var y = seed.y
+    var z = seed.z
+    var w = seed.w
+    var step = 0
+    while step < iterations {
+        x += 1.25
+        y += 1.25
+        z += 1.25
+        w += 1.25
+        step++
+    }
+    let divisor = iterations as float + 1.0
+    return Vec4(
+        x:(x / divisor - seed.x) * 0.35 + 2.0,
+        y:(y / divisor - seed.y) * 0.35 + 2.0,
+        z:(z / divisor - seed.z) * 0.35 + 2.0,
+        w:(w / divisor - seed.w) * 0.35 + 2.0
+    )
+}
+
+func main() {
+    let value = finish(Vec4(x:3.0, y:-4.0, z:5.0, w:-6.0), 4)
+    print(value.x > 1.5)
+    print(value.x < 1.52)
+    print(value.y > 3.46)
+    print(value.y < 3.48)
+    print(value.z > 0.94)
+    print(value.z < 0.96)
+    print(value.w > 4.02)
+    print(value.w < 4.04)
+}

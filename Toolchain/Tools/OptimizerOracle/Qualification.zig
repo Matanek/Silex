@@ -93,7 +93,8 @@ pub const Evidence = union(enum) {
         function: []const u8,
         required: u3,
         observed: u3,
-        native_required: bool,
+        arm64_required: bool,
+        x64_required: bool,
         arm64_pairs: usize,
         x64_pairs: usize,
     },
@@ -174,7 +175,8 @@ pub fn verifyContract(
             allocator,
             requirement.function,
             requirement.minimum,
-            requirement.native_pair,
+            requirement.arm64_pair,
+            requirement.x64_pair,
             differential.optimized_ir,
         ),
         .arm64_loop_cursor => |requirement| try verifyArm64LoopCursor(
@@ -679,7 +681,8 @@ fn verifySlp(
     allocator: std.mem.Allocator,
     function_name: []const u8,
     minimum: u3,
-    native_pair: bool,
+    arm64_pair: bool,
+    x64_pair: bool,
     program: Silex.Ir.Program,
 ) !Evidence {
     const function = findFunction(program, function_name) orelse return error.ContractFunctionMissing;
@@ -706,12 +709,14 @@ fn verifySlp(
             x64_pairs += 1;
         };
     }
-    if (native_pair and (arm64_pairs == 0 or x64_pairs == 0)) return error.ExpectedNativeLanePairMissing;
+    if (arm64_pair and arm64_pairs == 0) return error.ExpectedArm64LanePairMissing;
+    if (x64_pair and x64_pairs == 0) return error.ExpectedX64LanePairMissing;
     return .{ .slp = .{
         .function = function_name,
         .required = minimum,
         .observed = observed,
-        .native_required = native_pair,
+        .arm64_required = arm64_pair,
+        .x64_required = x64_pair,
         .arm64_pairs = arm64_pairs,
         .x64_pairs = x64_pairs,
     } };

@@ -299,7 +299,9 @@ independent single-definition arithmetic trees inside a pure region to make
 their lanes adjacent. This includes pure or read-only loops as well as mutable
 memory kernels. Memory accesses, calls, control-flow entries and potentially
 trapping operations remain barriers; expression trees and source positions are
-preserved.
+preserved. Float32 division is nontrapping under Silex semantics and can move
+with its pure dependency tree; integer division remains a barrier because its
+failure behavior is observable.
 Constructed aggregates can seed those lanes by copying each leaf at its original
 construction point, without requiring the input leaves to be packed already.
 Scalar aggregate construction also contributes ordinary copy affinity per
@@ -316,6 +318,10 @@ canonicalizes their lane order only if both results have multiple definitions
 and the incoming operands already form the corresponding reversed pair. This
 keeps genuine loop recurrences paired without treating unrelated reversed
 copies as a vectorization opportunity.
+Recurrence ancestry is likewise confined to the loop that carries it. Values
+copied after loop exit are stable snapshots: their compatible XY, XYZ, or XYZW
+arithmetic may be costed independently instead of being rejected as an
+out-of-loop recurrence.
 In these leaf functions, a borrowed aggregate read materializes only the fields
 used by the function. Those fields are still loaded at the original read,
 not at a later projection that could follow an aliasing write.

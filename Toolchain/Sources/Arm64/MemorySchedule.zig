@@ -87,7 +87,7 @@ fn pure(instruction: Machine.Instruction) bool {
     return switch (instruction) {
         .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .copy_range, .aggregate_init => true,
         .binary => |binary| binary.type == .float32 and switch (binary.operator) {
-            .add, .subtract, .multiply => true,
+            .add, .subtract, .multiply, .divide => true,
             else => false,
         },
         else => false,
@@ -282,13 +282,30 @@ test "memory arithmetic schedule never crosses stores entries or reused operands
                 instructions[6].reference_store.operand.start = 5;
             },
             3 => instructions[3].copy.operand = 5,
-            4 => instructions[2].binary.operator = .divide,
+            4 => {
+                instructions[2].binary.operator = .divide;
+                instructions[2].binary.type = .int;
+            },
             5 => function.reuses_slots = true,
             else => unreachable,
         }
         const result = try optimize(arena.allocator(), function);
         try std.testing.expectEqualDeep(instructions[0..], result.instructions);
     }
+}
+
+test "arithmetic schedule moves nontrapping float division dependencies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var instructions = fixture_instructions;
+    instructions[1].binary.operator = .divide;
+    instructions[4].binary.operator = .divide;
+    const scheduled = try optimize(arena.allocator(), fixture(&instructions));
+    try std.testing.expectEqual(@as(Machine.Slot, 7), scheduled.instructions[1].copy.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 5), scheduled.instructions[2].binary.result);
+    try std.testing.expectEqual(Machine.BinaryOperator.divide, scheduled.instructions[2].binary.operator);
+    try std.testing.expectEqual(@as(Machine.Slot, 8), scheduled.instructions[3].binary.result);
+    try std.testing.expectEqual(Machine.BinaryOperator.divide, scheduled.instructions[3].binary.operator);
 }
 
 test "memory arithmetic schedule uses proven external metadata without moving calls" {

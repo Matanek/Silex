@@ -75,7 +75,16 @@ quality class—blocks, branches, backedges, checks, calls and memory traffic—
 front-end iterator bookkeeping cannot either hide or invent a loop-quality
 regression. Target-cost unit counterexamples cover packing, extraction, spill,
 call and code-size cliffs; native SLP contracts then require both ARM64 and X64
-realization where the complete reduced kernel is profitable.
+realization where the complete reduced kernel is profitable. Requirements are
+recorded per target: the pinned ARM64 LLVM oracle materializes the loop-exit
+XY and XYZW witnesses as `<2 x float>` and `<4 x float>`, while the simple XYZ
+control remains scalar. Silex must recognize portable widths 2, 3, and 4, but
+only profitable target realizations are mandatory. The comparison command
+checks the expected LLVM width and the corresponding Silex ARM64 native pair;
+an already realized native pair suppresses a false portable-IR vectorization
+gap in the advisor. Integer-to-floating-point conversions used by these
+witnesses preserve signedness and Silex's exact-conversion failure through a
+saturating LLVM round trip before the value may continue.
 
 Profile a real package consumer from the root of its closed Spec worktree so
 the command resolves that worktree's package links:
@@ -104,6 +113,12 @@ Generated evidence is recreated under `.zig-cache/optimizer-oracle/`:
 - `report.tsv` includes source and executable hashes, LLVM source revision,
   target, CPU, robust timing statistics, and binary size;
 - `opportunities.tsv` ranks measured structural gaps against LLVM.
+
+Vector opportunities compare LLVM IR with Silex native backend evidence, not
+only with portable Silex IR. Portable IR intentionally carries lane affinity as
+metadata rather than inventing target vector instructions, so an ARM64 pair
+that already realizes the oracle's transformation is not reported again as a
+missing optimization.
 
 Opportunity profiles compare only the optimized functions corresponding to
 portable Silex functions. They exclude the generated ABI `main` wrapper and do

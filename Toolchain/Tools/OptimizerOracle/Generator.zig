@@ -3,6 +3,8 @@ const std = @import("std");
 pub const CorpusEntry = struct {
     name: []const u8,
     timing: bool,
+    llvm_float_width_minimum: u3 = 0,
+    silex_arm64_pair_function: ?[]const u8 = null,
 };
 
 pub const StructuralContract = union(enum) {
@@ -34,7 +36,8 @@ pub const StructuralContract = union(enum) {
     slp_width: struct {
         function: []const u8,
         minimum: u3,
-        native_pair: bool = false,
+        arm64_pair: bool = false,
+        x64_pair: bool = false,
     },
     arm64_loop_cursor: struct {
         function: []const u8,
@@ -62,6 +65,9 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "MutableViewMemory.sx", .timing = false },
     .{ .name = "NestedAggregateWidths.sx", .timing = false },
     .{ .name = "OwningCollectionCopy.sx", .timing = false },
+    .{ .name = "Regressions/LoopExitFloatLaneXY.sx", .timing = false, .llvm_float_width_minimum = 2, .silex_arm64_pair_function = "finish" },
+    .{ .name = "Regressions/FloatLaneXYZ.sx", .timing = false },
+    .{ .name = "Regressions/LoopExitFloatLaneXYZW.sx", .timing = false, .llvm_float_width_minimum = 4, .silex_arm64_pair_function = "finish" },
 };
 
 pub const regressions = [_]RegressionEntry{
@@ -170,9 +176,19 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .scalarizes_dense_loop = "integrate" },
     },
     .{
+        .name = "Regressions/LoopExitFloatLaneXY.sx",
+        .concern = "XY loop recurrences become stable vectorizable snapshots after loop exit",
+        .contract = .{ .slp_width = .{ .function = "finish", .minimum = 2, .arm64_pair = true } },
+    },
+    .{
         .name = "Regressions/FloatLaneXYZ.sx",
         .concern = "portable XYZ lane grouping through loads and arithmetic",
         .contract = .{ .slp_width = .{ .function = "transform", .minimum = 3 } },
+    },
+    .{
+        .name = "Regressions/LoopExitFloatLaneXYZW.sx",
+        .concern = "XYZW loop recurrences become two stable vectorizable pairs after loop exit",
+        .contract = .{ .slp_width = .{ .function = "finish", .minimum = 4, .arm64_pair = true } },
     },
     .{
         .name = "Regressions/TextOutputIntegrity.sx",
@@ -181,7 +197,7 @@ pub const regressions = [_]RegressionEntry{
     .{
         .name = "Regressions/BoidsKernel.sx",
         .concern = "boids-like arrays, shared boolean chains, and native XY/Z realization",
-        .contract = .{ .slp_width = .{ .function = "steer", .minimum = 3, .native_pair = true } },
+        .contract = .{ .slp_width = .{ .function = "steer", .minimum = 3, .arm64_pair = true, .x64_pair = true } },
     },
     .{
         .name = "Regressions/Boids2DSteering.sx",

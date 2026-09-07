@@ -38,6 +38,23 @@ pub fn emit(allocator: Allocator, program: Ir.Program) Error![]u8 {
                 .{ width, operation, width, width, width },
             );
         }
+        for ([_]struct { suffix: []const u8, type_name: []const u8 }{
+            .{ .suffix = "f32", .type_name = "float" },
+            .{ .suffix = "f64", .type_name = "double" },
+        }) |floating| {
+            try appendFmt(
+                &output,
+                allocator,
+                "declare i{d} @llvm.fptosi.sat.i{d}.{s}({s})\n",
+                .{ width, width, floating.suffix, floating.type_name },
+            );
+            try appendFmt(
+                &output,
+                allocator,
+                "declare i{d} @llvm.fptoui.sat.i{d}.{s}({s})\n",
+                .{ width, width, floating.suffix, floating.type_name },
+            );
+        }
     }
     try output.append(allocator, '\n');
     for (program.structures, 0..) |structure, structure_index| {
@@ -785,8 +802,10 @@ const FunctionEmitter = struct {
     }
 
     fn emitConvert(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Convert) Error!void {
-        if (!value.source.isInteger() or !value.target.isInteger()) return error.UnsupportedInstruction;
         if (value.source == value.target) return self.copyValue(value.result, value.operand);
+        if (value.source.isInteger() and value.target.isFloat())
+            return self.emitIntegerToFloat(block_id, value);
+        if (!value.source.isInteger() or !value.target.isInteger()) return error.UnsupportedInstruction;
         const serial = self.nextTemporary();
         const source_name = try llvmType(self.allocator, self.program, value.source);
         try self.write("  %t{d}.wide = {s} {s} %v{d} to i128\n", .{
@@ -813,6 +832,55 @@ const FunctionEmitter = struct {
             serial,
             try llvmType(self.allocator, self.program, value.target),
         });
+    }
+
+    fn emitIntegerToFloat(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Convert) Error!void {
+        const source_name = try llvmType(self.allocator, self.program, value.source);
+        const target_name = try llvmType(self.allocator, self.program, value.target);
+        const signed = value.source.isSignedInteger();
+        try self.write("  %v{d} = {s} {s} %v{d} to {s}\n", .{
+            value.result,
+            if (signed) "sitofp" else "uitofp",
+            source_name,
+            value.operand,
+            target_name,
+        });
+        if (!value.checked) return;
+
+        const serial = self.nextTemporary();
+        const width = value.source.bitWidth();
+        const floating_suffix = if (value.target == .float32) "f32" else "f64";
+        try self.write("  %t{d}.roundtrip = call {s} @llvm.{s}.sat.i{d}.{s}({s} %v{d})\n", .{
+            serial,
+            source_name,
+            if (signed) "fptosi" else "fptoui",
+            width,
+            floating_suffix,
+            target_name,
+            value.result,
+        });
+        try self.write("  %t{d}.same = icmp eq {s} %t{d}.roundtrip, %v{d}\n", .{
+            serial,
+            source_name,
+            serial,
+            value.operand,
+        });
+        const precision: u7 = if (value.target == .float32) 24 else 53;
+        const maximum_is_inexact = if (signed) width - 1 > precision else width > precision;
+        if (maximum_is_inexact) {
+            try self.write("  %t{d}.maximum = icmp eq {s} %v{d}, {d}\n", .{
+                serial,
+                source_name,
+                value.operand,
+                integerMaximum(value.source),
+            });
+            try self.write("  %t{d}.not_maximum = xor i1 %t{d}.maximum, true\n", .{ serial, serial });
+            try self.write("  %t{d}.exact = and i1 %t{d}.same, %t{d}.not_maximum\n", .{ serial, serial, serial });
+        } else {
+            try self.write("  %t{d}.exact = xor i1 %t{d}.same, false\n", .{ serial, serial });
+        }
+        try self.write("  br i1 %t{d}.exact, label %b{d}.cont{d}, label %trap\n", .{ serial, block_id, serial });
+        try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
     }
 
     fn emitCall(self: *FunctionEmitter, value: Ir.Instruction.Call) Error!void {
@@ -985,6 +1053,21 @@ test "LLVM emitter supports scalar floating-point loops and comparisons" {
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "fmul float"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "fadd float"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "fcmp ogt float"));
+}
+
+test "LLVM emitter supports integer to floating-point conversions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Silex.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func ratio(value:int) float { return value as float / 4.0 }
+        \\func main() { print(ratio(3) == 0.75) }
+    );
+    const text = try emit(allocator, compilation.ir);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "sitofp i64"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "llvm.fptosi.sat.i64.f32"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".exact = and i1"));
 }
 
 test "LLVM emitter supports plain value aggregates" {

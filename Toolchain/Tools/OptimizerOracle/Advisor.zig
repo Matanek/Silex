@@ -61,6 +61,10 @@ pub const Analysis = struct {
     findings: []const Finding,
 };
 
+pub const Capabilities = struct {
+    native_vectorization: bool = false,
+};
+
 pub const SummaryEntry = struct {
     kind: Kind,
     workloads: usize = 0,
@@ -103,6 +107,15 @@ pub fn analyze(
     allocator: std.mem.Allocator,
     silex: IrStats.Comparison,
     llvm: LlvmStats.Comparison,
+) !Analysis {
+    return analyzeWithCapabilities(allocator, silex, llvm, .{});
+}
+
+pub fn analyzeWithCapabilities(
+    allocator: std.mem.Allocator,
+    silex: IrStats.Comparison,
+    llvm: LlvmStats.Comparison,
+    capabilities: Capabilities,
 ) !Analysis {
     var findings: std.ArrayList(Finding) = .empty;
     const raw_silex = silex.raw;
@@ -228,7 +241,7 @@ pub fn analyze(
     );
 
     const vector_operations_added = llvm.matched.vector_operations_added;
-    if (vector_operations_added != 0) try append(
+    if (vector_operations_added != 0 and !capabilities.native_vectorization) try append(
         allocator,
         &findings,
         .vectorization,
@@ -448,4 +461,27 @@ test "advisor compares optimized residues instead of incompatible raw deltas" {
     });
     defer std.testing.allocator.free(analysis.findings);
     try std.testing.expectEqual(@as(usize, 0), analysis.findings.len);
+}
+
+test "advisor does not report an LLVM vector gap already realized by the native backend" {
+    const comparison: LlvmStats.Comparison = .{
+        .raw = .{},
+        .optimized = .{},
+        .matched = .{ .vector_operations_added = 8 },
+    };
+    const missing = try analyze(std.testing.allocator, .{ .raw = .{}, .optimized = .{}, .matched = .{} }, comparison);
+    defer {
+        for (missing.findings) |finding| std.testing.allocator.free(finding.evidence);
+        std.testing.allocator.free(missing.findings);
+    }
+    try std.testing.expectEqual(Kind.vectorization, missing.findings[0].kind);
+
+    const realized = try analyzeWithCapabilities(
+        std.testing.allocator,
+        .{ .raw = .{}, .optimized = .{}, .matched = .{} },
+        comparison,
+        .{ .native_vectorization = true },
+    );
+    defer std.testing.allocator.free(realized.findings);
+    try std.testing.expectEqual(@as(usize, 0), realized.findings.len);
 }

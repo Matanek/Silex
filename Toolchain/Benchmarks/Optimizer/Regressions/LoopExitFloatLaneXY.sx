@@ -1,0 +1,28 @@
+struct Vec2 {
+    let x:float
+    let y:float
+}
+
+func finish(seed:Vec2, iterations:int) Vec2 {
+    var x = seed.x
+    var y = seed.y
+    var step = 0
+    while step < iterations {
+        x += 1.25
+        y += 1.25
+        step++
+    }
+    let divisor = iterations as float + 1.0
+    return Vec2(
+        x:(x / divisor - seed.x) * 0.35 + 2.0,
+        y:(y / divisor - seed.y) * 0.35 + 2.0
+    )
+}
+
+func main() {
+    let value = finish(Vec2(x:3.0, y:-4.0), 4)
+    print(value.x > 1.5)
+    print(value.x < 1.52)
+    print(value.y > 3.46)
+    print(value.y < 3.48)
+}

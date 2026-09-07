@@ -166,7 +166,10 @@ fn qualifyNative(
         const source_path = try std.fs.path.join(allocator, &.{ corpus_directory, entry.name });
         const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
         const differential = try Differential.verify(allocator, source);
-        const evidence = try Qualification.verifyContract(allocator, entry.contract, differential);
+        const evidence = Qualification.verifyContract(allocator, entry.contract, differential) catch |err| {
+            std.debug.print("optimizer regression contract failed for {s}: {t}\n", .{ entry.name, err });
+            return err;
+        };
         var ssa_counter: ?Qualification.SsaValueCounter = null;
         if (entry.contract == .simplifies_ssa_values) {
             const without = try Differential.verifyWithOptions(allocator, source, .{
@@ -534,14 +537,15 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
         .slp => |slp| try Report.line(
             io,
             allocator,
-            "    contract: {s} SLP width {d} (required >= {d}), {d} ARM64 and {d} X64 native XY pairs{s}",
+            "    contract: {s} SLP width {d} (required >= {d}), ARM64 pairs {d} (required={s}), X64 pairs {d} (required={s})",
             .{
                 slp.function,
                 slp.observed,
                 slp.required,
                 slp.arm64_pairs,
+                if (slp.arm64_required) "yes" else "no",
                 slp.x64_pairs,
-                if (slp.native_required) " (required)" else "",
+                if (slp.x64_required) "yes" else "no",
             },
         ),
         .loop_cursor => |cursor| try Report.line(
@@ -822,6 +826,23 @@ fn fuzzLlvm(
     });
 }
 
+fn arm64PairCount(
+    allocator: std.mem.Allocator,
+    program: Silex.Ir.Program,
+    function_name: []const u8,
+) !usize {
+    const machine_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
+    for (machine_program.functions) |function| {
+        if (!std.mem.eql(u8, function.name, function_name)) continue;
+        var count: usize = 0;
+        for (function.float_lane_slots) |residence| if (residence) |lane| {
+            count += @intFromBool(lane.lane == 0);
+        };
+        return count;
+    }
+    return error.ContractFunctionMissing;
+}
+
 fn compareCorpus(
     io: std.Io,
     allocator: std.mem.Allocator,
@@ -880,6 +901,9 @@ fn compareCorpus(
             allocator,
             .limited(16 * 1024 * 1024),
         );
+        const llvm_float_width = LlvmStats.maximumFloatVectorWidth(optimized_llvm);
+        if (llvm_float_width < entry.llvm_float_width_minimum)
+            return error.ExpectedLlvmFloatVectorWidthMissing;
         _ = try successfulCommand(allocator, io, &.{
             oracle.executable, oracle.optimization, "-target", oracle.target_triple,
             cpu_argument,      optimized_llvm_path, "-o",      llvm_binary_path,
@@ -905,16 +929,35 @@ fn compareCorpus(
         const raw_stats = IrStats.count(differential.raw_ir);
         const optimized_stats = IrStats.count(differential.optimized_ir);
         const llvm_comparison = LlvmStats.compare(raw_llvm, optimized_llvm, differential.raw_ir.functions.len);
-        const advice = try Advisor.analyze(
+        const arm64_pairs = if (entry.silex_arm64_pair_function) |function_name|
+            try arm64PairCount(allocator, differential.optimized_ir, function_name)
+        else
+            0;
+        if (entry.silex_arm64_pair_function != null and arm64_pairs == 0)
+            return error.ExpectedArm64LanePairMissing;
+        const advice = try Advisor.analyzeWithCapabilities(
             allocator,
             try IrStats.compare(allocator, differential.raw_ir, differential.optimized_ir),
             llvm_comparison,
+            .{ .native_vectorization = arm64_pairs != 0 },
         );
         opportunity_summary.add(advice);
         var digest: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(source, &digest, .{});
         const source_hash = std.fmt.bytesToHex(digest, .lower);
         try Report.line(io, allocator, "  PASS {s}", .{name});
+        if (entry.llvm_float_width_minimum != 0) try Report.line(
+            io,
+            allocator,
+            "  LLVM oracle: float vector width {d} (required >= {d})",
+            .{ llvm_float_width, entry.llvm_float_width_minimum },
+        );
+        if (entry.silex_arm64_pair_function) |function_name| try Report.line(
+            io,
+            allocator,
+            "  Silex ARM64: {s} has {d} native XY pair(s)",
+            .{ function_name, arm64_pairs },
+        );
         try Report.ir(io, allocator, raw_stats, optimized_stats);
         try reportAdvice(io, allocator, advice);
         for (advice.findings, 0..) |finding, rank| try appendOpportunityRow(

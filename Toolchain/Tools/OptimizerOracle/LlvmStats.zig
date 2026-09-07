@@ -75,6 +75,20 @@ pub fn profile(text: []const u8) Profile {
     return profileFiltered(text, null);
 }
 
+pub fn maximumFloatVectorWidth(text: []const u8) usize {
+    var maximum: usize = 0;
+    var remaining = text;
+    while (std.mem.indexOf(u8, remaining, " x float>")) |suffix| {
+        var start = suffix;
+        while (start > 0 and std.ascii.isDigit(remaining[start - 1])) start -= 1;
+        if (start > 0 and remaining[start - 1] == '<' and start != suffix) {
+            maximum = @max(maximum, std.fmt.parseInt(usize, remaining[start..suffix], 10) catch 0);
+        }
+        remaining = remaining[suffix + " x float>".len ..];
+    }
+    return maximum;
+}
+
 pub fn profileNamed(text: []const u8, name: []const u8) Profile {
     return profileFiltered(text, name);
 }
@@ -295,6 +309,13 @@ test "profile recognizes memory promotion in optimized LLVM IR" {
     try std.testing.expectEqual(@as(usize, 0), optimized.trap_calls);
     try std.testing.expectEqual(@as(usize, 1), raw.safetyGuards());
     try std.testing.expectEqual(@as(usize, 0), optimized.safetyGuards());
+}
+
+test "maximum float vector width distinguishes scalar XY and XYZW IR" {
+    try std.testing.expectEqual(@as(usize, 0), maximumFloatVectorWidth("%x = fadd float %a, %b"));
+    try std.testing.expectEqual(@as(usize, 4), maximumFloatVectorWidth(
+        "%xy = fadd <2 x float> %a, %b\n%xyzw = fmul <4 x float> %c, %d\n",
+    ));
 }
 
 test "profile separates user value aggregates from overflow pairs" {
