@@ -159,19 +159,7 @@ fn compatiblePair(
             else => null,
         },
         .copy => |left| switch (second) {
-            .copy => |right| if (pairedOrEqual(pairs, left.operand, right.operand) and
-                isFloatValue(function, left.result) and isFloatValue(function, right.result))
-                .{
-                    .first = .{ .value = left.result },
-                    .second = .{ .value = right.result },
-                    .priority = pairPriority(pairs, .{ .value = left.operand }, .{ .value = right.operand }),
-                    .recurrence = (hasMultipleCopyDefinitions(function, left.result) and
-                        hasMultipleCopyDefinitions(function, right.result)) or
-                        pairRecurrence(pairs, .{ .value = left.operand }, .{ .value = right.operand }),
-                    .in_loop = in_loop,
-                }
-            else
-                null,
+            .copy => |right| compatibleCopyPair(function, pairs, left, right, in_loop),
             else => null,
         },
         .constant_float32 => |left| switch (second) {
@@ -202,6 +190,32 @@ fn compatiblePair(
             else => null,
         },
         else => null,
+    };
+}
+
+fn compatibleCopyPair(
+    function: Ir.Function,
+    pairs: []const Pair,
+    left: Ir.Instruction.Copy,
+    right: Ir.Instruction.Copy,
+    in_loop: bool,
+) ?Pair {
+    if (!isFloatValue(function, left.result) or !isFloatValue(function, right.result)) return null;
+    const reversed = !pairedOrEqual(pairs, left.operand, right.operand);
+    if (reversed and
+        (!hasMultipleCopyDefinitions(function, left.result) or
+            !hasMultipleCopyDefinitions(function, right.result) or
+            !paired(pairs, .{ .value = right.operand }, .{ .value = left.operand }))) return null;
+    const first = if (reversed) right else left;
+    const second = if (reversed) left else right;
+    return .{
+        .first = .{ .value = first.result },
+        .second = .{ .value = second.result },
+        .priority = pairPriority(pairs, .{ .value = first.operand }, .{ .value = second.operand }),
+        .recurrence = (hasMultipleCopyDefinitions(function, first.result) and
+            hasMultipleCopyDefinitions(function, second.result)) or
+            pairRecurrence(pairs, .{ .value = first.operand }, .{ .value = second.operand }),
+        .in_loop = in_loop,
     };
 }
 
@@ -354,4 +368,36 @@ test "SLP plan preserves XYZ lanes through loads and arithmetic" {
         found_xyz = true;
     };
     try std.testing.expect(found_xyz);
+}
+
+test "SLP propagates canonical lane order through reversed copies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const types = [_]Ir.Type{ .float32, .float32, .float32, .float32 };
+    const instructions = [_]Ir.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0 } },
+        .{ .copy = .{ .result = 3, .operand = 1 } },
+        .{ .copy = .{ .result = 2, .operand = 0 } },
+        .{ .copy = .{ .result = 3, .operand = 1 } },
+        .{ .copy = .{ .result = 2, .operand = 0 } },
+    };
+    const blocks = [_]Ir.Block{.{ .instructions = &instructions, .terminator = .{ .return_value = 2 } }};
+    const function: Ir.Function = .{
+        .name = "reversed_copies",
+        .parameter_types = &.{},
+        .return_type = .float32,
+        .value_types = &types,
+        .blocks = &blocks,
+    };
+    const plan = try analyze(allocator, function);
+    var found = false;
+    for (plan.groups) |group| if (group.width == 2 and
+        std.meta.eql(group.lanes[0], Lane{ .value = 2 }) and
+        std.meta.eql(group.lanes[1], Lane{ .value = 3 }))
+    {
+        found = true;
+    };
+    try std.testing.expect(found);
 }

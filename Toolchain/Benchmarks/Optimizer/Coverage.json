@@ -176,7 +176,7 @@
     {"id": "collections-ownership-and-bounds", "state": "equivalent", "owner_part": "silex-llvm-opt-03", "semantic": true, "cost_model": true, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["ReadonlyViewMemory.sx", "MutableViewMemory.sx:rewrite structural contract", "OwningCollectionCopy.sx:main structural contract", "Regressions/ArrayStorageAccess.sx", "Regressions/DenseScalarLoop.sx", "generated aggregate+COW+mutable-view interaction"]},
     {"id": "calls-closure-and-inlining", "state": "equivalent", "owner_part": "silex-llvm-opt-04", "semantic": true, "cost_model": true, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["ReferenceAliasing.sx", "ReferenceDeadStores.sx", "ReadonlyViewMemory.sx", "MutableViewMemory.sx", "Regressions/CallEffectsInlining.sx structural and pass-disabled contracts", "inline-or-nested-helper metamorphic pair", "CallSummary.zig recursive fixed point", "ARM64/Encoder.zig and X64/Encoder.zig infallible-status tests"]},
     {"id": "errors-and-overflow", "state": "gap", "owner_part": "silex-llvm-opt-02", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Differential.zig mutation and failure tests", "Regressions/IntegerRangeChecks.sx"]},
-    {"id": "simd-and-vectorization", "state": "gap", "owner_part": "silex-llvm-opt-05", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/FloatLaneXYZ.sx", "Regressions/BoidsKernel.sx"]},
+    {"id": "simd-and-vectorization", "state": "gap", "owner_part": "silex-llvm-opt-05", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/FloatLaneXYZ.sx", "Regressions/BoidsKernel.sx", "Regressions/ReversedFloatRecurrence.sx"]},
     {"id": "runtime-effects-and-text", "state": "equivalent", "owner_part": "silex-llvm-opt-04", "semantic": true, "cost_model": true, "debug": true, "release": true, "llvm": false, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/TextOutputIntegrity.sx", "CallSummary.zig observable-effect barriers", "ARM64 and X64 transitive infallibility fixed point"]},
     {"id": "registers-spills-and-stack", "state": "gap", "owner_part": "silex-llvm-opt-06", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "evidence": ["Regressions/FloatLaneXYZ.sx", "Regressions/BoidsKernel.sx"]},
     {"id": "packages-and-real-consumers", "state": "gap", "owner_part": "silex-llvm-opt-07", "semantic": true, "cost_model": false, "debug": true, "release": true, "llvm": false, "structure": false, "targets": ["macos-arm64"], "evidence": ["Silex-Benchmarks/Sources/Boids2D", "Silex-Benchmarks/Sources/FallingBodies2D", "Silex-Benchmarks/Sources/FontRasterization"]}
@@ -197,10 +197,12 @@
         {"metric": "ir_checked_operations", "direction": "max", "limit": 39, "observed": 39, "unit": "instructions"},
         {"metric": "machine_collection_loads", "direction": "max", "limit": 1, "observed": 1, "unit": "instructions"},
         {"metric": "machine_calls", "direction": "max", "limit": 0, "observed": 0, "unit": "instructions"},
-        {"metric": "machine_branches", "direction": "max", "limit": 16, "observed": 16, "unit": "instructions"},
-        {"metric": "machine_stack_slots", "direction": "max", "limit": 11, "observed": 11, "unit": "slots"},
-        {"metric": "machine_frame_bytes", "direction": "max", "limit": 1056, "observed": 1056, "unit": "bytes"},
-        {"metric": "machine_simd_xy_pairs", "direction": "min", "limit": 7, "observed": 7, "unit": "pairs"}
+        {"metric": "machine_branches", "direction": "max", "limit": 16, "observed": 10, "unit": "instructions"},
+        {"metric": "machine_stack_slots", "direction": "max", "limit": 20, "observed": 19, "unit": "slots"},
+        {"metric": "machine_frame_bytes", "direction": "max", "limit": 1056, "observed": 1008, "unit": "bytes"},
+        {"metric": "machine_simd_xy_pairs", "direction": "min", "limit": 7, "observed": 10, "unit": "pairs"},
+        {"metric": "machine_postindexed_cursors", "direction": "min", "limit": 1, "observed": 1, "unit": "cursors"},
+        {"metric": "machine_pointer_terminated_cursors", "direction": "min", "limit": 1, "observed": 1, "unit": "cursors"}
       ]
     },
     {
@@ -269,6 +271,20 @@
           "limit": 3,
           "observed": 3,
           "unit": "pairs"
+        },
+        {
+          "metric": "machine_postindexed_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
+        },
+        {
+          "metric": "machine_pointer_terminated_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
         }
       ]
     },
@@ -338,6 +354,20 @@
           "limit": 0,
           "observed": 0,
           "unit": "pairs"
+        },
+        {
+          "metric": "machine_postindexed_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
+        },
+        {
+          "metric": "machine_pointer_terminated_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
         }
       ]
     },
@@ -407,6 +437,20 @@
           "limit": 0,
           "observed": 0,
           "unit": "pairs"
+        },
+        {
+          "metric": "machine_postindexed_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
+        },
+        {
+          "metric": "machine_pointer_terminated_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
         }
       ]
     },
@@ -476,6 +520,20 @@
           "limit": 0,
           "observed": 0,
           "unit": "pairs"
+        },
+        {
+          "metric": "machine_postindexed_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
+        },
+        {
+          "metric": "machine_pointer_terminated_cursors",
+          "direction": "exact",
+          "limit": 0,
+          "observed": 0,
+          "unit": "cursors"
         }
       ]
     }

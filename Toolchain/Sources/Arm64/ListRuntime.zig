@@ -939,22 +939,34 @@ pub fn emitCursorDeferredLoad(
 ) Error!void {
     const stride = elementStride(value.result.width, value.element_stride);
     if (value.checked or !value.dynamic or !value.view or
-        first_leaf + 2 != value.result.width or
+        first_leaf >= value.result.width or
         stride != @as(u64, value.result.width) * 4) return error.InvalidMachineProgram;
-    const first_slot: Machine.Slot = @intCast(@as(usize, value.result.start) + first_leaf);
-    const second_slot = first_slot + 1;
-    const first = function.float_lane_slots[first_slot] orelse return error.InvalidMachineProgram;
-    const second = function.float_lane_slots[second_slot] orelse return error.InvalidMachineProgram;
-    if (first.register != second.register or first.lane != 0 or second.lane != 1)
-        return error.InvalidMachineProgram;
-    const byte_offset = @as(i64, first_leaf) * 4 - @as(i64, @intCast(stride));
-    if (byte_offset < std.math.minInt(i9) or byte_offset > std.math.maxInt(i9))
-        return error.InvalidMachineProgram;
-    try words.append(allocator, A64.loadVector64Unscaled(
-        @enumFromInt(first.register),
-        cursor,
-        @intCast(byte_offset),
-    ));
+    var leaf: usize = first_leaf;
+    while (leaf < value.result.width) {
+        const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+        const byte_offset = @as(i64, @intCast(leaf)) * 4 - @as(i64, @intCast(stride));
+        if (byte_offset < std.math.minInt(i9) or byte_offset > std.math.maxInt(i9))
+            return error.InvalidMachineProgram;
+        if (leaf + 1 < value.result.width and function.float_lane_slots.len != 0) {
+            if (function.float_lane_slots[slot]) |first| {
+                const second = function.float_lane_slots[slot + 1] orelse return error.InvalidMachineProgram;
+                if (first.register != second.register or first.lane != 0 or second.lane != 1)
+                    return error.InvalidMachineProgram;
+                try words.append(allocator, A64.loadVector64Unscaled(
+                    @enumFromInt(first.register),
+                    cursor,
+                    @intCast(byte_offset),
+                ));
+                leaf += 2;
+                continue;
+            }
+        }
+        if (function.float_register_slots.len == 0) return error.InvalidMachineProgram;
+        const destination: A64.Register = @enumFromInt(function.float_register_slots[slot] orelse
+            return error.InvalidMachineProgram);
+        try words.append(allocator, A64.loadFloat32Unscaled(destination, cursor, @intCast(byte_offset)));
+        leaf += 1;
+    }
 }
 
 fn emitResidentFloatLoads(
@@ -966,7 +978,7 @@ fn emitResidentFloatLoads(
     first_leaf: usize,
     end_leaf: usize,
     stride: u64,
-) Allocator.Error!usize {
+) Error!usize {
     var leaf = first_leaf;
     if (stride == @as(u64, span.width) * 4) {
         while (leaf + 1 < end_leaf) {
@@ -976,11 +988,13 @@ fn emitResidentFloatLoads(
                 if (function.float_lane_slots[second_slot]) |second_lane| if (first_lane.register == second_lane.register and
                     first_lane.lane == 0 and second_lane.lane == 1)
                 {
-                    try words.append(allocator, A64.loadVector64(
+                    try emitVector64LoadAtOffset(
+                        allocator,
+                        words,
                         @enumFromInt(first_lane.register),
                         base,
-                        @intCast(leaf * 4),
-                    ));
+                        leaf * 4,
+                    );
                     leaf += 2;
                     continue;
                 };
@@ -1015,6 +1029,26 @@ fn emitResidentFloatLoads(
         try words.append(allocator, A64.loadFloat32(destination, base, @intCast(leaf * Machine.slot_size)));
     }
     return leaf;
+}
+
+fn emitVector64LoadAtOffset(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    destination: A64.Register,
+    base: A64.Register,
+    byte_offset: usize,
+) Error!void {
+    if (byte_offset % 8 == 0 and byte_offset <= std.math.maxInt(u15)) {
+        try words.append(allocator, A64.loadVector64(destination, base, @intCast(byte_offset)));
+        return;
+    }
+    if (byte_offset <= std.math.maxInt(i9)) {
+        try words.append(allocator, A64.loadVector64Unscaled(destination, base, @intCast(byte_offset)));
+        return;
+    }
+    try immediate(allocator, words, .x14, byte_offset);
+    try words.append(allocator, A64.addRegisters(.x14, base, .x14));
+    try words.append(allocator, A64.loadVector64(destination, .x14, 0));
 }
 
 fn addElementOffset(
@@ -1541,6 +1575,17 @@ test "form fixed collection addresses beyond the immediate range from sp" {
         A64.addRegisters(.x10, .x10, .x11),
         words.items[words.items.len - 1],
     );
+}
+
+test "load compact SIMD pairs at their exact unaligned field offset" {
+    var words: std.ArrayList(u32) = .empty;
+    defer words.deinit(std.testing.allocator);
+
+    try emitVector64LoadAtOffset(std.testing.allocator, &words, .x19, .x10, 12);
+
+    try std.testing.expectEqualSlices(u32, &.{
+        A64.loadVector64Unscaled(.x19, .x10, 12),
+    }, words.items);
 }
 
 test "copy slot aggregates to collection storage with paired transfers" {

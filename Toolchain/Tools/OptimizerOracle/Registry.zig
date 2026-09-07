@@ -113,6 +113,8 @@ pub const HotMeasurement = struct {
     machine_stack_slots: u64,
     machine_frame_bytes: u64,
     machine_simd_xy_pairs: u64,
+    machine_postindexed_cursors: u64,
+    machine_pointer_terminated_cursors: u64,
 };
 
 const hot_metric_names = [_][]const u8{
@@ -124,6 +126,8 @@ const hot_metric_names = [_][]const u8{
     "machine_stack_slots",
     "machine_frame_bytes",
     "machine_simd_xy_pairs",
+    "machine_postindexed_cursors",
+    "machine_pointer_terminated_cursors",
 };
 
 const Interactions = struct {

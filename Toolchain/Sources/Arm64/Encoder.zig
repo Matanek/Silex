@@ -872,6 +872,9 @@ fn encodeFunction(
         instruction_offsets[instruction_index] = words.items.len;
         try emitDeferredCollectionLoads(allocator, words, function, instruction_index, collection_cursor);
         if (!scalarCacheInstruction(instruction)) scalar_cache.clear();
+        if (collection_cursor) |cursor| {
+            if (cursor.elided_collection_copy == instruction_index) continue;
+        }
         if (collection_cursor) |cursor| if (cursor.termination) |termination| {
             if (termination.elides(instruction_index)) continue;
         };

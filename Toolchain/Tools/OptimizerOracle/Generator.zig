@@ -180,6 +180,10 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .slp_width = .{ .function = "steer", .minimum = 3, .native_pair = true } },
     },
     .{
+        .name = "Regressions/ReversedFloatRecurrence.sx",
+        .concern = "reversed float recurrence copies preserve lane order and exact unaligned compact-field loads",
+    },
+    .{
         .name = "Regressions/CallEffectsInlining.sx",
         .concern = "small reference and checked-view callees inline into the final caller without losing their memory effects",
         .contract = .{ .specializes_effectful_calls = "main" },

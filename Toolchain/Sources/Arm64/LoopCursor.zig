@@ -9,6 +9,7 @@ pub const Cursor = struct {
     initial_index: Machine.Slot,
     register: u5,
     stride: u8,
+    elided_collection_copy: ?usize,
     termination: ?Termination,
 };
 
@@ -26,10 +27,16 @@ pub const Termination = struct {
 };
 
 const UnitIncrement = struct {
-    source: usize,
+    source: ?usize,
     one: usize,
     addition: usize,
     update: usize,
+};
+
+const Induction = struct {
+    state: Machine.Slot,
+    index: Machine.Slot,
+    header_copy: ?usize,
 };
 
 /// Recognizes one simple ascending collection loop whose element address can
@@ -84,12 +91,20 @@ fn recognize(
     const backedge_index = backedge orelse return null;
     if (header == 0 or header >= load_index or function.instructions[header - 1] != .jump or
         resolveJumpTarget(function.instructions, function.instructions[header - 1].jump) != header) return null;
-    const induction = switch (function.instructions[header]) {
-        .copy => |copy| copy,
-        else => return null,
+    const induction: Induction = switch (function.instructions[header]) {
+        .copy => |copy| .{
+            .state = copy.operand,
+            .index = copy.result,
+            .header_copy = header,
+        },
+        else => .{
+            .state = load.index,
+            .index = load.index,
+            .header_copy = null,
+        },
     };
-    if (induction.result != load.index or backedge_index < 4) return null;
-    const increment = unitIncrement(function.instructions, backedge_index, induction.operand) orelse return null;
+    if (induction.index != load.index or backedge_index < 3) return null;
+    const increment = unitIncrement(function.instructions, backedge_index, induction.state) orelse return null;
     if (!hasOnlySelectedBackedge(function.instructions, backedge_index, header, load_index)) return null;
     if (try reachesInstructionAvoiding(allocator, function.instructions, load_index, header - 1)) return null;
     if (try reachesInstructionAvoiding(allocator, function.instructions, backedge_index, load_index)) return null;
@@ -99,9 +114,15 @@ fn recognize(
         load_index - 1,
         collection_copy.operand,
     ) orelse return null;
+    const elided_collection_copy = if (!spanUsedBetween(
+        function.instructions,
+        load_index + 1,
+        backedge_index + 1,
+        collection_copy.result,
+    )) load_index - 1 else null;
 
-    const register = freeCursorRegister(function, null) orelse return null;
-    const termination = if (freeCursorRegister(function, register)) |end_register|
+    const register = freeCursorRegister(function, null, header - 1, backedge_index) orelse return null;
+    const termination = if (freeCursorRegister(function, register, header - 1, backedge_index)) |end_register|
         pointerTermination(
             function,
             header,
@@ -111,6 +132,7 @@ fn recognize(
             induction,
             increment,
             end_register,
+            if (elided_collection_copy != null) load_index else load_index - 1,
         )
     else
         null;
@@ -118,9 +140,10 @@ fn recognize(
         .entry_jump = header - 1,
         .load_index = load_index,
         .collection = collection,
-        .initial_index = induction.operand,
+        .initial_index = induction.state,
         .register = register,
         .stride = @intCast(load.element_stride),
+        .elided_collection_copy = elided_collection_copy,
         .termination = termination,
     };
 }
@@ -131,12 +154,13 @@ fn pointerTermination(
     load_index: usize,
     backedge: usize,
     collection: Machine.Span,
-    induction: Machine.Instruction.Copy,
+    induction: Induction,
     increment: UnitIncrement,
     register: u5,
+    body: usize,
 ) ?Termination {
     if (collection.width != 2 or header + 3 >= load_index or backedge < 4 or
-        !zeroInitializedBefore(function.instructions, header - 1, induction.operand))
+        !zeroInitializedBefore(function.instructions, header - 1, induction.state))
         return null;
     var count_index: ?usize = null;
     var count: Machine.Instruction.CollectionCount = undefined;
@@ -159,7 +183,7 @@ fn pointerTermination(
         else => return null,
     };
     if (comparison.operator != .less or comparison.type != .int or
-        comparison.left != induction.result or comparison.right != count.result)
+        comparison.left != induction.index or comparison.right != count.result)
         return null;
     const branch_index = comparison_index + 1;
     const branch_value = switch (function.instructions[branch_index]) {
@@ -171,24 +195,37 @@ fn pointerTermination(
         resolveJumpTarget(function.instructions, branch_value.else_instruction) != backedge + 1)
         return null;
 
-    const increment_source = function.instructions[increment.source].copy;
     const one = function.instructions[increment.one].constant_int;
     const addition = function.instructions[increment.addition].binary;
-    if (!slotUsedOnlyAtTwo(function.instructions, induction.operand, header, increment.source) or
-        !slotUsedOnlyAtTwo(function.instructions, induction.result, comparison_index, load_index) or
+    var state_uses: [3]usize = undefined;
+    const state_use_count: usize = if (induction.header_copy != null) 2 else 3;
+    if (induction.header_copy) |header_copy| {
+        state_uses[0] = header_copy;
+        state_uses[1] = increment.source orelse increment.addition;
+    } else {
+        state_uses[0] = comparison_index;
+        state_uses[1] = load_index;
+        state_uses[2] = increment.source orelse increment.addition;
+    }
+    if (!slotUsedOnlyAtIndices(function.instructions, induction.state, state_uses[0..state_use_count]) or
+        (induction.index != induction.state and
+            !slotUsedOnlyAtTwo(function.instructions, induction.index, comparison_index, load_index)) or
         !slotUsedOnlyAt(function.instructions, count.result, comparison_index) or
         !slotUsedOnlyAt(function.instructions, comparison.result, branch_index) or
-        !slotUsedOnlyAt(function.instructions, increment_source.result, increment.addition) or
         !slotUsedOnlyAt(function.instructions, one.result, increment.addition) or
         !slotUsedOnlyAt(function.instructions, addition.result, increment.update))
         return null;
+    if (increment.source) |source| {
+        const increment_source = function.instructions[source].copy;
+        if (!slotUsedOnlyAt(function.instructions, increment_source.result, increment.addition)) return null;
+    }
 
     return .{
         .register = register,
-        .increment_start = increment.source,
-        .increment_indices = .{ increment.source, increment.one, increment.addition, increment.update },
+        .increment_start = increment.source orelse increment.one,
+        .increment_indices = .{ increment.source orelse increment.one, increment.one, increment.addition, increment.update },
         .backedge = backedge,
-        .body = load_index - 1,
+        .body = body,
     };
 }
 
@@ -255,6 +292,37 @@ fn slotUsedOnlyAtTwo(
     return true;
 }
 
+fn slotUsedOnlyAtIndices(
+    instructions: []const Machine.Instruction,
+    slot: Machine.Slot,
+    allowed: []const usize,
+) bool {
+    for (instructions, 0..) |instruction, index| {
+        var expected = false;
+        for (allowed) |candidate| if (candidate == index) {
+            expected = true;
+            break;
+        };
+        if (instructionUsesSlot(instruction, slot) != expected) return false;
+    }
+    return true;
+}
+
+fn spanUsedBetween(
+    instructions: []const Machine.Instruction,
+    start: usize,
+    end: usize,
+    span: Machine.Span,
+) bool {
+    for (instructions[start..end]) |instruction| {
+        for (0..span.width) |offset| {
+            const slot: Machine.Slot = @intCast(@as(usize, span.start) + offset);
+            if (instructionUsesSlot(instruction, slot)) return true;
+        }
+    }
+    return false;
+}
+
 fn unitIncrement(
     instructions: []const Machine.Instruction,
     backedge: usize,
@@ -281,7 +349,7 @@ fn unitIncrement(
         }
         break;
     }
-    if (addition_index < 2) return null;
+    if (addition_index < 1) return null;
     const addition = switch (instructions[addition_index]) {
         .binary => |binary| binary,
         else => return null,
@@ -293,6 +361,10 @@ fn unitIncrement(
         else => return null,
     };
     if (one.bits != 1) return null;
+    if ((addition.left == state and addition.right == one.result) or
+        (addition.right == state and addition.left == one.result))
+        return .{ .source = null, .one = one_index, .addition = addition_index, .update = update_index };
+    if (addition_index < 2) return null;
     const source_index = addition_index - 2;
     const source = switch (instructions[source_index]) {
         .copy => |copy| copy,
@@ -485,12 +557,25 @@ fn reachesInstructionAvoiding(
     return false;
 }
 
-fn freeCursorRegister(function: Machine.Function, excluded: ?u5) ?u5 {
-    for ([_]u5{ 2, 3, 4, 5, 6, 7 }) |candidate| {
+fn freeCursorRegister(
+    function: Machine.Function,
+    excluded: ?u5,
+    loop_start: usize,
+    loop_end: usize,
+) ?u5 {
+    // Cursor-compatible functions contain no calls or runtime operations.
+    // x15 has completed its only entry duty after the hidden result address is
+    // saved, and these functions never use it again. Other volatile integer
+    // colors can be borrowed when their allocated live ranges do not overlap
+    // the cursor lifetime. The x16/x17 scalar cache is disabled for allocated
+    // functions. Register allocation reserves x17 when the same structural
+    // proof identifies a cursor before integer coloring.
+    for ([_]u5{ 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17 }) |candidate| {
         if (excluded != null and candidate == excluded.?) continue;
         var used = false;
-        for (function.register_slots) |residence| {
-            if (residence != null and residence.? == candidate) {
+        for (function.register_slots, 0..) |residence, slot| {
+            if (residence == null or residence.? != candidate) continue;
+            if (slotLiveAcrossRange(function, @intCast(slot), loop_start, loop_end)) {
                 used = true;
                 break;
             }
@@ -498,6 +583,33 @@ fn freeCursorRegister(function: Machine.Function, excluded: ?u5) ?u5 {
         if (!used) return candidate;
     }
     return null;
+}
+
+fn slotLiveAcrossRange(
+    function: Machine.Function,
+    slot: Machine.Slot,
+    range_start: usize,
+    range_end: usize,
+) bool {
+    var first: usize = std.math.maxInt(usize);
+    var last: usize = 0;
+    for (function.parameters) |parameter| if (spanContainsSlot(parameter, slot)) {
+        first = 0;
+        break;
+    };
+    for (function.capture_parameters) |capture| if (spanContainsSlot(capture, slot)) {
+        first = 0;
+        break;
+    };
+    if (function.hidden_return_slot) |hidden| {
+        if (hidden == slot) first = 0;
+    }
+    for (function.instructions, 0..) |instruction, index| {
+        if (!definesSlot(instruction, slot) and !instructionUsesSlot(instruction, slot)) continue;
+        first = @min(first, index);
+        last = index;
+    }
+    return first != std.math.maxInt(usize) and first <= range_end and last >= range_start;
 }
 
 fn floatLaneResidence(function: Machine.Function, slot: Machine.Slot) ?Machine.FloatLaneResidence {
@@ -540,12 +652,39 @@ test "recognize a unit-stride float32 collection cursor" {
     try std.testing.expectEqual(@as(usize, 8), cursor.load_index);
     try std.testing.expectEqual(@as(Machine.Slot, 2), cursor.initial_index);
     try std.testing.expectEqual(@as(u8, 16), cursor.stride);
-    try std.testing.expectEqual(@as(u5, 2), cursor.register);
+    try std.testing.expectEqual(@as(u5, 15), cursor.register);
     const termination = cursor.termination orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqual(@as(u5, 3), termination.register);
+    try std.testing.expectEqual(@as(u5, 0), termination.register);
     try std.testing.expectEqual(@as(usize, 9), termination.increment_start);
     try std.testing.expectEqual(@as(usize, 13), termination.backedge);
-    try std.testing.expectEqual(@as(usize, 7), termination.body);
+    try std.testing.expectEqual(@as(?usize, 7), cursor.elided_collection_copy);
+    try std.testing.expectEqual(@as(usize, 8), termination.body);
+}
+
+test "reuse a volatile register whose value dies before the cursor loop" {
+    const instructions = cursorInstructions(1);
+    var function = cursorFunction(&instructions);
+    var registers = [_]?u5{null} ** 16;
+    registers[14] = 15;
+    registers[4] = 0;
+    registers[5] = 1;
+    registers[15] = 2;
+    function.register_slots = &registers;
+    const cursor = (try find(std.testing.allocator, function)) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u5, 2), cursor.register);
+    try std.testing.expect(cursor.termination != null);
+}
+
+test "recognize a coalesced induction without header or increment copies" {
+    const instructions = cursorInstructionsWithCoalescedInduction();
+    const function = cursorFunction(&instructions);
+    const cursor = (try find(std.testing.allocator, function)) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(Machine.Slot, 2), cursor.initial_index);
+    const termination = cursor.termination orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 9), termination.increment_start);
+    try std.testing.expectEqual(@as(usize, 12), termination.backedge);
+    try std.testing.expectEqual(@as(?usize, 7), cursor.elided_collection_copy);
+    try std.testing.expectEqual(@as(usize, 8), termination.body);
 }
 
 test "reject a collection cursor whose index does not advance by one" {
@@ -575,7 +714,8 @@ test "recognize pointer termination through a copied count view" {
     const termination = cursor.termination orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(usize, 10), termination.increment_start);
     try std.testing.expectEqual(@as(usize, 14), termination.backedge);
-    try std.testing.expectEqual(@as(usize, 8), termination.body);
+    try std.testing.expectEqual(@as(?usize, 8), cursor.elided_collection_copy);
+    try std.testing.expectEqual(@as(usize, 9), termination.body);
 }
 
 test "recognize pointer termination across an independent SSA edge copy" {
@@ -657,6 +797,36 @@ fn cursorInstructionsWithVisibleIndex() [16]Machine.Instruction {
         source[12],
         source[13],
         source[14],
+    };
+}
+
+fn cursorInstructionsWithCoalescedInduction() [14]Machine.Instruction {
+    return .{
+        .{ .constant_int = .{ .result = 15, .bits = 0 } },
+        .{ .copy = .{ .result = 2, .operand = 15 } },
+        .{ .jump = 3 },
+        .{ .copy_range = .{ .result = .{ .start = 6, .width = 2, .aggregate = true }, .operand = .{ .start = 0, .width = 2, .aggregate = true } } },
+        .{ .collection_count = .{ .result = 4, .collection = .{ .start = 6, .width = 2, .aggregate = true }, .view = true } },
+        .{ .binary = .{ .result = 5, .operator = .less, .left = 2, .right = 4, .type = .int } },
+        .{ .branch = .{ .condition = 5, .then_instruction = 7, .else_instruction = 13 } },
+        .{ .copy_range = .{ .result = .{ .start = 6, .width = 2, .aggregate = true }, .operand = .{ .start = 0, .width = 2, .aggregate = true } } },
+        .{ .collection_load = .{
+            .result = .{ .start = 8, .width = 4, .aggregate = true },
+            .collection = .{ .start = 6, .width = 2, .aggregate = true },
+            .index = 2,
+            .count = 0,
+            .dynamic = true,
+            .view = true,
+            .checked = false,
+            .element_stride = 16,
+            .header = 0,
+            .tail = 0,
+        } },
+        .{ .constant_int = .{ .result = 13, .bits = 1 } },
+        .{ .binary = .{ .result = 14, .operator = .add, .left = 2, .right = 13, .type = .int } },
+        .{ .copy = .{ .result = 2, .operand = 14 } },
+        .{ .jump = 3 },
+        .return_void,
     };
 }
 

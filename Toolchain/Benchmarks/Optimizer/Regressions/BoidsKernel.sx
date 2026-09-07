@@ -60,6 +60,7 @@ func main() {
         neighbors += steering.neighbors
     }
     print(neighbors)
+    print(checksum)
     print(checksum == checksum)
     print(checksum > -1000000.0 && checksum < 1000000.0)
 }

@@ -2,6 +2,7 @@ const std = @import("std");
 const Machine = @import("Machine.zig");
 const MemoryResidence = @import("MemoryResidence.zig");
 const FloatPairs = @import("FloatPairs.zig");
+const LoopCursor = @import("LoopCursor.zig");
 const ResidenceLiveness = @import("ResidenceLiveness.zig");
 const successorLive = ResidenceLiveness.successorLive;
 const instructionUses = ResidenceLiveness.instructionUses;
@@ -90,6 +91,9 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     };
     const float_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
     if (fully_compatible) try FloatPairs.allocate(allocator, function, float_slots, float_lane_residences, float_registers);
+    var cursor_probe = function;
+    cursor_probe.float_lane_slots = float_lane_residences;
+    const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
     @memset(forced, false);
@@ -153,7 +157,12 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         else
             &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 })
     else if (function.slot_count >= Machine.direct_stack_slots)
-        &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27 }
+        if (reserve_cursor_end)
+            &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27 }
+        else
+            &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27 }
+    else if (reserve_cursor_end)
+        &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 }
     else
         &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
     try allocateGraph(

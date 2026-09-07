@@ -224,7 +224,14 @@ unsupported operations. AVX is not selected until target features can prove
 it is legal. Addressable values, unsupported aggregates, and values that
 cross unsupported machine operations remain explicit spills. Empty SSA edge
 transfers are bypassed after allocation, and the ARM64 collection cursor
-recognizes induction updates separated by independent SSA copies. Fully
+recognizes both induction updates separated by independent SSA copies and
+coalesced updates whose header and increment copies have disappeared. It
+borrows a volatile integer register only when that register's allocated live
+range does not overlap the loop, reserves the pointer-termination register
+before integer coloring, and removes a per-iteration view-descriptor copy only
+when no body operation uses that copy. A qualifying unit-stride loop therefore
+uses a post-indexed data cursor and may compare that cursor directly with its
+end pointer instead of rebuilding an indexed address on every iteration. Fully
 resident leaf functions allocate no value frame. Debug retains the direct
 stack-resident lowering.
 
@@ -292,6 +299,11 @@ these scheduled regions; safety and operand-residency checks still apply. An
 isolated pair remains scalar when its final values must be extracted before
 separate scalar stores. Chained arithmetic and aggregate returns can retain
 their lanes, where the setup cost is amortized or the result remains grouped.
+When two floating-point recurrence copies are scheduled in reverse order, SLP
+canonicalizes their lane order only if both results have multiple definitions
+and the incoming operands already form the corresponding reversed pair. This
+keeps genuine loop recurrences paired without treating unrelated reversed
+copies as a vectorization opportunity.
 In these leaf functions, a borrowed aggregate read materializes only the fields
 used by the function. Those fields are still loaded at the original read,
 not at a later projection that could follow an aliasing write.
@@ -315,6 +327,12 @@ at the transfer, an additional use or an indirect class field keeps the explicit
 address calculation. Large direct offsets synthesize a temporary base without
 materializing the projected reference. The folded transfer uses the same scalar
 or aggregate width and preserves the original access point.
+Compact float32 pairs loaded from collection elements retain their exact byte
+offset. ARM64 uses the scaled 64-bit vector load only for an eight-byte-aligned
+offset; a pair beginning at an odd float32 field uses the exact unscaled form,
+or a synthesized address when the offset exceeds that form's range. The
+backend never rounds such an offset down to the previous aligned field pair.
+
 In compatible Release functions, checked dynamic collection reads whose
 aggregate payload is unused keep the original index checks and diagnostics
 without copying any element fields. Views and owning lists retain their

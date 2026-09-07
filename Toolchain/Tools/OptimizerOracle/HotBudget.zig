@@ -15,6 +15,8 @@ const MachineProfile = struct {
     collection_loads: usize = 0,
     reference_loads: usize = 0,
     simd_pairs: usize = 0,
+    postindexed_cursors: usize = 0,
+    pointer_terminated_cursors: usize = 0,
 };
 
 pub fn run(
@@ -65,7 +67,11 @@ pub fn run(
         return err;
     };
     const machine = findMachineFunction(machine_program, function_name) orelse return error.ContractFunctionMissing;
-    const machine_profile = profileMachineFunction(machine);
+    var machine_profile = profileMachineFunction(machine);
+    if (try Silex.Arm64LoopCursor.find(allocator, machine)) |cursor| {
+        machine_profile.postindexed_cursors = 1;
+        machine_profile.pointer_terminated_cursors = @intFromBool(cursor.termination != null);
+    }
     const source_hash = try fileSha256(allocator, io, source_path);
     try Registry.validateHotMeasurement(registry, source_hash, function_name, .{
         .ir_field_loads = @intCast(field_loads),
@@ -76,12 +82,14 @@ pub fn run(
         .machine_stack_slots = @intCast(machine_profile.stack_slots),
         .machine_frame_bytes = machine_profile.frame_bytes,
         .machine_simd_xy_pairs = @intCast(machine_profile.simd_pairs),
+        .machine_postindexed_cursors = @intCast(machine_profile.postindexed_cursors),
+        .machine_pointer_terminated_cursors = @intCast(machine_profile.pointer_terminated_cursors),
     });
     try std.Io.Dir.cwd().createDirPath(io, output_directory);
     var report: std.Io.Writer.Allocating = .init(allocator);
     errdefer report.deinit();
-    try report.writer.writeAll("source_sha256\tfunction\tir_instructions\tir_blocks\tir_local_loads\tir_local_stores\tir_other_loads\tir_field_loads\tir_other_stores\tir_calls\tir_branches\tir_checked\tmachine_instructions\tmachine_stack_slots\tmachine_frame_bytes\tmachine_calls\tmachine_branches\tmachine_collection_loads\tmachine_reference_loads\tmachine_simd_pairs\n");
-    try report.writer.print("{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{
+    try report.writer.writeAll("source_sha256\tfunction\tir_instructions\tir_blocks\tir_local_loads\tir_local_stores\tir_other_loads\tir_field_loads\tir_other_stores\tir_calls\tir_branches\tir_checked\tmachine_instructions\tmachine_stack_slots\tmachine_frame_bytes\tmachine_calls\tmachine_branches\tmachine_collection_loads\tmachine_reference_loads\tmachine_simd_pairs\tmachine_postindexed_cursors\tmachine_pointer_terminated_cursors\n");
+    try report.writer.print("{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{
         source_hash,
         function_name,
         portable.counts.instructions,
@@ -102,6 +110,8 @@ pub fn run(
         machine_profile.collection_loads,
         machine_profile.reference_loads,
         machine_profile.simd_pairs,
+        machine_profile.postindexed_cursors,
+        machine_profile.pointer_terminated_cursors,
     });
     const report_path = output_directory ++ "/hot-budget.tsv";
     try writeFile(io, report_path, try report.toOwnedSlice());
@@ -121,6 +131,10 @@ pub fn run(
         machine_profile.stack_slots,
         machine_profile.frame_bytes,
         machine_profile.simd_pairs,
+    });
+    try Report.line(io, allocator, "  loop cursors: {d} post-indexed, {d} pointer-terminated", .{
+        machine_profile.postindexed_cursors,
+        machine_profile.pointer_terminated_cursors,
     });
     try Report.line(io, allocator, "hot budget: {s}", .{report_path});
     try Report.line(io, allocator, "structural budget: accepted", .{});

@@ -1,0 +1,28 @@
+struct Sample {
+    let padding:float32
+    let x:float32
+    let y:float32
+}
+
+func accumulate(values:@Sample[..]) Sample {
+    var x:float32 = 0.0
+    var y:float32 = 0.0
+    for value in values {
+        if value.x > 0.0 {
+            x += value.x
+            y += value.y
+        }
+    }
+    return Sample(x:x, y:y)
+}
+
+func main() {
+    let values:Sample[] = [
+        Sample(padding:100.0, x:1.0, y:2.0),
+        Sample(padding:200.0, x:-4.0, y:8.0),
+        Sample(padding:300.0, x:3.0, y:5.0)
+    ]
+    let result = accumulate(@values[0:values.count()])
+    print(result.x)
+    print(result.y)
+}

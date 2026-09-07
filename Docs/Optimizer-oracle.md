@@ -16,8 +16,15 @@ Real-consumer hot functions have source hashes and directional structural
 budgets. Alongside the initial Boids `steering` sentinel, the registry covers
 the Physics contact and preparation kernels and two independent font-raster
 functions. These budgets measure field and collection loads, checks, calls,
-branches, stack residence, frame size, and SIMD pairs without executing or
-timing the complete consumer.
+branches, stack residence, frame size, SIMD pairs, and recognized ARM64
+post-indexed and pointer-terminated collection cursors without executing or
+timing the complete consumer. `machine_stack_slots` counts machine slots that
+do not receive whole-function register residence; it is not a count of dynamic
+stack accesses in the hot loop. A consumer can therefore improve its loop
+shape while retaining a separate register-allocation gap. Directional caps use
+the last qualified real-consumer baseline, not an obsolete checked-in
+observation; the coverage entry keeps that remaining gap assigned to its
+owning Part.
 
 The registry audit fails when an IR operation, terminator, named type, machine
 operation, or Release pass is missing or duplicated. An `equivalent` coverage
@@ -73,7 +80,8 @@ Generated evidence is recreated under `.zig-cache/optimizer-oracle/`:
 - `cache-proof.tsv` contains cold, primed, warm, and output hashes;
 - `metamorphic.tsv` records the structural class of equivalent source forms;
 - `hot-budget.tsv` records the selected real function's Release IR and ARM64
-  machine budget against its exact source hash;
+  machine budget against its exact source hash, including SIMD-pair and loop-
+  cursor counts;
 - `*-raw.sir` and `*-silex.sir` preserve the deterministic portable IR before
   and after Release optimization for direct attribution of every reported gap;
 - `report.tsv` includes source and executable hashes, LLVM source revision,
