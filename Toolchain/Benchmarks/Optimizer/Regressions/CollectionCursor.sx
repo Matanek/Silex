@@ -1,0 +1,37 @@
+struct Sample {
+    let x:float32
+    let y:float32
+    let z:float32
+    let w:float32
+}
+
+func accumulate(anchor:Sample, values:@Sample[..]) Sample {
+    var x:float32 = 0.0
+    var y:float32 = 0.0
+    var z:float32 = 0.0
+    var w:float32 = 0.0
+    for value in values {
+        let difference_x = anchor.x - value.x
+        let difference_y = anchor.y - value.y
+        let difference_z = anchor.z - value.z
+        let difference_w = anchor.w - value.w
+        x += difference_x
+        y += difference_y
+        z += difference_z
+        w += difference_w
+    }
+    return Sample(x:x, y:y, z:z, w:w)
+}
+
+func main() {
+    let values:Sample[] = [
+        Sample(x:1.0, y:2.0, z:3.0, w:4.0),
+        Sample(x:-5.0, y:6.0, z:7.0, w:8.0),
+        Sample(x:9.0, y:10.0, z:11.0, w:12.0)
+    ]
+    let result = accumulate(values[0], @values[0:values.count()])
+    print(result.x)
+    print(result.y)
+    print(result.z)
+    print(result.w)
+}

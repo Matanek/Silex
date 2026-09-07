@@ -544,6 +544,16 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 if (slp.native_required) " (required)" else "",
             },
         ),
+        .loop_cursor => |cursor| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} ARM64 cursor post-indexed={s}, pointer-terminated={s}",
+            .{
+                cursor.function,
+                if (cursor.postindexed) "yes" else "no",
+                if (cursor.pointer_terminated) "yes" else "no",
+            },
+        ),
     }
 }
 

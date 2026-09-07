@@ -231,7 +231,10 @@ range does not overlap the loop, reserves the pointer-termination register
 before integer coloring, and removes a per-iteration view-descriptor copy only
 when no body operation uses that copy. A qualifying unit-stride loop therefore
 uses a post-indexed data cursor and may compare that cursor directly with its
-end pointer instead of rebuilding an indexed address on every iteration. Fully
+end pointer instead of rebuilding an indexed address on every iteration. The
+unit increment may precede other independent recurrence copies on the loop
+edge; those copies remain in place, while any extra use of the induction still
+rejects pointer termination. Fully
 resident leaf functions allocate no value frame. Debug retains the direct
 stack-resident lowering.
 

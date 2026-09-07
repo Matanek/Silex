@@ -64,6 +64,10 @@ mutable-view forwarding, and owning-list copy-on-write. The qualification gate
 reruns the reference and view contracts with `reference_memory_elision`
 disabled, proving that their measured memory reduction is attributable to the
 registered pass while negative alias observations remain intact.
+Native regression contracts also inspect the allocated ARM64 machine function
+for a recognized post-indexed collection cursor and, when required, its direct
+pointer termination. This makes a reduced unit-stride loop an independent
+structural witness instead of inferring the mechanism from a consumer timing.
 
 Profile a real package consumer from the root of its closed Spec worktree so
 the command resolves that worktree's package links:

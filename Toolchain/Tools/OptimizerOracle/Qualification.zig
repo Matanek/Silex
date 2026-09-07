@@ -97,6 +97,11 @@ pub const Evidence = union(enum) {
         arm64_pairs: usize,
         x64_pairs: usize,
     },
+    loop_cursor: struct {
+        function: []const u8,
+        postindexed: bool,
+        pointer_terminated: bool,
+    },
 };
 
 pub const SsaValueCounter = struct {
@@ -170,6 +175,12 @@ pub fn verifyContract(
             requirement.function,
             requirement.minimum,
             requirement.native_pair,
+            differential.optimized_ir,
+        ),
+        .arm64_loop_cursor => |requirement| try verifyArm64LoopCursor(
+            allocator,
+            requirement.function,
+            requirement.pointer_terminated,
             differential.optimized_ir,
         ),
     };
@@ -703,6 +714,27 @@ fn verifySlp(
         .native_required = native_pair,
         .arm64_pairs = arm64_pairs,
         .x64_pairs = x64_pairs,
+    } };
+}
+
+fn verifyArm64LoopCursor(
+    allocator: std.mem.Allocator,
+    function_name: []const u8,
+    require_pointer_termination: bool,
+    program: Silex.Ir.Program,
+) !Evidence {
+    const arm64_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
+    const function = findMachineFunction(arm64_program, function_name) orelse
+        return error.ContractFunctionMissing;
+    const cursor = (try Silex.Arm64LoopCursor.find(allocator, function)) orelse
+        return error.ExpectedArm64LoopCursorMissing;
+    const pointer_terminated = cursor.termination != null;
+    if (require_pointer_termination and !pointer_terminated)
+        return error.ExpectedArm64PointerTerminationMissing;
+    return .{ .loop_cursor = .{
+        .function = function_name,
+        .postindexed = true,
+        .pointer_terminated = pointer_terminated,
     } };
 }
 

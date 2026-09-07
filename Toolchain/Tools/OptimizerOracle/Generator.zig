@@ -36,6 +36,10 @@ pub const StructuralContract = union(enum) {
         minimum: u3,
         native_pair: bool = false,
     },
+    arm64_loop_cursor: struct {
+        function: []const u8,
+        pointer_terminated: bool = true,
+    },
 };
 
 pub const RegressionEntry = struct {
@@ -182,6 +186,11 @@ pub const regressions = [_]RegressionEntry{
     .{
         .name = "Regressions/ReversedFloatRecurrence.sx",
         .concern = "reversed float recurrence copies preserve lane order and exact unaligned compact-field loads",
+    },
+    .{
+        .name = "Regressions/CollectionCursor.sx",
+        .concern = "a generic unit-stride float collection loop retains a post-indexed pointer-terminated cursor",
+        .contract = .{ .arm64_loop_cursor = .{ .function = "accumulate" } },
     },
     .{
         .name = "Regressions/CallEffectsInlining.sx",

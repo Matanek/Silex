@@ -329,12 +329,25 @@ fn unitIncrement(
     state: Machine.Slot,
 ) ?UnitIncrement {
     if (backedge < 4) return null;
-    const update_index = backedge - 1;
-    const update = switch (instructions[update_index]) {
-        .copy => |copy| copy,
-        else => return null,
-    };
-    if (update.result != state) return null;
+    var update_index = backedge;
+    var update: Machine.Instruction.Copy = undefined;
+    while (update_index != 0) {
+        update_index -= 1;
+        const copy = switch (instructions[update_index]) {
+            .copy => |value| value,
+            else => return null,
+        };
+        if (copy.result == state) {
+            update = copy;
+            break;
+        }
+        if (copy.operand == state) return null;
+    } else return null;
+    for (instructions[update_index + 1 .. backedge]) |instruction| {
+        const copy = instruction.copy;
+        if (copy.result == state or copy.operand == state or
+            copy.result == update.operand or copy.operand == update.operand) return null;
+    }
 
     var addition_index = update_index;
     while (addition_index != 0) {
@@ -746,6 +759,37 @@ test "recognize pointer termination across an independent SSA edge copy" {
     try std.testing.expect(termination.elides(11));
     try std.testing.expect(!termination.elides(12));
     try std.testing.expect(termination.elides(13));
+    try std.testing.expectEqual(@as(usize, 14), termination.backedge);
+}
+
+test "recognize pointer termination before independent recurrence edge copies" {
+    const source = cursorInstructions(1);
+    const instructions = [_]Machine.Instruction{
+        source[0],
+        source[1],
+        source[2],
+        source[3],
+        source[4],
+        source[5],
+        .{ .branch = .{ .condition = 5, .then_instruction = 7, .else_instruction = 15 } },
+        source[7],
+        source[8],
+        source[9],
+        source[10],
+        source[11],
+        source[12],
+        .{ .copy = .{ .result = 10, .operand = 11 } },
+        source[13],
+        source[14],
+    };
+    const function = cursorFunction(&instructions);
+    const cursor = (try find(std.testing.allocator, function)) orelse return error.TestUnexpectedResult;
+    const termination = cursor.termination orelse return error.TestUnexpectedResult;
+    try std.testing.expect(termination.elides(9));
+    try std.testing.expect(termination.elides(10));
+    try std.testing.expect(termination.elides(11));
+    try std.testing.expect(termination.elides(12));
+    try std.testing.expect(!termination.elides(13));
     try std.testing.expectEqual(@as(usize, 14), termination.backedge);
 }
 
