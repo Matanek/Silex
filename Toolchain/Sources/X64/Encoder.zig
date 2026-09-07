@@ -1147,8 +1147,18 @@ fn emitBinary(
         .multiply => try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xc1 }),
         .bit_and => try bytes.appendSlice(allocator, &.{ 0x48, 0x21, 0xc8 }),
         .bit_xor => try bytes.appendSlice(allocator, &.{ 0x48, 0x31, 0xc8 }),
-        .shift_left => try bytes.appendSlice(allocator, &.{ 0x48, 0xd3, 0xe0 }),
-        .shift_right => try bytes.appendSlice(allocator, if (binary.type.isSignedInteger()) &.{ 0x48, 0xd3, 0xf8 } else &.{ 0x48, 0xd3, 0xe8 }),
+        .shift_left, .shift_right => {
+            // Machine integers carry normalized typed bits. Constants and prior
+            // operations can nevertheless leave sign-extended bits in a 64-bit
+            // X64 register, so normalize before and after shifting. Silex right
+            // shifts are logical for signed and unsigned integer types.
+            try emitIntegerWidthMask(allocator, bytes, .rax, .rdx, binary.type.bitWidth());
+            try bytes.appendSlice(allocator, if (binary.operator == .shift_left)
+                &.{ 0x48, 0xd3, 0xe0 }
+            else
+                &.{ 0x48, 0xd3, 0xe8 });
+            try emitIntegerWidthMask(allocator, bytes, .rax, .rdx, binary.type.bitWidth());
+        },
         .divide, .remainder => {
             if (binary.type.isSignedInteger()) {
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x99, 0x48, 0xf7, 0xf9 });
@@ -3643,6 +3653,18 @@ fn emitAndRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination:
     try emitRegisterBinary(allocator, bytes, 0x21, destination, source);
 }
 
+fn emitIntegerWidthMask(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    register: Register,
+    scratch: Register,
+    bit_width: u7,
+) Allocator.Error!void {
+    if (bit_width >= 64) return;
+    try emitImmediate(allocator, bytes, scratch, Numeric.mask(bit_width));
+    try emitAndRegister(allocator, bytes, register, scratch);
+}
+
 fn emitOrRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination: Register, source: Register) Allocator.Error!void {
     try emitRegisterBinary(allocator, bytes, 0x09, destination, source);
 }
@@ -4066,6 +4088,41 @@ test "encode X64 reciprocal division primitives" {
         0x0f, 0xaf, 0xd0,
         0x48, 0xf7, 0xda,
     }, bytes.items);
+}
+
+test "normalize narrow X64 shifts to typed integer bits" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try emitIntegerWidthMask(std.testing.allocator, &bytes, .rax, .rdx, 32);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x48, 0xba, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+        0x48, 0x21, 0xd0,
+    }, bytes.items);
+
+    bytes.clearRetainingCapacity();
+    try emitIntegerWidthMask(std.testing.allocator, &bytes, .rax, .rdx, 64);
+    try std.testing.expectEqual(@as(usize, 0), bytes.items.len);
+}
+
+test "encode narrow X64 right shifts with typed logical semantics" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    const residences = [_]?u5{ null, null, null };
+    try emitBinary(std.testing.allocator, &bytes, &residences, .{
+        .result = 2,
+        .operator = .shift_right,
+        .left = 0,
+        .right = 1,
+        .type = .uint32,
+        .checked = true,
+    });
+    const mask = &.{
+        0x48, 0xba, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+        0x48, 0x21, 0xd0,
+    };
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, bytes.items, mask));
+    try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0xd3, 0xe8 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0xd3, 0xf8 }) == null);
 }
 
 test "sign extend narrow signed constants on X64" {
