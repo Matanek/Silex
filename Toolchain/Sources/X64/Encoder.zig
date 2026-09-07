@@ -15,6 +15,8 @@ const TextRuntime = @import("TextRuntime.zig");
 const Allocator = std.mem.Allocator;
 const dynamic_string_flag: u64 = 1 << 63;
 const dynamic_string_prefix_size: u8 = 16;
+const float_print_scratch_size: u32 = 384;
+const float_print_buffer_offset: u8 = 32;
 const class_header_size: u32 = 4 * Machine.slot_size;
 const list_header_size: u32 = 5 * Machine.slot_size;
 const root_count_offset: i32 = Machine.slot_size;
@@ -848,9 +850,9 @@ fn encodeFunction(
             ),
             .print => |value| switch (value.kind) {
                 .signed_integer, .unsigned_integer => try emitPrintInteger(allocator, bytes, windows_import_sites, platform, value.value, value.newline, value.kind == .signed_integer),
+                .float32, .float64 => try emitPrintFloat(allocator, bytes, float_calls, data_fixups, windows_import_sites, platform, value.value, value.kind == .float64, value.newline),
                 .boolean => try emitPrintBoolean(allocator, bytes, data_fixups, windows_import_sites, platform, value.value, value.newline),
                 .string => try emitPrintString(allocator, bytes, data_fixups, windows_import_sites, platform, value.value, value.newline),
-                .float32, .float64 => return unsupported("floating-point print"),
             },
             .assert => |assertion| {
                 try emitLoadStack(allocator, bytes, .rax, assertion.condition);
@@ -1636,6 +1638,31 @@ fn emitClassDrop(
 fn emitRuntimeFailure(allocator: Allocator, bytes: *std.ArrayList(u8), epilogue: *std.ArrayList(EpilogueFixup)) Allocator.Error!void {
     try emitImmediate(allocator, bytes, .rdx, @intFromEnum(Machine.Status.runtime_failure));
     try appendEpilogueJump(allocator, bytes, epilogue);
+}
+
+fn emitPrintFloat(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    float_calls: *std.ArrayList(usize),
+    data_fixups: *std.ArrayList(DataFixup),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    slot: Machine.Slot,
+    double: bool,
+    newline: bool,
+) Error!void {
+    try emitSubtractImmediateRegister(allocator, bytes, .rsp, float_print_scratch_size);
+    try emitLoadStack(allocator, bytes, .rdi, slot);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x74, 0x24, float_print_buffer_offset });
+    try emitImmediate(allocator, bytes, .rdx, @intFromBool(double));
+    try bytes.append(allocator, 0xe8);
+    try float_calls.append(allocator, bytes.items.len);
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitMoveRegister(allocator, bytes, .r8, .rax);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x74, 0x24, float_print_buffer_offset });
+    try emitWriteBuffer(allocator, bytes, import_sites, platform, 1, .rsi, .r8);
+    try emitAddImmediateRegister(allocator, bytes, .rsp, float_print_scratch_size);
+    if (newline) try emitPrintStatic(allocator, bytes, data_fixups, import_sites, platform, 0);
 }
 
 fn emitPrintInteger(
@@ -3813,6 +3840,38 @@ test "encode X64 panic diagnostics for both process contracts" {
 
     const windows = try encodeWindows(allocator, machine);
     defer windows.deinit(allocator);
+    var writes: usize = 0;
+    for (windows.windows_import_sites) |site| {
+        if (site.symbol == .crt_write) writes += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), writes);
+}
+
+test "encode X64 floating-point print with the bundled formatter" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float64 = .{ .result = 0, .bits = @bitCast(@as(f64, 1.5)) } },
+        .{ .print = .{ .value = 0, .kind = .float64, .newline = true } },
+        .return_void,
+    };
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 1,
+        .frame_size = try Machine.frameSize(1),
+        .instructions = &instructions,
+    }};
+    const program: Machine.Program = .{
+        .functions = &functions,
+        .strings = &.{ "\n", "true", "false" },
+    };
+
+    const linux = try encodeLinux(std.testing.allocator, program);
+    defer linux.deinit(std.testing.allocator);
+    try std.testing.expect(linux.code.len > 4096);
+
+    const windows = try encodeWindows(std.testing.allocator, program);
+    defer windows.deinit(std.testing.allocator);
     var writes: usize = 0;
     for (windows.windows_import_sites) |site| {
         if (site.symbol == .crt_write) writes += 1;
