@@ -53,6 +53,11 @@ pub const StructuralContract = union(enum) {
         minimum_resident: u16,
         stack_slots: u16,
         frame_bytes: u32,
+        direct_calls: u16,
+        indirect_calls: u16,
+        aggregate_width: u16,
+        loop_stack_loads: u16 = 0,
+        loop_stack_stores: u16 = 0,
     },
 };
 
@@ -191,8 +196,24 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .x64_regional_budget = .{
             .function = "integrate",
             .minimum_resident = 8,
-            .stack_slots = 4,
+            .stack_slots = 2,
             .frame_bytes = 32,
+            .direct_calls = 1,
+            .indirect_calls = 0,
+            .aggregate_width = 2,
+        } },
+    },
+    .{
+        .name = "Regressions/X64IndirectAggregate.sx",
+        .concern = "a hot X64 scalar loop retains registers before a wide aggregate and indirect call barrier",
+        .contract = .{ .x64_regional_budget = .{
+            .function = "integrate",
+            .minimum_resident = 8,
+            .stack_slots = 6,
+            .frame_bytes = 64,
+            .direct_calls = 0,
+            .indirect_calls = 1,
+            .aggregate_width = 4,
         } },
     },
     .{

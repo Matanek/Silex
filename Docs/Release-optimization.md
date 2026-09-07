@@ -346,13 +346,17 @@ Floating-point negation similarly reads its allocated operand and writes its
 allocated result directly; spilled endpoints retain the ordinary stack path.
 X64 applies a corresponding regional policy to scalar integer and boolean
 loops containing at least four compatible arithmetic operations. Integer and
-boolean output, direct calls, and pure aggregate construction or copies may
-remain outside those loops as hard barriers. Values confined to a scalar
-region may use `r8` through `r11`, which are volatile in both System V and
-Win64; complete call arguments, call results, aggregate spans, and every value
-live across a barrier retain their deterministic stack homes. Calls or
-aggregate operations inside the loop, strings, floating-point values,
-unsupported operations and short loops retain the whole-function spill path.
+boolean output, direct and indirect calls, function addresses, and pure
+aggregate construction or copies may remain outside those loops as hard
+barriers. Values confined to a scalar region may use `r8` through `r11`, which
+are volatile in both System V and Win64. Values live across a barrier retain
+their deterministic stack homes. Direct-call arguments and results remain
+addressable; indirect calls additionally pin the two-slot function value.
+Aggregate results remain addressable, but their scalar source leaves are read
+straight from their residences instead of being reloaded from stale stack
+homes. Calls or aggregate operations inside the loop, strings, floating-point
+values, unsupported operations and short loops retain the whole-function
+spill path.
 When these X64 residences cover a contiguous prefix of virtual slots, Release
 omits that prefix from the physical value frame. A shifted frame base preserves
 the existing virtual offsets for every remaining stack home, the cycle context,

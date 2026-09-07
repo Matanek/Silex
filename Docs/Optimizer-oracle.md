@@ -28,13 +28,16 @@ owning Part.
 
 Fixed native regressions can also carry target-specific regional budgets.
 `X64RegionalBarriers.sx` requires its direct call and aggregate construction to
-survive portable optimization, then fixes the resulting X64 stack-slot and
-frame-byte counts while requiring the surrounding hot scalar region to retain
-register residence. These counts describe static homes and frame layout; they
-do not substitute for disassembly-based dynamic spill and reload inspection.
-Its frame-byte budget measures the contracted physical value frame: a
-contiguous register-resident prefix is excluded, while the reported stack-slot
-count still covers every virtual slot without a register residence.
+survive portable optimization; `X64IndirectAggregate.sx` independently retains
+a four-leaf aggregate, a function value, and an indirect call. Their contracts
+fix direct and indirect call counts, aggregate width, register residences,
+values without residence, physical frame slots and frame bytes. They also walk
+every machine instruction in each backedge region and count every possible
+value-frame load and store. A zero upper bound is exact even when a later X64
+peephole elides an access, so both witnesses require zero dynamic stack traffic
+in their hot loops. The physical frame may contain more slots than the number
+of spilled values: contraction can omit only a contiguous resident prefix
+while preserving the virtual offsets of all remaining addressable homes.
 
 The registry audit fails when an IR operation, terminator, named type, machine
 operation, or Release pass is missing or duplicated. An `equivalent` coverage

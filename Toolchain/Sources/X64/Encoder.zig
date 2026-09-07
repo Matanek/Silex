@@ -596,10 +596,21 @@ fn encodeFunction(
             .aggregate_init => |initialization| {
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {
-                    var destination = initialization.result;
-                    destination.start = @intCast(@as(usize, destination.start) + destination_offset);
-                    destination.width = field.width;
-                    try emitCopyRange(allocator, bytes, destination, field);
+                    for (0..field.width) |leaf| {
+                        try emitLoadValue(
+                            allocator,
+                            bytes,
+                            function.register_slots,
+                            .rax,
+                            @intCast(@as(usize, field.start) + leaf),
+                        );
+                        try emitStoreStack(
+                            allocator,
+                            bytes,
+                            .rax,
+                            @intCast(@as(usize, initialization.result.start) + destination_offset + leaf),
+                        );
+                    }
                     destination_offset += field.width;
                 }
             },

@@ -81,7 +81,7 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Erro
             // X64 output owns every volatile scratch register. Keep complete
             // intervals crossing that barrier in their deterministic homes;
             // registers are then used only by regions that end before it.
-            if (!compatibleInstruction(instruction)) pinIntervalsAt(index, first, last, forced);
+            if (!compatibleInstruction(instruction)) pinBarrier(instruction, index, first, last, forced);
         }
     }
 
@@ -114,7 +114,7 @@ fn regionallyCompatible(function: Machine.Function) bool {
                 .signed_integer, .unsigned_integer, .boolean => {},
                 .string, .float32, .float64 => return false,
             },
-            .copy_range, .aggregate_init, .call => {},
+            .copy_range, .aggregate_init, .function_address, .call, .indirect_call => {},
             else => return false,
         }
     }
@@ -169,7 +169,18 @@ fn visit(instruction: Machine.Instruction, index: usize, first: []usize, last: [
             for (value.fields) |field| touchSpan(field, index, first, last, weights, weight);
             touchSpan(value.result, index, first, last, weights, weight);
         },
+        .function_address => |value| {
+            touchSpan(value.result, index, first, last, weights, weight);
+            for (value.captures) |capture| touch(capture, index, first, last, weights, weight);
+            if (value.environment) |environment| touchSpan(environment, index, first, last, weights, weight);
+        },
         .call => |value| {
+            for (value.arguments) |argument| touchSpan(argument, index, first, last, weights, weight);
+            if (value.result) |result| touchSpan(result, index, first, last, weights, weight);
+        },
+        .indirect_call => |value| {
+            touch(value.callee, index, first, last, weights, weight);
+            touch(value.callee + 1, index, first, last, weights, weight);
             for (value.arguments) |argument| touchSpan(argument, index, first, last, weights, weight);
             if (value.result) |result| touchSpan(result, index, first, last, weights, weight);
         },
@@ -252,10 +263,50 @@ fn extendBackEdge(target: usize, source: usize, first: []const usize, last: []us
     }
 }
 
-fn pinIntervalsAt(index: usize, first: []const usize, last: []const usize, forced: []bool) void {
+fn pinBarrier(
+    instruction: Machine.Instruction,
+    index: usize,
+    first: []const usize,
+    last: []const usize,
+    forced: []bool,
+) void {
     for (first, last, forced) |start, end, *pinned| {
-        if (start != std.math.maxInt(usize) and start <= index and end >= index) pinned.* = true;
+        if (start != std.math.maxInt(usize) and start < index and end > index) pinned.* = true;
     }
+    switch (instruction) {
+        .print => |value| forceSlot(value.value, forced),
+        .copy_range => |value| {
+            forceSpan(value.operand, forced);
+            forceSpan(value.result, forced);
+        },
+        // The encoder can consume scalar field leaves from residences. Only
+        // the resulting addressable aggregate requires deterministic homes.
+        .aggregate_init => |value| forceSpan(value.result, forced),
+        .function_address => |value| {
+            forceSpan(value.result, forced);
+            for (value.captures) |capture| forceSlot(capture, forced);
+            if (value.environment) |environment| forceSpan(environment, forced);
+        },
+        .call => |value| {
+            for (value.arguments) |argument| forceSpan(argument, forced);
+            if (value.result) |result| forceSpan(result, forced);
+        },
+        .indirect_call => |value| {
+            forceSlot(value.callee, forced);
+            forceSlot(value.callee + 1, forced);
+            for (value.arguments) |argument| forceSpan(argument, forced);
+            if (value.result) |result| forceSpan(result, forced);
+        },
+        else => {},
+    }
+}
+
+fn forceSpan(span: Machine.Span, forced: []bool) void {
+    for (0..span.width) |leaf| forceSlot(@intCast(@as(usize, span.start) + leaf), forced);
+}
+
+fn forceSlot(slot: Machine.Slot, forced: []bool) void {
+    forced[slot] = true;
 }
 
 fn allocateGraph(
@@ -327,6 +378,19 @@ fn instructionUses(instruction: Machine.Instruction, slot: usize) bool {
         .return_value => |value| value.start == slot,
         .branch => |value| value.condition == slot,
         .print => |value| value.value == slot,
+        .copy_range => |value| spanContains(value.operand, slot),
+        .aggregate_init => |value| for (value.fields) |field| {
+            if (spanContains(field, slot)) break true;
+        } else false,
+        .function_address => |value| for (value.captures) |capture| {
+            if (capture == slot) break true;
+        } else false,
+        .call => |value| for (value.arguments) |argument| {
+            if (spanContains(argument, slot)) break true;
+        } else false,
+        .indirect_call => |value| value.callee == slot or value.callee + 1 == slot or for (value.arguments) |argument| {
+            if (spanContains(argument, slot)) break true;
+        } else false,
         else => false,
     };
 }
@@ -338,8 +402,18 @@ fn instructionDefines(instruction: Machine.Instruction, slot: usize) bool {
         .copy => |value| value.result == slot,
         .unary => |value| value.result == slot,
         .binary => |value| value.result == slot,
+        .copy_range => |value| spanContains(value.result, slot),
+        .aggregate_init => |value| spanContains(value.result, slot),
+        .function_address => |value| spanContains(value.result, slot) or
+            if (value.environment) |environment| spanContains(environment, slot) else false,
+        .call => |value| if (value.result) |result| spanContains(result, slot) else false,
+        .indirect_call => |value| if (value.result) |result| spanContains(result, slot) else false,
         else => false,
     };
+}
+
+fn spanContains(span: Machine.Span, slot: usize) bool {
+    return slot >= span.start and slot < @as(usize, span.start) + span.width;
 }
 
 fn copyResidence(
@@ -648,12 +722,12 @@ test "hot X64 scalar loops retain registers before aggregate and call barriers" 
     const residences = function.register_slots;
 
     try std.testing.expectEqual(@as(usize, 15), residences.len);
-    for ([_]usize{ 3, 4, 5, 6, 7, 8, 9, 10 }) |slot| {
+    for ([_]usize{ 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }) |slot| {
         try std.testing.expect(residences[slot] != null);
     }
-    for ([_]usize{ 11, 12, 13, 14 }) |slot| {
+    for ([_]usize{ 13, 14 }) |slot| {
         try std.testing.expectEqual(@as(?u5, null), residences[slot]);
     }
-    try std.testing.expectEqual(@as(Machine.Slot, 11), function.stack_slot_base);
-    try std.testing.expectEqual(@as(u32, 32), function.frame_size);
+    try std.testing.expectEqual(@as(Machine.Slot, 13), function.stack_slot_base);
+    try std.testing.expectEqual(@as(u32, 16), function.frame_size);
 }

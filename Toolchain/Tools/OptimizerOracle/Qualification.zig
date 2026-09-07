@@ -114,9 +114,14 @@ pub const Evidence = union(enum) {
         resident: usize,
         total: usize,
         stack_slots: usize,
+        frame_slots: usize,
         frame_bytes: u32,
-        calls: usize,
+        direct_calls: usize,
+        indirect_calls: usize,
         aggregate_barriers: usize,
+        aggregate_width: usize,
+        loop_stack_loads: usize,
+        loop_stack_stores: usize,
     },
 };
 
@@ -213,6 +218,11 @@ pub fn verifyContract(
             requirement.minimum_resident,
             requirement.stack_slots,
             requirement.frame_bytes,
+            requirement.direct_calls,
+            requirement.indirect_calls,
+            requirement.aggregate_width,
+            requirement.loop_stack_loads,
+            requirement.loop_stack_stores,
             differential.optimized_ir,
         ),
     };
@@ -809,6 +819,11 @@ fn verifyX64RegionalBudget(
     minimum_resident: u16,
     expected_stack_slots: u16,
     expected_frame_bytes: u32,
+    expected_direct_calls: u16,
+    expected_indirect_calls: u16,
+    expected_aggregate_width: u16,
+    expected_loop_stack_loads: u16,
+    expected_loop_stack_stores: u16,
     program: Silex.Ir.Program,
 ) !Evidence {
     const stack_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .debug);
@@ -819,22 +834,39 @@ fn verifyX64RegionalBudget(
     for (function.register_slots) |residence| resident += @intFromBool(residence != null);
     if (resident < minimum_resident) return error.ExpectedX64LoopResidenceMissing;
 
-    var calls: usize = 0;
+    var direct_calls: usize = 0;
+    var indirect_calls: usize = 0;
     var aggregate_barriers: usize = 0;
+    var aggregate_width: usize = 0;
     for (function.instructions) |instruction| switch (instruction) {
-        .call => calls += 1,
-        .copy_range, .aggregate_init => aggregate_barriers += 1,
+        .call => direct_calls += 1,
+        .indirect_call => indirect_calls += 1,
+        .copy_range => aggregate_barriers += 1,
+        .aggregate_init => |value| {
+            aggregate_barriers += 1;
+            aggregate_width += value.result.width;
+        },
         else => {},
     };
-    if (calls == 0) return error.ExpectedX64CallBarrierMissing;
+    if (direct_calls != expected_direct_calls or indirect_calls != expected_indirect_calls)
+        return error.X64CallBarrierMismatch;
     if (aggregate_barriers == 0) return error.ExpectedX64AggregateBarrierMissing;
+    if (aggregate_width != expected_aggregate_width) return error.X64AggregateWidthMismatch;
+
+    const loop_traffic = try profileX64LoopStackTraffic(allocator, function);
+    if (loop_traffic.loads != expected_loop_stack_loads or loop_traffic.stores != expected_loop_stack_stores)
+        return error.X64LoopStackTrafficMismatch;
 
     const stack_slots = @as(usize, function.slot_count) - resident;
     if (stack_slots != expected_stack_slots or function.frame_size != expected_frame_bytes) {
         std.debug.print(
-            "X64 regional budget mismatch for {s}: {d} resident/{d}, {d} stack slots, {d} frame bytes\n",
-            .{ function_name, resident, function.slot_count, stack_slots, function.frame_size },
+            "X64 regional budget mismatch for {s}: {d} resident/{d}, {d} stack slots, stack base {d}, {d} frame bytes; stack homes",
+            .{ function_name, resident, function.slot_count, stack_slots, function.stack_slot_base, function.frame_size },
         );
+        for (function.register_slots, 0..) |residence, slot| {
+            if (residence == null) std.debug.print(" {d}", .{slot});
+        }
+        std.debug.print("\n", .{});
         return error.X64RegionalBudgetMismatch;
     }
     return .{ .x64_regional_budget = .{
@@ -842,10 +874,98 @@ fn verifyX64RegionalBudget(
         .resident = resident,
         .total = function.slot_count,
         .stack_slots = stack_slots,
+        .frame_slots = @as(usize, function.slot_count) - function.stack_slot_base,
         .frame_bytes = function.frame_size,
-        .calls = calls,
+        .direct_calls = direct_calls,
+        .indirect_calls = indirect_calls,
         .aggregate_barriers = aggregate_barriers,
+        .aggregate_width = aggregate_width,
+        .loop_stack_loads = loop_traffic.loads,
+        .loop_stack_stores = loop_traffic.stores,
     } };
+}
+
+const X64LoopStackTraffic = struct {
+    loads: usize = 0,
+    stores: usize = 0,
+};
+
+fn profileX64LoopStackTraffic(
+    allocator: std.mem.Allocator,
+    function: Silex.Arm64Machine.Function,
+) !X64LoopStackTraffic {
+    const in_loop = try allocator.alloc(bool, function.instructions.len);
+    defer allocator.free(in_loop);
+    @memset(in_loop, false);
+    var found = false;
+    for (function.instructions, 0..) |instruction, source| switch (instruction) {
+        .jump => |target| if (target <= source) {
+            @memset(in_loop[target .. source + 1], true);
+            found = true;
+        },
+        .branch => |branch| {
+            if (branch.then_instruction <= source) {
+                @memset(in_loop[branch.then_instruction .. source + 1], true);
+                found = true;
+            }
+            if (branch.else_instruction <= source) {
+                @memset(in_loop[branch.else_instruction .. source + 1], true);
+                found = true;
+            }
+        },
+        else => {},
+    };
+    if (!found) return error.ExpectedX64LoopMissing;
+
+    var result: X64LoopStackTraffic = .{};
+    for (function.instructions, in_loop) |instruction, selected| {
+        if (!selected) continue;
+        switch (instruction) {
+            .constant_int => |value| countStackStore(function, value.result, &result),
+            .constant_bool => |value| countStackStore(function, value.result, &result),
+            .copy => |value| {
+                countStackLoad(function, value.operand, &result);
+                countStackStore(function, value.result, &result);
+            },
+            .unary => |value| {
+                countStackLoad(function, value.operand, &result);
+                countStackStore(function, value.result, &result);
+            },
+            .binary => |value| {
+                countStackLoad(function, value.left, &result);
+                countStackLoad(function, value.right, &result);
+                countStackStore(function, value.result, &result);
+            },
+            .return_value => |value| countStackLoad(function, value.start, &result),
+            .branch => |value| countStackLoad(function, value.condition, &result),
+            .return_void, .jump => {},
+            else => return error.UnsupportedX64RegionalLoopInstruction,
+        }
+    }
+    // This counts every possible value access of the regional instruction
+    // set. A zero upper bound is therefore an exact zero even when a target
+    // peephole elides a constant or reuses an operand.
+    return result;
+}
+
+fn countStackLoad(
+    function: Silex.Arm64Machine.Function,
+    slot: Silex.Arm64Machine.Slot,
+    traffic: *X64LoopStackTraffic,
+) void {
+    if (!hasX64Residence(function, slot)) traffic.loads += 1;
+}
+
+fn countStackStore(
+    function: Silex.Arm64Machine.Function,
+    slot: Silex.Arm64Machine.Slot,
+    traffic: *X64LoopStackTraffic,
+) void {
+    if (!hasX64Residence(function, slot)) traffic.stores += 1;
+}
+
+fn hasX64Residence(function: Silex.Arm64Machine.Function, slot: Silex.Arm64Machine.Slot) bool {
+    return function.register_slots.len != 0 and function.register_slots[slot] != null;
 }
 
 fn findMachineFunction(
