@@ -22,6 +22,21 @@ fn expectCompileError(source: []const u8, message: []const u8) !void {
     try std.testing.expectEqualStrings(message, frontend.diagnostic.?.message);
 }
 
+test "primitive type spellings remain available as contextual method names" {
+    const output = try run(
+        \\struct DType {
+        \\    private let code:int
+        \\    private init(code:int) { self.code = code }
+        \\    static func float32() DType { return DType(code:4) }
+        \\    static func int8() DType { return DType(code:1) }
+        \\    func width() int { return self.code }
+        \\}
+        \\func main() { print(DType.float32().width(), " ", DType.int8().width()) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("4 1\n", output);
+}
+
 test "classes preserve shared identity through transport and containers" {
     const output = try run(
         \\class Player {
@@ -151,7 +166,23 @@ test "classes allow recursive optional links" {
     try std.testing.expectEqualStrings("1\n", output);
 }
 
-test "class references require mutable initialized storage" {
+test "class references require mutable storage while immutable value wrappers remain readable" {
+    const output = try run(
+        \\class Player { let score:int; func current() int { return self.score } }
+        \\enum Roster { selected(Player); empty }
+        \\struct Team {
+        \\    private var roster:Roster
+        \\    init(player:Player) { self.roster = Roster.selected(player) }
+        \\    func score() int { return match self.roster { selected(player) => player.current(); empty => 0 } }
+        \\}
+        \\func main() {
+        \\    var player = Player(score:7)
+        \\    let team = Team(player)
+        \\    print(team.score())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("7\n", output);
     try expectCompileError(
         "class Player {} func main() { let player = Player() }",
         "a binding that can reach a class reference must use 'var'",
@@ -159,10 +190,6 @@ test "class references require mutable initialized storage" {
     try expectCompileError(
         "class Player {} func main() { var player:Player }",
         "a class binding requires an initializer; use an optional to start at null",
-    );
-    try expectCompileError(
-        "class Player {} struct Holder { let player:Player } func main() {}",
-        "a field that can reach a class reference must use 'var'",
     );
     try expectCompileError(
         "class Player {} func main() { let players:Player[] = [Player()] }",

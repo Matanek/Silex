@@ -79,8 +79,10 @@ pub const Parser = struct {
                     try functions.appendSlice(self.allocator, try TestBlocks.parse(self))
                 else if (std.mem.eql(u8, self.current.lexeme, "intrinsic"))
                     try structures.append(self.allocator, try Nominals.parseIntrinsicClass(self, false))
+                else if (std.mem.eql(u8, self.current.lexeme, "noncopyable"))
+                    try structures.append(self.allocator, try Nominals.parseNoncopyableClass(self, false, false, false, false, false))
                 else
-                    return self.fail("expected use, enum, struct, class, intrinsic class, protocol, function, or test declaration"),
+                    return self.fail("expected use, enum, struct, class, intrinsic class, noncopyable class, protocol, function, or test declaration"),
                 .keyword_let => try external_functions.append(self.allocator, try Interop.parseFunction(self)),
                 .keyword_extend => try extensions.append(self.allocator, try Extensions.parse(self)),
                 .keyword_contribute => try catalog_contributions.append(self.allocator, try Catalogs.parse(self)),
@@ -92,8 +94,10 @@ pub const Parser = struct {
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, true, false, false, true)),
                         .identifier => if (std.mem.eql(u8, self.current.lexeme, "intrinsic"))
                             try structures.append(self.allocator, try Nominals.parseIntrinsicClass(self, true))
+                        else if (std.mem.eql(u8, self.current.lexeme, "noncopyable"))
+                            try structures.append(self.allocator, try Nominals.parseNoncopyableClass(self, true, false, false, false, false))
                         else
-                            return self.fail("expected use, enum, struct, class, intrinsic class, protocol, or function declaration after 'public'"),
+                            return self.fail("expected use, enum, struct, class, intrinsic class, noncopyable class, protocol, or function declaration after 'public'"),
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, true, false, false)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false, false)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false, false)),
@@ -109,6 +113,16 @@ pub const Parser = struct {
                     switch (self.current.tag) {
                         .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, false)),
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, true)),
+                        .identifier => if (std.mem.eql(u8, self.current.lexeme, "noncopyable"))
+                            try structures.append(self.allocator, try Nominals.parseNoncopyableClass(self, false, is_internal, is_local, false, false))
+                        else {
+                            const message = try std.fmt.allocPrint(
+                                self.allocator,
+                                "expected enum, struct, class, noncopyable class, protocol, or function declaration after '{s}'",
+                                .{visibility_name},
+                            );
+                            return self.fail(message);
+                        },
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, false, is_internal, is_local)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, is_internal, is_local)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, is_internal, is_local)),
@@ -116,7 +130,7 @@ pub const Parser = struct {
                         else => {
                             const message = try std.fmt.allocPrint(
                                 self.allocator,
-                                "expected enum, struct, class, protocol, or function declaration after '{s}'",
+                                "expected enum, struct, class, noncopyable class, protocol, or function declaration after '{s}'",
                                 .{visibility_name},
                             );
                             return self.fail(message);
@@ -231,7 +245,7 @@ pub const Parser = struct {
     fn parseFunctionDeclaration(self: *Parser, is_public: bool, is_internal: bool, is_local: bool, allow_bodyless: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
-        if (self.current.tag != .identifier and self.current.tag != .keyword_copy and self.current.tag != .keyword_match) return self.fail("expected function name");
+        if (!isMemberName(self.current.tag)) return self.fail("expected function name");
         const source_name = self.current.lexeme;
         const name = self.testLocalFunctionName(source_name) orelse source_name;
         const name_position = self.current.position;
@@ -873,7 +887,7 @@ pub const Parser = struct {
             if (self.current.tag == .dot or self.current.tag == .question_dot) {
                 const safe = self.current.tag == .question_dot;
                 try self.advance();
-                if (self.current.tag != .identifier and self.current.tag != .keyword_copy and self.current.tag != .keyword_in and self.current.tag != .keyword_match) return self.fail(if (safe)
+                if (!isMemberName(self.current.tag)) return self.fail(if (safe)
                     "expected member name after '?.'"
                 else
                     "expected member name after '.'");
@@ -1202,6 +1216,32 @@ fn expectParseError(source: []const u8, message: []const u8) !void {
     var parser = Parser.init(arena.allocator(), source);
     try std.testing.expectError(error.InvalidSource, parser.parse());
     try std.testing.expectEqualStrings(message, parser.diagnostic.?.message);
+}
+
+fn isMemberName(tag: TokenTag) bool {
+    return switch (tag) {
+        .identifier,
+        .keyword_copy,
+        .keyword_in,
+        .keyword_match,
+        .keyword_int,
+        .keyword_int8,
+        .keyword_int16,
+        .keyword_int32,
+        .keyword_int64,
+        .keyword_uint,
+        .keyword_uint8,
+        .keyword_uint16,
+        .keyword_uint32,
+        .keyword_uint64,
+        .keyword_float,
+        .keyword_float32,
+        .keyword_float64,
+        .keyword_bool,
+        .keyword_str,
+        => true,
+        else => false,
+    };
 }
 
 test "parse user-defined function signatures" {
