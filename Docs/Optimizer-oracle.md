@@ -76,6 +76,13 @@ zig build optimizer-parity-gate
 baseline recorded in Git history, exact sealed source hashes, and writes a
 deterministic pairwise/risk-triplet plan. Later repository commits do not
 rewrite the immutable baseline, while a changed sealed source fails the audit.
+When at least one registered sibling repository is present, workspace mode
+requires every registered repository and validates the complete closure. A
+standalone `Silex` checkout with no sibling repository instead validates every
+compiler-owned revision and source hash locally while retaining the sealed
+external records in the registry. This makes source exports independently
+auditable without allowing a partially populated workspace to pass as a full
+qualification environment.
 LLVM commands additionally refuse a different Clang version or host triple.
 `cache-proof` builds each selected case without cache, after priming, and from
 a warm hit, then compares executable hashes and outputs. `metamorphic` executes

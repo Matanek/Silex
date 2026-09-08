@@ -224,26 +224,89 @@ pub fn validateQualificationCorpus(
     manifest: Manifest,
     corpus_directory: []const u8,
 ) !void {
-    const workspace_root = try std.fs.path.join(allocator, &.{ corpus_directory, "../../../.." });
+    const compiler_root = try std.fs.path.join(allocator, &.{ corpus_directory, "../../.." });
+    const workspace_root = try std.fs.path.join(allocator, &.{ compiler_root, ".." });
+    const standalone = !try hasExternalWorkspaceRepository(
+        allocator,
+        io,
+        workspace_root,
+        manifest.workspace_baseline,
+    );
     for (manifest.workspace_baseline) |entry| {
-        const repository_root = try std.fs.path.join(allocator, &.{ workspace_root, entry.repository });
+        if (!repositoryRequired(entry.repository, standalone)) continue;
+        const repository_root = try qualificationRepositoryRoot(
+            allocator,
+            compiler_root,
+            workspace_root,
+            entry.repository,
+        );
         try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
     }
     for (manifest.qualification_corpus) |entry| {
-        const repository_root = try std.fs.path.join(allocator, &.{ workspace_root, entry.repository });
+        if (!repositoryRequired(entry.repository, standalone)) continue;
+        const repository_root = try qualificationRepositoryRoot(
+            allocator,
+            compiler_root,
+            workspace_root,
+            entry.repository,
+        );
         try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
         try validateSourceHash(allocator, io, repository_root, entry.path, entry.sha256);
     }
     for (manifest.hot_functions) |entry| {
-        const repository_root = try std.fs.path.join(allocator, &.{ workspace_root, entry.repository });
+        if (!repositoryRequired(entry.repository, standalone)) continue;
+        const repository_root = try qualificationRepositoryRoot(
+            allocator,
+            compiler_root,
+            workspace_root,
+            entry.repository,
+        );
         try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
         try validateSourceHash(allocator, io, repository_root, entry.source, entry.source_sha256);
     }
     for (manifest.proofs) |entry| {
-        const repository_root = try std.fs.path.join(allocator, &.{ workspace_root, entry.repository });
+        if (!repositoryRequired(entry.repository, standalone)) continue;
+        const repository_root = try qualificationRepositoryRoot(
+            allocator,
+            compiler_root,
+            workspace_root,
+            entry.repository,
+        );
         try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
         try validateSourceHash(allocator, io, repository_root, entry.source, entry.source_sha256);
     }
+}
+
+fn hasExternalWorkspaceRepository(
+    allocator: Allocator,
+    io: std.Io,
+    workspace_root: []const u8,
+    repositories: []const WorkspaceRepository,
+) !bool {
+    for (repositories) |entry| {
+        if (std.mem.eql(u8, entry.repository, "Silex")) continue;
+        const repository_root = try std.fs.path.join(allocator, &.{ workspace_root, entry.repository });
+        _ = std.Io.Dir.cwd().statFile(io, repository_root, .{}) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => continue,
+            else => return err,
+        };
+        return true;
+    }
+    return false;
+}
+
+fn repositoryRequired(repository: []const u8, standalone: bool) bool {
+    return !standalone or std.mem.eql(u8, repository, "Silex");
+}
+
+fn qualificationRepositoryRoot(
+    allocator: Allocator,
+    compiler_root: []const u8,
+    workspace_root: []const u8,
+    repository: []const u8,
+) ![]const u8 {
+    if (std.mem.eql(u8, repository, "Silex")) return compiler_root;
+    return std.fs.path.join(allocator, &.{ workspace_root, repository });
 }
 
 pub fn validateHotMeasurement(
@@ -665,6 +728,13 @@ test "the checked-in optimization registry covers every current IR operation and
     );
     const manifest = try std.json.parseFromSliceLeaky(Manifest, arena.allocator(), bytes, .{});
     try audit(manifest);
+}
+
+test "standalone qualification retains compiler proofs without requiring sibling repositories" {
+    try std.testing.expect(repositoryRequired("Silex", true));
+    try std.testing.expect(!repositoryRequired("Silex-Benchmarks", true));
+    try std.testing.expect(!repositoryRequired("Packages/GFX.Physics", true));
+    try std.testing.expect(repositoryRequired("Silex-Benchmarks", false));
 }
 
 test "coverage audit rejects a stable entry without its cost proof" {
