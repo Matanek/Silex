@@ -405,6 +405,7 @@ pub const Resolver = struct {
     diagnostic: ?[]const u8 = null,
     include_dev_dependencies: bool = false,
     resolving_root_dev_dependency: bool = false,
+    user_package_allowlist: ?[]const u8 = null,
 
     pub fn init(allocator: Allocator, io: Io, global_root: ?[]const u8) Resolver {
         return initForTarget(allocator, io, global_root, TargetModule.Target.host() orelse .macos_arm64);
@@ -416,6 +417,10 @@ pub const Resolver = struct {
 
     pub fn enableDevelopmentDependencies(self: *Resolver) void {
         self.include_dev_dependencies = true;
+    }
+
+    pub fn restrictUserPackages(self: *Resolver, allowlist: []const u8) void {
+        self.user_package_allowlist = allowlist;
     }
 
     pub fn resolve(self: *Resolver, project_root: []const u8) !Graph {
@@ -521,6 +526,15 @@ pub const Resolver = struct {
         return links_root;
     }
 
+    fn userPackageAllowed(self: *Resolver, name: []const u8) bool {
+        const allowlist = self.user_package_allowlist orelse return true;
+        var names = std.mem.splitScalar(u8, allowlist, ',');
+        while (names.next()) |allowed| {
+            if (std.mem.eql(u8, std.mem.trim(u8, allowed, " \t"), name)) return true;
+        }
+        return false;
+    }
+
     fn resolveImplicitGlobals(self: *Resolver) !void {
         const global_root = self.global_root orelse return;
         var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
@@ -536,6 +550,7 @@ pub const Resolver = struct {
             const separator = std.mem.lastIndexOfScalar(u8, entry.name, '@') orelse continue;
             const name = entry.name[0..separator];
             if (!Modules.validName(name) or separator + 1 == entry.name.len) continue;
+            if (!self.userPackageAllowed(name)) continue;
             _ = Version.parse(entry.name[separator + 1 ..]) catch continue;
             try names.append(self.allocator, try self.allocator.dupe(u8, name));
         }
@@ -570,6 +585,7 @@ pub const Resolver = struct {
             if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".json")) continue;
             const name = entry.name[0 .. entry.name.len - ".json".len];
             if (!Modules.validName(name)) continue;
+            if (origin == .user_link and !self.userPackageAllowed(name)) continue;
             try names.append(self.allocator, try self.allocator.dupe(u8, name));
         }
         std.mem.sort([]const u8, names.items, {}, stringLessThan);
@@ -683,6 +699,7 @@ pub const Resolver = struct {
         if (self.workspace_links_root) |root| {
             if (try self.linkedNamedAt(root, name, .workspace_link)) |selected| return selected;
         }
+        if (!self.userPackageAllowed(name)) return null;
         const root = try self.userLinksRoot() orelse return null;
         return self.linkedNamedAt(root, name, .user_link);
     }
@@ -730,6 +747,7 @@ pub const Resolver = struct {
     }
 
     fn bestGlobal(self: *Resolver, request: ManifestDependency, available: *?Version) !?Selected {
+        if (!self.userPackageAllowed(request.name)) return null;
         const global_root = self.global_root orelse return null;
         var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,
@@ -768,6 +786,7 @@ pub const Resolver = struct {
     }
 
     fn bestImplicitGlobal(self: *Resolver, name: []const u8) !?Selected {
+        if (!self.userPackageAllowed(name)) return null;
         const global_root = self.global_root orelse return null;
         var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,

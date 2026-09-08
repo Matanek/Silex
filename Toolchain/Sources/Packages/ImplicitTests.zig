@@ -126,6 +126,18 @@ test "workspace links override user links without leaking into another workspace
     const graph_b = try resolver.resolve(workspace_b);
     try std.testing.expectEqualStrings(user_checkout, graph_b.packages[1].root);
     try std.testing.expectEqual(Packages.Origin.user_link, graph_b.packages[1].origin);
+
+    resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
+    resolver.restrictUserPackages("");
+    const isolated_a = try resolver.resolve(workspace_a);
+    try std.testing.expectEqual(@as(usize, 2), isolated_a.packages.len);
+    try std.testing.expectEqualStrings(workspace_checkout, isolated_a.packages[1].root);
+    try std.testing.expectEqual(Packages.Origin.workspace_link, isolated_a.packages[1].origin);
+
+    resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
+    resolver.restrictUserPackages("");
+    const isolated_b = try resolver.resolve(workspace_b);
+    try std.testing.expectEqual(@as(usize, 1), isolated_b.packages.len);
 }
 
 test "ignore an unavailable implicit link in a loose project" {

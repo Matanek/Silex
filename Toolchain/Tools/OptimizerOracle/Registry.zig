@@ -147,7 +147,7 @@ const hot_metric_names = [_][]const u8{
     "machine_pointer_terminated_cursors",
 };
 
-const Interactions = struct {
+pub const Interactions = struct {
     pairwise_seed: u64,
     triplet_seed: u64,
     axes: []const []const u8,

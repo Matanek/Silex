@@ -771,6 +771,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
         defer source_arena.deinit();
         const source_allocator = source_arena.allocator();
         var compiler = Project.Compiler.initWithPackagesAndCache(source_allocator, init.io, packages_root, options.cache);
+        configureUserPackageDiscovery(&compiler, init.environ_map);
         compiler.target = target;
         try configureShaderCompiler(&compiler, source_allocator, init.environ_map);
         const compilation = compiler.compileTests(source_path) catch |err| switch (err) {
@@ -1059,6 +1060,7 @@ fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: [
             try globalPackagesRoot(allocator, init.environ_map),
             options.cache,
         );
+        configureUserPackageDiscovery(&compiler, init.environ_map);
         compiler.target = target;
         try configureShaderCompiler(&compiler, allocator, init.environ_map);
         const compilation = compiler.compile(options.source_path) catch |err| switch (err) {
@@ -1200,6 +1202,7 @@ fn compileNativeOptions(
             try globalPackagesRoot(allocator, init.environ_map),
             options.cache,
         );
+        configureUserPackageDiscovery(&compiler, init.environ_map);
         compiler.target = target;
         if (trace.enabled()) compiler.trace = &trace;
         try configureShaderCompiler(&compiler, allocator, init.environ_map);
@@ -2098,6 +2101,26 @@ fn compilationWorkerCount(environment: *const std.process.Environ.Map, function_
     else
         null;
     return Lower.selectedWorkerCount(function_count, requested);
+}
+
+fn configureUserPackageDiscovery(
+    compiler: *Project.Compiler,
+    environment: *const std.process.Environ.Map,
+) void {
+    if (environment.get("SILEX_USER_PACKAGE_ALLOWLIST")) |value|
+        compiler.restrictUserPackages(value);
+}
+
+test "user package discovery can be restricted independently of the user home" {
+    var environment = std.process.Environ.Map.init(std.testing.allocator);
+    defer environment.deinit();
+    try environment.put("HOME", "/Users/example");
+    var compiler = Project.Compiler.init(std.testing.allocator, std.testing.io);
+    configureUserPackageDiscovery(&compiler, &environment);
+    try std.testing.expectEqual(@as(?[]const u8, null), compiler.user_package_allowlist);
+    try environment.put("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
+    configureUserPackageDiscovery(&compiler, &environment);
+    try std.testing.expectEqualStrings("STD", compiler.user_package_allowlist.?);
 }
 
 test "select release register allocation only for its supported target" {

@@ -1,0 +1,88 @@
+name: Qualify optimizer robustness
+
+run-name: Qualify optimizer robustness (${{ inputs.campaign }}) from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign:
+        description: Bounded adversarial campaign to execute
+        required: true
+        type: choice
+        default: qualified
+        options:
+          - quick
+          - qualified
+          - soak
+      rounds:
+        description: Deterministic seed windows for the soak campaign
+        required: true
+        default: "3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optimizer-robustness-${{ github.ref }}-${{ inputs.campaign }}
+  cancel-in-progress: true
+
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out the exact candidate
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz -o "$archive"
+          echo "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489  $archive" | shasum -a 256 -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Record the candidate and host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          mkdir -p Toolchain/.zig-cache/optimizer-oracle/robustness
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "system=$(uname -s)"
+            echo "architecture=$(uname -m)"
+            echo "os=$(sw_vers -productVersion)"
+            echo "cpu=$(sysctl -n machdep.cpu.brand_string)"
+          } | tee Toolchain/.zig-cache/optimizer-oracle/robustness/environment.txt
+
+      - name: Run the bounded campaign
+        shell: bash
+        env:
+          CAMPAIGN: ${{ inputs.campaign }}
+          ROUNDS: ${{ inputs.rounds }}
+          SILEX_USER_PACKAGE_ALLOWLIST: ""
+        run: |
+          set -euo pipefail
+          cd Toolchain
+          case "$CAMPAIGN" in
+            quick) zig build optimizer-robustness-quick ;;
+            qualified) zig build optimizer-robustness-qualified ;;
+            soak)
+              [[ "$ROUNDS" =~ ^[1-9][0-9]*$ ]]
+              test "$ROUNDS" -le 64
+              zig build optimizer-oracle -- robustness-soak "$ROUNDS"
+              ;;
+          esac
+
+      - name: Upload the append-only campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: optimizer-robustness-${{ inputs.campaign }}-${{ github.sha }}
+          path: Toolchain/.zig-cache/optimizer-oracle/robustness
+          if-no-files-found: error
+          retention-days: 14

@@ -2,6 +2,7 @@ const std = @import("std");
 const Silex = @import("silex_optimizer_api");
 const Advisor = @import("Advisor.zig");
 const Benchmark = @import("Benchmark.zig");
+const CacheStress = @import("CacheStress.zig");
 const Differential = @import("Differential.zig");
 const Generator = @import("Generator.zig");
 const HotBudget = @import("HotBudget.zig");
@@ -12,10 +13,12 @@ const Metamorphic = @import("Metamorphic.zig");
 const Native = @import("Native.zig");
 const NativeGenerator = @import("NativeGenerator.zig");
 const Parity = @import("Parity.zig");
+const ProjectStress = @import("ProjectStress.zig");
 const Qualification = @import("Qualification.zig");
 const Registry = @import("Registry.zig");
 const Reducer = @import("Reducer.zig");
 const Report = @import("Report.zig");
+const Robustness = @import("Robustness.zig");
 
 const usage =
     \\Usage: zig build optimizer-oracle -- <command> [options]
@@ -36,6 +39,11 @@ const usage =
     \\                      Execute generated programs through LLVM (default: 16)
     \\  qualify [count] [seed]
     \\                      Verify native Debug/Release regressions and generated scenarios
+    \\  robustness-quick    Execute all pairwise/triplet sources with sampled native modes
+    \\  robustness-qualified
+    \\                      Execute all pairwise/triplet sources and one native case per pair
+    \\  robustness-soak [rounds] [seed]
+    \\                      Repeat the adversarial plan across deterministic seed windows
     \\  gate                Run the complete optimizer qualification before integration
     \\  parity-audit        Refuse open coverage or LLVM-transposition gaps
     \\  parity-gate         Run the blocking closure and statistically qualified comparison
@@ -142,6 +150,43 @@ fn run(init: std.process.Init) !u8 {
         const seed = if (arguments.len >= 6) try std.fmt.parseInt(u64, arguments[5], 0) else 1;
         if (arguments.len > 6 or count == 0) return error.InvalidArguments;
         try qualifyNative(init.io, allocator, silex_binary, corpus_directory, count, seed);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "robustness-quick") or
+        std.mem.eql(u8, command, "robustness-qualified"))
+    {
+        if (arguments.len != 4) return error.InvalidArguments;
+        const qualified = std.mem.eql(u8, command, "robustness-qualified");
+        _ = try Robustness.run(
+            init.io,
+            allocator,
+            silex_binary,
+            registry.interactions,
+            if (qualified) .qualified else .quick,
+        );
+        if (qualified) {
+            try CacheStress.run(init.io, allocator, silex_binary);
+            try ProjectStress.run(init.io, allocator, silex_binary);
+        }
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "robustness-soak")) {
+        const rounds = if (arguments.len >= 5) try std.fmt.parseInt(usize, arguments[4], 10) else 3;
+        const initial_seed = if (arguments.len >= 6)
+            try std.fmt.parseInt(u64, arguments[5], 0)
+        else
+            registry.interactions.pairwise_seed;
+        if (arguments.len > 6 or rounds == 0 or rounds > 64) return error.InvalidArguments;
+        for (0..rounds) |round| {
+            var interactions = registry.interactions;
+            interactions.pairwise_seed = initial_seed +% @as(u64, @intCast(round)) *% 1_000_003;
+            interactions.triplet_seed = (initial_seed ^ 0xbb67ae8584caa73b) +%
+                @as(u64, @intCast(round)) *% 1_000_033;
+            _ = try Robustness.run(init.io, allocator, silex_binary, interactions, .quick);
+        }
+        try CacheStress.run(init.io, allocator, silex_binary);
+        try ProjectStress.run(init.io, allocator, silex_binary);
+        try Report.heading(init.io, allocator, "optimizer robustness soak passed");
         return 0;
     }
     if (std.mem.eql(u8, command, "gate")) {

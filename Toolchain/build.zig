@@ -374,6 +374,39 @@ pub fn build(b: *std.Build) void {
     optimizer_parity_gate_step.dependOn(&optimizer_oracle_test_command.step);
     optimizer_parity_gate_step.dependOn(&optimizer_parity_gate_command.step);
 
+    const optimizer_robustness_quick_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_robustness_quick_command.addArtifactArg(executable);
+    optimizer_robustness_quick_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    optimizer_robustness_quick_command.addArg("robustness-quick");
+    const optimizer_robustness_quick_step = b.step(
+        "optimizer-robustness-quick",
+        "Run deterministic pairwise, triplet, negative, and sampled native robustness cases",
+    );
+    optimizer_robustness_quick_step.dependOn(&optimizer_oracle_test_command.step);
+    optimizer_robustness_quick_step.dependOn(&optimizer_robustness_quick_command.step);
+
+    const optimizer_robustness_qualified_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_robustness_qualified_command.addArtifactArg(executable);
+    optimizer_robustness_qualified_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    optimizer_robustness_qualified_command.addArg("robustness-qualified");
+    const optimizer_robustness_qualified_step = b.step(
+        "optimizer-robustness-qualified",
+        "Run the qualified adversarial optimizer robustness campaign",
+    );
+    optimizer_robustness_qualified_step.dependOn(&optimizer_oracle_test_command.step);
+    optimizer_robustness_qualified_step.dependOn(&optimizer_robustness_qualified_command.step);
+
+    const optimizer_robustness_soak_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_robustness_soak_command.addArtifactArg(executable);
+    optimizer_robustness_soak_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    optimizer_robustness_soak_command.addArg("robustness-soak");
+    const optimizer_robustness_soak_step = b.step(
+        "optimizer-robustness-soak",
+        "Repeat the adversarial optimizer plan across deterministic seed windows",
+    );
+    optimizer_robustness_soak_step.dependOn(&optimizer_oracle_test_command.step);
+    optimizer_robustness_soak_step.dependOn(&optimizer_robustness_soak_command.step);
+
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
     const deep_copy_tests = b.addTest(.{
@@ -393,6 +426,9 @@ pub fn build(b: *std.Build) void {
     });
     const cycle_test_command = b.addRunArtifact(cycle_tests);
     const language_test_command = b.addRunArtifact(executable);
+    // Toolchain-owned language tests are hermetic: a user's live package links
+    // must not extend their package graph or make the same commit nondeterministic.
+    language_test_command.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
     language_test_command.addArg("test");
     language_test_command.addDirectoryArg(b.path("../Tests"));
     // The build runner executes from Toolchain/. Language validation must not
@@ -414,11 +450,13 @@ pub fn build(b: *std.Build) void {
         // This fixture needs the real Mach-O import linker; Runner.invoke
         // intentionally executes images without resolving external call sites.
         const native_math_debug = b.addRunArtifact(executable);
+        native_math_debug.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
         native_math_debug.setCwd(b.path("../.."));
         native_math_debug.addArg("run");
         native_math_debug.addFileArg(b.path("Benchmarks/Native/MathCallResidence.sx"));
         native_math_debug.addArgs(&.{ "--debug", "--nocache" });
         const native_math_release = b.addRunArtifact(executable);
+        native_math_release.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
         native_math_release.setCwd(b.path("../.."));
         native_math_release.addArg("run");
         native_math_release.addFileArg(b.path("Benchmarks/Native/MathCallResidence.sx"));

@@ -16,6 +16,51 @@ dominance, and complete edge-copy lowering of join values. A malformed program
 therefore fails at the pass that produced it instead of surfacing only in a
 later native benchmark.
 
+## Qualify adversarial robustness
+
+The optimizer oracle turns the interaction plan in
+`Benchmarks/Optimizer/Coverage.json` into executable Silex projects. Every
+binary combination of the registered type, control, memory, alias, call, loop,
+error, package, and target axes is materialized in all four states. The five
+registered high-risk triplets are materialized separately. A generated case is
+accepted only after raw and Release interpreter results agree, a repeated
+compilation produces byte-identical textual IR and output hashes, every Release
+pipeline prefix preserves the same observable result, and both the ARM64 and
+X64 machine allocation paths accept the optimized program. The quick campaign
+samples native Debug/Release execution; the qualified campaign runs one native
+case for every axis pair and every risk triplet. Every selected native build is
+repeated. The emitted Debug code object and the complete Release executable must
+have the same SHA-256 digest. The system linker's Debug-only Mach-O UUID and
+link metadata are deliberately not claimed as reproducible code bytes.
+
+`zig build optimizer-robustness-quick` is the bounded per-change campaign.
+`zig build optimizer-robustness-qualified` adds cold, warm, invalidated,
+partially replaced, restored, and concurrently populated cache states, then
+compiles a graph of sixteen linked packages containing recursion, an aggregate,
+a collection loop, and a larger live program. `zig build
+optimizer-robustness-soak` repeats the complete interaction plan across three
+deterministic seed windows by default; an explicit round count and initial seed
+can be passed to `optimizer-oracle -- robustness-soak`.
+
+All campaigns use fixed source, IR, and native-artifact size ceilings. They
+write seed-addressed sealed interaction tables plus uniquely named run records
+under `.zig-cache/optimizer-oracle/robustness/`; an existing sealed table may
+be reused only when its bytes match. Failures from the numeric differential
+generator retain their seed and reduced Silex source. Invalid-source cases are
+compiled twice and require the same nonempty diagnostic. Unit mutation tests
+prove that changes to values, effects, diagnostics, exit codes, Debug/Release
+coverage, target lowering, or cache state make the verdict fail.
+
+The manual `optimizer-robustness.yml` workflow provides a 90-minute external
+hang limit, records the exact commit and macOS ARM64 host, and uploads partial
+evidence even on failure. ARM64 and X64 lowering are structural proofs on every
+generated case; only the host named by a campaign record is a native execution
+claim. Toolchain-owned language and native-math tests set the internal
+`SILEX_USER_PACKAGE_ALLOWLIST` to `STD`; the robustness workflow sets an empty
+allowlist. Thus unrelated live package links cannot change the test graph of a
+fixed Silex commit without changing the user's home environment, while explicit
+workspace links remain available.
+
 ## Simplify portable IR
 
 Release propagates constants and copies across the control-flow graph. It

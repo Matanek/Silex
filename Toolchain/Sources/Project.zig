@@ -97,6 +97,7 @@ pub const Compiler = struct {
     allocator: Allocator,
     io: Io,
     global_packages_root: ?[]const u8 = null,
+    user_package_allowlist: ?[]const u8 = null,
     packages: Packages.Graph = undefined,
     index: Modules.Index = undefined,
     module_scope_roots: []const []const u8 = &.{},
@@ -162,6 +163,10 @@ pub const Compiler = struct {
         return self.compileConfigured(input_path);
     }
 
+    pub fn restrictUserPackages(self: *Compiler, allowlist: []const u8) void {
+        self.user_package_allowlist = allowlist;
+    }
+
     fn compileConfigured(self: *Compiler, input_path: []const u8) Error!Compilation {
         self.diagnostic = null;
         self.parsed_modules = 0;
@@ -177,6 +182,7 @@ pub const Compiler = struct {
             const root_path = try Paths.findRoot(self.allocator, self.io, input_path);
             if (builtin.is_test) try PackageTestFixtures.prepareWorkspaceLinks(self.allocator, self.io, root_path);
             var package_resolver = Packages.Resolver.initForTarget(self.allocator, self.io, self.global_packages_root, self.target);
+            if (self.user_package_allowlist) |allowlist| package_resolver.restrictUserPackages(allowlist);
             package_resolver.enableDevelopmentDependencies();
             self.packages = package_resolver.resolve(root_path) catch |err| switch (err) {
                 error.InvalidPackageGraph => return self.fail(
