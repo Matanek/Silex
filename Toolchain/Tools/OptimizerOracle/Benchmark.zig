@@ -32,6 +32,15 @@ pub const Summary = struct {
 pub const Pair = struct {
     left: Summary,
     right: Summary,
+    relative: RelativeSummary,
+};
+
+pub const RelativeSummary = struct {
+    samples: usize,
+    lower_bound_ppm: u64,
+    median_ppm: u64,
+    upper_bound_ppm: u64,
+    confidence_ppm: u64,
 };
 
 pub fn measurePair(
@@ -74,7 +83,52 @@ pub fn measurePair(
     return .{
         .left = try summarize(allocator, left_samples, batch),
         .right = try summarize(allocator, right_samples, batch),
+        .relative = try summarizeRelative(allocator, left_samples, right_samples),
     };
+}
+
+fn summarizeRelative(
+    allocator: std.mem.Allocator,
+    left: []const u64,
+    right: []const u64,
+) !RelativeSummary {
+    if (left.len < 5 or left.len != right.len or left.len > 63) return error.InvalidBenchmarkConfiguration;
+    const ratios = try allocator.alloc(u64, left.len);
+    defer allocator.free(ratios);
+    for (left, right, ratios) |left_value, right_value, *ratio| {
+        if (right_value == 0) return error.InvalidTimingReference;
+        ratio.* = @intCast((@as(u128, left_value) * 1_000_000) / right_value);
+    }
+    std.mem.sort(u64, ratios, {}, std.sort.asc(u64));
+    const bound = oneSidedMedianBound(ratios.len);
+    return .{
+        .samples = ratios.len,
+        .lower_bound_ppm = ratios[ratios.len - 1 - bound.index],
+        .median_ppm = percentile(ratios, 50),
+        .upper_bound_ppm = ratios[bound.index],
+        .confidence_ppm = bound.confidence_ppm,
+    };
+}
+
+const MedianBound = struct {
+    index: usize,
+    confidence_ppm: u64,
+};
+
+fn oneSidedMedianBound(samples: usize) MedianBound {
+    std.debug.assert(samples >= 5 and samples <= 63);
+    const total: u128 = @as(u128, 1) << @intCast(samples);
+    var combination: u128 = 1;
+    var cumulative: u128 = 0;
+    for (0..samples) |index| {
+        cumulative += combination;
+        if (cumulative * 1_000_000 >= total * 950_000) return .{
+            .index = index,
+            .confidence_ppm = @intCast((cumulative * 1_000_000) / total),
+        };
+        combination = (combination * (samples - index)) / (index + 1);
+    }
+    unreachable;
 }
 
 fn normalizedBatch(
@@ -143,4 +197,14 @@ test "summary uses robust median and deviation statistics" {
     try std.testing.expectEqual(@as(u64, 101), summary.median_ns);
     try std.testing.expectEqual(@as(u64, 1), summary.median_absolute_deviation_ns);
     try std.testing.expectEqual(@as(usize, 3), summary.batch);
+}
+
+test "paired ratios expose an exact one-sided median bound" {
+    const left = [_]u64{ 80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100 };
+    const right = [_]u64{100} ** left.len;
+    const relative = try summarizeRelative(std.testing.allocator, &left, &right);
+    try std.testing.expectEqual(@as(u64, 840_000), relative.lower_bound_ppm);
+    try std.testing.expectEqual(@as(u64, 900_000), relative.median_ppm);
+    try std.testing.expectEqual(@as(u64, 960_000), relative.upper_bound_ppm);
+    try std.testing.expectEqual(@as(u64, 967_285), relative.confidence_ppm);
 }

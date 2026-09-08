@@ -925,6 +925,11 @@ fn compareCorpus(
     try machine_report.writer.writeAll(
         "workload\tsource_sha256\traw_ir_instructions\toptimized_ir_instructions\tbackend\toracle_revision\ttarget\tcpu\tbinary_sha256\tsamples\tbatch\tminimum_ns\tp10_ns\tmedian_ns\tp90_ns\tmaximum_ns\tmad_ns\tmad_ppm\tbinary_bytes\n",
     );
+    var parity_report: std.Io.Writer.Allocating = .init(allocator);
+    errdefer parity_report.deinit();
+    try parity_report.writer.writeAll(
+        "workload\tsource_sha256\tsilex_binary_sha256\tllvm_binary_sha256\ttarget\tcpu\tsamples\tbatch\tlower_bound_ppm\tmedian_ppm\tupper_bound_ppm\tconfidence_ppm\n",
+    );
     var opportunity_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer opportunity_report.deinit();
     try opportunity_report.writer.writeAll(
@@ -1054,6 +1059,30 @@ fn compareCorpus(
         else
             @intCast((@as(u128, measurements.left.median_ns) * 100) / measurements.right.median_ns);
         try Report.line(io, allocator, "  relative median: Silex {d}% of LLVM time", .{relative_percent});
+        try Report.line(
+            io,
+            allocator,
+            "  paired median interval: {d}..{d} ppm at {d} ppm one-sided confidence (1000000 = parity)",
+            .{
+                measurements.relative.lower_bound_ppm,
+                measurements.relative.upper_bound_ppm,
+                measurements.relative.confidence_ppm,
+            },
+        );
+        try parity_report.writer.print("{s}\t{s}\t{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{
+            name,
+            &source_hash,
+            native_hash,
+            llvm_hash,
+            oracle.target_triple,
+            oracle.cpu,
+            measurements.relative.samples,
+            measurements.left.batch,
+            measurements.relative.lower_bound_ppm,
+            measurements.relative.median_ppm,
+            measurements.relative.upper_bound_ppm,
+            measurements.relative.confidence_ppm,
+        });
         if (measurements.left.spreadPpm() > 200_000 or measurements.right.spreadPpm() > 200_000) {
             try Report.line(io, allocator, "  stability: noisy sample set; treat timing as diagnostic", .{});
         }
@@ -1089,6 +1118,9 @@ fn compareCorpus(
     const report_path = output_directory ++ "/report.tsv";
     try writeFile(io, report_path, try machine_report.toOwnedSlice());
     try Report.line(io, allocator, "machine report: {s}", .{report_path});
+    const parity_path = output_directory ++ "/parity.tsv";
+    try writeFile(io, parity_path, try parity_report.toOwnedSlice());
+    try Report.line(io, allocator, "parity report: {s}", .{parity_path});
     const opportunities_path = output_directory ++ "/opportunities.tsv";
     try writeFile(io, opportunities_path, try opportunity_report.toOwnedSlice());
     try reportOpportunitySummary(io, allocator, opportunity_summary);
