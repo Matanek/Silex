@@ -232,6 +232,7 @@ pub fn itemsAtWithExpectedType(
             .{ "local", "Silex file visibility" },
             .{ "struct", "Silex value type declaration" },
             .{ "class", "Silex reference type declaration" },
+            .{ "noncopyable", "Silex noncopyable reference type modifier" },
             .{ "static", "Silex static type declaration" },
             .{ "protocol", "Silex nominal contract declaration" },
             .{ "enum", "Silex enumeration declaration" },
@@ -251,6 +252,7 @@ pub fn itemsAtWithExpectedType(
                 .{ "func", "Silex implicit static method declaration" },
                 .{ "struct", "Silex nested value type" },
                 .{ "class", "Silex nested reference type" },
+                .{ "noncopyable", "Silex noncopyable nested class modifier" },
             }, 70)
         else
             try appendKeywords(allocator, &candidates, context, &.{
@@ -267,6 +269,7 @@ pub fn itemsAtWithExpectedType(
                 .{ "static", "Silex static member" },
                 .{ "struct", "Silex nested value type" },
                 .{ "class", "Silex nested reference type" },
+                .{ "noncopyable", "Silex noncopyable nested class modifier" },
                 .{ "drop", "Silex deterministic destruction" },
             }, 70),
         .aggregate_field => if (program) |parsed| {
@@ -4193,6 +4196,11 @@ test "complete declaration keywords from partial module input" {
     const structure_items = try itemsAt(arena.allocator(), "s", 1, .invoked);
     try std.testing.expect(contains(structure_items, "struct"));
     try std.testing.expect(contains(structure_items, "static"));
+
+    const noncopyable_items = try itemsAt(arena.allocator(), "nonc", 4, .invoked);
+    try std.testing.expect(contains(noncopyable_items, "noncopyable"));
+    const noncopyable_item = noncopyable_items[indexOf(noncopyable_items, "noncopyable").?];
+    try std.testing.expectEqualStrings("noncopyable", noncopyable_item.insertText.?);
 }
 
 test "complete every accessible local type after a colon" {

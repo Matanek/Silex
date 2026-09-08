@@ -479,6 +479,9 @@ pub const Structure = struct {
     is_private: bool = false,
     is_protected: bool = false,
     is_class: bool = false,
+    /// Ordinary assignment may share this class identity, but `copy` cannot
+    /// clone it or any value that reaches it.
+    is_copyable: bool = true,
     /// The class contract is declared by source while its storage and member
     /// implementations are supplied by a compiler-recognized intrinsic.
     is_intrinsic: bool = false,

@@ -107,11 +107,11 @@ pub fn longestAccessibleModulePrefix(self: anytype, path: []const u8, owner: usi
 
 test "compare Windows provider paths across separator and case spelling" {
     try std.testing.expect(samePath(
-        "Examples\\Distribution\\Hello.sx",
-        "examples/Distribution/Hello.sx",
+        "Tests\\Native\\DistributionSmoke.sx",
+        "tests/Native/DistributionSmoke.sx",
         true,
     ));
-    try std.testing.expect(!samePath("Examples\\Distribution\\Hello.sx", "Examples/Distribution/Hello.sx", false));
+    try std.testing.expect(!samePath("Tests\\Native\\DistributionSmoke.sx", "Tests/Native/DistributionSmoke.sx", false));
 }
 
 test "keep a relative entry path below the current package root" {

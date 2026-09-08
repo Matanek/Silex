@@ -53,6 +53,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             .is_tuple = declaration.is_tuple,
             .tuple_named = declaration.tuple_named,
             .is_class = declaration.is_class,
+            .is_copyable = declaration.is_copyable,
             .is_static = declaration.is_static,
             .is_protocol = declaration.is_protocol,
             .conformances = try resolvedConformances(self, declaration),

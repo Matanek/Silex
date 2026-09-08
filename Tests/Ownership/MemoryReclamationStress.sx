@@ -5,18 +5,18 @@ class Node:Link {
     var next:Node?
     var links:Link[]
 
-    public init(label:str) {
+    init(label:str) {
         self.label = label
         self.next = null
         self.links = []
     }
 
-    public func connect(other:Node) {
+    func connect(other:Node) {
         self.next = other
         self.links.append(other)
     }
 
-    public func close_cycle() { self.links.append(self) }
+    func close_cycle() { self.links.append(self) }
 }
 
 struct Payload {
@@ -28,8 +28,8 @@ struct Payload {
 class MinimalNode {
     var next:MinimalNode?
 
-    public init() { self.next = null }
-    public func connect(other:MinimalNode) { self.next = other }
+    init() { self.next = null }
+    func connect(other:MinimalNode) { self.next = other }
 }
 
 func exercise(index:int) {
@@ -51,7 +51,6 @@ func exercise(index:int) {
     if detached.values.count() != 32 { panic("invalid detached copy") }
 }
 
-func main() {
+test "reclaim cyclic and deeply copied memory under sustained load" {
     for index in 0...20000 { exercise(index) }
-    print("memory stress complete")
 }
