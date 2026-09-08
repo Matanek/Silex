@@ -556,6 +556,7 @@ pub const Structure = struct {
     is_tuple: bool = false,
     tuple_named: bool = false,
     is_class: bool = false,
+    is_copyable: bool = true,
     is_static: bool = false,
     is_protocol: bool = false,
     conformances: []const usize = &.{},

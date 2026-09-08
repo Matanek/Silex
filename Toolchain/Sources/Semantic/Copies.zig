@@ -8,6 +8,9 @@ pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Mo
     if (Collections.isViewType(self.structures, operand.type)) {
         return self.fail(unary.operator_position, "'copy' cannot produce an owned borrowed-view type");
     }
+    if (Resources.containsNoncopyableClass(self, operand.type)) {
+        return self.fail(unary.operator_position, "'copy' cannot clone a value that reaches a noncopyable class");
+    }
     const result = try self.newValue(builder, operand.type);
     try self.emit(builder, .{ .deep_copy = .{ .result = result, .operand = operand.value } });
     return .{ .type = operand.type, .value = result, .transferred = Resources.ownsValue(self, operand.type) };
