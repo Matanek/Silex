@@ -372,9 +372,19 @@ fn appendUnique(allocator: std.mem.Allocator, values: *std.ArrayList([]const u8)
 
 fn mainThreadType(name: []const u8) bool {
     return std.mem.eql(u8, name, "GFX.Window") or
+        std.mem.eql(u8, name, "GFX.Input") or
         std.mem.eql(u8, name, "GFX.GPU") or
         std.mem.startsWith(u8, name, "GFX.Window.") or
+        std.mem.startsWith(u8, name, "GFX.Input.") or
         std.mem.startsWith(u8, name, "GFX.GPU.");
+}
+
+test "keep platform event resources on the main thread" {
+    try std.testing.expect(mainThreadType("GFX.Input"));
+    try std.testing.expect(mainThreadType("GFX.Input.State"));
+    try std.testing.expect(mainThreadType("GFX.Window"));
+    try std.testing.expect(mainThreadType("GFX.GPU.Device"));
+    try std.testing.expect(!mainThreadType("GFX.Application.Time"));
 }
 
 fn stringSequence(self: anytype, values: []const []const u8, position: Source.Position) !*Ast.Expression {
