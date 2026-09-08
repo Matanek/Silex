@@ -1618,7 +1618,16 @@ fn encodeFunction(
                 }
                 if (multiplyFeedsNextAdd(function, instruction_index, binary)) continue;
                 if (immediateArithmeticConstant(function, instruction_index, binary)) |constant| {
-                    try encodeImmediateArithmetic(allocator, words, &fixups, function, &scalar_cache, binary, constant);
+                    try encodeImmediateArithmetic(
+                        allocator,
+                        words,
+                        &fixups,
+                        function,
+                        &scalar_cache,
+                        binary,
+                        constant,
+                        countdownBackedgeForDecrement(function, instruction_index) != null,
+                    );
                 } else if (shiftedMultiplyConstant(function, instruction_index, binary)) |constant| {
                     try encodeShiftedMultiply(allocator, words, function, &scalar_cache, binary, constant);
                 } else if (constantDivisionConstant(function, instruction_index, binary)) |constant| {
@@ -1803,13 +1812,15 @@ fn encodeFunction(
                 if (loopBackedgeComparison(function, instruction_index, target)) |backedge| {
                     const header = resolveJumpTarget(function.instructions, target);
                     if (instruction_offsets[header] == instruction_offsets[backedge.comparison_index]) {
-                        try encodeComparisonFlags(
-                            allocator,
-                            words,
-                            function,
-                            backedge.comparison_index,
-                            backedge.comparison,
-                        );
+                        if (countdownDecrementForBackedge(function, instruction_index, backedge) == null) {
+                            try encodeComparisonFlags(
+                                allocator,
+                                words,
+                                function,
+                                backedge.comparison_index,
+                                backedge.comparison,
+                            );
+                        }
                         try control_fixups.append(allocator, .{
                             .at = words.items.len,
                             .target = backedge.body,
@@ -3021,6 +3032,7 @@ fn encodeImmediateArithmetic(
     scalar_cache: *ScalarCache,
     binary: Machine.Instruction.Binary,
     constant: Machine.Instruction.ConstantInt,
+    set_flags: bool,
 ) Error!void {
     const left = try prepareValueOperand(allocator, words, function, .x9, binary.left);
     const destination = valueResultRegister(function, binary.result) orelse .x11;
@@ -3045,12 +3057,10 @@ fn encodeImmediateArithmetic(
             .imm19,
         );
         try emitIntegerRangeCheck(allocator, words, fixups, binary.type, destination);
-    } else try words.append(allocator, A64.addSubtractImmediate(
-        destination,
-        left,
-        @intCast(constant.bits),
-        add,
-    ));
+    } else try words.append(allocator, if (set_flags)
+        addSubtractImmediateSetFlags(destination, left, @intCast(constant.bits), add)
+    else
+        A64.addSubtractImmediate(destination, left, @intCast(constant.bits), add));
     try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
 }
 
@@ -3660,6 +3670,68 @@ fn loopBackedgeComparison(
         }
     }
     return null;
+}
+
+fn countdownBackedgeForDecrement(
+    function: Machine.Function,
+    decrement_index: usize,
+) ?LoopBackedgeComparison {
+    for (function.instructions[decrement_index + 1 ..], decrement_index + 1..) |instruction, index| switch (instruction) {
+        .copy => {},
+        .jump => |target| {
+            const backedge = loopBackedgeComparison(function, index, target) orelse return null;
+            return if (countdownDecrementForBackedge(function, index, backedge) == decrement_index)
+                backedge
+            else
+                null;
+        },
+        else => return null,
+    };
+    return null;
+}
+
+fn countdownDecrementForBackedge(
+    function: Machine.Function,
+    jump_index: usize,
+    backedge: LoopBackedgeComparison,
+) ?usize {
+    const comparison = backedge.comparison;
+    if (!backedge.body_on_true or comparison.operator != .greater or !comparison.type.isSignedInteger() or
+        !constantSlotHasBits(function, comparison.right, 0)) return null;
+
+    var carried = comparison.left;
+    var index = jump_index;
+    while (index > backedge.body) {
+        index -= 1;
+        switch (function.instructions[index]) {
+            .copy => |copy| {
+                if (copy.result == carried) carried = copy.operand;
+            },
+            .binary => |binary| {
+                if (binary.result != carried or binary.operator != .subtract or binary.checked or
+                    binary.type != comparison.type or binary.left != comparison.left or
+                    !constantSlotHasBits(function, binary.right, 1)) return null;
+                return index;
+            },
+            else => return null,
+        }
+    }
+    return null;
+}
+
+fn constantSlotHasBits(function: Machine.Function, slot: Machine.Slot, bits: u64) bool {
+    var found = false;
+    for (function.instructions) |instruction| {
+        if (ResidenceLiveness.instructionDefines(instruction, slot)) {
+            const constant = switch (instruction) {
+                .constant_int => |value| value,
+                else => return false,
+            };
+            if (constant.bits != bits or found) return false;
+            found = true;
+        }
+    }
+    return found;
 }
 
 const FusedFloatRight = union(enum) {
@@ -5512,6 +5584,34 @@ test "recognize a comparison-only while header at its back edge" {
     try std.testing.expectEqual(@as(usize, 2), backedge.branch_index);
     try std.testing.expectEqual(@as(usize, 3), backedge.body);
     try std.testing.expect(backedge.body_on_true);
+}
+
+test "recognize a countdown decrement that can carry backedge flags" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 2, .bits = 0 } },
+        .{ .jump = 2 },
+        .{ .binary = .{ .result = 3, .operator = .greater, .left = 0, .right = 2, .type = .int } },
+        .{ .branch = .{ .condition = 3, .then_instruction = 4, .else_instruction = 9 } },
+        .{ .constant_int = .{ .result = 4, .bits = 1 } },
+        .{ .binary = .{ .result = 5, .operator = .subtract, .left = 0, .right = 4, .type = .int, .checked = false } },
+        .{ .copy = .{ .result = 0, .operand = 5 } },
+        .{ .copy = .{ .result = 6, .operand = 6 } },
+        .{ .jump = 2 },
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "countdown_loop",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .void,
+        .slot_count = 7,
+        .frame_size = try Machine.frameSize(7),
+        .register_slots = &.{ 0, 1, 2, 3, 4, 5, 6 },
+        .instructions = &instructions,
+    };
+    const backedge = countdownBackedgeForDecrement(function, 5) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 5), countdownDecrementForBackedge(function, 8, backedge).?);
 }
 
 test "omit ARM64 overflow work for a proven unchecked multiply" {
