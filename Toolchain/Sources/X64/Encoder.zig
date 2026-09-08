@@ -509,7 +509,6 @@ fn encodeFunction(
                 try emitStoreStack(allocator, bytes, .rax, address.result);
             },
             .reference_load => |load| {
-                if (load.result.width == 0) return error.InvalidMachineProgram;
                 try emitLoadStack(allocator, bytes, .rcx, load.reference);
                 for (0..load.result.width) |leaf| {
                     try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));

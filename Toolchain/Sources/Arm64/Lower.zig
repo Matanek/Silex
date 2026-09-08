@@ -1395,6 +1395,10 @@ fn collectionForType(program: Ir.Program, type_value: Ir.Type) ?@import("../Type
 }
 
 fn collectionElementStride(program: Ir.Program, element: Ir.Type, width: u12) Machine.Error!u12 {
+    // Zero-sized values still need a non-zero physical stride so list counts,
+    // references and capacity remain distinguishable without inventing a
+    // language-visible field for marker structures.
+    if (width == 0) return 1;
     if (try compactFloat32CollectionElement(program, element)) return std.math.mul(u12, width, 4) catch error.FrameTooLarge;
     return std.math.mul(u12, width, Machine.slot_size) catch error.FrameTooLarge;
 }
