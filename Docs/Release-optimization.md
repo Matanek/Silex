@@ -189,7 +189,9 @@ original ascending loop. The rewritten decrement is unchecked because the
 positive loop condition proves that subtracting one remains representable.
 On ARM64, when only copy instructions separate that decrement from the simple
 backedge, the decrement sets the comparison flags directly and the repeated
-compare is omitted. The entry guard remains an ordinary signed comparison.
+compare is omitted. Because the positive entry condition and unit decrement
+exclude a negative counter, the backedge tests the zero flag directly. The
+entry guard remains an ordinary signed comparison.
 
 After an effectful helper is inlined, a same-block address of a flat scalar
 local may be demoted back to independent field locals when every use is an

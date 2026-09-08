@@ -1812,7 +1812,12 @@ fn encodeFunction(
                 if (loopBackedgeComparison(function, instruction_index, target)) |backedge| {
                     const header = resolveJumpTarget(function.instructions, target);
                     if (instruction_offsets[header] == instruction_offsets[backedge.comparison_index]) {
-                        if (countdownDecrementForBackedge(function, instruction_index, backedge) == null) {
+                        const countdown_decrement = countdownDecrementForBackedge(
+                            function,
+                            instruction_index,
+                            backedge,
+                        );
+                        if (countdown_decrement == null) {
                             try encodeComparisonFlags(
                                 allocator,
                                 words,
@@ -1826,10 +1831,10 @@ fn encodeFunction(
                             .target = backedge.body,
                             .width = .imm19,
                         });
-                        const false_condition = comparisonFalseCondition(backedge.comparison);
-                        try words.append(allocator, conditionalBranch(
-                            if (backedge.body_on_true) invertCondition(false_condition) else false_condition,
-                        ));
+                        try words.append(allocator, conditionalBranch(loopBackedgeCondition(
+                            backedge,
+                            countdown_decrement,
+                        )));
                         continue;
                     }
                 }
@@ -3717,6 +3722,12 @@ fn countdownDecrementForBackedge(
         }
     }
     return null;
+}
+
+fn loopBackedgeCondition(backedge: LoopBackedgeComparison, countdown_decrement: ?usize) Condition {
+    if (countdown_decrement != null) return .not_equal;
+    const false_condition = comparisonFalseCondition(backedge.comparison);
+    return if (backedge.body_on_true) invertCondition(false_condition) else false_condition;
 }
 
 fn constantSlotHasBits(function: Machine.Function, slot: Machine.Slot, bits: u64) bool {
@@ -5612,6 +5623,7 @@ test "recognize a countdown decrement that can carry backedge flags" {
     const backedge = countdownBackedgeForDecrement(function, 5) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(usize, 5), countdownDecrementForBackedge(function, 8, backedge).?);
+    try std.testing.expectEqual(Condition.not_equal, loopBackedgeCondition(backedge, 5));
 }
 
 test "omit ARM64 overflow work for a proven unchecked multiply" {
