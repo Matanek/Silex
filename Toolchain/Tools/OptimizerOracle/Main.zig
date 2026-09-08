@@ -1087,7 +1087,7 @@ fn compareCorpus(
             try Report.line(io, allocator, "  timing: skipped correctness probe", .{});
             continue;
         }
-        const measurements = Benchmark.measurePair(
+        var measurements = Benchmark.measurePair(
             allocator,
             io,
             native_binary_path,
@@ -1096,6 +1096,26 @@ fn compareCorpus(
         ) catch |err| {
             try Report.line(io, allocator, "  timing: rejected ({t})", .{err});
             return err;
+        };
+        if (enforce_parity) Parity.qualifyTiming(measurements) catch |err| {
+            if (err == error.InconclusiveTiming and samples < Parity.inconclusive_retry_samples) {
+                try Report.line(
+                    io,
+                    allocator,
+                    "  timing: inconclusive at {d} pairs; retrying at {d}",
+                    .{ samples, Parity.inconclusive_retry_samples },
+                );
+                measurements = Benchmark.measurePair(
+                    allocator,
+                    io,
+                    native_binary_path,
+                    llvm_binary_path,
+                    .{ .samples = Parity.inconclusive_retry_samples },
+                ) catch |retry_err| {
+                    try Report.line(io, allocator, "  timing retry: rejected ({t})", .{retry_err});
+                    return retry_err;
+                };
+            }
         };
         try Report.benchmark(io, allocator, "Silex Release", measurements.left);
         try Report.benchmark(io, allocator, "LLVM -O3", measurements.right);

@@ -5,7 +5,14 @@ const Benchmark = @import("Benchmark.zig");
 // Coverage.json. Eleven pairs leave near-parity kernels unnecessarily
 // inconclusive on an otherwise quiet host.
 pub const minimum_samples = 21;
+pub const inconclusive_retry_samples = 63;
 pub const maximum_spread_ppm = 200_000;
+
+comptime {
+    std.debug.assert(inconclusive_retry_samples > minimum_samples);
+    std.debug.assert(inconclusive_retry_samples <= 63);
+    std.debug.assert(inconclusive_retry_samples % 2 == 1);
+}
 
 pub const required_llvm_families = [_][]const u8{
     "new-pass-manager-and-analysis-invalidation",
