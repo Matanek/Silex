@@ -968,6 +968,41 @@ test "release counts down only an otherwise unobserved simple induction" {
     try std.testing.expectEqualStrings(reference.stderr, release.stderr);
 }
 
+test "release keeps a loop-local dynamic bound at its definition" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Store {
+        \\    var values:int[]
+        \\    init() { self.values = [1, 2, 3, 4, 5, 6] }
+        \\    func count() int { return self.values.count() }
+        \\}
+        \\func fill(store:Store) int {
+        \\    var total = 0
+        \\    var index = 0
+        \\    while index < store.count() { total += 2; index++ }
+        \\    return total
+        \\}
+        \\func main() { print(fill(Store())) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    try Verifier.verify(allocator, optimized);
+    const text = try Ir.writeText(allocator, optimized);
+    const fill_start = std.mem.indexOf(u8, text, "func @fill") orelse return error.TestUnexpectedResult;
+    const main_start = std.mem.indexOfPos(u8, text, fill_start, "func @main") orelse return error.TestUnexpectedResult;
+    const fill = text[fill_start..main_start];
+    try std.testing.expect(std.mem.indexOf(u8, fill, " = lt ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fill, " = gt ") == null);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("12\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+}
+
 test "release removes only the first proven induction overflow check" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -276,6 +276,10 @@ pub const regressions = [_]RegressionEntry{
         .concern = "small reference and checked-view callees inline into the final caller without losing their memory effects",
         .contract = .{ .specializes_effectful_calls = "main" },
     },
+    .{
+        .name = "Regressions/DynamicFieldClearAppend.sx",
+        .concern = "a loop-local class call bound stays defined before clearing and rebuilding a dynamic field",
+    },
 };
 
 const IntegerKind = struct {

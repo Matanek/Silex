@@ -469,12 +469,28 @@ fn findDefinition(function: Ir.Function, value: Ir.ValueId) ?Definition {
 
 fn instructionResult(instruction: Ir.Instruction) ?Ir.ValueId {
     return switch (instruction) {
-        .constant_int => |value| value.result,
-        .collection_count => |value| value.result,
-        .collection_load => |value| value.result,
-        .local_load => |value| value.result,
-        .binary => |value| value.result,
-        else => null,
+        .class_retain,
+        .class_drop,
+        .list_retain,
+        .list_drop,
+        .string_retain,
+        .string_drop,
+        .global_store,
+        .local_store,
+        .address_store,
+        .reference_store,
+        .print,
+        .assert,
+        .mutex_lock,
+        .mutex_unlock,
+        => null,
+        .list_edit => |value| value.result,
+        .call => |value| value.result,
+        .indirect_call => |value| value.result,
+        .boundary_call => |value| value.result,
+        .boundary_indirect_call => |value| value.result,
+        .dynamic_call => |value| value.result,
+        inline else => |value| value.result,
     };
 }
 
@@ -505,4 +521,48 @@ fn reachesAvoiding(
         }
     }
     return false;
+}
+
+test "countdown keeps a loop-local call bound in the loop header" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const blocks = [_]Ir.Block{
+        .{
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 0, .bits = 0 } },
+                .{ .local_store = .{ .local = 0, .operand = 0 } },
+            },
+            .terminator = .{ .jump = 1 },
+        },
+        .{
+            .instructions = &.{
+                .{ .local_load = .{ .result = 1, .local = 0 } },
+                .{ .call = .{ .result = 2, .function = 0, .arguments = &.{} } },
+                .{ .binary = .{ .result = 3, .operator = .less, .left = 1, .right = 2 } },
+            },
+            .terminator = .{ .branch = .{ .condition = 3, .then_block = 2, .else_block = 3 } },
+        },
+        .{
+            .instructions = &.{
+                .{ .local_load = .{ .result = 4, .local = 0 } },
+                .{ .constant_int = .{ .result = 5, .bits = 1 } },
+                .{ .binary = .{ .result = 6, .operator = .add, .left = 4, .right = 5 } },
+                .{ .local_store = .{ .local = 0, .operand = 6 } },
+            },
+            .terminator = .{ .jump = 1 },
+        },
+        .{ .instructions = &.{}, .terminator = .return_void },
+    };
+    const function: Ir.Function = .{
+        .name = "dynamic_bound",
+        .parameter_types = &.{},
+        .return_type = .void,
+        .local_types = &.{.int},
+        .value_types = &.{ .int, .int, .int, .bool, .int, .int, .int },
+        .blocks = &blocks,
+    };
+    const optimized = try optimize(allocator, function);
+    try std.testing.expectEqual(@as(Ir.ValueId, 0), optimized.blocks[0].instructions[1].local_store.operand);
+    try std.testing.expectEqual(Ir.BinaryOperator.less, optimized.blocks[1].instructions[2].binary.operator);
 }

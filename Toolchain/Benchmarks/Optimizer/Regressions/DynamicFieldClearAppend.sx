@@ -1,0 +1,69 @@
+class Store {
+    var awake:bool[]
+    var inverse_masses:float[]
+
+    init() {
+        self.awake = [true, true, true, true, true, true]
+        self.inverse_masses = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    }
+
+    func count() int {
+        return self.awake.count()
+    }
+}
+
+class ConstraintState {
+    var entries:int[]
+
+    init() {
+        self.entries = [4]
+    }
+}
+
+class World {
+    var store:Store
+    var constraints:ConstraintState
+    var masks:uint32[]
+
+    init() {
+        self.store = Store()
+        self.constraints = ConstraintState()
+        self.masks = []
+    }
+
+    func build() {
+        var constraints = self.constraints
+        self.masks.clear()
+        var body = 0
+        var guard = 0
+        while body < self.store.count() {
+            if guard >= 32 {
+                print("invalid dynamic loop bound")
+                return
+            }
+            self.masks.append(0 as uint32)
+            body++
+            guard++
+        }
+
+        var source = 0
+        while source < constraints.entries.count() {
+            let second = constraints.entries[source]
+            if inverse_mass(self.store, second) > 0.0 {
+                self.masks[second] = self.masks[second] + 1
+            }
+            source++
+        }
+        print(self.masks.count(), " ", self.masks[4])
+    }
+}
+
+func inverse_mass(store:Store, index:int) float {
+    if !store.awake[index] { return 0.0 }
+    return store.inverse_masses[index]
+}
+
+func main() {
+    var world = World()
+    world.build()
+}
