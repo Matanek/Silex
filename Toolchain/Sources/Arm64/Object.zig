@@ -3,6 +3,7 @@ const Encoder = @import("Encoder.zig");
 const Instructions = @import("Instructions.zig");
 const LinuxObject = @import("../Linux/Object.zig");
 const Machine = @import("Machine.zig");
+const Coff = @import("../Windows/Coff.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -130,12 +131,12 @@ fn emitWindowsImage(allocator: Allocator, program: Machine.Program, image: *Enco
     }
 
     const relocation_count = image.external_call_sites.len + image.address_sites.len * 2;
-    if (relocation_count > std.math.maxInt(u16)) return error.InvalidImage;
+    const relocation_layout = try Coff.relocationLayout(relocation_count);
     const symbol_count: u32 = @intCast(1 + image.address_sites.len + external_names.items.len);
     const header_size: usize = 20 + 40;
     const text_offset = header_size;
     const relocation_offset = text_offset + image.code.len;
-    const symbol_offset = relocation_offset + relocation_count * 10;
+    const symbol_offset = relocation_offset + relocation_layout.table_entry_count * 10;
 
     var string_table: std.ArrayList(u8) = .empty;
     defer string_table.deinit(allocator);
@@ -156,10 +157,18 @@ fn emitWindowsImage(allocator: Allocator, program: Machine.Program, image: *Enco
     try appendInt(allocator, &bytes, u32, text_offset);
     try appendInt(allocator, &bytes, u32, relocation_offset);
     try appendInt(allocator, &bytes, u32, 0);
-    try appendInt(allocator, &bytes, u16, relocation_count);
+    try appendInt(allocator, &bytes, u16, relocation_layout.header_count);
     try appendInt(allocator, &bytes, u16, 0);
-    try appendInt(allocator, &bytes, u32, 0xe0000060);
+    try appendInt(
+        allocator,
+        &bytes,
+        u32,
+        0xe0000060 | if (relocation_layout.overflow_count != null) Coff.extended_relocations_flag else 0,
+    );
     try bytes.appendSlice(allocator, image.code);
+    if (relocation_layout.overflow_count) |count| {
+        try appendRelocation(allocator, &bytes, count, 0, 0);
+    }
     for (image.address_sites, 0..) |site, index| {
         const symbol: u32 = @intCast(1 + index);
         try appendRelocation(allocator, &bytes, site.instruction_offset, symbol, image_rel_arm64_pagebase_rel21);

@@ -3,6 +3,7 @@ const Encoder = @import("Encoder.zig");
 const LinuxObject = @import("../Linux/Object.zig");
 const Machine = @import("../Arm64/Machine.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
+const Coff = @import("../Windows/Coff.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -53,11 +54,11 @@ pub fn emitCoff(
         try symbol_names.append(allocator, try std.fmt.allocPrint(allocator, "__imp_{s}", .{site.symbol.sourceName()}));
     }
     const relocation_count = image.external_call_sites.len + image.windows_import_sites.len;
-    if (relocation_count > std.math.maxInt(u16)) return error.InvalidImage;
+    const relocation_layout = try Coff.relocationLayout(relocation_count);
     const header_size: usize = 20 + 40;
     const text_offset = header_size;
     const relocation_offset = text_offset + image.code.len;
-    const symbol_offset = relocation_offset + relocation_count * 10;
+    const symbol_offset = relocation_offset + relocation_layout.table_entry_count * 10;
     const symbol_count: u32 = @intCast(symbol_names.items.len);
 
     var string_table: std.ArrayList(u8) = .empty;
@@ -79,12 +80,32 @@ pub fn emitCoff(
     try appendInt(allocator, &bytes, u32, text_offset);
     try appendInt(allocator, &bytes, u32, relocation_offset);
     try appendInt(allocator, &bytes, u32, 0);
-    try appendInt(allocator, &bytes, u16, relocation_count);
+    try appendInt(allocator, &bytes, u16, relocation_layout.header_count);
     try appendInt(allocator, &bytes, u16, 0);
-    try appendInt(allocator, &bytes, u32, 0xe0000060);
+    try appendInt(
+        allocator,
+        &bytes,
+        u32,
+        0xe0000060 | if (relocation_layout.overflow_count != null) Coff.extended_relocations_flag else 0,
+    );
     try bytes.appendSlice(allocator, image.code);
-    for (image.external_call_sites) |site| try appendCoffRelocation(allocator, &bytes, site.displacement_offset, symbol_for_function[site.function]);
-    for (image.windows_import_sites) |site| try appendCoffRelocation(allocator, &bytes, site.displacement_offset, symbol_for_import[@intFromEnum(site.symbol)]);
+    if (relocation_layout.overflow_count) |count| {
+        try appendCoffRelocation(allocator, &bytes, count, 0, 0);
+    }
+    for (image.external_call_sites) |site| try appendCoffRelocation(
+        allocator,
+        &bytes,
+        site.displacement_offset,
+        symbol_for_function[site.function],
+        4,
+    );
+    for (image.windows_import_sites) |site| try appendCoffRelocation(
+        allocator,
+        &bytes,
+        site.displacement_offset,
+        symbol_for_import[@intFromEnum(site.symbol)],
+        4,
+    );
     for (symbol_names.items, 0..) |name, index| {
         try appendCoffName(allocator, &bytes, &string_table, name);
         try appendInt(allocator, &bytes, u32, if (index == 0) image.entry_offset else 0);
@@ -97,10 +118,16 @@ pub fn emitCoff(
     return bytes.toOwnedSlice(allocator);
 }
 
-fn appendCoffRelocation(allocator: Allocator, bytes: *std.ArrayList(u8), offset: u32, symbol: u32) !void {
+fn appendCoffRelocation(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    offset: u32,
+    symbol: u32,
+    kind: u16,
+) !void {
     try appendInt(allocator, bytes, u32, offset);
     try appendInt(allocator, bytes, u32, symbol);
-    try appendInt(allocator, bytes, u16, 4);
+    try appendInt(allocator, bytes, u16, kind);
 }
 
 fn appendCoffName(allocator: Allocator, bytes: *std.ArrayList(u8), strings: *std.ArrayList(u8), name: []const u8) !void {
