@@ -8,6 +8,11 @@ func optional_value(present:bool) int? {
     return null
 }
 
+func optional_total(values:int[]?) int {
+    if let present = values { return present[0] + present[1] }
+    return 0
+}
+
 test "optional intrinsic promotion comparison and binding" {
     let missing:int?
     let present:int? = 7
@@ -41,4 +46,9 @@ test "optionals compose with collections" {
         if item = value { total += item }
     }
     if total != 4 { panic("optional collection iteration") }
+}
+
+test "collection literals use the payload type of an optional context" {
+    if optional_total([20, 22]) != 42 { panic("optional collection literal") }
+    if optional_total(null) != 0 { panic("missing optional collection") }
 }

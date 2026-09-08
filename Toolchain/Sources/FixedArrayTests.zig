@@ -41,6 +41,22 @@ test "construct inspect index and mutate fixed arrays" {
     try std.testing.expect(std.mem.indexOf(u8, text, "collection.replace") != null);
 }
 
+test "contextualize a fixed array literal through an optional parameter" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func total(values:int[2]?) int {
+        \\    if let present = values { return present[0] + present[1] }
+        \\    return 0
+        \\}
+        \\func main() { print(total([20, 22]), total(null)) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("420\n", result.stdout);
+}
+
 test "diagnose fixed array type literal index and mutability errors" {
     try expectCompileError("func main() { let values:int[3] = [1, 2] }", "array literal expects 3 values, found 2");
     try expectCompileError(
