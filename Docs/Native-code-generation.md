@@ -79,7 +79,10 @@ Without a package-native provider, Release writes the Mach-O headers, load
 commands, `__text`, entry wrapper, and ad-hoc SHA-256 code signature itself.
 Debug emits the same machine code through the relocatable-object path so the
 bootstrap linker can preserve its Silex source symbols. Neither path invokes
-an assembler or `codesign`.
+an assembler or `codesign`. A process entry executes exactly once in its own
+address space, so it does not allocate the snapshot lock used to serialize
+repeated in-memory runner invocations. Programs without mutable globals can
+therefore omit the writable data segment entirely.
 
 ## Emit macOS X64 programs
 

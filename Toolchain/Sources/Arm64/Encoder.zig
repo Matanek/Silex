@@ -239,10 +239,8 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
                 try emitStackAdjustment(allocator, &words, 16, false);
                 try words.append(allocator, addSubtractImmediate(.x15, .zero_or_sp, 0, true));
             }
-            try emitSnapshotAcquire(allocator, &words, &snapshot_data_fixups);
             try calls.append(allocator, .{ .at = words.items.len, .function = function });
             try words.append(allocator, branchLink());
-            try emitSnapshotRelease(allocator, &words, &snapshot_data_fixups);
             const runtime_success = words.items.len;
             try words.append(allocator, compareBranchZero(.x8));
             if (main.recoverable_entry_result) try emitStackAdjustment(allocator, &words, 16, true);
@@ -363,10 +361,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     }
     const copy_model_offset: ?usize = if (program.copy_model.len == 0) null else std.mem.alignForward(usize, image_size, 8);
     if (copy_model_offset) |offset| image_size = offset + program.copy_model.len * @sizeOf(u64);
-    const has_snapshot_lock = switch (entry) {
-        .none => false,
-        else => true,
-    };
+    const has_snapshot_lock = snapshot_data_fixups.items.len != 0;
     const data_offset: ?u32 = if (program.globals.len == 0 and !has_snapshot_lock) null else @intCast(std.mem.alignForward(usize, image_size, 0x4000));
     if (data_offset) |offset| image_size = offset;
     const snapshot_lock_offset: ?usize = if (has_snapshot_lock) image_size else null;
@@ -5346,6 +5341,36 @@ test "resolve calls and append a native test entry" {
     try std.testing.expectEqual(expected, encoded_call);
     try std.testing.expectEqual(moveRegister(.x1, .x8), status_word);
     try std.testing.expectEqual(moveRegister(.x0, .x8), linux_status_word);
+}
+
+test "omit process-private snapshot data from an ARM64 executable entry" {
+    const instructions = [_]Machine.Instruction{.return_void};
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 0,
+        .frame_size = 0,
+        .instructions = &instructions,
+    }};
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const executable = try encode(
+        allocator,
+        .{ .functions = &functions },
+        .{ .executable_main = 0 },
+    );
+    try std.testing.expectEqual(@as(?u32, null), executable.data_offset);
+
+    const invoked = try encode(
+        allocator,
+        .{ .functions = &functions },
+        .{ .test_function = 0 },
+    );
+    try std.testing.expect(invoked.data_offset != null);
 }
 
 test "omit status checks only for proven infallible direct callees" {
