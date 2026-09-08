@@ -12,7 +12,7 @@ pub fn parseIntrinsicClass(self: anytype, is_public: bool) !Ast.Structure {
     return parseType(self, is_public, false, false, false, false, true, false, true, true);
 }
 
-pub fn parseNoncopyableClass(
+pub fn parseNocopyClass(
     self: anytype,
     is_public: bool,
     is_internal: bool,
@@ -21,7 +21,7 @@ pub fn parseNoncopyableClass(
     is_protected: bool,
 ) !Ast.Structure {
     try self.advance();
-    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'noncopyable'");
+    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'nocopy'");
     return parseType(self, is_public, is_internal, is_local, is_private, is_protected, true, false, false, false);
 }
 
@@ -150,8 +150,8 @@ fn parseType(
             try self.advance();
         }
         const member_static = is_static_container or member_static_explicit;
-        if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "noncopyable")) {
-            if (member_override or member_static_explicit) return self.fail("noncopyable nested classes cannot declare override or static");
+        if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "nocopy")) {
+            if (member_override or member_static_explicit) return self.fail("nocopy nested classes cannot declare override or static");
             const nested_short_name = blk: {
                 var lexer = self.lexer;
                 _ = try lexer.next();
@@ -166,7 +166,7 @@ fn parseType(
             };
             try nested_names.append(self.allocator, nested_short_name);
             try self.advance();
-            if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'noncopyable'");
+            if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'nocopy'");
             const nested = try parseType(
                 self,
                 member_public,
