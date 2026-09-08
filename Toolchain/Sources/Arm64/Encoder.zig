@@ -869,6 +869,11 @@ fn encodeFunction(
         try emitImmediate64(allocator, words, .x9, literal.bits);
         try words.append(allocator, moveGeneralToFloat(literal.register, .x9, literal.double));
     };
+    const hoisted_division = hoistedDivisionMultiplier(function);
+    if (hoisted_division) |division| {
+        try emitImmediate64(allocator, words, .x15, division.multiplier);
+        if (division.hoist_divisor) try emitImmediate64(allocator, words, .x14, division.divisor_bits);
+    }
 
     for (function.instructions, 0..) |instruction, instruction_index| {
         instruction_offsets[instruction_index] = words.items.len;
@@ -1617,7 +1622,7 @@ fn encodeFunction(
                 } else if (shiftedMultiplyConstant(function, instruction_index, binary)) |constant| {
                     try encodeShiftedMultiply(allocator, words, function, &scalar_cache, binary, constant);
                 } else if (constantDivisionConstant(function, instruction_index, binary)) |constant| {
-                    try encodeConstantDivision(allocator, words, function, &scalar_cache, binary, constant);
+                    try encodeConstantDivision(allocator, words, function, &scalar_cache, instruction_index, binary, constant, hoisted_division);
                 } else if (comparisonBranchIndex(function, instruction_index, binary) != null) {
                     try encodeComparisonFlags(allocator, words, function, instruction_index, binary);
                 } else if (fusedMultiplyForAdd(function, instruction_index)) |multiply_value| {
@@ -2818,6 +2823,81 @@ fn constantDivisionConstant(
         binary.right == constant.result) constant else null;
 }
 
+const HoistedDivisionMultiplier = struct {
+    divisor_bits: u64,
+    signed: bool,
+    multiplier: u64,
+    hoist_divisor: bool,
+    first_instruction: usize,
+    last_instruction: usize,
+
+    fn matches(self: HoistedDivisionMultiplier, instruction_index: usize, constant: Machine.Instruction.ConstantInt) bool {
+        const divisor_bits = if (constant.type.isSignedInteger())
+            Numeric.signExtend(constant.bits, constant.type.bitWidth())
+        else
+            constant.bits;
+        return instruction_index >= self.first_instruction and instruction_index <= self.last_instruction and
+            self.divisor_bits == divisor_bits and self.signed == constant.type.isSignedInteger();
+    }
+};
+
+fn hoistedDivisionMultiplier(function: Machine.Function) ?HoistedDivisionMultiplier {
+    if (function.hidden_return_slot != null) return null;
+    for (function.instructions, 0..) |instruction, source| {
+        const target = switch (instruction) {
+            .jump => |value| value,
+            .branch => |value| @min(value.then_instruction, value.else_instruction),
+            else => continue,
+        };
+        if (target > source) continue;
+        for (function.instructions[target .. source + 1], target..) |candidate, index| {
+            const binary = switch (candidate) {
+                .binary => |value| value,
+                else => continue,
+            };
+            const constant = constantDivisionConstant(function, index, binary) orelse continue;
+            const divisor_bits = if (constant.type.isSignedInteger())
+                Numeric.signExtend(constant.bits, constant.type.bitWidth())
+            else
+                constant.bits;
+            const multiplier = if (constant.type.isSignedInteger()) root: {
+                const plan = ConstantDivision.signed(@bitCast(divisor_bits)) orelse continue;
+                break :root @as(u64, @bitCast(plan.multiplier));
+            } else root: {
+                const plan = ConstantDivision.unsigned(divisor_bits) orelse continue;
+                break :root plan.multiplier;
+            };
+            if (!prefixPreservesHoistedDivision(function.instructions[0 .. source + 1])) return null;
+            return .{
+                .divisor_bits = divisor_bits,
+                .signed = constant.type.isSignedInteger(),
+                .multiplier = multiplier,
+                .hoist_divisor = binary.operator == .remainder and constant.type.isSignedInteger(),
+                .first_instruction = target,
+                .last_instruction = source,
+            };
+        }
+    }
+    return null;
+}
+
+fn prefixPreservesHoistedDivision(instructions: []const Machine.Instruction) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .constant_int,
+        .constant_bool,
+        .copy,
+        .unary,
+        .binary,
+        .return_value,
+        .return_void,
+        .jump,
+        .branch,
+        => {},
+        else => return false,
+    };
+    return true;
+}
+
 fn shiftForMultiplyAdd(bits: u64) ?u6 {
     if (bits <= 2) return null;
     const power = bits - 1;
@@ -2849,8 +2929,10 @@ fn encodeConstantDivision(
     words: *std.ArrayList(u32),
     function: Machine.Function,
     scalar_cache: *ScalarCache,
+    instruction_index: usize,
     binary: Machine.Instruction.Binary,
     constant: Machine.Instruction.ConstantInt,
+    hoisted: ?HoistedDivisionMultiplier,
 ) Allocator.Error!void {
     const left = try prepareValueOperand(allocator, words, function, .x9, binary.left);
     const destination = valueResultRegister(function, binary.result) orelse .x11;
@@ -2862,8 +2944,9 @@ fn encodeConstantDivision(
     if (constant.type.isSignedInteger()) {
         const divisor: i64 = @bitCast(divisor_bits);
         if (ConstantDivision.signed(divisor)) |plan| {
-            try emitImmediate64(allocator, words, .x12, @bitCast(plan.multiplier));
-            try words.append(allocator, A64.signedMultiplyHigh(.x13, left, .x12));
+            const multiplier_register: Register = if (hoisted != null and hoisted.?.matches(instruction_index, constant)) .x15 else .x12;
+            if (multiplier_register == .x12) try emitImmediate64(allocator, words, .x12, @bitCast(plan.multiplier));
+            try words.append(allocator, A64.signedMultiplyHigh(.x13, left, multiplier_register));
             switch (plan.adjustment) {
                 .none => {},
                 .add_dividend => try words.append(allocator, A64.addRegisters(.x13, .x13, left)),
@@ -2888,8 +2971,9 @@ fn encodeConstantDivision(
         }
     } else {
         if (ConstantDivision.unsigned(divisor_bits)) |plan| {
-            try emitImmediate64(allocator, words, .x12, plan.multiplier);
-            try words.append(allocator, A64.unsignedMultiplyHigh(.x13, left, .x12));
+            const multiplier_register: Register = if (hoisted != null and hoisted.?.matches(instruction_index, constant)) .x15 else .x12;
+            if (multiplier_register == .x12) try emitImmediate64(allocator, words, .x12, plan.multiplier);
+            try words.append(allocator, A64.unsignedMultiplyHigh(.x13, left, multiplier_register));
             if (plan.add_dividend) {
                 try words.append(allocator, A64.subtractRegisters(.x14, left, .x13));
                 try words.append(allocator, A64.logicalShiftRightImmediate(.x14, .x14, 1));
@@ -2915,8 +2999,12 @@ fn encodeConstantDivision(
     }
 
     if (binary.operator == .remainder) {
-        try emitImmediate64(allocator, words, .x12, divisor_bits);
-        try words.append(allocator, A64.multiplySubtract(destination, .x13, .x12, left));
+        const divisor_register: Register = if (hoisted != null and hoisted.?.matches(instruction_index, constant) and hoisted.?.hoist_divisor)
+            .x14
+        else
+            .x12;
+        if (divisor_register == .x12) try emitImmediate64(allocator, words, .x12, divisor_bits);
+        try words.append(allocator, A64.multiplySubtract(destination, .x13, divisor_register, left));
     } else if (destination != .x13) {
         try words.append(allocator, A64.moveRegister(destination, .x13));
     }
@@ -5452,8 +5540,10 @@ test "select ARM64 reciprocal division for adjacent signed and unsigned constant
         &signed_words,
         signed_function,
         &scalar_cache,
+        1,
         signed_instructions[1].binary,
         signed_instructions[0].constant_int,
+        null,
     );
     try std.testing.expectEqual(A64.signedMultiplyHigh(.x13, .x0, .x12), signed_words.items[4]);
     try std.testing.expectEqual(A64.arithmeticShiftRightImmediate(.x13, .x13, 19), signed_words.items[6]);
@@ -5479,8 +5569,10 @@ test "select ARM64 reciprocal division for adjacent signed and unsigned constant
         &unsigned_words,
         unsigned_function,
         &scalar_cache,
+        1,
         unsigned_instructions[1].binary,
         unsigned_instructions[0].constant_int,
+        null,
     );
     try std.testing.expect(std.mem.indexOfScalar(u32, unsigned_words.items, A64.unsignedMultiplyHigh(.x13, .x0, .x12)) != null);
     try std.testing.expect(std.mem.indexOfScalar(u32, unsigned_words.items, A64.unsignedDivide(.x2, .x0, .x1)) == null);
@@ -5496,8 +5588,10 @@ test "select ARM64 reciprocal division for adjacent signed and unsigned constant
         &power_words,
         power_function,
         &scalar_cache,
+        1,
         power_instructions[1].binary,
         power_instructions[0].constant_int,
+        null,
     );
     try std.testing.expect(std.mem.indexOfScalar(
         u32,
@@ -5526,6 +5620,54 @@ test "select ARM64 reciprocal division for adjacent signed and unsigned constant
         0,
         minus_one_instructions[0].constant_int,
     ));
+}
+
+test "hoist a loop-invariant reciprocal multiplier on ARM64" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 1, .bits = 1_000_003, .type = .int } },
+        .{ .binary = .{
+            .result = 2,
+            .operator = .remainder,
+            .left = 0,
+            .right = 1,
+            .type = .int,
+            .checked = false,
+        } },
+        .{ .jump = 0 },
+    };
+    const function: Machine.Function = .{
+        .name = "loop_remainder_by_constant",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .void,
+        .slot_count = 3,
+        .frame_size = try Machine.frameSize(3),
+        .register_slots = &.{ 0, 1, 2 },
+        .instructions = &instructions,
+    };
+    const hoisted = hoistedDivisionMultiplier(function) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(hoisted.matches(1, instructions[0].constant_int));
+    try std.testing.expect(!hoisted.matches(3, instructions[0].constant_int));
+
+    var words: std.ArrayList(u32) = .empty;
+    var scalar_cache: ScalarCache = .{ .enabled = false };
+    try encodeConstantDivision(
+        allocator,
+        &words,
+        function,
+        &scalar_cache,
+        1,
+        instructions[1].binary,
+        instructions[0].constant_int,
+        hoisted,
+    );
+    try std.testing.expectEqual(A64.signedMultiplyHigh(.x13, .x0, .x15), words.items[0]);
+    try std.testing.expect(std.mem.indexOfScalar(u32, words.items, A64.signedMultiplyHigh(.x13, .x0, .x12)) == null);
+    try std.testing.expectEqual(A64.multiplySubtract(.x2, .x13, .x14, .x0), words.items[4]);
 }
 
 test "omit ARM64 width guard for a proven unchecked shift" {
