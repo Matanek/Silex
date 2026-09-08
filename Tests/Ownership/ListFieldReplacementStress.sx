@@ -6,7 +6,7 @@ class FrameState {
     var fifth:int[]
     var sixth:int[]
 
-    public init() {
+    init() {
         self.first = []
         self.second = []
         self.third = []
@@ -15,7 +15,7 @@ class FrameState {
         self.sixth = []
     }
 
-    public func begin_frame() {
+    func begin_frame() {
         self.first = []
         self.second = []
         self.third = []
@@ -25,10 +25,9 @@ class FrameState {
     }
 }
 
-func main() {
+test "repeatedly replace owned list fields" {
     var state = FrameState()
     for index in 0...200000 {
         state.begin_frame()
     }
-    print("list field replacement stress complete")
 }

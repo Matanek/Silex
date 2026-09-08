@@ -1,7 +1,0 @@
-use STD.Collections.Hashing
-
-func main() {
-    if Hashing.hash_int(42) != 84 {
-        panic("STD returned an invalid hash")
-    }
-}

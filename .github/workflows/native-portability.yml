@@ -364,7 +364,7 @@ jobs:
           zig build -Dtarget=aarch64-windows -Doptimize=ReleaseFast -Dcpu=baseline \
             --prefix "$stage/silex" \
             --build-file Toolchain/build.zig
-          zig build-lib Fixtures/WindowsArm64BoundaryProbe/Provider.zig \
+          zig build-lib Tests/Target/windows-arm64/WindowsArm64BoundaryProbe/Provider.zig \
             -O ReleaseSmall \
             -target aarch64-windows \
             -femit-bin="$stage/boundary/BoundaryProbe.lib"
@@ -487,7 +487,7 @@ jobs:
           $builtSilex = Join-Path $buildPrefix "bin/silex.exe"
           Assert-Arm64Pe $builtSilex
 
-          $probeRoot = Join-Path $env:GITHUB_WORKSPACE "Fixtures/WindowsArm64BoundaryProbe"
+          $probeRoot = Join-Path $env:GITHUB_WORKSPACE "Tests/Target/windows-arm64/WindowsArm64BoundaryProbe"
           $boundaryDirectory = Join-Path $probeRoot "Boundary/windows-arm64"
           $boundaryArchive = Join-Path $boundaryDirectory "BoundaryProbe.lib"
           New-Item -ItemType Directory -Force $boundaryDirectory | Out-Null
