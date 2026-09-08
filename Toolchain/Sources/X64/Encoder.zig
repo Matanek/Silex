@@ -667,7 +667,14 @@ fn encodeFunction(
             .collection_count => |value| try emitCollectionCount(allocator, bytes, value),
             .list_edit => |value| try emitListEdit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .collection_slice => |value| try emitCollectionSlice(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
-            .collection_view => |value| try emitCollectionView(allocator, bytes, &epilogue_fixups, value),
+            .collection_view => |value| try emitCollectionView(
+                allocator,
+                bytes,
+                windows_import_sites,
+                platform,
+                &epilogue_fixups,
+                value,
+            ),
             .aggregate_equal => |value| try emitAggregateEqual(allocator, bytes, value),
             .class_init => |value| try emitClassInit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .class_load => |value| {
@@ -2228,20 +2235,22 @@ fn emitDynamicCollectionLoad(
     }
 }
 
-fn emitDetachDynamicReference(
+fn emitDetachDynamicRoot(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
     import_sites: *std.ArrayList(WindowsImports.X64Site),
     platform: Platform,
     epilogue: *std.ArrayList(EpilogueFixup),
-    value: Machine.Instruction.CollectionReference,
+    reference: Machine.Slot,
+    element_width: u12,
+    element_stride: u12,
+    ownership: @import("../Ir.zig").Ownership,
 ) Error!void {
-    const reference = value.reference orelse return error.InvalidMachineProgram;
-    const stride = if (value.element_stride != 0)
-        value.element_stride
+    const stride = if (element_stride != 0)
+        element_stride
     else
-        @as(u32, value.element_width) * Machine.slot_size;
-    const compact_float32 = stride == @as(u32, value.element_width) * 4;
+        @as(u32, element_width) * Machine.slot_size;
+    const compact_float32 = stride == @as(u32, element_width) * 4;
 
     const restart = bytes.items.len;
     try emitLoadStack(allocator, bytes, .r15, reference);
@@ -2262,14 +2271,14 @@ fn emitDetachDynamicReference(
     try emitAddImmediateRegister(allocator, bytes, .rsi, list_header_size);
     try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
     try emitMoveRegister(allocator, bytes, .r13, .rax);
-    try emitListHeader(allocator, bytes, .r13, .r12, .rsi, value.ownership);
+    try emitListHeader(allocator, bytes, .r13, .r12, .rsi, ownership);
 
     try emitMoveRegister(allocator, bytes, .rbx, .r14);
     try emitAddImmediateRegister(allocator, bytes, .rbx, list_header_size);
     try emitMoveRegister(allocator, bytes, .r10, .r13);
     try emitAddImmediateRegister(allocator, bytes, .r10, list_header_size);
     try emitMoveRegister(allocator, bytes, .rsi, .r12);
-    try emitImmediate(allocator, bytes, .rcx, value.element_width);
+    try emitImmediate(allocator, bytes, .rcx, element_width);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xf1, 0x48, 0x85, 0xf6, 0x0f, 0x84 });
     const copied = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
@@ -2295,13 +2304,13 @@ fn emitDetachDynamicReference(
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
     const publish_lost = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
-    try emitResourceDropPointer(allocator, bytes, import_sites, platform, .r14, value.ownership);
+    try emitResourceDropPointer(allocator, bytes, import_sites, platform, .r14, ownership);
     try bytes.append(allocator, 0xe9);
     const complete = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
 
     try patchRelative(bytes.items, publish_lost, bytes.items.len);
-    try emitResourceDropPointer(allocator, bytes, import_sites, platform, .r13, value.ownership);
+    try emitResourceDropPointer(allocator, bytes, import_sites, platform, .r13, ownership);
     try bytes.append(allocator, 0xe9);
     const retry_detach = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
@@ -2320,7 +2329,17 @@ fn emitCollectionReference(
     value: Machine.Instruction.CollectionReference,
 ) Error!void {
     if (value.dynamic and !value.view and value.reference != null) {
-        try emitDetachDynamicReference(allocator, bytes, import_sites, platform, epilogue, value);
+        try emitDetachDynamicRoot(
+            allocator,
+            bytes,
+            import_sites,
+            platform,
+            epilogue,
+            value.reference.?,
+            value.element_width,
+            value.element_stride,
+            value.ownership,
+        );
     }
     if (value.dynamic) {
         if (!value.view and value.reference != null) {
@@ -2812,10 +2831,35 @@ fn emitListTakeLast(
 fn emitCollectionView(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
     epilogue: *std.ArrayList(EpilogueFixup),
     value: Machine.Instruction.CollectionView,
 ) Error!void {
-    if (value.source_view) {
+    if (value.reference != null and value.dynamic and !value.source_view) {
+        try emitDetachDynamicRoot(
+            allocator,
+            bytes,
+            import_sites,
+            platform,
+            epilogue,
+            value.reference.?,
+            value.element_width,
+            value.element_stride,
+            .root,
+        );
+    }
+    if (value.reference) |reference| {
+        try emitLoadStack(allocator, bytes, .rbx, reference);
+        if (value.source_view) {
+            try emitLoadMemory(allocator, bytes, .rcx, .rbx, Machine.slot_size);
+            try emitLoadMemory(allocator, bytes, .rbx, .rbx, 0);
+        } else if (value.dynamic) {
+            try emitLoadMemory(allocator, bytes, .rbx, .rbx, 0);
+            try emitLoadMemory(allocator, bytes, .rcx, .rbx, 0);
+            try emitAddImmediateRegister(allocator, bytes, .rbx, list_header_size);
+        } else try emitImmediate(allocator, bytes, .rcx, value.count);
+    } else if (value.source_view) {
         try emitLoadStack(allocator, bytes, .rbx, value.collection.start);
         try emitLoadStack(allocator, bytes, .rcx, @intCast(@as(usize, value.collection.start) + 1));
     } else if (value.dynamic) {
@@ -2843,7 +2887,6 @@ fn emitCollectionView(
     try emitRegisterBinary(allocator, bytes, 0x01, .rbx, .rax);
     try emitStoreStack(allocator, bytes, .rbx, value.result.start);
     try emitStoreStack(allocator, bytes, .r11, @intCast(@as(usize, value.result.start) + 1));
-    _ = epilogue;
 }
 
 fn emitCollectionSlice(

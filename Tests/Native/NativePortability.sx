@@ -50,6 +50,11 @@ struct NativeFloatPair {
     let y:float
 }
 
+struct NativeIntegerPair {
+    var x:int
+    var y:int
+}
+
 enum NativeAssetKind {
     html
     css
@@ -253,6 +258,10 @@ func sum_view(values:@int[..]) int {
 func increment_middle(values:&int[]) {
     var middle = &values[1:4]
     for var value in middle { value += 1 }
+}
+
+func replace_pair_through_view(values:&NativeIntegerPair[..]) {
+    values[1].x = 17
 }
 
 func verify_collections() {
@@ -474,6 +483,16 @@ test "slice view mutate and clear native lists" {
     assert(values[4] == 5)
     values.clear()
     assert(values.is_empty())
+}
+
+test "mutable aggregate view detaches shared native list" {
+    var values:NativeIntegerPair[] = [NativeIntegerPair(x:1, y:2), NativeIntegerPair(x:3, y:4)]
+    let snapshot = values
+    replace_pair_through_view(&values[0:values.count()])
+    assert(snapshot[1].x == 3)
+    assert(snapshot[1].y == 4)
+    assert(values[1].x == 17)
+    assert(values[1].y == 4)
 }
 
 test "deep-copy repeated native class roots without collections" {
