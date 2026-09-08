@@ -275,7 +275,9 @@ fn pinBarrier(
         if (start != std.math.maxInt(usize) and start < index and end > index) pinned.* = true;
     }
     switch (instruction) {
-        .print => |value| forceSlot(value.value, forced),
+        // Integer and boolean output copy their terminal operand from its
+        // residence before the formatter starts clobbering volatile scratch.
+        .print => {},
         .copy_range => |value| {
             forceSpan(value.operand, forced);
             forceSpan(value.result, forced);
@@ -682,7 +684,7 @@ test "hot X64 scalar loops retain registers before a terminal print barrier" {
     try std.testing.expect(residences[6] != null);
     try std.testing.expect(residences[8] != null);
     try std.testing.expect(residences[10] != null);
-    try std.testing.expectEqual(@as(?u5, null), residences[11]);
+    try std.testing.expect(residences[11] != null);
 
     const short_instructions = [_]Machine.Instruction{
         .{ .constant_int = .{ .result = 0, .bits = 0 } },

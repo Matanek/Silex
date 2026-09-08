@@ -856,9 +856,9 @@ fn encodeFunction(
                 &argument_registers,
             ),
             .print => |value| switch (value.kind) {
-                .signed_integer, .unsigned_integer => try emitPrintInteger(allocator, bytes, windows_import_sites, platform, value.value, value.newline, value.kind == .signed_integer),
+                .signed_integer, .unsigned_integer => try emitPrintInteger(allocator, bytes, windows_import_sites, platform, function.register_slots, value.value, value.newline, value.kind == .signed_integer),
                 .float32, .float64 => try emitPrintFloat(allocator, bytes, float_calls, data_fixups, windows_import_sites, platform, value.value, value.kind == .float64, value.newline),
-                .boolean => try emitPrintBoolean(allocator, bytes, data_fixups, windows_import_sites, platform, value.value, value.newline),
+                .boolean => try emitPrintBoolean(allocator, bytes, data_fixups, windows_import_sites, platform, function.register_slots, value.value, value.newline),
                 .string => try emitPrintString(allocator, bytes, data_fixups, windows_import_sites, platform, value.value, value.newline),
             },
             .assert => |assertion| {
@@ -1677,6 +1677,7 @@ fn emitPrintInteger(
     bytes: *std.ArrayList(u8),
     import_sites: *std.ArrayList(WindowsImports.X64Site),
     platform: Platform,
+    residences: []const ?u5,
     slot: Machine.Slot,
     newline: bool,
     signed: bool,
@@ -1687,7 +1688,7 @@ fn emitPrintInteger(
         try bytes.appendSlice(allocator, &.{ 0xc6, 0x06, '\n' });
         try emitImmediate(allocator, bytes, .r8, 1);
     } else try emitImmediate(allocator, bytes, .r8, 0);
-    try emitLoadStack(allocator, bytes, .rax, slot);
+    try emitLoadValue(allocator, bytes, residences, .rax, slot);
     try emitImmediate(allocator, bytes, .r9, 0);
     if (signed) {
         try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x89 });
@@ -1728,10 +1729,11 @@ fn emitPrintBoolean(
     data_fixups: *std.ArrayList(DataFixup),
     import_sites: *std.ArrayList(WindowsImports.X64Site),
     platform: Platform,
+    residences: []const ?u5,
     slot: Machine.Slot,
     newline: bool,
 ) Error!void {
-    try emitLoadStack(allocator, bytes, .rax, slot);
+    try emitLoadValue(allocator, bytes, residences, .rax, slot);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x84 });
     const use_false = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);

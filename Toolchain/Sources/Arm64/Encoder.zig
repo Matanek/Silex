@@ -1700,8 +1700,8 @@ fn encodeFunction(
             .mutex_unlock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, false),
             .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, function, call),
             .print => |value| switch (value.kind) {
-                .signed_integer => try emitPrintInteger(allocator, words, external_call_sites, platform, value.value, 1, value.newline),
-                .unsigned_integer => try emitPrintUnsigned(allocator, words, external_call_sites, platform, value.value, value.newline),
+                .signed_integer => try emitPrintInteger(allocator, words, external_call_sites, platform, function, value.value, 1, value.newline),
+                .unsigned_integer => try emitPrintUnsigned(allocator, words, external_call_sites, platform, function, value.value, value.newline),
                 .float32, .float64 => try emitPrintFloat(
                     allocator,
                     words,
@@ -1714,7 +1714,7 @@ fn encodeFunction(
                     value.kind == .float64,
                     value.newline,
                 ),
-                .boolean => try emitPrintBoolean(allocator, words, data_fixups, external_call_sites, platform, program, value.value, value.newline),
+                .boolean => try emitPrintBoolean(allocator, words, data_fixups, external_call_sites, platform, program, function, value.value, value.newline),
                 .string => try StringRuntime.emitPrint(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, value.value, 1, value.newline),
             },
             .assert => |assertion| {
@@ -2634,7 +2634,7 @@ fn encodeCollectionLoad(
     try patch19(words.items, bounds.negative, failure);
     try patch19(words.items, bounds.upper, failure);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.header, 2);
-    try emitPrintInteger(allocator, words, external_call_sites, platform, access.index, 2, false);
+    try emitPrintInteger(allocator, words, external_call_sites, platform, null, access.index, 2, false);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.tail, 2);
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
     try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
@@ -2669,7 +2669,7 @@ fn encodeCollectionReference(
     try patch19(words.items, bounds.?.negative, failure);
     try patch19(words.items, bounds.?.upper, failure);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.header, 2);
-    try emitPrintInteger(allocator, words, external_call_sites, platform, access.index, 2, false);
+    try emitPrintInteger(allocator, words, external_call_sites, platform, null, access.index, 2, false);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.tail, 2);
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
     try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
@@ -2709,7 +2709,7 @@ fn encodeCollectionReplace(
     try patch19(words.items, bounds.?.negative, failure);
     try patch19(words.items, bounds.?.upper, failure);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement.header, 2);
-    try emitPrintInteger(allocator, words, external_call_sites, platform, replacement.index, 2, false);
+    try emitPrintInteger(allocator, words, external_call_sites, platform, null, replacement.index, 2, false);
     try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement.tail, 2);
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
     try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
@@ -4161,10 +4161,11 @@ fn emitPrintBoolean(
     external_call_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Platform,
     program: Machine.Program,
+    function: ?Machine.Function,
     slot: Machine.Slot,
     newline: bool,
 ) Error!void {
-    try words.append(allocator, loadStack(.x9, slot));
+    try loadOptionalValue(allocator, words, function, .x9, slot);
     const use_false = words.items.len;
     try words.append(allocator, compareBranchZero(.x9));
     try emitWriteStatic(allocator, words, data_fixups, external_call_sites, platform, program, 1, 1);
@@ -4222,11 +4223,12 @@ fn emitPrintInteger(
     words: *std.ArrayList(u32),
     external_call_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Platform,
+    function: ?Machine.Function,
     slot: Machine.Slot,
     descriptor: u16,
     newline: bool,
 ) Error!void {
-    try words.append(allocator, loadStack(.x9, slot));
+    try loadOptionalValue(allocator, words, function, .x9, slot);
     try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
     try words.append(allocator, addSubtractImmediate(.x11, .zero_or_sp, if (newline) 31 else 32, true));
     if (newline) {
@@ -4291,10 +4293,11 @@ fn emitPrintUnsigned(
     words: *std.ArrayList(u32),
     external_call_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Platform,
+    function: ?Machine.Function,
     slot: Machine.Slot,
     newline: bool,
 ) Error!void {
-    try words.append(allocator, loadStack(.x9, slot));
+    try loadOptionalValue(allocator, words, function, .x9, slot);
     try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
     try words.append(allocator, addSubtractImmediate(.x11, .zero_or_sp, if (newline) 31 else 32, true));
     if (newline) {

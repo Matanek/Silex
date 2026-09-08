@@ -132,7 +132,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     extendLoopCarriedIntervals(function.instructions, first, last);
     for (function.instructions, 0..) |instruction, index| {
         if (!isResidenceCompatibleInstruction(instruction, externals)) {
-            pinIntervalsAt(index, first, last, forced);
+            pinIntervalsAt(instruction, index, first, last, forced);
         }
     }
 
@@ -1001,8 +1001,22 @@ fn isResidenceCompatibleInstruction(instruction: Machine.Instruction, externals:
     };
 }
 
-fn pinIntervalsAt(index: usize, first: []const usize, last: []const usize, forced: []bool) void {
-    for (first, last, forced) |start, end, *pinned| {
+fn pinIntervalsAt(
+    instruction: Machine.Instruction,
+    index: usize,
+    first: []const usize,
+    last: []const usize,
+    forced: []bool,
+) void {
+    const terminal_operand: ?Machine.Slot = switch (instruction) {
+        .print => |value| switch (value.kind) {
+            .signed_integer, .unsigned_integer, .boolean => value.value,
+            .float32, .float64, .string => null,
+        },
+        else => null,
+    };
+    for (first, last, forced, 0..) |start, end, *pinned, slot| {
+        if (terminal_operand != null and terminal_operand.? == slot and end == index) continue;
         if (start != std.math.maxInt(usize) and start <= index and end >= index) pinned.* = true;
     }
 }
@@ -1778,5 +1792,5 @@ test "hot scalar loops retain registers across a terminal print barrier" {
     try std.testing.expect(result.residences[6] != null);
     try std.testing.expect(result.residences[8] != null);
     try std.testing.expect(result.residences[10] != null);
-    try std.testing.expectEqual(@as(?u5, null), result.residences[11]);
+    try std.testing.expect(result.residences[11] != null);
 }
