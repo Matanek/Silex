@@ -951,7 +951,7 @@ fn encodeFunction(
                     continue;
                 }
                 if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
-                if (constantFeedsNextComparison(function, instruction_index, constant.result) and
+                if (constantFeedsNextCachedFloatUse(function, instruction_index, constant.result) and
                     cachedFloatLiteralRegister(function, constant.bits, false) != null) continue;
                 if (constant.bits == 0) {
                     const destination = floatResultRegister(function, constant.result) orelse .x9;
@@ -992,7 +992,7 @@ fn encodeFunction(
                     continue;
                 }
                 if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
-                if (constantFeedsNextComparison(function, instruction_index, constant.result) and
+                if (constantFeedsNextCachedFloatUse(function, instruction_index, constant.result) and
                     cachedFloatLiteralRegister(function, constant.bits, true) != null) continue;
                 if (constant.bits == 0) {
                     const destination = floatResultRegister(function, constant.result) orelse .x9;
@@ -3247,6 +3247,25 @@ fn constantFeedsNextComparison(
         slotUsedOnlyAt(function.instructions, result, index + 1);
 }
 
+fn constantFeedsNextCachedFloatUse(
+    function: Machine.Function,
+    index: usize,
+    result: Machine.Slot,
+) bool {
+    if (index + 1 >= function.instructions.len or controlTargetsInstruction(function.instructions, index + 1)) return false;
+    const binary = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    if (!binary.type.isFloat() or (binary.left != result and binary.right != result) or
+        !slotUsedOnlyAt(function.instructions, result, index + 1)) return false;
+    return switch (binary.operator) {
+        .add, .subtract, .multiply, .divide, .minimum, .maximum => true,
+        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => comparisonBranchIndex(function, index + 1, binary) != null,
+        else => false,
+    };
+}
+
 fn viewCountFeedsNextComparison(
     function: Machine.Function,
     index: usize,
@@ -3287,7 +3306,7 @@ const float_literal_cache_registers = [_]Register{ .x5, .x6, .x7 };
 
 fn cachedFloatLiterals(function: Machine.Function) [float_literal_cache_registers.len]?CachedFloatLiteral {
     var result: [float_literal_cache_registers.len]?CachedFloatLiteral = @splat(null);
-    if (function.float_register_slots.len == 0) return result;
+    if (function.float_register_slots.len == 0 or functionCanClobberFloatLiteralCache(function)) return result;
     var count: usize = 0;
     for (function.instructions, 0..) |instruction, index| {
         const candidate: CachedFloatLiteral = switch (instruction) {
@@ -3301,7 +3320,7 @@ fn cachedFloatLiterals(function: Machine.Function) [float_literal_cache_register
             else => unreachable,
         };
         if (candidate.bits == 0 or
-            !constantFeedsNextComparison(function, index, result_slot) or
+            !constantFeedsNextCachedFloatUse(function, index, result_slot) or
             !instructionIsInsideLoop(function.instructions, index)) continue;
         var duplicate = false;
         for (result[0..count]) |existing| if (existing.?.bits == candidate.bits and
@@ -3322,11 +3341,83 @@ fn cachedFloatLiterals(function: Machine.Function) [float_literal_cache_register
     return result;
 }
 
+fn functionCanClobberFloatLiteralCache(function: Machine.Function) bool {
+    for (function.instructions) |instruction| switch (instruction) {
+        .call, .indirect_call, .external_call, .external_indirect_call, .dynamic_call => return true,
+        else => {},
+    };
+    return false;
+}
+
 fn cachedFloatLiteralRegister(function: Machine.Function, bits: u64, double: bool) ?Register {
     for (cachedFloatLiterals(function)) |candidate| if (candidate) |literal| {
         if (literal.bits == bits and literal.double == double) return literal.register;
     };
     return null;
+}
+
+fn cachedFloatBinaryOperand(
+    function: Machine.Function,
+    binary: Machine.Instruction.Binary,
+    slot: Machine.Slot,
+) ?Register {
+    for (function.instructions[1..], 1..) |instruction, index| {
+        const candidate = switch (instruction) {
+            .binary => |value| value,
+            else => continue,
+        };
+        if (candidate.result != binary.result) continue;
+        return switch (function.instructions[index - 1]) {
+            .constant_float32 => |constant| if (!binary.type.isFloat() or binary.type == .float64 or
+                constant.result != slot or !constantFeedsNextCachedFloatUse(function, index - 1, slot))
+                null
+            else
+                cachedFloatLiteralRegister(function, constant.bits, false),
+            .constant_float64 => |constant| if (binary.type != .float64 or
+                constant.result != slot or !constantFeedsNextCachedFloatUse(function, index - 1, slot))
+                null
+            else
+                cachedFloatLiteralRegister(function, constant.bits, true),
+            else => null,
+        };
+    }
+    return null;
+}
+
+test "cache loop floating-point arithmetic literals outside the loop" {
+    const first_bits: u32 = @bitCast(@as(f32, 0.99999));
+    const second_bits: u32 = @bitCast(@as(f32, 0.00001));
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 1, .bits = first_bits } },
+        .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+        .{ .constant_float32 = .{ .result = 3, .bits = second_bits } },
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 2, .right = 3, .type = .float32 } },
+        .{ .jump = 0 },
+    };
+    const float_residences = [_]?u5{null} ** 5;
+    var function: Machine.Function = .{
+        .name = "float_recurrence",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .void,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .float_register_slots = &float_residences,
+        .instructions = &instructions,
+    };
+    const cached = cachedFloatLiterals(function);
+    try std.testing.expectEqual(@as(?Register, .x5), if (cached[0]) |literal| literal.register else null);
+    try std.testing.expectEqual(@as(?Register, .x6), if (cached[1]) |literal| literal.register else null);
+    try std.testing.expectEqual(@as(?Register, .x5), cachedFloatBinaryOperand(function, instructions[1].binary, 1));
+    try std.testing.expectEqual(@as(?Register, .x6), cachedFloatBinaryOperand(function, instructions[3].binary, 3));
+
+    const with_call = instructions ++ [_]Machine.Instruction{.{ .call = .{
+        .result = null,
+        .function = 0,
+        .arguments = &.{},
+    } }};
+    function.instructions = &with_call;
+    for (cachedFloatLiterals(function)) |literal| try std.testing.expectEqual(@as(?CachedFloatLiteral, null), literal);
 }
 
 const FloatMaxDiamond = struct {
@@ -3739,8 +3830,16 @@ fn encodeFloatBinary(
     binary: Machine.Instruction.Binary,
 ) Error!void {
     const double = binary.type == .float64;
-    const left = try prepareFloatOperand(allocator, words, function, .x9, binary.left, double);
-    const right = try prepareFloatOperand(allocator, words, function, .x10, binary.right, double);
+    const left = if (function) |value|
+        cachedFloatBinaryOperand(value, binary, binary.left) orelse
+            try prepareFloatOperand(allocator, words, function, .x9, binary.left, double)
+    else
+        try prepareFloatOperand(allocator, words, function, .x9, binary.left, double);
+    const right = if (function) |value|
+        cachedFloatBinaryOperand(value, binary, binary.right) orelse
+            try prepareFloatOperand(allocator, words, function, .x10, binary.right, double)
+    else
+        try prepareFloatOperand(allocator, words, function, .x10, binary.right, double);
     switch (binary.operator) {
         .add, .subtract, .multiply, .divide => {
             const destination = floatResultRegister(function, binary.result) orelse .x11;
