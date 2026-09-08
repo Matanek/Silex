@@ -152,30 +152,30 @@ test "copy rejects borrowed view results and emits deterministic IR" {
     try std.testing.expect(std.mem.indexOf(u8, first_text, "deep_copy") != null);
 }
 
-test "copy rejects noncopyable classes through composite values" {
+test "copy rejects nocopy classes through composite values" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const sources = [_][]const u8{
-        "noncopyable class Handle {} func main() { var handle = Handle(); var clone = copy handle }",
-        "noncopyable class Handle {} struct Owner { var handle:Handle } func main() { var handle = Handle(); let owner = Owner(handle:handle); let clone = copy owner }",
-        "noncopyable class Handle {} enum Storage { handle(Handle); empty } func main() { var handle = Handle(); let storage = Storage.handle(handle); let clone = copy storage }",
-        "noncopyable class Handle {} func main() { var handle = Handle(); var handles:Handle[] = [handle]; var clone = copy handles }",
-        "noncopyable class Handle {} class Child : Handle {} func main() { var child = Child(); var clone = copy child }",
+        "nocopy class Handle {} func main() { var handle = Handle(); var clone = copy handle }",
+        "nocopy class Handle {} struct Owner { var handle:Handle } func main() { var handle = Handle(); let owner = Owner(handle:handle); let clone = copy owner }",
+        "nocopy class Handle {} enum Storage { handle(Handle); empty } func main() { var handle = Handle(); let storage = Storage.handle(handle); let clone = copy storage }",
+        "nocopy class Handle {} func main() { var handle = Handle(); var handles:Handle[] = [handle]; var clone = copy handles }",
+        "nocopy class Handle {} class Child : Handle {} func main() { var child = Child(); var clone = copy child }",
     };
     for (sources) |source| {
         var frontend = Frontend.Frontend.init(arena.allocator());
         try std.testing.expectError(error.InvalidSource, frontend.compile(source));
         try std.testing.expectEqualStrings(
-            "'copy' cannot clone a value that reaches a noncopyable class",
+            "'copy' cannot clone a value that reaches a nocopy class",
             frontend.diagnostic.?.message,
         );
     }
 }
 
-test "noncopyable class identities remain shareable without deep copy" {
+test "nocopy class identities remain shareable without deep copy" {
     const output = try run(
-        \\noncopyable class Handle { var value:int }
+        \\nocopy class Handle { var value:int }
         \\struct Owner {
         \\    private var handle:Handle
         \\    init(handle:Handle) { self.handle = handle }

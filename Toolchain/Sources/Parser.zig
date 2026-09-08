@@ -79,10 +79,10 @@ pub const Parser = struct {
                     try functions.appendSlice(self.allocator, try TestBlocks.parse(self))
                 else if (std.mem.eql(u8, self.current.lexeme, "intrinsic"))
                     try structures.append(self.allocator, try Nominals.parseIntrinsicClass(self, false))
-                else if (std.mem.eql(u8, self.current.lexeme, "noncopyable"))
-                    try structures.append(self.allocator, try Nominals.parseNoncopyableClass(self, false, false, false, false, false))
+                else if (std.mem.eql(u8, self.current.lexeme, "nocopy"))
+                    try structures.append(self.allocator, try Nominals.parseNocopyClass(self, false, false, false, false, false))
                 else
-                    return self.fail("expected use, enum, struct, class, intrinsic class, noncopyable class, protocol, function, or test declaration"),
+                    return self.fail("expected use, enum, struct, class, intrinsic class, nocopy class, protocol, function, or test declaration"),
                 .keyword_let => try external_functions.append(self.allocator, try Interop.parseFunction(self)),
                 .keyword_extend => try extensions.append(self.allocator, try Extensions.parse(self)),
                 .keyword_contribute => try catalog_contributions.append(self.allocator, try Catalogs.parse(self)),
@@ -94,10 +94,10 @@ pub const Parser = struct {
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, true, false, false, true)),
                         .identifier => if (std.mem.eql(u8, self.current.lexeme, "intrinsic"))
                             try structures.append(self.allocator, try Nominals.parseIntrinsicClass(self, true))
-                        else if (std.mem.eql(u8, self.current.lexeme, "noncopyable"))
-                            try structures.append(self.allocator, try Nominals.parseNoncopyableClass(self, true, false, false, false, false))
+                        else if (std.mem.eql(u8, self.current.lexeme, "nocopy"))
+                            try structures.append(self.allocator, try Nominals.parseNocopyClass(self, true, false, false, false, false))
                         else
-                            return self.fail("expected use, enum, struct, class, intrinsic class, noncopyable class, protocol, or function declaration after 'public'"),
+                            return self.fail("expected use, enum, struct, class, intrinsic class, nocopy class, protocol, or function declaration after 'public'"),
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, true, false, false)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false, false)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false, false)),
@@ -113,12 +113,12 @@ pub const Parser = struct {
                     switch (self.current.tag) {
                         .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, false)),
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, true)),
-                        .identifier => if (std.mem.eql(u8, self.current.lexeme, "noncopyable"))
-                            try structures.append(self.allocator, try Nominals.parseNoncopyableClass(self, false, is_internal, is_local, false, false))
+                        .identifier => if (std.mem.eql(u8, self.current.lexeme, "nocopy"))
+                            try structures.append(self.allocator, try Nominals.parseNocopyClass(self, false, is_internal, is_local, false, false))
                         else {
                             const message = try std.fmt.allocPrint(
                                 self.allocator,
-                                "expected enum, struct, class, noncopyable class, protocol, or function declaration after '{s}'",
+                                "expected enum, struct, class, nocopy class, protocol, or function declaration after '{s}'",
                                 .{visibility_name},
                             );
                             return self.fail(message);
@@ -130,7 +130,7 @@ pub const Parser = struct {
                         else => {
                             const message = try std.fmt.allocPrint(
                                 self.allocator,
-                                "expected enum, struct, class, noncopyable class, protocol, or function declaration after '{s}'",
+                                "expected enum, struct, class, nocopy class, protocol, or function declaration after '{s}'",
                                 .{visibility_name},
                             );
                             return self.fail(message);

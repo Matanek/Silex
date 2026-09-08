@@ -18,8 +18,8 @@ pub fn containsClass(self: anytype, type_value: Ast.Type) bool {
     return containsClassInner(self, type_value, 0);
 }
 
-pub fn containsNoncopyableClass(self: anytype, type_value: Ast.Type) bool {
-    return containsNoncopyableClassInner(self, type_value, 0);
+pub fn containsNocopyClass(self: anytype, type_value: Ast.Type) bool {
+    return containsNocopyClassInner(self, type_value, 0);
 }
 
 pub fn requiresRetain(self: anytype, type_value: Ast.Type) bool {
@@ -76,29 +76,29 @@ fn containsClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     return false;
 }
 
-fn containsNoncopyableClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
+fn containsNocopyClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     if (depth > self.structures.len + self.enums.len + 1) return false;
-    if (type_value.optionalChild()) |child| return containsNoncopyableClassInner(self, child, depth + 1);
+    if (type_value.optionalChild()) |child| return containsNocopyClassInner(self, child, depth + 1);
     const index = type_value.structureIndex() orelse return false;
     if (index >= self.structures.len) return false;
     const structure = self.structures[index];
     if (structure.is_protocol) return false;
     if (structure.is_class) {
         if (!structure.is_copyable) return true;
-        if (structure.base) |base| return containsNoncopyableClassInner(self, .structure(base), depth + 1);
+        if (structure.base) |base| return containsNocopyClassInner(self, .structure(base), depth + 1);
         return false;
     }
     if (structure.collection) |collection| {
         if (collection.view) return false;
-        return containsNoncopyableClassInner(self, collection.element, depth + 1);
+        return containsNocopyClassInner(self, collection.element, depth + 1);
     }
     for (self.enums) |enumeration| if (enumeration.type_index == index) {
         for (enumeration.variants) |variant| for (variant.associated_types) |associated| {
-            if (containsNoncopyableClassInner(self, associated, depth + 1)) return true;
+            if (containsNocopyClassInner(self, associated, depth + 1)) return true;
         };
         return false;
     };
-    for (structure.fields) |field| if (containsNoncopyableClassInner(self, field.type, depth + 1)) return true;
+    for (structure.fields) |field| if (containsNocopyClassInner(self, field.type, depth + 1)) return true;
     return false;
 }
 
