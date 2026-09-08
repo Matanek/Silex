@@ -41,6 +41,20 @@ pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
         const loop_blocks = (try naturalLoopBlocks(allocator, blocks, header_id, branch.then_block)) orelse continue;
         if (!(try provenZeroOriginInduction(allocator, function, loop_blocks, header_id, induction.local))) continue;
 
+        if (try rewriteUnusedInductionAsCountdown(
+            allocator,
+            function,
+            blocks,
+            loop_blocks,
+            header_id,
+            comparison_definition,
+            comparison,
+            induction.local,
+        )) {
+            changed = true;
+            continue;
+        }
+
         // Entering the loop body proves induction < bound. Since `bound` is
         // representable by the same integer type, the first unit
         // increment on every path cannot overflow. Keep later increments
@@ -118,6 +132,111 @@ pub fn optimize(allocator: Allocator, function: Ir.Function) !Ir.Function {
     var result = function;
     result.blocks = blocks;
     return result;
+}
+
+const InstructionLocation = struct {
+    block: Ir.BlockId,
+    instruction: usize,
+};
+
+fn rewriteUnusedInductionAsCountdown(
+    allocator: Allocator,
+    function: Ir.Function,
+    blocks: []Ir.Block,
+    loop_blocks: []const bool,
+    header: Ir.BlockId,
+    comparison_definition: Definition,
+    comparison: Ir.Instruction.Binary,
+    local: Ir.LocalId,
+) !bool {
+    if (function.value_types[comparison.left] != .int or function.value_types[comparison.right] != .int)
+        return false;
+    const branch = blocks[header].terminator.branch;
+    const body = branch.then_block;
+    if (body == header or body >= blocks.len or !loop_blocks[body] or loop_blocks[branch.else_block]) return false;
+    var loop_block_count: usize = 0;
+    for (loop_blocks) |member| loop_block_count += @intFromBool(member);
+    if (loop_block_count != 2 or blocks[body].terminator != .jump or blocks[body].terminator.jump != header)
+        return false;
+
+    var initialization: ?InstructionLocation = null;
+    var update: ?InstructionLocation = null;
+    for (function.blocks, 0..) |block, block_id| for (block.instructions, 0..) |instruction, instruction_index| {
+        const store = switch (instruction) {
+            .local_store => |value| value,
+            else => continue,
+        };
+        if (store.local != local) continue;
+        const location: InstructionLocation = .{ .block = block_id, .instruction = instruction_index };
+        if (loop_blocks[block_id]) {
+            if (block_id != body or update != null) return false;
+            update = location;
+        } else {
+            if (initialization != null) return false;
+            initialization = location;
+        }
+    };
+    const initialization_location = initialization orelse return false;
+    const update_location = update orelse return false;
+    const initialization_store = function.blocks[initialization_location.block]
+        .instructions[initialization_location.instruction].local_store;
+    const zero = findDefinition(function, initialization_store.operand) orelse return false;
+    if (zero.block != initialization_location.block or zero.instruction >= initialization_location.instruction or
+        zero.value != .constant_int or zero.value.constant_int.bits != 0) return false;
+
+    if (findDefinition(function, comparison.right)) |bound| {
+        if (bound.block != initialization_location.block or bound.instruction >= initialization_location.instruction)
+            return false;
+    }
+
+    const update_store = function.blocks[update_location.block].instructions[update_location.instruction].local_store;
+    const update_definition = findDefinition(function, update_store.operand) orelse return false;
+    if (update_definition.block != body or update_definition.instruction >= update_location.instruction or
+        update_definition.value != .binary) return false;
+    const increment = update_definition.value.binary;
+    if (increment.operator != .add) return false;
+    const update_load = if (isLocalLoad(function, increment.left, local) and
+        isIntegerConstant(function, increment.right, 1))
+        increment.left
+    else if (isLocalLoad(function, increment.right, local) and
+        isIntegerConstant(function, increment.left, 1))
+        increment.right
+    else
+        return false;
+
+    var local_loads: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .local_load => |load| if (load.local == local) {
+            if (load.result != comparison.left and load.result != update_load) return false;
+            local_loads += 1;
+        },
+        .local_address => |address| if (address.local == local) return false,
+        else => {},
+    };
+    if (local_loads != 2) return false;
+
+    const initial_instructions = try allocator.dupe(Ir.Instruction, blocks[initialization_location.block].instructions);
+    var countdown_store = initial_instructions[initialization_location.instruction].local_store;
+    countdown_store.operand = comparison.right;
+    initial_instructions[initialization_location.instruction] = .{ .local_store = countdown_store };
+    blocks[initialization_location.block].instructions = initial_instructions;
+
+    const header_instructions = try allocator.dupe(Ir.Instruction, blocks[header].instructions);
+    var positive = comparison;
+    positive.operator = .greater;
+    positive.right = initialization_store.operand;
+    header_instructions[comparison_definition.instruction] = .{ .binary = positive };
+    blocks[header].instructions = header_instructions;
+
+    const body_instructions = try allocator.dupe(Ir.Instruction, blocks[body].instructions);
+    var decrement = increment;
+    decrement.operator = .subtract;
+    decrement.left = update_load;
+    decrement.right = if (increment.left == update_load) increment.right else increment.left;
+    decrement.checked = false;
+    body_instructions[update_definition.instruction] = .{ .binary = decrement };
+    blocks[body].instructions = body_instructions;
+    return true;
 }
 
 fn removeProvenFirstIncrementChecks(

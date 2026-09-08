@@ -179,6 +179,15 @@ that access. Equivalent loads of the same unchanged collection and induction
 locals share this proof; every unproved access retains its runtime bounds
 diagnostic.
 
+A signed zero-origin induction used only by a simple `while index < limit`
+header and its unit increment may become a countdown from `limit` to zero.
+This requires one unconditional two-block loop, a stable parameter or earlier
+value for `limit`, exactly one initialization and one update, and no other load
+or address of the induction local. Observed indices, escaped addresses,
+additional control flow, non-unit updates, and mutable bounds retain their
+original ascending loop. The rewritten decrement is unchecked because the
+positive loop condition proves that subtracting one remains representable.
+
 After an effectful helper is inlined, a same-block address of a flat scalar
 local may be demoted back to independent field locals when every use is an
 exact field reference load or store. Any escaping address, unknown reference

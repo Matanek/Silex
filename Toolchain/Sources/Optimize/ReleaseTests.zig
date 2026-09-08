@@ -917,6 +917,57 @@ test "release removes only collection bounds proven by zero-origin loops" {
     try boundedCollectionLoops(optimize);
 }
 
+test "release counts down only an otherwise unobserved simple induction" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func hidden(limit:int) int {
+        \\    var total = 0
+        \\    var index = 0
+        \\    while index < limit { total += 2; index++ }
+        \\    return total
+        \\}
+        \\func observed(limit:int) int {
+        \\    var index = 0
+        \\    while index < limit { index++ }
+        \\    return index
+        \\}
+        \\func branched(limit:int) int {
+        \\    var total = 0
+        \\    var index = 0
+        \\    while index < limit {
+        \\        if index == 2 { index++; continue }
+        \\        total++
+        \\        index++
+        \\    }
+        \\    return total
+        \\}
+        \\func main() { print(hidden(3), " ", hidden(-2), " ", observed(3), " ", branched(4)) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    const hidden_start = std.mem.indexOf(u8, text, "func @hidden") orelse return error.TestUnexpectedResult;
+    const observed_start = std.mem.indexOf(u8, text, "func @observed") orelse return error.TestUnexpectedResult;
+    const branched_start = std.mem.indexOf(u8, text, "func @branched") orelse return error.TestUnexpectedResult;
+    const main_start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
+    const hidden = text[hidden_start..observed_start];
+    const observed = text[observed_start..branched_start];
+    const branched = text[branched_start..main_start];
+    try std.testing.expect(std.mem.indexOf(u8, hidden, " = gt ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hidden, " = sub ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hidden, " = lt ") == null);
+    try std.testing.expect(std.mem.indexOf(u8, observed, " = lt ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, branched, " = lt ") != null);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("6 0 3 3\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, release.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, release.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+}
+
 test "release removes only the first proven induction overflow check" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
