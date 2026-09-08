@@ -844,6 +844,10 @@ fn lowerInstruction(
         .reference_load => |load| .{ .reference_load = .{
             .result = layout.values[load.result],
             .reference = layout.values[load.reference].start,
+            .scalar_type = if (layout.values[load.result].width == 1)
+                function.value_types[load.result]
+            else
+                null,
         } },
         .address_load => |load| .{ .address_load = .{
             .result = layout.values[load.result].start,
@@ -860,6 +864,10 @@ fn lowerInstruction(
         .reference_store => |store| .{ .reference_store = .{
             .reference = layout.values[store.reference].start,
             .operand = layout.values[store.operand],
+            .scalar_type = if (layout.values[store.operand].width == 1)
+                function.value_types[store.operand]
+            else
+                null,
         } },
         .reference_field => |field| reference_field: {
             const is_class = program.structures[field.structure].is_class;

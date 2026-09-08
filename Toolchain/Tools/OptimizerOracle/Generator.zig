@@ -268,6 +268,10 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .arm64_loop_cursor = .{ .function = "accumulate" } },
     },
     .{
+        .name = "Regressions/ReferenceCursorReuse.sx",
+        .concern = "ascending mutable view references preserve checked bounds and reuse stable element addresses across field writes",
+    },
+    .{
         .name = "Regressions/LoopForms.sx",
         .concern = "signed and unsigned inductions, nested control, break, continue, dynamic bounds, strided access and contiguous recurrence",
     },

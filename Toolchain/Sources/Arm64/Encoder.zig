@@ -63,6 +63,7 @@ const floatMaxNumber = A64.floatMaxNumber;
 const floatCompare = A64.floatCompare;
 const floatCompareZero = A64.floatCompareZero;
 const floatConditionalCompare = A64.floatConditionalCompare;
+const floatConditionalSelect = A64.floatConditionalSelect;
 const integerToFloat = A64.integerToFloat;
 const floatToInteger = A64.floatToInteger;
 const floatConvert = A64.floatConvert;
@@ -129,6 +130,15 @@ const FunctionFixups = struct {
     overflow: std.ArrayList(LocalFixup) = .empty,
     division_by_zero: std.ArrayList(LocalFixup) = .empty,
     epilogue: std.ArrayList(LocalFixup) = .empty,
+    collection_bounds: std.ArrayList(CollectionFailure) = .empty,
+    dynamic_collection_bounds: std.ArrayList(ListRuntime.CollectionFailure) = .empty,
+};
+
+const CollectionFailure = struct {
+    bounds: CollectionBounds,
+    index: Machine.Slot,
+    header: usize,
+    tail: usize,
 };
 
 const DeepCopyFixup = struct {
@@ -771,6 +781,21 @@ fn encodeFunction(
         const load = function.instructions[cursor.load_index].collection_load;
         if (eagerCollectionWidth(function, cursor.load_index, load) != 2) collection_cursor = null;
     }
+    var reference_cursor = try LoopCursor.findReference(allocator, function);
+    if (reference_cursor) |cursor| {
+        const result = valueResultRegister(function, cursor.result);
+        if (result != null and (@intFromEnum(result.?) < 19 or @intFromEnum(result.?) > 28)) {
+            reference_cursor = null;
+        }
+    }
+    var checked_reference_cursor = try LoopCursor.findCheckedReference(allocator, function);
+    if (checked_reference_cursor) |cursor| {
+        const result = valueResultRegister(function, cursor.result);
+        if (result != null and (@intFromEnum(result.?) < 19 or @intFromEnum(result.?) > 28)) {
+            checked_reference_cursor = null;
+        }
+    }
+    const reference_reuses = try LoopCursor.findReferenceReuses(allocator, function);
     const runtime_frame_size: u32 = if (enable_cycle_collector and functionUsesCycleContext(function)) 16 else 0;
     const extended_frame = function.frame_size > Machine.direct_stack_slots * Machine.slot_size;
     const saved_register_count = calleeSavedRegisterCount(function, extended_frame);
@@ -873,6 +898,12 @@ fn encodeFunction(
     for (function.instructions, 0..) |instruction, instruction_index| {
         instruction_offsets[instruction_index] = words.items.len;
         try emitDeferredCollectionLoads(allocator, words, function, instruction_index, collection_cursor);
+        if (reference_cursor) |cursor| {
+            try emitReferenceCursorStep(allocator, words, function, cursor, instruction_index);
+        }
+        if (checked_reference_cursor) |cursor| {
+            try emitReferenceCursorStep(allocator, words, function, cursor, instruction_index);
+        }
         if (!scalarCacheInstruction(instruction)) scalar_cache.clear();
         if (collection_cursor) |cursor| {
             if (cursor.elided_collection_copy == instruction_index) continue;
@@ -882,7 +913,8 @@ fn encodeFunction(
         };
         switch (instruction) {
             .constant_int => |constant| {
-                if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
+                if (constant.bits == 0 and (zeroConstantFeedsNextComparison(function, instruction_index, constant.result) or
+                    zeroConstantFeedsParityComparison(function, instruction_index, constant.result))) continue;
                 if (integerConstantFeedsNextArithmetic(function, instruction_index, constant) or
                     integerConstantFeedsNextShiftedMultiply(function, instruction_index, constant) or
                     integerConstantFeedsNextDivision(function, instruction_index, constant)) continue;
@@ -1070,47 +1102,50 @@ fn encodeFunction(
                     }
                 }
             },
-            .copy_range => |copy| for (0..copy.result.width) |leaf| {
-                const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
-                const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
-                // The allocator may assign a dead leaf the register of a
-                // live sibling defined by this same aggregate transfer.
-                if ((valueResultRegister(function, result) != null or floatResidence(function, result) != null or floatLaneResidence(function, result) != null) and
-                    !slotHasUse(function.instructions, result)) continue;
-                if (floatLaneResidence(function, operand)) |source| if (floatLaneResidence(function, result)) |destination| {
-                    if (source.register == destination.register and source.lane == destination.lane) continue;
-                };
-                if (floatLaneResidence(function, result)) |pair| {
-                    if (floatLaneResidence(function, operand) == null) {
-                        try emitRegisteredCopy(allocator, words, function, result, operand);
-                        continue;
-                    }
-                    if (pair.lane == 0) {
-                        if (definingTransferOperandAfter(
+            .copy_range => |copy| copy_range: {
+                if (aggregateCopyFeedsCall(function, instruction_index, copy)) break :copy_range;
+                for (0..copy.result.width) |leaf| {
+                    const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
+                    const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
+                    // The allocator may assign a dead leaf the register of a
+                    // live sibling defined by this same aggregate transfer.
+                    if ((valueResultRegister(function, result) != null or floatResidence(function, result) != null or floatLaneResidence(function, result) != null) and
+                        !slotHasUse(function.instructions, result)) continue;
+                    if (floatLaneResidence(function, operand)) |source| if (floatLaneResidence(function, result)) |destination| {
+                        if (source.register == destination.register and source.lane == destination.lane) continue;
+                    };
+                    if (floatLaneResidence(function, result)) |pair| {
+                        if (floatLaneResidence(function, operand) == null) {
+                            try emitRegisteredCopy(allocator, words, function, result, operand);
+                            continue;
+                        }
+                        if (pair.lane == 0) {
+                            if (definingTransferOperandAfter(
+                                function.instructions,
+                                instruction_index,
+                                pair.partner,
+                            ) != null) continue;
+                        } else if (definingTransferOperandBefore(
                             function.instructions,
                             instruction_index,
                             pair.partner,
-                        ) != null) continue;
-                    } else if (definingTransferOperandBefore(
-                        function.instructions,
-                        instruction_index,
-                        pair.partner,
-                    )) |first_operand| {
-                        const source = try prepareFloatPairOperand(
-                            allocator,
-                            words,
-                            function,
-                            first_operand,
-                            operand,
-                            .x9,
-                            .x10,
-                        );
-                        const destination: Register = @enumFromInt(pair.register);
-                        if (source != destination) try words.append(allocator, moveFloat(destination, source, true));
-                        continue;
+                        )) |first_operand| {
+                            const source = try prepareFloatPairOperand(
+                                allocator,
+                                words,
+                                function,
+                                first_operand,
+                                operand,
+                                .x9,
+                                .x10,
+                            );
+                            const destination: Register = @enumFromInt(pair.register);
+                            if (source != destination) try words.append(allocator, moveFloat(destination, source, true));
+                            continue;
+                        }
                     }
+                    try emitRegisteredCopy(allocator, words, function, result, operand);
                 }
-                try emitRegisteredCopy(allocator, words, function, result, operand);
             },
             .deep_copy => |copy| {
                 try emitStackAddress(allocator, words, .x0, copy.operand.start);
@@ -1150,6 +1185,7 @@ fn encodeFunction(
                 }
             },
             .local_address => |address| {
+                if (localAddressOnlyFeedsViewReferences(function, address.result)) continue;
                 try emitStackAddress(allocator, words, .x9, address.local);
                 try words.append(allocator, storeStack(.x9, address.result));
             },
@@ -1162,9 +1198,18 @@ fn encodeFunction(
                         load.result,
                         offset.reference,
                         offset.byte_offset,
+                        load.scalar_type,
                         true,
                     );
-                } else try emitReferenceCopy(allocator, words, function, load.result, load.reference, true);
+                } else try emitReferenceCopy(
+                    allocator,
+                    words,
+                    function,
+                    load.result,
+                    load.reference,
+                    load.scalar_type,
+                    true,
+                );
             },
             .address_load => |load| {
                 try words.append(allocator, loadStack(.x9, load.address));
@@ -1204,9 +1249,18 @@ fn encodeFunction(
                         store.operand,
                         offset.reference,
                         offset.byte_offset,
+                        store.scalar_type,
                         false,
                     );
-                } else try emitReferenceCopy(allocator, words, function, store.operand, store.reference, false);
+                } else try emitReferenceCopy(
+                    allocator,
+                    words,
+                    function,
+                    store.operand,
+                    store.reference,
+                    store.scalar_type,
+                    false,
+                );
             },
             .reference_offset => |offset| {
                 if (referenceOffsetFeedsNextCopy(function, instruction_index, offset)) continue;
@@ -1458,7 +1512,7 @@ fn encodeFunction(
                         eagerCollectionWidth(function, instruction_index, access),
                     )
                 else
-                    try encodeCollectionLoad(allocator, words, data_fixups, &fixups, external_call_sites, platform, program, access)
+                    try encodeCollectionLoad(allocator, words, &fixups, access)
             else if (access.dynamic)
                 try ListRuntime.emitLoad(
                     allocator,
@@ -1473,25 +1527,36 @@ fn encodeFunction(
                     eagerCollectionWidth(function, instruction_index, access),
                 )
             else
-                try encodeCollectionLoad(allocator, words, data_fixups, &fixups, external_call_sites, platform, program, access),
-            .collection_reference => |access| if (access.dynamic)
-                try ListRuntime.emitReference(
-                    allocator,
-                    words,
-                    data_fixups,
-                    &fixups.epilogue,
-                    external_call_sites,
-                    platform,
-                    program,
-                    function,
-                    access,
-                )
-            else
-                try encodeCollectionReference(allocator, words, data_fixups, &fixups, external_call_sites, platform, program, access),
+                try encodeCollectionLoad(allocator, words, &fixups, access),
+            .collection_reference => |access| {
+                if (referenceReuseRegister(reference_reuses, instruction_index, false)) |register| {
+                    try storeValue(allocator, words, function, register, access.result);
+                } else if (!(reference_cursor != null and reference_cursor.?.reference == instruction_index)) {
+                    if (access.dynamic) {
+                        try ListRuntime.emitReference(
+                            allocator,
+                            words,
+                            data_fixups,
+                            &fixups.epilogue,
+                            external_call_sites,
+                            platform,
+                            program,
+                            function,
+                            access,
+                            checked_reference_cursor != null and checked_reference_cursor.?.reference == instruction_index,
+                            &fixups.dynamic_collection_bounds,
+                        );
+                    } else try encodeCollectionReference(allocator, words, &fixups, access);
+                }
+                if (referenceReuseRegister(reference_reuses, instruction_index, true)) |register| {
+                    const source = try prepareValueOperand(allocator, words, function, .x9, access.result);
+                    if (source != register) try words.append(allocator, moveRegister(register, source));
+                }
+            },
             .collection_replace => |replacement| if (replacement.dynamic)
                 try ListRuntime.emitReplace(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, platform, program, replacement)
             else
-                try encodeCollectionReplace(allocator, words, data_fixups, &fixups, external_call_sites, platform, program, replacement),
+                try encodeCollectionReplace(allocator, words, &fixups, replacement),
             .collection_count => |count| if (!viewCountFeedsNextComparison(function, instruction_index, count))
                 try ListRuntime.emitCount(allocator, words, function, count),
             .list_edit => |edit| try ListRuntime.emitEdit(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, platform, program, edit),
@@ -1540,6 +1605,7 @@ fn encodeFunction(
             ),
             .unary => |unary| {
                 if (unary.type.isFloat()) {
+                    if (negationFeedsNextMultiply(function, instruction_index, unary)) continue;
                     const double = unary.type == .float64;
                     const operand = try prepareFloatOperand(allocator, words, function, .x9, unary.operand, double);
                     const destination = floatResultRegister(function, unary.result) orelse .x10;
@@ -1561,6 +1627,7 @@ fn encodeFunction(
                 try storeCachedValue(allocator, words, function, &scalar_cache, .x11, unary.result);
             },
             .binary => |binary| {
+                if (remainderFeedsParityComparison(function, instruction_index, binary)) continue;
                 if (Pairing.floatDivisionFollower(function, instruction_index, binary)) |pair| {
                     const numerator: Register = @enumFromInt(pair.numerator);
                     const destination = floatResultRegister(function, binary.result) orelse .x11;
@@ -1599,6 +1666,17 @@ fn encodeFunction(
                     continue;
                 }
                 if (floatPairLeader(function, binary.result) != null) continue;
+                if (negatedOperandForMultiply(function, instruction_index, binary)) |negated| {
+                    const double = binary.type == .float64;
+                    const left = try prepareFloatOperand(allocator, words, function, .x9, negated.operand, double);
+                    const right = try prepareFloatOperand(allocator, words, function, .x10, negated.other, double);
+                    const destination = floatResultRegister(function, binary.result) orelse .x11;
+                    try words.append(allocator, A64.floatNegatedMultiply(destination, left, right, double));
+                    if (floatResultRegister(function, binary.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, binary.result, double);
+                    }
+                    continue;
+                }
                 if (floatLaneResidence(function, binary.result) != null and binary.type == .float32 and
                     switch (binary.operator) {
                         .add, .subtract, .multiply, .divide => true,
@@ -1611,7 +1689,15 @@ fn encodeFunction(
                     try encodeFloatPairBinary(allocator, words, function, first);
                     continue;
                 }
-                if (multiplyFeedsNextAdd(function, instruction_index, binary)) continue;
+                if (parityComparison(function, instruction_index, binary)) |parity| {
+                    const source = try prepareValueOperand(allocator, words, function, .x9, parity.source);
+                    const destination = valueResultRegister(function, binary.result) orelse .x11;
+                    try words.append(allocator, A64.testLowBit(source));
+                    try words.append(allocator, A64.conditionalSetZero(destination, parity.equal));
+                    try finishValueResult(allocator, words, function, &scalar_cache, destination, binary.result);
+                    continue;
+                }
+                if (multiplyFeedsNextFusedArithmetic(function, instruction_index, binary)) continue;
                 if (immediateArithmeticConstant(function, instruction_index, binary)) |constant| {
                     try encodeImmediateArithmetic(
                         allocator,
@@ -1629,8 +1715,8 @@ fn encodeFunction(
                     try encodeConstantDivision(allocator, words, function, &scalar_cache, instruction_index, binary, constant, hoisted_division);
                 } else if (comparisonBranchIndex(function, instruction_index, binary) != null) {
                     try encodeComparisonFlags(allocator, words, function, instruction_index, binary);
-                } else if (fusedMultiplyForAdd(function, instruction_index)) |multiply_value| {
-                    try encodeFloatMultiplyAdd(allocator, words, function, binary, multiply_value);
+                } else if (fusedMultiplyForArithmetic(function, instruction_index)) |multiply_value| {
+                    try encodeFloatFusedArithmetic(allocator, words, function, binary, multiply_value);
                 } else try encodeBinary(allocator, words, &fixups, function, &scalar_cache, binary);
             },
             .function_address => |address| {
@@ -1652,7 +1738,7 @@ fn encodeFunction(
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
                     } else try emitStackAddress(allocator, words, .x15, result.start);
                 };
-                const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, true);
+                const outgoing_stack_size = try emitCallArguments(allocator, words, function, instruction_index, call.arguments, true);
                 if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
@@ -1675,7 +1761,7 @@ fn encodeFunction(
                 if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
-                const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
+                const outgoing_stack_size = try emitCallArguments(allocator, words, function, instruction_index, call.arguments, false);
                 if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
@@ -2010,6 +2096,68 @@ fn encodeFunction(
     }
     try words.append(allocator, returnInstruction());
 
+    for (fixups.collection_bounds.items) |failure| {
+        const failure_label = words.items.len;
+        try patch19(words.items, failure.bounds.negative, failure_label);
+        try patch19(words.items, failure.bounds.upper, failure_label);
+        try StringRuntime.emitWriteStatic(
+            allocator,
+            words,
+            data_fixups,
+            external_call_sites,
+            @enumFromInt(@intFromEnum(platform)),
+            program,
+            failure.header,
+            2,
+        );
+        try emitPrintInteger(allocator, words, external_call_sites, platform, null, failure.index, 2, false);
+        try StringRuntime.emitWriteStatic(
+            allocator,
+            words,
+            data_fixups,
+            external_call_sites,
+            @enumFromInt(@intFromEnum(platform)),
+            program,
+            failure.tail,
+            2,
+        );
+        try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+        try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
+    }
+    for (fixups.dynamic_collection_bounds.items) |failure| {
+        const failure_label = words.items.len;
+        try patch19(words.items, failure.bounds.negative, failure_label);
+        if (failure.bounds.upper != failure.bounds.negative) {
+            try patch19(words.items, failure.bounds.upper, failure_label);
+        }
+        if (function.register_slots.len != 0) if (function.register_slots[failure.index]) |number| {
+            try words.append(allocator, storeStack(@enumFromInt(number), failure.index));
+        };
+        try StringRuntime.emitWriteStatic(
+            allocator,
+            words,
+            data_fixups,
+            external_call_sites,
+            @enumFromInt(@intFromEnum(platform)),
+            program,
+            failure.header,
+            2,
+        );
+        try emitPrintInteger(allocator, words, external_call_sites, platform, null, failure.index, 2, false);
+        try StringRuntime.emitWriteStatic(
+            allocator,
+            words,
+            data_fixups,
+            external_call_sites,
+            @enumFromInt(@intFromEnum(platform)),
+            program,
+            failure.tail,
+            2,
+        );
+        try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+        try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
+    }
+
     const overflow_label = words.items.len;
     try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.integer_overflow)));
     const overflow_to_epilogue = words.items.len;
@@ -2039,6 +2187,42 @@ fn encodeFunction(
             .position = position,
         });
     };
+}
+
+fn emitReferenceCursorStep(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    cursor: LoopCursor.ReferenceCursor,
+    instruction_index: usize,
+) Allocator.Error!void {
+    if (cursor.initialize == instruction_index) {
+        const base = try prepareValueOperand(allocator, words, function, .x9, cursor.collection.start);
+        try storeValue(allocator, words, function, base, cursor.result);
+    }
+    if (cursor.increment == instruction_index) {
+        const register = valueResultRegister(function, cursor.result) orelse .x9;
+        if (valueResultRegister(function, cursor.result) == null) {
+            try loadValue(allocator, words, function, register, cursor.result);
+        }
+        try words.append(allocator, addSubtractImmediate(register, register, cursor.stride, true));
+        if (valueResultRegister(function, cursor.result) == null) {
+            try storeValue(allocator, words, function, register, cursor.result);
+        }
+    }
+}
+
+fn referenceReuseRegister(
+    reuses: LoopCursor.ReferenceReuses,
+    instruction_index: usize,
+    first: bool,
+) ?Register {
+    const registers = [_]Register{ .x6, .x7 };
+    for (reuses.pairs[0..reuses.count], 0..) |reuse, index| {
+        const register = registers[index];
+        if ((if (first) reuse.first else reuse.reuse) == instruction_index) return register;
+    }
+    return null;
 }
 
 fn pairAggregateParameterLeaves(function: Machine.Function, parameter: Machine.Span, leaf: usize) bool {
@@ -2270,6 +2454,84 @@ fn emitRuntimeReleaseCallback(
     try words.append(allocator, returnInstruction());
 }
 
+fn aggregateCopyFeedsCall(
+    function: Machine.Function,
+    copy_index: usize,
+    copy: Machine.Instruction.CopyRange,
+) bool {
+    return aggregateCopyCallUse(function, copy_index, copy) != null;
+}
+
+fn aggregateCallArgumentOrigin(
+    function: Machine.Function,
+    call_index: usize,
+    argument: Machine.Span,
+) ?Machine.Span {
+    if (call_index >= function.instructions.len) return null;
+    var index = call_index;
+    while (index != 0) {
+        index -= 1;
+        const copy = switch (function.instructions[index]) {
+            .copy_range => |value| value,
+            else => continue,
+        };
+        if (!sameSpan(copy.result, argument)) continue;
+        return if (aggregateCopyCallUse(function, index, copy) == call_index) copy.operand else null;
+    }
+    return null;
+}
+
+fn aggregateCopyCallUse(
+    function: Machine.Function,
+    copy_index: usize,
+    copy: Machine.Instruction.CopyRange,
+) ?usize {
+    var call_index: ?usize = null;
+    for (function.instructions[copy_index + 1 ..], copy_index + 1..) |instruction, index| {
+        if (!callUsesSpan(instruction, copy.result)) continue;
+        if (call_index != null) return null;
+        call_index = index;
+    }
+    const use = call_index orelse return null;
+    for (0..copy.result.width) |leaf| {
+        const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
+        if (!slotUsedOnlyAt(function.instructions, result, use)) return null;
+    }
+    for (function.instructions[copy_index + 1 .. use]) |instruction| {
+        for (0..copy.operand.width) |leaf| {
+            if (ResidenceLiveness.instructionDefines(instruction, @as(usize, copy.operand.start) + leaf)) return null;
+        }
+        switch (instruction) {
+            .reference_store,
+            .address_store,
+            .collection_replace,
+            .list_edit,
+            .call,
+            .indirect_call,
+            .dynamic_call,
+            .external_call,
+            => return null,
+            else => {},
+        }
+    }
+    return use;
+}
+
+fn callUsesSpan(instruction: Machine.Instruction, span: Machine.Span) bool {
+    const arguments = switch (instruction) {
+        .call => |call| call.arguments,
+        .indirect_call => |call| call.arguments,
+        .dynamic_call => |call| call.arguments,
+        else => return false,
+    };
+    for (arguments) |argument| if (sameSpan(argument, span)) return true;
+    return false;
+}
+
+fn sameSpan(left: Machine.Span, right: Machine.Span) bool {
+    return left.start == right.start and left.width == right.width and left.aggregate == right.aggregate;
+}
+
 fn encodeDynamicCall(
     allocator: Allocator,
     words: *std.ArrayList(u32),
@@ -2284,7 +2546,7 @@ fn encodeDynamicCall(
     if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
         if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
     };
-    const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
+    const outgoing_stack_size = try emitCallArguments(allocator, words, function, std.math.maxInt(usize), call.arguments, false);
     if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
         if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
     };
@@ -2314,6 +2576,7 @@ fn emitCallArguments(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     function: Machine.Function,
+    instruction_index: usize,
     arguments: []const Machine.Span,
     use_residences: bool,
 ) Error!u16 {
@@ -2323,7 +2586,10 @@ fn emitCallArguments(
         if (argument.aggregate) {
             if (argument.width == 0) {
                 try words.append(allocator, moveWideZero64(outgoing, 0, 0));
-            } else try emitStackAddress(allocator, words, outgoing, argument.start);
+            } else {
+                const source = aggregateCallArgumentOrigin(function, instruction_index, argument) orelse argument;
+                try emitStackAddress(allocator, words, outgoing, source.start);
+            }
         } else if (use_residences and floatResidence(function, argument.start) != null) {
             try loadFloatValue(allocator, words, function, .x9, argument.start, false);
             try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
@@ -2387,9 +2653,10 @@ fn emitReferenceCopy(
     function: Machine.Function,
     span: Machine.Span,
     reference: Machine.Slot,
+    scalar_type: ?Ir.Type,
     load_reference: bool,
 ) Allocator.Error!void {
-    return emitOffsetReferenceCopy(allocator, words, function, span, reference, 0, load_reference);
+    return emitOffsetReferenceCopy(allocator, words, function, span, reference, 0, scalar_type, load_reference);
 }
 
 fn emitOffsetReferenceCopy(
@@ -2399,6 +2666,7 @@ fn emitOffsetReferenceCopy(
     span: Machine.Span,
     reference: Machine.Slot,
     byte_offset: u32,
+    scalar_type: ?Ir.Type,
     load_reference: bool,
 ) Allocator.Error!void {
     const base = valueResultRegister(function, reference) orelse .x9;
@@ -2414,19 +2682,28 @@ fn emitOffsetReferenceCopy(
                 !slotHasUse(function.instructions, slot)) continue;
             if (floatResidence(function, slot)) |register| {
                 if (offset <= std.math.maxInt(u15)) {
-                    try words.append(allocator, A64.loadVector64(@enumFromInt(register), base, @intCast(offset)));
+                    if (scalar_type == .float32 and offset <= std.math.maxInt(u12)) {
+                        try words.append(allocator, A64.loadFloat32(@enumFromInt(register), base, @intCast(offset)));
+                    } else {
+                        try words.append(allocator, A64.loadVector64(@enumFromInt(register), base, @intCast(offset)));
+                    }
                 } else {
                     try emitLoadAtOffset(allocator, words, .x10, base, offset);
                     try storeFloatValue(allocator, words, function, .x10, slot, true);
                 }
             } else {
-                try emitLoadAtOffset(allocator, words, .x10, base, offset);
-                try storeValue(allocator, words, function, .x10, slot);
+                const destination = if (span.width == 1) valueResultRegister(function, slot) orelse .x10 else .x10;
+                try emitLoadAtOffset(allocator, words, destination, base, offset);
+                if (destination == .x10) try storeValue(allocator, words, function, destination, slot);
             }
         } else {
             if (floatResidence(function, slot)) |register| {
                 if (offset <= std.math.maxInt(u15)) {
-                    try words.append(allocator, A64.storeVector64(@enumFromInt(register), base, @intCast(offset)));
+                    if (scalar_type == .float32 and offset <= std.math.maxInt(u12)) {
+                        try words.append(allocator, A64.storeFloat32(@enumFromInt(register), base, @intCast(offset)));
+                    } else {
+                        try words.append(allocator, A64.storeVector64(@enumFromInt(register), base, @intCast(offset)));
+                    }
                 } else {
                     try loadFloatValue(allocator, words, function, .x10, slot, true);
                     try emitStoreAtOffset(allocator, words, .x10, base, offset);
@@ -2616,11 +2893,7 @@ fn emitNormalizedCollectionIndex(
 fn encodeCollectionLoad(
     allocator: Allocator,
     words: *std.ArrayList(u32),
-    data_fixups: *std.ArrayList(DataFixup),
     function_fixups: *FunctionFixups,
-    external_call_sites: *std.ArrayList(ExternalCalls.Site),
-    platform: Platform,
-    program: Machine.Program,
     access: Machine.Instruction.CollectionLoad,
 ) Error!void {
     if (!access.checked) {
@@ -2644,27 +2917,18 @@ fn encodeCollectionLoad(
         try emitLoadAtOffset(allocator, words, .x12, .x10, leaf * Machine.slot_size);
         try words.append(allocator, storeStack(.x12, @intCast(@as(usize, access.result.start) + leaf)));
     }
-    const complete = words.items.len;
-    try words.append(allocator, branch());
-    const failure = words.items.len;
-    try patch19(words.items, bounds.negative, failure);
-    try patch19(words.items, bounds.upper, failure);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.header, 2);
-    try emitPrintInteger(allocator, words, external_call_sites, platform, null, access.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.tail, 2);
-    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
-    try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
-    try patch26(words.items, complete, words.items.len);
+    try function_fixups.collection_bounds.append(allocator, .{
+        .bounds = bounds,
+        .index = access.index,
+        .header = access.header,
+        .tail = access.tail,
+    });
 }
 
 fn encodeCollectionReference(
     allocator: Allocator,
     words: *std.ArrayList(u32),
-    data_fixups: *std.ArrayList(DataFixup),
     function_fixups: *FunctionFixups,
-    external_call_sites: *std.ArrayList(ExternalCalls.Site),
-    platform: Platform,
-    program: Machine.Program,
     access: Machine.Instruction.CollectionReference,
 ) Error!void {
     const bounds: ?CollectionBounds = if (access.checked)
@@ -2679,27 +2943,18 @@ fn encodeCollectionReference(
     try words.append(allocator, addRegisters(.x10, .x10, .x9));
     try words.append(allocator, storeStack(.x10, access.result));
     if (bounds == null) return;
-    const complete = words.items.len;
-    try words.append(allocator, branch());
-    const failure = words.items.len;
-    try patch19(words.items, bounds.?.negative, failure);
-    try patch19(words.items, bounds.?.upper, failure);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.header, 2);
-    try emitPrintInteger(allocator, words, external_call_sites, platform, null, access.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, access.tail, 2);
-    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
-    try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
-    try patch26(words.items, complete, words.items.len);
+    try function_fixups.collection_bounds.append(allocator, .{
+        .bounds = bounds.?,
+        .index = access.index,
+        .header = access.header,
+        .tail = access.tail,
+    });
 }
 
 fn encodeCollectionReplace(
     allocator: Allocator,
     words: *std.ArrayList(u32),
-    data_fixups: *std.ArrayList(DataFixup),
     function_fixups: *FunctionFixups,
-    external_call_sites: *std.ArrayList(ExternalCalls.Site),
-    platform: Platform,
-    program: Machine.Program,
     replacement: Machine.Instruction.CollectionReplace,
 ) Error!void {
     const bounds: ?CollectionBounds = if (replacement.checked)
@@ -2719,17 +2974,12 @@ fn encodeCollectionReplace(
         try emitStoreAtOffset(allocator, words, .x12, .x10, leaf * Machine.slot_size);
     }
     if (bounds == null) return;
-    const complete = words.items.len;
-    try words.append(allocator, branch());
-    const failure = words.items.len;
-    try patch19(words.items, bounds.?.negative, failure);
-    try patch19(words.items, bounds.?.upper, failure);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement.header, 2);
-    try emitPrintInteger(allocator, words, external_call_sites, platform, null, replacement.index, 2, false);
-    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement.tail, 2);
-    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
-    try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
-    try patch26(words.items, complete, words.items.len);
+    try function_fixups.collection_bounds.append(allocator, .{
+        .bounds = bounds.?,
+        .index = replacement.index,
+        .header = replacement.header,
+        .tail = replacement.tail,
+    });
 }
 
 fn integerConstantFeedsNextArithmetic(
@@ -3244,6 +3494,21 @@ fn zeroConstantFeedsNextComparison(
     return constantFeedsNextComparison(function, index, result);
 }
 
+fn zeroConstantFeedsParityComparison(
+    function: Machine.Function,
+    index: usize,
+    result: Machine.Slot,
+) bool {
+    if (index + 1 >= function.instructions.len or controlTargetsInstruction(function.instructions, index + 1)) return false;
+    const comparison = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return parityComparison(function, index + 1, comparison) != null and
+        (comparison.left == result or comparison.right == result) and
+        slotUsedOnlyAt(function.instructions, result, index + 1);
+}
+
 fn constantFeedsNextComparison(
     function: Machine.Function,
     index: usize,
@@ -3582,6 +3847,20 @@ fn slotUsedOnlyAt(instructions: []const Machine.Instruction, slot: Machine.Slot,
         if (index != allowed and instructionUsesSlot(instruction, slot)) return false;
     }
     return instructionUsesSlot(instructions[allowed], slot);
+}
+
+fn localAddressOnlyFeedsViewReferences(function: Machine.Function, slot: Machine.Slot) bool {
+    var found = false;
+    for (function.instructions) |instruction| {
+        if (!instructionUsesSlot(instruction, slot)) continue;
+        const reference = switch (instruction) {
+            .collection_reference => |value| value,
+            else => return false,
+        };
+        if (!reference.view or reference.reference == null or reference.reference.? != slot) return false;
+        found = true;
+    }
+    return found;
 }
 
 fn copyBelongsToFusedComparison(function: Machine.Function, index: usize) bool {
@@ -3960,6 +4239,7 @@ fn encodeFloatMinimumMaximum(
     double: bool,
 ) Error!void {
     const destination = floatResultRegister(function, binary.result) orelse .x11;
+    const finite_right_nonzero = knownNonNaNFloatConstant(function, binary.right, double);
     var choose_left: std.ArrayList(usize) = .empty;
     defer choose_left.deinit(allocator);
     var choose_right: std.ArrayList(usize) = .empty;
@@ -3967,25 +4247,26 @@ fn encodeFloatMinimumMaximum(
     try words.append(allocator, floatCompare(left, left, double));
     try choose_right.append(allocator, words.items.len);
     try words.append(allocator, conditionalBranch(.overflow));
-    try words.append(allocator, floatCompare(right, right, double));
-    try choose_left.append(allocator, words.items.len);
-    try words.append(allocator, conditionalBranch(.overflow));
+    if (finite_right_nonzero == null) {
+        try words.append(allocator, floatCompare(right, right, double));
+        try choose_left.append(allocator, words.items.len);
+        try words.append(allocator, conditionalBranch(.overflow));
+    }
     try words.append(allocator, floatCompare(left, right, double));
     try choose_left.append(allocator, words.items.len);
     try words.append(allocator, conditionalBranch(if (binary.operator == .maximum) .greater else .less));
     try choose_right.append(allocator, words.items.len);
     try words.append(allocator, conditionalBranch(if (binary.operator == .maximum) .less else .greater));
-    try words.append(allocator, moveFloatToGeneral(.x13, left, double));
-    if (!double) try words.append(allocator, signExtendRegister(.x13, .x13, 32));
-    try words.append(allocator, compareRegisters(.x13, .zero_or_sp));
-    if (binary.operator == .maximum) {
-        try choose_right.append(allocator, words.items.len);
+    if (finite_right_nonzero == true) {
+        if (destination != left) try words.append(allocator, moveFloat(destination, left, double));
     } else {
-        try choose_left.append(allocator, words.items.len);
+        try words.append(allocator, moveFloatToGeneral(.x13, left, double));
+        try words.append(allocator, if (double) compareRegisters(.x13, .zero_or_sp) else A64.compareZero32(.x13));
+        try words.append(allocator, if (binary.operator == .maximum)
+            floatConditionalSelect(destination, right, left, .less, double)
+        else
+            floatConditionalSelect(destination, left, right, .less, double));
     }
-    try words.append(allocator, conditionalBranch(.minus));
-    const equal_fallthrough = if (binary.operator == .maximum) left else right;
-    if (destination != equal_fallthrough) try words.append(allocator, moveFloat(destination, equal_fallthrough, double));
     const equal_done = words.items.len;
     try words.append(allocator, branch());
     const right_label = words.items.len;
@@ -4001,6 +4282,30 @@ fn encodeFloatMinimumMaximum(
     for (choose_right.items) |site| try patch19(words.items, site, right_label);
     if (floatResultRegister(function, binary.result) == null)
         try storeOptionalFloatValue(allocator, words, function, destination, binary.result, double);
+}
+
+fn knownNonNaNFloatConstant(function: ?Machine.Function, slot: Machine.Slot, double: bool) ?bool {
+    const instructions = if (function) |value| value.instructions else return null;
+    for (instructions) |instruction| if (double) {
+        const constant = switch (instruction) {
+            .constant_float64 => |value| value,
+            else => continue,
+        };
+        const exponent = constant.bits & 0x7ff0000000000000;
+        const significand = constant.bits & 0x000fffffffffffff;
+        if (constant.result != slot or (exponent == 0x7ff0000000000000 and significand != 0)) continue;
+        return constant.bits & 0x7fffffffffffffff != 0;
+    } else {
+        const constant = switch (instruction) {
+            .constant_float32 => |value| value,
+            else => continue,
+        };
+        const exponent = constant.bits & 0x7f800000;
+        const significand = constant.bits & 0x007fffff;
+        if (constant.result != slot or (exponent == 0x7f800000 and significand != 0)) continue;
+        return constant.bits & 0x7fffffff != 0;
+    };
+    return null;
 }
 
 fn encodeFloatPairBinary(
@@ -4058,6 +4363,96 @@ fn definingBinary(instructions: []const Machine.Instruction, slot: Machine.Slot)
     return null;
 }
 
+const NegatedMultiplyOperand = struct {
+    operand: Machine.Slot,
+    other: Machine.Slot,
+};
+
+fn negatedOperandForMultiply(
+    function: Machine.Function,
+    index: usize,
+    product: Machine.Instruction.Binary,
+) ?NegatedMultiplyOperand {
+    if (!product.type.isFloat() or product.operator != .multiply or index == 0 or
+        controlTargetsInstruction(function.instructions, index)) return null;
+    const negation = switch (function.instructions[index - 1]) {
+        .unary => |value| value,
+        else => return null,
+    };
+    if (negation.type != product.type or
+        (product.left != negation.result and product.right != negation.result) or
+        !slotUsedOnlyAt(function.instructions, negation.result, index)) return null;
+    return .{
+        .operand = negation.operand,
+        .other = if (product.left == negation.result) product.right else product.left,
+    };
+}
+
+fn negationFeedsNextMultiply(
+    function: Machine.Function,
+    index: usize,
+    negation: Machine.Instruction.Unary,
+) bool {
+    if (!negation.type.isFloat() or index + 1 >= function.instructions.len) return false;
+    const product = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return negatedOperandForMultiply(function, index + 1, product) != null;
+}
+
+const ParityComparison = struct {
+    source: Machine.Slot,
+    equal: bool,
+};
+
+fn parityComparison(
+    function: Machine.Function,
+    index: usize,
+    comparison: Machine.Instruction.Binary,
+) ?ParityComparison {
+    if ((comparison.operator != .equal and comparison.operator != .not_equal) or index < 2) return null;
+    const zero = switch (function.instructions[index - 1]) {
+        .constant_int => |value| value,
+        else => return null,
+    };
+    if (zero.bits != 0) return null;
+    const remainder = switch (function.instructions[index - 2]) {
+        .binary => |value| value,
+        else => return null,
+    };
+    if (remainder.operator != .remainder or remainder.type != comparison.type or
+        !slotUsedOnlyAt(function.instructions, remainder.result, index) or
+        !slotUsedOnlyAt(function.instructions, zero.result, index)) return null;
+    const compares_remainder_to_zero = (comparison.left == remainder.result and comparison.right == zero.result) or
+        (comparison.right == remainder.result and comparison.left == zero.result);
+    if (!compares_remainder_to_zero) return null;
+    const divisor = definingConstantInt(function.instructions, remainder.right) orelse return null;
+    if (divisor.bits != 2 or divisor.type != remainder.type) return null;
+    return .{ .source = remainder.left, .equal = comparison.operator == .equal };
+}
+
+fn remainderFeedsParityComparison(
+    function: Machine.Function,
+    index: usize,
+    remainder: Machine.Instruction.Binary,
+) bool {
+    if (remainder.operator != .remainder or index + 2 >= function.instructions.len) return false;
+    const comparison = switch (function.instructions[index + 2]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return parityComparison(function, index + 2, comparison) != null;
+}
+
+fn definingConstantInt(instructions: []const Machine.Instruction, slot: Machine.Slot) ?Machine.Instruction.ConstantInt {
+    for (instructions) |instruction| switch (instruction) {
+        .constant_int => |constant| if (constant.result == slot) return constant,
+        else => {},
+    };
+    return null;
+}
+
 fn definingCopy(instructions: []const Machine.Instruction, slot: Machine.Slot) ?Machine.Instruction.Copy {
     for (instructions) |instruction| switch (instruction) {
         .copy => |copy| if (copy.result == slot) return copy,
@@ -4102,48 +4497,56 @@ fn definingTransferOperandAfter(
     return null;
 }
 
-fn encodeFloatMultiplyAdd(
+fn encodeFloatFusedArithmetic(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     function: Machine.Function,
-    add: Machine.Instruction.Binary,
+    arithmetic: Machine.Instruction.Binary,
     multiply_value: Machine.Instruction.Binary,
 ) Error!void {
-    const double = add.type == .float64;
+    const double = arithmetic.type == .float64;
     const left = try prepareFloatOperand(allocator, words, function, .x9, multiply_value.left, double);
     const right = try prepareFloatOperand(allocator, words, function, .x10, multiply_value.right, double);
-    const accumulator_slot = if (add.left == multiply_value.result) add.right else add.left;
+    const accumulator_slot = if (arithmetic.left == multiply_value.result) arithmetic.right else arithmetic.left;
     const accumulator = try prepareFloatOperand(allocator, words, function, .x11, accumulator_slot, double);
-    const destination = floatResultRegister(function, add.result) orelse .x12;
-    try words.append(allocator, floatMultiplyAdd(destination, left, right, accumulator, double));
-    if (floatResultRegister(function, add.result) == null) {
-        try storeFloatValue(allocator, words, function, destination, add.result, double);
+    const destination = floatResultRegister(function, arithmetic.result) orelse .x12;
+    try words.append(allocator, switch (arithmetic.operator) {
+        .add => floatMultiplyAdd(destination, left, right, accumulator, double),
+        .subtract => if (arithmetic.right == multiply_value.result)
+            A64.floatMultiplySubtract(destination, left, right, accumulator, double)
+        else
+            A64.floatNegatedMultiplySubtract(destination, left, right, accumulator, double),
+        else => unreachable,
+    });
+    if (floatResultRegister(function, arithmetic.result) == null) {
+        try storeFloatValue(allocator, words, function, destination, arithmetic.result, double);
     }
 }
 
-fn multiplyFeedsNextAdd(
+fn multiplyFeedsNextFusedArithmetic(
     function: Machine.Function,
     index: usize,
     binary: Machine.Instruction.Binary,
 ) bool {
     if (!binary.type.isFloat() or binary.operator != .multiply or index + 1 >= function.instructions.len) return false;
-    const add = switch (function.instructions[index + 1]) {
+    const arithmetic = switch (function.instructions[index + 1]) {
         .binary => |value| value,
         else => return false,
     };
-    if (add.type != binary.type or add.operator != .add or
-        (add.left != binary.result and add.right != binary.result)) return false;
+    if (arithmetic.type != binary.type or
+        (arithmetic.operator != .add and arithmetic.operator != .subtract) or
+        (arithmetic.left != binary.result and arithmetic.right != binary.result)) return false;
     if (!slotUsedOnlyAt(function.instructions, binary.result, index + 1)) return false;
     return !controlTargetsInstruction(function.instructions, index + 1);
 }
 
-fn fusedMultiplyForAdd(function: Machine.Function, index: usize) ?Machine.Instruction.Binary {
+fn fusedMultiplyForArithmetic(function: Machine.Function, index: usize) ?Machine.Instruction.Binary {
     if (index == 0) return null;
     const multiply_value = switch (function.instructions[index - 1]) {
         .binary => |value| value,
         else => return null,
     };
-    return if (multiplyFeedsNextAdd(function, index - 1, multiply_value)) multiply_value else null;
+    return if (multiplyFeedsNextFusedArithmetic(function, index - 1, multiply_value)) multiply_value else null;
 }
 
 fn controlTargetsInstruction(instructions: []const Machine.Instruction, target: usize) bool {
@@ -5996,4 +6399,17 @@ test "omit ARM64 failure guards for a proven unchecked remainder" {
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.division_by_zero.items.len);
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
     try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
+}
+
+test "map only proven reference reuses to cache registers" {
+    const empty: LoopCursor.ReferenceReuses = .{};
+    try std.testing.expectEqual(@as(?Register, null), referenceReuseRegister(empty, 0, true));
+    try std.testing.expectEqual(@as(?Register, null), referenceReuseRegister(empty, 0, false));
+
+    var one: LoopCursor.ReferenceReuses = .{};
+    one.pairs[0] = .{ .first = 3, .reuse = 9 };
+    one.count = 1;
+    try std.testing.expectEqual(Register.x6, referenceReuseRegister(one, 3, true).?);
+    try std.testing.expectEqual(Register.x6, referenceReuseRegister(one, 9, false).?);
+    try std.testing.expectEqual(@as(?Register, null), referenceReuseRegister(one, 4, true));
 }

@@ -208,7 +208,7 @@ fn borrowDirectAggregateArguments(allocator: Allocator, program: Ir.Program) !Ir
         @memset(eligible[function_index], null);
         call_counts[function_index] = try allocator.alloc(usize, function.parameter_types.len);
         @memset(call_counts[function_index], 0);
-        if (function.capture_types.len != 0 or !referencesStableAcrossBlocks(function)) continue;
+        if (function.capture_types.len != 0) continue;
         const uses = try allocator.alloc(usize, function.value_types.len);
         @memset(uses, 0);
         for (function.blocks) |block| {
@@ -226,6 +226,7 @@ fn borrowDirectAggregateArguments(allocator: Allocator, program: Ir.Program) !Ir
         for (function.parameter_types, 0..) |parameter_type, parameter| {
             const structure_index = parameter_type.structureIndex() orelse continue;
             if (!flatScalarStructure(program, structure_index)) continue;
+            if (!aggregateReferenceStableAcrossBlocks(program, function, structure_index)) continue;
             if (projections[parameter] != 0 and uses[parameter] == projections[parameter]) {
                 eligible[function_index][parameter] = structure_index;
             }
@@ -1565,6 +1566,8 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     const constants = try allocator.alloc(Constant, function.value_types.len);
     @memset(constants, .unknown);
+    var entry_borrowed_fields: std.ArrayList(BorrowedFieldLoad) = .empty;
+    var entry_loads: std.ArrayList(Ir.Instruction.CollectionLoad) = .empty;
     var entry_references: std.ArrayList(Ir.Instruction.CollectionReference) = .empty;
     const stable_local_origins = try stableLocalOrigins(
         allocator,
@@ -1583,6 +1586,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
         const local_values = try allocator.alloc(?Ir.ValueId, function.local_types.len);
         @memset(local_values, null);
         var field_loads: std.ArrayList(Ir.Instruction.FieldLoad) = .empty;
+        var borrowed_field_loads: std.ArrayList(BorrowedFieldLoad) = .empty;
         var collection_loads: std.ArrayList(Ir.Instruction.CollectionLoad) = .empty;
         var collection_references: std.ArrayList(Ir.Instruction.CollectionReference) = .empty;
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
@@ -1621,10 +1625,14 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                 },
                 .local_store => |store| {
                     const local_type = function.local_types[store.local];
-                    local_values[store.local] = if (local_type.isNumeric() or local_type == .bool or isViewType(program, local_type))
-                        canonical(aliases, store.operand)
-                    else
-                        null;
+                    const reusable = local_type.isNumeric() or local_type == .bool or isViewType(program, local_type);
+                    const operand = canonical(aliases, store.operand);
+                    if (locals_cannot_alias and reusable) {
+                        if (local_values[store.local]) |previous| {
+                            if (canonical(aliases, previous) == operand) continue;
+                        }
+                    }
+                    local_values[store.local] = if (reusable) operand else null;
                 },
                 .field_load => |load| {
                     if (matchingFieldLoad(field_loads.items, load)) |previous| {
@@ -1633,7 +1641,31 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                     }
                     try field_loads.append(allocator, load);
                 },
+                .reference_load => |load| {
+                    if (projectedFieldOrigin(function, definitions, load.reference)) |origin| {
+                        if (matchingBorrowedFieldLoad(borrowed_field_loads.items, origin)) |previous| {
+                            aliases[load.result] = canonical(aliases, previous);
+                            continue;
+                        }
+                        const stable = readonlyFlatAddressRoot(function, uses, origin.root) and
+                            aggregateReferenceStableAcrossBlocks(program, function, origin.structure);
+                        if (stable and block_index != 0) {
+                            if (matchingBorrowedFieldLoad(entry_borrowed_fields.items, origin)) |previous| {
+                                aliases[load.result] = canonical(aliases, previous);
+                                continue;
+                            }
+                        }
+                        const borrowed: BorrowedFieldLoad = .{ .origin = origin, .value = load.result };
+                        try borrowed_field_loads.append(allocator, borrowed);
+                        if (stable and block_index == 0) try entry_borrowed_fields.append(allocator, borrowed);
+                    }
+                },
                 .collection_load => |load| {
+                    if (block_index == 0 and references_stable_across_blocks and load.checked and
+                        isViewType(program, function.value_types[load.collection]))
+                    {
+                        try entry_loads.append(allocator, load);
+                    }
                     const result_type = function.value_types[load.result];
                     if (result_type.isNumeric() or result_type == .bool) {
                         if (matchingCollectionLoad(collection_loads.items, load)) |previous| {
@@ -1644,14 +1676,23 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                     }
                 },
                 .collection_reference => |reference| {
-                    if (block_index != 0 and matchingDominatingCollectionReference(
+                    if (block_index != 0 and (matchingDominatingCollectionReference(
                         program,
                         function,
                         definitions,
+                        uses,
                         stable_local_origins,
                         entry_references.items,
                         reference,
-                    )) {
+                    ) or matchingDominatingCollectionLoad(
+                        program,
+                        function,
+                        definitions,
+                        uses,
+                        stable_local_origins,
+                        entry_loads.items,
+                        reference,
+                    ))) {
                         instruction.collection_reference.checked = false;
                     }
                     if (matchingCollectionReference(collection_references.items, reference)) |previous| {
@@ -1693,6 +1734,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                 },
                 else => {},
             }
+            invalidateProjectedFieldLoads(function, definitions, instruction, &borrowed_field_loads);
             try instructions.append(allocator, instruction);
         }
         if (block_index == 0 and references_stable_across_blocks) {
@@ -1727,6 +1769,33 @@ fn referencesStableAcrossBlocks(function: Ir.Function) bool {
         .mutex_lock,
         .mutex_unlock,
         => return false,
+        else => {},
+    };
+    return true;
+}
+
+fn aggregateReferenceStableAcrossBlocks(
+    program: Ir.Program,
+    function: Ir.Function,
+    structure_index: usize,
+) bool {
+    const parameter_type = Ir.Type.structure(structure_index);
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .collection_replace => |replace| {
+            if (function.value_types[replace.replacement] == parameter_type) return false;
+        },
+        .global_store,
+        .field_store,
+        .list_edit,
+        .address_store,
+        .indirect_call,
+        .boundary_call,
+        .boundary_indirect_call,
+        .dynamic_call,
+        .mutex_lock,
+        .mutex_unlock,
+        => return false,
+        .call => if (scalarMathCall(program, function, instruction) == null) return false,
         else => {},
     };
     return true;
@@ -1776,17 +1845,37 @@ fn matchingDominatingCollectionReference(
     program: Ir.Program,
     function: Ir.Function,
     definitions: []const usize,
+    uses: []const usize,
     stable_local_origins: []const ?Ir.ValueId,
     references: []const Ir.Instruction.CollectionReference,
     candidate: Ir.Instruction.CollectionReference,
 ) bool {
     if (candidate.reference != null) return false;
-    const collection = stableValueOrigin(program, function, definitions, stable_local_origins, candidate.collection);
-    const index = stableValueOrigin(program, function, definitions, stable_local_origins, candidate.index);
+    const collection = stableValueOrigin(program, function, definitions, uses, stable_local_origins, candidate.collection);
+    const index = stableValueOrigin(program, function, definitions, uses, stable_local_origins, candidate.index);
     for (references) |reference| {
         if (reference.reference == null and reference.ownership == candidate.ownership and
-            stableValueOrigin(program, function, definitions, stable_local_origins, reference.collection) == collection and
-            stableValueOrigin(program, function, definitions, stable_local_origins, reference.index) == index) return true;
+            stableValueOrigin(program, function, definitions, uses, stable_local_origins, reference.collection) == collection and
+            stableValueOrigin(program, function, definitions, uses, stable_local_origins, reference.index) == index) return true;
+    }
+    return false;
+}
+
+fn matchingDominatingCollectionLoad(
+    program: Ir.Program,
+    function: Ir.Function,
+    definitions: []const usize,
+    uses: []const usize,
+    stable_local_origins: []const ?Ir.ValueId,
+    loads: []const Ir.Instruction.CollectionLoad,
+    candidate: Ir.Instruction.CollectionReference,
+) bool {
+    if (candidate.reference != null) return false;
+    const collection = stableValueOrigin(program, function, definitions, uses, stable_local_origins, candidate.collection);
+    const index = stableValueOrigin(program, function, definitions, uses, stable_local_origins, candidate.index);
+    for (loads) |load| {
+        if (stableValueOrigin(program, function, definitions, uses, stable_local_origins, load.collection) == collection and
+            stableValueOrigin(program, function, definitions, uses, stable_local_origins, load.index) == index) return true;
     }
     return false;
 }
@@ -1795,6 +1884,7 @@ fn stableValueOrigin(
     program: Ir.Program,
     function: Ir.Function,
     definitions: []const usize,
+    uses: []const usize,
     stable_local_origins: []const ?Ir.ValueId,
     value: Ir.ValueId,
 ) Ir.ValueId {
@@ -1806,11 +1896,16 @@ fn stableValueOrigin(
             current = copyOriginAcrossBlocks(function, definitions, current);
             continue;
         }
-        const field = fieldLoadProducingAcrossBlocks(function, definitions, current) orelse return current;
-        const structure_index = function.value_types[field.base].structureIndex() orelse return current;
-        if (structure_index >= program.structures.len or program.structures[structure_index].is_class) return current;
-        const base = stableValueOrigin(program, function, definitions, stable_local_origins, field.base);
-        return stableFieldOrigin(function, definitions, base, field.field, current);
+        if (fieldLoadProducingAcrossBlocks(function, definitions, current)) |field| {
+            const structure_index = function.value_types[field.base].structureIndex() orelse return current;
+            if (structure_index >= program.structures.len or program.structures[structure_index].is_class) return current;
+            const base = stableValueOrigin(program, function, definitions, uses, stable_local_origins, field.base);
+            return stableFieldOrigin(function, definitions, base, field.field, current);
+        }
+        if (borrowedFieldOrigin(function, definitions, uses, current)) |field| {
+            return stableBorrowedFieldOrigin(function, definitions, uses, field, current);
+        }
+        return current;
     }
     return current;
 }
@@ -1819,6 +1914,135 @@ fn stableFieldOrigin(function: Ir.Function, definitions: []const usize, base: Ir
     for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
         .field_load => |load| if (load.field == field and
             copyOriginAcrossBlocks(function, definitions, load.base) == base) return load.result,
+        else => {},
+    };
+    return fallback;
+}
+
+const BorrowedFieldOrigin = struct {
+    root: Ir.ValueId,
+    structure: usize,
+    field: usize,
+};
+
+const BorrowedFieldLoad = struct {
+    origin: BorrowedFieldOrigin,
+    value: Ir.ValueId,
+};
+
+fn matchingBorrowedFieldLoad(loads: []const BorrowedFieldLoad, origin: BorrowedFieldOrigin) ?Ir.ValueId {
+    for (loads) |load| if (std.meta.eql(load.origin, origin)) return load.value;
+    return null;
+}
+
+fn borrowedFieldOrigin(
+    function: Ir.Function,
+    definitions: []const usize,
+    uses: []const usize,
+    value: Ir.ValueId,
+) ?BorrowedFieldOrigin {
+    if (value >= definitions.len or definitions[value] != 1) return null;
+    var load: ?Ir.Instruction.ReferenceLoad = null;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .reference_load => |candidate| if (candidate.result == value) {
+            if (load != null) return null;
+            load = candidate;
+        },
+        else => {},
+    };
+    const reference_load = load orelse return null;
+    const origin = projectedFieldOrigin(function, definitions, reference_load.reference) orelse return null;
+    if (!readonlyFlatAddressRoot(function, uses, origin.root)) return null;
+    return origin;
+}
+
+fn projectedFieldOrigin(
+    function: Ir.Function,
+    definitions: []const usize,
+    reference: Ir.ValueId,
+) ?BorrowedFieldOrigin {
+    const projection_reference = copyOriginAcrossBlocks(function, definitions, reference);
+    if (projection_reference >= definitions.len or definitions[projection_reference] != 1) return null;
+    var field: ?Ir.Instruction.ReferenceField = null;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .reference_field => |candidate| if (candidate.result == projection_reference) {
+            if (field != null) return null;
+            field = candidate;
+        },
+        else => {},
+    };
+    const projection = field orelse return null;
+    const root = copyOriginAcrossBlocks(function, definitions, projection.reference);
+    if (root >= function.parameter_types.len or function.parameter_types[root] != .address) return null;
+    return .{ .root = root, .structure = projection.structure, .field = projection.field };
+}
+
+fn invalidateProjectedFieldLoads(
+    function: Ir.Function,
+    definitions: []const usize,
+    instruction: Ir.Instruction,
+    loads: *std.ArrayList(BorrowedFieldLoad),
+) void {
+    switch (instruction) {
+        .reference_store => |store| {
+            const written = projectedFieldOrigin(function, definitions, store.reference) orelse {
+                loads.clearRetainingCapacity();
+                return;
+            };
+            var index: usize = 0;
+            while (index < loads.items.len) {
+                const loaded = loads.items[index].origin;
+                if (loaded.structure == written.structure and loaded.field == written.field) {
+                    _ = loads.orderedRemove(index);
+                } else index += 1;
+            }
+        },
+        .global_store,
+        .field_store,
+        .collection_replace,
+        .list_edit,
+        .address_store,
+        .call,
+        .indirect_call,
+        .boundary_call,
+        .dynamic_call,
+        .mutex_lock,
+        .mutex_unlock,
+        => loads.clearRetainingCapacity(),
+        else => {},
+    }
+}
+
+fn readonlyFlatAddressRoot(function: Ir.Function, uses: []const usize, root: Ir.ValueId) bool {
+    var projected_uses: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .reference_field => |field| if (field.reference == root) {
+            projected_uses += 1;
+            var load_uses: usize = 0;
+            for (function.blocks) |candidate_block| for (candidate_block.instructions) |candidate| switch (candidate) {
+                .reference_load => |load| if (load.reference == field.result) {
+                    load_uses += 1;
+                },
+                else => {},
+            };
+            if (field.result >= uses.len or uses[field.result] != load_uses) return false;
+        },
+        else => {},
+    };
+    return root < uses.len and projected_uses != 0 and uses[root] == projected_uses;
+}
+
+fn stableBorrowedFieldOrigin(
+    function: Ir.Function,
+    definitions: []const usize,
+    uses: []const usize,
+    target: BorrowedFieldOrigin,
+    fallback: Ir.ValueId,
+) Ir.ValueId {
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .reference_load => |load| if (borrowedFieldOrigin(function, definitions, uses, load.result)) |candidate| {
+            if (std.meta.eql(candidate, target)) return load.result;
+        },
         else => {},
     };
     return fallback;

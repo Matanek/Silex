@@ -367,6 +367,45 @@ test "release coalesces exact scalar stores through a mutable view" {
     return error.TestUnexpectedResult;
 }
 
+test "release removes redundant local descriptor stores after view field writes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:float; var y:float }
+        \\func update(values:&Pair[..], index:int, x:float, y:float) {
+        \\    values[index].x = x
+        \\    values[index].y = y
+        \\}
+        \\func main() {
+        \\    var values:Pair[] = [Pair(x:1.0, y:2.0)]
+        \\    update(&values[0:values.count()], 0, 3.0, 4.0)
+        \\    print(values[0].x, " ", values[0].y)
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "update")) continue;
+        var stores: usize = 0;
+        var local_stores: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .reference_store => stores += 1,
+            .local_store => local_stores += 1,
+            else => {},
+        };
+        try std.testing.expectEqual(@as(usize, 2), stores);
+        try std.testing.expectEqual(@as(usize, 0), local_stores);
+        return;
+    }
+    return error.TestUnexpectedResult;
+}
+
 test "release preserves floating branches and loops" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

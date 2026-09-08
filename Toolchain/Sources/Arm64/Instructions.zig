@@ -498,6 +498,36 @@ pub fn floatMultiplyAdd(
         registerBits(destination);
 }
 
+pub fn floatMultiplySubtract(
+    destination: Register,
+    left: Register,
+    right: Register,
+    accumulator: Register,
+    double: bool,
+) u32 {
+    return floatMultiplyAdd(destination, left, right, accumulator, double) | 0x00008000;
+}
+
+pub fn floatNegatedMultiplySubtract(
+    destination: Register,
+    left: Register,
+    right: Register,
+    accumulator: Register,
+    double: bool,
+) u32 {
+    return floatMultiplyAdd(destination, left, right, accumulator, double) | 0x00208000;
+}
+
+pub fn floatNegatedMultiply(
+    destination: Register,
+    left: Register,
+    right: Register,
+    double: bool,
+) u32 {
+    const base: u32 = if (double) 0x1e608800 else 0x1e208800;
+    return base | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
+}
+
 pub fn floatMaxNumber(destination: Register, left: Register, right: Register, double: bool) u32 {
     const base: u32 = if (double) 0x1e606800 else 0x1e206800;
     return base | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
@@ -526,6 +556,21 @@ pub fn floatConditionalCompare(
         (@as(u32, @intFromEnum(condition)) << 12) |
         (registerBits(left) << 5) |
         false_flags;
+}
+
+pub fn floatConditionalSelect(
+    destination: Register,
+    left: Register,
+    right: Register,
+    condition: Condition,
+    double: bool,
+) u32 {
+    const base: u32 = if (double) 0x1e600c00 else 0x1e200c00;
+    return base |
+        (registerBits(right) << 16) |
+        (@as(u32, @intFromEnum(condition)) << 12) |
+        (registerBits(left) << 5) |
+        registerBits(destination);
 }
 
 pub fn integerToFloat(destination: Register, source: Register, signed: bool, double: bool) u32 {
@@ -559,6 +604,18 @@ pub fn multiplySubtract(destination: Register, left: Register, right: Register, 
 
 pub fn compareRegisters(left: Register, right: Register) u32 {
     return 0xeb00001f | (registerBits(right) << 16) | (registerBits(left) << 5);
+}
+
+pub fn compareZero32(register: Register) u32 {
+    return 0x7100001f | (registerBits(register) << 5);
+}
+
+pub fn testLowBit(register: Register) u32 {
+    return 0xf240001f | (registerBits(register) << 5);
+}
+
+pub fn conditionalSetZero(destination: Register, equal: bool) u32 {
+    return (if (equal) @as(u32, 0x1a9f17e0) else @as(u32, 0x1a9f07e0)) | registerBits(destination);
 }
 
 pub const Condition = enum(u4) {
@@ -690,4 +747,25 @@ test "encode two-lane float32 arithmetic and lane movement" {
 
 test "encode horizontal float32 pair reduction" {
     try std.testing.expectEqual(@as(u32, 0x7e30d883), horizontalAddFloat32Pair(.x3, .x4));
+}
+
+test "encode scalar fused multiply subtraction variants" {
+    try std.testing.expectEqual(@as(u32, 0x1f018800), floatMultiplySubtract(.x0, .x0, .x1, .x2, false));
+    try std.testing.expectEqual(@as(u32, 0x1f218800), floatNegatedMultiplySubtract(.x0, .x0, .x1, .x2, false));
+    try std.testing.expectEqual(@as(u32, 0x1f418800), floatMultiplySubtract(.x0, .x0, .x1, .x2, true));
+    try std.testing.expectEqual(@as(u32, 0x1f618800), floatNegatedMultiplySubtract(.x0, .x0, .x1, .x2, true));
+    try std.testing.expectEqual(@as(u32, 0x1e228820), floatNegatedMultiply(.x0, .x1, .x2, false));
+    try std.testing.expectEqual(@as(u32, 0x1e658883), floatNegatedMultiply(.x3, .x4, .x5, true));
+}
+
+test "encode scalar floating conditional selection" {
+    try std.testing.expectEqual(@as(u32, 0x1e22cc20), floatConditionalSelect(.x0, .x1, .x2, .greater, false));
+    try std.testing.expectEqual(@as(u32, 0x1e654c83), floatConditionalSelect(.x3, .x4, .x5, .minus, true));
+    try std.testing.expectEqual(@as(u32, 0x7100015f), compareZero32(.x10));
+}
+
+test "encode parity comparison without signed remainder" {
+    try std.testing.expectEqual(@as(u32, 0xf240037f), testLowBit(.x27));
+    try std.testing.expectEqual(@as(u32, 0x1a9f17e4), conditionalSetZero(.x4, true));
+    try std.testing.expectEqual(@as(u32, 0x1a9f07e4), conditionalSetZero(.x4, false));
 }

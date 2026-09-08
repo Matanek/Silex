@@ -212,6 +212,7 @@ pub const Instruction = union(enum) {
     pub const ReferenceLoad = struct {
         result: Span,
         reference: Slot,
+        scalar_type: ?Types.Type = null,
     };
 
     pub const AddressLoad = struct {
@@ -231,6 +232,7 @@ pub const Instruction = union(enum) {
     pub const ReferenceStore = struct {
         reference: Slot,
         operand: Span,
+        scalar_type: ?Types.Type = null,
     };
 
     pub const ReferenceOffset = struct {

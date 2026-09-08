@@ -1,0 +1,43 @@
+struct Pair {
+    var x:float
+    var y:float
+}
+
+// The view count proves every ascending reference nonnegative and in bounds.
+// Consecutive field writes may share the carried element address.
+func shift(values:&Pair[..], x:float, y:float) {
+    var index = 0
+    while index < values.count() {
+        values[index].x += x
+        values[index].y += y
+        index++
+    }
+}
+
+// The independent round count deliberately preserves the dynamic upper-bound
+// check while still allowing the nonnegative cursor address to advance.
+func accumulate_checked(values:&Pair[..], rounds:int) float {
+    var total:float = 0.0
+    var index = 0
+    while index < rounds {
+        total += values[index].x
+        total += values[index].y
+        index++
+    }
+    return total
+}
+
+func main() {
+    var values:Pair[] = [
+        Pair(x:1.0, y:2.0),
+        Pair(x:3.0, y:4.0),
+        Pair(x:5.0, y:6.0)
+    ]
+    var mutable = &values[0:values.count()]
+    shift(mutable, 0.5, -1.0)
+    assert(mutable[0].x == 1.5 && mutable[0].y == 1.0)
+    assert(mutable[1].x == 3.5 && mutable[1].y == 3.0)
+    assert(mutable[2].x == 5.5 && mutable[2].y == 5.0)
+    assert(accumulate_checked(mutable, 3) == 19.5)
+    print("reference cursors and repeated field writes preserved")
+}

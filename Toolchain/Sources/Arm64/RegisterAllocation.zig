@@ -85,17 +85,23 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     inferFloatSlots(function, float_slots);
     inferExternalFloatSlots(function, externals, float_slots);
     if (!fully_compatible and hasMixedAggregateLoad(function, float_slots)) return spilled(allocator, function);
+    // A call-free function pays the ABI save/restore cost for v8...v15 but
+    // may freely clobber v0...v7 and v16...v31. Exhaust the available
+    // volatile colors before borrowing the preserved scalar subset.
     const pair_registers = [_]u5{
         16, 17, 18, 19, 20, 21, 22, 23,
         24, 25, 26, 27, 28, 29, 30, 31,
-        8,  13, 14, 15, 0,  1,  2,  3,
-        4,
+        0,  1,  2,  3,  4,  5,  8,  13,
+        14, 15,
     };
     const float_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
     if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, float_registers);
     var cursor_probe = function;
     cursor_probe.float_lane_slots = float_lane_residences;
     const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
+    const reference_cursor = try LoopCursor.findReference(allocator, function);
+    const checked_reference_cursor = try LoopCursor.findCheckedReference(allocator, function);
+    const reference_reuses = try LoopCursor.findReferenceReuses(allocator, function);
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
     @memset(forced, false);
@@ -130,6 +136,14 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         forceStackOperands(function, instruction, forced, externals);
     }
     extendLoopCarriedIntervals(function.instructions, first, last);
+    if (reference_cursor) |cursor| {
+        touch(cursor.result, cursor.initialize, first, last, weights, instruction_weights[cursor.initialize]);
+        touch(cursor.result, cursor.increment, first, last, weights, instruction_weights[cursor.increment]);
+    }
+    if (checked_reference_cursor) |cursor| {
+        touch(cursor.result, cursor.initialize, first, last, weights, instruction_weights[cursor.initialize]);
+        touch(cursor.result, cursor.increment, first, last, weights, instruction_weights[cursor.increment]);
+    }
     for (function.instructions, 0..) |instruction, index| {
         if (!isResidenceCompatibleInstruction(instruction, externals)) {
             pinIntervalsAt(instruction, index, first, last, forced);
@@ -158,6 +172,16 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27 }
         else
             &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 })
+    else if (reference_reuses.count != 0)
+        if (function.slot_count >= Machine.direct_stack_slots)
+            if (reserve_cursor_end)
+                &[_]u5{ 0, 1, 2, 3, 4, 5, 8, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27 }
+            else
+                &[_]u5{ 0, 1, 2, 3, 4, 5, 8, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27 }
+        else if (reserve_cursor_end)
+            &[_]u5{ 0, 1, 2, 3, 4, 5, 8, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 }
+        else
+            &[_]u5{ 0, 1, 2, 3, 4, 5, 8, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 }
     else if (function.slot_count >= Machine.direct_stack_slots)
         if (reserve_cursor_end)
             &[_]u5{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27 }
@@ -175,14 +199,17 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         function.instructions,
         function.slot_count,
         forced,
+        reference_cursor,
+        checked_reference_cursor,
     );
-    // Incoming arguments occupy x0...x7 until every parameter has been
-    // captured by the prologue. Keep parameter residences out of that range;
-    // Call-free functions may still reuse volatile registers for temporaries.
+    // Incoming arguments occupy x0 up to the last register parameter until
+    // the prologue captures them. Lower volatile registers beyond that point
+    // are already free and can retain call-free parameters.
+    const incoming_register_count = @min(function.parameter_count, Machine.max_register_arguments);
     for (function.parameters) |parameter| for (0..parameter.width) |leaf| {
         const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
         if (residences[slot]) |register| {
-            if (register <= 7) residences[slot] = null;
+            if (@as(usize, register) < incoming_register_count) residences[slot] = null;
         }
     };
     // Float scalars and SLP groups occupy one physical register class. Keep
@@ -199,6 +226,8 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         function.instructions,
         function.slot_count,
         forced,
+        reference_cursor,
+        checked_reference_cursor,
     );
     for (float_lane_residences, 0..) |lane, slot| if (lane != null) {
         float_residences[slot] = null;
@@ -258,9 +287,24 @@ fn precolorCallFreeParameters(
     forced: []const bool,
     float_slots: []const bool,
 ) void {
-    const ordinary = [_]u5{ 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
-    const extended = [_]u5{ 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27 };
-    const registers: []const u5 = if (function.slot_count >= Machine.direct_stack_slots) &extended else &ordinary;
+    var candidates: [21]u5 = undefined;
+    var candidate_count: usize = 0;
+    for ([_]u5{ 16, 17, 8 }) |register| {
+        candidates[candidate_count] = register;
+        candidate_count += 1;
+    }
+    var free_argument_register = @min(function.parameter_count, Machine.max_register_arguments);
+    while (free_argument_register < Machine.max_register_arguments) : (free_argument_register += 1) {
+        candidates[candidate_count] = @intCast(free_argument_register);
+        candidate_count += 1;
+    }
+    const saved_end: u5 = if (function.slot_count >= Machine.direct_stack_slots) 28 else 29;
+    var saved: u5 = 19;
+    while (saved < saved_end) : (saved += 1) {
+        candidates[candidate_count] = saved;
+        candidate_count += 1;
+    }
+    const registers = candidates[0..candidate_count];
     var register_index: usize = 0;
     for (function.parameters) |parameter| {
         if (isCollectionParameter(function, parameter)) {
@@ -284,6 +328,10 @@ fn isCollectionParameter(function: Machine.Function, parameter: Machine.Span) bo
     for (function.instructions) |instruction| switch (instruction) {
         .collection_load => |load| if (load.collection.start == parameter.start and
             load.collection.width == parameter.width) return true,
+        .collection_reference => |reference| if (reference.collection.start == parameter.start and
+            reference.collection.width == parameter.width) return true,
+        .collection_replace => |replacement| if (replacement.collection.start == parameter.start and
+            replacement.collection.width == parameter.width) return true,
         .collection_count => |count| if (count.collection.start == parameter.start and
             count.collection.width == parameter.width) return true,
         else => {},
@@ -325,6 +373,8 @@ fn allocateGraph(
     instructions: []const Machine.Instruction,
     slot_count: usize,
     forced: []const bool,
+    reference_cursor: ?LoopCursor.ReferenceCursor,
+    checked_reference_cursor: ?LoopCursor.ReferenceCursor,
 ) Allocator.Error!void {
     const live = try allocator.alloc(bool, instructions.len * slot_count);
     defer allocator.free(live);
@@ -348,6 +398,8 @@ fn allocateGraph(
             }
         }
     }
+    markReferenceCursorLive(live, slot_count, reference_cursor);
+    markReferenceCursorLive(live, slot_count, checked_reference_cursor);
 
     const alias_roots = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(alias_roots);
@@ -375,6 +427,17 @@ fn allocateGraph(
                 break;
             }
         }
+    }
+}
+
+fn markReferenceCursorLive(
+    live: []bool,
+    slot_count: usize,
+    cursor: ?LoopCursor.ReferenceCursor,
+) void {
+    const value = cursor orelse return;
+    for (value.initialize..value.increment + 1) |instruction| {
+        live[instruction * slot_count + value.result] = true;
     }
 }
 

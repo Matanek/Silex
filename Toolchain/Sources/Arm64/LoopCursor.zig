@@ -26,6 +26,25 @@ pub const Termination = struct {
     }
 };
 
+pub const ReferenceCursor = struct {
+    initialize: usize,
+    reference: usize,
+    increment: usize,
+    collection: Machine.Span,
+    result: Machine.Slot,
+    stride: u12,
+};
+
+pub const ReferenceReuse = struct {
+    first: usize,
+    reuse: usize,
+};
+
+pub const ReferenceReuses = struct {
+    pairs: [2]ReferenceReuse = undefined,
+    count: u2 = 0,
+};
+
 const UnitIncrement = struct {
     source: ?usize,
     one: usize,
@@ -55,6 +74,195 @@ pub fn find(allocator: Allocator, function: Machine.Function) Allocator.Error!?C
         result = candidate;
     }
     return result;
+}
+
+/// Recognizes one ascending unchecked view reference whose address can be
+/// carried in the reference result register. The normal loop comparison still
+/// guards the index; only repeated normalization and multiplication disappear.
+pub fn findReference(allocator: Allocator, function: Machine.Function) Allocator.Error!?ReferenceCursor {
+    var found: ?ReferenceCursor = null;
+    for (function.instructions, 0..) |instruction, reference_index| {
+        const reference = switch (instruction) {
+            .collection_reference => |value| value,
+            else => continue,
+        };
+        if (reference.checked or !reference.dynamic or !reference.view or reference.reference != null or
+            reference.element_stride == 0 or reference.element_stride > std.math.maxInt(u12)) continue;
+        const candidate = (try recognizeReference(allocator, function, reference_index, reference, true)) orelse continue;
+        if (found != null) return null;
+        found = candidate;
+    }
+    return found;
+}
+
+pub fn findCheckedReference(allocator: Allocator, function: Machine.Function) Allocator.Error!?ReferenceCursor {
+    var found: ?ReferenceCursor = null;
+    for (function.instructions, 0..) |instruction, reference_index| {
+        const reference = switch (instruction) {
+            .collection_reference => |value| value,
+            else => continue,
+        };
+        if (!reference.checked or !reference.dynamic or !reference.view or
+            reference.element_stride == 0 or reference.element_stride > std.math.maxInt(u12)) continue;
+        const candidate = (try recognizeReference(allocator, function, reference_index, reference, false)) orelse continue;
+        if (found != null) return null;
+        found = candidate;
+    }
+    return found;
+}
+
+/// Finds up to two dominating view references whose element address remains
+/// stable until a later access. Call-free functions may retain those pointers
+/// in otherwise reserved volatile registers instead of normalizing and
+/// multiplying the same index again.
+pub fn findReferenceReuses(allocator: Allocator, function: Machine.Function) Allocator.Error!ReferenceReuses {
+    var result: ReferenceReuses = .{};
+    for (function.instructions) |instruction| switch (instruction) {
+        .call, .external_call => return result,
+        else => {},
+    };
+    for (function.instructions, 0..) |instruction, first_index| {
+        const first = switch (instruction) {
+            .collection_reference => |value| value,
+            else => continue,
+        };
+        if (!first.dynamic or !first.view) continue;
+        const first_collection = collectionOriginBefore(function.instructions, first_index, first.collection);
+        for (function.instructions[first_index + 1 ..], first_index + 1..) |later_instruction, later_index| {
+            const later = switch (later_instruction) {
+                .collection_reference => |value| value,
+                else => continue,
+            };
+            const later_collection = collectionOriginBefore(function.instructions, later_index, later.collection);
+            if (!later.dynamic or !later.view or (!first.checked and later.checked) or
+                !sameSpan(first_collection, later_collection) or first.index != later.index or
+                first.element_width != later.element_width or first.element_stride != later.element_stride) continue;
+            if (try reachesInstructionAvoiding(allocator, function.instructions, later_index, first_index)) continue;
+            var stable = true;
+            for (function.instructions[first_index + 1 .. later_index]) |between| {
+                if (definesSpan(between, first_collection) or definesSlot(between, first.index)) {
+                    stable = false;
+                    break;
+                }
+            }
+            if (!stable) continue;
+            var overlaps = false;
+            for (result.pairs[0..result.count]) |pair| {
+                if (pair.first == first_index or pair.reuse == first_index or
+                    pair.first == later_index or pair.reuse == later_index)
+                {
+                    overlaps = true;
+                    break;
+                }
+            }
+            if (overlaps) continue;
+            result.pairs[result.count] = .{ .first = first_index, .reuse = later_index };
+            result.count += 1;
+            break;
+        }
+        if (result.count == result.pairs.len) break;
+    }
+    return result;
+}
+
+fn collectionOriginBefore(
+    instructions: []const Machine.Instruction,
+    reference: usize,
+    collection: Machine.Span,
+) Machine.Span {
+    var current = collection;
+    var before = reference;
+    for (0..instructions.len) |_| {
+        const definition = definingCopyRangeBefore(instructions, before, current) orelse break;
+        current = definition.copy.operand;
+        before = definition.index;
+    }
+    return current;
+}
+
+fn recognizeReference(
+    allocator: Allocator,
+    function: Machine.Function,
+    reference_index: usize,
+    reference: Machine.Instruction.CollectionReference,
+    require_matching_count: bool,
+) Allocator.Error!?ReferenceCursor {
+    var backedge: ?usize = null;
+    var header: usize = 0;
+    for (function.instructions[reference_index + 1 ..], reference_index + 1..) |instruction, index| {
+        const target = switch (instruction) {
+            .jump => |value| resolveJumpTarget(function.instructions, value),
+            else => continue,
+        };
+        if (target > reference_index or target < header) continue;
+        if (backedge != null and target == header) return null;
+        backedge = index;
+        header = target;
+    }
+    const backedge_index = backedge orelse return null;
+    const increment = unitIncrement(function.instructions, backedge_index, reference.index) orelse return null;
+    const initialization = definingInstructionBefore(function.instructions, header, reference.index) orelse return null;
+    if (initialization.instruction != .copy or !zeroInitializedBefore(function.instructions, header, reference.index)) return null;
+    if (try reachesInstructionAvoiding(allocator, function.instructions, backedge_index, reference_index)) return null;
+
+    const stable_collection = stableCursorCollection(function, initialization.index, reference_index, reference.collection) orelse return null;
+
+    var count_slot: ?Machine.Slot = null;
+    var comparison_index: ?usize = null;
+    for (function.instructions[header..reference_index], header..) |instruction, index| switch (instruction) {
+        .collection_count => |count| if (count.view and (!require_matching_count or sameSpan(count.collection, reference.collection))) {
+            if (count_slot != null) return null;
+            count_slot = count.result;
+        },
+        .binary => |binary| {
+            if (count_slot != null and binary.operator == .less and binary.type == .int and
+                binary.left == reference.index and binary.right == count_slot.?) comparison_index = index;
+        },
+        else => {},
+    };
+    const comparison = comparison_index orelse return null;
+    if (comparison + 1 >= function.instructions.len or function.instructions[comparison + 1] != .branch or
+        function.instructions[comparison + 1].branch.condition != function.instructions[comparison].binary.result) return null;
+
+    for (function.instructions, 0..) |instruction, index| {
+        if (definesSlot(instruction, reference.index) and index != initialization.index and index != increment.update) return null;
+    }
+    return .{
+        .initialize = initialization.index,
+        .reference = reference_index,
+        .increment = increment.update,
+        .collection = stable_collection,
+        .result = reference.result,
+        .stride = @intCast(reference.element_stride),
+    };
+}
+
+fn stableCursorCollection(
+    function: Machine.Function,
+    initialize: usize,
+    reference: usize,
+    collection: Machine.Span,
+) ?Machine.Span {
+    var current = collection;
+    var before = reference;
+    for (0..function.instructions.len) |_| {
+        const definition = definingCopyRangeBefore(function.instructions, before, current) orelse break;
+        if (definition.index < initialize) break;
+        current = definition.copy.operand;
+        before = definition.index;
+    }
+    var available = false;
+    for (function.parameters) |parameter| if (sameSpan(parameter, current)) {
+        available = true;
+        break;
+    };
+    if (!available) {
+        const definition = definingCopyRangeBefore(function.instructions, initialize, current) orelse return null;
+        available = definition.index < initialize;
+    }
+    if (!available) return null;
+    for (function.instructions[initialize..]) |instruction| if (definesSpan(instruction, current)) return null;
+    return current;
 }
 
 fn recognize(
@@ -748,6 +956,65 @@ test "reject a collection cursor whose initialization does not dominate the load
     try std.testing.expectEqual(@as(?Cursor, null), try find(std.testing.allocator, function));
 }
 
+test "recognize unchecked and checked ascending view reference cursors" {
+    var unchecked_instructions = referenceCursorInstructions(false, 1);
+    const unchecked = (try findReference(
+        std.testing.allocator,
+        referenceCursorFunction(&unchecked_instructions),
+    )) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 1), unchecked.initialize);
+    try std.testing.expectEqual(@as(usize, 6), unchecked.reference);
+    try std.testing.expectEqual(@as(usize, 9), unchecked.increment);
+    try std.testing.expectEqual(@as(Machine.Slot, 8), unchecked.result);
+    try std.testing.expectEqual(@as(u12, 16), unchecked.stride);
+
+    var checked_instructions = referenceCursorInstructions(true, 1);
+    const checked = (try findCheckedReference(
+        std.testing.allocator,
+        referenceCursorFunction(&checked_instructions),
+    )) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 1), checked.initialize);
+    try std.testing.expectEqual(@as(usize, 6), checked.reference);
+    try std.testing.expectEqual(@as(usize, 9), checked.increment);
+}
+
+test "reject a view reference cursor whose index advances by more than one" {
+    var instructions = referenceCursorInstructions(false, 2);
+    try std.testing.expectEqual(
+        @as(?ReferenceCursor, null),
+        try findReference(std.testing.allocator, referenceCursorFunction(&instructions)),
+    );
+}
+
+test "reuse a dominating view reference through a descriptor copy" {
+    const instructions = [_]Machine.Instruction{
+        .{ .collection_reference = referenceInstruction(true, 0, 8) },
+        .{ .copy_range = .{
+            .result = .{ .start = 6, .width = 2, .aggregate = true },
+            .operand = .{ .start = 0, .width = 2, .aggregate = true },
+        } },
+        .{ .collection_reference = referenceInstruction(false, 6, 9) },
+        .return_void,
+    };
+    const parameters = [_]Machine.Span{
+        .{ .start = 0, .width = 2, .aggregate = true },
+        .{ .start = 2, .width = 1 },
+    };
+    const function: Machine.Function = .{
+        .name = "reference_reuse",
+        .parameter_count = parameters.len,
+        .parameters = &parameters,
+        .return_type = .void,
+        .slot_count = 10,
+        .frame_size = try Machine.frameSize(10),
+        .instructions = &instructions,
+    };
+    const reuses = try findReferenceReuses(std.testing.allocator, function);
+    try std.testing.expectEqual(@as(u2, 1), reuses.count);
+    try std.testing.expectEqual(@as(usize, 0), reuses.pairs[0].first);
+    try std.testing.expectEqual(@as(usize, 2), reuses.pairs[0].reuse);
+}
+
 test "retain index induction when the loop body observes it" {
     const instructions = cursorInstructionsWithVisibleIndex();
     const function = cursorFunction(&instructions);
@@ -854,6 +1121,59 @@ fn cursorInstructionsWithCountCopy() [16]Machine.Instruction {
         source[12],
         source[13],
         source[14],
+    };
+}
+
+fn referenceCursorInstructions(checked: bool, step: u64) [12]Machine.Instruction {
+    return .{
+        .{ .constant_int = .{ .result = 15, .bits = 0 } },
+        .{ .copy = .{ .result = 2, .operand = 15 } },
+        .{ .jump = 3 },
+        .{ .collection_count = .{
+            .result = 4,
+            .collection = .{ .start = 0, .width = 2, .aggregate = true },
+            .view = true,
+        } },
+        .{ .binary = .{ .result = 5, .operator = .less, .left = 2, .right = 4, .type = .int } },
+        .{ .branch = .{ .condition = 5, .then_instruction = 6, .else_instruction = 11 } },
+        .{ .collection_reference = referenceInstruction(checked, 0, 8) },
+        .{ .constant_int = .{ .result = 13, .bits = step } },
+        .{ .binary = .{ .result = 14, .operator = .add, .left = 2, .right = 13, .type = .int } },
+        .{ .copy = .{ .result = 2, .operand = 14 } },
+        .{ .jump = 3 },
+        .return_void,
+    };
+}
+
+fn referenceInstruction(checked: bool, collection_start: Machine.Slot, result: Machine.Slot) Machine.Instruction.CollectionReference {
+    return .{
+        .result = result,
+        .collection = .{ .start = collection_start, .width = 2, .aggregate = true },
+        .reference = null,
+        .index = 2,
+        .element_width = 4,
+        .element_stride = 16,
+        .count = 0,
+        .dynamic = true,
+        .view = true,
+        .checked = checked,
+        .header = 0,
+        .tail = 0,
+    };
+}
+
+fn referenceCursorFunction(instructions: []const Machine.Instruction) Machine.Function {
+    const parameters = &[_]Machine.Span{
+        .{ .start = 0, .width = 2, .aggregate = true },
+    };
+    return .{
+        .name = "reference_cursor",
+        .parameter_count = parameters.len,
+        .parameters = parameters,
+        .return_type = .void,
+        .slot_count = 16,
+        .frame_size = Machine.frameSize(16) catch unreachable,
+        .instructions = instructions,
     };
 }
 

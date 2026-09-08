@@ -1205,43 +1205,112 @@ pub fn emitReference(
     program: Machine.Program,
     function: Machine.Function,
     value: Machine.Instruction.CollectionReference,
+    cursor: bool,
+    failures: *std.ArrayList(CollectionFailure),
 ) Error!void {
     if (value.view) {
+        if (cursor) {
+            if (!value.checked) return error.InvalidMachineProgram;
+            const count = try residentOrLoadedValue(allocator, words, function, .x13, value.collection.start + 1);
+            const index = try residentOrLoadedValue(allocator, words, function, .x9, value.index);
+            try words.append(allocator, A64.compareRegisters(index, count));
+            const upper = words.items.len;
+            try words.append(allocator, A64.conditionalBranch(.greater_equal));
+            try failures.append(allocator, .{
+                .bounds = .{ .negative = upper, .upper = upper },
+                .index = value.index,
+                .header = value.header,
+                .tail = value.tail,
+            });
+            return;
+        }
         const base = try residentOrLoadedValue(allocator, words, function, .x10, value.collection.start);
-        try loadValue(allocator, words, function, .x13, value.collection.start + 1);
+        const count = try residentOrLoadedValue(allocator, words, function, .x13, value.collection.start + 1);
+        const resident_index: ?A64.Register = if (function.register_slots.len != 0)
+            if (function.register_slots[value.index]) |number| @enumFromInt(number) else null
+        else
+            null;
+        const resident_result: ?A64.Register = if (function.register_slots.len != 0)
+            if (function.register_slots[value.result]) |number| @enumFromInt(number) else null
+        else
+            null;
+        if (value.checked and resident_index != null and resident_result != null) {
+            const index = resident_index.?;
+            const destination = resident_result.?;
+            try words.append(allocator, A64.compareRegisters(index, .zero_or_sp));
+            const nonnegative = words.items.len;
+            try words.append(allocator, A64.conditionalBranch(.greater_equal));
+
+            try words.append(allocator, A64.addRegisters(.x9, index, count));
+            const negative_bounds = try boundsWithNormalizedIndexRegister(allocator, words, count);
+            try emitElementAddress(
+                allocator,
+                words,
+                destination,
+                base,
+                .x9,
+                elementStride(value.element_width, value.element_stride),
+            );
+            const complete = words.items.len;
+            try words.append(allocator, A64.branch());
+
+            try Fixups.patch19(words.items, nonnegative, words.items.len);
+            try words.append(allocator, A64.compareRegisters(index, count));
+            const positive_upper = words.items.len;
+            try words.append(allocator, A64.conditionalBranch(.greater_equal));
+            try emitElementAddress(
+                allocator,
+                words,
+                destination,
+                base,
+                index,
+                elementStride(value.element_width, value.element_stride),
+            );
+            try Fixups.patch26(words.items, complete, words.items.len);
+            try failures.append(allocator, .{
+                .bounds = negative_bounds,
+                .index = value.index,
+                .header = value.header,
+                .tail = value.tail,
+            });
+            try failures.append(allocator, .{
+                .bounds = .{ .negative = positive_upper, .upper = positive_upper },
+                .index = value.index,
+                .header = value.header,
+                .tail = value.tail,
+            });
+            return;
+        }
         try loadValue(allocator, words, function, .x9, value.index);
         try words.append(allocator, A64.compareRegisters(.x9, .zero_or_sp));
         const nonnegative = words.items.len;
         try words.append(allocator, A64.conditionalBranch(.greater_equal));
-        try words.append(allocator, A64.addRegisters(.x9, .x9, .x13));
+        try words.append(allocator, A64.addRegisters(.x9, .x9, count));
         try Fixups.patch19(words.items, nonnegative, words.items.len);
         const bounds: ?Bounds = if (value.checked)
-            try boundsWithNormalizedIndex(allocator, words)
+            try boundsWithNormalizedIndexRegister(allocator, words, count)
         else
             null;
+        const destination: A64.Register = if (function.register_slots.len != 0)
+            if (function.register_slots[value.result]) |number| @enumFromInt(number) else .x10
+        else
+            .x10;
         try emitElementAddress(
             allocator,
             words,
-            .x10,
+            destination,
             base,
             .x9,
             elementStride(value.element_width, value.element_stride),
         );
-        try storeValue(allocator, words, function, .x10, value.result);
+        try storeValue(allocator, words, function, destination, value.result);
         if (bounds == null) return;
-        const complete = words.items.len;
-        try words.append(allocator, A64.branch());
-        const failure = words.items.len;
-        try Fixups.patch19(words.items, bounds.?.negative, failure);
-        try Fixups.patch19(words.items, bounds.?.upper, failure);
-        if (function.register_slots.len != 0) if (function.register_slots[value.index]) |number| {
-            try words.append(allocator, A64.storeStack(@enumFromInt(number), value.index));
-        };
-        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.header, 2);
-        try emitPrintInteger(allocator, words, sites, platform, value.index, 2, false);
-        try StringRuntime.emitWriteStatic(allocator, words, data_fixups, sites, platform, program, value.tail, 2);
-        try fail(allocator, words, epilogue);
-        try Fixups.patch26(words.items, complete, words.items.len);
+        try failures.append(allocator, .{
+            .bounds = bounds.?,
+            .index = value.index,
+            .header = value.header,
+            .tail = value.tail,
+        });
         return;
     }
     if (value.reference != null and !value.view) {
@@ -1456,7 +1525,13 @@ fn copyReplacementToAddress(
     }
 }
 
-const Bounds = struct { negative: usize, upper: usize };
+pub const Bounds = struct { negative: usize, upper: usize };
+pub const CollectionFailure = struct {
+    bounds: Bounds,
+    index: Machine.Slot,
+    header: usize,
+    tail: usize,
+};
 fn boundsView(allocator: Allocator, words: *std.ArrayList(u32), collection: Machine.Span, index: Machine.Slot) Error!Bounds {
     try loadAndNormalizeViewIndex(allocator, words, collection, index);
     return boundsWithNormalizedIndex(allocator, words);
@@ -1496,10 +1571,18 @@ fn normalizeWithLoadedCollection(allocator: Allocator, words: *std.ArrayList(u32
 }
 
 fn boundsWithNormalizedIndex(allocator: Allocator, words: *std.ArrayList(u32)) Error!Bounds {
+    return boundsWithNormalizedIndexRegister(allocator, words, .x13);
+}
+
+fn boundsWithNormalizedIndexRegister(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    count: A64.Register,
+) Error!Bounds {
     try words.append(allocator, A64.compareRegisters(.x9, .zero_or_sp));
     const negative = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.less));
-    try words.append(allocator, A64.compareRegisters(.x9, .x13));
+    try words.append(allocator, A64.compareRegisters(.x9, count));
     const upper = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.greater_equal));
     return .{ .negative = negative, .upper = upper };
