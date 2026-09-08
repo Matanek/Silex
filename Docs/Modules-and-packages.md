@@ -69,15 +69,17 @@ related to Mach-O symbol export or native layout.
 
 ## Collect catalog contributions
 
-Umbrella catalog contributions are discovered only in an active child
-package's portable principal module. The parent manifest authenticates each
-open catalog, and composition accepts only public reexports whose declaration
-provider is owned by that child. Ownership follows the exact source provider,
-including when the child adds a declaration to a parent-owned principal module
-through an authorized `merge`. Conflicting aliases or child namespaces are
-rejected deterministically. Contributions become ordinary typed reexport
+Umbrella catalog contributions are discovered only in an active named
+package's portable principal module. The target package manifest authenticates
+each open catalog, and the contributor must declare that target package as a
+direct dependency. Composition accepts only public reexports whose declaration
+provider is owned by the contributor. Ownership follows the exact source
+provider, including when a child adds a declaration to a parent-owned principal
+module through an authorized `merge`. Conflicting aliases or child namespaces
+are rejected deterministically. Contributions become ordinary typed reexport
 bindings before semantic lowering; they inject no declarations, executable
-code, runtime registry or backend concept into the parent module.
+code, runtime registry, namespace permission or backend concept into the
+target module.
 
 ## Build the active semantic closure
 

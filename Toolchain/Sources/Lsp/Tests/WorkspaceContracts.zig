@@ -322,18 +322,18 @@ test "server completes additive parent and extension module declarations" {
     try std.testing.expectEqualStrings(extension_uri, extension.uri);
 }
 
-test "server completes and navigates authorized umbrella contributions" {
+test "server completes and navigates external umbrella contributions" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
-    try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
+    try temporary.dir.createDirPath(std.testing.io, "AI/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"AI\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Components\",\"GFX.Plugins\",\"GFX.Resources\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[\"GFX.Components\",\"GFX.Plugins\",\"GFX.Resources\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Components.sx",
@@ -348,37 +348,37 @@ test "server completes and navigates authorized umbrella contributions" {
         .data = "public struct CoreResource {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Package.json",
-        .data = "{\"name\":\"GFX.Physics\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+        .sub_path = "AI/Package.json",
+        .data = "{\"name\":\"AI\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/@Module.sx",
+        .sub_path = "AI/Module/@Module.sx",
         .data =
         \\contribute GFX.Plugins {
-        \\    public use GFX.Physics.Plugin as Physics
+        \\    public use AI.Plugin as BehaviourTree
         \\}
         \\contribute GFX.Components {
-        \\    public use GFX.Physics.Body as RigidBody
+        \\    public use AI.Behaviour as Behaviour
         \\}
         \\contribute GFX.Resources {
-        \\    public use GFX.Physics.World as World
+        \\    public use AI.Trees as BehaviourTrees
         \\}
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/Plugin.sx",
+        .sub_path = "AI/Module/Plugin.sx",
         .data = "public struct Plugin {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/Body.sx",
-        .data = "public struct Body {}",
+        .sub_path = "AI/Module/Behaviour.sx",
+        .data = "public struct Behaviour {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/World.sx",
+        .sub_path = "AI/Module/Trees.sx",
         .data =
-        \\public class World {
-        \\    func spawn() int { return 0 }
-        \\    func is_alive() bool { return true }
+        \\public class Trees {
+        \\    func count() int { return 0 }
+        \\    func is_empty() bool { return true }
         \\    private func hidden() {}
         \\}
         ,
@@ -391,7 +391,7 @@ test "server completes and navigates authorized umbrella contributions" {
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
     const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
-    const plugin_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Physics/Module/Plugin.sx", .{root});
+    const plugin_uri = try std.fmt.allocPrint(allocator, "file://{s}/AI/Module/Plugin.sx", .{root});
 
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
@@ -405,31 +405,31 @@ test "server completes and navigates authorized umbrella contributions" {
         \\func main() { Plugins.<|> }
     );
     try Support.expectPresent("Core", items);
-    try Support.expectPresent("Physics", items);
+    try Support.expectPresent("BehaviourTree", items);
     try Support.expectNoDuplicates(items);
 
-    const world_members = try Support.serverCompletion(&server, allocator, main_uri,
+    const resource_members = try Support.serverCompletion(&server, allocator, main_uri,
         \\use GFX.Resources
-        \\func circle(world:&Resources.World) { world.<|> }
+        \\func inspect(trees:&Resources.BehaviourTrees) { trees.<|> }
     );
-    try Support.expectExactLabels(&.{ "is_alive", "spawn" }, world_members);
+    try Support.expectExactLabels(&.{ "count", "is_empty" }, resource_members);
 
     const definition = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use GFX.Plugins
-        \\func main() { Plugins.Phys<|>ics() }
+        \\func main() { Plugins.Behaviour<|>Tree() }
     )).?;
     try std.testing.expectEqualStrings(plugin_uri, definition.uri);
     try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Plugins.sx",
-        .data = "public struct Physics {}",
+        .data = "public struct BehaviourTree {}",
     });
     const colliding = try Support.serverCompletion(&server, allocator, main_uri,
         \\use GFX.Plugins
         \\func main() { Plugins.<|> }
     );
-    try Support.expectPresent("Physics", colliding);
+    try Support.expectPresent("BehaviourTree", colliding);
     try Support.expectNoDuplicates(colliding);
 }
 
