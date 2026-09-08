@@ -474,9 +474,7 @@ pub fn storeExecutableFile(
     const destination = executablePath(allocator, digest, kind) catch return;
     if (Io.Dir.cwd().statFile(io, destination, .{})) |_| return else |_| {}
     if (std.fs.path.dirname(destination)) |directory| Io.Dir.cwd().createDirPath(io, directory) catch return;
-    Io.Dir.hardLink(Io.Dir.cwd(), source_path, Io.Dir.cwd(), destination, io, .{}) catch {
-        Io.Dir.cwd().copyFile(source_path, Io.Dir.cwd(), destination, io, .{}) catch return;
-    };
+    copyExecutableFile(io, source_path, destination) catch return;
 }
 
 pub fn materializeExecutable(
@@ -492,9 +490,11 @@ pub fn materializeExecutable(
         error.FileNotFound => {},
         else => return err,
     };
-    Io.Dir.hardLink(Io.Dir.cwd(), source, Io.Dir.cwd(), output_path, io, .{}) catch {
-        try Io.Dir.cwd().copyFile(source, Io.Dir.cwd(), output_path, io, .{});
-    };
+    try copyExecutableFile(io, source, output_path);
+}
+
+fn copyExecutableFile(io: Io, source_path: []const u8, destination_path: []const u8) !void {
+    try Io.Dir.cwd().copyFile(source_path, Io.Dir.cwd(), destination_path, io, .{});
 }
 
 pub fn ensureOutputParent(io: Io, output_path: []const u8) !void {
@@ -810,6 +810,23 @@ test "a corrupt cache entry is a measured safe miss" {
 
     const after = statistics();
     try std.testing.expectEqual(before.entry_misses + 1, after.entry_misses);
+}
+
+test "materialized executable bytes do not alias their cache source" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache", .data = "stable executable" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const cache_path = try std.fs.path.join(allocator, &.{ root, "cache" });
+    const output_path = try std.fs.path.join(allocator, &.{ root, "output" });
+
+    try copyExecutableFile(std.testing.io, cache_path, output_path);
+    try Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = output_path, .data = "replaced output" });
+    const cached = try Io.Dir.cwd().readFileAlloc(std.testing.io, cache_path, allocator, .limited(1024));
+    try std.testing.expectEqualStrings("stable executable", cached);
 }
 
 test "output parent accepts an existing symbolic link to a directory" {
