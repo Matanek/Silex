@@ -478,8 +478,16 @@ fn analyzeStatements(
             },
             .if_statement => |conditional| try analyzeIf(self, builder, function, structure, self_local, conditional, initialized),
             .return_statement => return self.fail(statement.position(), "constructors return 'self' implicitly"),
-            .while_statement => return self.fail(statement.position(), "while is not available during constructor initialization yet"),
-            .for_statement => return self.fail(statement.position(), "for is not available during constructor initialization yet"),
+            .while_statement => while_statement: {
+                try validateStatementReads(self, structure, statement, initialized);
+                const one = [_]Ast.Statement{statement};
+                break :while_statement try self.analyzeStatements(builder, function, &one);
+            },
+            .for_statement => for_statement: {
+                try validateStatementReads(self, structure, statement, initialized);
+                const one = [_]Ast.Statement{statement};
+                break :for_statement try self.analyzeStatements(builder, function, &one);
+            },
             .mutex_statement => |mutex| mutex_statement: {
                 if (mutex.synchronized) {
                     try self.emit(builder, .mutex_lock);
@@ -719,10 +727,32 @@ fn fieldOwnerIndex(self: anytype, name: []const u8) usize {
     unreachable;
 }
 
-fn validateStatementReads(self: anytype, structure: Ast.Structure, statement: Ast.Statement, initialized: []const bool) !void {
+fn validateStatementReads(self: anytype, structure: Ast.Structure, statement: Ast.Statement, initialized: []const bool) AnalyzeError!void {
     switch (statement) {
         .variable_declaration => |declaration| if (declaration.initializer) |value| try validateExpressionReads(self, structure, value, initialized),
-        .assignment_statement => |assignment| if (assignment.value) |value| try validateExpressionReads(self, structure, value, initialized),
+        .assignment_statement => |assignment| {
+            if (std.mem.eql(u8, assignment.target.name, "self") and !allInitialized(initialized)) {
+                if (assignment.target.fields.len == 0) {
+                    return self.fail(assignment.target.name_position, "the complete object 'self' cannot escape before all fields are initialized");
+                }
+                const target = assignment.target.fields[0];
+                for (structure.fields, 0..) |field, field_index| {
+                    if (!std.mem.eql(u8, field.name, target.name)) continue;
+                    if (!initialized[field_index]) {
+                        const message = try std.fmt.allocPrint(
+                            self.allocator,
+                            "field '{s}' cannot be initialized only inside a loop that may not execute",
+                            .{field.name},
+                        );
+                        return self.fail(target.name_position, message);
+                    }
+                    break;
+                }
+            }
+            if (assignment.target.source) |source| try validateExpressionReads(self, structure, source, initialized);
+            for (assignment.target.indices) |index| try validateExpressionReads(self, structure, index.value, initialized);
+            if (assignment.value) |value| try validateExpressionReads(self, structure, value, initialized);
+        },
         .return_statement => |statement_value| if (statement_value.value) |value| try validateExpressionReads(self, structure, value, initialized),
         .expression_statement => |value| try validateExpressionReads(self, structure, value, initialized),
         .print_statement => |print_statement| for (print_statement.values) |value| try validateExpressionReads(self, structure, value, initialized),
@@ -731,15 +761,38 @@ fn validateStatementReads(self: anytype, structure: Ast.Structure, statement: As
             try validateExpressionReads(self, structure, assertion.message, initialized);
         },
         .panic_statement => |panic_statement| try validateExpressionReads(self, structure, panic_statement.value, initialized),
+        .if_statement => |conditional| {
+            for (conditional.branches) |branch| {
+                try validateExpressionReads(self, structure, branch.condition.source(), initialized);
+                for (branch.statements) |nested| try validateStatementReads(self, structure, nested, initialized);
+            }
+            if (conditional.else_statements) |statements| {
+                for (statements) |nested| try validateStatementReads(self, structure, nested, initialized);
+            }
+        },
+        .while_statement => |loop| {
+            try validateExpressionReads(self, structure, loop.condition.source(), initialized);
+            for (loop.statements) |nested| try validateStatementReads(self, structure, nested, initialized);
+        },
+        .for_statement => |loop| {
+            switch (loop.source) {
+                .collection => |source| try validateExpressionReads(self, structure, source, initialized),
+                .range => |range| {
+                    try validateExpressionReads(self, structure, range.start, initialized);
+                    try validateExpressionReads(self, structure, range.end, initialized);
+                },
+            }
+            for (loop.statements) |nested| try validateStatementReads(self, structure, nested, initialized);
+        },
         .mutex_statement => |mutex| for (mutex.statements) |nested| try validateStatementReads(self, structure, nested, initialized),
         else => {},
     }
 }
 
-fn validateExpressionReads(self: anytype, structure: Ast.Structure, expression: *const Ast.Expression, initialized: []const bool) !void {
+fn validateExpressionReads(self: anytype, structure: Ast.Structure, expression: *const Ast.Expression, initialized: []const bool) AnalyzeError!void {
     switch (expression.value) {
         .identifier => |name| if (std.mem.eql(u8, name, "self") and !allInitialized(initialized)) {
-            return self.fail(expression.position, "self cannot be used before all fields are initialized");
+            return self.fail(expression.position, "the complete object 'self' cannot escape before all fields are initialized");
         },
         .field_access => |access| {
             if (access.base.value == .identifier and std.mem.eql(u8, access.base.value.identifier, "self")) {
@@ -776,6 +829,27 @@ fn validateExpressionReads(self: anytype, structure: Ast.Structure, expression: 
         },
         .conversion => |conversion| try validateExpressionReads(self, structure, conversion.operand, initialized),
         .string_count => |operand| try validateExpressionReads(self, structure, operand, initialized),
+        .sequence_literal => |sequence| for (sequence.values) |value| try validateExpressionReads(self, structure, value, initialized),
+        .tuple_literal => |tuple| for (tuple.elements) |element| try validateExpressionReads(self, structure, element.value, initialized),
+        .index_access => |access| {
+            try validateExpressionReads(self, structure, access.base, initialized);
+            try validateExpressionReads(self, structure, access.index, initialized);
+        },
+        .slice_access => |access| {
+            try validateExpressionReads(self, structure, access.base, initialized);
+            try validateExpressionReads(self, structure, access.start, initialized);
+            try validateExpressionReads(self, structure, access.end, initialized);
+        },
+        .match_expression => |match_expression| {
+            try validateExpressionReads(self, structure, match_expression.subject, initialized);
+            for (match_expression.branches) |branch| {
+                if (branch.guard) |guard| try validateExpressionReads(self, structure, guard, initialized);
+                if (branch.value) |value| try validateExpressionReads(self, structure, value, initialized);
+                if (branch.statements) |statements| {
+                    for (statements) |statement| try validateStatementReads(self, structure, statement, initialized);
+                }
+            }
+        },
         .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
             .text => {},
             .expression => |value| try validateExpressionReads(self, structure, value, initialized),
