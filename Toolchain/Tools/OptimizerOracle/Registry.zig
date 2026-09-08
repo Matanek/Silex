@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 pub const Manifest = struct {
     schema_version: u32,
     oracle: Oracle,
+    proofs: []const Proof,
     baselines: []const Baseline,
     workspace_baseline: []const WorkspaceRepository,
     portable_ir: []const InventoryFamily,
@@ -81,7 +82,22 @@ pub const Coverage = struct {
     llvm: bool,
     structure: bool,
     targets: []const []const u8,
-    evidence: []const []const u8,
+    proof_ids: []const []const u8,
+};
+
+pub const Proof = struct {
+    id: []const u8,
+    kind: []const u8,
+    repository: []const u8,
+    revision: []const u8,
+    source: []const u8,
+    source_sha256: []const u8,
+    command: []const u8,
+    configuration: []const u8,
+    expectation: []const u8,
+    outcome: []const u8,
+    result: []const u8,
+    result_sha256: []const u8,
 };
 
 pub const HotFunction = struct {
@@ -93,7 +109,7 @@ pub const HotFunction = struct {
     function: []const u8,
     state: []const u8,
     owner_part: []const u8,
-    evidence: []const u8,
+    proof_ids: []const []const u8,
     budgets: []const StructuralBudget,
 };
 
@@ -152,7 +168,7 @@ pub const Transposition = struct {
     verdict: []const u8,
     owner_part: []const u8,
     source: []const u8,
-    proof: []const u8,
+    proof_ids: []const []const u8,
 };
 
 pub fn load(allocator: Allocator, io: std.Io, corpus_directory: []const u8) !Manifest {
@@ -162,8 +178,9 @@ pub fn load(allocator: Allocator, io: std.Io, corpus_directory: []const u8) !Man
 }
 
 pub fn audit(manifest: Manifest) !void {
-    if (manifest.schema_version != 1) return error.UnsupportedRegistrySchema;
+    if (manifest.schema_version != 2) return error.UnsupportedRegistrySchema;
     try auditOracle(manifest.oracle);
+    try auditProofs(manifest.proofs);
     try auditBaselines(manifest.baselines);
     try auditWorkspaceBaseline(manifest.workspace_baseline);
     try auditInventory(Silex.Ir.Instruction, manifest.portable_ir);
@@ -183,6 +200,7 @@ pub fn audit(manifest: Manifest) !void {
     }
     try auditQualification(manifest.qualification_corpus);
     try auditTransposition(manifest.transposition);
+    try auditProofReferences(manifest);
 }
 
 pub fn auditParity(manifest: Manifest) !void {
@@ -217,6 +235,11 @@ pub fn validateQualificationCorpus(
         try validateSourceHash(allocator, io, repository_root, entry.path, entry.sha256);
     }
     for (manifest.hot_functions) |entry| {
+        const repository_root = try std.fs.path.join(allocator, &.{ workspace_root, entry.repository });
+        try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
+        try validateSourceHash(allocator, io, repository_root, entry.source, entry.source_sha256);
+    }
+    for (manifest.proofs) |entry| {
         const repository_root = try std.fs.path.join(allocator, &.{ workspace_root, entry.repository });
         try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
         try validateSourceHash(allocator, io, repository_root, entry.source, entry.source_sha256);
@@ -348,6 +371,76 @@ fn auditOracle(oracle: Oracle) !void {
     try requireHex(oracle.source_revision, 40);
 }
 
+fn auditProofs(proofs: []const Proof) !void {
+    if (proofs.len == 0) return error.EmptyProofCatalog;
+    for (proofs, 0..) |proof, index| {
+        if (proof.id.len == 0 or proof.repository.len == 0 or proof.source.len == 0 or
+            proof.command.len == 0 or proof.configuration.len == 0 or proof.expectation.len == 0 or
+            proof.result.len == 0)
+        {
+            return error.IncompleteProof;
+        }
+        if (!oneOf(proof.kind, &.{
+            "registry",    "semantic", "structural", "native",   "differential",
+            "metamorphic", "timing",   "cache",      "consumer", "portability",
+        })) return error.InvalidProofKind;
+        if (!oneOf(proof.outcome, &.{ "passed", "diagnostic-red" })) return error.InvalidProofOutcome;
+        try requireHex(proof.revision, 40);
+        try requireHex(proof.source_sha256, 64);
+        try requireHex(proof.result_sha256, 64);
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(proof.result, &digest, .{});
+        const actual = std.fmt.bytesToHex(digest, .lower);
+        if (!std.mem.eql(u8, &actual, proof.result_sha256)) return error.ProofResultMismatch;
+        for (proofs[0..index]) |previous| if (std.mem.eql(u8, previous.id, proof.id))
+            return error.DuplicateRegistryEntry;
+    }
+}
+
+fn auditProofReferences(manifest: Manifest) !void {
+    for (manifest.coverage) |entry| {
+        try auditProofIds(manifest.proofs, entry.proof_ids);
+        if (std.mem.eql(u8, entry.state, "equivalent"))
+            try requirePassedProofs(manifest.proofs, entry.proof_ids);
+    }
+    for (manifest.hot_functions) |entry| {
+        try auditProofIds(manifest.proofs, entry.proof_ids);
+        if (!std.mem.eql(u8, entry.state, "diagnostic-red"))
+            try requirePassedProofs(manifest.proofs, entry.proof_ids);
+    }
+    for (manifest.transposition) |entry| {
+        try auditProofIds(manifest.proofs, entry.proof_ids);
+        if (!std.mem.eql(u8, entry.verdict, "gap"))
+            try requirePassedProofs(manifest.proofs, entry.proof_ids);
+    }
+}
+
+fn auditProofIds(proofs: []const Proof, ids: []const []const u8) !void {
+    if (ids.len == 0) return error.MissingProofReference;
+    try auditUniqueStrings(ids);
+    for (ids) |id| {
+        var found = false;
+        for (proofs) |proof| {
+            if (std.mem.eql(u8, id, proof.id)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return error.UnknownProofReference;
+    }
+}
+
+fn requirePassedProofs(proofs: []const Proof, ids: []const []const u8) !void {
+    for (ids) |id| {
+        for (proofs) |proof| {
+            if (std.mem.eql(u8, id, proof.id)) {
+                if (!std.mem.eql(u8, proof.outcome, "passed")) return error.UnpassedProofReference;
+                break;
+            }
+        }
+    }
+}
+
 fn auditBaselines(baselines: []const Baseline) !void {
     if (baselines.len == 0) return error.MissingBaseline;
     for (baselines, 0..) |baseline, index| {
@@ -424,7 +517,7 @@ fn auditPasses(passes: []const Pass) !void {
 fn auditCoverage(coverage: []const Coverage) !void {
     if (coverage.len == 0) return error.EmptyCoverageRegistry;
     for (coverage, 0..) |entry, index| {
-        if (entry.id.len == 0 or entry.owner_part.len == 0 or entry.targets.len == 0 or entry.evidence.len == 0)
+        if (entry.id.len == 0 or entry.owner_part.len == 0 or entry.targets.len == 0 or entry.proof_ids.len == 0)
             return error.IncompleteCoverageEntry;
         if (!oneOf(entry.state, &.{ "equivalent", "gap", "not-measurable", "irrelevant" }))
             return error.InvalidCoverageState;
@@ -437,7 +530,7 @@ fn auditCoverage(coverage: []const Coverage) !void {
         for (coverage[0..index]) |previous| if (std.mem.eql(u8, previous.id, entry.id))
             return error.DuplicateRegistryEntry;
         try auditUniqueStrings(entry.targets);
-        try auditUniqueStrings(entry.evidence);
+        try auditUniqueStrings(entry.proof_ids);
         _ = entry.llvm;
     }
 }
@@ -446,7 +539,7 @@ fn auditHotFunctions(entries: []const HotFunction) !void {
     if (entries.len == 0) return error.EmptyHotFunctionRegistry;
     for (entries, 0..) |entry, index| {
         if (entry.id.len == 0 or entry.repository.len == 0 or entry.source.len == 0 or
-            entry.function.len == 0 or entry.owner_part.len == 0 or entry.evidence.len == 0 or
+            entry.function.len == 0 or entry.owner_part.len == 0 or entry.proof_ids.len == 0 or
             entry.budgets.len == 0)
         {
             return error.IncompleteHotFunction;
@@ -501,7 +594,7 @@ fn auditQualification(cases: []const QualificationCase) !void {
 fn auditTransposition(entries: []const Transposition) !void {
     if (entries.len == 0) return error.EmptyTranspositionMap;
     for (entries, 0..) |entry, index| {
-        if (entry.family.len == 0 or entry.owner_part.len == 0 or entry.source.len == 0 or entry.proof.len == 0)
+        if (entry.family.len == 0 or entry.owner_part.len == 0 or entry.source.len == 0 or entry.proof_ids.len == 0)
             return error.IncompleteTranspositionEntry;
         if (!oneOf(entry.verdict, &.{ "adapted", "existing-equivalent", "gap", "irrelevant" }))
             return error.InvalidTranspositionVerdict;
@@ -586,7 +679,7 @@ test "coverage audit rejects a stable entry without its cost proof" {
         .llvm = true,
         .structure = true,
         .targets = &.{"arm64"},
-        .evidence = &.{"case.sx"},
+        .proof_ids = &.{"semantic-case"},
     };
     try std.testing.expectError(error.UnprovedEquivalentEntry, auditCoverage(&.{entry}));
 }
@@ -603,7 +696,7 @@ test "parity coverage audit rejects an attributed gap" {
         .llvm = true,
         .structure = true,
         .targets = &.{"arm64"},
-        .evidence = &.{"case.sx"},
+        .proof_ids = &.{"diagnostic-case"},
     };
     const entries = [_]Coverage{entry};
     try std.testing.expectError(error.OpenCoverageGap, Parity.auditClosedCoverage(entries[0..]));
@@ -615,13 +708,55 @@ test "parity transposition audit rejects a missing canonical LLVM family" {
         .verdict = "adapted",
         .owner_part = "silex-llvm-opt-01",
         .source = "llvm/source",
-        .proof = "executable proof",
+        .proof_ids = &.{"structural-case"},
     };
     const entries = [_]Transposition{entry};
     try std.testing.expectError(
         error.MissingRequiredLlvmFamily,
         Parity.auditClosedTransposition(entries[0..]),
     );
+}
+
+fn proofFixture(result: []const u8, result_sha256: []const u8) Proof {
+    return .{
+        .id = "structural-case",
+        .kind = "structural",
+        .repository = "Silex",
+        .revision = "0123456789abcdef0123456789abcdef01234567",
+        .source = "Toolchain/Benchmarks/Optimizer/IntegerArithmetic.sx",
+        .source_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        .command = "zig build optimizer-gate",
+        .configuration = "macos-arm64 Release",
+        .expectation = "all structural contracts pass",
+        .outcome = "passed",
+        .result = result,
+        .result_sha256 = result_sha256,
+    };
+}
+
+test "proof audit rejects a result whose hash is stale" {
+    const entry = proofFixture(
+        "passed",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+    try std.testing.expectError(error.ProofResultMismatch, auditProofs(&.{entry}));
+}
+
+test "proof references reject unresolved identifiers" {
+    const entry = proofFixture(
+        "passed",
+        "284d1e8c4918248233df17642bbb940c001e1fa856c18aab86ba6dbe7813eb13",
+    );
+    try std.testing.expectError(error.UnknownProofReference, auditProofIds(&.{entry}, &.{"missing"}));
+}
+
+test "closed entries reject diagnostic proof references" {
+    var entry = proofFixture(
+        "passed",
+        "284d1e8c4918248233df17642bbb940c001e1fa856c18aab86ba6dbe7813eb13",
+    );
+    entry.outcome = "diagnostic-red";
+    try std.testing.expectError(error.UnpassedProofReference, requirePassedProofs(&.{entry}, &.{entry.id}));
 }
 
 test "a current hot measurement must satisfy its versioned structural budget" {

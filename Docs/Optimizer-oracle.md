@@ -26,6 +26,15 @@ the last qualified real-consumer baseline, not an obsolete checked-in
 observation; the coverage entry keeps that remaining gap assigned to its
 owning Part.
 
+Schema version 2 replaces free-form evidence strings with `proof_ids`. Every
+identifier resolves through the top-level proof catalog to a repository and
+ancestor revision, a source and SHA-256, the exact command and configuration,
+the expected observation, and the result with its own SHA-256. The audit
+rejects unknown identifiers, stale source or result hashes, and duplicate
+references. A closed coverage or LLVM-transposition entry may reference only
+passed proofs; `diagnostic-red` results remain usable to explain an open gap
+but cannot close it.
+
 Fixed native regressions can also carry target-specific regional budgets.
 `X64RegionalBarriers.sx` requires its direct call and aggregate construction to
 survive portable optimization; `X64IndirectAggregate.sx` independently retains
@@ -60,6 +69,7 @@ zig build optimizer-oracle -- fuzz 100 1
 zig build optimizer-oracle -- fuzz-llvm 16 1
 zig build optimizer-oracle -- compare 11
 zig build optimizer-gate
+zig build optimizer-parity-gate
 ```
 
 `audit` verifies the checked-in schema, the exact workspace and sealed-corpus
