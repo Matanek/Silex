@@ -894,6 +894,66 @@ test "type contexts expose modules as paths without leaking module values" {
     try Support.expectNoDuplicates(provider_items);
 }
 
+test "typed initializers preserve prefixed workspace expression roots" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Models.sx",
+        .data = "public struct Recipe {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Factory.sx",
+        .data =
+        \\use Module.Models.Recipe
+        \\public func recipe() Recipe { return Recipe() }
+        ,
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const function_items = try Support.serverCompletion(&server, allocator, uri,
+        \\use Module.Models.Recipe
+        \\use Module.Factory.recipe as world_factory
+        \\func make() Recipe {
+        \\    var result:Recipe = world_f<|>
+        \\    return result
+        \\}
+    );
+    try Support.expectExactLabels(&.{"world_factory"}, function_items);
+    try Support.expectItem(.{
+        .label = "world_factory",
+        .kind = 3,
+        .detail = "world_factory() Recipe",
+        .insert_text = "world_factory()",
+        .insert_text_format = null,
+    }, function_items);
+    try Support.expectNoDuplicates(function_items);
+
+    const module_items = try Support.serverCompletion(&server, allocator, uri,
+        \\use Module.Models.Recipe
+        \\func make() Recipe {
+        \\    var result:Recipe = Mod<|>
+        \\    return result
+        \\}
+    );
+    try Support.expectPresent("Module", module_items);
+    try Support.expectAbsent("true", module_items);
+    try Support.expectNoDuplicates(module_items);
+}
+
 test "field parameter and generic annotations expose module paths to types" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

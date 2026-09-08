@@ -539,9 +539,11 @@ pub fn scopeItemsAtForTargetExpected(
         else
             use.path;
         if (!matchesPrefix(label, prefix)) continue;
-        if (expected_type) |expected| {
-            if (!std.mem.eql(u8, expected, label) and
-                !(expected.len > label.len and std.mem.startsWith(u8, expected, label) and expected[label.len] == '.')) continue;
+        if (prefix.len == 0) {
+            if (expected_type) |expected| {
+                if (!std.mem.eql(u8, expected, label) and
+                    !(expected.len > label.len and std.mem.startsWith(u8, expected, label) and expected[label.len] == '.')) continue;
+            }
         }
         if (fundamentalAliasTarget(program, use, 0)) |type_target| {
             if (type_only) try appendRanked(allocator, &ranked, .{
@@ -580,10 +582,12 @@ pub fn scopeItemsAtForTargetExpected(
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
+                var displayed = function;
+                displayed.name = label;
                 try appendRanked(allocator, &ranked, .{
                     .label = label,
                     .kind = CompletionKind.function,
-                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, displayed),
                 }, 35, true);
                 matched = true;
             };
