@@ -1,7 +1,10 @@
 const std = @import("std");
 const Benchmark = @import("Benchmark.zig");
 
-pub const minimum_samples = 11;
+// Keep the blocking gate aligned with the sealed qualified timing proofs in
+// Coverage.json. Eleven pairs leave near-parity kernels unnecessarily
+// inconclusive on an otherwise quiet host.
+pub const minimum_samples = 21;
 pub const maximum_spread_ppm = 200_000;
 
 pub const required_llvm_families = [_][]const u8{
@@ -108,33 +111,33 @@ fn relative(samples: usize, lower: u64, median: u64, upper: u64) Benchmark.Relat
 
 test "qualified timing accepts only a Silex upper bound at or below LLVM" {
     try qualifyTiming(.{
-        .left = summary(11, 80, 85, 90),
-        .right = summary(11, 90, 95, 100),
-        .relative = relative(11, 800_000, 880_000, 950_000),
+        .left = summary(21, 80, 85, 90),
+        .right = summary(21, 90, 95, 100),
+        .relative = relative(21, 800_000, 880_000, 950_000),
     });
 }
 
 test "qualified timing rejects a ratio whose ranges are entirely slower" {
     try std.testing.expectError(error.SlowerThanLlvm, qualifyTiming(.{
-        .left = summary(11, 111, 115, 119),
-        .right = summary(11, 96, 100, 104),
-        .relative = relative(11, 1_100_000, 1_150_000, 1_190_000),
+        .left = summary(21, 111, 115, 119),
+        .right = summary(21, 96, 100, 104),
+        .relative = relative(21, 1_100_000, 1_150_000, 1_190_000),
     }));
 }
 
 test "qualified timing rejects excessive dispersion" {
     try std.testing.expectError(error.ExcessiveTimingDispersion, qualifyTiming(.{
-        .left = summary(11, 70, 100, 130),
-        .right = summary(11, 90, 100, 110),
-        .relative = relative(11, 700_000, 1_000_000, 1_300_000),
+        .left = summary(21, 70, 100, 130),
+        .right = summary(21, 90, 100, 110),
+        .relative = relative(21, 700_000, 1_000_000, 1_300_000),
     }));
 }
 
 test "qualified timing rejects an inconclusive overlap" {
     try std.testing.expectError(error.InconclusiveTiming, qualifyTiming(.{
-        .left = summary(11, 92, 99, 106),
-        .right = summary(11, 95, 100, 105),
-        .relative = relative(11, 950_000, 990_000, 1_050_000),
+        .left = summary(21, 92, 99, 106),
+        .right = summary(21, 95, 100, 105),
+        .relative = relative(21, 950_000, 990_000, 1_050_000),
     }));
 }
 
