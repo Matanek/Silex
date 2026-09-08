@@ -363,6 +363,17 @@ pub fn build(b: *std.Build) void {
     optimizer_oracle_test_step.dependOn(&optimizer_oracle_test_command.step);
     optimizer_gate_step.dependOn(&optimizer_oracle_test_command.step);
 
+    const optimizer_parity_gate_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_parity_gate_command.addArtifactArg(executable);
+    optimizer_parity_gate_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    optimizer_parity_gate_command.addArg("parity-gate");
+    const optimizer_parity_gate_step = b.step(
+        "optimizer-parity-gate",
+        "Run the blocking optimizer parity closure and qualified comparison",
+    );
+    optimizer_parity_gate_step.dependOn(&optimizer_oracle_test_command.step);
+    optimizer_parity_gate_step.dependOn(&optimizer_parity_gate_command.step);
+
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
     const deep_copy_tests = b.addTest(.{

@@ -11,6 +11,7 @@ const LlvmStats = @import("LlvmStats.zig");
 const Metamorphic = @import("Metamorphic.zig");
 const Native = @import("Native.zig");
 const NativeGenerator = @import("NativeGenerator.zig");
+const Parity = @import("Parity.zig");
 const Qualification = @import("Qualification.zig");
 const Registry = @import("Registry.zig");
 const Reducer = @import("Reducer.zig");
@@ -36,6 +37,8 @@ const usage =
     \\  qualify [count] [seed]
     \\                      Verify native Debug/Release regressions and generated scenarios
     \\  gate                Run the complete optimizer qualification before integration
+    \\  parity-audit        Refuse open coverage or LLVM-transposition gaps
+    \\  parity-gate         Run the blocking closure and statistically qualified comparison
     \\
     \\LLVM is a development oracle only. The Silex compiler never consumes its output.
     \\
@@ -67,6 +70,14 @@ fn run(init: std.process.Init) !u8 {
         if (arguments.len != 4) return error.InvalidArguments;
         try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
         try reportRegistry(init.io, allocator, registry);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "parity-audit")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try Registry.auditParity(registry);
+        try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
+        try reportRegistry(init.io, allocator, registry);
+        try Report.heading(init.io, allocator, "optimizer parity registry closed");
         return 0;
     }
     if (std.mem.eql(u8, command, "verify")) {
@@ -108,7 +119,7 @@ fn run(init: std.process.Init) !u8 {
         const samples = if (arguments.len == 5) try std.fmt.parseInt(usize, arguments[4], 10) else 11;
         if (arguments.len > 5 or samples < 5 or samples % 2 == 0) return error.InvalidArguments;
         try Registry.validateOracleEnvironment(allocator, init.io, registry.oracle);
-        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, registry.oracle, samples);
+        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, registry.oracle, samples, false);
         return 0;
     }
     if (std.mem.eql(u8, command, "fuzz")) {
@@ -144,8 +155,32 @@ fn run(init: std.process.Init) !u8 {
         try qualifyNative(init.io, allocator, silex_binary, corpus_directory, 8, 1);
         try fuzz(init.io, allocator, 128, 1);
         try fuzzLlvm(init.io, allocator, registry.oracle, 32, 1);
-        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, registry.oracle, 5);
+        try compareCorpus(init.io, allocator, silex_binary, corpus_directory, registry.oracle, 5, false);
         try Report.heading(init.io, allocator, "optimizer qualification gate passed");
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "parity-gate")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try Registry.auditParity(registry);
+        try Registry.validateOracleEnvironment(allocator, init.io, registry.oracle);
+        try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
+        try reportRegistry(init.io, allocator, registry);
+        try verifyCorpus(init.io, allocator, corpus_directory);
+        try verifyCacheReproducibility(init.io, allocator, silex_binary, corpus_directory);
+        try qualifyMetamorphic(init.io, allocator, silex_binary);
+        try qualifyNative(init.io, allocator, silex_binary, corpus_directory, 8, 1);
+        try fuzz(init.io, allocator, 128, 1);
+        try fuzzLlvm(init.io, allocator, registry.oracle, 32, 1);
+        try compareCorpus(
+            init.io,
+            allocator,
+            silex_binary,
+            corpus_directory,
+            registry.oracle,
+            Parity.minimum_samples,
+            true,
+        );
+        try Report.heading(init.io, allocator, "blocking optimizer parity gate passed");
         return 0;
     }
     std.debug.print("optimizer oracle: unknown command '{s}'\n\n{s}", .{ command, usage });
@@ -880,6 +915,7 @@ fn compareCorpus(
     corpus_directory: []const u8,
     oracle: Registry.Oracle,
     samples: usize,
+    enforce_parity: bool,
 ) !void {
     try std.Io.Dir.cwd().createDirPath(io, output_directory);
     try Report.heading(io, allocator, "Silex Release versus LLVM -O3");
@@ -1021,6 +1057,10 @@ fn compareCorpus(
         if (measurements.left.spreadPpm() > 200_000 or measurements.right.spreadPpm() > 200_000) {
             try Report.line(io, allocator, "  stability: noisy sample set; treat timing as diagnostic", .{});
         }
+        if (enforce_parity) Parity.qualifyTiming(measurements) catch |err| {
+            try Report.line(io, allocator, "  parity: rejected ({t})", .{err});
+            return err;
+        };
         try appendMachineRow(
             &machine_report.writer,
             name,

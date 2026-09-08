@@ -1,5 +1,6 @@
 const std = @import("std");
 const Silex = @import("silex_optimizer_api");
+const Parity = @import("Parity.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -69,7 +70,7 @@ const Pass = struct {
     families: []const []const u8,
 };
 
-const Coverage = struct {
+pub const Coverage = struct {
     id: []const u8,
     state: []const u8,
     owner_part: []const u8,
@@ -146,7 +147,7 @@ const QualificationCase = struct {
     sealed: bool,
 };
 
-const Transposition = struct {
+pub const Transposition = struct {
     family: []const u8,
     verdict: []const u8,
     owner_part: []const u8,
@@ -182,6 +183,12 @@ pub fn audit(manifest: Manifest) !void {
     }
     try auditQualification(manifest.qualification_corpus);
     try auditTransposition(manifest.transposition);
+}
+
+pub fn auditParity(manifest: Manifest) !void {
+    try audit(manifest);
+    try Parity.auditClosedCoverage(manifest.coverage);
+    try Parity.auditClosedTransposition(manifest.transposition);
 }
 
 pub fn validateOracleEnvironment(allocator: Allocator, io: std.Io, oracle: Oracle) !void {
@@ -582,6 +589,39 @@ test "coverage audit rejects a stable entry without its cost proof" {
         .evidence = &.{"case.sx"},
     };
     try std.testing.expectError(error.UnprovedEquivalentEntry, auditCoverage(&.{entry}));
+}
+
+test "parity coverage audit rejects an attributed gap" {
+    const entry: Coverage = .{
+        .id = "known-gap",
+        .state = "gap",
+        .owner_part = "silex-llvm-opt-02",
+        .semantic = true,
+        .cost_model = false,
+        .debug = true,
+        .release = true,
+        .llvm = true,
+        .structure = true,
+        .targets = &.{"arm64"},
+        .evidence = &.{"case.sx"},
+    };
+    const entries = [_]Coverage{entry};
+    try std.testing.expectError(error.OpenCoverageGap, Parity.auditClosedCoverage(entries[0..]));
+}
+
+test "parity transposition audit rejects a missing canonical LLVM family" {
+    const entry: Transposition = .{
+        .family = Parity.required_llvm_families[0],
+        .verdict = "adapted",
+        .owner_part = "silex-llvm-opt-01",
+        .source = "llvm/source",
+        .proof = "executable proof",
+    };
+    const entries = [_]Transposition{entry};
+    try std.testing.expectError(
+        error.MissingRequiredLlvmFamily,
+        Parity.auditClosedTransposition(entries[0..]),
+    );
 }
 
 test "a current hot measurement must satisfy its versioned structural budget" {
