@@ -456,6 +456,7 @@ pub const Instruction = union(enum) {
         left: ValueId,
         right: ValueId,
         checked: bool = true,
+        left_non_negative: bool = false,
     };
 
     pub const Call = struct {

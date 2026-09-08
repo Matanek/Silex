@@ -2955,7 +2955,9 @@ fn encodeConstantDivision(
             if (plan.shift != 0) {
                 try words.append(allocator, A64.arithmeticShiftRightImmediate(.x13, .x13, plan.shift));
             }
-            try words.append(allocator, A64.addLogicalShiftRightRegisters(.x13, .x13, .x13, 63));
+            if (!binary.left_non_negative or divisor < 0) {
+                try words.append(allocator, A64.addLogicalShiftRightRegisters(.x13, .x13, .x13, 63));
+            }
         } else {
             const plan = ConstantDivision.signedPowerOfTwo(divisor).?;
             if (plan.shift == 0) {
@@ -5648,6 +5650,28 @@ test "select ARM64 reciprocal division for adjacent signed and unsigned constant
     try std.testing.expectEqual(A64.arithmeticShiftRightImmediate(.x13, .x13, 19), signed_words.items[6]);
     try std.testing.expectEqual(A64.multiplySubtract(.x2, .x13, .x12, .x0), signed_words.items[signed_words.items.len - 1]);
     try std.testing.expect(std.mem.indexOfScalar(u32, signed_words.items, A64.signedDivide(.x11, .x0, .x1)) == null);
+
+    var nonnegative_instructions = signed_instructions;
+    nonnegative_instructions[1].binary.left_non_negative = true;
+    var nonnegative_function = signed_function;
+    nonnegative_function.instructions = &nonnegative_instructions;
+    var nonnegative_words: std.ArrayList(u32) = .empty;
+    try encodeConstantDivision(
+        allocator,
+        &nonnegative_words,
+        nonnegative_function,
+        &scalar_cache,
+        1,
+        nonnegative_instructions[1].binary,
+        nonnegative_instructions[0].constant_int,
+        null,
+    );
+    try std.testing.expectEqual(nonnegative_words.items.len + 1, signed_words.items.len);
+    try std.testing.expect(std.mem.indexOfScalar(
+        u32,
+        nonnegative_words.items,
+        A64.addLogicalShiftRightRegisters(.x13, .x13, .x13, 63),
+    ) == null);
 
     var unsigned_instructions = signed_instructions;
     unsigned_instructions[0].constant_int.type = .uint;

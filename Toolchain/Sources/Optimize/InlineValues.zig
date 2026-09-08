@@ -419,6 +419,7 @@ fn emitCall(
                 .left = mapped(mapping, value.left),
                 .right = mapped(mapping, value.right),
                 .checked = value.checked,
+                .left_non_negative = value.left_non_negative,
             } });
         },
         .convert => |value| {

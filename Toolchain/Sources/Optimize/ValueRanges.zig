@@ -252,22 +252,23 @@ fn rewriteInstruction(function: Ir.Function, facts: []const Fact, instruction: I
                     break :rewrite .{ .constant_bool = .{ .result = binary.result, .value = value } };
                 }
             }
+            var rewritten = binary;
             if (binary.checked and arithmeticFits(function, facts, binary)) {
-                var unchecked = binary;
-                unchecked.checked = false;
-                break :rewrite .{ .binary = unchecked };
+                rewritten.checked = false;
             }
             if (binary.checked and shiftCountFits(function, facts, binary)) {
-                var unchecked = binary;
-                unchecked.checked = false;
-                break :rewrite .{ .binary = unchecked };
+                rewritten.checked = false;
             }
             if (binary.checked and divisionFits(function, facts, binary)) {
-                var unchecked = binary;
-                unchecked.checked = false;
-                break :rewrite .{ .binary = unchecked };
+                rewritten.checked = false;
             }
-            break :rewrite instruction;
+            if ((binary.operator == .divide or binary.operator == .remainder) and
+                function.value_types[binary.left].isSignedInteger() and facts[binary.left] == .interval and
+                facts[binary.left].interval.minimum >= 0)
+            {
+                rewritten.left_non_negative = true;
+            }
+            break :rewrite .{ .binary = rewritten };
         },
         .convert => |conversion| rewrite: {
             if (!conversion.checked or !conversion.target.isInteger()) break :rewrite instruction;
@@ -638,6 +639,31 @@ test "constant remainder bounds prove dependent arithmetic" {
     const optimized = try optimize(allocator, program);
     try std.testing.expect(!optimized.functions[0].blocks[0].instructions[1].binary.checked);
     try std.testing.expect(!optimized.functions[0].blocks[0].instructions[3].binary.checked);
+}
+
+test "constant signed division records only proven nonnegative dividends" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "nonnegative_dividend",
+        .parameter_types = &.{},
+        .return_type = .int,
+        .value_types = &.{ .int, .int, .int, .int, .int },
+        .blocks = &.{.{
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 0, .bits = 42 } },
+                .{ .constant_int = .{ .result = 1, .bits = 7 } },
+                .{ .binary = .{ .result = 2, .operator = .remainder, .left = 0, .right = 1 } },
+                .{ .constant_int = .{ .result = 3, .bits = @bitCast(@as(i64, -42)) } },
+                .{ .binary = .{ .result = 4, .operator = .remainder, .left = 3, .right = 1 } },
+            },
+            .terminator = .{ .return_value = 2 },
+        }},
+    }} };
+    const optimized = try optimize(allocator, program);
+    try std.testing.expect(optimized.functions[0].blocks[0].instructions[2].binary.left_non_negative);
+    try std.testing.expect(!optimized.functions[0].blocks[0].instructions[4].binary.left_non_negative);
 }
 
 test "constant shift counts remove only proven width checks" {

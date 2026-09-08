@@ -481,6 +481,7 @@ pub const Instruction = union(enum) {
         right: Slot,
         type: Types.Type = .int,
         checked: bool = true,
+        left_non_negative: bool = false,
     };
 
     pub const StringByteAt = struct {

@@ -310,6 +310,7 @@ fn mapInstruction(
             .left = values[value.left],
             .right = values[value.right],
             .checked = value.checked,
+            .left_non_negative = value.left_non_negative,
         } },
         .convert => |value| .{ .convert = .{
             .result = values[value.result],

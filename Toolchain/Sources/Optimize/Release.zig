@@ -2453,6 +2453,7 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .left = canonical(aliases, value.left),
             .right = canonical(aliases, value.right),
             .checked = value.checked,
+            .left_non_negative = value.left_non_negative,
         } },
         .call => |value| .{ .call = .{
             .result = value.result,

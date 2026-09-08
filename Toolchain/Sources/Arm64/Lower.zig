@@ -946,6 +946,7 @@ fn lowerInstruction(
                 .right = layout.values[binary.right].start,
                 .type = function.value_types[binary.left],
                 .checked = binary.checked,
+                .left_non_negative = binary.left_non_negative,
             } };
         },
         .call => |call| call: {

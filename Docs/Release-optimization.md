@@ -389,6 +389,9 @@ division semantics. Exact powers of two use a separate selection: unsigned
 quotients and remainders become a shift or mask, while signed quotients add the
 sign bias required for truncation toward zero before the arithmetic shift and
 signed remainders reuse that quotient. A negative divisor negates the quotient.
+When range analysis proves a signed dividend non-negative and the constant
+divisor positive, ARM64 omits the final quotient sign correction; all other
+signed ranges keep it.
 Checked division or remainder by `-1` retains the ordinary path and its minimum
 value overflow guard; an earlier range proof may make the same operation
 eligible once it is unchecked. Debug and constants not covered by either
