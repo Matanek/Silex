@@ -86,13 +86,14 @@ pub fn optimize(
                         continue;
 
                     var updated_load = machine_load;
-                    updated_load.forwarded_result = machine_result.start;
                     updated_load.forwarded_function = machine_call.function;
                     instructions[load_index] = .{ .collection_load = updated_load };
                     var updated_call = machine_call;
+                    updated_call.result = machine_load.result;
                     updated_call.result_forwarded = true;
                     instructions[call_index] = .{ .call = updated_call };
                     var updated_replace = machine_replace;
+                    updated_replace.replacement = machine_load.result;
                     updated_replace.forwarded_replacement = machine_call.function;
                     instructions[replace_index] = .{ .collection_replace = updated_replace };
                     changed = true;
@@ -422,11 +423,11 @@ test "forward a disjoint checked view load into an aggregate call result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const values = try testPrograms(arena.allocator(), 0);
-    try std.testing.expectEqual(@as(Machine.Slot, 10), values[2].instructions[3].call.result.?.start);
     const result = try optimize(arena.allocator(), values[0], values[1], values[2]);
-    try std.testing.expectEqual(@as(Machine.Slot, 10), result.instructions[1].collection_load.forwarded_result.?);
     try std.testing.expectEqual(@as(Machine.FunctionId, 0), result.instructions[1].collection_load.forwarded_function.?);
+    try std.testing.expectEqual(@as(Machine.Slot, 7), result.instructions[3].call.result.?.start);
     try std.testing.expect(result.instructions[3].call.result_forwarded);
+    try std.testing.expectEqual(@as(Machine.Slot, 7), result.instructions[5].collection_replace.replacement.start);
     try std.testing.expectEqual(@as(Machine.FunctionId, 0), result.instructions[5].collection_replace.forwarded_replacement.?);
 }
 
@@ -435,8 +436,9 @@ test "retain aggregate temporaries when the input can alias the destination" {
     defer arena.deinit();
     const values = try testPrograms(arena.allocator(), 2);
     const result = try optimize(arena.allocator(), values[0], values[1], values[2]);
-    try std.testing.expect(result.instructions[1].collection_load.forwarded_result == null);
     try std.testing.expect(result.instructions[1].collection_load.forwarded_function == null);
+    try std.testing.expectEqual(@as(Machine.Slot, 10), result.instructions[3].call.result.?.start);
     try std.testing.expect(!result.instructions[3].call.result_forwarded);
+    try std.testing.expectEqual(@as(Machine.Slot, 10), result.instructions[5].collection_replace.replacement.start);
     try std.testing.expect(result.instructions[5].collection_replace.forwarded_replacement == null);
 }

@@ -1496,7 +1496,7 @@ fn encodeFunction(
                 try words.append(allocator, storeStack(.x11, test_value.result));
             },
             .collection_load => |access| load: {
-                if (access.forwarded_result) |forwarded_result| if (access.forwarded_function) |forwarded_function| if (forwarded_function < infallible_functions.len and
+                if (access.forwarded_function) |forwarded_function| if (forwarded_function < infallible_functions.len and
                     infallible_functions[forwarded_function])
                 {
                     try ListRuntime.emitReference(
@@ -1509,7 +1509,7 @@ fn encodeFunction(
                         program,
                         function,
                         .{
-                            .result = forwarded_result,
+                            .result = access.result.start,
                             .collection = access.collection,
                             .reference = null,
                             .index = access.index,
