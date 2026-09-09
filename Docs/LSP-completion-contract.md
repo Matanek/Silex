@@ -77,11 +77,18 @@ From `Silex/Toolchain`, run:
 ```text
 zig build test-lsp
 zig build check
+zig build benchmark-lsp-completion -- 101
 ```
 
 The ordinary `check` step already depends on the LSP suite. A change to the
 parser catalogue, compiler enums, registry schema, or protected behaviour is
 therefore rejected by the normal Silex validation path.
+
+The benchmark remains separate from `check`: it validates the expected member
+for every sample, then reports fresh, warmed, and edited-overlay latency,
+dispersion, and request-arena backing allocations. Its committed observation is
+documented under `Toolchain/Benchmarks/LspCompletion`; timing values are
+comparison data, not nondeterministic test thresholds.
 
 During construction of the contract, `assigned_gap` rows are allowed only with
 an owner and an exact reproduction. Release qualification requires the count

@@ -426,6 +426,30 @@ pub fn build(b: *std.Build) void {
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");
     lsp_test_step.dependOn(&lsp_test_command.step);
 
+    const lsp_completion_benchmark_module = b.createModule(.{
+        .root_source_file = b.path("Tools/LspCompletionBenchmark/Main.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    lsp_completion_benchmark_module.addOptions("build_options", build_options);
+    const lsp_benchmark_api_module = b.createModule(.{
+        .root_source_file = b.path("Sources/LspBenchmarkApi.zig"),
+    });
+    lsp_benchmark_api_module.addOptions("build_options", build_options);
+    lsp_completion_benchmark_module.addImport("silex_lsp", lsp_benchmark_api_module);
+    const lsp_completion_benchmark = b.addExecutable(.{
+        .name = "silex-lsp-completion-benchmark",
+        .root_module = lsp_completion_benchmark_module,
+    });
+    const lsp_completion_benchmark_command = b.addRunArtifact(lsp_completion_benchmark);
+    lsp_completion_benchmark_command.addDirectoryArg(b.path("Benchmarks/LspCompletion/Fixture"));
+    if (b.args) |args| lsp_completion_benchmark_command.addArgs(args);
+    const lsp_completion_benchmark_step = b.step(
+        "benchmark-lsp-completion",
+        "Measure fresh, warm, and edited-overlay completion requests",
+    );
+    lsp_completion_benchmark_step.dependOn(&lsp_completion_benchmark_command.step);
+
     const check_step = b.step("check", "Build and test the toolchain");
     // Validation must never replace the compiler used by `silex` or Zed.
     // The language-test command already builds this executable in the

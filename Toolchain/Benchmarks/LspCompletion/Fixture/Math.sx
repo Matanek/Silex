@@ -1,0 +1,4 @@
+public struct Vec2 {
+    func length() float { return 1.0 }
+    func normalized() Vec2 { return self }
+}
