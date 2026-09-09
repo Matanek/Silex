@@ -1,29 +1,50 @@
 use STD.Math
 
-struct Direction {
-    var x:float
-    var y:float
+struct Body {
+    var velocity_x:float
+    var velocity_y:float
+    var angular_velocity:float
+    var position_x:float
+    var position_y:float
+    var cosine:float
+    var sine:float
 }
 
 // The system sqrt boundary is pure in Silex's observable model. Keeping that
 // proof in portable IR lets this bounded branching helper inline at a hot site
 // without admitting arbitrary native calls or larger pressure-heavy helpers.
-func normalize(direction:&Direction) {
-    let magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y)
+func advance(body:&Body) {
+    let step:float = 1.0 / 240.0
+    let angle = step * body.angular_velocity
+    let cosine = body.cosine - angle * body.sine
+    let sine = body.sine + angle * body.cosine
+    let magnitude = Math.sqrt(sine * sine + cosine * cosine)
     var inverse = 0.0
     if magnitude > 0.0 { inverse = 1.0 / magnitude }
-    direction.x *= inverse
-    direction.y *= inverse
+    body.cosine = cosine * inverse
+    body.sine = sine * inverse
+    body.position_x += step * body.velocity_x
+    body.position_y += step * body.velocity_y
 }
 
 func main() {
-    var direction = Direction(x:3.0, y:4.0)
+    var body = Body(
+        velocity_x:3.0,
+        velocity_y:4.0,
+        angular_velocity:0.5,
+        position_x:0.0,
+        position_y:0.0,
+        cosine:0.6,
+        sine:0.8
+    )
     var step = 0
     while step < 16 {
-        normalize(direction)
+        advance(body)
         step++
     }
-    assert(direction.x > 0.59 && direction.x < 0.61)
-    assert(direction.y > 0.79 && direction.y < 0.81)
+    assert(body.position_x > 0.19 && body.position_x < 0.21)
+    assert(body.position_y > 0.26 && body.position_y < 0.28)
+    assert(body.cosine > 0.59 && body.cosine < 0.61)
+    assert(body.sine > 0.79 && body.sine < 0.81)
     print("pure math reference call preserved")
 }

@@ -42,7 +42,7 @@ pub const Summary = struct {
 /// summary with their already-bounded expansion cost.
 pub fn analyze(allocator: Allocator, program: Ir.Program) ![]Summary {
     const summaries = try allocator.alloc(Summary, program.functions.len);
-    for (program.functions, 0..) |function, index| summaries[index] = localSummary(program, function);
+    for (program.functions, 0..) |function, index| summaries[index] = try localSummary(allocator, program, function);
 
     var changed = true;
     while (changed) {
@@ -110,9 +110,18 @@ pub fn isHotBlock(function: Ir.Function, block_index: usize) bool {
     return false;
 }
 
-fn localSummary(program: Ir.Program, function: Ir.Function) Summary {
+fn localSummary(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Summary {
     var result: Summary = .{ .blocks = function.blocks.len };
-    for (function.value_types) |value_type| {
+    const materialized = try allocator.alloc(bool, function.value_types.len);
+    defer allocator.free(materialized);
+    @memset(materialized, false);
+    const input_count = @min(function.capture_types.len + function.parameter_types.len, materialized.len);
+    @memset(materialized[0..input_count], true);
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        if (instructionResult(instruction)) |value| if (value < materialized.len) materialized[value] = true;
+    };
+    for (function.value_types, materialized) |value_type, present| {
+        if (!present) continue;
         if (value_type.isNumeric() or value_type == .bool or value_type == .address) {
             result.scalar_values += 1;
         } else result.aggregate_values += 1;
@@ -130,6 +139,33 @@ fn localSummary(program: Ir.Program, function: Ir.Function) Summary {
         }
     }
     return result;
+}
+
+fn instructionResult(instruction: Ir.Instruction) ?Ir.ValueId {
+    return switch (instruction) {
+        .class_retain,
+        .class_drop,
+        .list_retain,
+        .list_drop,
+        .string_retain,
+        .string_drop,
+        .global_store,
+        .local_store,
+        .address_store,
+        .reference_store,
+        .print,
+        .assert,
+        .mutex_lock,
+        .mutex_unlock,
+        => null,
+        .list_edit => |value| value.result,
+        .call => |value| value.result,
+        .indirect_call => |value| value.result,
+        .boundary_call => |value| value.result,
+        .boundary_indirect_call => |value| value.result,
+        .dynamic_call => |value| value.result,
+        inline else => |value| value.result,
+    };
 }
 
 fn classifyInstruction(program: Ir.Program, summary: *Summary, instruction: Ir.Instruction) void {
@@ -317,6 +353,22 @@ test "only proven pure direct boundaries are transparent to call summaries" {
     });
     try std.testing.expect(!pure[0].effects.crosses_boundary);
     try std.testing.expect(!pure[0].may_fail);
+}
+
+test "call pressure excludes values removed by earlier optimizer passes" {
+    const instructions = [_]Ir.Instruction{.{ .copy = .{ .result = 63, .operand = 0 } }};
+    const value_types: [64]Ir.Type = @splat(.float32);
+    const functions = [_]Ir.Function{.{
+        .name = "sparse_values",
+        .parameter_types = &.{.float32},
+        .return_type = .float32,
+        .value_types = &value_types,
+        .blocks = &.{.{ .instructions = &instructions, .terminator = .{ .return_value = 63 } }},
+    }};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const summaries = try analyze(arena.allocator(), .{ .functions = &functions });
+    try std.testing.expectEqual(@as(usize, 2), summaries[0].scalar_values);
 }
 
 test "backedges classify only their loop range as hot" {
