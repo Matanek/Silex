@@ -1973,6 +1973,10 @@ fn encodeFunction(
                         continue;
                     }
                 }
+                // Lowered CFG blocks remain adjacent when a conditional arm
+                // joins the next block. Falling through is already the exact
+                // jump semantics and avoids one branch in every such diamond.
+                if (jumpFallsThrough(instruction_index, target)) continue;
                 try control_fixups.append(allocator, .{ .at = words.items.len, .target = target, .width = .imm26 });
                 try words.append(allocator, branch());
             },
@@ -3784,6 +3788,16 @@ fn instructionIsInsideLoop(instructions: []const Machine.Instruction, index: usi
         else => {},
     };
     return false;
+}
+
+fn jumpFallsThrough(instruction_index: usize, target: usize) bool {
+    return target == instruction_index + 1;
+}
+
+test "omit an ARM64 jump to the adjacent machine instruction" {
+    try std.testing.expect(jumpFallsThrough(8, 9));
+    try std.testing.expect(!jumpFallsThrough(8, 7));
+    try std.testing.expect(!jumpFallsThrough(8, 10));
 }
 
 fn comparisonHasElidedCachedRight(

@@ -896,7 +896,11 @@ fn encodeFunction(
                 try bytes.appendSlice(allocator, &.{ 0x31, 0xc0, 0x31, 0xd2 });
                 try appendEpilogueJump(allocator, bytes, &epilogue_fixups);
             },
-            .jump => |target| try appendBranch(allocator, bytes, &branches, target),
+            // Lowered CFG blocks remain adjacent when a conditional arm joins
+            // the next block. Native fallthrough already implements the jump.
+            .jump => |target| if (!jumpFallsThrough(instruction_index, target)) {
+                try appendBranch(allocator, bytes, &branches, target);
+            },
             .branch => |branch| {
                 try emitLoadValue(allocator, bytes, function.register_slots, .rax, branch.condition);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
@@ -3203,6 +3207,16 @@ fn appendBranch(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.Ar
     const displacement_at = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     try fixups.append(allocator, .{ .displacement_at = displacement_at, .instruction = instruction });
+}
+
+fn jumpFallsThrough(instruction_index: usize, target: usize) bool {
+    return target == instruction_index + 1;
+}
+
+test "omit an X64 jump to the adjacent machine instruction" {
+    try std.testing.expect(jumpFallsThrough(8, 9));
+    try std.testing.expect(!jumpFallsThrough(8, 7));
+    try std.testing.expect(!jumpFallsThrough(8, 10));
 }
 
 fn appendCall(allocator: Allocator, bytes: *std.ArrayList(u8), calls: *std.ArrayList(CallFixup), function: usize) Allocator.Error!void {
