@@ -536,7 +536,10 @@ pub const Budgets = struct {
     pub const server_initializations: usize = 1;
     pub const mutation_cases: usize = 33;
     pub const mutation_score: usize = 98;
-    pub const max_duration_ns: u64 = 5 * std.time.ns_per_s;
+    // The isolated ReleaseSafe baseline is about 250 ms. Keep a generous wall-clock
+    // margin for shared CI hosts and concurrent `zig build check` test processes while
+    // still rejecting a campaign that has become unsuitable for the ordinary portal.
+    pub const max_duration_ns: u64 = 15 * std.time.ns_per_s;
     pub const max_requested_memory: usize = 64 * 1024 * 1024;
 };
 
@@ -758,6 +761,19 @@ fn expectBudgets(report: Report) !void {
     try std.testing.expectEqual(Budgets.mutation_score, report.mutation_score);
 }
 
+fn expectDurationWithinBudget(run: []const u8, duration_ns: u64) !void {
+    if (duration_ns <= Budgets.max_duration_ns) return;
+    std.debug.print(
+        "metamorphic campaign {s} run took {d:.3} s (budget {d:.3} s)\n",
+        .{
+            run,
+            @as(f64, @floatFromInt(duration_ns)) / std.time.ns_per_s,
+            @as(f64, @floatFromInt(Budgets.max_duration_ns)) / std.time.ns_per_s,
+        },
+    );
+    return error.TestUnexpectedResult;
+}
+
 test "metamorphic mutation campaign is deterministic and stays within pinned budgets" {
     const first_start = std.Io.Clock.awake.now(std.testing.io);
     const first = try runCampaign();
@@ -767,8 +783,8 @@ test "metamorphic mutation campaign is deterministic and stays within pinned bud
     const second_duration: u64 = @intCast(second_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toNanoseconds());
     try expectBudgets(first);
     try expectBudgets(second);
-    try std.testing.expect(first_duration <= Budgets.max_duration_ns);
-    try std.testing.expect(second_duration <= Budgets.max_duration_ns);
+    try expectDurationWithinBudget("first", first_duration);
+    try expectDurationWithinBudget("second", second_duration);
     try std.testing.expectEqualDeep(first, second);
 }
 
