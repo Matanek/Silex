@@ -343,12 +343,8 @@ pub const Instruction = union(enum) {
         element_stride: u12 = 0,
         header: usize,
         tail: usize,
-        forwarded_result: ?ForwardedAggregateResult = null,
-    };
-
-    pub const ForwardedAggregateResult = struct {
-        result: Slot,
-        function: FunctionId,
+        forwarded_result: ?Slot = null,
+        forwarded_function: ?FunctionId = null,
     };
 
     pub const CollectionReference = struct {
@@ -947,10 +943,12 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.result);
                     try requireSpan(function, value.collection);
                     try requireSlot(function, value.index);
-                    if (value.forwarded_result) |forwarding| {
-                        try requireSlot(function, forwarding.result);
+                    if ((value.forwarded_result == null) != (value.forwarded_function == null))
+                        return error.InvalidMachineProgram;
+                    if (value.forwarded_result) |forwarded_result| {
+                        try requireSlot(function, forwarded_result);
                         if (!value.dynamic or !value.view or !value.checked or
-                            value.result.width == 0 or forwarding.function >= program.functions.len)
+                            value.result.width == 0 or value.forwarded_function.? >= program.functions.len)
                             return error.InvalidMachineProgram;
                     }
                     if ((!value.dynamic and (!value.collection.aggregate or value.collection.width != value.result.width * value.count)) or
