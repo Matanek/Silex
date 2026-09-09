@@ -488,7 +488,10 @@ fn encodeFunction(
                 try emitLoadValue(allocator, bytes, function.register_slots, .rax, copy.operand);
                 try emitStoreValue(allocator, bytes, function.register_slots, .rax, copy.result);
             },
-            .copy_range => |copy| try emitCopyRange(allocator, bytes, copy.result, copy.operand),
+            .copy_range => |copy| {
+                if (!spanHasUse(function.instructions, copy.result)) continue;
+                try emitCopyRange(allocator, bytes, copy.result, copy.operand);
+            },
             .deep_copy => |copy| {
                 if (copy.operand.width != copy.result.width) return error.InvalidMachineProgram;
                 const value_byte_count = @as(u32, copy.operand.width) * Machine.slot_size;
@@ -1010,6 +1013,13 @@ fn slotUsedOnlyAt(instructions: []const Machine.Instruction, slot: Machine.Slot,
         if (index != allowed and ResidenceLiveness.instructionUses(instruction, slot)) return false;
     }
     return ResidenceLiveness.instructionUses(instructions[allowed], slot);
+}
+
+fn spanHasUse(instructions: []const Machine.Instruction, span: Machine.Span) bool {
+    for (0..span.width) |leaf| {
+        if (ResidenceLiveness.instructionUses(instructions, @as(usize, span.start) + leaf)) return true;
+    }
+    return false;
 }
 
 fn controlTargetsInstruction(instructions: []const Machine.Instruction, target: usize) bool {

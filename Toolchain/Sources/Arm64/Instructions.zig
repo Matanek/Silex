@@ -341,6 +341,14 @@ pub fn multiply(destination: Register, left: Register, right: Register) u32 {
     return 0x9b007c00 | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
 }
 
+pub fn multiplyAdd(destination: Register, left: Register, right: Register, accumulator: Register) u32 {
+    return 0x9b000000 |
+        (registerBits(right) << 16) |
+        (registerBits(accumulator) << 10) |
+        (registerBits(left) << 5) |
+        registerBits(destination);
+}
+
 pub fn signedMultiplyHigh(destination: Register, left: Register, right: Register) u32 {
     return 0x9b407c00 | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
 }
@@ -750,6 +758,8 @@ test "encode horizontal float32 pair reduction" {
 }
 
 test "encode scalar fused multiply subtraction variants" {
+    try std.testing.expectEqual(@as(u32, 0x9b020c20), multiplyAdd(.x0, .x1, .x2, .x3));
+    try std.testing.expectEqual(@as(u32, 0x9b058c83), multiplySubtract(.x3, .x4, .x5, .x3));
     try std.testing.expectEqual(@as(u32, 0x1f018800), floatMultiplySubtract(.x0, .x0, .x1, .x2, false));
     try std.testing.expectEqual(@as(u32, 0x1f218800), floatNegatedMultiplySubtract(.x0, .x0, .x1, .x2, false));
     try std.testing.expectEqual(@as(u32, 0x1f418800), floatMultiplySubtract(.x0, .x0, .x1, .x2, true));

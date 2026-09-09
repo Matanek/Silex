@@ -2,6 +2,7 @@ const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const FloatLaneAllocation = @import("../Arm64/RegisterAllocation.zig");
 const MemorySchedule = @import("../Arm64/MemorySchedule.zig");
+const AggregateCallForwarding = @import("../Arm64/AggregateCallForwarding.zig");
 
 const Allocator = std.mem.Allocator;
 // These registers are volatile in both the System V and Windows X64 ABIs.
@@ -23,16 +24,16 @@ pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocato
     var result = program;
     const functions = try allocator.alloc(Machine.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
-        functions[index] = function;
-        functions[index].register_slots = try allocate(allocator, function);
+        functions[index] = try AggregateCallForwarding.optimize(allocator, function);
+        functions[index].register_slots = try allocate(allocator, functions[index]);
         functions[index].float_lane_slots = try FloatLaneAllocation.allocateFloatLanePairsFor(
             allocator,
-            function,
+            functions[index],
             .x64,
             &float_lane_registers,
         );
-        functions[index].stack_slot_base = residentStackPrefix(function, functions[index].register_slots);
-        functions[index].frame_size = try Machine.frameSize(function.slot_count - functions[index].stack_slot_base);
+        functions[index].stack_slot_base = residentStackPrefix(functions[index], functions[index].register_slots);
+        functions[index].frame_size = try Machine.frameSize(functions[index].slot_count - functions[index].stack_slot_base);
     }
     result.functions = functions;
     try Machine.validate(result);

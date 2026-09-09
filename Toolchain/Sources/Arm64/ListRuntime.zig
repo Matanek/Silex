@@ -1120,8 +1120,7 @@ fn addElementOffset(
         return;
     }
     try immediate(allocator, words, .x11, byte_width);
-    try words.append(allocator, A64.multiply(.x9, index, .x11));
-    try words.append(allocator, A64.addRegisters(base, base, .x9));
+    try words.append(allocator, A64.multiplyAdd(base, index, .x11, base));
 }
 
 fn emitElementAddress(
@@ -1142,8 +1141,7 @@ fn emitElementAddress(
         return;
     }
     try immediate(allocator, words, .x11, byte_width);
-    try words.append(allocator, A64.multiply(.x9, index, .x11));
-    try words.append(allocator, A64.addRegisters(destination, base, .x9));
+    try words.append(allocator, A64.multiplyAdd(destination, index, .x11, base));
 }
 
 fn residentOrLoadedValue(
