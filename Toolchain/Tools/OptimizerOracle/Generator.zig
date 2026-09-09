@@ -49,6 +49,10 @@ pub const StructuralContract = union(enum) {
         unchecked: u16,
         checked: u16,
     },
+    arm64_aggregate_parameter_residence: struct {
+        function: []const u8,
+        minimum: u16,
+    },
     native_loop_residence: struct {
         function: []const u8,
         arm64_minimum: u16,
@@ -284,6 +288,14 @@ pub const regressions = [_]RegressionEntry{
             .function = "shift",
             .unchecked = 0,
             .checked = 2,
+        } },
+    },
+    .{
+        .name = "Regressions/AggregateParameterResidence.sx",
+        .concern = "read-only aggregate parameters keep scalar leaves in ARM64 registers unless storage is required",
+        .contract = .{ .arm64_aggregate_parameter_residence = .{
+            .function = "evaluate",
+            .minimum = 12,
         } },
     },
     .{

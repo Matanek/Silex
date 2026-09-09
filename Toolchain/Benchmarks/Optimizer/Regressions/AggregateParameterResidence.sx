@@ -1,0 +1,29 @@
+struct Inputs {
+    var a:float
+    var b:float
+    var c:float
+    var d:float
+    var e:float
+    var f:float
+    var g:float
+    var h:float
+    var i:float
+    var j:float
+    var k:float
+    var l:float
+}
+
+// A read-only aggregate keeps its scalar leaves eligible for registers. Uses
+// that require a stable aggregate address remain pinned by the backend.
+func evaluate(input:@Inputs) float {
+    return input.a + input.b * 2.0 + input.c * 3.0 + input.d * 4.0 +
+        input.e * 5.0 + input.f * 6.0 + input.g * 7.0 + input.h * 8.0 +
+        input.i * 9.0 + input.j * 10.0 + input.k * 11.0 + input.l * 12.0
+}
+
+func main() {
+    let input = Inputs(a:1.0, b:2.0, c:3.0, d:4.0, e:5.0, f:6.0,
+        g:7.0, h:8.0, i:9.0, j:10.0, k:11.0, l:12.0)
+    assert(evaluate(input) == 650.0)
+    print("aggregate parameter leaves preserved")
+}

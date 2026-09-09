@@ -108,6 +108,11 @@ pub const Evidence = union(enum) {
         unchecked: usize,
         checked: usize,
     },
+    aggregate_parameter_residence: struct {
+        function: []const u8,
+        resident: usize,
+        total: usize,
+    },
     loop_residence: struct {
         function: []const u8,
         arm64_resident: usize,
@@ -219,6 +224,12 @@ pub fn verifyContract(
             requirement.function,
             requirement.unchecked,
             requirement.checked,
+            differential.optimized_ir,
+        ),
+        .arm64_aggregate_parameter_residence => |requirement| try verifyArm64AggregateParameterResidence(
+            allocator,
+            requirement.function,
+            requirement.minimum,
             differential.optimized_ir,
         ),
         .native_loop_residence => |requirement| try verifyNativeLoopResidence(
@@ -868,6 +879,36 @@ fn verifyNativeLoopResidence(
         .arm64_resident = arm64_resident,
         .x64_resident = x64_resident,
         .total = arm64_function.slot_count,
+    } };
+}
+
+fn verifyArm64AggregateParameterResidence(
+    allocator: std.mem.Allocator,
+    function_name: []const u8,
+    minimum: u16,
+    program: Silex.Ir.Program,
+) !Evidence {
+    const arm64_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
+    const function = findMachineFunction(arm64_program, function_name) orelse
+        return error.ContractFunctionMissing;
+    var resident: usize = 0;
+    var total: usize = 0;
+    for (function.parameters) |parameter| {
+        if (!parameter.aggregate) continue;
+        for (0..parameter.width) |leaf| {
+            const slot = @as(usize, parameter.start) + leaf;
+            total += 1;
+            resident += @intFromBool(function.register_slots[slot] != null or
+                function.float_register_slots[slot] != null or
+                function.float_lane_slots[slot] != null);
+        }
+    }
+    if (total == 0 or resident < minimum)
+        return error.ExpectedArm64AggregateParameterResidenceMissing;
+    return .{ .aggregate_parameter_residence = .{
+        .function = function_name,
+        .resident = resident,
+        .total = total,
     } };
 }
 

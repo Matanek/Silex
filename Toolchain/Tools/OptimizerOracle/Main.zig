@@ -658,6 +658,12 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
             "    contract: {s} ARM64 reference cursors unchecked={d}, checked={d}",
             .{ cursors.function, cursors.unchecked, cursors.checked },
         ),
+        .aggregate_parameter_residence => |residence| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} ARM64 aggregate parameter residence {d}/{d}",
+            .{ residence.function, residence.resident, residence.total },
+        ),
         .loop_residence => |residence| try Report.line(
             io,
             allocator,

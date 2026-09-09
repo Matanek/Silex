@@ -127,7 +127,14 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             for (0..parameter.width) |leaf| {
                 touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
             }
-        } else if (parameter.aggregate or parameter.width != 1) {
+        } else if (parameter.aggregate) {
+            // Aggregate arguments arrive through a stable ABI pointer. Let
+            // scalar leaves participate in coloring; operations that need the
+            // aggregate's address or whole storage pin them again below.
+            for (0..parameter.width) |leaf| {
+                touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
+            }
+        } else if (parameter.width != 1) {
             forceSpan(parameter, forced);
         } else touch(parameter.start, 0, first, last, weights, 1);
     }
@@ -1528,6 +1535,57 @@ test "collection view parameters and scalar accumulators use registers" {
     try std.testing.expect(result.residences[4] != null);
     try std.testing.expect(result.float_residences[5] != null);
     try std.testing.expect(result.float_residences[6] != null);
+}
+
+test "unaddressed aggregate parameter leaves use scalar float registers" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 4, .bits = 0x3f800000 } },
+        .{ .binary = .{ .result = 5, .operator = .add, .left = 0, .right = 4, .type = .float32 } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 1, .right = 4, .type = .float32 } },
+        .{ .binary = .{ .result = 7, .operator = .add, .left = 2, .right = 4, .type = .float32 } },
+        .{ .binary = .{ .result = 8, .operator = .add, .left = 3, .right = 4, .type = .float32 } },
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "aggregate_parameter_leaves",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 4, .aggregate = true }},
+        .return_type = .void,
+        .slot_count = 9,
+        .frame_size = try Machine.frameSize(9),
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+    for (0..4) |slot| try std.testing.expect(result.float_residences[slot] != null or
+        result.float_lane_residences[slot] != null);
+}
+
+test "addressed aggregate parameter leaves remain stack resident" {
+    const instructions = [_]Machine.Instruction{
+        .{ .local_address = .{ .result = 4, .local = 0, .width = 4 } },
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "addressed_aggregate_parameter",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 4, .aggregate = true }},
+        .return_type = .void,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+    for (0..4) |slot| {
+        try std.testing.expectEqual(@as(?u5, null), result.residences[slot]);
+        try std.testing.expectEqual(@as(?u5, null), result.float_residences[slot]);
+        try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[slot]);
+    }
 }
 
 test "numeric conversion operands and results stay in their register banks" {
