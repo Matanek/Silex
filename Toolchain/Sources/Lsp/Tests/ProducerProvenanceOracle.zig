@@ -279,12 +279,19 @@ test "ECS query binding uses the same compiler-backed member oracle" {
         },
         .{ .path = "GFX/Module/ECS/@Module.sx", .source =
         \\public use GFX.ECS.Entity.Entity
-        \\public use GFX.ECS.Position.Position
+        \\public use GFX.ECS.Vec2.Vec2
         \\public use GFX.ECS.World.World
         \\public use GFX.ECS.Query.Query
         },
         .{ .path = "GFX/Module/ECS/Entity.sx", .source = "public struct Entity { let index:int }" },
-        .{ .path = "GFX/Module/ECS/Position.sx", .source = "public struct Position { public func paint() {} }" },
+        .{ .path = "GFX/Module/ECS/Vec2.sx", .source =
+        \\public struct Vec2 {
+        \\    public var x:float
+        \\    public var y:float
+        \\    public func length() float { return 0.0 }
+        \\    private func storage() int { return 0 }
+        \\}
+        },
         .{ .path = "GFX/Module/ECS/ComponentPool.sx", .source =
         \\use GFX.ECS.Entity.Entity
         \\public struct ComponentPool<T> {
@@ -330,8 +337,8 @@ test "ECS query binding uses the same compiler-backed member oracle" {
     const canonical =
         \\use GFX.Application
         \\use GFX.ECS
-        \\func inspect(query:ECS.Query<(ECS.Entity, @GFX.ECS.Position)>) {
-        \\    for (entity, position) in query { position.paint() }
+        \\func inspect(query:ECS.Query<(ECS.Entity, @GFX.ECS.Vec2)>) {
+        \\    for (entity, position) in query { print(position.x) }
         \\}
         \\func main() {
         \\    var application = Application()
@@ -342,7 +349,7 @@ test "ECS query binding uses the same compiler-backed member oracle" {
     const partial =
         \\use GFX.Application
         \\use GFX.ECS
-        \\func inspect(query:ECS.Query<(ECS.Entity, @GFX.ECS.Position)>) {
+        \\func inspect(query:ECS.Query<(ECS.Entity, @GFX.ECS.Vec2)>) {
         \\    for (entity, position) in query { position.<|> }
         \\}
         \\func main() {
@@ -360,7 +367,7 @@ test "ECS query binding uses the same compiler-backed member oracle" {
     const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(main_path);
-    const expected = try Oracle.publicInstanceMemberFromProgram(allocator, compilation.ast, "Position", "paint");
+    const expected_labels = try Oracle.publicInstanceMembersFromProgram(allocator, compilation.ast, "Vec2");
 
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
@@ -393,14 +400,19 @@ test "ECS query binding uses the same compiler-backed member oracle" {
             },
         );
     }
-    try Support.expectItem(.{
-        .label = expected.name,
-        .kind = expected.kind,
-        .detail = expected.detail,
-        .insert_text = expected.insert_text,
-        .insert_text_format = expected.insert_text_format,
-    }, actual);
-    try Support.expectExactLabels(&.{"paint"}, actual);
+    for (expected_labels) |label| {
+        const member = try Oracle.publicInstanceMemberFromProgram(allocator, compilation.ast, "Vec2", label);
+        try Support.expectItem(.{
+            .label = member.name,
+            .kind = member.kind,
+            .detail = member.detail,
+            .insert_text = member.insert_text,
+            .insert_text_format = member.insert_text_format,
+        }, actual);
+    }
+    try std.testing.expectEqual(expected_labels.len, actual.len);
+    for (expected_labels) |label| try Support.expectPresent(label, actual);
+    try Support.expectAbsent("storage", actual);
     try Support.expectNoDuplicates(actual);
 
     const recovery_mutations = [_][]const u8{

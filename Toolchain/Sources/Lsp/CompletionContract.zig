@@ -1189,7 +1189,7 @@ fn assertAstFieldDecisions(comptime T: type, comptime decisions: []const AstFiel
     }
 }
 
-fn hasScenario(comptime identifier: []const u8) bool {
+pub fn hasScenario(comptime identifier: []const u8) bool {
     inline for (scenarios) |scenario| if (std.mem.eql(u8, scenario.id, identifier)) return true;
     return false;
 }

@@ -159,3 +159,47 @@ test "sealed corpus stays equal to the independent semantic oracle on first qual
         try Support.expectEqualItems(actual, repeated);
     }
 }
+
+test "Canvas constructor cascade stays semantic beside erroneous neighbours" {
+    const canonical =
+        \\public class Canvas {
+        \\    public func fill() Canvas { return self }
+        \\    public func stroke() Canvas { return self }
+        \\    private func flush_internal() {}
+        \\}
+        \\func main() { Canvas()..fill()..stroke() }
+    ;
+    const partial =
+        \\public class Canvas {
+        \\    public func fill() Canvas { return self }
+        \\    public func stroke() Canvas { return self }
+        \\    private func flush_internal() {}
+        \\}
+        \\func main() { Canvas()..<|> }
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const expected = try Oracle.publicInstanceMembers(allocator, canonical, "Canvas");
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    const uri = "file:///Sealed-Canvas-Cascade.sx";
+    const clean = try Support.serverCompletionAfterTrigger(&server, allocator, uri, partial, ".");
+    try Support.expectExactLabels(expected, clean);
+    try Support.expectAbsent("flush_internal", clean);
+    try Support.expectNoDuplicates(clean);
+
+    const recovery_mutations = [_][]const u8{
+        try std.fmt.allocPrint(allocator, "// Canvas 🙂\n{s}", .{partial}),
+        try std.fmt.allocPrint(allocator, "func neighbour() {{ if }}\n{s}", .{partial}),
+        try std.fmt.allocPrint(allocator, "{s}\nfunc broken( {{ }}", .{partial}),
+    };
+    for (recovery_mutations, 0..) |mutation, index| {
+        const marked = try Support.removeMarker(allocator, mutation);
+        try Support.changeDocument(&server, allocator, uri, @intCast(index + 2), marked.text);
+        const recovered = try Support.serverCompletionInOpenDocumentAfterTrigger(&server, allocator, uri, marked, ".");
+        try Support.expectEqualItems(clean, recovered);
+        try Support.expectNoDuplicates(recovered);
+    }
+}

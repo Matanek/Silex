@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("../../Ast.zig");
 const FrontendModule = @import("../../Frontend.zig");
+const ParserModule = @import("../../Parser.zig");
 
 pub const Parameter = struct {
     name: []const u8,
@@ -131,6 +132,42 @@ pub fn publicInstanceMembers(
     var frontend = FrontendModule.Frontend.init(allocator);
     const program = (try frontend.compile(source)).ast;
     return publicInstanceMembersFromProgram(allocator, program, type_name);
+}
+
+pub fn parsedPublicInstanceMembers(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    type_name: []const u8,
+) ![]const []const u8 {
+    var parser = ParserModule.Parser.init(allocator, source);
+    const program = try parser.parse();
+    return publicInstanceMembersFromProgram(allocator, program, type_name);
+}
+
+pub fn parsedSameFileInstanceMembers(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    type_name: []const u8,
+) ![]const []const u8 {
+    var parser = ParserModule.Parser.init(allocator, source);
+    const program = try parser.parse();
+    var labels: std.ArrayList([]const u8) = .empty;
+    for (program.structures) |structure| {
+        if (!matchesType(structure.name, type_name)) continue;
+        for (structure.fields) |field| {
+            if (!field.is_static) try labels.append(allocator, field.name);
+        }
+        for (structure.methods) |method| {
+            if (!method.is_static and method.accessor == null) try labels.append(allocator, method.name);
+        }
+        std.mem.sort([]const u8, labels.items, {}, struct {
+            fn lessThan(_: void, left: []const u8, right: []const u8) bool {
+                return std.mem.lessThan(u8, left, right);
+            }
+        }.lessThan);
+        return labels.toOwnedSlice(allocator);
+    }
+    return error.MissingOracleType;
 }
 
 pub fn publicInstanceMembersFromProgram(

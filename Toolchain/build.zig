@@ -421,6 +421,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lsp_test_module.addOptions("build_options", build_options);
+
+    const lsp_admission_module = b.createModule(.{
+        .root_source_file = b.path("Sources/LspAdmissionTests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lsp_admission_module.addOptions("build_options", build_options);
+    const lsp_admission_tests = b.addTest(.{ .root_module = lsp_admission_module });
+    const lsp_admission_command = b.addRunArtifact(lsp_admission_tests);
+    // Default builds must reject structural or clean-matrix completion gaps.
+    // The heavier deterministic mutation campaign remains in LspTests and is
+    // therefore mandatory in the ordinary `check`/`silex-dev test` portal.
+    b.getInstallStep().dependOn(&lsp_admission_command.step);
+
     const lsp_tests = b.addTest(.{ .root_module = lsp_test_module });
     const lsp_test_command = b.addRunArtifact(lsp_tests);
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");
@@ -439,6 +453,7 @@ pub fn build(b: *std.Build) void {
     const lsp_audit_api_module = b.createModule(.{
         .root_source_file = b.path("Sources/LspAuditApi.zig"),
     });
+    lsp_audit_api_module.addOptions("build_options", build_options);
     lsp_completion_audit_module.addImport("silex_lsp_audit", lsp_audit_api_module);
     const lsp_completion_audit = b.addExecutable(.{
         .name = "silex-lsp-completion-audit",
