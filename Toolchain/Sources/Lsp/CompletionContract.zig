@@ -5,6 +5,7 @@ const Lexer = @import("../Lexer.zig");
 const Parser = @import("../Parser.zig");
 const LspTypes = @import("Types.zig");
 const Axes = @import("CompletionContract/Axes.zig");
+const WorkspaceFixtures = @import("CompletionContract/WorkspaceFixtures.zig");
 
 pub const marker = "<|>";
 
@@ -42,6 +43,7 @@ pub const Scenario = struct {
     capability: Capability,
     canonical_source: []const u8,
     canonical_validation: CanonicalValidation = .frontend,
+    workspace_fixture: ?WorkspaceFixtures.Id = null,
     partial_source: []const u8,
     required: []const []const u8,
     forbidden: []const []const u8,
@@ -73,9 +75,10 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "type-qualified-import",
         .capability = .types,
-        .canonical_source = "struct Player { var position:Math.Vec2 }",
+        .canonical_source = "use STD.Math\nstruct Player { var position:Math.Vec2 = Math.Vec2() }\nfunc main() {}",
         .canonical_validation = .workspace,
-        .partial_source = "struct Player { var position:Math.<|> }",
+        .workspace_fixture = .std_math,
+        .partial_source = "use STD.Math\nstruct Player { var position:Math.<|> }\nfunc main() {}",
         .required = &.{"Vec2"},
         .forbidden = &.{"print"},
         .provenance = "FR/Language/Types",
@@ -96,6 +99,7 @@ pub const scenarios = [_]Scenario{
         .capability = .topology,
         .canonical_source = "use STD.Math\nfunc main() {}",
         .canonical_validation = .workspace,
+        .workspace_fixture = .std_math,
         .partial_source = "use STD.Ma<|>\nfunc main() {}",
         .required = &.{"Math"},
         .forbidden = &.{"while"},
@@ -255,9 +259,10 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "member-imported-field-chain",
         .capability = .member_imported,
-        .canonical_source = "func update() { if transform.position.length() > 0.0 {} }",
+        .canonical_source = "use STD.Math\nstruct Transform2D { var position:Math.Vec2 }\nfunc update(transform:&Transform2D) { if transform.position.length() > 0.0 {} }\nfunc main() {}",
         .canonical_validation = .workspace,
-        .partial_source = "func update() { if transform.position.<|> }",
+        .workspace_fixture = .std_math,
+        .partial_source = "use STD.Math\nstruct Transform2D { var position:Math.Vec2 }\nfunc update(transform:&Transform2D) { if transform.position.<|> }\nfunc main() {}",
         .required = &.{ "length", "normalized" },
         .forbidden = &.{"position"},
         .provenance = "Sandbox/Main.sx transform.position : Math.Vec2",
@@ -268,6 +273,7 @@ pub const scenarios = [_]Scenario{
         .capability = .member_imported,
         .canonical_source = "use Api.Widget as Button\nfunc main() { Button().paint() }",
         .canonical_validation = .workspace,
+        .workspace_fixture = .widget_alias,
         .partial_source = "use Api.Widget as Button\nfunc main() { Button().<|> }",
         .required = &.{"paint"},
         .forbidden = &.{"Widget"},
@@ -279,6 +285,7 @@ pub const scenarios = [_]Scenario{
         .capability = .member_imported,
         .canonical_source = "use Module.Tools\nfunc main() { Tools.build() }",
         .canonical_validation = .workspace,
+        .workspace_fixture = .current_module,
         .partial_source = "use Module.Tools\nfunc main() { Tools.<|> }",
         .required = &.{"build"},
         .forbidden = &.{"other_module_private"},
@@ -290,6 +297,7 @@ pub const scenarios = [_]Scenario{
         .capability = .member_imported,
         .canonical_source = "use Api.Math\nfunc main() { Math.Vec2().length() }",
         .canonical_validation = .workspace,
+        .workspace_fixture = .atom_math,
         .partial_source = "use Api.Math\nfunc main() { Math.Vec2().<|> }",
         .required = &.{"length"},
         .forbidden = &.{"internal"},
@@ -309,9 +317,10 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "cascade-imported-principal-reexport",
         .capability = .cascade_imported,
-        .canonical_source = "use GFX.Canvas\nfunc draw_player() Canvas { return Canvas()..paint(func () {}) }",
+        .canonical_source = "use GFX.Canvas\nfunc draw_player() Canvas { return Canvas()..paint(func () {}) }\nfunc main() { draw_player() }",
         .canonical_validation = .workspace,
-        .partial_source = "use GFX.Canvas\nfunc draw_player() Canvas { return Canvas()..<|> }",
+        .workspace_fixture = .canvas_principal_reexport,
+        .partial_source = "use GFX.Canvas\nfunc draw_player() Canvas { return Canvas()..<|> }\nfunc main() { draw_player() }",
         .required = &.{ "paint", "clear" },
         .forbidden = &.{"spawn"},
         .provenance = "Sandbox/Main.sx and GFX.Canvas principal reexport",
@@ -320,9 +329,10 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "topology-catalog-fragment-field-chain",
         .capability = .topology,
-        .canonical_source = "use GFX.Components\nuse STD.Math\nfunc update() { var pos:Math.Vec2 = transform.position; print(pos.length()) }",
+        .canonical_source = "use GFX.Components\nuse STD.Math\nfunc update(transform:&Components.Transform2D) { var pos:Math.Vec2 = transform.position; print(pos.length()) }\nfunc main() {}",
         .canonical_validation = .workspace,
-        .partial_source = "use GFX.Components\nuse STD.Math\nfunc update() { var pos:Math.Vec2 = transform.position if pos.<|> }",
+        .workspace_fixture = .catalog_field_chain,
+        .partial_source = "use GFX.Components\nuse STD.Math\nfunc update(transform:&Components.Transform2D) { var pos:Math.Vec2 = transform.position if pos.<|> }\nfunc main() {}",
         .required = &.{ "length", "normalized" },
         .forbidden = &.{"position"},
         .provenance = "Sandbox/Main.sx catalog plus @Vec2.sx fragment",
@@ -333,6 +343,7 @@ pub const scenarios = [_]Scenario{
         .capability = .topology,
         .canonical_source = "use TestKit.Assertions\nfunc main() { Assertions.equal(1, 1) }",
         .canonical_validation = .workspace,
+        .workspace_fixture = .development_dependency,
         .partial_source = "use TestKit.Assertions\nfunc main() { Assertions.<|> }",
         .required = &.{"equal"},
         .forbidden = &.{"private_helper"},
@@ -342,9 +353,10 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "topology-friend-package",
         .capability = .topology,
-        .canonical_source = "use FriendApi.Tools\nfunc main() { Tools.package_visible() }",
+        .canonical_source = "use GFX.Core\nfunc main() { print(Core.package_visible()) }",
         .canonical_validation = .workspace,
-        .partial_source = "use FriendApi.Tools\nfunc main() { Tools.<|> }",
+        .workspace_fixture = .friend_package,
+        .partial_source = "use GFX.Core\nfunc main() { Core.<|> }",
         .required = &.{"package_visible"},
         .forbidden = &.{"private_visible"},
         .provenance = "friend package visibility graph",
@@ -355,6 +367,7 @@ pub const scenarios = [_]Scenario{
         .capability = .topology,
         .canonical_source = "use Api.Rendering.Canvas\nfunc main() { Canvas().paint() }",
         .canonical_validation = .workspace,
+        .workspace_fixture = .submodule,
         .partial_source = "use Api.Rendering.Canvas\nfunc main() { Canvas().<|> }",
         .required = &.{"paint"},
         .forbidden = &.{"internal"},
@@ -364,9 +377,10 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "topology-merged-extension",
         .capability = .topology,
-        .canonical_source = "use Core.Adapter\nuse Algorithms.Adapter\nfunc main() { Adapter().choose() }",
+        .canonical_source = "use GFX.Physics\nfunc main() { print(Physics.Adapter().choose()) }",
         .canonical_validation = .workspace,
-        .partial_source = "use Core.Adapter\nuse Algorithms.Adapter\nfunc main() { Adapter().<|> }",
+        .workspace_fixture = .merged_extension,
+        .partial_source = "use GFX.Physics\nfunc main() { Physics.Adapter().<|> }",
         .required = &.{"choose"},
         .forbidden = &.{"private_helper"},
         .provenance = "merged extension from a dependency",
@@ -375,9 +389,10 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "topology-platform-fragment",
         .capability = .topology,
-        .canonical_source = "use Platform.Window\nfunc main() { Window.current().show() }",
+        .canonical_source = "use Bridge.Window\nfunc main() { Window.current().show() }",
         .canonical_validation = .workspace,
-        .partial_source = "use Platform.Window\nfunc main() { Window.current().<|> }",
+        .workspace_fixture = .platform_fragment,
+        .partial_source = "use Bridge.Window\nfunc main() { Window.current().<|> }",
         .required = &.{"show"},
         .forbidden = &.{"unsupported_backend"},
         .provenance = "target-selected package fragment",
@@ -939,6 +954,7 @@ pub fn statementCapability(tag: std.meta.Tag(Ast.Statement)) Capability {
 
 pub fn audit(registry: []const Scenario) !void {
     var covered = [_]bool{false} ** @typeInfo(Capability).@"enum".fields.len;
+    var workspace_fixtures = [_]bool{false} ** @typeInfo(WorkspaceFixtures.Id).@"enum".fields.len;
     for (registry, 0..) |scenario, index| {
         if (scenario.id.len == 0) return error.MissingIdentifier;
         if (scenario.canonical_source.len == 0) return error.MissingCanonicalSource;
@@ -947,6 +963,13 @@ pub fn audit(registry: []const Scenario) !void {
         if (scenario.forbidden.len == 0) return error.MissingForbiddenCandidate;
         if (scenario.provenance.len == 0) return error.MissingProvenance;
         if (containsInfrastructurePath(scenario)) return error.InfrastructureDependency;
+        switch (scenario.canonical_validation) {
+            .frontend => if (scenario.workspace_fixture != null) return error.UnexpectedWorkspaceFixture,
+            .workspace => {
+                const fixture = scenario.workspace_fixture orelse return error.MissingWorkspaceFixture;
+                workspace_fixtures[@intFromEnum(fixture)] = true;
+            },
+        }
         switch (scenario.status) {
             .protected => |proof| if (proof.len == 0) return error.MissingProof,
             .assigned_gap => {},
@@ -958,6 +981,7 @@ pub fn audit(registry: []const Scenario) !void {
         covered[@intFromEnum(scenario.capability)] = true;
     }
     for (covered) |present| if (!present) return error.MissingCapability;
+    for (workspace_fixtures) |present| if (!present) return error.UnusedWorkspaceFixture;
     try auditAxisWitnesses(registry);
 }
 
@@ -1044,15 +1068,24 @@ test "canonical completion sources pass their declared frontend boundary" {
             std.debug.print("completion canonical source '{s}' does not parse\n", .{scenario.id});
             return err;
         };
-        if (scenario.canonical_validation == .workspace) continue;
-        var frontend = Frontend.Frontend.init(arena.allocator());
-        frontend.checkDocument(scenario.canonical_source) catch |err| {
-            std.debug.print(
-                "completion canonical source '{s}' is not semantically valid: {s}\n",
-                .{ scenario.id, if (frontend.diagnostic) |diagnostic| diagnostic.message else @errorName(err) },
-            );
-            return err;
-        };
+        switch (scenario.canonical_validation) {
+            .frontend => {
+                var frontend = Frontend.Frontend.init(arena.allocator());
+                frontend.checkDocument(scenario.canonical_source) catch |err| {
+                    std.debug.print(
+                        "completion canonical source '{s}' is not semantically valid: {s}\n",
+                        .{ scenario.id, if (frontend.diagnostic) |diagnostic| diagnostic.message else @errorName(err) },
+                    );
+                    return err;
+                };
+            },
+            .workspace => {
+                WorkspaceFixtures.validate(scenario.workspace_fixture.?, scenario.canonical_source) catch |err| {
+                    std.debug.print("completion workspace source '{s}' failed its fixture\n", .{scenario.id});
+                    return err;
+                };
+            },
+        }
     }
 }
 
@@ -1097,4 +1130,7 @@ test "registry mutations expose missing rows and missing proofs" {
     var missing_cursor = scenarios;
     missing_cursor[0].partial_source = "public";
     try std.testing.expectError(error.InvalidCursorCount, audit(&missing_cursor));
+    var missing_fixture = scenarios;
+    missing_fixture[2].workspace_fixture = null;
+    try std.testing.expectError(error.MissingWorkspaceFixture, audit(&missing_fixture));
 }

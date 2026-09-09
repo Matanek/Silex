@@ -47,12 +47,16 @@ The oracle never reads LSP candidates or recovery decisions. A source that
 parses but is ill-typed is explicitly rejected.
 
 The registry gate separately parses every canonical source and sends every
-autonomous fixture through semantic document checking. Multi-package fixtures
-are explicitly marked `workspace`; their parsing is already mandatory, while
-semantic composition remains a required Part 01 gate rather than being
-mistaken for a local frontend proof. Catalogue, reexport, specialization,
-conformance, and package-topology gaps remain explicit `assigned_gap` rows
-until their owning Parts close them.
+autonomous fixture through semantic checking. Local fixtures use the frontend
+boundary. Each multi-package scenario names one fixture from a closed
+`WorkspaceFixtures.Id` enum and is compiled through `Project.Compiler` with an
+autonomous package graph. The audit rejects a `workspace` row without a
+fixture, a local row tied to one, and a fixture enum value that no scenario
+exercises. These graphs cover qualified imports, aliases, source atoms,
+principal reexports, catalogues, development dependencies, friend visibility,
+submodules, merged extensions, and platform-selected sources without reading
+sibling repositories. Remaining completion defects stay explicit
+`assigned_gap` rows until their owning Parts close them.
 
 Semantic, workspace, and protocol cases keep both a low-level proof and a
 server proof. Real package or example failures are reduced to autonomous
