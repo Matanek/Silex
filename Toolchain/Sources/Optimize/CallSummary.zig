@@ -118,7 +118,9 @@ fn localSummary(allocator: Allocator, program: Ir.Program, function: Ir.Function
     const input_count = @min(function.capture_types.len + function.parameter_types.len, materialized.len);
     @memset(materialized[0..input_count], true);
     for (function.blocks) |block| for (block.instructions) |instruction| {
-        if (instructionResult(instruction)) |value| if (value < materialized.len) materialized[value] = true;
+        if (instructionResult(instruction)) |value| {
+            if (value < materialized.len) materialized[value] = true;
+        }
     };
     for (function.value_types, materialized) |value_type, present| {
         if (!present) continue;
