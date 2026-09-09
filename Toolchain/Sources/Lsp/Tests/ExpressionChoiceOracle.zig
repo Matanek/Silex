@@ -1,6 +1,7 @@
 const std = @import("std");
 const FrontendModule = @import("../../Frontend.zig");
 const Completion = @import("../Completion.zig");
+const Oracle = @import("CompletionOracleSupport.zig");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
@@ -10,7 +11,11 @@ const Case = struct {
     partial_before: []const u8,
     choice: []const u8,
     partial_after: []const u8,
-    expected: Support.ExpectedItem,
+    expected: ?Support.ExpectedItem = null,
+    oracle_parameter: ?struct {
+        function_name: []const u8,
+        parameter_name: []const u8,
+    } = null,
     forbidden: []const []const u8,
     expect_first: bool = false,
 };
@@ -73,11 +78,9 @@ const cases = [_]Case{
         .partial_before = "enum Month { january; unknown }\nfunc to_month_str(month:Month) str {\n    return match ",
         .choice = "month",
         .partial_after = "\n}",
-        .expected = .{
-            .label = "month",
-            .kind = 6,
-            .detail = "month:Month",
-            .insert_text = "month",
+        .oracle_parameter = .{
+            .function_name = "to_month_str",
+            .parameter_name = "month",
         },
         .forbidden = &.{ "while", "public" },
         .expect_first = true,
@@ -155,6 +158,24 @@ test "canonical expression choices survive every typed prefix through the server
             );
             return err;
         };
+        const expected: Support.ExpectedItem = if (case.oracle_parameter) |target| oracle: {
+            const parameter = try Oracle.parameter(
+                canonical_arena.allocator(),
+                case.canonical_source,
+                target.function_name,
+                target.parameter_name,
+            );
+            break :oracle .{
+                .label = parameter.name,
+                .kind = 6,
+                .detail = try std.fmt.allocPrint(
+                    canonical_arena.allocator(),
+                    "{s}:{s}",
+                    .{ parameter.name, parameter.type_name },
+                ),
+                .insert_text = parameter.name,
+            };
+        } else case.expected orelse return error.MissingOracleExpectation;
 
         for (0..case.choice.len + 1) |prefix_length| {
             var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -180,7 +201,7 @@ test "canonical expression choices survive every typed prefix through the server
                 );
                 return err;
             };
-            Support.expectItem(case.expected, actual) catch |err| {
+            Support.expectItem(expected, actual) catch |err| {
                 std.debug.print(
                     "expression choice oracle '{s}' misses '{s}' for prefix '{s}'\n",
                     .{ case.id, case.choice, case.choice[0..prefix_length] },

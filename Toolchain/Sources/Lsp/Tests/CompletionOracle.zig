@@ -66,3 +66,16 @@ test "semantic oracle rejects a parsed but ill-typed canonical source" {
         ),
     );
 }
+
+test "semantic oracle derives parameter identity and type from the frontend" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parameter = try Oracle.parameter(
+        arena.allocator(),
+        "enum Month { january; unknown } func to_month_str(month:Month) str { return \"month\" } func main() {}",
+        "to_month_str",
+        "month",
+    );
+    try std.testing.expectEqualStrings("month", parameter.name);
+    try std.testing.expectEqualStrings("Month", parameter.type_name);
+}

@@ -1,5 +1,33 @@
 const std = @import("std");
+const Ast = @import("../../Ast.zig");
 const FrontendModule = @import("../../Frontend.zig");
+
+pub const Parameter = struct {
+    name: []const u8,
+    type_name: []const u8,
+};
+
+pub fn parameter(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    function_name: []const u8,
+    parameter_name: []const u8,
+) !Parameter {
+    var frontend = FrontendModule.Frontend.init(allocator);
+    const program = (try frontend.compile(source)).ast;
+    for (program.functions) |function| {
+        if (function.is_anonymous or !std.mem.eql(u8, function.name, function_name)) continue;
+        for (function.parameters) |candidate| {
+            if (!std.mem.eql(u8, candidate.name, parameter_name)) continue;
+            return .{
+                .name = candidate.name,
+                .type_name = typeName(program, candidate.type),
+            };
+        }
+        return error.MissingOracleParameter;
+    }
+    return error.MissingOracleFunction;
+}
 
 pub fn publicInstanceMembers(
     allocator: std.mem.Allocator,
@@ -35,4 +63,9 @@ fn matchesType(candidate: []const u8, requested: []const u8) bool {
         std.mem.startsWith(u8, candidate, requested) and
         candidate[requested.len] == '<' and
         candidate[candidate.len - 1] == '>';
+}
+
+fn typeName(program: Ast.Program, type_value: Ast.Type) []const u8 {
+    const index = type_value.structureIndex() orelse return type_value.name();
+    return if (index < program.type_names.len) program.type_names[index] else "structure";
 }
