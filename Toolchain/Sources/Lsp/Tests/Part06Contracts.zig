@@ -120,6 +120,37 @@ test "part 06 UTF-16 completion metadata and JSON response are byte deterministi
     try std.testing.expect(std.mem.indexOf(u8, first, "\"insertText\":\"paint()\"") != null);
 }
 
+test "part 06 negotiated UTF-8 positions preserve multiline Unicode completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    const initialize = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = "2.0",
+        .id = 1,
+        .method = "initialize",
+        .params = .{
+            .rootUri = @as(?[]const u8, null),
+            .capabilities = .{ .general = .{ .positionEncodings = &.{"utf-8"} } },
+        },
+    }, .{});
+    const initialized = (try server.handleBody(allocator, initialize)) orelse return error.MissingLspResponse;
+    try std.testing.expect(std.mem.indexOf(u8, initialized, "\"positionEncoding\":\"utf-8\"") != null);
+
+    const uri = "file:///Part06-UTF8.sx";
+    const marked = try Support.removeMarker(
+        allocator,
+        "func paint() {}\nfunc main() {\n    print(\"pre\u{0302}t 🙂\")\n    pai<|>\n}",
+    );
+    try Support.openDocument(&server, allocator, uri, 7, marked.text);
+    const first = try rawCompletionResponseWithEncoding(&server, allocator, uri, marked, .utf8);
+    const repeated = try rawCompletionResponseWithEncoding(&server, allocator, uri, marked, .utf8);
+    try std.testing.expectEqualStrings(first, repeated);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"label\":\"paint\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"label\":\"main\"") == null);
+}
+
 test "part 06 contextual alternatives expose exact kinds details snippets and stable order" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -243,7 +274,17 @@ fn rawCompletionResponse(
     uri: []const u8,
     source: Support.MarkedSource,
 ) ![]const u8 {
-    const position = Protocol.positionAtByteOffset(source.text, source.cursor, .utf16) orelse
+    return rawCompletionResponseWithEncoding(server, allocator, uri, source, .utf16);
+}
+
+fn rawCompletionResponseWithEncoding(
+    server: *ServerModule.Server,
+    allocator: std.mem.Allocator,
+    uri: []const u8,
+    source: Support.MarkedSource,
+    encoding: Types.PositionEncoding,
+) ![]const u8 {
+    const position = Protocol.positionAtByteOffset(source.text, source.cursor, encoding) orelse
         return error.InvalidCompletionPosition;
     const request = try std.json.Stringify.valueAlloc(allocator, .{
         .jsonrpc = "2.0",
