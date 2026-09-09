@@ -1102,8 +1102,7 @@ fn encodeFunction(
                     }
                 }
             },
-            .copy_range => |copy| copy_range: {
-                if (aggregateCopyFeedsCall(function, instruction_index, copy)) break :copy_range;
+            .copy_range => |copy| {
                 for (0..copy.result.width) |leaf| {
                     const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
                     const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
@@ -1738,7 +1737,7 @@ fn encodeFunction(
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
                     } else try emitStackAddress(allocator, words, .x15, result.start);
                 };
-                const outgoing_stack_size = try emitCallArguments(allocator, words, function, instruction_index, call.arguments, true);
+                const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, true);
                 if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
@@ -1761,7 +1760,7 @@ fn encodeFunction(
                 if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
-                const outgoing_stack_size = try emitCallArguments(allocator, words, function, instruction_index, call.arguments, false);
+                const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
                 if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
@@ -2454,84 +2453,6 @@ fn emitRuntimeReleaseCallback(
     try words.append(allocator, returnInstruction());
 }
 
-fn aggregateCopyFeedsCall(
-    function: Machine.Function,
-    copy_index: usize,
-    copy: Machine.Instruction.CopyRange,
-) bool {
-    return aggregateCopyCallUse(function, copy_index, copy) != null;
-}
-
-fn aggregateCallArgumentOrigin(
-    function: Machine.Function,
-    call_index: usize,
-    argument: Machine.Span,
-) ?Machine.Span {
-    if (call_index >= function.instructions.len) return null;
-    var index = call_index;
-    while (index != 0) {
-        index -= 1;
-        const copy = switch (function.instructions[index]) {
-            .copy_range => |value| value,
-            else => continue,
-        };
-        if (!sameSpan(copy.result, argument)) continue;
-        return if (aggregateCopyCallUse(function, index, copy) == call_index) copy.operand else null;
-    }
-    return null;
-}
-
-fn aggregateCopyCallUse(
-    function: Machine.Function,
-    copy_index: usize,
-    copy: Machine.Instruction.CopyRange,
-) ?usize {
-    var call_index: ?usize = null;
-    for (function.instructions[copy_index + 1 ..], copy_index + 1..) |instruction, index| {
-        if (!callUsesSpan(instruction, copy.result)) continue;
-        if (call_index != null) return null;
-        call_index = index;
-    }
-    const use = call_index orelse return null;
-    for (0..copy.result.width) |leaf| {
-        const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
-        if (!slotUsedOnlyAt(function.instructions, result, use)) return null;
-    }
-    for (function.instructions[copy_index + 1 .. use]) |instruction| {
-        for (0..copy.operand.width) |leaf| {
-            if (ResidenceLiveness.instructionDefines(instruction, @as(usize, copy.operand.start) + leaf)) return null;
-        }
-        switch (instruction) {
-            .reference_store,
-            .address_store,
-            .collection_replace,
-            .list_edit,
-            .call,
-            .indirect_call,
-            .dynamic_call,
-            .external_call,
-            => return null,
-            else => {},
-        }
-    }
-    return use;
-}
-
-fn callUsesSpan(instruction: Machine.Instruction, span: Machine.Span) bool {
-    const arguments = switch (instruction) {
-        .call => |call| call.arguments,
-        .indirect_call => |call| call.arguments,
-        .dynamic_call => |call| call.arguments,
-        else => return false,
-    };
-    for (arguments) |argument| if (sameSpan(argument, span)) return true;
-    return false;
-}
-
-fn sameSpan(left: Machine.Span, right: Machine.Span) bool {
-    return left.start == right.start and left.width == right.width and left.aggregate == right.aggregate;
-}
-
 fn encodeDynamicCall(
     allocator: Allocator,
     words: *std.ArrayList(u32),
@@ -2546,7 +2467,7 @@ fn encodeDynamicCall(
     if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
         if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
     };
-    const outgoing_stack_size = try emitCallArguments(allocator, words, function, std.math.maxInt(usize), call.arguments, false);
+    const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
     if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
         if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
     };
@@ -2576,7 +2497,6 @@ fn emitCallArguments(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     function: Machine.Function,
-    instruction_index: usize,
     arguments: []const Machine.Span,
     use_residences: bool,
 ) Error!u16 {
@@ -2586,10 +2506,7 @@ fn emitCallArguments(
         if (argument.aggregate) {
             if (argument.width == 0) {
                 try words.append(allocator, moveWideZero64(outgoing, 0, 0));
-            } else {
-                const source = aggregateCallArgumentOrigin(function, instruction_index, argument) orelse argument;
-                try emitStackAddress(allocator, words, outgoing, source.start);
-            }
+            } else try emitStackAddress(allocator, words, outgoing, argument.start);
         } else if (use_residences and floatResidence(function, argument.start) != null) {
             try loadFloatValue(allocator, words, function, .x9, argument.start, false);
             try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
@@ -5966,6 +5883,54 @@ test "preserve the pointer of a stack-passed aggregate across paired transfers" 
         A64.store64Pair(.x9, .x11, .zero_or_sp, 64),
         A64.load64Pair(.x9, .x11, .x10, 16),
         A64.store64Pair(.x9, .x11, .zero_or_sp, 80),
+    };
+    var found: usize = 0;
+    var offset: usize = 0;
+    while (offset + 4 <= image.code.len and found < expected.len) : (offset += 4) {
+        const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+        if (word == expected[found]) found += 1;
+    }
+    try std.testing.expectEqual(expected.len, found);
+}
+
+test "materialize aggregate copies before direct calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const caller: Machine.Function = .{
+        .name = "caller",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = try Machine.frameSize(4),
+        .instructions = &.{
+            .{ .copy_range = .{
+                .result = .{ .start = 2, .width = 2, .aggregate = true },
+                .operand = .{ .start = 0, .width = 2, .aggregate = true },
+            } },
+            .{ .call = .{
+                .result = null,
+                .function = 1,
+                .arguments = &.{.{ .start = 2, .width = 2, .aggregate = true }},
+            } },
+            .return_void,
+        },
+    };
+    const callee: Machine.Function = .{
+        .name = "callee",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 2, .aggregate = true }},
+        .return_type = .void,
+        .slot_count = 2,
+        .frame_size = try Machine.frameSize(2),
+        .instructions = &.{.return_void},
+    };
+    const image = try encode(arena.allocator(), .{ .functions = &.{ caller, callee } }, .none);
+    const expected = [_]u32{
+        loadStack(.x9, 0),
+        storeStack(.x9, 2),
+        loadStack(.x9, 1),
+        storeStack(.x9, 3),
+        addSubtractImmediate(.x0, .zero_or_sp, 16, true),
     };
     var found: usize = 0;
     var offset: usize = 0;
