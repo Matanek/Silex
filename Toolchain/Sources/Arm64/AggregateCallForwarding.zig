@@ -9,7 +9,11 @@ const Allocator = std.mem.Allocator;
 /// operand lets liveness and stack forcing preserve its authoritative storage.
 pub fn optimize(allocator: Allocator, function: Machine.Function) Allocator.Error!Machine.Function {
     const instructions = try allocator.dupe(Machine.Instruction, function.instructions);
-    var changed = false;
+    defer allocator.free(instructions);
+    const removed = try allocator.alloc(bool, instructions.len);
+    defer allocator.free(removed);
+    @memset(removed, false);
+    var removed_count: usize = 0;
     for (instructions, 0..) |instruction, copy_index| {
         const copy = switch (instruction) {
             .copy_range => |value| value,
@@ -35,14 +39,34 @@ pub fn optimize(allocator: Allocator, function: Machine.Function) Allocator.Erro
         }
         call.arguments = arguments;
         instructions[call_index] = .{ .call = call };
-        changed = true;
+        removed[copy_index] = true;
+        removed_count += 1;
     }
-    if (!changed) {
-        allocator.free(instructions);
-        return function;
+    if (removed_count == 0) return function;
+
+    const compact = try allocator.alloc(Machine.Instruction, instructions.len - removed_count);
+    var destination: usize = 0;
+    for (instructions, 0..) |instruction, index| {
+        if (removed[index]) continue;
+        compact[destination] = switch (instruction) {
+            .jump => |target| .{ .jump = remapTarget(removed, target) },
+            .branch => |branch_value| .{ .branch = .{
+                .condition = branch_value.condition,
+                .then_instruction = remapTarget(removed, branch_value.then_instruction),
+                .else_instruction = remapTarget(removed, branch_value.else_instruction),
+            } },
+            else => instruction,
+        };
+        destination += 1;
     }
     var result = function;
-    result.instructions = instructions;
+    result.instructions = compact;
+    return result;
+}
+
+fn remapTarget(removed: []const bool, target: usize) usize {
+    var result = target;
+    for (removed[0..target]) |is_removed| result -= @intFromBool(is_removed);
     return result;
 }
 
@@ -133,7 +157,8 @@ test "forward an unchanged aggregate copy before a direct call" {
         .return_void,
     };
     const result = try optimize(arena.allocator(), fixture(&instructions));
-    try std.testing.expectEqual(@as(Machine.Slot, 0), result.instructions[2].call.arguments[0].start);
+    try std.testing.expectEqual(@as(usize, 3), result.instructions.len);
+    try std.testing.expectEqual(@as(Machine.Slot, 0), result.instructions[1].call.arguments[0].start);
 }
 
 test "retain a captured aggregate copy when its source changes" {
@@ -156,5 +181,28 @@ test "retain a captured aggregate copy when its source changes" {
         .return_void,
     };
     const result = try optimize(arena.allocator(), fixture(&instructions));
+    try std.testing.expectEqual(@as(usize, instructions.len), result.instructions.len);
     try std.testing.expectEqual(@as(Machine.Slot, 2), result.instructions[2].call.arguments[0].start);
+}
+
+test "remap control flow that targets a removed aggregate copy" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const instructions = [_]Machine.Instruction{
+        .{ .branch = .{ .condition = 4, .then_instruction = 1, .else_instruction = 3 } },
+        .{ .copy_range = .{
+            .result = .{ .start = 2, .width = 2, .aggregate = true },
+            .operand = .{ .start = 0, .width = 2, .aggregate = true },
+        } },
+        .{ .call = .{
+            .result = null,
+            .function = 1,
+            .arguments = &.{.{ .start = 2, .width = 2, .aggregate = true }},
+        } },
+        .return_void,
+    };
+    const result = try optimize(arena.allocator(), fixture(&instructions));
+    try std.testing.expectEqual(@as(usize, 3), result.instructions.len);
+    try std.testing.expectEqual(@as(usize, 1), result.instructions[0].branch.then_instruction);
+    try std.testing.expectEqual(@as(usize, 2), result.instructions[0].branch.else_instruction);
 }

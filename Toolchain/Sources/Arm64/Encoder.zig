@@ -1103,7 +1103,6 @@ fn encodeFunction(
                 }
             },
             .copy_range => |copy| {
-                if (!spanHasUse(function.instructions, copy.result)) continue;
                 for (0..copy.result.width) |leaf| {
                     const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
                     const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
@@ -4058,13 +4057,6 @@ fn firstSlotUseAfter(
 
 fn slotHasUse(instructions: []const Machine.Instruction, slot: Machine.Slot) bool {
     for (instructions) |instruction| if (instructionUsesSlot(instruction, slot)) return true;
-    return false;
-}
-
-fn spanHasUse(instructions: []const Machine.Instruction, span: Machine.Span) bool {
-    for (0..span.width) |leaf| {
-        if (slotHasUse(instructions, @intCast(@as(usize, span.start) + leaf))) return true;
-    }
     return false;
 }
 
