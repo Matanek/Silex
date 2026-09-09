@@ -1,12 +1,13 @@
 const std = @import("std");
 const Completion = @import("../Completion.zig");
 const Contract = @import("../CompletionContract.zig");
+const Composition = @import("../CompletionContract/Composition.zig");
 const WorkspaceFixtures = @import("../CompletionContract/WorkspaceFixtures.zig");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
-test "part 05 workspace registry fixtures are executable completion contracts" {
-    const proof = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts";
+test "workspace topology registry fixtures are executable completion contracts" {
+    const proof = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts";
     for (Contract.scenarios) |scenario| {
         switch (scenario.status) {
             .protected => |protected| if (!std.mem.eql(u8, protected, proof)) continue,
@@ -28,12 +29,12 @@ test "part 05 workspace registry fixtures are executable completion contracts" {
         var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
         defer server.deinit();
         Support.initializeServer(&server, allocator, root_uri) catch |err| {
-            std.debug.print("Part 05 registry fixture '{s}' initialization failed: {s}\n", .{ scenario.id, @errorName(err) });
+            std.debug.print("workspace topology fixture '{s}' initialization failed: {s}\n", .{ scenario.id, @errorName(err) });
             return err;
         };
 
         const items = Support.serverCompletion(&server, allocator, entry_uri, scenario.partial_source) catch |err| {
-            std.debug.print("Part 05 registry fixture '{s}' request failed: {s}\n", .{ scenario.id, @errorName(err) });
+            std.debug.print("workspace topology fixture '{s}' request failed: {s}\n", .{ scenario.id, @errorName(err) });
             return err;
         };
         for (scenario.required) |label| Support.expectPresent(label, items) catch |err| {
@@ -53,7 +54,7 @@ test "part 05 workspace registry fixtures are executable completion contracts" {
                     null
             else
                 null;
-            std.debug.print("Part 05 registry fixture '{s}' misses required '{s}'\n", .{ scenario.id, label });
+            std.debug.print("workspace topology fixture '{s}' misses required '{s}'\n", .{ scenario.id, label });
             std.debug.print("  receiver={s} recovery={s} program={any} local_type={s}\n", .{
                 decision.receiver orelse "<none>",
                 @tagName(decision.recovery),
@@ -63,25 +64,25 @@ test "part 05 workspace registry fixtures are executable completion contracts" {
             return err;
         };
         for (scenario.forbidden) |label| Support.expectAbsent(label, items) catch |err| {
-            std.debug.print("Part 05 registry fixture '{s}' exposes forbidden '{s}'\n", .{ scenario.id, label });
+            std.debug.print("workspace topology fixture '{s}' exposes forbidden '{s}'\n", .{ scenario.id, label });
             return err;
         };
         Support.expectNoDuplicates(items) catch |err| {
-            std.debug.print("Part 05 registry fixture '{s}' contains duplicates\n", .{scenario.id});
+            std.debug.print("workspace topology fixture '{s}' contains duplicates\n", .{scenario.id});
             return err;
         };
         const repeated = Support.serverCompletion(&server, allocator, entry_uri, scenario.partial_source) catch |err| {
-            std.debug.print("Part 05 registry fixture '{s}' repeated request failed: {s}\n", .{ scenario.id, @errorName(err) });
+            std.debug.print("workspace topology fixture '{s}' repeated request failed: {s}\n", .{ scenario.id, @errorName(err) });
             return err;
         };
         Support.expectEqualItems(items, repeated) catch |err| {
-            std.debug.print("Part 05 registry fixture '{s}' is not stable across repetitions\n", .{scenario.id});
+            std.debug.print("workspace topology fixture '{s}' is not stable across repetitions\n", .{scenario.id});
             return err;
         };
     }
 }
 
-test "part 05 excludes non-public members from an ordinary dependency" {
+test "workspace topology excludes non-public members from an ordinary dependency" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "Api/Module");
@@ -129,7 +130,7 @@ test "part 05 excludes non-public members from an ordinary dependency" {
     try Support.expectNoDuplicates(items);
 }
 
-test "part 05 imported overlays are authoritative ordered and recover without stale members" {
+test "workspace overlays are authoritative ordered and recover without stale members" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "Api/Module");
@@ -253,9 +254,30 @@ test "part 05 imported overlays are authoritative ordered and recover without st
     try Support.changeDocument(&server, allocator, widget_uri, 18, "public class Widget {}");
     const extension_removed = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
     try Support.expectExactLabels(&.{}, extension_removed);
+
+    try Support.changeDocument(
+        &server,
+        allocator,
+        widget_uri,
+        19,
+        "public class Other { func consumer_member() {} }",
+    );
+    const consumer = try Support.removeMarker(
+        allocator,
+        "use Api.Widget.Other\nfunc inspect(value:&Other) { value.<|> }",
+    );
+    try Support.changeDocument(&server, allocator, main_uri, 2, consumer.text);
+    const consumer_changed = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, consumer);
+    try Support.expectExactLabels(&.{"consumer_member"}, consumer_changed);
+    const consumer_repeated = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, consumer);
+    try Support.expectEqualItems(consumer_changed, consumer_repeated);
+
+    try Support.changeDocument(&server, allocator, main_uri, 3, marked.text);
+    const stale_consumer = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+    try Support.expectExactLabels(&.{}, stale_consumer);
 }
 
-test "part 05 live reexports replace disk aliases and navigate to canonical declarations" {
+test "live reexports replace disk aliases and navigate to canonical declarations" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "Api/Module");
@@ -334,7 +356,7 @@ test "part 05 live reexports replace disk aliases and navigate to canonical decl
     try Support.expectExactLabels(&.{}, invalid);
 }
 
-test "part 05 enforces private and protected visibility in the current file" {
+test "workspace visibility respects private and protected access in the current file" {
     const cases = [_]struct {
         source: []const u8,
         expected: []const []const u8,
@@ -384,7 +406,7 @@ test "part 05 enforces private and protected visibility in the current file" {
         Support.expectExactLabels(case.expected, items) catch |err| {
             const completed = try Support.removeMarker(allocator, case.source);
             const decision = try Completion.decisionAt(allocator, completed.text, completed.cursor, .trigger_character);
-            std.debug.print("Part 05 local visibility case {d} failed\n", .{index});
+            std.debug.print("workspace local visibility case {d} failed\n", .{index});
             std.debug.print("  receiver={s} recovery={s} program={any}\n{s}\n", .{
                 decision.receiver orelse "<none>",
                 @tagName(decision.recovery),
@@ -394,5 +416,94 @@ test "part 05 enforces private and protected visibility in the current file" {
             return err;
         };
         try Support.expectNoDuplicates(items);
+    }
+}
+
+const TopologyProof = struct {
+    topology: Composition.TopologyKind,
+    scenario: []const u8,
+};
+
+const topology_proofs = [_]TopologyProof{
+    .{ .topology = .same_file, .scenario = "member-local-incomplete-if" },
+    .{ .topology = .module_file, .scenario = "origin-current-module" },
+    .{ .topology = .submodule, .scenario = "topology-submodule" },
+    .{ .topology = .package, .scenario = "visibility-imported-private-negative" },
+    .{ .topology = .dependency, .scenario = "member-imported-alias" },
+    .{ .topology = .development_dependency, .scenario = "topology-development-dependency" },
+    .{ .topology = .friend_dependency, .scenario = "topology-friend-package" },
+    .{ .topology = .alias, .scenario = "member-imported-alias" },
+    .{ .topology = .reexport, .scenario = "cascade-imported-principal-reexport" },
+    .{ .topology = .contribution, .scenario = "topology-catalog-fragment-field-chain" },
+    .{ .topology = .catalog, .scenario = "topology-catalog-fragment-field-chain" },
+    .{ .topology = .atom, .scenario = "member-imported-atom" },
+    .{ .topology = .extension, .scenario = "topology-merged-extension" },
+    .{ .topology = .platform_fragment, .scenario = "topology-platform-fragment" },
+    .{ .topology = .unsaved_overlay, .scenario = "overlay-unsaved-import" },
+};
+
+fn hasScenario(identifier: []const u8) bool {
+    for (Contract.scenarios) |scenario| if (std.mem.eql(u8, scenario.id, identifier)) return true;
+    return false;
+}
+
+fn auditTopologyCoverage(suppressed: ?Composition.TopologyKind) !usize {
+    var covered = [_]bool{false} ** @typeInfo(Composition.TopologyKind).@"enum".fields.len;
+    var proofs: usize = 0;
+    for (topology_proofs) |proof| {
+        if (suppressed != null and proof.topology == suppressed.?) continue;
+        if (!hasScenario(proof.scenario)) return error.MissingTopologyScenario;
+        covered[@intFromEnum(proof.topology)] = true;
+        proofs += 1;
+    }
+    for (covered) |present| if (!present) return error.MissingTopologyProof;
+    return proofs;
+}
+
+fn auditWorkspaceMemberKeys(suppressed: ?Composition.ProducerKind) !usize {
+    var producers = [_]bool{false} ** @typeInfo(Composition.ProducerKind).@"enum".fields.len;
+    for ([_]Composition.ProducerKind{ .intrinsic, .imported_value, .workspace_contribution }) |producer| {
+        if (suppressed == null or producer != suppressed.?) producers[@intFromEnum(producer)] = true;
+    }
+    var proofs: usize = 0;
+    for (std.enums.values(Composition.DemandKind)) |demand| for (std.enums.values(Composition.ProducerKind)) |producer|
+        for (std.enums.values(Composition.ConsumerKind)) |consumer| for (std.enums.values(Composition.TransformKind)) |transform| {
+            const status = Composition.statusFor(.{ .demand = demand, .producer = producer, .consumer = consumer, .transform = transform });
+            const schema = switch (status) {
+                .proved => |owned| owned,
+                .required, .excluded => continue,
+            };
+            if (schema != .workspace_member_surface) continue;
+            if (!producers[@intFromEnum(producer)]) return error.MissingWorkspaceProducerProof;
+            proofs += 1;
+        };
+    return proofs;
+}
+
+test "intrinsic and workspace member producers close the semantic matrix" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    const intrinsic = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        "file:///Workspace-Intrinsic.sx",
+        "func inspect(text:str) { text.<|> }\nfunc main() {}",
+        ".",
+    );
+    try Support.expectExactLabels(&.{"count"}, intrinsic);
+    try Support.expectItem(.{ .label = "count", .kind = 2, .detail = "count() int", .insert_text = "count()" }, intrinsic);
+    try std.testing.expectEqual(@as(usize, 23), try auditWorkspaceMemberKeys(null));
+    for ([_]Composition.ProducerKind{ .intrinsic, .imported_value, .workspace_contribution }) |producer| {
+        try std.testing.expectError(error.MissingWorkspaceProducerProof, auditWorkspaceMemberKeys(producer));
+    }
+}
+
+test "every workspace topology has a registered proof and suppression is detected" {
+    try std.testing.expectEqual(topology_proofs.len, try auditTopologyCoverage(null));
+    for (std.enums.values(Composition.TopologyKind)) |topology| {
+        try std.testing.expectError(error.MissingTopologyProof, auditTopologyCoverage(topology));
     }
 }

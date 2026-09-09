@@ -1697,9 +1697,9 @@ fn appendMembers(
     if (std.mem.eql(u8, type_name, "str")) {
         try appendCandidate(allocator, candidates, context, .{
             .label = "count",
-            .kind = CompletionKind.field,
-            .detail = "count:int",
-        }, 0, false);
+            .kind = CompletionKind.method,
+            .detail = "count() int",
+        }, 0, true);
         return;
     }
     const structure = findStructure(program, nominalReceiverName(type_name)) orelse return;
@@ -6661,7 +6661,7 @@ test "complete self and fundamental string members exclusively" {
         \\}
         \\func main() {
         \\    let text:str = "value"
-        \\    print(text.count)
+        \\    print(text.count())
         \\}
     ;
     const self_cursor = std.mem.indexOf(u8, source, "self.x").? + "self.x".len;
@@ -6669,7 +6669,7 @@ test "complete self and fundamental string members exclusively" {
     try std.testing.expectEqual(@as(usize, 1), self_items.len);
     try std.testing.expectEqualStrings("x", self_items[0].label);
 
-    const string_cursor = std.mem.indexOf(u8, source, "text.count").? + "text.c".len;
+    const string_cursor = std.mem.indexOf(u8, source, "text.count()").? + "text.c".len;
     const string_items = try itemsAt(arena.allocator(), source, string_cursor, .trigger_character);
     try std.testing.expectEqual(@as(usize, 1), string_items.len);
     try std.testing.expectEqualStrings("count", string_items[0].label);

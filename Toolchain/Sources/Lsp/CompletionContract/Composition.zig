@@ -132,12 +132,14 @@ pub const SchemaId = enum {
     receiver_member_surface,
     value_flow_surface,
     callable_composition_surface,
+    workspace_member_surface,
 };
 
 pub const SchemaPredicate = enum {
     receiver_member_surface,
     value_flow_surface,
     callable_composition_surface,
+    workspace_member_surface,
     none,
     all_applicable,
 };
@@ -146,12 +148,14 @@ pub const OracleProjection = enum {
     declared_member_surface,
     typed_value_identity,
     callable_signature,
+    workspace_member_identity,
 };
 
 pub const PartialTransform = enum {
     member_cursor,
     value_cursor,
     callable_cursor,
+    workspace_member_cursor,
 };
 
 pub const AssertionMode = enum {
@@ -238,6 +242,20 @@ pub const schemas = [_]ProofSchema{
         .scenario_ids = &.{
             "expression-introducers",
             "call-argument-expression",
+        },
+    },
+    .{
+        .id = .workspace_member_surface,
+        .predicate = .workspace_member_surface,
+        .canonical_template = "intrinsic or workspace-provided typed member access",
+        .oracle_projection = .workspace_member_identity,
+        .partial_transform = .workspace_member_cursor,
+        .assertions = .exact_surface,
+        .runner_tier = .server,
+        .scenario_ids = &.{
+            "member-intrinsic-string",
+            "member-imported-atom",
+            "topology-catalog-fragment-field-chain",
         },
     },
 };
@@ -351,6 +369,9 @@ fn schemaOwns(predicate: SchemaPredicate, key: Key) bool {
             isProducerProvenanceProducer(key.producer),
         .value_flow_surface => isValueDemandKey(key),
         .callable_composition_surface => deliveryPart(key) == .callable_composition,
+        .workspace_member_surface => key.demand == .member and
+            key.consumer == .member_access and
+            isWorkspaceMemberProducer(key.producer),
         .none => false,
         .all_applicable => isApplicable(key),
     };
@@ -392,6 +413,37 @@ pub fn isProducerProvenanceProducer(producer: ProducerKind) bool {
 
 pub fn isValueDemandKey(key: Key) bool {
     return deliveryPart(key) == .value_consumers;
+}
+
+pub fn isWorkspaceMemberProducer(producer: ProducerKind) bool {
+    return switch (producer) {
+        .intrinsic, .imported_value, .workspace_contribution => true,
+        .lexical_local,
+        .parameter,
+        .self_value,
+        .field,
+        .property,
+        .constructor_result,
+        .function_result,
+        .method_result,
+        .callback_result,
+        .tuple_value,
+        .tuple_element,
+        .destructured_element,
+        .iteration_binding,
+        .ecs_query_binding,
+        .injected_dependency,
+        .function_declaration,
+        .method_declaration,
+        .bound_method,
+        .callback_parameter,
+        .callback_field,
+        .returned_callback,
+        .tuple_callable,
+        .injected_callable,
+        .imported_callable,
+        => false,
+    };
 }
 
 pub fn isValueDemandConsumer(consumer: ConsumerKind) bool {
@@ -665,12 +717,12 @@ test "semantic completion compositions are all classified" {
     const statistics = try audit();
     try std.testing.expect(statistics.proved > 8);
     try std.testing.expectEqual(schemas.len, statistics.schemas);
-    try std.testing.expect(statistics.required != 0);
+    try std.testing.expectEqual(@as(usize, 0), statistics.required);
     try std.testing.expect(statistics.excluded != 0);
 }
 
-test "semantic completion release remains closed while compositions lack proof" {
-    try std.testing.expectError(error.MissingCompositionProof, auditRelease());
+test "semantic completion release admits the closed composition matrix" {
+    try auditRelease();
 }
 
 test "removing a declared quantified schema is rejected" {

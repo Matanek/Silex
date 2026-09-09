@@ -115,7 +115,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"Math"},
         .forbidden = &.{"while"},
         .provenance = "FR/Language/Modules",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "statement-loop-control",
@@ -220,6 +220,16 @@ pub const scenarios = [_]Scenario{
         .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
+        .id = "member-intrinsic-string",
+        .capability = .member_local,
+        .canonical_source = "func inspect(text:str) { print(text.count()) }\nfunc main() {}",
+        .partial_source = "func inspect(text:str) { text.<|> }\nfunc main() {}",
+        .required = &.{"count"},
+        .forbidden = &.{"unrelated_global"},
+        .provenance = "FR/Language/Data-types intrinsic string surface",
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: intrinsic and workspace member producers close the semantic matrix" },
+    },
+    .{
         .id = "member-local-incomplete-if",
         .capability = .member_local,
         .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input(); if input.pressed() {} }",
@@ -321,7 +331,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"paint"},
         .forbidden = &.{"Widget"},
         .provenance = "FR/Language/Modules aliases",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "origin-current-module",
@@ -333,7 +343,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"build"},
         .forbidden = &.{"other_module_private"},
         .provenance = "FR/Language/Modules current folder anchor",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "member-imported-atom",
@@ -345,7 +355,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"length"},
         .forbidden = &.{"internal"},
         .provenance = "package source atom @Vec2.sx",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "cascade-local-incomplete",
@@ -379,7 +389,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{ "length", "normalized" },
         .forbidden = &.{"position"},
         .provenance = "Sandbox/Main.sx catalog plus @Vec2.sx fragment",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-development-dependency",
@@ -391,7 +401,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"equal"},
         .forbidden = &.{"private_helper"},
         .provenance = "development dependency package graph",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-friend-package",
@@ -403,7 +413,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"package_visible"},
         .forbidden = &.{"private_visible"},
         .provenance = "friend package visibility graph",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-submodule",
@@ -415,7 +425,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"paint"},
         .forbidden = &.{"internal"},
         .provenance = "FR/Language/Modules submodules",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-merged-extension",
@@ -427,7 +437,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"choose"},
         .forbidden = &.{"private_helper"},
         .provenance = "merged extension from a dependency",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-platform-fragment",
@@ -439,7 +449,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"show"},
         .forbidden = &.{"unsupported_backend"},
         .provenance = "target-selected package fragment",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts" },
     },
     .{
         .id = "visibility-imported-private-negative",
@@ -449,7 +459,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"visible"},
         .forbidden = &.{"secret"},
         .provenance = "FR/Language/Visibility",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 excludes non-public members from an ordinary dependency" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology excludes non-public members from an ordinary dependency" },
     },
     .{
         .id = "visibility-package-member",
@@ -459,7 +469,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"private_member"},
         .provenance = "FR/Language/Modules package visibility",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace visibility respects private and protected access in the current file" },
     },
     .{
         .id = "visibility-module-member",
@@ -469,7 +479,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"local_member"},
         .provenance = "FR/Language/Modules module visibility",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace visibility respects private and protected access in the current file" },
     },
     .{
         .id = "visibility-local-member",
@@ -479,7 +489,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"other_file_member"},
         .provenance = "FR/Language/Modules local visibility",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace visibility respects private and protected access in the current file" },
     },
     .{
         .id = "visibility-protected-member",
@@ -489,7 +499,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"unrelated_private"},
         .provenance = "FR/Language/Data-types protected class members",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace visibility respects private and protected access in the current file" },
     },
     .{
         .id = "overlay-unsaved-import",
@@ -499,7 +509,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"BufferType"},
         .forbidden = &.{"DiskType"},
         .provenance = "unsaved imported document overlay",
-        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 imported overlays are authoritative ordered and recover without stale members" },
+        .status = .{ .protected = "Lsp.Tests.WorkspaceTopologyOracle: workspace overlays are authoritative ordered and recover without stale members" },
     },
     .{
         .id = "lsp-utf16-trigger-metadata",
