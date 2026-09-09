@@ -302,42 +302,42 @@ fn sameSpan(left: Machine.Span, right: Machine.Span) bool {
 
 const test_position: @import("../Source.zig").Position = .{ .offset = 0, .line = 1, .column = 1 };
 
-fn testPrograms(address_collection: Ir.ValueId) struct { Ir.Program, Ir.Function, Machine.Function } {
-    const input_fields = [_]Ir.StructureField{
+fn testPrograms(allocator: Allocator, address_collection: Ir.ValueId) !struct { Ir.Program, Ir.Function, Machine.Function } {
+    const input_fields = try allocator.dupe(Ir.StructureField, &.{
         .{ .name = "x", .type = .float32, .mutable = false },
         .{ .name = "y", .type = .float32, .mutable = false },
-    };
+    });
     const output_fields = input_fields;
-    const structures = [_]Ir.Structure{
-        .{ .name = "Input", .fields = &input_fields },
-        .{ .name = "Output", .fields = &output_fields },
+    const structures = try allocator.dupe(Ir.Structure, &.{
+        .{ .name = "Input", .fields = input_fields },
+        .{ .name = "Output", .fields = output_fields },
         .{ .name = "InputView", .fields = &.{}, .collection = .{ .element = .structure(0), .length = null, .view = true } },
         .{ .name = "OutputView", .fields = &.{}, .collection = .{ .element = .structure(1), .length = null, .view = true } },
-    };
-    const callee_fields = [_]Ir.ValueId{ 1, 2 };
-    const callee_instructions = [_]Ir.Instruction{
+    });
+    const callee_fields = try allocator.dupe(Ir.ValueId, &.{ 1, 2 });
+    const callee_instructions = try allocator.dupe(Ir.Instruction, &.{
         .{ .field_load = .{ .result = 1, .base = 0, .field = 0 } },
         .{ .field_load = .{ .result = 2, .base = 0, .field = 1 } },
-        .{ .structure_init = .{ .result = 3, .structure = 1, .fields = &callee_fields } },
-    };
-    const callee_blocks = [_]Ir.Block{.{ .instructions = &callee_instructions, .terminator = .{ .return_value = 3 } }};
-    const caller_arguments = [_]Ir.ValueId{4};
-    const caller_instructions = [_]Ir.Instruction{
+        .{ .structure_init = .{ .result = 3, .structure = 1, .fields = callee_fields } },
+    });
+    const callee_blocks = try allocator.dupe(Ir.Block, &.{.{ .instructions = callee_instructions, .terminator = .{ .return_value = 3 } }});
+    const caller_arguments = try allocator.dupe(Ir.ValueId, &.{4});
+    const caller_instructions = try allocator.dupe(Ir.Instruction, &.{
         .{ .local_load = .{ .result = 2, .local = 0 } },
         .{ .collection_load = .{ .result = 3, .collection = 2, .index = 1, .position = test_position } },
         .{ .collection_reference = .{ .result = 4, .collection = address_collection, .reference = null, .index = 1, .position = test_position } },
-        .{ .call = .{ .result = 5, .function = 0, .arguments = &caller_arguments } },
+        .{ .call = .{ .result = 5, .function = 0, .arguments = caller_arguments } },
         .{ .local_load = .{ .result = 6, .local = 0 } },
         .{ .collection_replace = .{ .result = 7, .collection = 6, .index = 1, .replacement = 5, .position = test_position } },
-    };
-    const caller_blocks = [_]Ir.Block{.{ .instructions = &caller_instructions, .terminator = .return_void }};
-    const functions = [_]Ir.Function{
+    });
+    const caller_blocks = try allocator.dupe(Ir.Block, &.{.{ .instructions = caller_instructions, .terminator = .return_void }});
+    const functions = try allocator.dupe(Ir.Function, &.{
         .{
             .name = "make",
             .parameter_types = &.{.structure(0)},
             .return_type = .structure(1),
             .value_types = &.{ .structure(0), .float32, .float32, .structure(1) },
-            .blocks = &callee_blocks,
+            .blocks = callee_blocks,
         },
         .{
             .name = "fill",
@@ -345,11 +345,11 @@ fn testPrograms(address_collection: Ir.ValueId) struct { Ir.Program, Ir.Function
             .return_type = .void,
             .value_types = &.{ .structure(2), .int, .structure(3), .structure(1), .address, .structure(1), .structure(3), .structure(3) },
             .local_types = &.{.structure(3)},
-            .blocks = &caller_blocks,
+            .blocks = caller_blocks,
         },
-    };
-    const machine_arguments = [_]Machine.Span{.{ .start = 9, .width = 1 }};
-    const machine_instructions = [_]Machine.Instruction{
+    });
+    const machine_arguments = try allocator.dupe(Machine.Span, &.{.{ .start = 9, .width = 1 }});
+    const machine_instructions = try allocator.dupe(Machine.Instruction, &.{
         .{ .copy_range = .{ .result = .{ .start = 5, .width = 2, .aggregate = true }, .operand = .{ .start = 3, .width = 2, .aggregate = true } } },
         .{ .collection_load = .{
             .result = .{ .start = 7, .width = 2, .aggregate = true },
@@ -375,7 +375,7 @@ fn testPrograms(address_collection: Ir.ValueId) struct { Ir.Program, Ir.Function
             .header = 0,
             .tail = 0,
         } },
-        .{ .call = .{ .result = .{ .start = 10, .width = 2, .aggregate = true }, .function = 0, .arguments = &machine_arguments } },
+        .{ .call = .{ .result = .{ .start = 10, .width = 2, .aggregate = true }, .function = 0, .arguments = machine_arguments } },
         .{ .copy_range = .{ .result = .{ .start = 12, .width = 2, .aggregate = true }, .operand = .{ .start = 3, .width = 2, .aggregate = true } } },
         .{ .collection_replace = .{
             .result = .{ .start = 14, .width = 2, .aggregate = true },
@@ -390,9 +390,9 @@ fn testPrograms(address_collection: Ir.ValueId) struct { Ir.Program, Ir.Function
             .tail = 0,
         } },
         .return_void,
-    };
+    });
     return .{
-        .{ .structures = &structures, .functions = &functions },
+        .{ .structures = structures, .functions = functions },
         functions[1],
         .{
             .name = "fill",
@@ -401,7 +401,7 @@ fn testPrograms(address_collection: Ir.ValueId) struct { Ir.Program, Ir.Function
             .return_type = .void,
             .slot_count = 16,
             .frame_size = 128,
-            .instructions = &machine_instructions,
+            .instructions = machine_instructions,
         },
     };
 }
@@ -409,7 +409,7 @@ fn testPrograms(address_collection: Ir.ValueId) struct { Ir.Program, Ir.Function
 test "forward a disjoint checked view load into an aggregate call result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const values = comptime testPrograms(0);
+    const values = try testPrograms(arena.allocator(), 0);
     const result = try optimize(arena.allocator(), values[0], values[1], values[2]);
     try std.testing.expectEqual(@as(Machine.Slot, 10), result.instructions[1].collection_load.forwarded_result.?.result);
     try std.testing.expect(result.instructions[3].call.result_forwarded);
@@ -419,7 +419,7 @@ test "forward a disjoint checked view load into an aggregate call result" {
 test "retain aggregate temporaries when the input can alias the destination" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const values = comptime testPrograms(2);
+    const values = try testPrograms(arena.allocator(), 2);
     const result = try optimize(arena.allocator(), values[0], values[1], values[2]);
     try std.testing.expect(result.instructions[1].collection_load.forwarded_result == null);
     try std.testing.expect(!result.instructions[3].call.result_forwarded);
