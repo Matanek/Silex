@@ -406,7 +406,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"visible"},
         .forbidden = &.{"secret"},
         .provenance = "FR/Language/Visibility",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 excludes non-public members from an ordinary dependency" },
     },
     .{
         .id = "visibility-package-member",
@@ -416,7 +416,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"private_member"},
         .provenance = "FR/Language/Modules package visibility",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
     },
     .{
         .id = "visibility-module-member",
@@ -426,7 +426,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"local_member"},
         .provenance = "FR/Language/Modules module visibility",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
     },
     .{
         .id = "visibility-local-member",
@@ -436,7 +436,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"other_file_member"},
         .provenance = "FR/Language/Modules local visibility",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
     },
     .{
         .id = "visibility-protected-member",
@@ -446,7 +446,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"shared"},
         .forbidden = &.{"unrelated_private"},
         .provenance = "FR/Language/Data-types protected class members",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 enforces private and protected visibility in the current file" },
     },
     .{
         .id = "overlay-unsaved-import",

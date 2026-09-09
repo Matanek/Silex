@@ -1520,10 +1520,12 @@ fn appendMembers(
         return;
     }
     if (structure.is_tuple and !structure.tuple_named) return;
+    const access_structure = if (containingCallable(source, program, cursor)) |callable| callable.structure_name else null;
     if (std.mem.eql(u8, std.mem.trim(u8, receiver, " \t\r\n"), structure.name)) {
         for (program.structures) |nested| {
             const enclosing = nested.enclosing orelse continue;
             if (!std.mem.eql(u8, enclosing, structure.name)) continue;
+            if (!localMemberVisible(program, access_structure, structure, nested)) continue;
             const label = if (std.mem.lastIndexOfScalar(u8, nested.name, '.')) |dot| nested.name[dot + 1 ..] else nested.name;
             try appendCandidate(allocator, candidates, context, .{
                 .label = label,
@@ -1531,22 +1533,26 @@ fn appendMembers(
                 .detail = try std.fmt.allocPrint(allocator, "nested type {s}", .{nested.name}),
             }, 0, true);
         }
-        for (structure.static_fields) |field| try appendCandidate(allocator, candidates, context, .{
-            .label = field.name,
-            .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
-            .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{
-                field.name,
-                try specializedTypeName(
-                    allocator,
-                    program,
-                    structure,
-                    type_name,
-                    if (field.property) |property| property.value_type else field.type,
-                ),
-            }),
-        }, memberFieldPriority, false);
+        for (structure.static_fields) |field| {
+            if (!localMemberVisible(program, access_structure, structure, field)) continue;
+            try appendCandidate(allocator, candidates, context, .{
+                .label = field.name,
+                .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
+                .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{
+                    field.name,
+                    try specializedTypeName(
+                        allocator,
+                        program,
+                        structure,
+                        type_name,
+                        if (field.property) |property| property.value_type else field.type,
+                    ),
+                }),
+            }, memberFieldPriority, false);
+        }
         for (structure.methods) |method| {
             if (method.accessor != null or (!method.is_static and !context.system_callback) or
+                !localMemberVisible(program, access_structure, structure, method) or
                 !callAcceptsParameters(source, cursor, program, method.parameters)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = method.name,
@@ -1556,27 +1562,72 @@ fn appendMembers(
         }
         return;
     }
-    for (structure.fields) |field| try appendCandidate(allocator, candidates, context, .{
-        .label = field.name,
-        .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
-        .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
-            field.name,
-            try specializedTypeName(
-                allocator,
-                program,
-                structure,
-                type_name,
-                if (field.property) |property| property.value_type else field.type,
-            ),
-        }),
-    }, memberFieldPriority, false);
+    var declaration = structure;
+    var declaration_type = type_name;
+    var inheritance_depth: usize = 0;
+    while (true) : (inheritance_depth += 1) {
+        if (inheritance_depth > program.structures.len) return;
+        try appendInstanceMembers(
+            allocator,
+            candidates,
+            source,
+            program,
+            cursor,
+            context,
+            declaration,
+            declaration_type,
+            access_structure,
+        );
+        const base_type = declaration.base orelse break;
+        declaration_type = specializedTypeName(
+            allocator,
+            program,
+            declaration,
+            declaration_type,
+            base_type,
+        ) catch break;
+        declaration = findStructure(program, nominalReceiverName(declaration_type)) orelse break;
+    }
+}
+
+fn appendInstanceMembers(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    context: Context,
+    structure: Ast.Structure,
+    receiver_type: []const u8,
+    access_structure: ?[]const u8,
+) !void {
+    for (structure.fields) |field| {
+        if (!localMemberVisible(program, access_structure, structure, field)) continue;
+        try appendCandidate(allocator, candidates, context, .{
+            .label = field.name,
+            .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
+            .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
+                field.name,
+                try specializedTypeName(
+                    allocator,
+                    program,
+                    structure,
+                    receiver_type,
+                    if (field.property) |property| property.value_type else field.type,
+                ),
+            }),
+        }, memberFieldPriority, false);
+    }
     for (structure.methods) |method| {
-        if (method.is_static) continue;
+        if (method.is_static or !localMemberVisible(program, access_structure, structure, method)) continue;
         if (method.accessor) |accessor| {
             if (structure.is_protocol and accessor.kind == .get) try appendCandidate(allocator, candidates, context, .{
                 .label = accessor.property,
                 .kind = CompletionKind.property,
-                .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ accessor.property, typeName(program, method.return_type) }),
+                .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
+                    accessor.property,
+                    try specializedTypeName(allocator, program, structure, receiver_type, method.return_type),
+                }),
             }, memberFieldPriority, false);
             continue;
         }
@@ -1584,9 +1635,32 @@ fn appendMembers(
         try appendCandidate(allocator, candidates, context, .{
             .label = method.name,
             .kind = CompletionKind.method,
-            .detail = try functionSignatureForReceiver(allocator, source, program, structure, type_name, method),
+            .detail = try functionSignatureForReceiver(allocator, source, program, structure, receiver_type, method),
         }, memberMethodPriority, true);
     }
+}
+
+fn localMemberVisible(
+    program: Ast.Program,
+    access_structure: ?[]const u8,
+    declaration: Ast.Structure,
+    member: anytype,
+) bool {
+    if (member.is_private) return if (access_structure) |name| std.mem.eql(u8, name, declaration.name) else false;
+    if (!member.is_protected) return true;
+    const name = access_structure orelse return false;
+    return structureIsOrDerivesFrom(program, name, declaration.name);
+}
+
+fn structureIsOrDerivesFrom(program: Ast.Program, candidate_name: []const u8, base_name: []const u8) bool {
+    var candidate = findStructure(program, candidate_name) orelse return false;
+    var depth: usize = 0;
+    while (depth <= program.structures.len) : (depth += 1) {
+        if (std.mem.eql(u8, candidate.name, base_name)) return true;
+        const base = candidate.base orelse return false;
+        candidate = structureForType(program, base) orelse return false;
+    }
+    return false;
 }
 
 fn insideSystemRegistration(tokens: []const Token) bool {
