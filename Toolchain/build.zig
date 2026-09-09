@@ -429,10 +429,11 @@ pub fn build(b: *std.Build) void {
     // Toolchain-owned language tests are hermetic: a user's live package links
     // must not extend their package graph or make the same commit nondeterministic.
     language_test_command.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
+    language_test_command.setCwd(b.path("../.."));
     language_test_command.addArg("test");
     language_test_command.addDirectoryArg(b.path("../Tests"));
-    // The build runner executes from Toolchain/. Language validation must not
-    // create a second project cache there; cache behavior has dedicated tests.
+    // Language validation shares the Spec/workspace-root package graph and
+    // must not create a second project cache under Silex/Toolchain.
     language_test_command.addArg("--nocache");
     const language_test_step = b.step("test-language", "Run executable Silex language tests");
     language_test_step.dependOn(&language_test_command.step);

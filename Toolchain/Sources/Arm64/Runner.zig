@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Encoder = @import("Encoder.zig");
+const InternalAbi = @import("InternalAbi.zig");
 const Lower = @import("Lower.zig");
 const Machine = @import("Machine.zig");
 
@@ -41,10 +42,13 @@ pub fn invoke(
     arguments: []const i64,
 ) Error!Result {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.UnsupportedHost;
-    if (function >= program.functions.len or arguments.len != program.functions[function].parameter_count) {
+    if (function >= program.functions.len) return error.InvalidMachineProgram;
+    const target_function = program.functions[function];
+    if (arguments.len != target_function.parameter_count) {
         return error.InvalidMachineProgram;
     }
-    if (arguments.len > Machine.max_register_arguments) return error.TooManyArguments;
+    const register_argument_count = InternalAbi.registerArgumentCount(target_function.parameters);
+    if (register_argument_count > Machine.max_register_arguments) return error.TooManyArguments;
     const image = try Encoder.encode(allocator, program, .{ .test_function = function });
     defer image.deinit(allocator);
     const entry_offset = image.entry_offset orelse return error.InvalidMachineProgram;
@@ -69,7 +73,24 @@ pub fn invoke(
     const entry_address = @intFromPtr(memory.ptr) + entry_offset;
     const native: NativeFunction = @ptrFromInt(entry_address);
     var padded_arguments = [_]i64{0} ** Machine.max_register_arguments;
-    @memcpy(padded_arguments[0..arguments.len], arguments);
+    if (InternalAbi.flattensSmallAggregates(target_function.parameters)) {
+        var register_index: usize = 0;
+        for (target_function.parameters, arguments) |parameter, argument| {
+            if (InternalAbi.isDirectAggregate(parameter, true)) {
+                const address: usize = @intCast(@as(u64, @bitCast(argument)));
+                const leaves: [*]const i64 = @ptrFromInt(address);
+                for (0..parameter.width) |leaf| {
+                    padded_arguments[register_index + leaf] = leaves[leaf];
+                }
+                register_index += parameter.width;
+            } else {
+                padded_arguments[register_index] = argument;
+                register_index += 1;
+            }
+        }
+    } else {
+        @memcpy(padded_arguments[0..arguments.len], arguments);
+    }
     const raw = native(
         padded_arguments[0],
         padded_arguments[1],
