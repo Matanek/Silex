@@ -291,75 +291,17 @@ fn slotParticipates(function: Machine.Function, slot: usize) bool {
     if (function.hidden_return_slot) |hidden| if (hidden == slot) return true;
     for (function.parameters) |parameter| if (spanContains(parameter, slot)) return true;
     for (function.capture_parameters) |capture| if (spanContains(capture, slot)) return true;
-    for (function.instructions, 0..) |instruction, instruction_index| {
-        const forwarded_return = switch (instruction) {
-            .return_value => |value| immediateReturnedAggregateInitialization(
-                function,
-                instruction_index,
-                value,
-            ) != null,
-            else => false,
-        };
-        if (!forwarded_return and instructionUses(instruction, slot)) return true;
-    }
-    for (function.instructions, 0..) |instruction, instruction_index| {
+    for (function.instructions) |instruction| if (instructionUses(instruction, slot)) return true;
+    for (function.instructions) |instruction| {
         if (!instructionDefines(instruction, slot)) continue;
         switch (instruction) {
             // The encoder omits individually unused leaves of borrowed
             // aggregate loads. Their virtual definitions need no stack home.
             .reference_load => |load| if (load.result.width > 1) continue,
-            // An aggregate immediately returned on an unbranched edge is
-            // emitted field-by-field into the hidden destination. Its
-            // intermediate result span is never materialized.
-            .aggregate_init => |initialization| if (aggregateInitializationFeedsImmediateReturn(
-                function,
-                instruction_index,
-                initialization,
-            )) continue,
             else => {},
         }
         return true;
     }
-    return false;
-}
-
-fn aggregateInitializationFeedsImmediateReturn(
-    function: Machine.Function,
-    instruction_index: usize,
-    initialization: Machine.Instruction.AggregateInit,
-) bool {
-    if (instruction_index + 1 >= function.instructions.len) return false;
-    const returned = switch (function.instructions[instruction_index + 1]) {
-        .return_value => |value| value,
-        else => return false,
-    };
-    if (controlTargetsInstruction(function.instructions, instruction_index + 1)) return false;
-    return returned.aggregate and returned.start == initialization.result.start and
-        returned.width == initialization.result.width;
-}
-
-fn immediateReturnedAggregateInitialization(
-    function: Machine.Function,
-    instruction_index: usize,
-    returned: Machine.Span,
-) ?Machine.Instruction.AggregateInit {
-    if (instruction_index == 0 or
-        controlTargetsInstruction(function.instructions, instruction_index)) return null;
-    const initialization = switch (function.instructions[instruction_index - 1]) {
-        .aggregate_init => |value| value,
-        else => return null,
-    };
-    if (!returned.aggregate or returned.start != initialization.result.start or
-        returned.width != initialization.result.width) return null;
-    return initialization;
-}
-
-fn controlTargetsInstruction(instructions: []const Machine.Instruction, target: usize) bool {
-    for (instructions) |instruction| switch (instruction) {
-        .jump => |value| if (value == target) return true,
-        .branch => |value| if (value.then_instruction == target or value.else_instruction == target) return true,
-        else => {},
-    };
     return false;
 }
 
@@ -1444,39 +1386,6 @@ test "resident frame omits a registered suffix after the final spill" {
             &.{ null, 1, 0 },
             &.{ null, null, null },
             &.{ null, null, null },
-        ),
-    );
-}
-
-test "immediate aggregate return result needs no frame home" {
-    const instructions = [_]Machine.Instruction{
-        .{ .aggregate_init = .{
-            .result = .{ .start = 1, .width = 2, .aggregate = true },
-            .fields = &.{
-                .{ .start = 3, .width = 1 },
-                .{ .start = 4, .width = 1 },
-            },
-        } },
-        .{ .return_value = .{ .start = 1, .width = 2, .aggregate = true } },
-    };
-    const function: Machine.Function = .{
-        .name = "direct_aggregate_return",
-        .parameter_count = 0,
-        .return_type = .float32,
-        .return_width = 2,
-        .return_aggregate = true,
-        .hidden_return_slot = 0,
-        .slot_count = 5,
-        .frame_size = try Machine.frameSize(5),
-        .instructions = &instructions,
-    };
-    try std.testing.expectEqual(
-        try Machine.frameSize(1),
-        try residentFrameSize(
-            function,
-            &.{ null, null, null, 0, 1 },
-            &.{ null, null, null, null, null },
-            &.{ null, null, null, null, null },
         ),
     );
 }
