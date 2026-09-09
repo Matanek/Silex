@@ -15,6 +15,7 @@ test {
     _ = @import("Lsp/Tests/ValueDemandOracle.zig");
     _ = @import("Lsp/Tests/CallableCompositionOracle.zig");
     _ = @import("Lsp/Tests/TypedIslandRecoveryOracle.zig");
+    _ = @import("Lsp/Tests/MetamorphicCompletionCampaign.zig");
     _ = @import("Lsp/Tests/SealedCompletionCorpus.zig");
     _ = @import("Lsp/Tests/CallbackCompletion.zig");
     _ = @import("Lsp/Tests/WorkspaceContracts.zig");

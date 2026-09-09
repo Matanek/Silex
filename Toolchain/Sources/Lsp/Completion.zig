@@ -3528,7 +3528,7 @@ fn expectedTypeAt(allocator: Allocator, source: []const u8, program: Ast.Program
             count += 1;
         }
     }
-    const tokens = line_tokens[0..count];
+    const tokens = currentStatementTokens(line_tokens[0..count]);
     if (tokens.len == 0) return null;
     if (tokens[0].tag == .keyword_for and isForSourceLine(source[tokens[0].start..context.prefix_start])) {
         return .{ .name = "iterable", .strict = true, .constraint = .iterable };
@@ -3560,13 +3560,34 @@ fn expectedTypeAt(allocator: Allocator, source: []const u8, program: Ast.Program
     if (expectedCallArgumentType(allocator, source[0..context.prefix_start], program)) |expected| return expected;
     if (expectedAssignmentType(allocator, source, program, cursor, tokens)) |expected| return expected;
     if (tokens[0].tag == .keyword_panic) return .{ .name = "str" };
-    var annotation: ?[]const u8 = null;
-    var has_equal = false;
+    var annotation_start: ?usize = null;
+    var annotation_end: ?usize = null;
     for (tokens, 0..) |token, index| {
-        if (token.tag == .colon and index + 1 < tokens.len) annotation = tokens[index + 1].lexeme;
-        if (token.tag == .equal) has_equal = true;
+        if (token.tag == .colon and index + 1 < tokens.len) annotation_start = tokens[index + 1].start;
+        if (token.tag == .equal and annotation_start != null) annotation_end = token.start;
     }
-    return if (has_equal and annotation != null) .{ .name = annotation.?, .strict = true } else null;
+    if (annotation_start) |start| if (annotation_end) |end| {
+        const spelling = std.mem.trim(u8, source[start..end], " \t\r\n");
+        const type_value = typeForSourceSpelling(program, spelling) orelse return .{
+            .name = spelling,
+            .strict = true,
+        };
+        return .{
+            .name = typeName(program, type_value),
+            .strict = true,
+            .function_type = if (type_value.functionIndex() != null) type_value else null,
+        };
+    };
+    return null;
+}
+
+fn currentStatementTokens(tokens: []const Token) []const Token {
+    var start: usize = 0;
+    for (tokens, 0..) |token, index| switch (token.tag) {
+        .left_brace, .right_brace, .semicolon => start = index + 1,
+        else => {},
+    };
+    return tokens[start..];
 }
 
 fn expectedActiveArgumentType(
@@ -4075,6 +4096,8 @@ fn parseForCompletionObserved(
         .aggregate_field => "__completion:true",
         .statement => if (control_body_missing or (for_source and !for_body_follows))
             "true {}"
+        else if (lineHasAssignmentBeforeCursor(before_prefix))
+            "true"
         else if (closers.len != 0)
             "true"
         else
@@ -4181,6 +4204,20 @@ fn lineHasUnclosedControlCondition(line: []const u8) bool {
         switch (token.tag) {
             .keyword_if, .keyword_elif, .keyword_while => found = true,
             .left_brace => found = false,
+            .end => return found,
+            else => {},
+        }
+    }
+}
+
+fn lineHasAssignmentBeforeCursor(line: []const u8) bool {
+    var lexer = LexerModule.Lexer.init(line);
+    var found = false;
+    while (true) {
+        const token = lexer.next() catch return false;
+        switch (token.tag) {
+            .left_brace, .right_brace, .semicolon => found = false,
+            .equal, .plus_equal, .minus_equal, .star_equal, .slash_equal, .percent_equal => found = true,
             .end => return found,
             else => {},
         }

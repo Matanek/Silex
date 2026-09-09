@@ -125,6 +125,16 @@ pub fn serverCompletionInOpenDocument(
     return serverCompletionRequest(server, allocator, uri, source, 1, null);
 }
 
+pub fn serverCompletionInOpenDocumentAfterTrigger(
+    server: *ServerModule.Server,
+    allocator: std.mem.Allocator,
+    uri: []const u8,
+    source: MarkedSource,
+    trigger_character: []const u8,
+) ![]const Types.CompletionItem {
+    return serverCompletionRequest(server, allocator, uri, source, 2, trigger_character);
+}
+
 pub fn serverCompletionAfterTrigger(
     server: *ServerModule.Server,
     allocator: std.mem.Allocator,
