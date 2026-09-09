@@ -2290,6 +2290,32 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                     binding += 1;
                 }
                 if (binding >= tokens.len or tokens[binding].tag != .identifier) continue;
+                if (binding + 1 < tokens.len and tokens[binding + 1].tag == .comma) {
+                    var element_binding = binding + 2;
+                    if (element_binding < tokens.len and
+                        (tokens[element_binding].tag == .keyword_let or tokens[element_binding].tag == .keyword_var))
+                    {
+                        element_binding += 1;
+                    }
+                    if (element_binding >= tokens.len or tokens[element_binding].tag != .identifier) continue;
+                    try locals.append(allocator, .{
+                        .name = tokens[binding].lexeme,
+                        .type_name = "int",
+                        .depth = depth + 1,
+                    });
+                    try locals.append(allocator, .{
+                        .name = tokens[element_binding].lexeme,
+                        .type_name = inferForElementType(
+                            program,
+                            containingCallable(source, program, cursor),
+                            locals.items,
+                            tokens,
+                            element_binding,
+                        ),
+                        .depth = depth + 1,
+                    });
+                    continue;
+                }
                 try locals.append(allocator, .{
                     .name = tokens[binding].lexeme,
                     .type_name = inferForElementType(program, containingCallable(source, program, cursor), locals.items, tokens, binding),
@@ -2322,6 +2348,16 @@ fn inferDestructuredDeclarationType(
     const value_index = (equal orelse return null) + 1;
     if (value_index >= tokens.len or tokens[value_index].tag != .identifier) return null;
     const name = tokens[value_index].lexeme;
+
+    if (value_index + 1 < tokens.len and tokens[value_index + 1].tag == .left_parenthesis) {
+        var return_type: ?Ast.Type = null;
+        for (program.functions) |function| {
+            if (!std.mem.eql(u8, function.name, name)) continue;
+            if (return_type != null and return_type.? != function.return_type) return null;
+            return_type = function.return_type;
+        }
+        return return_type;
+    }
 
     var local_index = locals.len;
     while (local_index != 0) {
@@ -2407,7 +2443,9 @@ fn inferDestructuredForType(program: Ast.Program, callable: ?Callable, tokens: [
         source_type = parameter.type;
         break;
     };
-    const generic_index = (source_type orelse return null).genericInstantiationIndex() orelse return null;
+    const resolved_source = source_type orelse return null;
+    if (collectionElementType(program, resolved_source)) |element| return element;
+    const generic_index = resolved_source.genericInstantiationIndex() orelse return null;
     if (generic_index >= program.generic_types.len) return null;
     const generic = program.generic_types[generic_index];
     if (generic.arguments.len == 0) return null;
@@ -2459,6 +2497,22 @@ fn inferForElementType(
         const owner = structureForType(program, current orelse return null) orelse return null;
         const name = tokens[index + 1].lexeme;
         const call = index + 2 < tokens.len and tokens[index + 2].tag == .left_parenthesis;
+        if (call and std.mem.eql(u8, name, "indexed")) {
+            index += 2;
+            var depth: usize = 0;
+            while (index < tokens.len) : (index += 1) switch (tokens[index].tag) {
+                .left_parenthesis => depth += 1,
+                .right_parenthesis => {
+                    depth -|= 1;
+                    if (depth == 0) {
+                        index += 1;
+                        break;
+                    }
+                },
+                else => {},
+            };
+            continue;
+        }
         var next: ?Ast.Type = null;
         if (call) {
             for (owner.methods) |method| if (std.mem.eql(u8, method.name, name)) {
@@ -4165,6 +4219,23 @@ test "publish typed bindings from a local tuple destructuring" {
         \\        let (target, motion) = pair
         \\        motion.
         \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "motion.").? + "motion.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "advance"));
+}
+
+test "type local tuple bindings initialized by a function call" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Target {}
+        \\struct Motion { func advance() {} }
+        \\func make_pair() (Target, Motion) { return (Target(), Motion()) }
+        \\func update() {
+        \\    let (target, motion) = make_pair()
+        \\    motion.
         \\}
     ;
     const cursor = std.mem.indexOf(u8, source, "motion.").? + "motion.".len;

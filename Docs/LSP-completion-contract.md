@@ -96,6 +96,35 @@ they must never become a successful empty completion list. A source-level gate
 forbids `catch` conversions inside the completion request handler, while an
 injected-failure test proves the protocol distinction.
 
+## Local syntax and scope invariant
+
+Local completion is checked through the real server request path, including
+the item kind, detail, filter text, insertion text, order and absence of
+duplicates. Exclusive positions compare the complete response, rather than
+checking one expected label in a larger accidental catalogue. The contracts
+cover module and structure declarations, nominal relations, type positions,
+statement and expression roots, call labels and values, aggregate fields, and
+lexical bindings.
+
+The lexical collector models parameters, ordinary declarations, nested and
+shadowed scopes, direct tuple `for` bindings, indexed traversal bindings, local
+tuple destructuring and implicit `match`/`try` bindings. Tuple element types
+are retained whether the tuple comes from a parameter, a collection element,
+a local binding or a function return. A binding becomes visible only after its
+declaration and is removed at the closing brace of its exact scope.
+
+Parser recovery at the cursor is insensitive to physical line layout. The
+placeholder is selected from structural facts: an unfinished control condition
+receives a condition and body, while an unfinished parenthesis, tuple or
+collection receives an expression plus the exact missing closers. The same
+lexical candidate must therefore survive missing `()`, `[]`, commas and bodies,
+an invalid neighbouring statement, an invalid top-level declaration before or
+after the cursor, interpolation, and Unicode preceding the cursor. Ordinary
+string and comment text must return no language completion.
+
+These guarantees live in `Lsp/Tests/Part03Contracts.zig` and the focused unit
+tests next to `Lsp/Completion.zig`; they do not depend on the construction Spec.
+
 ## Running the gate
 
 From `Silex/Toolchain`, run:

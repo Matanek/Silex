@@ -33,12 +33,14 @@ test "part 03 local registry gaps are executable contracts" {
         defer server.deinit();
         const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Part03-{d}.sx", .{index});
         const items = try Support.serverCompletion(&server, arena.allocator(), uri, case.source);
+        const repeated = try Support.serverCompletion(&server, arena.allocator(), uri, case.source);
         try Support.expectItem(case.expected, items);
         for (case.forbidden) |label| if (hasLabel(items, label)) {
             std.debug.print("Part 03 contract '{s}' exposes forbidden label '{s}'\n", .{ case.id, label });
             all_satisfied = false;
         };
         try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, repeated);
     }
     try std.testing.expect(all_satisfied);
 }
@@ -86,6 +88,74 @@ test "part 03 completes a qualified field type from the workspace" {
     }, items);
     try Support.expectAbsent("print", items);
     try Support.expectNoDuplicates(items);
+    const repeated = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        uri,
+        "use STD.Math\nstruct Player { var position:Math.<|> }\nfunc main() {}",
+        ".",
+    );
+    try Support.expectEqualItems(items, repeated);
+}
+
+test "part 03 exercises every non-empty keyword prefix" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const KeywordSet = struct {
+        before: []const u8,
+        after: []const u8,
+        keywords: []const []const u8,
+    };
+    const sets = [_]KeywordSet{
+        .{
+            .before = "",
+            .after = "<|>",
+            .keywords = &.{ "use", "public", "package", "module", "local", "struct", "class", "nocopy", "static", "protocol", "enum", "func", "test", "extend" },
+        },
+        .{
+            .before = "struct Container { ",
+            .after = "<|> }\nfunc main() {}",
+            .keywords = &.{ "public", "package", "module", "local", "private", "protected", "let", "var", "init", "func", "static", "struct", "class", "nocopy", "drop" },
+        },
+        .{
+            .before = "func main() { ",
+            .after = "<|> }",
+            .keywords = &.{ "let", "var", "if", "while", "mutex", "return", "print", "assert", "panic" },
+        },
+    };
+    for (sets) |set| for (set.keywords) |keyword| {
+        var prefix_length: usize = 1;
+        while (prefix_length <= keyword.len) : (prefix_length += 1) {
+            const source = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+                set.before,
+                keyword[0..prefix_length],
+                set.after,
+            });
+            const items = try Support.complete(allocator, source);
+            const item = itemNamed(items, keyword) orelse {
+                std.debug.print("Part 03 keyword '{s}' is missing at prefix '{s}'\n", .{ keyword, keyword[0..prefix_length] });
+                return error.MissingCompletionItem;
+            };
+            try std.testing.expectEqualStrings(keyword, item.filterText.?);
+            try std.testing.expectEqualStrings(keyword, item.insertText.?);
+            try Support.expectNoDuplicates(items);
+        }
+    };
+
+    for ([_][]const u8{ "break", "continue" }) |keyword| {
+        var prefix_length: usize = 1;
+        while (prefix_length <= keyword.len) : (prefix_length += 1) {
+            const source = try std.fmt.allocPrint(
+                allocator,
+                "func main() {{ while true {{ {s}<|> }} }}",
+                .{keyword[0..prefix_length]},
+            );
+            const items = try Support.complete(allocator, source);
+            try Support.expectPresent(keyword, items);
+            try Support.expectNoDuplicates(items);
+        }
+    }
 }
 
 test "part 03 keeps lexical values through incomplete delimiters" {
@@ -149,6 +219,30 @@ test "part 03 enforces nested lexical scope and nearest shadowing" {
     }
 }
 
+test "part 03 publishes direct tuple and indexed for bindings" {
+    const sources = [_][]const u8{
+        "struct Target {}\nstruct Motion {}\nfunc update(query:(Target, Motion)[]) { for (target, motion) in query { mot<|> } }",
+        "struct Motion {}\nfunc update(values:Motion[]) { for index, motion in values.indexed() { mot<|> } }",
+    };
+    for (sources, 0..) |source, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Part03-ForBindings-{d}.sx", .{index});
+        const items = try Support.serverCompletion(&server, arena.allocator(), uri, source);
+        if (items.len == 0) std.debug.print("Part 03 for binding case {d} returned no completion\n", .{index});
+        try Support.expectExactLabels(&.{"motion"}, items);
+        try Support.expectItem(.{
+            .label = "motion",
+            .kind = 6,
+            .detail = "motion:Motion",
+            .insert_text = "motion",
+        }, items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
 test "part 03 distinguishes code from comments strings and interpolation" {
     const LexicalCase = struct {
         source: []const u8,
@@ -199,6 +293,10 @@ test "part 03 responses stay deterministic across malformed local states" {
 }
 
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
-    for (items) |item| if (std.mem.eql(u8, item.label, label)) return true;
-    return false;
+    return itemNamed(items, label) != null;
+}
+
+fn itemNamed(items: []const Types.CompletionItem, label: []const u8) ?Types.CompletionItem {
+    for (items) |item| if (std.mem.eql(u8, item.filterText orelse item.label, label)) return item;
+    return null;
 }
