@@ -174,7 +174,10 @@ pub fn itemsAtWithDecision(
     var candidates: std.ArrayList(Candidate) = .empty;
     const completing_try_alternative = context.completing_try_alternative;
     const program = context.program;
-    const expected_type: ?ExpectedType = if (contextual_expected_type) |name|
+    const completing_match_subject = try isMatchSubjectPositionAt(allocator, source, context.prefix_start);
+    const expected_type: ?ExpectedType = if (completing_match_subject)
+        null
+    else if (contextual_expected_type) |name|
         .{ .name = name, .strict = true }
     else if (program) |parsed|
         expectedTypeAt(source, parsed, cursor, context)
@@ -1065,6 +1068,11 @@ fn matchPatternSubjectAt(allocator: Allocator, source: []const u8, cursor: usize
     const matched = match_index orelse return null;
     if (matched + 2 != brace) return null;
     return tokens[matched + 1].lexeme;
+}
+
+fn isMatchSubjectPositionAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
+    const tokens = try tokensUntil(allocator, source, cursor);
+    return tokens.len != 0 and tokens[tokens.len - 1].tag == .keyword_match;
 }
 
 fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Context {
@@ -2014,6 +2022,11 @@ fn appendExpressionSymbols(
     context: Context,
     expected_type: ?ExpectedType,
 ) !void {
+    try appendCandidate(allocator, candidates, context, .{
+        .label = "match",
+        .kind = CompletionKind.keyword,
+        .detail = "Silex value selection",
+    }, 50, false);
     // Once the user has started a name, keep matching expression roots available:
     // their member or call path can still produce the contextually expected type.
     const selection_type: ?ExpectedType = if (context.prefix.len != 0)
@@ -3402,12 +3415,15 @@ fn parseForCompletionObserved(
         lineHasUnclosedControlCondition(before_prefix)) and !blockFollowsCompletion(source, cursor);
     const completing_try_error = context.completing_try_error;
     const completing_try_alternative = context.completing_try_alternative;
+    const completing_match_subject = try isMatchSubjectPositionAt(allocator, source, context.prefix_start);
     const completing_match_pattern = (try matchPatternSubjectAt(allocator, source, context.prefix_start)) != null;
     const closers = try RecoveryModule.unmatchedLineClosers(allocator, source, line_start, cursor);
     const placeholder: []const u8 = if (completing_try_error)
         "error"
     else if (completing_try_alternative)
         "else {}"
+    else if (completing_match_subject)
+        "true { else => true }"
     else if (completing_match_pattern)
         "else => {}"
     else switch (context.kind) {
@@ -4610,6 +4626,35 @@ test "complete only valid continuations at a scalar literal match pattern" {
     try std.testing.expectEqual(@as(usize, 1), integer_items.len);
     try std.testing.expectEqualStrings("else", integer_items[0].label);
     try std.testing.expectEqualStrings("else => $0", integer_items[0].insertText.?);
+}
+
+test "complete the match keyword and an incomplete match subject" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const keyword_source =
+        \\func to_month_str(month:int) str {
+        \\    return ma
+        \\}
+    ;
+    const keyword_cursor = std.mem.indexOf(u8, keyword_source, "return ma").? + "return ma".len;
+    const keyword_items = try itemsAt(arena.allocator(), keyword_source, keyword_cursor, .invoked);
+    try std.testing.expect(contains(keyword_items, "match"));
+    const match_item = keyword_items[indexOf(keyword_items, "match").?];
+    try std.testing.expectEqualStrings("match", match_item.insertText.?);
+    try std.testing.expectEqual(CompletionKind.keyword, match_item.kind);
+
+    const subject_source =
+        \\func to_month_str(month:int) str {
+        \\    return match mon
+        \\}
+    ;
+    const subject_cursor = std.mem.indexOf(u8, subject_source, "match mon").? + "match mon".len;
+    const subject_items = try itemsAt(arena.allocator(), subject_source, subject_cursor, .invoked);
+    try std.testing.expect(contains(subject_items, "month"));
+    const month_index = indexOf(subject_items, "month").?;
+    try std.testing.expectEqualStrings("month:int", subject_items[month_index].detail);
+    try std.testing.expect(contains(subject_items, "to_month_str"));
+    try std.testing.expect(month_index < indexOf(subject_items, "to_month_str").?);
 }
 
 test "complete variants on a specialized generic enum" {
