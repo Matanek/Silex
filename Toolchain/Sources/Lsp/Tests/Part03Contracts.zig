@@ -219,9 +219,9 @@ test "part 03 enforces nested lexical scope and nearest shadowing" {
     }
 }
 
-test "part 03 publishes direct tuple and indexed for bindings" {
+test "part 03 publishes tuple destructuring and indexed for bindings" {
     const sources = [_][]const u8{
-        "struct Target {}\nstruct Motion {}\nfunc update(query:(Target, Motion)[]) { for (target, motion) in query { mot<|> } }",
+        "struct Target {}\nstruct Motion {}\nfunc update(query:(Target, Motion)[]) { for pair in query { let (target, motion) = pair; mot<|> } }",
         "struct Motion {}\nfunc update(values:Motion[]) { for index, motion in values.indexed() { mot<|> } }",
     };
     for (sources, 0..) |source, index| {

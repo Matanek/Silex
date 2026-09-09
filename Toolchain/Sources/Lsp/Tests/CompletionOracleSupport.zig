@@ -44,6 +44,14 @@ pub fn publicInstanceMembers(
 ) ![]const []const u8 {
     var frontend = FrontendModule.Frontend.init(allocator);
     const program = (try frontend.compile(source)).ast;
+    return publicInstanceMembersFromProgram(allocator, program, type_name);
+}
+
+pub fn publicInstanceMembersFromProgram(
+    allocator: std.mem.Allocator,
+    program: Ast.Program,
+    type_name: []const u8,
+) ![]const []const u8 {
     var labels: std.ArrayList([]const u8) = .empty;
     for (program.structures) |structure| {
         if (!matchesType(structure.name, type_name)) continue;
@@ -73,6 +81,15 @@ pub fn publicInstanceMember(
 ) !InstanceMember {
     var frontend = FrontendModule.Frontend.init(allocator);
     const program = (try frontend.compile(source)).ast;
+    return publicInstanceMemberFromProgram(allocator, program, type_name, member_name);
+}
+
+pub fn publicInstanceMemberFromProgram(
+    allocator: std.mem.Allocator,
+    program: Ast.Program,
+    type_name: []const u8,
+    member_name: []const u8,
+) !InstanceMember {
     for (program.structures) |structure| {
         if (!matchesType(structure.name, type_name)) continue;
         for (structure.fields) |field| {
@@ -106,8 +123,44 @@ pub fn publicInstanceMember(
     return error.MissingOracleType;
 }
 
+pub fn namedTupleFieldsFromFunction(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    function_name: []const u8,
+) ![]const InstanceMember {
+    var frontend = FrontendModule.Frontend.init(allocator);
+    const program = (try frontend.compile(source)).ast;
+    var return_type: ?Ast.Type = null;
+    for (program.functions) |function| {
+        if (!function.is_anonymous and std.mem.eql(u8, function.name, function_name)) {
+            return_type = function.return_type;
+            break;
+        }
+    }
+    const tuple_name = typeName(program, return_type orelse return error.MissingOracleFunction);
+    for (program.structures) |structure| {
+        if (!structure.is_tuple or !structure.tuple_named or !std.mem.eql(u8, structure.name, tuple_name)) continue;
+        var members: std.ArrayList(InstanceMember) = .empty;
+        for (structure.fields) |field| try members.append(allocator, .{
+            .name = field.name,
+            .kind = 5,
+            .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ field.name, typeName(program, field.type) }),
+            .insert_text = field.name,
+        });
+        std.mem.sort(InstanceMember, members.items, {}, struct {
+            fn lessThan(_: void, left: InstanceMember, right: InstanceMember) bool {
+                return std.mem.lessThan(u8, left.name, right.name);
+            }
+        }.lessThan);
+        return members.toOwnedSlice(allocator);
+    }
+    return error.MissingOracleTuple;
+}
+
 fn matchesType(candidate: []const u8, requested: []const u8) bool {
     if (std.mem.eql(u8, candidate, requested)) return true;
+    if (candidate.len > requested.len and std.mem.endsWith(u8, candidate, requested) and
+        candidate[candidate.len - requested.len - 1] == '.') return true;
     return candidate.len > requested.len + 1 and
         std.mem.startsWith(u8, candidate, requested) and
         candidate[requested.len] == '<' and

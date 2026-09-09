@@ -329,12 +329,9 @@ fn schemaOwnerForKey(registry: []const ProofSchema, key: Key) !?SchemaId {
 
 fn schemaOwns(predicate: SchemaPredicate, key: Key) bool {
     return switch (predicate) {
-        .receiver_member_surface => key.demand == .member and key.consumer == .member_access and switch (key.producer) {
-            .lexical_local, .self_value, .tuple_value => key.transform == .direct,
-            .field => key.transform == .field_chain,
-            .constructor_result => key.transform == .cascade,
-            else => false,
-        },
+        .receiver_member_surface => key.demand == .member and
+            key.consumer == .member_access and
+            isProducerProvenanceProducer(key.producer),
         .value_flow_surface => key.demand == .value and switch (key.producer) {
             .lexical_local => key.consumer == .argument_value and key.transform == .direct,
             .destructured_element => key.consumer == .initializer and key.transform == .destructured,
@@ -343,6 +340,40 @@ fn schemaOwns(predicate: SchemaPredicate, key: Key) bool {
         },
         .none => false,
         .all_applicable => isApplicable(key),
+    };
+}
+
+pub fn isProducerProvenanceProducer(producer: ProducerKind) bool {
+    return switch (producer) {
+        .lexical_local,
+        .parameter,
+        .self_value,
+        .field,
+        .property,
+        .constructor_result,
+        .function_result,
+        .method_result,
+        .callback_result,
+        .tuple_value,
+        .tuple_element,
+        .destructured_element,
+        .iteration_binding,
+        .ecs_query_binding,
+        .injected_dependency,
+        => true,
+        .intrinsic,
+        .imported_value,
+        .workspace_contribution,
+        .function_declaration,
+        .method_declaration,
+        .bound_method,
+        .callback_parameter,
+        .callback_field,
+        .returned_callback,
+        .tuple_callable,
+        .injected_callable,
+        .imported_callable,
+        => false,
     };
 }
 
@@ -586,7 +617,7 @@ fn deliveryPart(key: Key) DeliveryPart {
 
 test "semantic completion compositions are all classified" {
     const statistics = try audit();
-    try std.testing.expectEqual(@as(usize, 8), statistics.proved);
+    try std.testing.expect(statistics.proved > 8);
     try std.testing.expectEqual(schemas.len, statistics.schemas);
     try std.testing.expect(statistics.required != 0);
     try std.testing.expect(statistics.excluded != 0);

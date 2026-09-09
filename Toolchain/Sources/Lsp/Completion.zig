@@ -3016,6 +3016,24 @@ pub fn resolveReceiverTypeForAccess(
         const name = std.mem.trim(u8, trimmed[0..open], " \t");
         if (findStructure(program, name)) |_| return name;
         if (findStructure(program, nominalReceiverName(name))) |_| return name;
+        const callables = containingCallables(allocator, source, program, cursor) catch return null;
+        defer allocator.free(callables);
+        var callable_index = callables.len;
+        while (callable_index != 0) {
+            callable_index -= 1;
+            for (callables[callable_index].parameters) |parameter| {
+                if (std.mem.eql(u8, parameter.name, name)) {
+                    const function_index = parameter.type.functionIndex() orelse return null;
+                    if (function_index >= program.function_types.len) return null;
+                    const return_type = typeSpelling(
+                        allocator,
+                        program,
+                        program.function_types[function_index].return_type,
+                    ) catch return null;
+                    return typeAfterSafeAccess(return_type, safe_access);
+                }
+            }
+        }
         for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) {
             const return_type = typeSpelling(allocator, program, function.return_type) catch return null;
             return typeAfterSafeAccess(return_type, safe_access);
@@ -3036,19 +3054,34 @@ pub fn resolveReceiverTypeForAccess(
     var parts = std.mem.splitScalar(u8, trimmed, '.');
     const first = parts.next() orelse return null;
     var current_type: ?[]const u8 = null;
+    const lexical_callables = containingCallables(allocator, source, program, cursor) catch return null;
+    defer allocator.free(lexical_callables);
     if (std.mem.eql(u8, first, "self")) {
-        if (containingCallable(source, program, cursor)) |callable| current_type = callable.structure_name;
-    } else if (containingCallable(source, program, cursor)) |callable| {
-        for (callable.parameters) |parameter| if (std.mem.eql(u8, parameter.name, first)) {
-            current_type = if (genericType(parameter.type) != null)
-                typeSpelling(allocator, program, parameter.type) catch return null
-            else
-                memberTypeName(program, parameter.type);
-            break;
-        };
+        var scope_index = lexical_callables.len;
+        while (scope_index != 0) {
+            scope_index -= 1;
+            if (lexical_callables[scope_index].structure_name) |name| {
+                current_type = name;
+                break;
+            }
+        }
+    } else if (lexical_callables.len != 0) {
+        var scope_index = lexical_callables.len;
+        while (scope_index != 0 and current_type == null) {
+            scope_index -= 1;
+            for (lexical_callables[scope_index].parameters) |parameter| {
+                if (std.mem.eql(u8, parameter.name, first)) {
+                    current_type = if (genericType(parameter.type) != null)
+                        typeSpelling(allocator, program, parameter.type) catch return null
+                    else
+                        memberTypeName(program, parameter.type);
+                    break;
+                }
+            }
+        }
         if (current_type == null) {
-            const locals = visibleLocals(std.heap.page_allocator, source, program, callable.position, cursor) catch return null;
-            defer std.heap.page_allocator.free(locals);
+            const locals = visibleLocals(allocator, source, program, lexical_callables[0].position, cursor) catch return null;
+            defer allocator.free(locals);
             var index = locals.len;
             while (index != 0) {
                 index -= 1;
@@ -3496,11 +3529,19 @@ fn isForSourceLine(line: []const u8) bool {
     var lexer = LexerModule.Lexer.init(line);
     const first = lexer.next() catch return false;
     if (first.tag != .keyword_for) return false;
+    var has_in = false;
     while (true) {
         const token = lexer.next() catch return false;
-        if (token.tag == .end) return false;
-        if (token.tag == .keyword_in) return true;
+        if (token.tag == .end) return has_in;
+        if (token.tag == .keyword_in) has_in = true;
+        if (has_in and token.tag == .left_brace) return false;
     }
+}
+
+test "for-source recovery does not absorb completion inside a same-line body" {
+    try std.testing.expect(isForSourceLine("for value in val"));
+    try std.testing.expect(!isForSourceLine("for value in values { value."));
+    try std.testing.expect(!isForSourceLine("for (entity, position) in query { position."));
 }
 
 fn lineHasUnclosedControlCondition(line: []const u8) bool {
@@ -3972,6 +4013,9 @@ pub fn partialCascadeReceiver(source: []const u8, dot: usize) ?[]const u8 {
 
 fn cascadeReceiverAt(source: []const u8, dot: usize) ?[]const u8 {
     const cascade_start = cascadeRecoveryStart(source, dot);
+    if (cascade_start == dot) if (previousCascadeSeparator(source, dot)) |previous| {
+        return cascadeReceiverAt(source, previous);
+    };
     const base_end = if (cascade_start < dot) cascade_start else dot;
     var end = base_end;
     while (end != 0 and (source[end - 1] == ' ' or source[end - 1] == '\t' or source[end - 1] == '\r' or
@@ -3995,6 +4039,23 @@ fn cascadeReceiverAt(source: []const u8, dot: usize) ?[]const u8 {
         if (content_start + initializer_start == receiver_start) return name;
     }
     return receiver;
+}
+
+fn previousCascadeSeparator(source: []const u8, dot: usize) ?usize {
+    var index = dot;
+    var depth: usize = 0;
+    while (index != 0) {
+        index -= 1;
+        switch (source[index]) {
+            ')', ']', '}' => depth += 1,
+            '(', '[', '{' => depth -|= 1,
+            '.' => if (depth == 0 and index != 0 and source[index - 1] == '.' and
+                (index < 2 or source[index - 2] != '.')) return index - 1,
+            '\n' => if (depth == 0) return null,
+            else => {},
+        }
+    }
+    return null;
 }
 
 pub fn recoverCascadeForParsing(
