@@ -402,6 +402,19 @@ test "ECS query binding uses the same compiler-backed member oracle" {
     }, actual);
     try Support.expectExactLabels(&.{"paint"}, actual);
     try Support.expectNoDuplicates(actual);
+
+    const recovery_mutations = [_][]const u8{
+        try std.fmt.allocPrint(allocator, "// îlot ECS 🙂\n{s}", .{partial}),
+        try std.fmt.allocPrint(allocator, "{s}\nfunc broken( {{ }}", .{partial}),
+        try std.fmt.allocPrint(allocator, "func neighbour() {{ if }}\n{s}", .{partial}),
+    };
+    for (recovery_mutations, 0..) |mutation, mutation_index| {
+        const marked = try Support.removeMarker(allocator, mutation);
+        try Support.changeDocument(&server, allocator, main_uri, @intCast(mutation_index + 2), marked.text);
+        const recovered = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+        try Support.expectEqualItems(actual, recovered);
+        try Support.expectNoDuplicates(recovered);
+    }
 }
 
 test "producer provenance campaign covers every declared local producer and transform family" {

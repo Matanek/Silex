@@ -3992,6 +3992,40 @@ fn parseForCompletionObserved(
             .program = mergeExtensionsForCompletion(allocator, program),
             .recovery = .completion_site,
         } else |_| {}
+        const original_line_start = if (std.mem.lastIndexOfScalar(u8, source[0..context.prefix_start], '\n')) |newline|
+            newline + 1
+        else
+            0;
+        const recovery_point = std.mem.indexOfScalarPos(u8, recovered, @min(original_line_start, recovered.len), '\n') orelse recovered.len;
+        const line_start = if (std.mem.lastIndexOfScalar(u8, recovered[0..recovery_point], '\n')) |newline|
+            newline + 1
+        else
+            0;
+        const closers = try RecoveryModule.unmatchedLineClosers(allocator, recovered, line_start, recovery_point);
+        if (closers.len != 0) {
+            const balanced = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+                recovered[0..recovery_point],
+                closers,
+                recovered[recovery_point..],
+            });
+            parser = ParserModule.Parser.init(allocator, balanced);
+            if (parser.parse()) |program| return .{
+                .program = mergeExtensionsForCompletion(allocator, program),
+                .recovery = .completion_site,
+            } else |_| {}
+        }
+        if (lineHasUnclosedControlCondition(recovered[line_start..recovery_point])) {
+            const with_body = try std.fmt.allocPrint(allocator, "{s}{s} {{}}{s}", .{
+                recovered[0..recovery_point],
+                closers,
+                recovered[recovery_point..],
+            });
+            parser = ParserModule.Parser.init(allocator, with_body);
+            if (parser.parse()) |program| return .{
+                .program = mergeExtensionsForCompletion(allocator, program),
+                .recovery = .completion_site,
+            } else |_| {}
+        }
         if (try RecoveryModule.isolateInvalidTopLevelDeclarations(
             allocator,
             recovered,
