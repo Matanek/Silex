@@ -957,8 +957,22 @@ fn queryAt(
                 .type_only = qualified_type,
             } };
         }
-        if (Completion.resolveReceiverType(allocator, source, program, cursor, receiver)) |local_type| {
-            if (try importedNominalTypePath(allocator, io, documents, program, project, local_type)) |resolved| {
+        if (Completion.resolveReceiverTypeForAccess(
+            allocator,
+            source,
+            program,
+            cursor,
+            receiver,
+            decision.safe_member_access,
+        )) |local_type| {
+            if (try importedNominalTypePath(
+                allocator,
+                io,
+                documents,
+                program,
+                project,
+                Completion.nominalReceiverName(local_type),
+            )) |resolved| {
                 return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
             }
         }

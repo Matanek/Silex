@@ -194,7 +194,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{ "value", "read" },
         .forbidden = &.{"static_only"},
         .provenance = "FR/Language/Data-types self members",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "member-local-extension",
@@ -204,7 +204,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"choose"},
         .forbidden = &.{"public"},
         .provenance = "FR/Language/Data-types extensions",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "member-dynamic-protocol",
@@ -214,7 +214,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"read"},
         .forbidden = &.{"secret"},
         .provenance = "FR/Language/Data-types protocols",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "member-optional-safe-access",
@@ -224,7 +224,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"pressed"},
         .forbidden = &.{"if"},
         .provenance = "FR/Language/Data-types optionals",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "member-static-type",
@@ -234,7 +234,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"red"},
         .forbidden = &.{"instance"},
         .provenance = "FR/Language/Data-types static members",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "member-specialized-generic",
@@ -244,7 +244,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"get"},
         .forbidden = &.{"T"},
         .provenance = "FR/Language/Data-types generics",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "member-named-tuple",
@@ -254,7 +254,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{ "width", "height" },
         .forbidden = &.{"length"},
         .provenance = "FR/Language/Data-types tuples",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "member-imported-field-chain",
@@ -266,7 +266,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{ "length", "normalized" },
         .forbidden = &.{"position"},
         .provenance = "Sandbox/Main.sx transform.position : Math.Vec2",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 preserves an imported field type through query and local bindings" },
     },
     .{
         .id = "member-imported-alias",
@@ -496,7 +496,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{ "north", "south" },
         .forbidden = &.{"private compiler symbol"},
         .provenance = "FR/Language/Data-types enums",
-        .status = .{ .assigned_gap = .part_04 },
+        .status = .{ .protected = "Lsp.Tests.Part04Contracts: part 04 local receiver registry gaps are executable contracts" },
     },
     .{
         .id = "invariant-deterministic-no-duplicates",

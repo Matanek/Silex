@@ -61,6 +61,7 @@ pub const Decision = struct {
     has_use: bool = false,
     has_try: bool = false,
     inside_parentheses: bool = false,
+    safe_member_access: bool = false,
     completing_try_error: bool = false,
     completing_try_alternative: bool = false,
     active_call: ?ActiveCall = null,
@@ -989,6 +990,7 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
             .has_use = has_use,
             .has_try = has_try,
             .inside_parentheses = inside_parentheses,
+            .safe_member_access = separator.tag == .question_dot,
         };
     }
 
@@ -1496,7 +1498,14 @@ fn appendMembers(
         }, 0, variant.associated_types.len != 0);
         return;
     }
-    const type_name = resolveReceiverType(allocator, source, program, cursor, receiver) orelse return;
+    const type_name = resolveReceiverTypeForAccess(
+        allocator,
+        source,
+        program,
+        cursor,
+        receiver,
+        context.safe_member_access,
+    ) orelse return;
     if (std.mem.eql(u8, type_name, "str")) {
         try appendCandidate(allocator, candidates, context, .{
             .label = "count",
@@ -1525,7 +1534,16 @@ fn appendMembers(
         for (structure.static_fields) |field| try appendCandidate(allocator, candidates, context, .{
             .label = field.name,
             .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
-            .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{ field.name, typeName(program, if (field.property) |property| property.value_type else field.type) }),
+            .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{
+                field.name,
+                try specializedTypeName(
+                    allocator,
+                    program,
+                    structure,
+                    type_name,
+                    if (field.property) |property| property.value_type else field.type,
+                ),
+            }),
         }, memberFieldPriority, false);
         for (structure.methods) |method| {
             if (method.accessor != null or (!method.is_static and !context.system_callback) or
@@ -1533,7 +1551,7 @@ fn appendMembers(
             try appendCandidate(allocator, candidates, context, .{
                 .label = method.name,
                 .kind = CompletionKind.method,
-                .detail = try functionSignature(allocator, source, program, method),
+                .detail = try functionSignatureForReceiver(allocator, source, program, structure, type_name, method),
             }, memberMethodPriority, true);
         }
         return;
@@ -1541,9 +1559,19 @@ fn appendMembers(
     for (structure.fields) |field| try appendCandidate(allocator, candidates, context, .{
         .label = field.name,
         .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
-        .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ field.name, typeName(program, if (field.property) |property| property.value_type else field.type) }),
+        .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
+            field.name,
+            try specializedTypeName(
+                allocator,
+                program,
+                structure,
+                type_name,
+                if (field.property) |property| property.value_type else field.type,
+            ),
+        }),
     }, memberFieldPriority, false);
     for (structure.methods) |method| {
+        if (method.is_static) continue;
         if (method.accessor) |accessor| {
             if (structure.is_protocol and accessor.kind == .get) try appendCandidate(allocator, candidates, context, .{
                 .label = accessor.property,
@@ -1556,7 +1584,7 @@ fn appendMembers(
         try appendCandidate(allocator, candidates, context, .{
             .label = method.name,
             .kind = CompletionKind.method,
-            .detail = try functionSignature(allocator, source, program, method),
+            .detail = try functionSignatureForReceiver(allocator, source, program, structure, type_name, method),
         }, memberMethodPriority, true);
     }
 }
@@ -2730,15 +2758,95 @@ pub fn resolveReceiverType(
     cursor: usize,
     receiver: []const u8,
 ) ?[]const u8 {
-    _ = allocator;
+    return resolveReceiverTypeForAccess(allocator, source, program, cursor, receiver, false);
+}
+
+pub fn resolveReceiverTypeForAccess(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    receiver: []const u8,
+    safe_access: bool,
+) ?[]const u8 {
     const trimmed = std.mem.trim(u8, receiver, " \t\r\n");
     if (trimmed.len == 0) return null;
+    if (outerParenthesizedExpression(trimmed)) |inner| {
+        return resolveReceiverTypeForAccess(allocator, source, program, cursor, inner, safe_access);
+    }
+    if (indexedExpressionBase(trimmed)) |base| {
+        const base_type = resolveReceiverTypeForAccess(allocator, source, program, cursor, base, false) orelse return null;
+        const collection = findStructure(program, nominalReceiverName(base_type)) orelse return null;
+        const element = (collection.collection orelse return null).element;
+        const element_type = specializedTypeName(allocator, program, collection, base_type, element) catch return null;
+        return typeAfterSafeAccess(element_type, safe_access);
+    }
     if (findStructure(program, trimmed) != null) return trimmed;
+    if (topLevelMemberAccess(trimmed)) |access| {
+        const base_type = resolveReceiverTypeForAccess(
+            allocator,
+            source,
+            program,
+            cursor,
+            access.base,
+            access.safe,
+        ) orelse return null;
+        const owner = findStructure(program, nominalReceiverName(base_type)) orelse return null;
+        const static_access = findStructure(program, std.mem.trim(u8, access.base, " \t\r\n")) != null;
+
+        if (directCall(access.member)) |call| {
+            var return_type: ?[]const u8 = null;
+            for (owner.methods) |method| {
+                if (method.is_static != static_access or !std.mem.eql(u8, method.name, call.name) or
+                    !acceptsArity(method.parameters, call.arity)) continue;
+                const candidate = specializedTypeName(
+                    allocator,
+                    program,
+                    owner,
+                    base_type,
+                    method.return_type,
+                ) catch return null;
+                if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
+                return_type = candidate;
+            }
+            return if (return_type) |resolved| typeAfterSafeAccess(resolved, safe_access) else null;
+        }
+
+        const fields = if (static_access) owner.static_fields else owner.fields;
+        for (fields) |field| if (std.mem.eql(u8, field.name, access.member)) {
+            const field_type = specializedTypeName(
+                allocator,
+                program,
+                owner,
+                base_type,
+                if (field.property) |property| property.value_type else field.type,
+            ) catch return null;
+            return typeAfterSafeAccess(field_type, safe_access);
+        };
+        if (!static_access and owner.is_protocol) for (owner.methods) |method| {
+            const accessor = method.accessor orelse continue;
+            if (accessor.kind == .get and std.mem.eql(u8, accessor.property, access.member)) {
+                const property_type = specializedTypeName(
+                    allocator,
+                    program,
+                    owner,
+                    base_type,
+                    method.return_type,
+                ) catch return null;
+                return typeAfterSafeAccess(property_type, safe_access);
+            }
+        };
+        return null;
+    }
     if (trimmed[trimmed.len - 1] == ')') {
         const open = std.mem.lastIndexOfScalar(u8, trimmed, '(') orelse return null;
         const name = std.mem.trim(u8, trimmed[0..open], " \t");
         if (findStructure(program, name)) |_| return name;
-        for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) return memberTypeName(program, function.return_type);
+        if (findStructure(program, nominalReceiverName(name))) |_| return name;
+        for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) {
+            const return_type = typeSpelling(allocator, program, function.return_type) catch return null;
+            return typeAfterSafeAccess(return_type, safe_access);
+        };
         const qualified = qualifiedCall(trimmed) orelse return null;
         const owner = findStructure(program, qualified.owner) orelse return null;
         var return_type: ?[]const u8 = null;
@@ -2749,7 +2857,7 @@ pub fn resolveReceiverType(
             if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
             return_type = candidate;
         }
-        return return_type;
+        return if (return_type) |resolved| typeAfterSafeAccess(resolved, safe_access) else null;
     }
 
     var parts = std.mem.splitScalar(u8, trimmed, '.');
@@ -2759,7 +2867,10 @@ pub fn resolveReceiverType(
         if (containingCallable(source, program, cursor)) |callable| current_type = callable.structure_name;
     } else if (containingCallable(source, program, cursor)) |callable| {
         for (callable.parameters) |parameter| if (std.mem.eql(u8, parameter.name, first)) {
-            current_type = memberTypeName(program, parameter.type);
+            current_type = if (genericType(parameter.type) != null)
+                typeSpelling(allocator, program, parameter.type) catch return null
+            else
+                memberTypeName(program, parameter.type);
             break;
         };
         if (current_type == null) {
@@ -2775,35 +2886,114 @@ pub fn resolveReceiverType(
             }
         }
     }
+    if (safe_access) if (current_type) |candidate| {
+        if (std.mem.endsWith(u8, candidate, "?")) current_type = candidate[0 .. candidate.len - 1];
+    };
     if (current_type) |candidate| if (findStructure(program, candidate) == null) {
         for (program.functions) |function| if (std.mem.eql(u8, function.name, candidate)) {
-            current_type = memberTypeName(program, function.return_type);
+            current_type = typeSpelling(allocator, program, function.return_type) catch return null;
             break;
         };
     };
     while (parts.next()) |field_name| {
         if (current_type) |candidate| if (findStructure(program, candidate) == null) {
             for (program.functions) |function| if (std.mem.eql(u8, function.name, candidate)) {
-                current_type = memberTypeName(program, function.return_type);
+                current_type = typeSpelling(allocator, program, function.return_type) catch return null;
                 break;
             };
         };
         const owner = findStructure(program, current_type orelse return null) orelse return null;
         var next: ?[]const u8 = null;
         for (owner.fields) |field| if (std.mem.eql(u8, field.name, field_name)) {
-            next = memberTypeName(program, if (field.property) |property| property.value_type else field.type);
+            next = typeSpelling(
+                allocator,
+                program,
+                if (field.property) |property| property.value_type else field.type,
+            ) catch return null;
             break;
         };
         if (next == null and owner.is_protocol) for (owner.methods) |method| {
             const accessor = method.accessor orelse continue;
             if (accessor.kind == .get and std.mem.eql(u8, accessor.property, field_name)) {
-                next = memberTypeName(program, method.return_type);
+                next = typeSpelling(allocator, program, method.return_type) catch return null;
                 break;
             }
         };
         current_type = next orelse return null;
     }
     return current_type;
+}
+
+fn typeAfterSafeAccess(type_name: []const u8, safe_access: bool) []const u8 {
+    if (safe_access and std.mem.endsWith(u8, type_name, "?")) return type_name[0 .. type_name.len - 1];
+    return type_name;
+}
+
+fn outerParenthesizedExpression(expression: []const u8) ?[]const u8 {
+    if (expression.len < 2 or expression[0] != '(' or expression[expression.len - 1] != ')') return null;
+    var depth: usize = 0;
+    for (expression, 0..) |character, index| switch (character) {
+        '(' => depth += 1,
+        ')' => {
+            depth -|= 1;
+            if (depth == 0 and index != expression.len - 1) return null;
+        },
+        else => {},
+    };
+    return if (depth == 0) std.mem.trim(u8, expression[1 .. expression.len - 1], " \t\r\n") else null;
+}
+
+fn indexedExpressionBase(expression: []const u8) ?[]const u8 {
+    if (expression.len < 3 or expression[expression.len - 1] != ']') return null;
+    var depth: usize = 0;
+    var index = expression.len;
+    while (index != 0) {
+        index -= 1;
+        switch (expression[index]) {
+            ']' => depth += 1,
+            '[' => {
+                depth -|= 1;
+                if (depth == 0) return std.mem.trim(u8, expression[0..index], " \t\r\n");
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+const MemberAccess = struct {
+    base: []const u8,
+    member: []const u8,
+    safe: bool,
+};
+
+fn topLevelMemberAccess(expression: []const u8) ?MemberAccess {
+    var round_depth: usize = 0;
+    var square_depth: usize = 0;
+    var angle_depth: usize = 0;
+    var separator: ?usize = null;
+    for (expression, 0..) |character, index| switch (character) {
+        '(' => round_depth += 1,
+        ')' => round_depth -|= 1,
+        '[' => square_depth += 1,
+        ']' => square_depth -|= 1,
+        '<' => angle_depth += 1,
+        '>' => angle_depth -|= 1,
+        '.' => if (round_depth == 0 and square_depth == 0 and angle_depth == 0 and
+            (index == 0 or expression[index - 1] != '.') and
+            (index + 1 == expression.len or expression[index + 1] != '.'))
+        {
+            separator = index;
+        },
+        else => {},
+    };
+    const dot = separator orelse return null;
+    const safe = dot != 0 and expression[dot - 1] == '?';
+    const base_end = dot - @intFromBool(safe);
+    const base = std.mem.trim(u8, expression[0..base_end], " \t\r\n");
+    const member = std.mem.trim(u8, expression[dot + 1 ..], " \t\r\n");
+    if (base.len == 0 or member.len == 0) return null;
+    return .{ .base = base, .member = member, .safe = safe };
 }
 
 fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, context: Context) ?ExpectedType {
@@ -3234,6 +3424,121 @@ pub fn functionSignature(
     return std.fmt.allocPrint(allocator, "{s}) {s}", .{ result, typeName(program, function.return_type) });
 }
 
+fn functionSignatureForReceiver(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    structure: Ast.Structure,
+    receiver_type: []const u8,
+    function: Ast.Function,
+) ![]const u8 {
+    var result = try std.fmt.allocPrint(allocator, "{s}(", .{function.name});
+    for (function.parameters, 0..) |parameter, index| {
+        result = try std.fmt.allocPrint(allocator, "{s}{s}{s}:{s}", .{
+            result,
+            if (index == 0) "" else ", ",
+            parameter.name,
+            try specializedTypeName(allocator, program, structure, receiver_type, parameter.type),
+        });
+        if (parameter.default != null) if (parameterDefaultText(source, parameter.position.offset)) |text| {
+            result = try std.fmt.allocPrint(allocator, "{s} = {s}", .{ result, text });
+        };
+    }
+    return std.fmt.allocPrint(allocator, "{s}) {s}", .{
+        result,
+        try specializedTypeName(allocator, program, structure, receiver_type, function.return_type),
+    });
+}
+
+fn specializedTypeName(
+    allocator: Allocator,
+    program: Ast.Program,
+    structure: Ast.Structure,
+    receiver_type: []const u8,
+    type_value: Ast.Type,
+) ![]const u8 {
+    var direct = type_value;
+    var optional_depth: usize = 0;
+    while (direct.optionalChild()) |child| {
+        optional_depth += 1;
+        direct = child;
+    }
+
+    var result: []const u8 = if (direct.genericParameterIndex()) |parameter_index|
+        genericArgumentSpelling(structure, receiver_type, parameter_index) orelse typeName(program, direct)
+    else if (direct.genericInstantiationIndex()) |generic_index| generic: {
+        if (generic_index >= program.generic_types.len) break :generic typeName(program, direct);
+        const generic_type = program.generic_types[generic_index];
+        var spelling = try allocator.dupe(u8, typeName(program, generic_type.base));
+        for (generic_type.arguments, 0..) |argument, index| spelling = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+            spelling,
+            if (index == 0) "<" else ", ",
+            try specializedTypeName(allocator, program, structure, receiver_type, argument),
+        });
+        break :generic try std.fmt.allocPrint(allocator, "{s}>", .{spelling});
+    } else typeName(program, direct);
+
+    for (0..optional_depth) |_| result = try std.fmt.allocPrint(allocator, "{s}?", .{result});
+    return result;
+}
+
+fn typeSpelling(allocator: Allocator, program: Ast.Program, type_value: Ast.Type) ![]const u8 {
+    var direct = type_value;
+    var optional_depth: usize = 0;
+    while (direct.optionalChild()) |child| {
+        optional_depth += 1;
+        direct = child;
+    }
+
+    var result: []const u8 = if (direct.genericInstantiationIndex()) |generic_index| generic: {
+        if (generic_index >= program.generic_types.len) break :generic typeName(program, direct);
+        const generic_type = program.generic_types[generic_index];
+        var spelling = try allocator.dupe(u8, typeName(program, generic_type.base));
+        for (generic_type.arguments, 0..) |argument, index| spelling = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+            spelling,
+            if (index == 0) "<" else ", ",
+            try typeSpelling(allocator, program, argument),
+        });
+        break :generic try std.fmt.allocPrint(allocator, "{s}>", .{spelling});
+    } else typeName(program, direct);
+
+    for (0..optional_depth) |_| result = try std.fmt.allocPrint(allocator, "{s}?", .{result});
+    return result;
+}
+
+fn genericType(type_value: Ast.Type) ?Ast.Type {
+    var direct = type_value;
+    while (direct.optionalChild()) |child| direct = child;
+    return if (direct.genericInstantiationIndex() != null) direct else null;
+}
+
+fn genericArgumentSpelling(structure: Ast.Structure, receiver_type: []const u8, parameter_index: usize) ?[]const u8 {
+    if (parameter_index >= structure.type_parameters.len) return null;
+    const opening = std.mem.indexOfScalar(u8, receiver_type, '<') orelse return null;
+    var start = opening + 1;
+    var depth: usize = 0;
+    var argument_index: usize = 0;
+    var index = start;
+    while (index < receiver_type.len) : (index += 1) switch (receiver_type[index]) {
+        '<', '(', '[' => depth += 1,
+        '>', ')', ']' => if (depth != 0) {
+            depth -= 1;
+        } else {
+            return if (argument_index == parameter_index)
+                std.mem.trim(u8, receiver_type[start..index], " \t\r\n")
+            else
+                null;
+        },
+        ',' => if (depth == 0) {
+            if (argument_index == parameter_index) return std.mem.trim(u8, receiver_type[start..index], " \t\r\n");
+            argument_index += 1;
+            start = index + 1;
+        },
+        else => {},
+    };
+    return null;
+}
+
 pub fn constructorSignature(
     allocator: Allocator,
     source: []const u8,
@@ -3403,38 +3708,35 @@ pub fn isTypeArgumentPrefix(source: []const u8, end: usize) bool {
 pub fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
     if (dot == 0) return null;
     var start = dot;
-    if (source[start - 1] == ')') {
-        var depth: usize = 0;
-        while (start != 0) {
-            start -= 1;
-            if (source[start] == ')') depth += 1;
-            if (source[start] == '(') {
-                depth -|= 1;
-                if (depth == 0) break;
-            }
-        }
-    }
-    if (start != 0 and source[start - 1] == '>') {
-        var depth: usize = 0;
-        while (start != 0) {
-            start -= 1;
-            if (source[start] == '>') depth += 1;
-            if (source[start] == '<') {
-                depth -|= 1;
-                if (depth == 0) break;
-            }
-        }
-    }
+    var delimiter_depth: usize = 0;
     while (start != 0) {
-        if (isIdentifierContinue(source[start - 1])) {
+        const character = source[start - 1];
+        if (delimiter_depth != 0) {
+            start -= 1;
+            switch (character) {
+                ')', ']', '>' => delimiter_depth += 1,
+                '(', '[', '<' => delimiter_depth -|= 1,
+                else => {},
+            }
+            continue;
+        }
+        if (isIdentifierContinue(character) or character == '?') {
             start -= 1;
             continue;
         }
-        if (source[start - 1] != '.') break;
-        // A range boundary is not part of the member receiver. Without this
-        // guard, `0...self.` resolves the receiver as `0...self`.
-        if (start >= 3 and std.mem.eql(u8, source[start - 3 .. start], "...")) break;
-        start -= 1;
+        if (character == ')' or character == ']' or character == '>') {
+            delimiter_depth = 1;
+            start -= 1;
+            continue;
+        }
+        if (character == '.') {
+            // A range or cascade boundary is not part of the member receiver.
+            if ((start >= 2 and source[start - 2] == '.') or
+                (start < dot and source[start] == '.')) break;
+            start -= 1;
+            continue;
+        }
+        break;
     }
     return source[start..dot];
 }
