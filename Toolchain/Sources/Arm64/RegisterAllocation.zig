@@ -206,13 +206,26 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     // Incoming arguments occupy x0 up to the last register parameter until
     // the prologue captures them. Lower volatile registers beyond that point
     // are already free and can retain call-free parameters.
-    const incoming_register_count = @min(function.parameter_count, Machine.max_register_arguments);
-    for (function.parameters) |parameter| for (0..parameter.width) |leaf| {
-        const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
-        if (residences[slot]) |register| {
-            if (@as(usize, register) < incoming_register_count) residences[slot] = null;
+    const flattened_parameters = InternalAbi.flattensSmallAggregates(function.parameters);
+    const incoming_register_count = if (flattened_parameters)
+        InternalAbi.registerArgumentCount(function.parameters)
+    else
+        @min(function.parameter_count, Machine.max_register_arguments);
+    var incoming_parameter_index: usize = 0;
+    for (function.parameters) |parameter| {
+        for (0..parameter.width) |leaf| {
+            const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+            if (residences[slot]) |register| {
+                const matching_flattened_register = flattened_parameters and
+                    (InternalAbi.isDirectAggregate(parameter, true) or !parameter.aggregate) and
+                    @as(usize, register) == incoming_parameter_index + leaf;
+                if (@as(usize, register) < incoming_register_count and !matching_flattened_register) {
+                    residences[slot] = null;
+                }
+            }
         }
-    };
+        incoming_parameter_index += InternalAbi.registerWidth(parameter, flattened_parameters);
+    }
     // Float scalars and SLP groups occupy one physical register class. Keep
     // the proven group placement stable, but let scalar colors borrow v0...v7
     // whenever their live ranges do not interfere with a resident group.
