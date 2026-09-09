@@ -205,6 +205,10 @@ pub fn verifyContract(
             function_name,
             differential,
         ),
+        .preserves_branching_reference_calls => |function_name| verifyBranchingReferenceCallPreservation(
+            function_name,
+            differential,
+        ),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -290,6 +294,26 @@ fn verifyBranchingReferenceCallSpecialization(function_name: []const u8, differe
         .optimized_calls = optimized.internal_calls,
         .raw_reference_stores = raw_closure.reference_stores,
         .optimized_reference_stores = optimized.reference_stores,
+    } };
+}
+
+fn verifyBranchingReferenceCallPreservation(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const raw_closure = IrStats.profile(differential.raw_ir);
+    const optimized_closure = IrStats.profile(differential.optimized_ir);
+    if (raw.internal_calls == 0 or optimized.internal_calls != raw.internal_calls)
+        return error.ExpectedBranchingReferenceCallPreservationMissing;
+    if (raw_closure.reference_stores == 0 or optimized_closure.reference_stores == 0)
+        return error.ExpectedReferenceEffectMissing;
+    return .{ .call_specialization = .{
+        .function = function_name,
+        .raw_calls = raw.internal_calls,
+        .optimized_calls = optimized.internal_calls,
+        .raw_reference_stores = raw_closure.reference_stores,
+        .optimized_reference_stores = optimized_closure.reference_stores,
     } };
 }
 

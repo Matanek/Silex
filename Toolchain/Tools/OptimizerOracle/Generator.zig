@@ -34,6 +34,7 @@ pub const StructuralContract = union(enum) {
     },
     specializes_effectful_calls: []const u8,
     specializes_branching_reference_calls: []const u8,
+    preserves_branching_reference_calls: []const u8,
     slp_width: struct {
         function: []const u8,
         minimum: u3,
@@ -319,8 +320,8 @@ pub const regressions = [_]RegressionEntry{
     },
     .{
         .name = "Regressions/PureMathReferenceInlining.sx",
-        .concern = "small branching reference callees retain proven pure scalar-math effects and inline at hot loop sites",
-        .contract = .{ .specializes_branching_reference_calls = "main" },
+        .concern = "proven pure scalar-math effects remain exact while a native call barrier stays outside a branching reference caller",
+        .contract = .{ .preserves_branching_reference_calls = "main" },
     },
     .{
         .name = "Regressions/DynamicFieldClearAppend.sx",

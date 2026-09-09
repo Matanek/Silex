@@ -9,6 +9,7 @@ const Info = struct {
     state: enum { unresolved, visiting, rejected, eligible } = .unresolved,
     cost: usize = 0,
     previously_eligible: bool = false,
+    native_barrier: bool = false,
 };
 
 /// Inlines small direct callees with arbitrary control flow. Returns are
@@ -64,6 +65,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
 
     var cost: usize = function.blocks.len;
     var returns: usize = 0;
+    var native_barrier = false;
     for (function.blocks) |block| {
         switch (block.terminator) {
             .jump, .branch => {},
@@ -118,6 +120,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                         info.state = .rejected;
                         return;
                     }
+                    native_barrier = true;
                     cost += 4;
                 },
                 .call => |call| {
@@ -130,6 +133,8 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                         info.state = .rejected;
                         return;
                     }
+                    if (information[call.function].state == .eligible and
+                        information[call.function].native_barrier) native_barrier = true;
                     cost += if (information[call.function].state == .eligible)
                         information[call.function].cost
                     else
@@ -152,6 +157,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
     }
     info.cost = cost;
     info.previously_eligible = previously_eligible;
+    info.native_barrier = native_barrier;
     info.state = .eligible;
 }
 
@@ -197,6 +203,7 @@ fn inlineOnce(
         };
         if (call.function == function_index or call.function >= information.len or
             information[call.function].state != .eligible or
+            (!information[call.function].previously_eligible and information[call.function].native_barrier) or
             !CallSummary.shouldInline(
                 summaries[call.function],
                 information[call.function].cost,
@@ -489,7 +496,7 @@ test "inline branching reference updates without losing their addresses" {
     try std.testing.expect(optimized.functions[1].blocks[3].instructions[0] == .reference_load);
 }
 
-test "keep newly supported branching references behind the effect cost model" {
+test "keep newly supported branching references with native barriers out of callers" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -514,22 +521,25 @@ test "keep newly supported branching references behind the effect cost model" {
         .instructions = &.{.{ .call = .{ .result = null, .function = 0, .arguments = &.{ 0, 1, 2 } } }},
         .terminator = .return_void,
     }};
-    const program: Ir.Program = .{ .functions = &.{
-        .{
-            .name = "update_with_boundary",
-            .parameter_types = &.{ .address, .bool, .float32 },
-            .return_type = .void,
-            .value_types = &.{ .address, .bool, .float32, .float32 },
-            .blocks = &update_blocks,
+    const program: Ir.Program = .{
+        .functions = &.{
+            .{
+                .name = "update_with_boundary",
+                .parameter_types = &.{ .address, .bool, .float32 },
+                .return_type = .void,
+                .value_types = &.{ .address, .bool, .float32, .float32 },
+                .blocks = &update_blocks,
+            },
+            .{
+                .name = "caller",
+                .parameter_types = &.{ .address, .bool, .float32 },
+                .return_type = .void,
+                .value_types = &.{ .address, .bool, .float32 },
+                .blocks = &caller_blocks,
+            },
         },
-        .{
-            .name = "caller",
-            .parameter_types = &.{ .address, .bool, .float32 },
-            .return_type = .void,
-            .value_types = &.{ .address, .bool, .float32 },
-            .blocks = &caller_blocks,
-        },
-    } };
+        .boundary_effects = &.{.pure},
+    };
     const optimized = try optimize(allocator, program);
     try std.testing.expect(optimized.functions[1].blocks[0].instructions[0] == .call);
 }
