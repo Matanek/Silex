@@ -1642,9 +1642,18 @@ fn appendExpressionSymbols(
     context: Context,
     expected_type: ?ExpectedType,
 ) !void {
-    try appendEmbeddedFileIntrinsics(allocator, candidates, context, expected_type);
+    // Once the user has started a name, keep matching expression roots available:
+    // their member or call path can still produce the contextually expected type.
+    const selection_type: ?ExpectedType = if (context.prefix.len != 0)
+        if (expected_type) |expected| .{
+            .name = expected.name,
+            .function_type = expected.function_type,
+        } else null
+    else
+        expected_type;
+    try appendEmbeddedFileIntrinsics(allocator, candidates, context, selection_type);
     try appendReflectionIntrinsic(allocator, candidates, context);
-    if (matchesExpectedType(expected_type, "Result")) try appendCandidate(
+    if (matchesExpectedType(selection_type, "Result")) try appendCandidate(
         allocator,
         candidates,
         context,
@@ -1653,7 +1662,7 @@ fn appendExpressionSymbols(
             .kind = CompletionKind.enum_type,
             .detail = "Silex intrinsic result type",
         },
-        typedPriority(5, expected_type, "Result"),
+        typedPriority(5, selection_type, "Result"),
         false,
     );
     const callable = containingCallable(source, program, cursor);
@@ -1665,7 +1674,7 @@ fn appendExpressionSymbols(
         while (index != 0) {
             index -= 1;
             const local = locals[index];
-            if (!matchesExpectedType(expected_type, local.type_name)) continue;
+            if (!matchesExpectedType(selection_type, local.type_name)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = local.name,
                 .kind = CompletionKind.variable,
@@ -1673,18 +1682,18 @@ fn appendExpressionSymbols(
                     try std.fmt.allocPrint(allocator, "{s}:{s}", .{ local.name, name })
                 else
                     "Silex local binding",
-            }, typedPriority(10, expected_type, local.type_name), false);
+            }, typedPriority(10, selection_type, local.type_name), false);
         }
         for (lexical_callables) |scope| for (scope.parameters) |parameter| {
             const parameter_type = typeName(program, parameter.type);
-            if (!matchesExpectedType(expected_type, parameter_type)) continue;
+            if (!matchesExpectedType(selection_type, parameter_type)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = parameter.name,
                 .kind = CompletionKind.variable,
                 .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ parameter.name, parameter_type }),
-            }, typedPriority(12, expected_type, parameter_type), false);
+            }, typedPriority(12, selection_type, parameter_type), false);
         };
-        if (current.structure_name) |name| if (matchesExpectedType(expected_type, name)) try appendCandidate(
+        if (current.structure_name) |name| if (matchesExpectedType(selection_type, name)) try appendCandidate(
             allocator,
             candidates,
             context,
@@ -1693,7 +1702,7 @@ fn appendExpressionSymbols(
                 .kind = CompletionKind.variable,
                 .detail = try std.fmt.allocPrint(allocator, "self:{s}", .{name}),
             },
-            typedPriority(14, expected_type, name),
+            typedPriority(14, selection_type, name),
             false,
         );
     }
@@ -1708,51 +1717,51 @@ fn appendExpressionSymbols(
         }
         if (!callAcceptsParameters(source, cursor, program, function.parameters)) continue;
         const return_type = typeName(program, function.return_type);
-        const passed_as_value = if (expected_type) |expected|
+        const passed_as_value = if (selection_type) |expected|
             if (expected.function_type) |function_type|
                 functionMatchesType(program, function, function_type)
             else
                 false
         else
             false;
-        if (!passed_as_value and !matchesExpectedType(expected_type, return_type)) continue;
+        if (!passed_as_value and !matchesExpectedType(selection_type, return_type)) continue;
         var displayed = function;
         displayed.name = function.test_source_name orelse function.name;
         try appendCandidate(allocator, candidates, context, .{
             .label = displayed.name,
             .kind = CompletionKind.function,
             .detail = try functionSignature(allocator, source, program, displayed),
-        }, typedPriority(25, expected_type, if (passed_as_value) "function" else return_type), !passed_as_value);
+        }, typedPriority(25, selection_type, if (passed_as_value) "function" else return_type), !passed_as_value);
     }
     for (program.structures) |structure| {
         if (structure.is_protocol or structure.is_tuple) continue;
-        if (!matchesExpectedType(expected_type, structure.name)) continue;
+        if (!matchesExpectedType(selection_type, structure.name)) continue;
         if (structure.constructors.len == 0) {
             try appendCandidate(allocator, candidates, context, .{
                 .label = structure.name,
                 .kind = structureCompletionKind(structure),
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
-            }, typedPriority(30, expected_type, structure.name), true);
+            }, typedPriority(30, selection_type, structure.name), true);
         } else for (structure.constructors) |constructor| {
             if (!callAcceptsParameters(source, cursor, program, constructor.parameters)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = structure.name,
                 .kind = structureCompletionKind(structure),
                 .detail = try constructorSignature(allocator, source, program, structure.name, constructor),
-            }, typedPriority(30, expected_type, structure.name), true);
+            }, typedPriority(30, selection_type, structure.name), true);
         }
     }
-    if (matchesExpectedType(expected_type, "bool")) {
+    if (matchesExpectedType(selection_type, "bool")) {
         try appendCandidate(allocator, candidates, context, .{
             .label = "true",
             .kind = CompletionKind.value,
             .detail = "true:bool",
-        }, typedPriority(55, expected_type, "bool"), false);
+        }, typedPriority(55, selection_type, "bool"), false);
         try appendCandidate(allocator, candidates, context, .{
             .label = "false",
             .kind = CompletionKind.value,
             .detail = "false:bool",
-        }, typedPriority(55, expected_type, "bool"), false);
+        }, typedPriority(55, selection_type, "bool"), false);
     }
 }
 
@@ -3120,10 +3129,23 @@ fn cascadeReceiverAt(source: []const u8, dot: usize) ?[]const u8 {
         source[end - 1] == '\n')) end -= 1;
     if (end == 0) return null;
 
+    const receiver = memberReceiver(source, end) orelse return null;
+    const receiver_start = end - receiver.len;
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..end], '\n')) |newline| newline + 1 else 0;
-    const line = std.mem.trimStart(u8, source[line_start..end], " \t");
-    if (bindingName(line)) |name| return name;
-    return memberReceiver(source, end);
+    const raw_line = source[line_start..end];
+    const line = std.mem.trimStart(u8, raw_line, " \t");
+    const content_start = line_start + raw_line.len - line.len;
+    if (bindingName(line)) |name| {
+        const equal = std.mem.indexOfScalar(u8, line, '=') orelse return receiver;
+        var initializer_start = equal + 1;
+        while (initializer_start < line.len and (line[initializer_start] == ' ' or line[initializer_start] == '\t')) {
+            initializer_start += 1;
+        }
+        // A cascade rooted at the complete initializer continues through its binding.
+        // A receiver nested inside that initializer remains the nested expression itself.
+        if (content_start + initializer_start == receiver_start) return name;
+    }
+    return receiver;
 }
 
 pub fn recoverCascadeForParsing(
@@ -3589,6 +3611,39 @@ test "complete members of the original receiver in a cascade" {
     const continued = try itemsAt(arena.allocator(), continued_source, continued_cursor, .trigger_character);
     try std.testing.expectEqual(@as(usize, 1), continued.len);
     try std.testing.expectEqualStrings("run", continued[0].label);
+}
+
+test "keep a nested call argument as the cascade receiver without a following statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\class Recipe {
+        \\    func with(value:int) Recipe { return self }
+        \\}
+        \\class World {
+        \\    func spawn(recipe:Recipe) int { return 0 }
+        \\    func wrong_receiver() {}
+        \\}
+        \\func make(world:World) Recipe {
+        \\    var entity:Recipe = world.spawn(Recipe()
+        \\        ..
+        \\    )
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "        ..\n").? + "        ..".len;
+    const context = try classifyContext(arena.allocator(), source, cursor);
+    try std.testing.expectEqualStrings("Recipe()", context.receiver.?);
+
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    try std.testing.expectEqualStrings("with", items[0].label);
+    try std.testing.expectEqual(CompletionKind.method, items[0].kind);
+    try std.testing.expectEqualStrings("with(value:int) Recipe", items[0].detail);
+    try std.testing.expectEqualStrings("with(${1:value})$0", items[0].insertText.?);
+    try std.testing.expectEqual(@as(?u8, 2), items[0].insertTextFormat);
+    try std.testing.expect(!contains(items, "spawn"));
+    try std.testing.expect(!contains(items, "wrong_receiver"));
+    try std.testing.expect(!contains(items, "if"));
 }
 
 test "resume an outer cascade after a nested cascade argument" {

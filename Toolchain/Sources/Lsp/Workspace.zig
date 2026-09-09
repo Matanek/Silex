@@ -539,9 +539,11 @@ pub fn scopeItemsAtForTargetExpected(
         else
             use.path;
         if (!matchesPrefix(label, prefix)) continue;
-        if (expected_type) |expected| {
-            if (!std.mem.eql(u8, expected, label) and
-                !(expected.len > label.len and std.mem.startsWith(u8, expected, label) and expected[label.len] == '.')) continue;
+        if (prefix.len == 0) {
+            if (expected_type) |expected| {
+                if (!std.mem.eql(u8, expected, label) and
+                    !(expected.len > label.len and std.mem.startsWith(u8, expected, label) and expected[label.len] == '.')) continue;
+            }
         }
         if (fundamentalAliasTarget(program, use, 0)) |type_target| {
             if (type_only) try appendRanked(allocator, &ranked, .{
@@ -573,6 +575,19 @@ pub fn scopeItemsAtForTargetExpected(
                 );
                 matched = true;
             }
+            for (loaded.program.enums) |enumeration| {
+                if (!std.mem.eql(u8, enumeration.name, target.declaration)) continue;
+                if (enumeration.is_local) continue;
+                if (enumeration.is_internal) {
+                    if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
+                } else if (!enumeration.is_public and !providerInCurrentModule(project, provider)) continue;
+                try appendRanked(allocator, &ranked, .{
+                    .label = label,
+                    .kind = CompletionKind.enum_type,
+                    .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
+                }, 18, false);
+                matched = true;
+            }
             if (!type_only) for (loaded.program.functions) |function| {
                 if (!std.mem.eql(u8, function.name, target.declaration)) continue;
                 if (function.is_local) continue;
@@ -580,10 +595,12 @@ pub fn scopeItemsAtForTargetExpected(
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
+                var displayed = function;
+                displayed.name = label;
                 try appendRanked(allocator, &ranked, .{
                     .label = label,
                     .kind = CompletionKind.function,
-                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, displayed),
                 }, 35, true);
                 matched = true;
             };
@@ -2030,7 +2047,8 @@ fn importedQualifiedCallReturnTypePath(
     current: Ast.Program,
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
-    const owner_path = try importedTypePath(allocator, current, project, call.owner) orelse return null;
+    const owner_path = (try importedTypePath(allocator, current, project, call.owner)) orelse
+        (try importedQualifierPath(allocator, current, project, call.owner)) orelse return null;
     const qualified_type = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ owner_path, call.name });
     if (try importedConstructorTypePath(allocator, io, documents, project, qualified_type, call.arity)) |type_path| {
         return type_path;
@@ -2164,6 +2182,28 @@ fn importedTypePath(
     else
         try std.fmt.allocPrint(allocator, "{s}.{s}", .{ use.path, suffix });
     return if (declarationTarget(project.index, full) != null) full else null;
+}
+
+fn importedQualifierPath(
+    allocator: Allocator,
+    program: Ast.Program,
+    project: IndexedProject,
+    local_path: []const u8,
+) !?[]const u8 {
+    if (findProvider(project.index, local_path) != null or project.index.isNamespace(local_path)) return local_path;
+    const separator = std.mem.indexOfScalar(u8, local_path, '.');
+    const first = if (separator) |index| local_path[0..index] else local_path;
+    const use = findUseByAlias(program, first) orelse return null;
+    const use_path = if (ProjectIndex.currentProvider(project)) |provider|
+        try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path)
+    else
+        use.path;
+    const suffix = if (separator) |index| local_path[index + 1 ..] else "";
+    const full = if (suffix.len == 0)
+        use_path
+    else
+        try std.fmt.allocPrint(allocator, "{s}.{s}", .{ use_path, suffix });
+    return if (findProvider(project.index, full) != null or project.index.isNamespace(full)) full else null;
 }
 
 fn importedNominalTypePath(
