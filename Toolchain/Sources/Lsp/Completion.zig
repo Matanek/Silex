@@ -29,7 +29,7 @@ const CompletionKind = struct {
 pub const memberFieldPriority: u8 = 0;
 pub const memberMethodPriority: u8 = 10;
 
-const ContextKind = enum {
+pub const ContextKind = enum {
     none,
     member,
     type_name,
@@ -41,10 +41,12 @@ const ContextKind = enum {
     expression,
 };
 
-const Context = struct {
+pub const Decision = struct {
     kind: ContextKind,
     prefix: []const u8,
     prefix_start: usize,
+    cursor: usize = 0,
+    trigger_kind: Types.CompletionTriggerKind = .invoked,
     receiver: ?[]const u8 = null,
     nominal_relation: bool = false,
     in_loop: bool = false,
@@ -54,7 +56,20 @@ const Context = struct {
     system_callback: bool = false,
     static_container: bool = false,
     aggregate: ?AggregateContext = null,
+    return_expression: bool = false,
+    qualified_type_position: bool = false,
+    has_use: bool = false,
+    has_try: bool = false,
+    inside_parentheses: bool = false,
+    completing_try_error: bool = false,
+    completing_try_alternative: bool = false,
+    active_call: ?ActiveCall = null,
+    active_argument: ?ActiveArgument = null,
+    program: ?Ast.Program = null,
+    recovery: Recovery = .unavailable,
 };
+
+const Context = Decision;
 
 pub const Recovery = RecoveryModule.Kind;
 
@@ -103,6 +118,36 @@ pub fn isMemberCompletionAt(allocator: Allocator, source: []const u8, cursor: us
     return (try classifyContext(allocator, source, cursor)).kind == .member;
 }
 
+pub fn decisionAt(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    trigger_kind: Types.CompletionTriggerKind,
+) !Decision {
+    if (cursor > source.len or !cursorAllowsCode(source, cursor)) return .{
+        .kind = .none,
+        .prefix = "",
+        .prefix_start = @min(cursor, source.len),
+        .cursor = @min(cursor, source.len),
+        .trigger_kind = trigger_kind,
+    };
+    var decision = try classifyContext(allocator, source, cursor);
+    decision.cursor = cursor;
+    decision.trigger_kind = trigger_kind;
+    if (decision.has_try) {
+        decision.completing_try_error = try isTryErrorBindingPositionAt(allocator, source, decision.prefix_start);
+        decision.completing_try_alternative = try isTryAlternativePositionAt(allocator, source, decision.prefix_start);
+    }
+    if (decision.inside_parentheses) {
+        decision.active_call = try activeCallAt(allocator, source, cursor);
+        decision.active_argument = try activeArgumentAt(allocator, source, cursor);
+    }
+    const outcome = try parseForCompletionObserved(allocator, source, cursor, decision);
+    decision.program = outcome.program;
+    decision.recovery = outcome.recovery;
+    return decision;
+}
+
 pub fn itemsAtWithExpectedType(
     allocator: Allocator,
     source: []const u8,
@@ -110,23 +155,29 @@ pub fn itemsAtWithExpectedType(
     trigger_kind: Types.CompletionTriggerKind,
     contextual_expected_type: ?[]const u8,
 ) ![]const CompletionItem {
-    _ = trigger_kind;
-    if (cursor > source.len or !cursorAllowsCode(source, cursor)) return allocator.alloc(CompletionItem, 0);
+    const decision = try decisionAt(allocator, source, cursor, trigger_kind);
+    return itemsAtWithDecision(allocator, source, decision, contextual_expected_type);
+}
 
-    const context = try classifyContext(allocator, source, cursor);
+pub fn itemsAtWithDecision(
+    allocator: Allocator,
+    source: []const u8,
+    context: Decision,
+    contextual_expected_type: ?[]const u8,
+) ![]const CompletionItem {
+    const cursor = context.cursor;
     if (context.kind == .none or context.kind == .use_path) return allocator.alloc(CompletionItem, 0);
 
     var candidates: std.ArrayList(Candidate) = .empty;
-    const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
-    const outcome = try parseForCompletionObserved(allocator, source, cursor, context);
-    const program = outcome.program;
+    const completing_try_alternative = context.completing_try_alternative;
+    const program = context.program;
     const expected_type: ?ExpectedType = if (contextual_expected_type) |name|
         .{ .name = name, .strict = true }
     else if (program) |parsed|
         expectedTypeAt(source, parsed, cursor, context)
     else
         null;
-    const completing_try_error = try isTryErrorBindingPositionAt(allocator, source, context.prefix_start);
+    const completing_try_error = context.completing_try_error;
 
     if (completing_try_error) {
         const error_type: ?[]const u8 = if (program) |parsed|
@@ -366,9 +417,18 @@ pub fn parameterItemsAt(
     source: []const u8,
     cursor: usize,
 ) ![]const CompletionItem {
-    const call = try activeCallAt(allocator, source, cursor) orelse
+    const decision = try decisionAt(allocator, source, cursor, .invoked);
+    return parameterItemsAtWithDecision(allocator, source, decision);
+}
+
+pub fn parameterItemsAtWithDecision(
+    allocator: Allocator,
+    source: []const u8,
+    decision: Decision,
+) ![]const CompletionItem {
+    const call = decision.active_call orelse
         return allocator.alloc(CompletionItem, 0);
-    const lookup_source = try sourceForParameterLookup(allocator, source, cursor, call);
+    const lookup_source = try sourceForParameterLookup(allocator, source, decision.cursor, call);
     const callables = try itemsAt(allocator, lookup_source, call.callee_end, .invoked);
     return parameterItemsFromCallables(allocator, callables, call);
 }
@@ -886,6 +946,9 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
     const tokens = try tokensUntil(allocator, source, prefix_start);
     if (tokens.len == 0) return .{ .kind = .module_declaration, .prefix = prefix, .prefix_start = prefix_start };
 
+    const has_use = containsTokenTag(tokens, .keyword_use);
+    const has_try = containsTokenTag(tokens, .keyword_try);
+    const inside_parentheses = unclosedParenthesisInTokens(tokens);
     const scope = scopeAt(tokens);
     const current_line = lineAtOffset(source, prefix_start);
     const line_start = currentLineTokenStart(tokens, current_line);
@@ -895,6 +958,9 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .kind = .use_path,
         .prefix = prefix,
         .prefix_start = prefix_start,
+        .has_use = has_use,
+        .has_try = has_try,
+        .inside_parentheses = inside_parentheses,
     };
 
     if (tokens[tokens.len - 1].tag == .dot or tokens[tokens.len - 1].tag == .question_dot or
@@ -905,6 +971,7 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
             partialCascadeReceiver(source, separator.start)
         else
             null;
+        const qualified_type_position = qualifiedTypePositionFromTokens(source, prefix_start, tokens);
         return .{
             .kind = .member,
             .prefix = prefix,
@@ -916,6 +983,12 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
             .in_loop = scope.in_loop,
             .cascade = separator.tag == .dot_dot or partial_cascade != null,
             .system_callback = insideSystemRegistration(tokens),
+            .qualified_type_position = qualified_type_position,
+            .nominal_relation = qualified_type_position,
+            .return_expression = lineStartsReturn(line_tokens),
+            .has_use = has_use,
+            .has_try = has_try,
+            .inside_parentheses = inside_parentheses,
         };
     }
 
@@ -927,6 +1000,9 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix_start = prefix_start,
         .nominal_relation = nominal_relation,
         .in_loop = scope.in_loop,
+        .has_use = has_use,
+        .has_try = has_try,
+        .inside_parentheses = inside_parentheses,
     };
 
     if (scope.interpolation_depth != 0) return .{
@@ -935,6 +1011,10 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix_start = prefix_start,
         .in_loop = scope.in_loop,
         .allow_conversion = expressionCanConvert(line_tokens),
+        .return_expression = lineStartsReturn(line_tokens),
+        .has_use = has_use,
+        .has_try = has_try,
+        .inside_parentheses = inside_parentheses,
     };
 
     if (try aggregateContextAt(allocator, source, cursor)) |aggregate| return .{
@@ -943,6 +1023,10 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix_start = prefix_start,
         .aggregate = aggregate,
         .in_loop = scope.in_loop,
+        .return_expression = lineStartsReturn(line_tokens),
+        .has_use = has_use,
+        .has_try = has_try,
+        .inside_parentheses = inside_parentheses,
     };
 
     if (scope.in_structure and fieldInitializerIsExpression(line_tokens)) return .{
@@ -950,6 +1034,9 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix = prefix,
         .prefix_start = prefix_start,
         .allow_conversion = expressionCanConvert(line_tokens),
+        .has_use = has_use,
+        .has_try = has_try,
+        .inside_parentheses = inside_parentheses,
     };
 
     if (scope.in_callable) {
@@ -961,6 +1048,10 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
             .in_loop = scope.in_loop,
             .after_conditional = !expression and followsConditional(tokens),
             .allow_conversion = expression and expressionCanConvert(line_tokens),
+            .return_expression = expression and lineStartsReturn(line_tokens),
+            .has_use = has_use,
+            .has_try = has_try,
+            .inside_parentheses = inside_parentheses,
         };
     }
     return .{
@@ -968,11 +1059,25 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix = prefix,
         .prefix_start = prefix_start,
         .static_container = scope.in_static_container,
+        .has_use = has_use,
+        .has_try = has_try,
+        .inside_parentheses = inside_parentheses,
     };
 }
 
-pub fn isTypePositionAt(allocator: Allocator, source: []const u8, prefix_start: usize) !bool {
-    const tokens = try tokensUntil(allocator, source, prefix_start);
+fn qualifiedTypePositionFromTokens(source: []const u8, prefix_start: usize, tokens: []const Token) bool {
+    var qualified_start = prefix_start;
+    while (qualified_start != 0) {
+        const character = source[qualified_start - 1];
+        if (!std.ascii.isAlphanumeric(character) and character != '_' and character != '.') break;
+        qualified_start -= 1;
+    }
+    var token_count: usize = 0;
+    while (token_count < tokens.len and tokens[token_count].end <= qualified_start) : (token_count += 1) {}
+    return isTypePositionFromTokens(source, qualified_start, tokens[0..token_count]);
+}
+
+fn isTypePositionFromTokens(source: []const u8, prefix_start: usize, tokens: []const Token) bool {
     if (tokens.len == 0) return false;
     if (tokens[tokens.len - 1].tag == .keyword_extend) return true;
     const current_line = lineAtOffset(source, prefix_start);
@@ -985,6 +1090,11 @@ pub fn isTypePositionAt(allocator: Allocator, source: []const u8, prefix_start: 
         scope.pending_callable,
         isNominalRelationPosition(line_tokens),
     ) or isTypeArgumentPrefix(source, prefix_start);
+}
+
+pub fn isTypePositionAt(allocator: Allocator, source: []const u8, prefix_start: usize) !bool {
+    const tokens = try tokensUntil(allocator, source, prefix_start);
+    return isTypePositionFromTokens(source, prefix_start, tokens);
 }
 
 pub fn isQualifiedTypePositionAt(
@@ -1004,13 +1114,38 @@ pub fn isQualifiedTypePositionAt(
 pub fn isReturnExpressionAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
     if (cursor > source.len) return false;
     const context = try classifyContext(allocator, source, cursor);
+    return isReturnExpressionForContext(allocator, source, context);
+}
+
+fn isReturnExpressionForContext(allocator: Allocator, source: []const u8, context: Context) !bool {
     if (context.kind != .expression and context.kind != .aggregate_field and context.kind != .member) return false;
     const tokens = try tokensUntil(allocator, source, context.prefix_start);
     if (tokens.len == 0) return false;
     const current_line = lineAtOffset(source, context.prefix_start);
     const line_start = currentLineTokenStart(tokens, current_line);
     const line_tokens = tokens[line_start..];
-    return line_tokens.len != 0 and line_tokens[0].tag == .keyword_return;
+    return lineStartsReturn(line_tokens);
+}
+
+fn lineStartsReturn(tokens: []const Token) bool {
+    return tokens.len != 0 and tokens[0].tag == .keyword_return;
+}
+
+fn containsTokenTag(tokens: []const Token, expected: TokenTag) bool {
+    for (tokens) |token| if (token.tag == expected) return true;
+    return false;
+}
+
+fn unclosedParenthesisInTokens(tokens: []const Token) bool {
+    var depth: usize = 0;
+    for (tokens) |token| {
+        switch (token.tag) {
+            .left_parenthesis => depth += 1,
+            .right_parenthesis => depth -|= 1,
+            else => {},
+        }
+    }
+    return depth != 0;
 }
 
 fn followsConditional(tokens: []const Token) bool {
@@ -2768,14 +2903,16 @@ fn parseForCompletionObserved(
     const for_body_follows = for_source and blockFollowsCompletion(source, cursor);
     const control_body_missing = (lineStartsControlCondition(before_prefix) or
         lineHasUnclosedControlCondition(before_prefix)) and !blockFollowsCompletion(source, cursor);
-    const completing_try_error = try isTryErrorBindingPositionAt(allocator, source, context.prefix_start);
-    const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
+    const completing_try_error = context.completing_try_error;
+    const completing_try_alternative = context.completing_try_alternative;
     const placeholder: []const u8 = if (completing_try_error)
         "error"
     else if (completing_try_alternative)
         "else {}"
     else switch (context.kind) {
-        .member => if (callFollows(source, cursor))
+        .member => if (context.qualified_type_position)
+            if (context.prefix.len == 0) "__Completion" else ""
+        else if (callFollows(source, cursor))
             if (context.prefix.len == 0) "__completion" else ""
         else if (context.prefix.len != 0)
             "()"

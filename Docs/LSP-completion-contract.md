@@ -80,6 +80,22 @@ only to the parser view. Tests observe a closed recovery reason (`complete`,
 `discarded_completion_line`, or `unavailable`) and exercise all four error
 positions through the server protocol.
 
+Every request constructs one `Completion.Decision` before any catalogue is
+queried. It owns the byte cursor and prefix range, syntactic position,
+receiver/cascade identity, qualified-type and return context, aggregate,
+active call and argument, `try` variants, recovered program, trigger kind and
+recovery reason. `Server.CompletionRequestDecision` binds that edit decision to
+the document URI, exact document version and trigger character. Local and
+workspace collectors consume this value; they do not classify the position a
+second time.
+
+Workspace member resolution has three observable outcomes: `items`,
+`not_applicable`, and `unresolved_receiver`. Internal errors remain Zig errors
+and reach the server's JSON-RPC safety boundary, which returns error `-32603`;
+they must never become a successful empty completion list. A source-level gate
+forbids `catch` conversions inside the completion request handler, while an
+injected-failure test proves the protocol distinction.
+
 ## Running the gate
 
 From `Silex/Toolchain`, run:
