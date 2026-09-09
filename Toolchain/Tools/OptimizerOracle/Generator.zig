@@ -44,6 +44,11 @@ pub const StructuralContract = union(enum) {
         function: []const u8,
         pointer_terminated: bool = true,
     },
+    arm64_reference_cursors: struct {
+        function: []const u8,
+        unchecked: u16,
+        checked: u16,
+    },
     native_loop_residence: struct {
         function: []const u8,
         arm64_minimum: u16,
@@ -271,6 +276,15 @@ pub const regressions = [_]RegressionEntry{
     .{
         .name = "Regressions/ReferenceCursorReuse.sx",
         .concern = "ascending mutable view references preserve checked bounds and reuse stable element addresses across field writes",
+    },
+    .{
+        .name = "Regressions/MultipleReferenceCursors.sx",
+        .concern = "independent mutable views carry every checked ascending element address in one loop",
+        .contract = .{ .arm64_reference_cursors = .{
+            .function = "shift",
+            .unchecked = 0,
+            .checked = 2,
+        } },
     },
     .{
         .name = "Regressions/LoopForms.sx",

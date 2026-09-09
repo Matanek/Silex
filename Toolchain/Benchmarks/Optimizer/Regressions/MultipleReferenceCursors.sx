@@ -1,0 +1,26 @@
+struct Pair {
+    var x:float
+    var y:float
+}
+
+// The independent round count keeps both dynamic bounds checks observable.
+// Each mutable view must nevertheless carry its own ascending element address.
+func shift(left:&Pair[..], right:&Pair[..], rounds:int) {
+    var index = 0
+    while index < rounds {
+        left[index].x += 0.5
+        right[index].y -= 1.0
+        index++
+    }
+}
+
+func main() {
+    var left:Pair[] = [Pair(x:1.0, y:2.0), Pair(x:3.0, y:4.0)]
+    var right:Pair[] = [Pair(x:5.0, y:6.0), Pair(x:7.0, y:8.0)]
+    var left_view = &left[0:left.count()]
+    var right_view = &right[0:right.count()]
+    shift(left_view, right_view, 2)
+    assert(left_view[0].x == 1.5 && left_view[1].x == 3.5)
+    assert(right_view[0].y == 5.0 && right_view[1].y == 7.0)
+    print("parallel mutable reference cursors preserved")
+}

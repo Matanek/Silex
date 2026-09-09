@@ -103,6 +103,11 @@ pub const Evidence = union(enum) {
         postindexed: bool,
         pointer_terminated: bool,
     },
+    reference_cursors: struct {
+        function: []const u8,
+        unchecked: usize,
+        checked: usize,
+    },
     loop_residence: struct {
         function: []const u8,
         arm64_resident: usize,
@@ -207,6 +212,13 @@ pub fn verifyContract(
             allocator,
             requirement.function,
             requirement.pointer_terminated,
+            differential.optimized_ir,
+        ),
+        .arm64_reference_cursors => |requirement| try verifyArm64ReferenceCursors(
+            allocator,
+            requirement.function,
+            requirement.unchecked,
+            requirement.checked,
             differential.optimized_ir,
         ),
         .native_loop_residence => |requirement| try verifyNativeLoopResidence(
@@ -803,6 +815,29 @@ fn verifyArm64LoopCursor(
         .function = function_name,
         .postindexed = true,
         .pointer_terminated = pointer_terminated,
+    } };
+}
+
+fn verifyArm64ReferenceCursors(
+    allocator: std.mem.Allocator,
+    function_name: []const u8,
+    expected_unchecked: usize,
+    expected_checked: usize,
+    program: Silex.Ir.Program,
+) !Evidence {
+    const arm64_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
+    const function = findMachineFunction(arm64_program, function_name) orelse
+        return error.ContractFunctionMissing;
+    const unchecked = try Silex.Arm64LoopCursor.findReferenceCursors(allocator, function, false);
+    defer allocator.free(unchecked);
+    const checked = try Silex.Arm64LoopCursor.findReferenceCursors(allocator, function, true);
+    defer allocator.free(checked);
+    if (unchecked.len != expected_unchecked or checked.len != expected_checked)
+        return error.ExpectedArm64ReferenceCursorsMissing;
+    return .{ .reference_cursors = .{
+        .function = function_name,
+        .unchecked = unchecked.len,
+        .checked = checked.len,
     } };
 }
 

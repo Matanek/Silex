@@ -652,6 +652,12 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 if (cursor.pointer_terminated) "yes" else "no",
             },
         ),
+        .reference_cursors => |cursors| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} ARM64 reference cursors unchecked={d}, checked={d}",
+            .{ cursors.function, cursors.unchecked, cursors.checked },
+        ),
         .loop_residence => |residence| try Report.line(
             io,
             allocator,

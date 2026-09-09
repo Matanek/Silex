@@ -782,20 +782,12 @@ fn encodeFunction(
         const load = function.instructions[cursor.load_index].collection_load;
         if (eagerCollectionWidth(function, cursor.load_index, load) != 2) collection_cursor = null;
     }
-    var reference_cursor = try LoopCursor.findReference(allocator, function);
-    if (reference_cursor) |cursor| {
-        const result = valueResultRegister(function, cursor.result);
-        if (result != null and (@intFromEnum(result.?) < 19 or @intFromEnum(result.?) > 28)) {
-            reference_cursor = null;
-        }
-    }
-    var checked_reference_cursor = try LoopCursor.findCheckedReference(allocator, function);
-    if (checked_reference_cursor) |cursor| {
-        const result = valueResultRegister(function, cursor.result);
-        if (result != null and (@intFromEnum(result.?) < 19 or @intFromEnum(result.?) > 28)) {
-            checked_reference_cursor = null;
-        }
-    }
+    const reference_cursor_storage = try LoopCursor.findReferenceCursors(allocator, function, false);
+    defer allocator.free(reference_cursor_storage);
+    const reference_cursors = retainEncodableReferenceCursors(function, reference_cursor_storage);
+    const checked_reference_cursor_storage = try LoopCursor.findReferenceCursors(allocator, function, true);
+    defer allocator.free(checked_reference_cursor_storage);
+    const checked_reference_cursors = retainEncodableReferenceCursors(function, checked_reference_cursor_storage);
     const reference_reuses = try LoopCursor.findReferenceReuses(allocator, function);
     const runtime_frame_size: u32 = if (enable_cycle_collector and functionUsesCycleContext(function)) 16 else 0;
     const extended_frame = function.frame_size > Machine.direct_stack_slots * Machine.slot_size;
@@ -914,10 +906,10 @@ fn encodeFunction(
     for (function.instructions, 0..) |instruction, instruction_index| {
         instruction_offsets[instruction_index] = words.items.len;
         try emitDeferredCollectionLoads(allocator, words, function, instruction_index, collection_cursor);
-        if (reference_cursor) |cursor| {
+        for (reference_cursors) |cursor| {
             try emitReferenceCursorStep(allocator, words, function, cursor, instruction_index);
         }
-        if (checked_reference_cursor) |cursor| {
+        for (checked_reference_cursors) |cursor| {
             try emitReferenceCursorStep(allocator, words, function, cursor, instruction_index);
         }
         if (!scalarCacheInstruction(instruction)) scalar_cache.clear();
@@ -1546,7 +1538,7 @@ fn encodeFunction(
             .collection_reference => |access| {
                 if (referenceReuseRegister(reference_reuses, instruction_index, false)) |register| {
                     try storeValue(allocator, words, function, register, access.result);
-                } else if (!(reference_cursor != null and reference_cursor.?.reference == instruction_index)) {
+                } else if (!hasReferenceCursorAt(reference_cursors, instruction_index)) {
                     if (access.dynamic) {
                         try ListRuntime.emitReference(
                             allocator,
@@ -1558,7 +1550,7 @@ fn encodeFunction(
                             program,
                             function,
                             access,
-                            checked_reference_cursor != null and checked_reference_cursor.?.reference == instruction_index,
+                            hasReferenceCursorAt(checked_reference_cursors, instruction_index),
                             &fixups.dynamic_collection_bounds,
                         );
                     } else try encodeCollectionReference(allocator, words, &fixups, access);
@@ -2227,6 +2219,25 @@ fn emitReferenceCursorStep(
             try storeValue(allocator, words, function, register, cursor.result);
         }
     }
+}
+
+fn retainEncodableReferenceCursors(
+    function: Machine.Function,
+    cursors: []LoopCursor.ReferenceCursor,
+) []LoopCursor.ReferenceCursor {
+    var retained: usize = 0;
+    for (cursors) |cursor| {
+        const result = valueResultRegister(function, cursor.result);
+        if (result != null and (@intFromEnum(result.?) < 19 or @intFromEnum(result.?) > 28)) continue;
+        cursors[retained] = cursor;
+        retained += 1;
+    }
+    return cursors[0..retained];
+}
+
+fn hasReferenceCursorAt(cursors: []const LoopCursor.ReferenceCursor, instruction_index: usize) bool {
+    for (cursors) |cursor| if (cursor.reference == instruction_index) return true;
+    return false;
 }
 
 fn referenceReuseRegister(

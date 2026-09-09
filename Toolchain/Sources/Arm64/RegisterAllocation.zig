@@ -100,8 +100,10 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     var cursor_probe = function;
     cursor_probe.float_lane_slots = float_lane_residences;
     const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
-    const reference_cursor = try LoopCursor.findReference(allocator, function);
-    const checked_reference_cursor = try LoopCursor.findCheckedReference(allocator, function);
+    const reference_cursors = try LoopCursor.findReferenceCursors(allocator, function, false);
+    defer allocator.free(reference_cursors);
+    const checked_reference_cursors = try LoopCursor.findReferenceCursors(allocator, function, true);
+    defer allocator.free(checked_reference_cursors);
     const reference_reuses = try LoopCursor.findReferenceReuses(allocator, function);
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
@@ -137,11 +139,11 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         forceStackOperands(function, instruction, forced, externals);
     }
     extendLoopCarriedIntervals(function.instructions, first, last);
-    if (reference_cursor) |cursor| {
+    for (reference_cursors) |cursor| {
         touch(cursor.result, cursor.initialize, first, last, weights, instruction_weights[cursor.initialize]);
         touch(cursor.result, cursor.increment, first, last, weights, instruction_weights[cursor.increment]);
     }
-    if (checked_reference_cursor) |cursor| {
+    for (checked_reference_cursors) |cursor| {
         touch(cursor.result, cursor.initialize, first, last, weights, instruction_weights[cursor.initialize]);
         touch(cursor.result, cursor.increment, first, last, weights, instruction_weights[cursor.increment]);
     }
@@ -200,8 +202,8 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         function.instructions,
         function.slot_count,
         forced,
-        reference_cursor,
-        checked_reference_cursor,
+        reference_cursors,
+        checked_reference_cursors,
     );
     // Incoming arguments occupy x0 up to the last register parameter until
     // the prologue captures them. Lower volatile registers beyond that point
@@ -240,8 +242,8 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         function.instructions,
         function.slot_count,
         forced,
-        reference_cursor,
-        checked_reference_cursor,
+        reference_cursors,
+        checked_reference_cursors,
     );
     for (float_lane_residences, 0..) |lane, slot| if (lane != null) {
         float_residences[slot] = null;
@@ -410,8 +412,8 @@ fn allocateGraph(
     instructions: []const Machine.Instruction,
     slot_count: usize,
     forced: []const bool,
-    reference_cursor: ?LoopCursor.ReferenceCursor,
-    checked_reference_cursor: ?LoopCursor.ReferenceCursor,
+    reference_cursors: []const LoopCursor.ReferenceCursor,
+    checked_reference_cursors: []const LoopCursor.ReferenceCursor,
 ) Allocator.Error!void {
     const live = try allocator.alloc(bool, instructions.len * slot_count);
     defer allocator.free(live);
@@ -435,8 +437,8 @@ fn allocateGraph(
             }
         }
     }
-    markReferenceCursorLive(live, slot_count, reference_cursor);
-    markReferenceCursorLive(live, slot_count, checked_reference_cursor);
+    for (reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
+    for (checked_reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
 
     const alias_roots = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(alias_roots);
@@ -470,11 +472,10 @@ fn allocateGraph(
 fn markReferenceCursorLive(
     live: []bool,
     slot_count: usize,
-    cursor: ?LoopCursor.ReferenceCursor,
+    cursor: LoopCursor.ReferenceCursor,
 ) void {
-    const value = cursor orelse return;
-    for (value.initialize..value.increment + 1) |instruction| {
-        live[instruction * slot_count + value.result] = true;
+    for (cursor.initialize..cursor.increment + 1) |instruction| {
+        live[instruction * slot_count + cursor.result] = true;
     }
 }
 

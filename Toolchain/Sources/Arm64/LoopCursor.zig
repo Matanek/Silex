@@ -80,35 +80,41 @@ pub fn find(allocator: Allocator, function: Machine.Function) Allocator.Error!?C
 /// carried in the reference result register. The normal loop comparison still
 /// guards the index; only repeated normalization and multiplication disappear.
 pub fn findReference(allocator: Allocator, function: Machine.Function) Allocator.Error!?ReferenceCursor {
-    var found: ?ReferenceCursor = null;
-    for (function.instructions, 0..) |instruction, reference_index| {
-        const reference = switch (instruction) {
-            .collection_reference => |value| value,
-            else => continue,
-        };
-        if (reference.checked or !reference.dynamic or !reference.view or reference.reference != null or
-            reference.element_stride == 0 or reference.element_stride > std.math.maxInt(u12)) continue;
-        const candidate = (try recognizeReference(allocator, function, reference_index, reference, true)) orelse continue;
-        if (found != null) return null;
-        found = candidate;
-    }
-    return found;
+    const cursors = try findReferenceCursors(allocator, function, false);
+    defer allocator.free(cursors);
+    if (cursors.len != 1) return null;
+    return cursors[0];
 }
 
 pub fn findCheckedReference(allocator: Allocator, function: Machine.Function) Allocator.Error!?ReferenceCursor {
-    var found: ?ReferenceCursor = null;
+    const cursors = try findReferenceCursors(allocator, function, true);
+    defer allocator.free(cursors);
+    if (cursors.len != 1) return null;
+    return cursors[0];
+}
+
+/// Recognizes every independent ascending view-reference cursor. Their live
+/// ranges are colored together by register allocation, so references in the
+/// same loop receive distinct registers while disjoint loops may reuse one.
+pub fn findReferenceCursors(
+    allocator: Allocator,
+    function: Machine.Function,
+    checked: bool,
+) Allocator.Error![]ReferenceCursor {
+    var found: std.ArrayList(ReferenceCursor) = .empty;
+    errdefer found.deinit(allocator);
     for (function.instructions, 0..) |instruction, reference_index| {
         const reference = switch (instruction) {
             .collection_reference => |value| value,
             else => continue,
         };
-        if (!reference.checked or !reference.dynamic or !reference.view or
+        if (reference.checked != checked or !reference.dynamic or !reference.view or
+            (!checked and reference.reference != null) or
             reference.element_stride == 0 or reference.element_stride > std.math.maxInt(u12)) continue;
-        const candidate = (try recognizeReference(allocator, function, reference_index, reference, false)) orelse continue;
-        if (found != null) return null;
-        found = candidate;
+        const candidate = (try recognizeReference(allocator, function, reference_index, reference, !checked)) orelse continue;
+        try found.append(allocator, candidate);
     }
-    return found;
+    return found.toOwnedSlice(allocator);
 }
 
 /// Finds up to two dominating view references whose element address remains
@@ -976,6 +982,52 @@ test "recognize unchecked and checked ascending view reference cursors" {
     try std.testing.expectEqual(@as(usize, 1), checked.initialize);
     try std.testing.expectEqual(@as(usize, 6), checked.reference);
     try std.testing.expectEqual(@as(usize, 9), checked.increment);
+}
+
+test "recognize multiple checked references carried by one loop" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 15, .bits = 0 } },
+        .{ .copy = .{ .result = 2, .operand = 15 } },
+        .{ .jump = 3 },
+        .{ .collection_count = .{
+            .result = 4,
+            .collection = .{ .start = 0, .width = 2, .aggregate = true },
+            .view = true,
+        } },
+        .{ .binary = .{ .result = 5, .operator = .less, .left = 2, .right = 4, .type = .int } },
+        .{ .branch = .{ .condition = 5, .then_instruction = 6, .else_instruction = 12 } },
+        .{ .collection_reference = referenceInstruction(true, 0, 8) },
+        .{ .collection_reference = referenceInstruction(true, 16, 18) },
+        .{ .constant_int = .{ .result = 13, .bits = 1 } },
+        .{ .binary = .{ .result = 14, .operator = .add, .left = 2, .right = 13, .type = .int } },
+        .{ .copy = .{ .result = 2, .operand = 14 } },
+        .{ .jump = 3 },
+        .return_void,
+    };
+    const parameters = [_]Machine.Span{
+        .{ .start = 0, .width = 2, .aggregate = true },
+        .{ .start = 16, .width = 2, .aggregate = true },
+    };
+    const function: Machine.Function = .{
+        .name = "parallel_checked_reference_cursors",
+        .parameter_count = parameters.len,
+        .parameters = &parameters,
+        .return_type = .void,
+        .slot_count = 19,
+        .frame_size = try Machine.frameSize(19),
+        .instructions = &instructions,
+    };
+    const cursors = try findReferenceCursors(std.testing.allocator, function, true);
+    defer std.testing.allocator.free(cursors);
+    try std.testing.expectEqual(@as(usize, 2), cursors.len);
+    try std.testing.expectEqual(@as(usize, 6), cursors[0].reference);
+    try std.testing.expectEqual(@as(Machine.Slot, 8), cursors[0].result);
+    try std.testing.expectEqual(@as(usize, 7), cursors[1].reference);
+    try std.testing.expectEqual(@as(Machine.Slot, 18), cursors[1].result);
+    try std.testing.expectEqual(
+        @as(?ReferenceCursor, null),
+        try findCheckedReference(std.testing.allocator, function),
+    );
 }
 
 test "reject a view reference cursor whose index advances by more than one" {
