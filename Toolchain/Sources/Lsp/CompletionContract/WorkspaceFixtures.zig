@@ -33,6 +33,17 @@ pub fn validate(identifier: Id, canonical_source: []const u8) !void {
     unreachable;
 }
 
+pub fn install(identifier: Id, temporary: *std.testing.TmpDir) ![]const u8 {
+    return switch (identifier) {
+        inline else => |known| installDefinition(comptime definition(known), temporary),
+    };
+}
+
+fn installDefinition(comptime fixture: Definition, temporary: *std.testing.TmpDir) ![]const u8 {
+    for (fixture.files) |file| try writeFile(temporary, file.path, file.source);
+    return fixture.entry_path;
+}
+
 fn validateDefinition(fixture: Definition, canonical_source: []const u8) !void {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

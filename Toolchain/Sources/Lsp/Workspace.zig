@@ -1653,7 +1653,18 @@ fn appendImportedMembersDepth(
 ) !void {
     if (depth > project.index.providers.len) return;
     const target = declarationTarget(project.index, query.type_path) orelse return;
-    const provider = project.index.providers[target.provider];
+    var provider_index = target.provider;
+    const module_name = project.index.providers[target.provider].name;
+    for (project.index.providers, 0..) |candidate, candidate_index| {
+        if (!std.mem.eql(u8, candidate.name, module_name) or
+            !project.graph.canAccess(project.current_owner, candidate.owner, candidate.name)) continue;
+        const candidate_program = try loadProgram(allocator, io, documents, candidate) orelse continue;
+        if (programProvidesDeclaration(candidate_program.program, target.declaration)) {
+            provider_index = candidate_index;
+            break;
+        }
+    }
+    const provider = project.index.providers[provider_index];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return;
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
     for (loaded.program.structures) |structure| {
@@ -1815,6 +1826,16 @@ fn appendImportedMembersDepth(
             depth + 1,
         );
     }
+}
+
+fn programProvidesDeclaration(program: Ast.Program, declaration: []const u8) bool {
+    for (program.structures) |structure| if (std.mem.eql(u8, structure.name, declaration)) return true;
+    for (program.enums) |enumeration| if (std.mem.eql(u8, enumeration.name, declaration)) return true;
+    for (program.uses) |use| {
+        const alias = use.alias orelse lastSegment(use.path);
+        if (use.is_public and std.mem.eql(u8, alias, declaration)) return true;
+    }
+    return false;
 }
 
 fn appendProviderExtensionMethods(
@@ -2005,32 +2026,35 @@ fn importedConstructorTypePathDepth(
 ) !?[]const u8 {
     if (depth > project.index.providers.len) return null;
     const target = declarationTarget(project.index, type_path) orelse return null;
-    const provider = project.index.providers[target.provider];
-    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
-    const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
-    for (loaded.program.structures) |structure| {
-        if (!structure.is_public or structure.is_protocol or structure.is_static or
-            !std.mem.eql(u8, structure.name, target.declaration)) continue;
-        if (structure.constructors.len == 0) return if (arity == 0) type_path else null;
-        for (structure.constructors) |constructor| {
-            if (!importedMemberVisible(project, provider, constructor)) continue;
-            if (parametersAcceptArity(constructor.parameters, arity)) return type_path;
+    const module_name = project.index.providers[target.provider].name;
+    for (project.index.providers) |provider| {
+        if (!std.mem.eql(u8, provider.name, module_name) or
+            !project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        for (loaded.program.structures) |structure| {
+            if (!structure.is_public or structure.is_protocol or structure.is_static or
+                !std.mem.eql(u8, structure.name, target.declaration)) continue;
+            if (structure.constructors.len == 0) return if (arity == 0) type_path else null;
+            for (structure.constructors) |constructor| {
+                if (!importedMemberVisible(project, provider, constructor)) continue;
+                if (parametersAcceptArity(constructor.parameters, arity)) return type_path;
+            }
+            return null;
         }
-        return null;
-    }
-    for (loaded.program.uses) |use| {
-        const alias = use.alias orelse lastSegment(use.path);
-        if (!use.is_public or !std.mem.eql(u8, alias, target.declaration)) continue;
-        const use_path = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
-        return importedConstructorTypePathDepth(
-            allocator,
-            io,
-            documents,
-            project,
-            use_path,
-            arity,
-            depth + 1,
-        );
+        for (loaded.program.uses) |use| {
+            const alias = use.alias orelse lastSegment(use.path);
+            if (!use.is_public or !std.mem.eql(u8, alias, target.declaration)) continue;
+            const use_path = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
+            return importedConstructorTypePathDepth(
+                allocator,
+                io,
+                documents,
+                project,
+                use_path,
+                arity,
+                depth + 1,
+            );
+        }
     }
     return null;
 }

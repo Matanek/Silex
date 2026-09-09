@@ -104,7 +104,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"Math"},
         .forbidden = &.{"while"},
         .provenance = "FR/Language/Modules",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "statement-loop-control",
@@ -278,7 +278,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"paint"},
         .forbidden = &.{"Widget"},
         .provenance = "FR/Language/Modules aliases",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "origin-current-module",
@@ -290,7 +290,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"build"},
         .forbidden = &.{"other_module_private"},
         .provenance = "FR/Language/Modules current folder anchor",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "member-imported-atom",
@@ -302,7 +302,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"length"},
         .forbidden = &.{"internal"},
         .provenance = "package source atom @Vec2.sx",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "cascade-local-incomplete",
@@ -336,7 +336,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{ "length", "normalized" },
         .forbidden = &.{"position"},
         .provenance = "Sandbox/Main.sx catalog plus @Vec2.sx fragment",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-development-dependency",
@@ -348,7 +348,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"equal"},
         .forbidden = &.{"private_helper"},
         .provenance = "development dependency package graph",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-friend-package",
@@ -360,7 +360,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"package_visible"},
         .forbidden = &.{"private_visible"},
         .provenance = "friend package visibility graph",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-submodule",
@@ -372,7 +372,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"paint"},
         .forbidden = &.{"internal"},
         .provenance = "FR/Language/Modules submodules",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-merged-extension",
@@ -384,7 +384,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"choose"},
         .forbidden = &.{"private_helper"},
         .provenance = "merged extension from a dependency",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "topology-platform-fragment",
@@ -396,7 +396,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"show"},
         .forbidden = &.{"unsupported_backend"},
         .provenance = "target-selected package fragment",
-        .status = .{ .assigned_gap = .part_05 },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 workspace registry fixtures are executable completion contracts" },
     },
     .{
         .id = "visibility-imported-private-negative",

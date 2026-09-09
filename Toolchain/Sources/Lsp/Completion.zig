@@ -2256,6 +2256,9 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 var completed = false;
                 while (end < tokens.len) : (end += 1) {
                     if (tokens[end].tag == .semicolon or tokens[end].tag == .right_brace or
+                        tokens[end].tag == .keyword_if or tokens[end].tag == .keyword_while or
+                        tokens[end].tag == .keyword_for or tokens[end].tag == .keyword_match or
+                        tokens[end].tag == .keyword_mutex or
                         tokens[end].position.line > declaration_line)
                     {
                         completed = true;
@@ -3252,6 +3255,15 @@ fn parseForCompletionObserved(
         .program = mergeExtensionsForCompletion(allocator, program),
         .recovery = .completion_site,
     } else |_| {}
+
+    const separated = try RecoveryModule.separateAdjacentControlStatement(allocator, recovered, recovered_cursor);
+    if (separated) |repaired| {
+        parser = ParserModule.Parser.init(allocator, repaired);
+        if (parser.parse()) |program| return .{
+            .program = mergeExtensionsForCompletion(allocator, program),
+            .recovery = .completion_site,
+        } else |_| {}
+    }
 
     if (try RecoveryModule.isolateInvalidTopLevelDeclarations(allocator, recovered, recovered_cursor)) |isolated| {
         parser = ParserModule.Parser.init(allocator, isolated);

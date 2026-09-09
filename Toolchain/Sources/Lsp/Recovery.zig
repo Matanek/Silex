@@ -115,6 +115,37 @@ pub fn unmatchedLineClosers(
     return closers;
 }
 
+pub fn separateAdjacentControlStatement(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+) !?[]u8 {
+    const tokens = try tokensUntil(allocator, source, @min(cursor, source.len));
+    var candidate: ?Token = null;
+    var previous: ?Token = null;
+    for (tokens) |token| {
+        if (token.tag == .keyword_if or token.tag == .keyword_while) {
+            if (previous) |before| {
+                const boundary = before.tag == .left_brace or before.tag == .semicolon or
+                    before.tag == .keyword_else or before.position.line != token.position.line;
+                if (!boundary and before.end < token.start and
+                    std.mem.trim(u8, source[before.end..token.start], " \t\r").len == 0)
+                {
+                    candidate = token;
+                }
+            }
+        }
+        previous = token;
+    }
+    const control = candidate orelse return null;
+    var separated = try allocator.dupe(u8, source);
+    var boundary = control.start;
+    while (boundary != 0 and (separated[boundary - 1] == ' ' or separated[boundary - 1] == '\t')) boundary -= 1;
+    if (boundary == control.start) return null;
+    separated[control.start - 1] = '\n';
+    return separated;
+}
+
 fn tokensUntil(allocator: Allocator, source: []const u8, end: usize) ![]const Token {
     var tokens: std.ArrayList(Token) = .empty;
     var lexer = LexerModule.Lexer.init(source[0..end]);
@@ -144,4 +175,19 @@ test "isolating an invalid declaration preserves a preceding use" {
     try std.testing.expectEqualStrings("GFX.Canvas", program.uses[0].path);
     try std.testing.expectEqual(@as(usize, 1), program.functions.len);
     try std.testing.expectEqualStrings("okay", program.functions[0].name);
+}
+
+test "separate an adjacent control statement without shifting source offsets" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "func inspect() { let value = make() if value.member() {} }";
+    const cursor = std.mem.indexOf(u8, source, "member").? + "member".len;
+    const separated = (try separateAdjacentControlStatement(arena.allocator(), source, cursor)).?;
+    try std.testing.expectEqual(source.len, separated.len);
+    try std.testing.expectEqualStrings(
+        "func inspect() { let value = make()\nif value.member() {} }",
+        separated,
+    );
+    var parser = ParserModule.Parser.init(arena.allocator(), separated);
+    _ = try parser.parse();
 }
