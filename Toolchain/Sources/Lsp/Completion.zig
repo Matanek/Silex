@@ -2223,8 +2223,6 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 depth -|= 1;
             },
             .keyword_let, .keyword_var => {
-                if (index + 1 >= tokens.len or tokens[index + 1].tag != .identifier) continue;
-                const name = tokens[index + 1].lexeme;
                 const declaration_line = token.position.line;
                 var end = index + 2;
                 var completed = false;
@@ -2237,6 +2235,31 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                     }
                 }
                 if (!completed and lineAtOffset(source, cursor) <= declaration_line) continue;
+                if (index + 1 >= tokens.len) continue;
+                if (tokens[index + 1].tag == .left_parenthesis) {
+                    const tuple_type = inferDestructuredDeclarationType(
+                        program,
+                        containingCallable(source, program, cursor),
+                        locals.items,
+                        tokens[index..end],
+                    ) orelse continue;
+                    const tuple = structureForType(program, tuple_type) orelse continue;
+                    if (!tuple.is_tuple) continue;
+                    var field_index: usize = 0;
+                    var binding = index + 2;
+                    while (binding < end and tokens[binding].tag != .right_parenthesis) : (binding += 1) {
+                        if (tokens[binding].tag != .identifier or field_index >= tuple.fields.len) continue;
+                        try locals.append(allocator, .{
+                            .name = tokens[binding].lexeme,
+                            .type_name = memberTypeName(program, tuple.fields[field_index].type),
+                            .depth = depth,
+                        });
+                        field_index += 1;
+                    }
+                    continue;
+                }
+                if (tokens[index + 1].tag != .identifier) continue;
+                const name = tokens[index + 1].lexeme;
                 try locals.append(allocator, .{
                     .name = name,
                     .type_name = inferDeclarationType(source, program, tokens[index..end]),
@@ -2283,6 +2306,33 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
     }
     try appendCurrentMatchBindings(allocator, tokens, &locals, depth);
     return locals.toOwnedSlice(allocator);
+}
+
+fn inferDestructuredDeclarationType(
+    program: Ast.Program,
+    callable: ?Callable,
+    locals: []const Local,
+    tokens: []const Token,
+) ?Ast.Type {
+    var equal: ?usize = null;
+    for (tokens, 0..) |token, token_index| if (token.tag == .equal) {
+        equal = token_index;
+        break;
+    };
+    const value_index = (equal orelse return null) + 1;
+    if (value_index >= tokens.len or tokens[value_index].tag != .identifier) return null;
+    const name = tokens[value_index].lexeme;
+
+    var local_index = locals.len;
+    while (local_index != 0) {
+        local_index -= 1;
+        if (!std.mem.eql(u8, locals[local_index].name, name)) continue;
+        return typeForSpelling(program, locals[local_index].type_name orelse return null);
+    }
+    if (callable) |owner| for (owner.parameters) |parameter| {
+        if (std.mem.eql(u8, parameter.name, name)) return parameter.type;
+    };
+    return null;
 }
 
 fn appendCurrentMatchBindings(
@@ -2905,6 +2955,7 @@ fn parseForCompletionObserved(
         lineHasUnclosedControlCondition(before_prefix)) and !blockFollowsCompletion(source, cursor);
     const completing_try_error = context.completing_try_error;
     const completing_try_alternative = context.completing_try_alternative;
+    const closers = try RecoveryModule.unmatchedLineClosers(allocator, source, line_start, cursor);
     const placeholder: []const u8 = if (completing_try_error)
         "error"
     else if (completing_try_alternative)
@@ -2924,7 +2975,12 @@ fn parseForCompletionObserved(
             "__completion()",
         .type_name => "int",
         .aggregate_field => "__completion:true",
-        .statement => "print(true)",
+        .statement => if (control_body_missing or (for_source and !for_body_follows))
+            "true {}"
+        else if (closers.len != 0)
+            "true"
+        else
+            "print(true)",
         .expression => if (control_body_missing or (for_source and !for_body_follows))
             "true {}"
         else if (before_prefix.len == 0)
@@ -2937,7 +2993,6 @@ fn parseForCompletionObserved(
         cursor
     else
         context.prefix_start;
-    const closers = try RecoveryModule.unmatchedLineClosers(allocator, source, line_start, cursor);
     const block_suffix: []const u8 = if (std.mem.endsWith(u8, placeholder, " {}")) " {}" else "";
     const placeholder_expression = placeholder[0 .. placeholder.len - block_suffix.len];
     const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}", .{
@@ -4097,6 +4152,24 @@ test "preserve tuple element types in query-style for destructuring" {
     const cursor = std.mem.indexOf(u8, source, "rotator.").? + "rotator.".len;
     const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
     try std.testing.expect(contains(items, "rotate"));
+}
+
+test "publish typed bindings from a local tuple destructuring" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Target {}
+        \\struct Motion { func advance() {} }
+        \\func update(query:(Target, Motion)[]) {
+        \\    for pair in query {
+        \\        let (target, motion) = pair
+        \\        motion.
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "motion.").? + "motion.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "advance"));
 }
 
 test "complete an inline cascade" {
@@ -5376,4 +5449,15 @@ test "isolate syntax errors before after and beside member completion" {
         try std.testing.expect(contains(items, "pressed"));
         try std.testing.expectEqual(case.recovery, try recoveryAt(arena.allocator(), case.source, cursor));
     }
+}
+
+test "recover a control condition written on the callable line" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "func update(input:bool) bool { if inp }";
+    const cursor = std.mem.lastIndexOf(u8, source, "inp").? + "inp".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    const recovery = try recoveryAt(arena.allocator(), source, cursor);
+    try std.testing.expect(contains(items, "input"));
+    try std.testing.expectEqual(Recovery.completion_site, recovery);
 }

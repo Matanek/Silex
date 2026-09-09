@@ -60,7 +60,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"public"},
         .forbidden = &.{"break"},
         .provenance = "FR/Language/Declarations",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "declaration-structure-member",
@@ -70,7 +70,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"var"},
         .forbidden = &.{"while"},
         .provenance = "FR/Language/Data-types",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "type-qualified-import",
@@ -82,7 +82,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"Vec2"},
         .forbidden = &.{"print"},
         .provenance = "FR/Language/Types",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 completes a qualified field type from the workspace" },
     },
     .{
         .id = "nominal-relation-type",
@@ -92,7 +92,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"Drawable"},
         .forbidden = &.{"print"},
         .provenance = "FR/Language/Data-types",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "use-path-qualified",
@@ -114,7 +114,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"break"},
         .forbidden = &.{"public"},
         .provenance = "FR/Language/Statements",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "expression-typed-prefix",
@@ -134,7 +134,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"force"},
         .forbidden = &.{"health"},
         .provenance = "FR/Language/Functions",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "call-argument-expression",
@@ -144,7 +144,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"red"},
         .forbidden = &.{"public"},
         .provenance = "FR/Language/Functions",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "aggregate-remaining-field",
@@ -154,7 +154,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"force"},
         .forbidden = &.{"health"},
         .provenance = "FR/Language/Structures",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "lexical-query-destructuring",
@@ -164,7 +164,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"motion"},
         .forbidden = &.{"query_internal"},
         .provenance = "FR/Language/Control-flow",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "intrinsic-expression-root",
@@ -174,7 +174,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"print"},
         .forbidden = &.{"public"},
         .provenance = "FR/Language/Program-output",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "member-local-incomplete-if",
@@ -476,7 +476,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"color"},
         .forbidden = &.{"private compiler symbol"},
         .provenance = "FR/Language/Functions parameters",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "symbol-constructor-root",
@@ -486,7 +486,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"Widget"},
         .forbidden = &.{"while"},
         .provenance = "FR/Language/Data-types construction",
-        .status = .{ .assigned_gap = .part_03 },
+        .status = .{ .protected = "Lsp.Tests.Part03Contracts: part 03 local registry gaps are executable contracts" },
     },
     .{
         .id = "symbol-enum-case",
