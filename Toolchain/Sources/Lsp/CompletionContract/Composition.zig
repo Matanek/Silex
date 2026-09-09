@@ -49,6 +49,7 @@ pub const ConsumerKind = enum {
     field_default,
     property_default,
     return_value,
+    match_subject,
     argument_value,
     argument_callable,
     cascade_argument_value,
@@ -135,6 +136,7 @@ pub const ProofId = enum {
     local_cascade_member,
     lexical_argument_value,
     destructured_initializer_value,
+    match_subject_parameter,
 };
 
 pub const Key = struct {
@@ -198,6 +200,11 @@ pub const proofs = [_]Proof{
         .id = .destructured_initializer_value,
         .key = .{ .demand = .value, .producer = .destructured_element, .consumer = .initializer, .transform = .destructured },
         .scenario_id = "lexical-query-destructuring",
+    },
+    .{
+        .id = .match_subject_parameter,
+        .key = .{ .demand = .value, .producer = .parameter, .consumer = .match_subject, .transform = .direct },
+        .scenario_id = "expression-match-subject-parameter",
     },
 };
 
@@ -280,6 +287,7 @@ fn consumerRequests(consumer: ConsumerKind, demand: DemandKind) bool {
         .field_default,
         .property_default,
         .return_value,
+        .match_subject,
         .cascade_assignment,
         .aggregate_value,
         .interpolation,
@@ -453,6 +461,7 @@ fn transformFitsConsumer(transform: TransformKind, consumer: ConsumerKind) bool 
             .initializer,
             .assignment,
             .return_value,
+            .match_subject,
             .argument_value,
             .argument_callable,
             .cascade_argument_value,
@@ -488,6 +497,7 @@ fn deliveryPart(key: Key) DeliveryPart {
         .field_default,
         .property_default,
         .return_value,
+        .match_subject,
         .argument_value,
         .cascade_argument_value,
         .cascade_assignment,

@@ -138,6 +138,38 @@ pub const scenarios = [_]Scenario{
         .status = .{ .protected = "Lsp.Tests.WorkspaceContracts: typed initializers preserve prefixed workspace expression roots" },
     },
     .{
+        .id = "expression-introducers",
+        .capability = .expressions,
+        .canonical_source =
+        \\enum Choice { first; second }
+        \\struct Box { let value:int }
+        \\class State { var value:int }
+        \\struct Owner { var state:State }
+        \\func parse() Result<int, str> { return Result<int, str>.success(1) }
+        \\func propagate() Result<int, str> { return Result<int, str>.success(try parse()) }
+        \\func transfer(value:Box) Box { return move value }
+        \\func detach(value:Owner) Owner { return copy value }
+        \\func callback() func(int) int { return func(value:int) int { return value } }
+        \\func choose(value:Choice) int { return match value { first => 1; second => 2 } }
+        \\func main() {}
+        ,
+        .partial_source = "func probe() { <|> }",
+        .required = &.{ "match", "try", "move", "copy", "func" },
+        .forbidden = &.{"public"},
+        .provenance = "FR/Reference/Syntax expression grammar",
+        .status = .{ .protected = "Lsp.Tests.ExpressionChoiceOracle: canonical expression choices survive every typed prefix through the server" },
+    },
+    .{
+        .id = "expression-match-subject-parameter",
+        .capability = .expressions,
+        .canonical_source = "enum Month { january; unknown }\nfunc to_month_str(month:Month) str { return match month { january => \"January\"; unknown => \"Unknown\" } }\nfunc main() { print(to_month_str(Month.january)) }",
+        .partial_source = "enum Month { january; unknown }\nfunc to_month_str(month:Month) str { return match mon<|> }",
+        .required = &.{"month"},
+        .forbidden = &.{ "while", "public" },
+        .provenance = "FR/Language/Data-types/Enums match expression subject",
+        .status = .{ .protected = "Lsp.Tests.ExpressionChoiceOracle: canonical expression choices survive every typed prefix through the server" },
+    },
+    .{
         .id = "call-label-middle",
         .capability = .call_arguments,
         .canonical_source = "func spawn(health:int, force:int) {}\nfunc main() { spawn(health:100, force:10) }",
@@ -793,10 +825,17 @@ pub fn parserProductionCapability(value: Parser.CompletionSites.Production) Capa
     };
 }
 
-pub const TokenPolicy = enum { choice, context, recovery, irrelevant };
+pub const TokenPolicy = enum { choice, expression_choice, context, recovery, irrelevant };
 
 pub fn tokenPolicy(tag: Lexer.TokenTag) TokenPolicy {
     return switch (tag) {
+        .keyword_try,
+        .keyword_move,
+        .keyword_copy,
+        .keyword_match,
+        .keyword_func,
+        => .expression_choice,
+
         .keyword_let,
         .keyword_var,
         .keyword_if,
@@ -810,22 +849,17 @@ pub fn tokenPolicy(tag: Lexer.TokenTag) TokenPolicy {
         .keyword_break,
         .keyword_continue,
         .keyword_return,
-        .keyword_try,
-        .keyword_move,
-        .keyword_copy,
         .keyword_struct,
         .keyword_class,
         .keyword_protocol,
         .keyword_extend,
         .keyword_contribute,
         .keyword_enum,
-        .keyword_match,
         .keyword_init,
         .keyword_drop,
         .keyword_super,
         .keyword_override,
         .keyword_static,
-        .keyword_func,
         .keyword_use,
         .keyword_private,
         .keyword_package,
@@ -916,6 +950,58 @@ pub fn tokenPolicy(tag: Lexer.TokenTag) TokenPolicy {
         => .recovery,
 
         .legacy_internal, .end => .irrelevant,
+    };
+}
+
+pub fn expressionChoiceWitness(tag: Lexer.TokenTag) ?[]const u8 {
+    return switch (tag) {
+        .keyword_try,
+        .keyword_move,
+        .keyword_copy,
+        .keyword_match,
+        .keyword_func,
+        => "expression-introducers",
+        else => null,
+    };
+}
+
+pub fn unaryExpressionChoice(operator: Ast.UnaryOperator) ?Lexer.TokenTag {
+    return switch (operator) {
+        .propagate => .keyword_try,
+        .move => .keyword_move,
+        .copy => .keyword_copy,
+        .negate,
+        .logical_not,
+        .borrow_read,
+        .borrow_mutable,
+        .force_optional,
+        => null,
+    };
+}
+
+pub fn astExpressionChoice(tag: std.meta.Tag(Ast.Expression.Value)) ?Lexer.TokenTag {
+    return switch (tag) {
+        .match_expression => .keyword_match,
+        .integer,
+        .floating,
+        .boolean,
+        .null_value,
+        .string,
+        .interpolated_string,
+        .identifier,
+        .generic_reference,
+        .unary,
+        .binary,
+        .conversion,
+        .string_count,
+        .sequence_literal,
+        .tuple_literal,
+        .call,
+        .field_access,
+        .index_access,
+        .slice_access,
+        .cascade,
+        => null,
     };
 }
 
@@ -1286,9 +1372,48 @@ test "closed compiler and completion inventories require exhaustive policies" {
         _ = Parser.CompletionSites.policy(production);
         _ = parserProductionCapability(production);
     }
-    inline for (@typeInfo(Lexer.TokenTag).@"enum".fields) |field| _ = tokenPolicy(@enumFromInt(field.value));
-    inline for (@typeInfo(std.meta.Tag(Ast.Expression.Value)).@"enum".fields) |field| {
-        _ = expressionCapability(@enumFromInt(field.value));
+    comptime {
+        for (@typeInfo(Lexer.TokenTag).@"enum".fields) |field| {
+            const tag: Lexer.TokenTag = @enumFromInt(field.value);
+            const policy = tokenPolicy(tag);
+            const witness = expressionChoiceWitness(tag);
+            if (policy == .expression_choice) {
+                if (witness == null) @compileError(std.fmt.comptimePrint(
+                    "expression token '{s}' needs an explicit completion witness",
+                    .{@tagName(tag)},
+                ));
+                if (!hasScenario(witness.?)) @compileError(std.fmt.comptimePrint(
+                    "expression token '{s}' names missing completion witness '{s}'",
+                    .{ @tagName(tag), witness.? },
+                ));
+            } else if (witness != null) @compileError(std.fmt.comptimePrint(
+                "expression token '{s}' must use the expression_choice policy",
+                .{@tagName(tag)},
+            ));
+        }
+        for (@typeInfo(std.meta.Tag(Ast.Expression.Value)).@"enum".fields) |field| {
+            const tag: std.meta.Tag(Ast.Expression.Value) = @enumFromInt(field.value);
+            _ = expressionCapability(tag);
+            if (astExpressionChoice(tag)) |token| {
+                if (tokenPolicy(token) != .expression_choice or expressionChoiceWitness(token) == null) {
+                    @compileError(std.fmt.comptimePrint(
+                        "AST expression '{s}' introduces token '{s}' without a completion proof",
+                        .{ @tagName(tag), @tagName(token) },
+                    ));
+                }
+            }
+        }
+        for (@typeInfo(Ast.UnaryOperator).@"enum".fields) |field| {
+            const operator: Ast.UnaryOperator = @enumFromInt(field.value);
+            if (unaryExpressionChoice(operator)) |token| {
+                if (tokenPolicy(token) != .expression_choice or expressionChoiceWitness(token) == null) {
+                    @compileError(std.fmt.comptimePrint(
+                        "unary expression '{s}' introduces token '{s}' without a completion proof",
+                        .{ @tagName(operator), @tagName(token) },
+                    ));
+                }
+            }
+        }
     }
     inline for (@typeInfo(std.meta.Tag(Ast.Statement)).@"enum".fields) |field| {
         _ = statementCapability(@enumFromInt(field.value));

@@ -57,6 +57,7 @@ pub const Decision = struct {
     static_container: bool = false,
     aggregate: ?AggregateContext = null,
     return_expression: bool = false,
+    match_subject: bool = false,
     qualified_type_position: bool = false,
     has_use: bool = false,
     has_try: bool = false,
@@ -135,6 +136,7 @@ pub fn decisionAt(
     var decision = try classifyContext(allocator, source, cursor);
     decision.cursor = cursor;
     decision.trigger_kind = trigger_kind;
+    decision.match_subject = try isMatchSubjectPositionAt(allocator, source, decision.prefix_start);
     if (decision.has_try) {
         decision.completing_try_error = try isTryErrorBindingPositionAt(allocator, source, decision.prefix_start);
         decision.completing_try_alternative = try isTryAlternativePositionAt(allocator, source, decision.prefix_start);
@@ -391,6 +393,12 @@ pub fn itemsAtWithDecision(
                     expression_context,
                     expression_expected,
                 );
+                try appendExpressionIntroducers(
+                    allocator,
+                    &candidates,
+                    expression_context,
+                    expression_expected,
+                );
             }
         },
         .statement, .expression => if (program) |parsed| {
@@ -403,17 +411,18 @@ pub fn itemsAtWithDecision(
                 context,
                 expected_type,
             );
+            try appendExpressionIntroducers(allocator, &candidates, context, expected_type);
             const strict_expected_type = if (expected_type) |expected| expected.strict else false;
             if (context.kind == .statement and !strict_expected_type) {
                 try appendStatementKeywords(allocator, &candidates, context);
             }
-            if (context.kind == .expression and !strict_expected_type) try appendKeywords(allocator, &candidates, context, &.{
-                .{ "try", "Silex result propagation" },
-            }, 50);
             if (context.allow_conversion) try appendKeywords(allocator, &candidates, context, &.{
                 .{ "as", "Silex explicit conversion" },
             }, 65);
-        } else try appendLexicalSymbols(allocator, &candidates, source, cursor, context),
+        } else {
+            try appendLexicalSymbols(allocator, &candidates, source, cursor, context);
+            try appendExpressionIntroducers(allocator, &candidates, context, expected_type);
+        },
         else => {},
     };
 
@@ -966,6 +975,45 @@ fn appendParameterPlaceholder(allocator: Allocator, prefix: []const u8, paramete
     });
 }
 
+fn isMatchSubjectPositionAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
+    const tokens = try tokensUntil(allocator, source, cursor);
+    const Marker = struct {
+        round_depth: usize,
+        square_depth: usize,
+        brace_depth: usize,
+    };
+    var pending: std.ArrayList(Marker) = .empty;
+    var round_depth: usize = 0;
+    var square_depth: usize = 0;
+    var brace_depth: usize = 0;
+    for (tokens, 0..) |token, index| switch (token.tag) {
+        .keyword_match => {
+            const previous = if (index == 0) null else tokens[index - 1].tag;
+            if (previous == .dot or previous == .question_dot or previous == .dot_dot) continue;
+            try pending.append(allocator, .{
+                .round_depth = round_depth,
+                .square_depth = square_depth,
+                .brace_depth = brace_depth,
+            });
+        },
+        .left_parenthesis => round_depth += 1,
+        .right_parenthesis => round_depth -|= 1,
+        .left_bracket => square_depth += 1,
+        .right_bracket => square_depth -|= 1,
+        .left_brace => {
+            if (pending.getLastOrNull()) |marker| if (marker.round_depth == round_depth and
+                marker.square_depth == square_depth and marker.brace_depth == brace_depth)
+            {
+                _ = pending.pop();
+            };
+            brace_depth += 1;
+        },
+        .right_brace => brace_depth -|= 1,
+        else => {},
+    };
+    return pending.items.len != 0;
+}
+
 fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Context {
     const prefix_start = identifierPrefixStart(source, cursor);
     const prefix = source[prefix_start..cursor];
@@ -1067,7 +1115,8 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
     };
 
     if (scope.in_callable) {
-        const expression = lineIsExpression(line_tokens);
+        const return_expression = lineStartsReturn(line_tokens) or tokens[tokens.len - 1].tag == .keyword_return;
+        const expression = lineIsExpression(line_tokens) or return_expression;
         return .{
             .kind = if (expression) .expression else .statement,
             .prefix = prefix,
@@ -1075,7 +1124,7 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
             .in_loop = scope.in_loop,
             .after_conditional = !expression and followsConditional(tokens),
             .allow_conversion = expression and expressionCanConvert(line_tokens),
-            .return_expression = expression and lineStartsReturn(line_tokens),
+            .return_expression = return_expression,
             .has_use = has_use,
             .has_try = has_try,
             .inside_parentheses = inside_parentheses,
@@ -2086,6 +2135,28 @@ fn appendStatementKeywords(allocator: Allocator, candidates: *std.ArrayList(Cand
         .{ "elif", "Silex conditional branch" },
         .{ "else", "Silex fallback branch" },
     }, 68);
+}
+
+fn appendExpressionIntroducers(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    context: Context,
+    expected_type: ?ExpectedType,
+) !void {
+    try appendKeywords(allocator, candidates, context, &.{
+        .{ "match", "Silex match expression" },
+        .{ "try", "Silex result propagation" },
+        .{ "move", "Silex value transfer" },
+        .{ "copy", "Silex detached copy" },
+    }, 50);
+
+    const accepts_function = if (expected_type) |expected|
+        !expected.strict or expected.function_type != null
+    else
+        true;
+    if (accepts_function) try appendKeywords(allocator, candidates, context, &.{
+        .{ "func", "Silex anonymous function" },
+    }, 50);
 }
 
 fn appendKeywords(
@@ -3115,13 +3186,29 @@ fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, conte
     }
     const tokens = line_tokens[0..count];
     if (tokens.len == 0) return null;
-    if (isControlConditionKeyword(tokens[0].tag)) return .{ .name = "bool" };
+    if (isControlConditionKeyword(tokens[0].tag)) {
+        if (context.match_subject) {
+            if (expectedCallArgumentType(source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
+            return null;
+        }
+        return .{ .name = "bool" };
+    }
     if (tokens[0].tag == .keyword_return) {
         if (expectedCallArgumentType(source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
+        if (context.match_subject) return null;
         return if (callable) |current| .{
             .name = baseTypeName(program, current.return_type),
             .strict = true,
+            .function_type = if (current.return_type.optionalChild() == null and
+                current.return_type.functionIndex() != null)
+                current.return_type
+            else
+                null,
         } else null;
+    }
+    if (context.match_subject) {
+        if (expectedCallArgumentType(source[0..context.prefix_start], program)) |expected| return expected;
+        return null;
     }
     if (expectedCallArgumentType(source[0..context.prefix_start], program)) |expected| return expected;
     if (tokens[0].tag == .keyword_panic) return .{ .name = "str" };
@@ -3250,7 +3337,8 @@ fn parseForCompletion(
 
 pub fn recoveryAt(allocator: Allocator, source: []const u8, cursor: usize) !Recovery {
     if (cursor > source.len or !cursorAllowsCode(source, cursor)) return .unavailable;
-    const context = try classifyContext(allocator, source, cursor);
+    var context = try classifyContext(allocator, source, cursor);
+    context.match_subject = try isMatchSubjectPositionAt(allocator, source, context.prefix_start);
     return (try parseForCompletionObserved(allocator, source, cursor, context)).recovery;
 }
 
@@ -3306,6 +3394,8 @@ fn parseForCompletionObserved(
         "error"
     else if (completing_try_alternative)
         "else {}"
+    else if (context.match_subject)
+        "true { else => true }"
     else switch (context.kind) {
         .member => if (context.qualified_type_position)
             if (context.prefix.len == 0) "__Completion" else ""
@@ -4473,6 +4563,37 @@ test "complete contextual and ordinary enum variants according to their payload"
     try std.testing.expect(ready.insertTextFormat == null);
     try std.testing.expectEqualStrings("value($0)", value.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), value.insertTextFormat);
+}
+
+test "isolate match subjects from their surrounding expected type" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func to_month_str(month:int) str {
+        \\    return match mon
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "match mon").? + "match mon".len;
+    const decision = try decisionAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(decision.match_subject);
+    try std.testing.expect(decision.program != null);
+    try std.testing.expect(expectedTypeAt(source, decision.program.?, cursor, decision) == null);
+
+    const items = try itemsAtWithDecision(arena.allocator(), source, decision, null);
+    try std.testing.expect(contains(items, "month"));
+    const month = items[indexOf(items, "month").?];
+    try std.testing.expectEqualStrings("month:int", month.detail);
+    try std.testing.expectEqualStrings("month", month.insertText.?);
+}
+
+test "track match subject boundaries without treating contextual methods as expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try std.testing.expect(try isMatchSubjectPositionAt(allocator, "return match ", "return match ".len));
+    try std.testing.expect(try isMatchSubjectPositionAt(allocator, "return match (value", "return match (value".len));
+    try std.testing.expect(!try isMatchSubjectPositionAt(allocator, "match value { else => true", "match value { else => true".len));
+    try std.testing.expect(!try isMatchSubjectPositionAt(allocator, "value.match(", "value.match(".len));
 }
 
 test "complete variants on a specialized generic enum" {
