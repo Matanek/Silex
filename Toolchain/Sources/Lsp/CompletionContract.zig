@@ -1,7 +1,10 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Frontend = @import("../Frontend.zig");
 const Lexer = @import("../Lexer.zig");
 const Parser = @import("../Parser.zig");
+const LspTypes = @import("Types.zig");
+const Axes = @import("CompletionContract/Axes.zig");
 
 pub const marker = "<|>";
 
@@ -32,10 +35,13 @@ pub const Status = union(enum) {
     irrelevant: []const u8,
 };
 
+pub const CanonicalValidation = enum { frontend, workspace };
+
 pub const Scenario = struct {
     id: []const u8,
     capability: Capability,
     canonical_source: []const u8,
+    canonical_validation: CanonicalValidation = .frontend,
     partial_source: []const u8,
     required: []const []const u8,
     forbidden: []const []const u8,
@@ -55,14 +61,46 @@ pub const scenarios = [_]Scenario{
         .status = .{ .assigned_gap = .part_03 },
     },
     .{
+        .id = "declaration-structure-member",
+        .capability = .declarations,
+        .canonical_source = "struct Player { var health:int }\nfunc main() {}",
+        .partial_source = "struct Player { va<|> }\nfunc main() {}",
+        .required = &.{"var"},
+        .forbidden = &.{"while"},
+        .provenance = "FR/Language/Data-types",
+        .status = .{ .assigned_gap = .part_03 },
+    },
+    .{
         .id = "type-qualified-import",
         .capability = .types,
         .canonical_source = "struct Player { var position:Math.Vec2 }",
+        .canonical_validation = .workspace,
         .partial_source = "struct Player { var position:Math.<|> }",
         .required = &.{"Vec2"},
         .forbidden = &.{"print"},
         .provenance = "FR/Language/Types",
         .status = .{ .assigned_gap = .part_03 },
+    },
+    .{
+        .id = "nominal-relation-type",
+        .capability = .types,
+        .canonical_source = "protocol Drawable { func draw() }\nstruct Sprite : Drawable { func draw() {} }\nfunc main() {}",
+        .partial_source = "protocol Drawable { func draw() }\nstruct Sprite : Dra<|> { func draw() {} }\nfunc main() {}",
+        .required = &.{"Drawable"},
+        .forbidden = &.{"print"},
+        .provenance = "FR/Language/Data-types",
+        .status = .{ .assigned_gap = .part_03 },
+    },
+    .{
+        .id = "use-path-qualified",
+        .capability = .topology,
+        .canonical_source = "use STD.Math\nfunc main() {}",
+        .canonical_validation = .workspace,
+        .partial_source = "use STD.Ma<|>\nfunc main() {}",
+        .required = &.{"Math"},
+        .forbidden = &.{"while"},
+        .provenance = "FR/Language/Modules",
+        .status = .{ .assigned_gap = .part_05 },
     },
     .{
         .id = "statement-loop-control",
@@ -95,10 +133,20 @@ pub const scenarios = [_]Scenario{
         .status = .{ .assigned_gap = .part_03 },
     },
     .{
+        .id = "call-argument-expression",
+        .capability = .call_arguments,
+        .canonical_source = "func paint(color:int) {}\nfunc main() { let red = 1; paint(red) }",
+        .partial_source = "func paint(color:int) {}\nfunc main() { let red = 1; paint(<|>) }",
+        .required = &.{"red"},
+        .forbidden = &.{"public"},
+        .provenance = "FR/Language/Functions",
+        .status = .{ .assigned_gap = .part_03 },
+    },
+    .{
         .id = "aggregate-remaining-field",
         .capability = .aggregate_fields,
-        .canonical_source = "struct Player { var health:int var force:int }\nfunc main() { Player(health:100, force:10) }",
-        .partial_source = "struct Player { var health:int var force:int }\nfunc main() { Player(health:100, <|>) }",
+        .canonical_source = "struct Player { var health:int; var force:int }\nfunc main() { let player = Player(health:100, force:10); print(player.health) }",
+        .partial_source = "struct Player { var health:int; var force:int }\nfunc main() { Player(health:100, <|>) }",
         .required = &.{"force"},
         .forbidden = &.{"health"},
         .provenance = "FR/Language/Structures",
@@ -107,17 +155,27 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "lexical-query-destructuring",
         .capability = .lexical_scope,
-        .canonical_source = "class Query<T> {}\nstruct Motion {}\nfunc update(query:Query<(&Motion,)>) { for motion in query { print(motion) } }",
-        .partial_source = "class Query<T> {}\nstruct Motion {}\nfunc update(query:Query<(&Motion,)>) { for motion in query { mot<|> } }",
+        .canonical_source = "struct Target {}\nstruct Motion {}\nfunc update(query:(Target, Motion)[]) { for pair in query { let (target, motion) = pair; let current = motion } }",
+        .partial_source = "struct Target {}\nstruct Motion {}\nfunc update(query:(Target, Motion)[]) { for pair in query { let (target, motion) = pair; mot<|> } }",
         .required = &.{"motion"},
         .forbidden = &.{"query_internal"},
         .provenance = "FR/Language/Control-flow",
         .status = .{ .assigned_gap = .part_03 },
     },
     .{
+        .id = "intrinsic-expression-root",
+        .capability = .lexical_scope,
+        .canonical_source = "func main() { print(1) }",
+        .partial_source = "func main() { pri<|> }",
+        .required = &.{"print"},
+        .forbidden = &.{"public"},
+        .provenance = "FR/Language/Program-output",
+        .status = .{ .assigned_gap = .part_03 },
+    },
+    .{
         .id = "member-local-incomplete-if",
         .capability = .member_local,
-        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input() if input.pressed() {} }",
+        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input(); if input.pressed() {} }",
         .partial_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input() if input.<|> }",
         .required = &.{"pressed"},
         .forbidden = &.{"if"},
@@ -125,14 +183,118 @@ pub const scenarios = [_]Scenario{
         .status = .{ .protected = "Lsp.Completion: recover member completion in an unfinished conditional" },
     },
     .{
+        .id = "member-self-receiver",
+        .capability = .member_local,
+        .canonical_source = "struct Counter { var value:int; func read() int { return self.value } }\nfunc main() {}",
+        .partial_source = "struct Counter { var value:int; func read() int { return self.<|> } }\nfunc main() {}",
+        .required = &.{ "value", "read" },
+        .forbidden = &.{"static_only"},
+        .provenance = "FR/Language/Data-types self members",
+        .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
+        .id = "member-local-extension",
+        .capability = .member_local,
+        .canonical_source = "struct Adapter {}\nextend Adapter { func choose() int { return 1 } }\nfunc main() { print(Adapter().choose()) }",
+        .partial_source = "struct Adapter {}\nextend Adapter { func choose() int { return 1 } }\nfunc main() { Adapter().<|> }",
+        .required = &.{"choose"},
+        .forbidden = &.{"public"},
+        .provenance = "FR/Language/Data-types extensions",
+        .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
+        .id = "member-dynamic-protocol",
+        .capability = .member_local,
+        .canonical_source = "protocol Readable { func read() int }\nstruct Text : Readable { func read() int { return 1 } }\nfunc main() { var value:Readable = Text(); print(value.read()) }",
+        .partial_source = "protocol Readable { func read() int }\nstruct Text : Readable { func read() int { return 1 } }\nfunc main() { var value:Readable = Text(); value.<|> }",
+        .required = &.{"read"},
+        .forbidden = &.{"secret"},
+        .provenance = "FR/Language/Data-types protocols",
+        .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
+        .id = "member-optional-safe-access",
+        .capability = .member_local,
+        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input:Input? = Input(); if input?.pressed() ?? false {} }",
+        .partial_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input:Input? = Input(); if input?.<|> }",
+        .required = &.{"pressed"},
+        .forbidden = &.{"if"},
+        .provenance = "FR/Language/Data-types optionals",
+        .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
+        .id = "member-static-type",
+        .capability = .member_local,
+        .canonical_source = "struct Palette { static func red() int { return 1 } }\nfunc main() { print(Palette.red()) }",
+        .partial_source = "struct Palette { static func red() int { return 1 } }\nfunc main() { Palette.<|> }",
+        .required = &.{"red"},
+        .forbidden = &.{"instance"},
+        .provenance = "FR/Language/Data-types static members",
+        .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
+        .id = "member-specialized-generic",
+        .capability = .member_local,
+        .canonical_source = "struct Box<T> { let value:T; func get() T { return self.value } }\nfunc main() { print(Box<int>(value:1).get()) }",
+        .partial_source = "struct Box<T> { let value:T; func get() T { return self.value } }\nfunc main() { Box<int>(value:1).<|> }",
+        .required = &.{"get"},
+        .forbidden = &.{"T"},
+        .provenance = "FR/Language/Data-types generics",
+        .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
+        .id = "member-named-tuple",
+        .capability = .member_local,
+        .canonical_source = "func main() { let size:(width:int, height:int) = (width:1, height:2); print(size.width) }",
+        .partial_source = "func main() { let size:(width:int, height:int) = (width:1, height:2); size.<|> }",
+        .required = &.{ "width", "height" },
+        .forbidden = &.{"length"},
+        .provenance = "FR/Language/Data-types tuples",
+        .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
         .id = "member-imported-field-chain",
         .capability = .member_imported,
         .canonical_source = "func update() { if transform.position.length() > 0.0 {} }",
+        .canonical_validation = .workspace,
         .partial_source = "func update() { if transform.position.<|> }",
         .required = &.{ "length", "normalized" },
         .forbidden = &.{"position"},
         .provenance = "Sandbox/Main.sx transform.position : Math.Vec2",
         .status = .{ .assigned_gap = .part_04 },
+    },
+    .{
+        .id = "member-imported-alias",
+        .capability = .member_imported,
+        .canonical_source = "use Api.Widget as Button\nfunc main() { Button().paint() }",
+        .canonical_validation = .workspace,
+        .partial_source = "use Api.Widget as Button\nfunc main() { Button().<|> }",
+        .required = &.{"paint"},
+        .forbidden = &.{"Widget"},
+        .provenance = "FR/Language/Modules aliases",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "origin-current-module",
+        .capability = .member_imported,
+        .canonical_source = "use Module.Tools\nfunc main() { Tools.build() }",
+        .canonical_validation = .workspace,
+        .partial_source = "use Module.Tools\nfunc main() { Tools.<|> }",
+        .required = &.{"build"},
+        .forbidden = &.{"other_module_private"},
+        .provenance = "FR/Language/Modules current folder anchor",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "member-imported-atom",
+        .capability = .member_imported,
+        .canonical_source = "use Api.Math\nfunc main() { Math.Vec2().length() }",
+        .canonical_validation = .workspace,
+        .partial_source = "use Api.Math\nfunc main() { Math.Vec2().<|> }",
+        .required = &.{"length"},
+        .forbidden = &.{"internal"},
+        .provenance = "package source atom @Vec2.sx",
+        .status = .{ .assigned_gap = .part_05 },
     },
     .{
         .id = "cascade-local-incomplete",
@@ -148,6 +310,7 @@ pub const scenarios = [_]Scenario{
         .id = "cascade-imported-principal-reexport",
         .capability = .cascade_imported,
         .canonical_source = "use GFX.Canvas\nfunc draw_player() Canvas { return Canvas()..paint(func () {}) }",
+        .canonical_validation = .workspace,
         .partial_source = "use GFX.Canvas\nfunc draw_player() Canvas { return Canvas()..<|> }",
         .required = &.{ "paint", "clear" },
         .forbidden = &.{"spawn"},
@@ -157,7 +320,8 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "topology-catalog-fragment-field-chain",
         .capability = .topology,
-        .canonical_source = "use GFX.Components\nuse STD.Math\nfunc update() { var pos:Math.Vec2 = transform.position print(pos.length()) }",
+        .canonical_source = "use GFX.Components\nuse STD.Math\nfunc update() { var pos:Math.Vec2 = transform.position; print(pos.length()) }",
+        .canonical_validation = .workspace,
         .partial_source = "use GFX.Components\nuse STD.Math\nfunc update() { var pos:Math.Vec2 = transform.position if pos.<|> }",
         .required = &.{ "length", "normalized" },
         .forbidden = &.{"position"},
@@ -165,13 +329,108 @@ pub const scenarios = [_]Scenario{
         .status = .{ .assigned_gap = .part_05 },
     },
     .{
+        .id = "topology-development-dependency",
+        .capability = .topology,
+        .canonical_source = "use TestKit.Assertions\nfunc main() { Assertions.equal(1, 1) }",
+        .canonical_validation = .workspace,
+        .partial_source = "use TestKit.Assertions\nfunc main() { Assertions.<|> }",
+        .required = &.{"equal"},
+        .forbidden = &.{"private_helper"},
+        .provenance = "development dependency package graph",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "topology-friend-package",
+        .capability = .topology,
+        .canonical_source = "use FriendApi.Tools\nfunc main() { Tools.package_visible() }",
+        .canonical_validation = .workspace,
+        .partial_source = "use FriendApi.Tools\nfunc main() { Tools.<|> }",
+        .required = &.{"package_visible"},
+        .forbidden = &.{"private_visible"},
+        .provenance = "friend package visibility graph",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "topology-submodule",
+        .capability = .topology,
+        .canonical_source = "use Api.Rendering.Canvas\nfunc main() { Canvas().paint() }",
+        .canonical_validation = .workspace,
+        .partial_source = "use Api.Rendering.Canvas\nfunc main() { Canvas().<|> }",
+        .required = &.{"paint"},
+        .forbidden = &.{"internal"},
+        .provenance = "FR/Language/Modules submodules",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "topology-merged-extension",
+        .capability = .topology,
+        .canonical_source = "use Core.Adapter\nuse Algorithms.Adapter\nfunc main() { Adapter().choose() }",
+        .canonical_validation = .workspace,
+        .partial_source = "use Core.Adapter\nuse Algorithms.Adapter\nfunc main() { Adapter().<|> }",
+        .required = &.{"choose"},
+        .forbidden = &.{"private_helper"},
+        .provenance = "merged extension from a dependency",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "topology-platform-fragment",
+        .capability = .topology,
+        .canonical_source = "use Platform.Window\nfunc main() { Window.current().show() }",
+        .canonical_validation = .workspace,
+        .partial_source = "use Platform.Window\nfunc main() { Window.current().<|> }",
+        .required = &.{"show"},
+        .forbidden = &.{"unsupported_backend"},
+        .provenance = "target-selected package fragment",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
         .id = "visibility-imported-private-negative",
         .capability = .visibility,
-        .canonical_source = "public class Api { private func secret() {} func visible() {} }",
+        .canonical_source = "public class Api {\nprivate func secret() {}\nfunc visible() {}\n}",
         .partial_source = "use Package.Api\nfunc main(api:&Api) { api.<|> }",
         .required = &.{"visible"},
         .forbidden = &.{"secret"},
         .provenance = "FR/Language/Visibility",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "visibility-package-member",
+        .capability = .visibility,
+        .canonical_source = "package class Api { package func shared() {} }",
+        .partial_source = "func consume(api:&Api) { api.<|> }",
+        .required = &.{"shared"},
+        .forbidden = &.{"private_member"},
+        .provenance = "FR/Language/Modules package visibility",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "visibility-module-member",
+        .capability = .visibility,
+        .canonical_source = "class Api { module func shared() {} }",
+        .partial_source = "func consume(api:&Api) { api.<|> }",
+        .required = &.{"shared"},
+        .forbidden = &.{"local_member"},
+        .provenance = "FR/Language/Modules module visibility",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "visibility-local-member",
+        .capability = .visibility,
+        .canonical_source = "local class Api { local func shared() {} }",
+        .partial_source = "func consume(api:&Api) { api.<|> }",
+        .required = &.{"shared"},
+        .forbidden = &.{"other_file_member"},
+        .provenance = "FR/Language/Modules local visibility",
+        .status = .{ .assigned_gap = .part_05 },
+    },
+    .{
+        .id = "visibility-protected-member",
+        .capability = .visibility,
+        .canonical_source = "class Base { protected func shared() {} }\nclass Child : Base { func call() { self.shared() } }",
+        .partial_source = "class Base { protected func shared() {} }\nclass Child : Base { func call() { self.<|> } }",
+        .required = &.{"shared"},
+        .forbidden = &.{"unrelated_private"},
+        .provenance = "FR/Language/Data-types protected class members",
         .status = .{ .assigned_gap = .part_05 },
     },
     .{
@@ -187,12 +446,42 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "lsp-utf16-trigger-metadata",
         .capability = .lsp_contract,
-        .canonical_source = "func café() {}\nfunc main() { café() }",
-        .partial_source = "func café() {}\nfunc main() { caf<|> }",
-        .required = &.{"café"},
-        .forbidden = &.{"duplicate:café"},
+        .canonical_source = "func paint() {}\nfunc main() { print(\"café\"); paint() }",
+        .partial_source = "func paint() {}\nfunc main() { print(\"café\"); pai<|> }",
+        .required = &.{"paint"},
+        .forbidden = &.{"duplicate:paint"},
         .provenance = "LSP UTF-16 completion contract",
         .status = .{ .assigned_gap = .part_06 },
+    },
+    .{
+        .id = "symbol-parameter-binding",
+        .capability = .lexical_scope,
+        .canonical_source = "func paint(color:int) { print(color) }\nfunc main() {}",
+        .partial_source = "func paint(color:int) { col<|> }\nfunc main() {}",
+        .required = &.{"color"},
+        .forbidden = &.{"private compiler symbol"},
+        .provenance = "FR/Language/Functions parameters",
+        .status = .{ .assigned_gap = .part_03 },
+    },
+    .{
+        .id = "symbol-constructor-root",
+        .capability = .expressions,
+        .canonical_source = "struct Widget {}\nfunc main() { let value = Widget() }",
+        .partial_source = "struct Widget {}\nfunc main() { let value = Wid<|> }",
+        .required = &.{"Widget"},
+        .forbidden = &.{"while"},
+        .provenance = "FR/Language/Data-types construction",
+        .status = .{ .assigned_gap = .part_03 },
+    },
+    .{
+        .id = "symbol-enum-case",
+        .capability = .member_local,
+        .canonical_source = "enum Direction { north; south }\nfunc main() { let value = Direction.north() }",
+        .partial_source = "enum Direction { north; south }\nfunc main() { let value = Direction.<|> }",
+        .required = &.{ "north", "south" },
+        .forbidden = &.{"private compiler symbol"},
+        .provenance = "FR/Language/Data-types enums",
+        .status = .{ .assigned_gap = .part_04 },
     },
     .{
         .id = "invariant-deterministic-no-duplicates",
@@ -205,9 +494,119 @@ pub const scenarios = [_]Scenario{
         .status = .{ .assigned_gap = .part_06 },
     },
     .{
+        .id = "editing-empty-expression",
+        .capability = .invariants,
+        .canonical_source = "func paint() {}\nfunc main() { paint() }",
+        .partial_source = "func paint() {}\nfunc main() { <|> }",
+        .required = &.{"paint"},
+        .forbidden = &.{"private compiler symbol"},
+        .provenance = "empty explicitly invoked completion",
+        .status = .{ .assigned_gap = .part_02 },
+    },
+    .{
+        .id = "editing-delete-and-retype",
+        .capability = .invariants,
+        .canonical_source = "func paint() {}\nfunc main() { paint() }",
+        .partial_source = "func paint() {}\nfunc main() { pai<|> }",
+        .required = &.{"paint"},
+        .forbidden = &.{"stale deleted candidate"},
+        .provenance = "didChange deletion followed by retyping",
+        .status = .{ .assigned_gap = .part_02 },
+    },
+    .{
+        .id = "editing-interpolation-expression",
+        .capability = .invariants,
+        .canonical_source = "func main() { let value = 42; print(\"$(value)\") }",
+        .partial_source = "func main() { let value = 42; print(\"$(val<|>)\") }",
+        .required = &.{"value"},
+        .forbidden = &.{"class"},
+        .provenance = "Lsp.Server interpolation binding contract",
+        .status = .{ .protected = "Lsp.Server: completion exposes an interpolation binding without historical types" },
+    },
+    .{
+        .id = "trigger-type-colon",
+        .capability = .lsp_contract,
+        .canonical_source = "struct Error { let message:str }\nfunc main() {}",
+        .partial_source = "struct Error { let message:<|> }\nfunc main() {}",
+        .required = &.{"str"},
+        .forbidden = &.{"if"},
+        .provenance = "Lsp.Server ':' trigger in type position",
+        .status = .{ .protected = "Lsp.Server: publish diagnostics after open and change" },
+    },
+    .{
+        .id = "trigger-generic-less",
+        .capability = .lsp_contract,
+        .canonical_source = "struct Box<T> { let value:T }\nfunc main() { let box = Box<int>(value:1) }",
+        .partial_source = "struct Box<T> { let value:T }\nfunc main() { let box = Box<<|> }",
+        .required = &.{"int"},
+        .forbidden = &.{"while"},
+        .provenance = "announced '<' completion trigger",
+        .status = .{ .assigned_gap = .part_06 },
+    },
+    .{
+        .id = "trigger-argument-comma",
+        .capability = .lsp_contract,
+        .canonical_source = "func spawn(health:int, force:int) {}\nfunc main() { spawn(health:100, force:10) }",
+        .partial_source = "func spawn(health:int, force:int) {}\nfunc main() { spawn(health:100,<|>) }",
+        .required = &.{"force"},
+        .forbidden = &.{"health"},
+        .provenance = "announced ',' completion trigger",
+        .status = .{ .assigned_gap = .part_06 },
+    },
+    .{
+        .id = "trigger-try-space",
+        .capability = .lsp_contract,
+        .canonical_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read() else { return } }",
+        .partial_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read() <|> }",
+        .required = &.{ "else", "else error" },
+        .forbidden = &.{"public"},
+        .provenance = "Lsp.Server ' ' trigger after try",
+        .status = .{ .protected = "Lsp.Server: space triggers only contextual try completions" },
+    },
+    .{
+        .id = "trigger-try-closing-parenthesis",
+        .capability = .lsp_contract,
+        .canonical_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read() else { return } }",
+        .partial_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read()<|> }",
+        .required = &.{ "else", "else error" },
+        .forbidden = &.{"public"},
+        .provenance = "Lsp.Server ')' trigger after try call",
+        .status = .{ .protected = "Lsp.Server: space triggers only contextual try completions" },
+    },
+    .{
+        .id = "trigger-try-else-prefix",
+        .capability = .lsp_contract,
+        .canonical_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read() else { return } }",
+        .partial_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read() e<|> }",
+        .required = &.{ "else", "else error" },
+        .forbidden = &.{"public"},
+        .provenance = "Lsp.Server 'e' trigger after try",
+        .status = .{ .protected = "Lsp.Server: space triggers only contextual try completions" },
+    },
+    .{
+        .id = "observable-metadata-and-insertion",
+        .capability = .lsp_contract,
+        .canonical_source = "func main() { let value = 42; print(\"$(value)\") }",
+        .partial_source = "func main() { let value = 42; print(\"$(val<|>)\") }",
+        .required = &.{ "value", "filterText:value", "sortText:present" },
+        .forbidden = &.{"class"},
+        .provenance = "Lsp.Server completion item metadata",
+        .status = .{ .protected = "Lsp.Server: completion exposes an interpolation binding without historical types" },
+    },
+    .{
+        .id = "observable-kind-detail-snippet",
+        .capability = .lsp_contract,
+        .canonical_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read() else { return } }",
+        .partial_source = "func read() Result<int,str> { return Result<int,str>.success(1) }\nfunc main() { var value = try read() <|> }",
+        .required = &.{ "detail", "kind", "insertText:else {$0}" },
+        .forbidden = &.{"duplicate:else"},
+        .provenance = "Lsp.Server contextual snippet contract",
+        .status = .{ .assigned_gap = .part_06 },
+    },
+    .{
         .id = "recovery-error-before-cursor",
         .capability = .invariants,
-        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc helper() {}\nfunc main() { let input = Input() input.pressed() }",
+        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc helper() {}\nfunc main() { let input = Input(); input.pressed() }",
         .partial_source = "struct Input { func pressed() bool { return true } }\nfunc helper( { }\nfunc main() { let input = Input() input.<|> }",
         .required = &.{"pressed"},
         .forbidden = &.{"empty response caused by unrelated parse error"},
@@ -217,7 +616,7 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "recovery-error-at-cursor",
         .capability = .invariants,
-        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input() if input.pressed() {} }",
+        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input(); if input.pressed() {} }",
         .partial_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input() if (input.<|> }",
         .required = &.{"pressed"},
         .forbidden = &.{"empty response caused by the incomplete expression"},
@@ -227,7 +626,7 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "recovery-error-after-cursor",
         .capability = .invariants,
-        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input() input.pressed() }\nfunc helper() {}",
+        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input(); input.pressed() }\nfunc helper() {}",
         .partial_source = "struct Input { func pressed() bool { return true } }\nfunc main() { let input = Input() input.<|> }\nfunc helper( { }",
         .required = &.{"pressed"},
         .forbidden = &.{"empty response caused by following parse error"},
@@ -237,7 +636,7 @@ pub const scenarios = [_]Scenario{
     .{
         .id = "recovery-error-neighbour-block",
         .capability = .invariants,
-        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc helper() {}\nfunc main() { let input = Input() input.pressed() }",
+        .canonical_source = "struct Input { func pressed() bool { return true } }\nfunc helper() {}\nfunc main() { let input = Input(); input.pressed() }",
         .partial_source = "struct Input { func pressed() bool { return true } }\nfunc helper() { if }\nfunc main() { let input = Input() input.<|> }",
         .required = &.{"pressed"},
         .forbidden = &.{"context imported from broken neighbour"},
@@ -246,26 +645,15 @@ pub const scenarios = [_]Scenario{
     },
 };
 
-pub const Position = enum { module, structure, modifier, type_name, statement, expression, member, argument, call_label, aggregate_field, nominal_relation, use_path };
-pub const Origin = enum { intrinsic, lexical, local, imported, extension, protocol_member, alias, reexport, catalog, atom };
-pub const Receiver = enum { value, reference, optional, static_type, module, principal_type, generic, tuple, dynamic_protocol, call_result, field_result, chain, cascade };
-pub const Topology = enum { loose, package, dependency, development_dependency, friend, submodule, merged_extension, suite_extension, catalog, overlay, platform_fragment };
-pub const Editing = enum {
-    empty,
-    prefixed,
-    deleted,
-    delimiter_missing,
-    body_missing,
-    nested,
-    interpolation,
-    unicode_before_cursor,
-    syntax_error_before_cursor,
-    syntax_error_at_cursor,
-    syntax_error_after_cursor,
-    syntax_error_neighbour_block,
-};
-pub const Trigger = enum { invoked, dot, colon, less, comma, space, closing_parenthesis };
-pub const Observable = enum { labels, order, kind, detail, insertion, snippet, duplicates, deterministic };
+pub const Position = Axes.Position;
+pub const Origin = Axes.Origin;
+pub const Receiver = Axes.Receiver;
+pub const Topology = Axes.Topology;
+pub const Visibility = Axes.Visibility;
+pub const Symbol = Axes.Symbol;
+pub const Editing = Axes.Editing;
+pub const Trigger = Axes.Trigger;
+pub const Observable = Axes.Observable;
 
 pub fn positionCapability(value: Position) Capability {
     return switch (value) {
@@ -282,8 +670,9 @@ pub fn positionCapability(value: Position) Capability {
 
 pub fn originCapability(value: Origin) Capability {
     return switch (value) {
-        .intrinsic, .lexical, .local => .lexical_scope,
-        .imported, .extension, .protocol_member, .alias, .reexport, .catalog, .atom => .member_imported,
+        .intrinsic, .lexical => .lexical_scope,
+        .self_member, .local => .member_local,
+        .current_module, .dependency, .extension, .protocol_member, .alias, .reexport, .contribution, .catalog, .atom => .member_imported,
     };
 }
 
@@ -297,8 +686,25 @@ pub fn receiverCapability(value: Receiver) Capability {
 
 pub fn topologyCapability(value: Topology) Capability {
     return switch (value) {
-        .loose, .package, .dependency, .development_dependency, .friend, .submodule, .merged_extension, .suite_extension, .catalog, .platform_fragment => .topology,
+        .loose, .same_file, .module_file, .package, .dependency, .development_dependency, .friend, .submodule, .merged_extension, .suite_extension, .catalog, .platform_fragment => .topology,
         .overlay => .overlay_protocol,
+    };
+}
+
+pub fn visibilityCapability(value: Visibility) Capability {
+    return switch (value) {
+        .public, .package, .module, .local, .protected, .private, .friend => .visibility,
+    };
+}
+
+pub fn symbolCapability(value: Symbol) Capability {
+    return switch (value) {
+        .keyword => .declarations,
+        .variable, .parameter => .lexical_scope,
+        .function, .constructor => .expressions,
+        .field, .method, .enum_case => .member_local,
+        .type => .types,
+        .module, .alias => .topology,
     };
 }
 
@@ -322,13 +728,25 @@ pub fn editingCapability(value: Editing) Capability {
 
 pub fn triggerCapability(value: Trigger) Capability {
     return switch (value) {
-        .invoked, .dot, .colon, .less, .comma, .space, .closing_parenthesis => .lsp_contract,
+        .invoked, .dot, .colon, .less, .comma, .space, .closing_parenthesis, .else_prefix => .lsp_contract,
+    };
+}
+
+pub fn protocolTrigger(value: LspTypes.CompletionTriggerCharacter) Trigger {
+    return switch (value) {
+        .dot => .dot,
+        .colon => .colon,
+        .less => .less,
+        .comma => .comma,
+        .space => .space,
+        .closing_parenthesis => .closing_parenthesis,
+        .else_prefix => .else_prefix,
     };
 }
 
 pub fn observableCapability(value: Observable) Capability {
     return switch (value) {
-        .labels, .order, .kind, .detail, .insertion, .snippet => .lsp_contract,
+        .labels, .order, .kind, .detail, .filter_text, .sort_text, .insertion, .snippet => .lsp_contract,
         .duplicates, .deterministic => .invariants,
     };
 }
@@ -540,6 +958,53 @@ pub fn audit(registry: []const Scenario) !void {
         covered[@intFromEnum(scenario.capability)] = true;
     }
     for (covered) |present| if (!present) return error.MissingCapability;
+    try auditAxisWitnesses(registry);
+}
+
+fn auditAxisWitnesses(registry: []const Scenario) !void {
+    inline for (std.meta.fields(Position)) |field| try requireScenario(
+        registry,
+        Axes.positionWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Origin)) |field| try requireScenario(
+        registry,
+        Axes.originWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Receiver)) |field| try requireScenario(
+        registry,
+        Axes.receiverWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Topology)) |field| try requireScenario(
+        registry,
+        Axes.topologyWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Visibility)) |field| try requireScenario(
+        registry,
+        Axes.visibilityWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Symbol)) |field| try requireScenario(
+        registry,
+        Axes.symbolWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Editing)) |field| try requireScenario(
+        registry,
+        Axes.editingWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Trigger)) |field| try requireScenario(
+        registry,
+        Axes.triggerWitness(@enumFromInt(field.value)),
+    );
+    inline for (std.meta.fields(Observable)) |field| try requireScenario(
+        registry,
+        Axes.observableWitness(@enumFromInt(field.value)),
+    );
+}
+
+fn requireScenario(registry: []const Scenario, identifier: []const u8) !void {
+    for (registry) |scenario| {
+        if (std.mem.eql(u8, scenario.id, identifier)) return;
+    }
+    return error.MissingAxisWitness;
 }
 
 fn countOccurrences(haystack: []const u8, needle: []const u8) usize {
@@ -570,13 +1035,39 @@ test "completion registry is classified and self contained" {
     try audit(&scenarios);
 }
 
+test "canonical completion sources pass their declared frontend boundary" {
+    for (scenarios) |scenario| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var parser = Parser.Parser.init(arena.allocator(), scenario.canonical_source);
+        _ = parser.parse() catch |err| {
+            std.debug.print("completion canonical source '{s}' does not parse\n", .{scenario.id});
+            return err;
+        };
+        if (scenario.canonical_validation == .workspace) continue;
+        var frontend = Frontend.Frontend.init(arena.allocator());
+        frontend.checkDocument(scenario.canonical_source) catch |err| {
+            std.debug.print(
+                "completion canonical source '{s}' is not semantically valid: {s}\n",
+                .{ scenario.id, if (frontend.diagnostic) |diagnostic| diagnostic.message else @errorName(err) },
+            );
+            return err;
+        };
+    }
+}
+
 test "closed compiler and completion inventories require exhaustive policies" {
     inline for (@typeInfo(Position).@"enum".fields) |field| _ = positionCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Origin).@"enum".fields) |field| _ = originCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Receiver).@"enum".fields) |field| _ = receiverCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Topology).@"enum".fields) |field| _ = topologyCapability(@enumFromInt(field.value));
+    inline for (@typeInfo(Visibility).@"enum".fields) |field| _ = visibilityCapability(@enumFromInt(field.value));
+    inline for (@typeInfo(Symbol).@"enum".fields) |field| _ = symbolCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Editing).@"enum".fields) |field| _ = editingCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Trigger).@"enum".fields) |field| _ = triggerCapability(@enumFromInt(field.value));
+    inline for (@typeInfo(LspTypes.CompletionTriggerCharacter).@"enum".fields) |field| {
+        _ = protocolTrigger(@enumFromInt(field.value));
+    }
     inline for (@typeInfo(Observable).@"enum".fields) |field| _ = observableCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Parser.CompletionSites.Production).@"enum".fields) |field| {
         const production: Parser.CompletionSites.Production = @enumFromInt(field.value);
@@ -593,7 +1084,13 @@ test "closed compiler and completion inventories require exhaustive policies" {
 }
 
 test "registry mutations expose missing rows and missing proofs" {
-    try std.testing.expectError(error.MissingCapability, audit(scenarios[1..]));
+    var without_declarations: std.ArrayList(Scenario) = .empty;
+    defer without_declarations.deinit(std.testing.allocator);
+    for (scenarios) |scenario| {
+        if (scenario.capability != .declarations) try without_declarations.append(std.testing.allocator, scenario);
+    }
+    try std.testing.expectError(error.MissingCapability, audit(without_declarations.items));
+    try std.testing.expectError(error.MissingAxisWitness, audit(scenarios[1..]));
     var missing_proof = scenarios;
     missing_proof[3].status = .{ .protected = "" };
     try std.testing.expectError(error.MissingProof, audit(&missing_proof));

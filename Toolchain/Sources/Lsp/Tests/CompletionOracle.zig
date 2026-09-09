@@ -1,5 +1,5 @@
 const std = @import("std");
-const ParserModule = @import("../../Parser.zig");
+const FrontendModule = @import("../../Frontend.zig");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
@@ -8,8 +8,8 @@ fn publicInstanceMembers(
     source: []const u8,
     type_name: []const u8,
 ) ![]const []const u8 {
-    var parser = ParserModule.Parser.init(allocator, source);
-    const program = try parser.parse();
+    var frontend = FrontendModule.Frontend.init(allocator);
+    const program = (try frontend.compile(source)).ast;
     var labels: std.ArrayList([]const u8) = .empty;
     for (program.structures) |structure| {
         if (!std.mem.eql(u8, structure.name, type_name)) continue;
@@ -34,10 +34,14 @@ fn publicInstanceMembers(
 test "complete source syntax provides an oracle independent from LSP recovery" {
     const canonical =
         \\public class Widget {
-        \\    public var opacity:float
+        \\    public var opacity:float = 0.0
         \\    public func clear() {}
         \\    public func paint() {}
         \\    private func secret() {}
+        \\}
+        \\func main() {
+        \\    var widget = Widget()
+        \\    widget.paint()
         \\}
     ;
     var temporary = std.testing.tmpDir(.{});
@@ -78,9 +82,15 @@ test "complete source syntax provides an oracle independent from LSP recovery" {
     try Support.expectNoDuplicates(actual);
 }
 
-test "oracle rejects an invalid canonical source" {
+test "semantic oracle rejects a parsed but ill-typed canonical source" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
     try std.testing.expectError(
         error.InvalidSource,
-        publicInstanceMembers(std.testing.allocator, "public class {", "Widget"),
+        publicInstanceMembers(
+            arena.allocator(),
+            "public class Widget { public func value() int { return false } } func main() {}",
+            "Widget",
+        ),
     );
 }

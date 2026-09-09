@@ -23,23 +23,36 @@ an unrepresented capability family. It also rejects runtime data tied to
 `.specs/`, `.agents/`, or an absolute user path. Mutation tests remove a family,
 a proof, and a cursor to demonstrate that those omissions turn the gate red.
 
-The matrix axes are closed enums: syntax position, symbol origin, receiver
-shape, project topology, editing state, trigger, and observable output. Lexer
-tokens, expression and statement union tags, and parser completion productions
-are mapped with exhaustive switches and no catch-all branch. Adding a variant
-without a completion policy therefore fails compilation of the LSP suite.
+The matrix axes are closed enums: syntax position, symbol origin and kind,
+receiver shape, project topology, visibility, editing state, trigger, and
+observable output. Every enum value names an exact registry witness; deleting
+that row fails the audit even when another scenario still covers the same broad
+capability. Lexer tokens, expression and statement union tags, and parser
+completion productions are mapped with exhaustive switches and no catch-all
+branch. Adding a variant without a completion policy therefore fails
+compilation of the LSP suite.
+
+The completion characters announced to clients are generated from the closed
+protocol enum in `Lsp/Types.zig`. The contract maps that same enum, so adding a
+trigger cannot update server capabilities while silently bypassing the
+completion inventory.
 
 ## Independent oracle boundary
 
 `Toolchain/Sources/Lsp/Tests/CompletionOracle.zig` establishes the first
-independent boundary: it derives the declared public instance surface from a
-complete source parsed by the frontend and compares that surface with the LSP
-response from an incomplete consumer. The oracle never reads LSP candidates or
-recovery decisions, and invalid canonical sources are rejected. This initial
-oracle does not yet claim to reproduce the complete semantic visibility graph;
-catalogue, reexport, specialization, conformance, and package-topology cases
-remain explicit `assigned_gap` rows until the typed frontend oracle covers
-them.
+independent boundary: it compiles a complete source through semantic analysis,
+derives the declared public instance surface from the resulting frontend AST,
+and compares that surface with the LSP response from an incomplete consumer.
+The oracle never reads LSP candidates or recovery decisions. A source that
+parses but is ill-typed is explicitly rejected.
+
+The registry gate separately parses every canonical source and sends every
+autonomous fixture through semantic document checking. Multi-package fixtures
+are explicitly marked `workspace`; their parsing is already mandatory, while
+semantic composition remains a required Part 01 gate rather than being
+mistaken for a local frontend proof. Catalogue, reexport, specialization,
+conformance, and package-topology gaps remain explicit `assigned_gap` rows
+until their owning Parts close them.
 
 Semantic, workspace, and protocol cases keep both a low-level proof and a
 server proof. Real package or example failures are reduced to autonomous
