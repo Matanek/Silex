@@ -13,6 +13,7 @@ test {
     _ = @import("Lsp/Tests/ExpressionChoiceOracle.zig");
     _ = @import("Lsp/Tests/ProducerProvenanceOracle.zig");
     _ = @import("Lsp/Tests/ValueDemandOracle.zig");
+    _ = @import("Lsp/Tests/CallableCompositionOracle.zig");
     _ = @import("Lsp/Tests/SealedCompletionCorpus.zig");
     _ = @import("Lsp/Tests/CallbackCompletion.zig");
     _ = @import("Lsp/Tests/WorkspaceContracts.zig");

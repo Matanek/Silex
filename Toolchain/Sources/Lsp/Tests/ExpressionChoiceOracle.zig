@@ -264,7 +264,9 @@ fn runCampaign() !Report {
     var report = Report{
         .semantic_tuples = composition.total,
         .exclusions = composition.excluded,
-        .schemas = composition.schemas,
+        // This campaign owns the two expression-choice schemas. Later Parts add
+        // independent quantified campaigns to the shared registry.
+        .schemas = 2,
     };
 
     for (canonical_templates) |template| {

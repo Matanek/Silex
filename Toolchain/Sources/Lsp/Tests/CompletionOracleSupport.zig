@@ -61,6 +61,68 @@ pub fn functionValue(
     return error.MissingOracleFunction;
 }
 
+pub fn functionReference(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    function_name: []const u8,
+) !InstanceMember {
+    var frontend = FrontendModule.Frontend.init(allocator);
+    const program = (try frontend.compile(source)).ast;
+    for (program.functions) |function| {
+        if (function.is_anonymous or !std.mem.eql(u8, function.name, function_name)) continue;
+        return .{
+            .name = function.name,
+            .kind = 3,
+            .detail = try callableDeclarationSignature(allocator, program, function),
+            .insert_text = function.name,
+        };
+    }
+    return error.MissingOracleFunction;
+}
+
+pub fn methodReference(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    type_name: []const u8,
+    method_name: []const u8,
+) !InstanceMember {
+    var frontend = FrontendModule.Frontend.init(allocator);
+    const program = (try frontend.compile(source)).ast;
+    for (program.structures) |structure| {
+        if (!matchesType(structure.name, type_name)) continue;
+        for (structure.methods) |method| {
+            if (!std.mem.eql(u8, method.name, method_name)) continue;
+            return .{
+                .name = method.name,
+                .kind = 2,
+                .detail = try callableDeclarationSignature(allocator, program, method),
+                .insert_text = method.name,
+            };
+        }
+        return error.MissingOracleMember;
+    }
+    return error.MissingOracleType;
+}
+
+fn callableDeclarationSignature(
+    allocator: std.mem.Allocator,
+    program: Ast.Program,
+    function: Ast.Function,
+) ![]const u8 {
+    var result = try std.fmt.allocPrint(allocator, "{s}(", .{function.name});
+    for (function.parameters, 0..) |parameter_value, index| result = try std.fmt.allocPrint(
+        allocator,
+        "{s}{s}{s}:{s}",
+        .{
+            result,
+            if (index == 0) "" else ", ",
+            parameter_value.name,
+            typeName(program, parameter_value.type),
+        },
+    );
+    return std.fmt.allocPrint(allocator, "{s}) {s}", .{ result, typeName(program, function.return_type) });
+}
+
 pub fn publicInstanceMembers(
     allocator: std.mem.Allocator,
     source: []const u8,

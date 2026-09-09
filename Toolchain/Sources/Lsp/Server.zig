@@ -170,12 +170,8 @@ pub const Server = struct {
             );
             if (self.completion_failure_for_testing) return error.InjectedCompletionFailure;
             const decision = request_decision.edit;
-            const function_value_expected = try self.functionValueExpectedAt(
-                allocator,
-                uri,
-                source,
-                decision,
-            );
+            const function_value_expected = Completion.expectsFunctionValueAt(allocator, source, decision) or
+                try self.functionValueExpectedAt(allocator, uri, source, decision);
             const assignment_expected_type = if (self.workspace_root_uri != null)
                 try Workspace.assignmentExpectedTypeAtForTargetWithDecision(
                     allocator,
@@ -236,10 +232,16 @@ pub const Server = struct {
                 );
                 switch (project_outcome) {
                     .items => |items| {
+                        const typed_items = try Completion.filterCallableItemsAt(
+                            allocator,
+                            source,
+                            decision,
+                            items,
+                        );
                         const merged = if (completing_member)
-                            items
+                            typed_items
                         else
-                            try mergeCompletionItems(allocator, parameters, items);
+                            try mergeCompletionItems(allocator, parameters, typed_items);
                         const contextual = if (function_value_expected)
                             try Completion.insertFunctionReferences(allocator, merged)
                         else
@@ -268,7 +270,13 @@ pub const Server = struct {
                     decision,
                     assignment_expected_type,
                 );
-                const scoped = try mergeCompletionItems(allocator, items, imported);
+                const typed_imported = try Completion.filterCallableItemsAt(
+                    allocator,
+                    source,
+                    decision,
+                    imported,
+                );
+                const scoped = try mergeCompletionItems(allocator, items, typed_imported);
                 const merged = try mergeCompletionItems(allocator, parameters, scoped);
                 const contextual = if (function_value_expected)
                     try Completion.insertFunctionReferences(allocator, merged)

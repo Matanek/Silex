@@ -131,11 +131,13 @@ pub const ExclusionReason = enum {
 pub const SchemaId = enum {
     receiver_member_surface,
     value_flow_surface,
+    callable_composition_surface,
 };
 
 pub const SchemaPredicate = enum {
     receiver_member_surface,
     value_flow_surface,
+    callable_composition_surface,
     none,
     all_applicable,
 };
@@ -143,11 +145,13 @@ pub const SchemaPredicate = enum {
 pub const OracleProjection = enum {
     declared_member_surface,
     typed_value_identity,
+    callable_signature,
 };
 
 pub const PartialTransform = enum {
     member_cursor,
     value_cursor,
+    callable_cursor,
 };
 
 pub const AssertionMode = enum {
@@ -221,6 +225,19 @@ pub const schemas = [_]ProofSchema{
             "call-argument-expression",
             "lexical-query-destructuring",
             "expression-match-subject-parameter",
+        },
+    },
+    .{
+        .id = .callable_composition_surface,
+        .predicate = .callable_composition_surface,
+        .canonical_template = "callable identity and propagated signature",
+        .oracle_projection = .callable_signature,
+        .partial_transform = .callable_cursor,
+        .assertions = .exact_surface,
+        .runner_tier = .server,
+        .scenario_ids = &.{
+            "expression-introducers",
+            "call-argument-expression",
         },
     },
 };
@@ -333,6 +350,7 @@ fn schemaOwns(predicate: SchemaPredicate, key: Key) bool {
             key.consumer == .member_access and
             isProducerProvenanceProducer(key.producer),
         .value_flow_surface => isValueDemandKey(key),
+        .callable_composition_surface => deliveryPart(key) == .callable_composition,
         .none => false,
         .all_applicable => isApplicable(key),
     };
@@ -447,7 +465,7 @@ fn producerSatisfies(producer: ProducerKind, demand: DemandKind) bool {
     };
 }
 
-fn isCallableProducer(producer: ProducerKind) bool {
+pub fn isCallableProducer(producer: ProducerKind) bool {
     return switch (producer) {
         .function_declaration,
         .method_declaration,
