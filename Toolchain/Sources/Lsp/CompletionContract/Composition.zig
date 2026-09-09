@@ -332,12 +332,7 @@ fn schemaOwns(predicate: SchemaPredicate, key: Key) bool {
         .receiver_member_surface => key.demand == .member and
             key.consumer == .member_access and
             isProducerProvenanceProducer(key.producer),
-        .value_flow_surface => key.demand == .value and switch (key.producer) {
-            .lexical_local => key.consumer == .argument_value and key.transform == .direct,
-            .destructured_element => key.consumer == .initializer and key.transform == .destructured,
-            .parameter => key.consumer == .match_subject and key.transform == .direct,
-            else => false,
-        },
+        .value_flow_surface => isValueDemandKey(key),
         .none => false,
         .all_applicable => isApplicable(key),
     };
@@ -373,6 +368,39 @@ pub fn isProducerProvenanceProducer(producer: ProducerKind) bool {
         .tuple_callable,
         .injected_callable,
         .imported_callable,
+        => false,
+    };
+}
+
+pub fn isValueDemandKey(key: Key) bool {
+    return deliveryPart(key) == .value_consumers;
+}
+
+pub fn isValueDemandConsumer(consumer: ConsumerKind) bool {
+    return switch (consumer) {
+        .initializer,
+        .assignment,
+        .field_default,
+        .property_default,
+        .return_value,
+        .match_subject,
+        .argument_value,
+        .cascade_argument_value,
+        .cascade_assignment,
+        .aggregate_value,
+        .condition,
+        .loop_source,
+        .interpolation,
+        => true,
+        .argument_callable,
+        .cascade_argument_callable,
+        .member_access,
+        .callable_invocation,
+        .type_position,
+        .call_label,
+        .aggregate_label,
+        .statement,
+        .declaration,
         => false,
     };
 }
@@ -590,7 +618,7 @@ fn transformFitsConsumer(transform: TransformKind, consumer: ConsumerKind) bool 
     };
 }
 
-fn deliveryPart(key: Key) DeliveryPart {
+pub fn deliveryPart(key: Key) DeliveryPart {
     if (key.demand == .callable or isCallableProducer(key.producer) or
         key.consumer == .argument_callable or key.consumer == .cascade_argument_callable or
         key.consumer == .callable_invocation) return .callable_composition;

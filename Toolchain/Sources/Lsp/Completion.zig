@@ -95,6 +95,7 @@ const ExpectedType = struct {
     name: []const u8,
     strict: bool = false,
     function_type: ?Ast.Type = null,
+    constraint: enum { exact, iterable } = .exact,
 };
 
 const builtin_types = [_][]const u8{
@@ -177,7 +178,7 @@ pub fn itemsAtWithDecision(
     const expected_type: ?ExpectedType = if (contextual_expected_type) |name|
         .{ .name = name, .strict = true }
     else if (program) |parsed|
-        expectedTypeAt(source, parsed, cursor, context)
+        expectedTypeAt(allocator, source, parsed, cursor, context)
     else
         null;
     const completing_try_error = context.completing_try_error;
@@ -383,7 +384,7 @@ pub fn itemsAtWithDecision(
             if (!native_initializer) {
                 var expression_context = context;
                 expression_context.kind = .expression;
-                const expression_expected = expectedTypeAt(source, parsed, cursor, expression_context);
+                const expression_expected = expectedTypeAt(allocator, source, parsed, cursor, expression_context);
                 try appendExpressionSymbols(
                     allocator,
                     &candidates,
@@ -1968,12 +1969,13 @@ fn appendExpressionSymbols(
         if (expected_type) |expected| .{
             .name = expected.name,
             .function_type = expected.function_type,
+            .constraint = expected.constraint,
         } else null
     else
         expected_type;
     try appendEmbeddedFileIntrinsics(allocator, candidates, context, selection_type);
     try appendReflectionIntrinsic(allocator, candidates, context);
-    if (matchesExpectedType(selection_type, "Result")) try appendCandidate(
+    if (matchesExpectedType(program, selection_type, "Result")) try appendCandidate(
         allocator,
         candidates,
         context,
@@ -1982,7 +1984,7 @@ fn appendExpressionSymbols(
             .kind = CompletionKind.enum_type,
             .detail = "Silex intrinsic result type",
         },
-        typedPriority(5, selection_type, "Result"),
+        typedPriority(program, 5, selection_type, "Result"),
         false,
     );
     const callable = containingCallable(source, program, cursor);
@@ -1994,7 +1996,7 @@ fn appendExpressionSymbols(
         while (index != 0) {
             index -= 1;
             const local = locals[index];
-            if (!matchesExpectedType(selection_type, local.type_name)) continue;
+            if (!matchesExpectedType(program, selection_type, local.type_name)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = local.name,
                 .kind = CompletionKind.variable,
@@ -2002,18 +2004,18 @@ fn appendExpressionSymbols(
                     try std.fmt.allocPrint(allocator, "{s}:{s}", .{ local.name, name })
                 else
                     "Silex local binding",
-            }, typedPriority(10, selection_type, local.type_name), false);
+            }, typedPriority(program, 10, selection_type, local.type_name), false);
         }
         for (lexical_callables) |scope| for (scope.parameters) |parameter| {
             const parameter_type = typeName(program, parameter.type);
-            if (!matchesExpectedType(selection_type, parameter_type)) continue;
+            if (!matchesExpectedType(program, selection_type, parameter_type)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = parameter.name,
                 .kind = CompletionKind.variable,
                 .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ parameter.name, parameter_type }),
-            }, typedPriority(12, selection_type, parameter_type), false);
+            }, typedPriority(program, 12, selection_type, parameter_type), false);
         };
-        if (current.structure_name) |name| if (matchesExpectedType(selection_type, name)) try appendCandidate(
+        if (current.structure_name) |name| if (matchesExpectedType(program, selection_type, name)) try appendCandidate(
             allocator,
             candidates,
             context,
@@ -2022,7 +2024,7 @@ fn appendExpressionSymbols(
                 .kind = CompletionKind.variable,
                 .detail = try std.fmt.allocPrint(allocator, "self:{s}", .{name}),
             },
-            typedPriority(14, selection_type, name),
+            typedPriority(program, 14, selection_type, name),
             false,
         );
     }
@@ -2044,44 +2046,44 @@ fn appendExpressionSymbols(
                 false
         else
             false;
-        if (!passed_as_value and !matchesExpectedType(selection_type, return_type)) continue;
+        if (!passed_as_value and !matchesExpectedType(program, selection_type, return_type)) continue;
         var displayed = function;
         displayed.name = function.test_source_name orelse function.name;
         try appendCandidate(allocator, candidates, context, .{
             .label = displayed.name,
             .kind = CompletionKind.function,
             .detail = try functionSignature(allocator, source, program, displayed),
-        }, typedPriority(25, selection_type, if (passed_as_value) "function" else return_type), !passed_as_value);
+        }, typedPriority(program, 25, selection_type, if (passed_as_value) "function" else return_type), !passed_as_value);
     }
     for (program.structures) |structure| {
         if (structure.is_protocol or structure.is_tuple) continue;
-        if (!matchesExpectedType(selection_type, structure.name)) continue;
+        if (!matchesExpectedType(program, selection_type, structure.name)) continue;
         if (structure.constructors.len == 0) {
             try appendCandidate(allocator, candidates, context, .{
                 .label = structure.name,
                 .kind = structureCompletionKind(structure),
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
-            }, typedPriority(30, selection_type, structure.name), true);
+            }, typedPriority(program, 30, selection_type, structure.name), true);
         } else for (structure.constructors) |constructor| {
             if (!callAcceptsParameters(source, cursor, program, constructor.parameters)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = structure.name,
                 .kind = structureCompletionKind(structure),
                 .detail = try constructorSignature(allocator, source, program, structure.name, constructor),
-            }, typedPriority(30, selection_type, structure.name), true);
+            }, typedPriority(program, 30, selection_type, structure.name), true);
         }
     }
-    if (matchesExpectedType(selection_type, "bool")) {
+    if (matchesExpectedType(program, selection_type, "bool")) {
         try appendCandidate(allocator, candidates, context, .{
             .label = "true",
             .kind = CompletionKind.value,
             .detail = "true:bool",
-        }, typedPriority(55, selection_type, "bool"), false);
+        }, typedPriority(program, 55, selection_type, "bool"), false);
         try appendCandidate(allocator, candidates, context, .{
             .label = "false",
             .kind = CompletionKind.value,
             .detail = "false:bool",
-        }, typedPriority(55, selection_type, "bool"), false);
+        }, typedPriority(program, 55, selection_type, "bool"), false);
     }
 }
 
@@ -2091,16 +2093,16 @@ fn appendEmbeddedFileIntrinsics(
     context: Context,
     expected_type: ?ExpectedType,
 ) !void {
-    if (matchesExpectedType(expected_type, "str")) try appendCandidate(allocator, candidates, context, .{
+    if (matchesExpectedType(null, expected_type, "str")) try appendCandidate(allocator, candidates, context, .{
         .label = "embed_text",
         .kind = CompletionKind.function,
         .detail = "embed_text(file:str) str",
-    }, typedPriority(18, expected_type, "str"), true);
-    if (matchesExpectedType(expected_type, "uint8[]")) try appendCandidate(allocator, candidates, context, .{
+    }, typedPriority(null, 18, expected_type, "str"), true);
+    if (matchesExpectedType(null, expected_type, "uint8[]")) try appendCandidate(allocator, candidates, context, .{
         .label = "embed_bytes",
         .kind = CompletionKind.function,
         .detail = "embed_bytes(file:str) uint8[]",
-    }, typedPriority(18, expected_type, "uint8[]"), true);
+    }, typedPriority(null, 18, expected_type, "uint8[]"), true);
 }
 
 fn appendReflectionIntrinsic(
@@ -2258,16 +2260,33 @@ fn candidateLessThan(_: void, left: Candidate, right: Candidate) bool {
     return std.mem.lessThan(u8, left.item.detail, right.item.detail);
 }
 
-fn typedPriority(base: u8, expected: ?ExpectedType, actual: ?[]const u8) u8 {
-    const wanted = if (expected) |value| value.name else return base;
+fn typedPriority(program: ?Ast.Program, base: u8, expected: ?ExpectedType, actual: ?[]const u8) u8 {
+    const wanted = expected orelse return base;
     const provided = actual orelse return base + 8;
-    return if (std.mem.eql(u8, wanted, provided)) base -| 5 else base + 12;
+    return if (expectedTypeCompatible(program, wanted, provided)) base -| 5 else base + 12;
 }
 
-fn matchesExpectedType(expected: ?ExpectedType, actual: ?[]const u8) bool {
+fn matchesExpectedType(program: ?Ast.Program, expected: ?ExpectedType, actual: ?[]const u8) bool {
     const wanted = expected orelse return true;
     if (!wanted.strict) return true;
-    return std.mem.eql(u8, wanted.name, actual orelse return false);
+    return expectedTypeCompatible(program, wanted, actual orelse return false);
+}
+
+fn expectedTypeCompatible(program: ?Ast.Program, expected: ExpectedType, actual: []const u8) bool {
+    if (expected.constraint == .iterable) return isIterableType(program, actual);
+    return std.mem.eql(u8, expected.name, actual);
+}
+
+fn isIterableType(program: ?Ast.Program, spelling: []const u8) bool {
+    if (std.mem.eql(u8, spelling, "str") or std.mem.endsWith(u8, spelling, "[]")) return true;
+    const parsed = program orelse return false;
+    const structure = findStructure(parsed, nominalReceiverName(spelling)) orelse return false;
+    if (structure.collection != null) return true;
+    for (structure.methods) |method| {
+        if (!method.is_static and std.mem.eql(u8, method.name, "next") and
+            requiredParameterCount(method.parameters) == 0 and method.return_type.optionalChild() != null) return true;
+    }
+    return false;
 }
 
 const Callable = struct {
@@ -3202,7 +3221,7 @@ fn topLevelMemberAccess(expression: []const u8) ?MemberAccess {
     return .{ .base = base, .member = member, .safe = safe };
 }
 
-fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, context: Context) ?ExpectedType {
+fn expectedTypeAt(allocator: Allocator, source: []const u8, program: Ast.Program, cursor: usize, context: Context) ?ExpectedType {
     if (context.kind != .expression and context.kind != .statement) return null;
     const callable = containingCallable(source, program, cursor);
     const line = lineAtOffset(source, cursor);
@@ -3219,15 +3238,25 @@ fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, conte
     }
     const tokens = line_tokens[0..count];
     if (tokens.len == 0) return null;
+    if (context.active_argument) |argument| if (expectedActiveArgumentType(
+        allocator,
+        source,
+        program,
+        cursor,
+        argument,
+    )) |expected| return expected;
+    if (tokens[0].tag == .keyword_for and isForSourceLine(source[tokens[0].start..context.prefix_start])) {
+        return .{ .name = "iterable", .strict = true, .constraint = .iterable };
+    }
     if (isControlConditionKeyword(tokens[0].tag)) {
         if (context.match_subject) {
-            if (expectedCallArgumentType(source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
+            if (expectedCallArgumentType(allocator, source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
             return null;
         }
         return .{ .name = "bool" };
     }
     if (tokens[0].tag == .keyword_return) {
-        if (expectedCallArgumentType(source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
+        if (expectedCallArgumentType(allocator, source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
         if (context.match_subject) return null;
         return if (callable) |current| .{
             .name = baseTypeName(program, current.return_type),
@@ -3240,10 +3269,11 @@ fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, conte
         } else null;
     }
     if (context.match_subject) {
-        if (expectedCallArgumentType(source[0..context.prefix_start], program)) |expected| return expected;
+        if (expectedCallArgumentType(allocator, source[0..context.prefix_start], program)) |expected| return expected;
         return null;
     }
-    if (expectedCallArgumentType(source[0..context.prefix_start], program)) |expected| return expected;
+    if (expectedCallArgumentType(allocator, source[0..context.prefix_start], program)) |expected| return expected;
+    if (expectedAssignmentType(allocator, source, program, cursor, tokens)) |expected| return expected;
     if (tokens[0].tag == .keyword_panic) return .{ .name = "str" };
     var annotation: ?[]const u8 = null;
     var has_equal = false;
@@ -3254,7 +3284,80 @@ fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, conte
     return if (has_equal and annotation != null) .{ .name = annotation.?, .strict = true } else null;
 }
 
-fn expectedCallArgumentType(source: []const u8, program: Ast.Program) ?ExpectedType {
+fn expectedActiveArgumentType(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    argument: ActiveArgument,
+) ?ExpectedType {
+    var selected: ?Ast.Type = null;
+    for (program.functions) |function| {
+        if (!std.mem.eql(u8, function.name, argument.callee_name)) continue;
+        const candidate = selectedParameterType(function.parameters, argument) orelse continue;
+        if (selected != null and selected.? != candidate) return null;
+        selected = candidate;
+    }
+
+    const callee_start = argument.callee_end - argument.callee_name.len;
+    if (selected == null and callee_start != 0 and source[callee_start - 1] == '.') {
+        const receiver = if (callee_start >= 2 and source[callee_start - 2] == '.')
+            cascadeReceiver(source, callee_start - 2)
+        else
+            memberReceiver(source, callee_start - 1);
+        const receiver_type = resolveReceiverTypeForAccess(
+            allocator,
+            source,
+            program,
+            cursor,
+            receiver orelse return null,
+            false,
+        ) orelse return null;
+        const owner = findStructure(program, nominalReceiverName(receiver_type)) orelse return null;
+        for (owner.methods) |method| {
+            if (method.is_static or !std.mem.eql(u8, method.name, argument.callee_name)) continue;
+            const candidate = selectedParameterType(method.parameters, argument) orelse continue;
+            if (selected != null and selected.? != candidate) return null;
+            selected = candidate;
+        }
+    }
+
+    if (selected == null) if (findStructure(program, argument.callee_name)) |structure| {
+        if (structure.constructors.len == 0) {
+            if (argument.parameter_name) |name| {
+                for (structure.fields) |field| if (std.mem.eql(u8, field.name, name)) {
+                    selected = field.type;
+                    break;
+                };
+            } else if (argument.positional_index < structure.fields.len) {
+                selected = structure.fields[argument.positional_index].type;
+            }
+        } else {
+            for (structure.constructors) |constructor| {
+                const candidate = selectedParameterType(constructor.parameters, argument) orelse continue;
+                if (selected != null and selected.? != candidate) return null;
+                selected = candidate;
+            }
+        }
+    };
+
+    const type_value = selected orelse return null;
+    return .{
+        .name = typeName(program, type_value),
+        .strict = true,
+        .function_type = if (type_value.functionIndex() != null) type_value else null,
+    };
+}
+
+fn selectedParameterType(parameters: []const Ast.Parameter, argument: ActiveArgument) ?Ast.Type {
+    if (argument.parameter_name) |name| {
+        for (parameters) |parameter| if (std.mem.eql(u8, parameter.name, name)) return parameter.type;
+        return null;
+    }
+    return if (argument.positional_index < parameters.len) parameters[argument.positional_index].type else null;
+}
+
+fn expectedCallArgumentType(allocator: Allocator, source: []const u8, program: Ast.Program) ?ExpectedType {
     const Call = struct {
         name: ?[]const u8,
         receiver: ?[]const u8,
@@ -3275,7 +3378,10 @@ fn expectedCallArgumentType(source: []const u8, program: Ast.Program) ?ExpectedT
                     .name = if (previous != null and previous.?.tag == .identifier) previous.?.lexeme else null,
                     .receiver = if (previous != null and previous.?.tag == .identifier and previous.?.start != 0 and
                         source[previous.?.start - 1] == '.')
-                        memberReceiver(source, previous.?.start - 1)
+                        if (previous.?.start >= 2 and source[previous.?.start - 2] == '.')
+                            cascadeReceiver(source, previous.?.start - 2)
+                        else
+                            memberReceiver(source, previous.?.start - 1)
                     else
                         null,
                 };
@@ -3326,6 +3432,35 @@ fn expectedCallArgumentType(source: []const u8, program: Ast.Program) ?ExpectedT
             if (selected != null and selected.? != candidate) return null;
             selected = candidate;
         }
+        if (selected == null and call.receiver != null) {
+            const receiver_type = resolveReceiverTypeForAccess(
+                allocator,
+                source,
+                program,
+                source.len,
+                call.receiver.?,
+                false,
+            ) orelse return null;
+            const owner = findStructure(program, nominalReceiverName(receiver_type)) orelse return null;
+            for (owner.methods) |method| {
+                if (method.is_static or !std.mem.eql(u8, method.name, name) or call.argument >= method.parameters.len) continue;
+                const candidate = method.parameters[call.argument].type;
+                if (selected != null and selected.? != candidate) return null;
+                selected = candidate;
+            }
+        }
+        if (selected == null) if (findStructure(program, name)) |structure| {
+            if (structure.constructors.len == 0) {
+                if (call.argument < structure.fields.len) selected = structure.fields[call.argument].type;
+            } else {
+                for (structure.constructors) |constructor| {
+                    if (call.argument >= constructor.parameters.len) continue;
+                    const candidate = constructor.parameters[call.argument].type;
+                    if (selected != null and selected.? != candidate) return null;
+                    selected = candidate;
+                }
+            }
+        };
         const type_value = selected orelse return null;
         return .{
             .name = typeName(program, type_value),
@@ -3333,6 +3468,60 @@ fn expectedCallArgumentType(source: []const u8, program: Ast.Program) ?ExpectedT
             .function_type = if (type_value.functionIndex() != null) type_value else null,
         };
     }
+    return null;
+}
+
+fn expectedAssignmentType(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    tokens: []const Token,
+) ?ExpectedType {
+    var operator_index: ?usize = null;
+    for (tokens, 0..) |token, index| switch (token.tag) {
+        .equal, .plus_equal, .minus_equal, .star_equal, .slash_equal, .percent_equal => operator_index = index,
+        else => {},
+    };
+    const operator = operator_index orelse return null;
+    if (operator == 0) return null;
+    const declaration = tokens[0].tag == .keyword_let or tokens[0].tag == .keyword_var;
+    if (declaration) return null;
+    var start = operator;
+    while (start != 0) {
+        const previous = tokens[start - 1].tag;
+        if (previous == .semicolon or previous == .left_brace or previous == .right_brace) break;
+        start -= 1;
+    }
+    if (start == operator) return null;
+    const target = std.mem.trim(u8, source[tokens[start].start..tokens[operator].start], " \t\r\n");
+    const target_type = resolveReceiverTypeForAccess(allocator, source, program, cursor, target, false) orelse
+        cascadeAssignmentType(allocator, source, program, cursor, target) orelse return null;
+    return .{ .name = target_type, .strict = true };
+}
+
+fn cascadeAssignmentType(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    target: []const u8,
+) ?[]const u8 {
+    const separator = std.mem.lastIndexOf(u8, target, "..") orelse return null;
+    if (separator + 2 >= target.len) return null;
+    const root = std.mem.trim(u8, target[0..separator], " \t\r\n");
+    const field_name = std.mem.trim(u8, target[separator + 2 ..], " \t\r\n");
+    const root_type = resolveReceiverTypeForAccess(allocator, source, program, cursor, root, false) orelse return null;
+    const owner = findStructure(program, nominalReceiverName(root_type)) orelse return null;
+    for (owner.fields) |field| if (!field.is_static and std.mem.eql(u8, field.name, field_name)) {
+        return specializedTypeName(
+            allocator,
+            program,
+            owner,
+            root_type,
+            if (field.property) |property| property.value_type else field.type,
+        ) catch return null;
+    };
     return null;
 }
 
@@ -4638,7 +4827,7 @@ test "isolate match subjects from their surrounding expected type" {
     const decision = try decisionAt(arena.allocator(), source, cursor, .invoked);
     try std.testing.expect(decision.match_subject);
     try std.testing.expect(decision.program != null);
-    try std.testing.expect(expectedTypeAt(source, decision.program.?, cursor, decision) == null);
+    try std.testing.expect(expectedTypeAt(arena.allocator(), source, decision.program.?, cursor, decision) == null);
 
     const items = try itemsAtWithDecision(arena.allocator(), source, decision, null);
     try std.testing.expect(contains(items, "month"));
@@ -4687,7 +4876,7 @@ test "complete anonymous function parameters without exposing synthetic function
     const parsed = (try parseForCompletion(arena.allocator(), source, cursor, context)).?;
     const callable = containingCallable(source, parsed, cursor).?;
     try std.testing.expectEqualStrings("value", callable.parameters[0].name);
-    try std.testing.expect(expectedTypeAt(source, parsed, cursor, context) == null);
+    try std.testing.expect(expectedTypeAt(arena.allocator(), source, parsed, cursor, context) == null);
     const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
     try std.testing.expect(contains(items, "value"));
     for (items) |item| try std.testing.expect(!std.mem.startsWith(u8, item.label, "__silex_anonymous_"));
@@ -4711,7 +4900,7 @@ test "nested anonymous functions retain outer lexical completion scopes" {
     const cursor = std.mem.indexOf(u8, source, "return ba").? + "return ba".len;
     const context = try classifyContext(arena.allocator(), source, cursor);
     const parsed = (try parseForCompletion(arena.allocator(), source, cursor, context)).?;
-    const expected = expectedTypeAt(source, parsed, cursor, context);
+    const expected = expectedTypeAt(arena.allocator(), source, parsed, cursor, context);
     try std.testing.expectEqualStrings("int", expected.?.name);
     const callables = try containingCallables(arena.allocator(), source, parsed, cursor);
     try std.testing.expectEqual(@as(usize, 3), callables.len);

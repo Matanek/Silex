@@ -37,6 +37,30 @@ pub fn parameter(
     return error.MissingOracleFunction;
 }
 
+pub fn functionValue(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    function_name: []const u8,
+) !InstanceMember {
+    var frontend = FrontendModule.Frontend.init(allocator);
+    const program = (try frontend.compile(source)).ast;
+    for (program.functions) |function| {
+        if (function.is_anonymous or !std.mem.eql(u8, function.name, function_name)) continue;
+        if (function.parameters.len != 0) return error.OracleSnippetNotImplemented;
+        return .{
+            .name = function.name,
+            .kind = 3,
+            .detail = try std.fmt.allocPrint(
+                allocator,
+                "{s}() {s}",
+                .{ function.name, typeName(program, function.return_type) },
+            ),
+            .insert_text = try std.fmt.allocPrint(allocator, "{s}()", .{function.name}),
+        };
+    }
+    return error.MissingOracleFunction;
+}
+
 pub fn publicInstanceMembers(
     allocator: std.mem.Allocator,
     source: []const u8,
