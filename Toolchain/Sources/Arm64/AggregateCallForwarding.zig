@@ -42,6 +42,41 @@ pub fn optimize(allocator: Allocator, function: Machine.Function) Allocator.Erro
         removed[copy_index] = true;
         removed_count += 1;
     }
+    for (instructions, 0..) |instruction, initialization_index| {
+        var initialization = switch (instruction) {
+            .aggregate_init => |value| value,
+            else => continue,
+        };
+        if (!aggregateInitializationFeedsImmediateReturn(
+            instructions,
+            initialization_index,
+            initialization,
+        )) continue;
+        const fields = try allocator.dupe(Machine.Span, initialization.fields);
+        var changed = false;
+        for (fields) |*field| {
+            if (field.width != 1 or field.aggregate) continue;
+            const copy_index = scalarCopyDefinition(instructions, field.start, initialization_index) orelse continue;
+            const copy = instructions[copy_index].copy;
+            if (!slotUsedOnlyByInstruction(instructions, copy.result, initialization_index) or
+                spanDefinedBetween(
+                    instructions,
+                    .{ .start = copy.operand, .width = 1 },
+                    copy_index + 1,
+                    initialization_index,
+                )) continue;
+            field.* = .{ .start = copy.operand, .width = 1 };
+            if (!removed[copy_index]) {
+                removed[copy_index] = true;
+                removed_count += 1;
+            }
+            changed = true;
+        }
+        if (changed) {
+            initialization.fields = fields;
+            instructions[initialization_index] = .{ .aggregate_init = initialization };
+        } else allocator.free(fields);
+    }
     if (removed_count == 0) return function;
 
     const compact = try allocator.alloc(Machine.Instruction, instructions.len - removed_count);
@@ -68,6 +103,63 @@ fn remapTarget(removed: []const bool, target: usize) usize {
     var result = target;
     for (removed[0..target]) |is_removed| result -= @intFromBool(is_removed);
     return result;
+}
+
+fn aggregateInitializationFeedsImmediateReturn(
+    instructions: []const Machine.Instruction,
+    initialization_index: usize,
+    initialization: Machine.Instruction.AggregateInit,
+) bool {
+    if (initialization_index + 1 >= instructions.len or
+        controlTargetsInstruction(instructions, initialization_index + 1)) return false;
+    const returned = switch (instructions[initialization_index + 1]) {
+        .return_value => |value| value,
+        else => return false,
+    };
+    return returned.aggregate and returned.start == initialization.result.start and
+        returned.width == initialization.result.width;
+}
+
+fn scalarCopyDefinition(
+    instructions: []const Machine.Instruction,
+    slot: Machine.Slot,
+    before: usize,
+) ?usize {
+    var found: ?usize = null;
+    for (instructions, 0..) |instruction, index| {
+        if (!ResidenceLiveness.instructionDefines(instruction, slot)) continue;
+        if (index >= before or found != null) return null;
+        const copy = switch (instruction) {
+            .copy => |value| value,
+            else => return null,
+        };
+        if (copy.result != slot or copy.operand == slot) return null;
+        found = index;
+    }
+    return found;
+}
+
+fn slotUsedOnlyByInstruction(
+    instructions: []const Machine.Instruction,
+    slot: Machine.Slot,
+    expected: usize,
+) bool {
+    var found = false;
+    for (instructions, 0..) |instruction, index| {
+        if (!ResidenceLiveness.instructionUses(instruction, slot)) continue;
+        if (index != expected) return false;
+        found = true;
+    }
+    return found;
+}
+
+fn controlTargetsInstruction(instructions: []const Machine.Instruction, target: usize) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .jump => |value| if (value == target) return true,
+        .branch => |value| if (value.then_instruction == target or value.else_instruction == target) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn soleDirectCallUse(instructions: []const Machine.Instruction, span: Machine.Span, after: usize) ?usize {
@@ -205,4 +297,39 @@ test "remap control flow that targets a removed aggregate copy" {
     try std.testing.expectEqual(@as(usize, 3), result.instructions.len);
     try std.testing.expectEqual(@as(usize, 1), result.instructions[0].branch.then_instruction);
     try std.testing.expectEqual(@as(usize, 2), result.instructions[0].branch.else_instruction);
+}
+
+test "forward scalar copies into an immediately returned aggregate" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0x3f800000 } },
+        .{ .copy = .{ .result = 1, .operand = 0 } },
+        .{ .aggregate_init = .{
+            .result = .{ .start = 2, .width = 1, .aggregate = true },
+            .fields = &.{.{ .start = 1, .width = 1 }},
+        } },
+        .{ .return_value = .{ .start = 2, .width = 1, .aggregate = true } },
+    };
+    const result = try optimize(arena.allocator(), fixture(&instructions));
+    try std.testing.expectEqual(@as(usize, 3), result.instructions.len);
+    try std.testing.expectEqual(@as(Machine.Slot, 0), result.instructions[1].aggregate_init.fields[0].start);
+}
+
+test "retain a return field copy when its source changes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0x3f800000 } },
+        .{ .copy = .{ .result = 1, .operand = 0 } },
+        .{ .constant_float32 = .{ .result = 0, .bits = 0x40000000 } },
+        .{ .aggregate_init = .{
+            .result = .{ .start = 2, .width = 1, .aggregate = true },
+            .fields = &.{.{ .start = 1, .width = 1 }},
+        } },
+        .{ .return_value = .{ .start = 2, .width = 1, .aggregate = true } },
+    };
+    const result = try optimize(arena.allocator(), fixture(&instructions));
+    try std.testing.expectEqual(@as(usize, instructions.len), result.instructions.len);
+    try std.testing.expectEqual(@as(Machine.Slot, 1), result.instructions[3].aggregate_init.fields[0].start);
 }
