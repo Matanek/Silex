@@ -343,6 +343,12 @@ pub const Instruction = union(enum) {
         element_stride: u12 = 0,
         header: usize,
         tail: usize,
+        forwarded_result: ?ForwardedAggregateResult = null,
+    };
+
+    pub const ForwardedAggregateResult = struct {
+        result: Slot,
+        function: FunctionId,
     };
 
     pub const CollectionReference = struct {
@@ -374,6 +380,7 @@ pub const Instruction = union(enum) {
         element_stride: u12 = 0,
         header: usize,
         tail: usize,
+        forwarded_replacement: ?FunctionId = null,
     };
 
     pub const CollectionCount = struct {
@@ -501,6 +508,7 @@ pub const Instruction = union(enum) {
         result: ?Span,
         function: FunctionId,
         arguments: []const Span,
+        result_forwarded: bool = false,
     };
 
     pub const FunctionAddress = struct {
@@ -939,6 +947,12 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.result);
                     try requireSpan(function, value.collection);
                     try requireSlot(function, value.index);
+                    if (value.forwarded_result) |forwarding| {
+                        try requireSlot(function, forwarding.result);
+                        if (!value.dynamic or !value.view or !value.checked or
+                            value.result.width == 0 or forwarding.function >= program.functions.len)
+                            return error.InvalidMachineProgram;
+                    }
                     if ((!value.dynamic and (!value.collection.aggregate or value.collection.width != value.result.width * value.count)) or
                         (value.dynamic and ((value.collection.aggregate != value.view) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
                         value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
@@ -958,6 +972,10 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.collection);
                     try requireSlot(function, value.index);
                     try requireSpan(function, value.replacement);
+                    if (value.forwarded_replacement) |callee| {
+                        if (!value.dynamic or !value.view or !value.checked or callee >= program.functions.len)
+                            return error.InvalidMachineProgram;
+                    }
                     if ((!value.dynamic and (!value.result.aggregate or value.result.width != value.collection.width or
                         value.collection.width != value.replacement.width * value.count)) or
                         (value.dynamic and ((value.result.aggregate != value.view) or (value.collection.aggregate != value.view) or value.result.width != @as(u12, if (value.view) 2 else 1) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
@@ -1060,6 +1078,9 @@ pub fn validate(program: Program) Error!void {
                         }
                     }
                     const callee = program.functions[call.function];
+                    if (call.result_forwarded and
+                        (call.result == null or !call.result.?.aggregate or call.result.?.width == 0))
+                        return error.InvalidMachineProgram;
                     if (call.result) |result| {
                         if (result.width != callee.return_width or result.aggregate != callee.return_aggregate) {
                             return error.InvalidMachineProgram;

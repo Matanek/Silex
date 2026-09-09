@@ -1495,17 +1495,64 @@ fn encodeFunction(
                 try patch19(words.items, skip_true, words.items.len);
                 try words.append(allocator, storeStack(.x11, test_value.result));
             },
-            .collection_load => |access| if (collection_cursor) |cursor|
-                if (cursor.load_index == instruction_index)
-                    try ListRuntime.emitCursorLoad(
+            .collection_load => |access| load: {
+                if (access.forwarded_result) |forwarding| if (forwarding.function < infallible_functions.len and
+                    infallible_functions[forwarding.function])
+                {
+                    try ListRuntime.emitReference(
                         allocator,
                         words,
+                        data_fixups,
+                        &fixups.epilogue,
+                        external_call_sites,
+                        platform,
+                        program,
                         function,
-                        access,
-                        eagerCollectionWidth(function, instruction_index, access),
-                        @enumFromInt(cursor.register),
-                    )
-                else if (access.dynamic)
+                        .{
+                            .result = forwarding.result,
+                            .collection = access.collection,
+                            .reference = null,
+                            .index = access.index,
+                            .element_width = access.result.width,
+                            .element_stride = access.element_stride,
+                            .count = access.count,
+                            .dynamic = access.dynamic,
+                            .view = access.view,
+                            .checked = access.checked,
+                            .header = access.header,
+                            .tail = access.tail,
+                        },
+                        false,
+                        &fixups.dynamic_collection_bounds,
+                    );
+                    break :load;
+                };
+                if (collection_cursor) |cursor| {
+                    if (cursor.load_index == instruction_index)
+                        try ListRuntime.emitCursorLoad(
+                            allocator,
+                            words,
+                            function,
+                            access,
+                            eagerCollectionWidth(function, instruction_index, access),
+                            @enumFromInt(cursor.register),
+                        )
+                    else if (access.dynamic)
+                        try ListRuntime.emitLoad(
+                            allocator,
+                            words,
+                            data_fixups,
+                            &fixups.epilogue,
+                            external_call_sites,
+                            @enumFromInt(@intFromEnum(platform)),
+                            program,
+                            function,
+                            access,
+                            eagerCollectionWidth(function, instruction_index, access),
+                        )
+                    else
+                        try encodeCollectionLoad(allocator, words, &fixups, access);
+                } else if (access.dynamic)
                     try ListRuntime.emitLoad(
                         allocator,
                         words,
@@ -1519,22 +1566,8 @@ fn encodeFunction(
                         eagerCollectionWidth(function, instruction_index, access),
                     )
                 else
-                    try encodeCollectionLoad(allocator, words, &fixups, access)
-            else if (access.dynamic)
-                try ListRuntime.emitLoad(
-                    allocator,
-                    words,
-                    data_fixups,
-                    &fixups.epilogue,
-                    external_call_sites,
-                    @enumFromInt(@intFromEnum(platform)),
-                    program,
-                    function,
-                    access,
-                    eagerCollectionWidth(function, instruction_index, access),
-                )
-            else
-                try encodeCollectionLoad(allocator, words, &fixups, access),
+                    try encodeCollectionLoad(allocator, words, &fixups, access);
+            },
             .collection_reference => |access| {
                 if (referenceReuseRegister(reference_reuses, instruction_index, false)) |register| {
                     try storeValue(allocator, words, function, register, access.result);
@@ -1560,10 +1593,18 @@ fn encodeFunction(
                     if (source != register) try words.append(allocator, moveRegister(register, source));
                 }
             },
-            .collection_replace => |replacement| if (replacement.dynamic)
-                try ListRuntime.emitReplace(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, platform, program, replacement)
-            else
-                try encodeCollectionReplace(allocator, words, &fixups, replacement),
+            .collection_replace => |replacement| replace: {
+                if (replacement.forwarded_replacement) |callee| if (callee < infallible_functions.len and
+                    infallible_functions[callee])
+                {
+                    try emitSpanCopy(allocator, words, replacement.result, replacement.collection);
+                    break :replace;
+                };
+                if (replacement.dynamic)
+                    try ListRuntime.emitReplace(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, platform, program, replacement)
+                else
+                    try encodeCollectionReplace(allocator, words, &fixups, replacement);
+            },
             .collection_count => |count| if (!viewCountFeedsNextComparison(function, instruction_index, count))
                 try ListRuntime.emitCount(allocator, words, function, count),
             .list_edit => |edit| try ListRuntime.emitEdit(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, platform, program, edit),
@@ -1744,12 +1785,16 @@ fn encodeFunction(
                 if (argument_count > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
+                    } else if (call.result_forwarded and infallible_functions[call.function]) {
+                        try words.append(allocator, loadStack(.x15, result.start));
                     } else try emitStackAddress(allocator, words, .x15, result.start);
                 };
                 const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, true);
                 if (argument_count <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
+                    } else if (call.result_forwarded and infallible_functions[call.function]) {
+                        try words.append(allocator, loadStack(.x15, result.start));
                     } else try emitStackAddress(allocator, words, .x15, result.start);
                 };
                 try calls.append(allocator, .{ .at = words.items.len, .function = call.function });

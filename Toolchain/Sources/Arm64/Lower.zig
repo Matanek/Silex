@@ -6,6 +6,7 @@ const MainBoundary = @import("../MainBoundary.zig");
 const Machine = @import("Machine.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
 const AggregateCallForwarding = @import("AggregateCallForwarding.zig");
+const AggregateResultStores = @import("AggregateResultStores.zig");
 const MemorySchedule = @import("MemorySchedule.zig");
 const Slp = @import("../Optimize/Slp.zig");
 const StackLayout = @import("StackLayout.zig");
@@ -219,7 +220,10 @@ fn lowerRange(
     for (start..end) |index| {
         if (!pending[index]) continue;
         var value = try lowerFunction(allocator, program, strings, source_functions[index]);
-        if (mode == .release) value = try allocateRegisters(allocator, value);
+        if (mode == .release) {
+            value = try AggregateResultStores.optimize(allocator, program, source_functions[index], value);
+            value = try allocateRegisters(allocator, value);
+        }
         functions[index] = value;
     }
 }
