@@ -325,8 +325,8 @@ pub const regressions = [_]RegressionEntry{
     },
     .{
         .name = "Regressions/HotReferenceLeafClosure.sx",
-        .concern = "a bounded hot set of safe reference leaf callees closes atomically instead of leaving a call-constrained partial expansion",
-        .contract = .{ .specializes_branching_reference_calls = "integrate" },
+        .concern = "a pressure-heavy hot set of reference leaf callees stays out of line until expanded caller residences are proven profitable",
+        .contract = .{ .preserves_branching_reference_calls = "integrate" },
     },
     .{
         .name = "Regressions/DynamicFieldClearAppend.sx",
