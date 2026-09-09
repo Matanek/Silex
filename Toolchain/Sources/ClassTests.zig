@@ -144,8 +144,8 @@ test "read-reference class parameters reject direct transitive and dynamic mutat
         "cannot pass 'value' as both a read reference and a mutation-capable class value",
     );
     try expectCompileError(
-        "class Base { func inspect() {} } class Child : Base { var value:int = 0; override func inspect() { self.value++ } } func main() {}",
-        "an override cannot introduce receiver mutation",
+        "class Node { protected func hook() {} func dispatch() { self.hook() } } class Leaf:Node { var count:int = 0; override func hook() { self.count++ } } func inspect(node:@Node) { node.dispatch() } func main() {}",
+        "mutating method 'dispatch' cannot be called through a read reference",
     );
 }
 
@@ -448,6 +448,32 @@ test "nonmutating override bodies preserve a mutating receiver contract" {
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("child\n1\n", output);
+}
+
+test "mutating final overrides propagate through the virtual family" {
+    const output = try run(
+        \\class Node {
+        \\    protected var count:int = 0
+        \\    protected func hook() {}
+        \\    func dispatch() { self.hook() }
+        \\    func current() int { return self.count }
+        \\}
+        \\class Branch:Node {
+        \\    override func hook() {}
+        \\}
+        \\class Leaf:Branch {
+        \\    override func hook() { self.count++ }
+        \\}
+        \\func dispatch(node:Node) { node.dispatch() }
+        \\func main() {
+        \\    var leaf = Leaf()
+        \\    var node:Node = leaf
+        \\    dispatch(node)
+        \\    print(leaf.current())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1\n", output);
 }
 
 test "static members use type-qualified shared storage" {
