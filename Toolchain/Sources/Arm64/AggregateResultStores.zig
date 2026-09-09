@@ -38,17 +38,25 @@ pub fn optimize(
             if (!machine_load.dynamic or !machine_load.view or !machine_load.checked or
                 !machine_load.result.aggregate or machine_load.result.width < 2 or
                 spanUsed(instructions, machine_load.result, null)) break :candidate;
+            const diagnose = machine_load.result.width == 26;
+            if (diagnose) std.debug.print("aggregate-result-store: load accepted in {s}\n", .{source.name});
 
             const load_origin = localCollectionOrigin(block.instructions, source_load.collection, load_offset) orelse
                 break :candidate;
+            if (diagnose) std.debug.print("aggregate-result-store: local origin {d}\n", .{load_origin});
             for (block.instructions[load_offset + 1 ..], load_offset + 1..) |possible_call, call_offset| {
                 const source_call = switch (possible_call) {
                     .call => |value| value,
                     else => continue,
                 };
                 const call_result = source_call.result orelse continue;
-                if (call_result >= source.value_types.len or source.value_types[call_result] != result_type or
-                    !safeCallee(program, source, block, call_offset, source_call, result_type)) continue;
+                const safe_call = call_result < source.value_types.len and source.value_types[call_result] == result_type and
+                    safeCallee(program, source, block, call_offset, source_call, result_type);
+                if (!safe_call) {
+                    if (diagnose) std.debug.print("aggregate-result-store: call rejected at {d}\n", .{call_offset});
+                    continue;
+                }
+                if (diagnose) std.debug.print("aggregate-result-store: call accepted at {d}\n", .{call_offset});
                 const call_index = block_start + call_offset;
                 const machine_call = switch (instructions[call_index]) {
                     .call => |value| value,
@@ -62,14 +70,26 @@ pub fn optimize(
                         .collection_replace => |value| value,
                         else => continue,
                     };
+                    if (diagnose) std.debug.print("aggregate-result-store: replacement seen at {d}\n", .{replace_offset});
                     if (!source_replace.checked or source_replace.replacement != call_result or
                         source_replace.index != source_load.index or
-                        valueDefinedBetween(block.instructions, source_load.index, load_offset + 1, replace_offset)) continue;
+                        valueDefinedBetween(block.instructions, source_load.index, load_offset + 1, replace_offset))
+                    {
+                        if (diagnose) std.debug.print("aggregate-result-store: replacement source mismatch\n", .{});
+                        continue;
+                    }
                     const replace_origin = localCollectionOrigin(block.instructions, source_replace.collection, replace_offset) orelse
                         continue;
                     if (replace_origin != load_origin or
-                        localStoredBetween(block.instructions, load_origin, load_offset + 1, replace_offset)) continue;
-                    if (!transparentAfterCall(block.instructions, call_offset + 1, replace_offset)) continue;
+                        localStoredBetween(block.instructions, load_origin, load_offset + 1, replace_offset))
+                    {
+                        if (diagnose) std.debug.print("aggregate-result-store: replacement origin mismatch\n", .{});
+                        continue;
+                    }
+                    if (!transparentAfterCall(block.instructions, call_offset + 1, replace_offset)) {
+                        if (diagnose) std.debug.print("aggregate-result-store: post-call effect\n", .{});
+                        continue;
+                    }
 
                     const replace_index = block_start + replace_offset;
                     const machine_replace = switch (instructions[replace_index]) {
@@ -80,10 +100,15 @@ pub fn optimize(
                         !sameSpan(machine_replace.replacement, machine_result) or
                         machine_replace.index != machine_load.index or
                         machine_replace.element_stride != machine_load.element_stride or
-                        !spanUsed(instructions, machine_result, replace_index)) continue;
+                        !spanUsed(instructions, machine_result, replace_index))
+                    {
+                        if (diagnose) std.debug.print("aggregate-result-store: machine mismatch\n", .{});
+                        continue;
+                    }
+                    if (diagnose) std.debug.print("aggregate-result-store: forwarding enabled\n", .{});
 
                     var updated_load = machine_load;
-                    updated_load.forwarded_result = .{
+                    updated_load.forwarded_result = Machine.Instruction.ForwardedAggregateResult{
                         .result = machine_result.start,
                         .function = machine_call.function,
                     };
@@ -410,6 +435,7 @@ test "forward a disjoint checked view load into an aggregate call result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const values = try testPrograms(arena.allocator(), 0);
+    try std.testing.expectEqual(@as(Machine.Slot, 10), values[2].instructions[3].call.result.?.start);
     const result = try optimize(arena.allocator(), values[0], values[1], values[2]);
     try std.testing.expectEqual(@as(Machine.Slot, 10), result.instructions[1].collection_load.forwarded_result.?.result);
     try std.testing.expect(result.instructions[3].call.result_forwarded);
