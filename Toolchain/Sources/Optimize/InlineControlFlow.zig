@@ -143,6 +143,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
 }
 
 fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (value_type == .address) return true;
     if (isValueType(program, value_type, 0)) return true;
     const structure_index = value_type.structureIndex() orelse return false;
     if (structure_index >= program.structures.len) return false;
@@ -151,6 +152,7 @@ fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
 }
 
 fn isInlineValueType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (value_type == .address) return true;
     if (isValueType(program, value_type, 0)) return true;
     const structure_index = value_type.structureIndex() orelse return false;
     return structure_index < program.structures.len and !program.structures[structure_index].is_static;
