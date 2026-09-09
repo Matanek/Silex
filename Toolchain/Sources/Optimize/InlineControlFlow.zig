@@ -4,6 +4,7 @@ const CallSummary = @import("CallSummary.zig");
 
 const Allocator = std.mem.Allocator;
 const maximum_cost = 128;
+const maximum_hot_leaf_closure_cost = 384;
 
 const Info = struct {
     state: enum { unresolved, visiting, rejected, eligible } = .unresolved,
@@ -23,9 +24,18 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
         var current = function;
+        const close_hot_leaf_calls = closesHotLeafCallSet(information, summaries, function, index);
         var expansions: usize = 0;
         while (expansions < 64) : (expansions += 1) {
-            const next = try inlineOnce(allocator, program, information, summaries, current, index);
+            const next = try inlineOnce(
+                allocator,
+                program,
+                information,
+                summaries,
+                current,
+                index,
+                close_hot_leaf_calls,
+            );
             if (next == null) break;
             current = next.?;
         }
@@ -145,7 +155,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                     return;
                 },
             }
-            if (cost > maximum_cost) {
+            if (cost > maximum_hot_leaf_closure_cost) {
                 info.state = .rejected;
                 return;
             }
@@ -195,6 +205,7 @@ fn inlineOnce(
     summaries: []const CallSummary.Summary,
     function: Ir.Function,
     function_index: usize,
+    close_hot_leaf_calls: bool,
 ) !?Ir.Function {
     for (function.blocks, 0..) |block, block_index| for (block.instructions, 0..) |instruction, instruction_index| {
         const call = switch (instruction) {
@@ -202,17 +213,51 @@ fn inlineOnce(
             else => continue,
         };
         if (call.function == function_index or call.function >= information.len or
-            information[call.function].state != .eligible or
-            (!information[call.function].previously_eligible and information[call.function].native_barrier) or
-            !CallSummary.shouldInline(
+            information[call.function].state != .eligible) continue;
+        const ordinary = information[call.function].cost <= maximum_cost and
+            !(!information[call.function].previously_eligible and information[call.function].native_barrier) and
+            CallSummary.shouldInline(
                 summaries[call.function],
                 information[call.function].cost,
                 CallSummary.isHotBlock(function, block_index),
                 information[call.function].previously_eligible,
-            )) continue;
+            );
+        if (!ordinary and !close_hot_leaf_calls) continue;
         return try expandCall(allocator, program, function, block_index, instruction_index, call);
     };
     return null;
+}
+
+fn closesHotLeafCallSet(
+    information: []const Info,
+    summaries: []const CallSummary.Summary,
+    function: Ir.Function,
+    function_index: usize,
+) bool {
+    var calls: usize = 0;
+    var total_cost: usize = 0;
+    var hot = false;
+    var needs_closure = false;
+    for (function.blocks, 0..) |block, block_index| for (block.instructions) |instruction| switch (instruction) {
+        .call => |call| {
+            if (call.function == function_index or call.function >= information.len or
+                call.function >= summaries.len or information[call.function].state != .eligible) return false;
+            const info = information[call.function];
+            const summary = summaries[call.function];
+            if (summary.recursive or summary.direct_calls != 0 or summary.effects.crosses_boundary or
+                summary.effects.synchronizes or summary.effects.observes_output or
+                summary.effects.manages_ownership) return false;
+            if (info.cost > maximum_hot_leaf_closure_cost -| total_cost) return false;
+            total_cost += info.cost;
+            calls += 1;
+            hot = hot or CallSummary.isHotBlock(function, block_index);
+            needs_closure = needs_closure or info.cost > maximum_cost or
+                (!info.previously_eligible and info.native_barrier);
+        },
+        .indirect_call, .boundary_indirect_call, .dynamic_call => return false,
+        else => {},
+    };
+    return calls >= 2 and hot and needs_closure and total_cost <= maximum_hot_leaf_closure_cost;
 }
 
 fn expandCall(
@@ -542,4 +587,37 @@ test "keep newly supported branching references with native barriers out of call
     };
     const optimized = try optimize(allocator, program);
     try std.testing.expect(optimized.functions[1].blocks[0].instructions[0] == .call);
+}
+
+test "close a bounded set of hot leaf calls as one decision" {
+    const caller: Ir.Function = .{
+        .name = "caller",
+        .parameter_types = &.{.bool},
+        .return_type = .void,
+        .value_types = &.{.bool},
+        .blocks = &.{
+            .{ .instructions = &.{}, .terminator = .{ .jump = 1 } },
+            .{
+                .instructions = &.{
+                    .{ .call = .{ .result = null, .function = 0, .arguments = &.{} } },
+                    .{ .call = .{ .result = null, .function = 1, .arguments = &.{} } },
+                },
+                .terminator = .{ .branch = .{ .condition = 0, .then_block = 1, .else_block = 2 } },
+            },
+            .{ .instructions = &.{}, .terminator = .return_void },
+        },
+    };
+    var information = [_]Info{
+        .{ .state = .eligible, .cost = 200 },
+        .{ .state = .eligible, .cost = 100, .native_barrier = true },
+        .{},
+    };
+    var summaries = [_]CallSummary.Summary{ .{}, .{}, .{} };
+    try std.testing.expect(closesHotLeafCallSet(&information, &summaries, caller, 2));
+
+    summaries[0].direct_calls = 1;
+    try std.testing.expect(!closesHotLeafCallSet(&information, &summaries, caller, 2));
+    summaries[0].direct_calls = 0;
+    information[0].cost = 300;
+    try std.testing.expect(!closesHotLeafCallSet(&information, &summaries, caller, 2));
 }

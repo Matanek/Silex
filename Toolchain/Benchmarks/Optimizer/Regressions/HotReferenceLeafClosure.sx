@@ -1,0 +1,101 @@
+use STD.Math
+
+struct Body {
+    var vx:float
+    var vy:float
+    var w:float
+    var px:float
+    var py:float
+    var c:float
+    var s:float
+}
+
+struct Forces {
+    var x:float
+    var y:float
+    var torque:float
+    var inverse_mass:float
+    var inverse_inertia:float
+    var gravity_scale:float
+    var linear_damping:float
+    var angular_damping:float
+    var allow_fast_rotation:bool
+    var speed_capped:bool
+}
+
+// The first leaf deliberately exceeds the ordinary per-callee budget while
+// the complete pair remains bounded and removes every internal call from the
+// two hot loops.
+func integrate_velocity(body:&Body, forces:&Forces) {
+    let step:float = 1.0 / 240.0
+    let maximum_angular:float = (0.25 * 3.14159265359) * 60.0
+    let linear_damping = 1.0 / (1.0 + step * forces.linear_damping)
+    let angular_damping = 1.0 / (1.0 + step * forces.angular_damping)
+    var gravity_scale = 0.0
+    if forces.inverse_mass > 0.0 { gravity_scale = forces.gravity_scale }
+    let dx = (step * forces.inverse_mass) * forces.x + (step * gravity_scale) * 0.0
+    let dy = (step * forces.inverse_mass) * forces.y + (step * gravity_scale) * -10.0
+    let dw = step * forces.inverse_inertia * forces.torque
+    var vx = dx + linear_damping * body.vx
+    var vy = dy + linear_damping * body.vy
+    var w = dw + angular_damping * body.w
+    if vx * vx + vy * vy > 16.0 {
+        let ratio = 4.0 / Math.sqrt(vx * vx + vy * vy)
+        vx = ratio * vx
+        vy = ratio * vy
+        forces.speed_capped = true
+    }
+    if w * w > maximum_angular * maximum_angular && !forces.allow_fast_rotation {
+        let ratio = maximum_angular / Math.abs(w)
+        w *= ratio
+        forces.speed_capped = true
+    }
+    body.vx = vx
+    body.vy = vy
+    body.w = w
+}
+
+func integrate_position(body:&Body) {
+    let step:float = 1.0 / 240.0
+    let angle = step * body.w
+    let cosine = body.c - angle * body.s
+    let sine = body.s + angle * body.c
+    let magnitude = Math.sqrt(sine * sine + cosine * cosine)
+    var inverse = 0.0
+    if magnitude > 0.0 { inverse = 1.0 / magnitude }
+    body.c = cosine * inverse
+    body.s = sine * inverse
+    body.px += step * body.vx
+    body.py += step * body.vy
+}
+
+func integrate(bodies:&Body[..], forces:&Forces[..]) {
+    var index = 0
+    while index < bodies.count() {
+        integrate_velocity(bodies[index], forces[index])
+        index++
+    }
+    index = 0
+    while index < bodies.count() {
+        integrate_position(bodies[index])
+        index++
+    }
+}
+
+func main() {
+    var bodies = [Body(vx:3.0, vy:4.0, w:0.5, px:0.0, py:0.0, c:0.6, s:0.8)]
+    var forces = [Forces(
+        x:0.25, y:0.5, torque:0.125,
+        inverse_mass:0.5, inverse_inertia:0.25, gravity_scale:1.0,
+        linear_damping:0.25, angular_damping:0.125,
+        allow_fast_rotation:false, speed_capped:false
+    )]
+    var body_view = &bodies[0:bodies.count()]
+    var force_view = &forces[0:forces.count()]
+    integrate(body_view, force_view)
+    assert(body_view[0].px > 0.0)
+    assert(body_view[0].py > 0.0)
+    assert(body_view[0].c > 0.0)
+    assert(body_view[0].s > 0.0)
+    print("hot reference leaf closure preserved")
+}
