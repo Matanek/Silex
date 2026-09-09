@@ -343,6 +343,14 @@ fn executeInstruction(
             value.static_type = function.value_types[cast.result];
             try store(function, values, cast.result, .{ .class = value });
         },
+        .class_test => |test_value| {
+            const class = switch (try load(values, test_value.operand)) {
+                .class => |value| value,
+                else => return error.InvalidProgram,
+            };
+            const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
+            try store(function, values, test_value.result, .{ .boolean = dynamic_type == test_value.structure });
+        },
         .class_retain => |retain| {
             const class = switch (try load(values, retain.operand)) {
                 .class => |value| value,

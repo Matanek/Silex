@@ -82,6 +82,34 @@ test "reflect values through category-specific metadata" {
     , result.stdout);
 }
 
+test "reflect class identity through an upcast" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Root {}
+        \\class Branch : Root {}
+        \\class Leaf : Branch {}
+        \\func main() {
+        \\    var value:Root = Leaf()
+        \\    let metadata = reflect(value)
+        \\    print(metadata.type)
+        \\    print(metadata.name)
+        \\    for type_name in metadata.types { print(type_name) }
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings(
+        \\Leaf
+        \\Leaf
+        \\Root
+        \\Branch
+        \\Leaf
+        \\
+    , result.stdout);
+}
+
 test "reflect public values through a package alias without changing their canonical identity" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -108,6 +136,9 @@ test "reflect public values through a package alias without changing their canon
         \\    func translated() {}
         \\    package func prepare() {}
         \\}
+        \\public class Base {}
+        \\public class Leaf : Base {}
+        \\public func dynamic_name(value:Base) str { return reflect(value).type }
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -115,6 +146,7 @@ test "reflect public values through a package alias without changing their canon
         .data =
         \\use Library.Animation as Motion
         \\enum LocalState { ready }
+        \\class ExternalLeaf : Motion.Base {}
         \\func main() {
         \\    print(reflect(LocalState.ready).name)
         \\    let easing = reflect(Motion.Easing.constant)
@@ -123,6 +155,14 @@ test "reflect public values through a package alias without changing their canon
         \\    let point = reflect(Motion.Point(x:1))
         \\    for field in point.fields { print(field) }
         \\    for method in point.methods { print(method) }
+        \\    var value:Motion.Base = Motion.Leaf()
+        \\    let class_info = reflect(value)
+        \\    print(class_info.type)
+        \\    for type_name in class_info.types { print(type_name) }
+        \\    print(Motion.dynamic_name(value))
+        \\    var external:Motion.Base = ExternalLeaf()
+        \\    print(reflect(external).type)
+        \\    print(Motion.dynamic_name(external))
         \\}
         ,
     });
@@ -137,6 +177,12 @@ test "reflect public values through a package alias without changing their canon
         \\Library.Animation.Easing.constant
         \\x
         \\translated
+        \\Library.Animation.Leaf
+        \\Library.Animation.Base
+        \\Library.Animation.Leaf
+        \\Library.Animation.Leaf
+        \\ExternalLeaf
+        \\ExternalLeaf
         \\
     , result.stdout);
 }

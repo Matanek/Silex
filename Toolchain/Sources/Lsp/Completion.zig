@@ -1884,6 +1884,7 @@ fn appendReflectionMembers(
     if (findStructure(program, nominalReceiverName(type_name))) |structure| {
         if (!structure.is_tuple and !structure.is_protocol and structure.collection == null) {
             try appendReflectionMember(allocator, candidates, context, "name", "name:str");
+            if (structure.is_class) try appendReflectionMember(allocator, candidates, context, "types", "types:str[]");
             try appendReflectionMember(allocator, candidates, context, "fields", "fields:str[]");
             try appendReflectionMember(allocator, candidates, context, "methods", "methods:str[]");
         }
@@ -5744,6 +5745,22 @@ test "complete reflect and category-specific reflection members" {
     try std.testing.expect(contains(structure_items, "name"));
     try std.testing.expect(contains(structure_items, "fields"));
     try std.testing.expect(contains(structure_items, "methods"));
+
+    const class_source =
+        \\class Root {}
+        \\class Leaf : Root {}
+        \\func inspect(value:Root) {
+        \\    print(reflect(value).)
+        \\}
+    ;
+    const class_cursor = std.mem.indexOf(u8, class_source, "reflect(value).").? + "reflect(value).".len;
+    const class_items = try itemsAt(allocator, class_source, class_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 5), class_items.len);
+    try std.testing.expect(contains(class_items, "type"));
+    try std.testing.expect(contains(class_items, "name"));
+    try std.testing.expect(contains(class_items, "types"));
+    try std.testing.expect(contains(class_items, "fields"));
+    try std.testing.expect(contains(class_items, "methods"));
 
     const selected_field_source =
         \\struct Foo { let name:str = "Foo" }

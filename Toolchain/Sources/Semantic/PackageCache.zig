@@ -369,6 +369,7 @@ fn relocateFunction(session: *Session, old: Context, function: *Ir.Function) !bo
             .global_load => |*value| value.global = mapGlobal(session, old, value.global) orelse return false,
             .global_store => |*value| value.global = mapGlobal(session, old, value.global) orelse return false,
             .structure_init => |*value| value.structure = mapStructure(session, old, value.structure) orelse return false,
+            .class_test => |*value| value.structure = mapStructure(session, old, value.structure) orelse return false,
             .protocol_init => |*value| value.structure = mapStructure(session, old, value.structure) orelse return false,
             .protocol_test => |*value| value.structure = mapStructure(session, old, value.structure) orelse return false,
             .protocol_extract => |*value| value.structure = mapStructure(session, old, value.structure) orelse return false,

@@ -742,6 +742,7 @@ pub const Extension = struct {
 };
 
 pub const Program = struct {
+    entry_module: []const u8 = "",
     uses: []const Use = &.{},
     catalog_contributions: []const CatalogContribution = &.{},
     type_names: []const []const u8 = &.{},

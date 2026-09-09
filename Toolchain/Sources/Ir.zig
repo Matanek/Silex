@@ -79,6 +79,7 @@ pub const Instruction = union(enum) {
     copy: Copy,
     deep_copy: Copy,
     class_cast: Copy,
+    class_test: ClassTest,
     class_retain: ClassRetain,
     class_drop: ClassDrop,
     list_retain: ListResource,
@@ -183,6 +184,12 @@ pub const Instruction = union(enum) {
     pub const Copy = struct {
         result: ValueId,
         operand: ValueId,
+    };
+
+    pub const ClassTest = struct {
+        result: ValueId,
+        operand: ValueId,
+        structure: usize,
     };
 
     pub const ClassRetain = struct {
@@ -769,6 +776,21 @@ fn writeInstruction(
             try appendResult(output, allocator, program, function, copy.result);
             try output.appendSlice(allocator, "deep_copy ");
             try appendValueChecked(output, allocator, function, copy.operand);
+        },
+        .class_test => |test_value| {
+            if (test_value.result >= function.value_types.len or function.value_types[test_value.result] != .bool or
+                test_value.operand >= function.value_types.len or test_value.structure >= program.structures.len or
+                !program.structures[test_value.structure].is_class)
+            {
+                return error.InvalidProgram;
+            }
+            const operand_structure = function.value_types[test_value.operand].structureIndex() orelse return error.InvalidProgram;
+            if (operand_structure >= program.structures.len or !program.structures[operand_structure].is_class) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, test_value.result);
+            try output.appendSlice(allocator, "class.test ");
+            try appendValueChecked(output, allocator, function, test_value.operand);
+            try output.appendSlice(allocator, ", @");
+            try output.appendSlice(allocator, program.structures[test_value.structure].name);
         },
         .class_retain => |retain| {
             try output.appendSlice(allocator, "class.retain ");

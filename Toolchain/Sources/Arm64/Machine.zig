@@ -98,6 +98,7 @@ pub const Instruction = union(enum) {
     protocol_test: ProtocolTest,
     protocol_extract: ProtocolExtract,
     class_init: ClassInit,
+    class_test: ClassTest,
     class_load: ClassLoad,
     class_store: ClassStore,
     class_retain: ClassRetain,
@@ -269,6 +270,12 @@ pub const Instruction = union(enum) {
         result: Slot,
         structure: u64,
         fields: []const Span,
+    };
+
+    pub const ClassTest = struct {
+        result: Slot,
+        operand: Slot,
+        structure: u64,
     };
 
     pub const ClassLoad = struct {
@@ -791,6 +798,10 @@ pub fn validate(program: Program) Error!void {
                 .class_init => |value| {
                     try requireSlot(function, value.result);
                     for (value.fields) |field| try requireSpan(function, field);
+                },
+                .class_test => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
                 },
                 .class_load => |value| {
                     try requireSpan(function, value.result);
