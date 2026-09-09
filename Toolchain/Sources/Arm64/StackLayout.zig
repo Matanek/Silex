@@ -116,15 +116,42 @@ pub fn build(
         return error.FrameTooLarge;
     const recycle = naive_slots > Machine.max_slots;
     const values = try allocator.alloc(Machine.Span, value_count);
+    const locals = try allocator.alloc(Machine.Span, function.local_types.len);
+    const abi_value_count = function.capture_types.len + function.parameter_types.len;
+    if (abi_value_count > value_count) return error.InvalidMachineProgram;
+    const place_frame_anchors_before_temporaries = !recycle and
+        (return_aggregate or hasAggregateParameter(program, function));
     var next: usize = 0;
+    var hidden_return_slot: ?Machine.Slot = null;
     if (!recycle) {
-        for (0..value_count) |value| {
+        const leading_value_count = if (place_frame_anchors_before_temporaries)
+            abi_value_count
+        else
+            value_count;
+        for (0..leading_value_count) |value| {
             values[value] = .{
                 .start = try Machine.checkedSlot(next),
                 .width = widths[value],
                 .aggregate = aggregates[value],
             };
             next += widths[value];
+        }
+        if (place_frame_anchors_before_temporaries) {
+            if (return_aggregate) {
+                hidden_return_slot = try Machine.checkedSlot(next);
+                next += 1;
+            }
+            for (function.local_types, 0..) |type_value, local| {
+                locals[local] = try appendSpan(program, type_value, &next);
+            }
+            for (leading_value_count..value_count) |value| {
+                values[value] = .{
+                    .start = try Machine.checkedSlot(next),
+                    .width = widths[value],
+                    .aggregate = aggregates[value],
+                };
+                next += widths[value];
+            }
         }
     } else {
         const pinned = try allocator.alloc(bool, value_count);
@@ -169,9 +196,10 @@ pub fn build(
         }
     }
 
-    const locals = try allocator.alloc(Machine.Span, function.local_types.len);
-    for (function.local_types, 0..) |type_value, local| {
-        locals[local] = try appendSpan(program, type_value, &next);
+    if (!place_frame_anchors_before_temporaries) {
+        for (function.local_types, 0..) |type_value, local| {
+            locals[local] = try appendSpan(program, type_value, &next);
+        }
     }
     const environments = try allocator.alloc(?Machine.Span, value_count);
     @memset(environments, null);
@@ -189,11 +217,10 @@ pub fn build(
         },
         else => {},
     };
-    const hidden_return_slot: ?Machine.Slot = if (return_aggregate) hidden: {
-        const slot = try Machine.checkedSlot(next);
+    if (return_aggregate and hidden_return_slot == null) {
+        hidden_return_slot = try Machine.checkedSlot(next);
         next += 1;
-        break :hidden slot;
-    } else null;
+    }
     if (function.capture_types.len + function.parameter_types.len > values.len) {
         return error.InvalidMachineProgram;
     }
@@ -218,6 +245,13 @@ pub fn build(
 fn residenceClass(type_value: Ir.Type, aggregate: bool) ResidenceClass {
     if (aggregate) return .aggregate;
     return if (type_value.isFloat()) .float else .integer;
+}
+
+fn hasAggregateParameter(program: Ir.Program, function: Ir.Function) bool {
+    for (function.parameter_types) |type_value| {
+        if (TypeLayout.isAggregate(program, type_value)) return true;
+    }
+    return false;
 }
 
 fn firstAvailable(
@@ -664,4 +698,37 @@ test "prune unused declarations without dropping ABI parameters" {
     try std.testing.expectEqual(@as(u12, 1), layout.capture_parameters[0].width);
     try std.testing.expect(layout.parameters[0].start != layout.capture_parameters[0].start);
     try std.testing.expectEqual(@as(u12, 0), layout.values[2].width);
+}
+
+test "place aggregate return frame anchors before register-only temporaries" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const pair_type = Ir.Type.structure(0);
+    const structures = [_]Ir.Structure{.{
+        .name = "Pair",
+        .fields = &.{
+            .{ .name = "x", .type = .float32, .mutable = true },
+            .{ .name = "y", .type = .float32, .mutable = true },
+        },
+    }};
+    const function: Ir.Function = .{
+        .name = "aggregate_return_frame_anchors",
+        .parameter_types = &.{pair_type},
+        .return_type = pair_type,
+        .value_types = &.{ pair_type, .int },
+        .local_types = &.{pair_type},
+        .blocks = &.{.{
+            .instructions = &.{.{ .constant_int = .{ .result = 1, .bits = 42 } }},
+            .terminator = .{ .return_value = 0 },
+        }},
+    };
+    const program: Ir.Program = .{ .structures = &structures, .functions = &.{function} };
+    const layout = try build(allocator, program, function);
+
+    try std.testing.expectEqual(@as(Machine.Slot, 0), layout.parameters[0].start);
+    try std.testing.expectEqual(@as(?Machine.Slot, 2), layout.hidden_return_slot);
+    try std.testing.expectEqual(@as(Machine.Slot, 3), layout.locals[0].start);
+    try std.testing.expectEqual(@as(Machine.Slot, 5), layout.values[1].start);
+    try std.testing.expectEqual(@as(Machine.Slot, 6), layout.slot_count);
 }
