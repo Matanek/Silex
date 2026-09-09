@@ -15,4 +15,5 @@ test {
     _ = @import("Lsp/Tests/Part03Contracts.zig");
     _ = @import("Lsp/Tests/Part04Contracts.zig");
     _ = @import("Lsp/Tests/Part05Contracts.zig");
+    _ = @import("Lsp/Tests/Part06Contracts.zig");
 }

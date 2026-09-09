@@ -466,7 +466,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"paint"},
         .forbidden = &.{"duplicate:paint"},
         .provenance = "LSP UTF-16 completion contract",
-        .status = .{ .assigned_gap = .part_06 },
+        .status = .{ .protected = "Lsp.Tests.Part06Contracts: part 06 UTF-16 completion metadata and JSON response are byte deterministic" },
     },
     .{
         .id = "symbol-parameter-binding",
@@ -506,7 +506,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"same response twice"},
         .forbidden = &.{ "duplicate identity", "internal compiler name" },
         .provenance = "universal completion invariants",
-        .status = .{ .assigned_gap = .part_06 },
+        .status = .{ .protected = "Lsp.Tests.Part06Contracts: part 06 UTF-16 completion metadata and JSON response are byte deterministic" },
     },
     .{
         .id = "editing-empty-expression",
@@ -556,7 +556,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"int"},
         .forbidden = &.{"while"},
         .provenance = "announced '<' completion trigger",
-        .status = .{ .assigned_gap = .part_06 },
+        .status = .{ .protected = "Lsp.Tests.Part06Contracts: part 06 every advertised trigger reaches its exact completion context" },
     },
     .{
         .id = "trigger-argument-comma",
@@ -566,7 +566,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"force"},
         .forbidden = &.{"health"},
         .provenance = "announced ',' completion trigger",
-        .status = .{ .assigned_gap = .part_06 },
+        .status = .{ .protected = "Lsp.Tests.Part06Contracts: part 06 every advertised trigger reaches its exact completion context" },
     },
     .{
         .id = "trigger-try-space",
@@ -616,7 +616,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{ "detail", "kind", "insertText:else {$0}" },
         .forbidden = &.{"duplicate:else"},
         .provenance = "Lsp.Server contextual snippet contract",
-        .status = .{ .assigned_gap = .part_06 },
+        .status = .{ .protected = "Lsp.Tests.Part06Contracts: part 06 contextual alternatives expose exact kinds details snippets and stable order" },
     },
     .{
         .id = "recovery-error-before-cursor",
