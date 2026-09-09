@@ -56,9 +56,16 @@ pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]co
         flat = 0;
         for (program.structures, 0..) |structure, structure_index| {
             for (structure.methods) |method| {
-                if (!mutating[flat] and method.is_override and inheritedOverrideMutates(program, structure_index, method, mutating)) {
-                    mutating[flat] = true;
-                    changed = true;
+                if (method.is_override) {
+                    if (inheritedOverrideIndex(program, structure_index, method)) |base_flat| {
+                        if (mutating[flat] and !mutating[base_flat]) {
+                            mutating[base_flat] = true;
+                            changed = true;
+                        } else if (!mutating[flat] and mutating[base_flat]) {
+                            mutating[flat] = true;
+                            changed = true;
+                        }
+                    }
                 }
                 flat += 1;
             }
@@ -79,25 +86,24 @@ pub fn validateAccessors(self: anytype) !void {
     }
 }
 
-fn inheritedOverrideMutates(
+fn inheritedOverrideIndex(
     program: Ast.Program,
     structure_index: usize,
     method: Ast.Function,
-    mutating: []const bool,
-) bool {
+) ?usize {
     var current = program.structures[structure_index].base;
     while (current) |base_type| {
-        const base_index = base_type.structureIndex() orelse return false;
-        if (base_index >= program.structures.len) return false;
+        const base_index = base_type.structureIndex() orelse return null;
+        if (base_index >= program.structures.len) return null;
         const base = program.structures[base_index];
         for (base.methods, 0..) |candidate, method_index| {
             if (!candidate.is_static and Inheritance.sameSignature(candidate, method)) {
-                return mutating[flatMethodIndex(program, base_index, method_index)];
+                return flatMethodIndex(program, base_index, method_index);
             }
         }
         current = base.base;
     }
-    return false;
+    return null;
 }
 
 pub fn extendStructures(

@@ -1202,6 +1202,7 @@ pub const Compiler = struct {
             }
         }
         return .{ .program = .{
+            .entry_module = self.index.providers[self.entry_module].name,
             .type_names = try type_names.toOwnedSlice(self.allocator),
             .generic_types = generic_composition.types,
             .function_types = function_composition.types,

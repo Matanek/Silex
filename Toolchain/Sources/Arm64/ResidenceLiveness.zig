@@ -61,6 +61,7 @@ pub fn instructionUses(instruction: Machine.Instruction, slot: usize) bool {
         .class_init => |value| for (value.fields) |field| {
             if (spanContains(field, slot)) break true;
         } else false,
+        .class_test => |value| value.operand == slot,
         .class_load => |value| value.base == slot,
         .class_store => |value| value.base == slot or spanContains(value.replacement, slot),
         .class_retain => |value| value.operand == slot,
@@ -145,6 +146,7 @@ pub fn instructionDefines(instruction: Machine.Instruction, slot: usize) bool {
         .protocol_test => |value| value.result == slot,
         .protocol_extract => |value| spanContains(value.result, slot),
         .class_init => |value| value.result == slot,
+        .class_test => |value| value.result == slot,
         .class_load => |value| spanContains(value.result, slot),
         .class_store => |value| value.result == slot,
         .list_init => |value| value.result == slot,

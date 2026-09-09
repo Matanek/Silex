@@ -553,6 +553,11 @@ fn lowerInstruction(
         else
             lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
+        .class_test => |test_value| .{ .class_test = .{
+            .result = layout.values[test_value.result].start,
+            .operand = layout.values[test_value.operand].start,
+            .structure = test_value.structure,
+        } },
         .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
         .list_retain => |retain| .{ .list_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
         .string_retain => |retain| .{ .string_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },

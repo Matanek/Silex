@@ -41,6 +41,8 @@ pub const ContextKind = enum {
     expression,
 };
 
+const LiteralMatchSubject = enum { boolean, integer, string };
+
 pub const Decision = struct {
     kind: ContextKind,
     prefix: []const u8,
@@ -183,13 +185,26 @@ pub fn itemsAtWithDecision(
     var candidates: std.ArrayList(Candidate) = .empty;
     const completing_try_alternative = context.completing_try_alternative;
     const program = context.program;
-    const expected_type: ?ExpectedType = if (contextual_expected_type) |name|
+    const completing_match_subject = try isMatchSubjectPositionAt(allocator, source, context.prefix_start);
+    const expected_type: ?ExpectedType = if (completing_match_subject)
+        null
+    else if (contextual_expected_type) |name|
         .{ .name = name, .strict = true }
     else if (program) |parsed|
         expectedTypeAt(allocator, source, parsed, cursor, context)
     else
         null;
     const completing_try_error = context.completing_try_error;
+    const literal_match_subject: ?LiteralMatchSubject = if (program) |parsed| literal_subject: {
+        const subject = try matchPatternSubjectAt(allocator, source, context.prefix_start) orelse break :literal_subject null;
+        const type_name = literalMatchSubjectType(allocator, source, parsed, cursor, subject) orelse break :literal_subject null;
+        break :literal_subject if (std.mem.eql(u8, type_name, "bool"))
+            .boolean
+        else if (std.mem.eql(u8, type_name, "str"))
+            .string
+        else
+            .integer;
+    } else null;
     const operator_completion = if (context.kind == .module_declaration)
         try operatorDeclarationCompletionAt(allocator, source, context.prefix_start)
     else
@@ -262,7 +277,9 @@ pub fn itemsAtWithDecision(
         }, 1, false);
     }
 
-    if (!contextual_try_alternative and !completing_try_error and operator_completion == .none) switch (context.kind) {
+    if (!contextual_try_alternative and !completing_try_error and operator_completion == .none and literal_match_subject != null) {
+        try appendLiteralMatchPatterns(allocator, &candidates, context, literal_match_subject.?);
+    } else if (!contextual_try_alternative and !completing_try_error and operator_completion == .none) switch (context.kind) {
         .member => if (program) |parsed| try appendMembers(
             allocator,
             &candidates,
@@ -455,6 +472,52 @@ pub fn itemsAtWithDecision(
     const unique = deduplicateCallableShapes(expanded);
     disambiguateCallableLabels(unique);
     return unique;
+}
+
+fn appendLiteralMatchPatterns(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    context: Context,
+    subject: LiteralMatchSubject,
+) !void {
+    if (subject == .boolean) {
+        for ([_][]const u8{ "true", "false" }) |value| try appendCandidate(allocator, candidates, context, .{
+            .label = value,
+            .kind = CompletionKind.value,
+            .detail = try std.fmt.allocPrint(allocator, "{s}:bool literal match branch", .{value}),
+            .insertText = try std.fmt.allocPrint(allocator, "{s} => $0", .{value}),
+            .insertTextFormat = 2,
+        }, 0, false);
+    }
+    try appendCandidate(allocator, candidates, context, .{
+        .label = "else",
+        .kind = CompletionKind.keyword,
+        .detail = "Silex literal match fallback branch",
+        .insertText = "else => $0",
+        .insertTextFormat = 2,
+    }, 5, false);
+}
+
+fn literalMatchSubjectType(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    subject: []const u8,
+) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, subject, " \t\r\n");
+    const type_name = if (std.mem.eql(u8, trimmed, "true") or std.mem.eql(u8, trimmed, "false"))
+        "bool"
+    else if (trimmed.len != 0 and trimmed[0] == '"')
+        "str"
+    else if (trimmed.len != 0 and (std.ascii.isDigit(trimmed[0]) or trimmed[0] == '-'))
+        "int"
+    else
+        resolveReceiverType(allocator, source, program, cursor, trimmed) orelse return null;
+    if (std.mem.eql(u8, type_name, "bool") or std.mem.eql(u8, type_name, "str") or
+        std.mem.eql(u8, type_name, "int") or std.mem.startsWith(u8, type_name, "int") or
+        std.mem.eql(u8, type_name, "uint") or std.mem.startsWith(u8, type_name, "uint")) return type_name;
+    return null;
 }
 
 pub fn parameterItemsAt(
@@ -1086,6 +1149,47 @@ fn appendParameterPlaceholder(allocator: Allocator, prefix: []const u8, paramete
         placeholder,
         name,
     });
+}
+
+fn matchPatternSubjectAt(allocator: Allocator, source: []const u8, cursor: usize) !?[]const u8 {
+    const tokens = try tokensUntil(allocator, source, cursor);
+    if (tokens.len == 0) return null;
+
+    var nesting: usize = 0;
+    var opening: ?usize = null;
+    var index = tokens.len;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .right_brace => nesting += 1,
+            .left_brace => if (nesting == 0) {
+                opening = index;
+                break;
+            } else {
+                nesting -= 1;
+            },
+            else => {},
+        }
+    }
+    const brace = opening orelse return null;
+    if (tokens.len != brace + 1 and tokens[tokens.len - 1].tag != .semicolon) return null;
+
+    var match_index: ?usize = null;
+    index = brace;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .keyword_match => {
+                match_index = index;
+                break;
+            },
+            .left_brace, .right_brace, .semicolon, .fat_arrow => break,
+            else => {},
+        }
+    }
+    const matched = match_index orelse return null;
+    if (matched + 2 != brace) return null;
+    return tokens[matched + 1].lexeme;
 }
 
 fn isMatchSubjectPositionAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
@@ -1971,6 +2075,7 @@ fn appendReflectionMembers(
     if (findStructure(program, nominalReceiverName(type_name))) |structure| {
         if (!structure.is_tuple and !structure.is_protocol and structure.collection == null) {
             try appendReflectionMember(allocator, candidates, context, "name", "name:str");
+            if (structure.is_class) try appendReflectionMember(allocator, candidates, context, "types", "types:str[]");
             try appendReflectionMember(allocator, candidates, context, "fields", "fields:str[]");
             try appendReflectionMember(allocator, candidates, context, "methods", "methods:str[]");
         }
@@ -4072,13 +4177,17 @@ fn parseForCompletionObserved(
         lineHasUnclosedControlCondition(before_prefix)) and !blockFollowsCompletion(source, cursor);
     const completing_try_error = context.completing_try_error;
     const completing_try_alternative = context.completing_try_alternative;
+    const completing_match_subject = try isMatchSubjectPositionAt(allocator, source, context.prefix_start);
+    const completing_match_pattern = (try matchPatternSubjectAt(allocator, source, context.prefix_start)) != null;
     const closers = try RecoveryModule.unmatchedLineClosers(allocator, source, line_start, cursor);
     const placeholder: []const u8 = if (completing_try_error)
         "error"
     else if (completing_try_alternative)
         "else {}"
-    else if (context.match_subject)
+    else if (completing_match_subject)
         "true { else => true }"
+    else if (completing_match_pattern)
+        "else => {}"
     else switch (context.kind) {
         .member => if (context.qualified_type_position)
             if (context.prefix.len == 0) "__Completion" else ""
@@ -5366,6 +5475,68 @@ test "complete contextual and ordinary enum variants according to their payload"
     try std.testing.expectEqual(@as(?u8, 2), value.insertTextFormat);
 }
 
+test "complete only valid continuations at a scalar literal match pattern" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const boolean_source =
+        \\func classify(value:bool) int {
+        \\    return match value {
+        \\
+        \\    }
+        \\}
+    ;
+    const boolean_cursor = std.mem.indexOf(u8, boolean_source, "{\n\n").? + "{\n".len;
+    const boolean_items = try itemsAt(arena.allocator(), boolean_source, boolean_cursor, .invoked);
+    try std.testing.expectEqual(@as(usize, 3), boolean_items.len);
+    try std.testing.expectEqualStrings("true => $0", boolean_items[indexOf(boolean_items, "true").?].insertText.?);
+    try std.testing.expectEqualStrings("false => $0", boolean_items[indexOf(boolean_items, "false").?].insertText.?);
+    try std.testing.expectEqualStrings("else => $0", boolean_items[indexOf(boolean_items, "else").?].insertText.?);
+    try std.testing.expect(!contains(boolean_items, "if"));
+    try std.testing.expect(!contains(boolean_items, "value"));
+
+    const integer_source =
+        \\func classify(code:int) int {
+        \\    return match code {
+        \\        el
+        \\    }
+        \\}
+    ;
+    const integer_cursor = std.mem.indexOf(u8, integer_source, "        el").? + "        el".len;
+    const integer_items = try itemsAt(arena.allocator(), integer_source, integer_cursor, .invoked);
+    try std.testing.expectEqual(@as(usize, 1), integer_items.len);
+    try std.testing.expectEqualStrings("else", integer_items[0].label);
+    try std.testing.expectEqualStrings("else => $0", integer_items[0].insertText.?);
+}
+
+test "complete the match keyword and an incomplete match subject" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const keyword_source =
+        \\func to_month_str(month:int) str {
+        \\    return ma
+        \\}
+    ;
+    const keyword_cursor = std.mem.indexOf(u8, keyword_source, "return ma").? + "return ma".len;
+    const keyword_items = try itemsAt(arena.allocator(), keyword_source, keyword_cursor, .invoked);
+    try std.testing.expect(contains(keyword_items, "match"));
+    const match_item = keyword_items[indexOf(keyword_items, "match").?];
+    try std.testing.expectEqualStrings("match", match_item.insertText.?);
+    try std.testing.expectEqual(CompletionKind.keyword, match_item.kind);
+
+    const subject_source =
+        \\func to_month_str(month:int) str {
+        \\    return match mon
+        \\}
+    ;
+    const subject_cursor = std.mem.indexOf(u8, subject_source, "match mon").? + "match mon".len;
+    const subject_items = try itemsAt(arena.allocator(), subject_source, subject_cursor, .invoked);
+    try std.testing.expect(contains(subject_items, "month"));
+    const month_index = indexOf(subject_items, "month").?;
+    try std.testing.expectEqualStrings("month:int", subject_items[month_index].detail);
+    try std.testing.expect(contains(subject_items, "to_month_str"));
+    try std.testing.expect(month_index < indexOf(subject_items, "to_month_str").?);
+}
+
 test "isolate match subjects from their surrounding expected type" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -6484,6 +6655,22 @@ test "complete reflect and category-specific reflection members" {
     try std.testing.expect(contains(structure_items, "name"));
     try std.testing.expect(contains(structure_items, "fields"));
     try std.testing.expect(contains(structure_items, "methods"));
+
+    const class_source =
+        \\class Root {}
+        \\class Leaf : Root {}
+        \\func inspect(value:Root) {
+        \\    print(reflect(value).)
+        \\}
+    ;
+    const class_cursor = std.mem.indexOf(u8, class_source, "reflect(value).").? + "reflect(value).".len;
+    const class_items = try itemsAt(allocator, class_source, class_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 5), class_items.len);
+    try std.testing.expect(contains(class_items, "type"));
+    try std.testing.expect(contains(class_items, "name"));
+    try std.testing.expect(contains(class_items, "types"));
+    try std.testing.expect(contains(class_items, "fields"));
+    try std.testing.expect(contains(class_items, "methods"));
 
     const selected_field_source =
         \\struct Foo { let name:str = "Foo" }

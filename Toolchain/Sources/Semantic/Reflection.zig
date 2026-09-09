@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 const Enums = @import("Enums.zig");
+const Inheritance = @import("Inheritance.zig");
 const Resources = @import("Resources.zig");
 const Support = @import("Support.zig");
 const Visibility = @import("Visibility.zig");
@@ -19,9 +20,20 @@ pub fn analyze(self: anytype, builder: anytype, call: Ast.Expression.Call) !Mode
     const expression = call.arguments[0];
     const operand = try self.analyzeExpression(builder, expression);
     const type_name = try typeSpelling(self, operand.type, call);
+    const reflected = reflectedStructure(self, operand.type);
+    const dynamic_class = if (reflected) |structure|
+        if (self.structures[structure.index].is_class)
+            try classIdentity(self, builder, operand.value, structure.index, call)
+        else
+            null
+    else
+        null;
     var fields: std.ArrayList(Ir.StructureField) = .empty;
     var values: std.ArrayList(Ir.ValueId) = .empty;
-    try appendString(self, builder, &fields, &values, "type", type_name);
+    if (dynamic_class) |identity|
+        try appendValue(self, &fields, &values, "type", .str, identity.name)
+    else
+        try appendString(self, builder, &fields, &values, "type", type_name);
 
     if (Enums.findByType(self, operand.type)) |enum_index| {
         const enumeration = self.enums[enum_index];
@@ -42,20 +54,23 @@ pub fn analyze(self: anytype, builder: anytype, call: Ast.Expression.Call) !Mode
         );
         try appendNames(self, builder, &fields, &values, "parameters", parameters.items);
         try appendString(self, builder, &fields, &values, "return_type", try returnSpelling(self, signature, call));
-    } else if (reflectedStructure(self, operand.type)) |reflected| {
-        try appendString(self, builder, &fields, &values, "name", type_name);
+    } else if (reflected) |structure| {
+        if (dynamic_class) |identity| {
+            try appendValue(self, &fields, &values, "name", .str, identity.name);
+            try appendValue(self, &fields, &values, "types", identity.types_type, identity.types);
+        } else try appendString(self, builder, &fields, &values, "name", type_name);
         var field_names: std.ArrayList([]const u8) = .empty;
         var property_names: std.ArrayList([]const u8) = .empty;
-        for (reflected.declaration.fields) |field| {
-            if (field.is_static or !Visibility.memberVisible(self, reflected.index, field, call.name_position)) continue;
+        for (structure.declaration.fields) |field| {
+            if (field.is_static or !Visibility.memberVisible(self, structure.index, field, call.name_position)) continue;
             if (field.property != null)
                 try property_names.append(self.allocator, field.name)
             else
                 try field_names.append(self.allocator, field.name);
         }
         var method_names: std.ArrayList([]const u8) = .empty;
-        for (reflected.declaration.methods) |method| {
-            if (method.is_static or method.accessor != null or !Visibility.memberVisible(self, reflected.index, method, call.name_position)) continue;
+        for (structure.declaration.methods) |method| {
+            if (method.is_static or method.accessor != null or !Visibility.memberVisible(self, structure.index, method, call.name_position)) continue;
             try method_names.append(self.allocator, method.name);
         }
         try appendNames(self, builder, &fields, &values, "fields", field_names.items);
@@ -124,11 +139,97 @@ fn appendNames(
     names: []const []const u8,
 ) !void {
     const list_type = stringListType(self) orelse return error.InvalidSource;
+    const list = try namesValue(self, builder, list_type, names);
+    try appendValue(self, fields, values, name, list_type, list);
+}
+
+fn namesValue(
+    self: anytype,
+    builder: anytype,
+    list_type: Ast.Type,
+    names: []const []const u8,
+) !Ir.ValueId {
     const items = try self.allocator.alloc(Ir.ValueId, names.len);
     for (names, 0..) |item, index| items[index] = (try self.emitString(builder, item)).value;
     const list = try self.newValue(builder, list_type);
     try self.emit(builder, .{ .list_init = .{ .result = list, .values = items } });
-    try appendValue(self, fields, values, name, list_type, list);
+    return list;
+}
+
+const ClassIdentity = struct {
+    name: Ir.ValueId,
+    types: Ir.ValueId,
+    types_type: Ast.Type,
+};
+
+fn classIdentity(
+    self: anytype,
+    builder: anytype,
+    operand: Ir.ValueId,
+    static_type: usize,
+    call: Ast.Expression.Call,
+) !ClassIdentity {
+    const list_type = stringListType(self) orelse return error.InvalidSource;
+    const name_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .str);
+    const types_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, list_type);
+    const merge = try self.newBlock(builder);
+
+    for (self.structures, 0..) |structure, candidate| {
+        if (!structure.is_class or structure.is_static or candidate == static_type or
+            !Inheritance.isDescendant(self, candidate, static_type)) continue;
+        const selected = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .class_test = .{
+            .result = selected,
+            .operand = operand,
+            .structure = candidate,
+        } });
+        const matched = try self.newBlock(builder);
+        const next = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = selected, .then_block = matched, .else_block = next } });
+        builder.current_block = matched;
+        try storeClassIdentity(self, builder, name_local, types_local, list_type, candidate, call);
+        self.terminate(builder, .{ .jump = merge });
+        builder.current_block = next;
+    }
+    try storeClassIdentity(self, builder, name_local, types_local, list_type, static_type, call);
+    self.terminate(builder, .{ .jump = merge });
+    builder.current_block = merge;
+
+    const name = try self.newValue(builder, .str);
+    try self.emit(builder, .{ .local_load = .{ .result = name, .local = name_local } });
+    const types = try self.newValue(builder, list_type);
+    try self.emit(builder, .{ .local_load = .{ .result = types, .local = types_local } });
+    return .{ .name = name, .types = types, .types_type = list_type };
+}
+
+fn storeClassIdentity(
+    self: anytype,
+    builder: anytype,
+    name_local: usize,
+    types_local: usize,
+    list_type: Ast.Type,
+    dynamic_type: usize,
+    call: Ast.Expression.Call,
+) !void {
+    const name = try self.emitString(builder, try typeSpelling(self, .structure(dynamic_type), call));
+    try self.emit(builder, .{ .local_store = .{ .local = name_local, .operand = name.value } });
+    const lineage = try classLineageNames(self, dynamic_type, call);
+    const types = try namesValue(self, builder, list_type, lineage);
+    try self.emit(builder, .{ .local_store = .{ .local = types_local, .operand = types } });
+}
+
+fn classLineageNames(self: anytype, dynamic_type: usize, call: Ast.Expression.Call) ![]const []const u8 {
+    var lineage: std.ArrayList(usize) = .empty;
+    var current: ?usize = dynamic_type;
+    while (current) |candidate| : (current = self.structures[candidate].base) try lineage.append(self.allocator, candidate);
+    const names = try self.allocator.alloc([]const u8, lineage.items.len);
+    for (lineage.items, 0..) |_, index| {
+        const candidate = lineage.items[lineage.items.len - index - 1];
+        names[index] = try typeSpelling(self, .structure(candidate), call);
+    }
+    return names;
 }
 
 fn appendValue(
@@ -298,12 +399,18 @@ fn functionName(self: anytype, requested: []const u8) ?[]const u8 {
 }
 
 fn displayName(self: anytype, canonical: []const u8, call: Ast.Expression.Call) Allocator.Error![]const u8 {
-    if (!call.entry_module or call.module.len == 0 or canonical.len <= call.module.len or
-        !std.mem.startsWith(u8, canonical, call.module) or canonical[call.module.len] != '.')
+    const entry_module = if (self.program.entry_module.len != 0)
+        self.program.entry_module
+    else if (call.entry_module)
+        call.module
+    else
+        "";
+    if (entry_module.len == 0 or canonical.len <= entry_module.len or
+        !std.mem.startsWith(u8, canonical, entry_module) or canonical[entry_module.len] != '.')
     {
         return self.allocator.dupe(u8, canonical);
     }
-    return self.allocator.dupe(u8, canonical[call.module.len + 1 ..]);
+    return self.allocator.dupe(u8, canonical[entry_module.len + 1 ..]);
 }
 
 fn modeSpelling(mode: Ast.Parameter.Mode) []const u8 {

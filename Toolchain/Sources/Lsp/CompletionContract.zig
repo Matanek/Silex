@@ -1066,6 +1066,7 @@ const AstFieldDecision = struct {
 };
 
 const program_field_decisions = [_]AstFieldDecision{
+    .{ .name = "entry_module", .irrelevant_reason = "entry-module identity affects semantic reflection spelling, not completion candidates" },
     .{ .name = "uses", .witness = "use-path-qualified" },
     .{ .name = "catalog_contributions", .witness = "topology-catalog-fragment-field-chain" },
     .{ .name = "type_names", .witness = "type-qualified-import" },

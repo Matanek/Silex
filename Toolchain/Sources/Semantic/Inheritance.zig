@@ -98,7 +98,7 @@ pub fn methodCandidates(self: anytype, allocator: std.mem.Allocator, structure_i
 pub fn validateOverrides(self: anytype) !void {
     for (self.program.structures, 0..) |structure, structure_index| {
         if (!structure.is_class) continue;
-        for (structure.methods, 0..) |method, method_index| {
+        for (structure.methods) |method| {
             if (method.extension != null) continue;
             if (method.is_static) continue;
             const inherited = inheritedMethod(self, structure_index, method);
@@ -112,20 +112,9 @@ pub fn validateOverrides(self: anytype) !void {
                 if (base.method.is_private) {
                     return self.fail(method.name_position, "private methods cannot be overridden");
                 }
-                const method_flat = flatMethodIndex(self.program, structure_index, method_index);
-                const base_flat = flatMethodIndex(self.program, base.owner, base.index);
-                if (self.method_mutability[method_flat] and !self.method_mutability[base_flat]) {
-                    return self.fail(method.name_position, "an override cannot introduce receiver mutation");
-                }
             }
         }
     }
-}
-
-fn flatMethodIndex(program: Ast.Program, structure_index: usize, method_index: usize) usize {
-    var result: usize = 0;
-    for (program.structures[0..structure_index]) |structure| result += structure.methods.len;
-    return result + method_index;
 }
 
 pub fn implementations(
@@ -159,15 +148,15 @@ fn effectiveOverride(self: anytype, candidate: usize, owner: usize, slot: Ast.Fu
     return null;
 }
 
-const InheritedMethod = struct { owner: usize, index: usize, method: Ast.Function };
+const InheritedMethod = struct { method: Ast.Function };
 
 fn inheritedMethod(self: anytype, structure_index: usize, method: Ast.Function) ?InheritedMethod {
     var current = self.structures[structure_index].base;
     while (current) |index| : (current = self.structures[index].base) {
         const declaration = findDeclaration(self, index) orelse return null;
-        for (declaration.methods, 0..) |candidate, method_index| {
+        for (declaration.methods) |candidate| {
             if (candidate.extension != null) continue;
-            if (!candidate.is_static and sameSignature(candidate, method)) return .{ .owner = index, .index = method_index, .method = candidate };
+            if (!candidate.is_static and sameSignature(candidate, method)) return .{ .method = candidate };
         }
     }
     return null;
