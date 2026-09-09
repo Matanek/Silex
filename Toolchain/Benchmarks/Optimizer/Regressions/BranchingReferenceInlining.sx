@@ -1,0 +1,28 @@
+struct Body {
+    var velocity:float
+    var capped:bool
+}
+
+// The conditional callee deliberately mutates a borrowed aggregate. It is
+// small enough to inline at the hot loop site, where the caller can then keep
+// the reference and loop state visible to the remaining Release passes.
+func integrate_velocity(body:&Body, delta:float, maximum:float) {
+    var next = body.velocity + delta
+    if next > maximum {
+        next = maximum
+        body.capped = true
+    }
+    body.velocity = next
+}
+
+func main() {
+    var body = Body(velocity:1.0, capped:false)
+    var step = 0
+    while step < 16 {
+        integrate_velocity(body, 0.75, 5.0)
+        step++
+    }
+    assert(body.velocity == 5.0)
+    assert(body.capped)
+    print("branching reference call preserved")
+}

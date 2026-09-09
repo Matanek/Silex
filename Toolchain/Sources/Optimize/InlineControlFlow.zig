@@ -89,6 +89,10 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                 .local_store,
                 .local_address,
                 .field_load,
+                .reference_load,
+                .reference_store,
+                .reference_field,
+                .reference_optional,
                 .collection_count,
                 .structure_init,
                 .unary,
@@ -290,6 +294,24 @@ fn mapInstruction(
             .base = values[value.base],
             .field = value.field,
         } },
+        .reference_load => |value| .{ .reference_load = .{
+            .result = values[value.result],
+            .reference = values[value.reference],
+        } },
+        .reference_store => |value| .{ .reference_store = .{
+            .reference = values[value.reference],
+            .operand = values[value.operand],
+        } },
+        .reference_field => |value| .{ .reference_field = .{
+            .result = values[value.result],
+            .reference = values[value.reference],
+            .structure = value.structure,
+            .field = value.field,
+        } },
+        .reference_optional => |value| .{ .reference_optional = .{
+            .result = values[value.result],
+            .reference = values[value.reference],
+        } },
         .collection_count => |value| .{ .collection_count = .{
             .result = values[value.result],
             .collection = values[value.collection],
@@ -388,4 +410,66 @@ test "inline a scalar branch with locals through a shared continuation" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text[main..], 1, "call @choose"));
     try std.testing.expectEqual(@as(usize, 5), optimized.functions[1].blocks.len);
     try std.testing.expectEqualSlices(Ir.Type, &.{.int}, optimized.functions[1].local_types);
+}
+
+test "inline branching reference updates without losing their addresses" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const update_blocks = [_]Ir.Block{
+        .{
+            .instructions = &.{.{ .reference_field = .{
+                .result = 3,
+                .reference = 0,
+                .structure = 0,
+                .field = 0,
+            } }},
+            .terminator = .{ .branch = .{ .condition = 1, .then_block = 1, .else_block = 2 } },
+        },
+        .{
+            .instructions = &.{.{ .reference_store = .{ .reference = 3, .operand = 2 } }},
+            .terminator = .return_void,
+        },
+        .{
+            .instructions = &.{
+                .{ .reference_load = .{ .result = 4, .reference = 3 } },
+                .{ .reference_store = .{ .reference = 3, .operand = 4 } },
+            },
+            .terminator = .return_void,
+        },
+    };
+    const caller_blocks = [_]Ir.Block{.{
+        .instructions = &.{.{ .call = .{ .result = null, .function = 0, .arguments = &.{ 0, 1, 2 } } }},
+        .terminator = .return_void,
+    }};
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "Counter",
+            .fields = &.{.{ .name = "value", .type = .int, .mutable = true }},
+        }},
+        .functions = &.{
+            .{
+                .name = "update",
+                .parameter_types = &.{ .address, .bool, .int },
+                .return_type = .void,
+                .value_types = &.{ .address, .bool, .int, .address, .int },
+                .blocks = &update_blocks,
+            },
+            .{
+                .name = "caller",
+                .parameter_types = &.{ .address, .bool, .int },
+                .return_type = .void,
+                .value_types = &.{ .address, .bool, .int },
+                .blocks = &caller_blocks,
+            },
+        },
+    };
+    const optimized = try optimize(allocator, program);
+    const text = try Ir.writeText(allocator, optimized);
+    const caller = std.mem.indexOf(u8, text, "func @caller") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text[caller..], 1, "call @update"));
+    try std.testing.expectEqual(@as(usize, 5), optimized.functions[1].blocks.len);
+    try std.testing.expect(optimized.functions[1].blocks[1].instructions[0] == .reference_field);
+    try std.testing.expect(optimized.functions[1].blocks[2].instructions[0] == .reference_store);
+    try std.testing.expect(optimized.functions[1].blocks[3].instructions[0] == .reference_load);
 }

@@ -319,13 +319,27 @@ fn qualifyNative(
             memory_counter = try Qualification.verifyMemoryCounter(function_name, differential, without);
         }
         var call_counter: ?Qualification.CallCounter = null;
-        if (entry.contract == .specializes_effectful_calls) {
+        const call_requirement: ?struct {
+            function: []const u8,
+            disabled: Silex.ReleaseOptimizer.PassId,
+        } = switch (entry.contract) {
+            .specializes_effectful_calls => |function| .{
+                .function = function,
+                .disabled = .value_inlining,
+            },
+            .specializes_branching_reference_calls => |function| .{
+                .function = function,
+                .disabled = .control_flow_inlining,
+            },
+            else => null,
+        };
+        if (call_requirement) |requirement| {
             const without = try Differential.verifyWithOptions(allocator, source, .{
                 .verify_each_pass = true,
-                .disabled = .value_inlining,
+                .disabled = requirement.disabled,
             });
             call_counter = try Qualification.verifyCallCounter(
-                entry.contract.specializes_effectful_calls,
+                requirement.function,
                 differential,
                 without,
             );

@@ -191,6 +191,10 @@ pub fn verifyContract(
         .folds_integer_conversions => |function_name| verifyIntegerConversionFolding(function_name, differential),
         .proves_integer_ranges => |requirement| verifyIntegerRanges(requirement, differential),
         .specializes_effectful_calls => |function_name| verifyCallSpecialization(function_name, differential),
+        .specializes_branching_reference_calls => |function_name| verifyBranchingReferenceCallSpecialization(
+            function_name,
+            differential,
+        ),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -238,6 +242,25 @@ fn verifyCallSpecialization(function_name: []const u8, differential: Differentia
         return error.ExpectedEffectfulCallSpecializationMissing;
     if (raw_closure.reference_stores == 0 or optimized.reference_stores != 0)
         return error.InlinedReferenceEffectNotScalarized;
+    return .{ .call_specialization = .{
+        .function = function_name,
+        .raw_calls = raw.internal_calls,
+        .optimized_calls = optimized.internal_calls,
+        .raw_reference_stores = raw_closure.reference_stores,
+        .optimized_reference_stores = optimized.reference_stores,
+    } };
+}
+
+fn verifyBranchingReferenceCallSpecialization(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const raw_closure = IrStats.profile(differential.raw_ir);
+    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    if (raw.internal_calls == 0 or optimized.internal_calls != 0)
+        return error.ExpectedEffectfulCallSpecializationMissing;
+    if (raw_closure.reference_stores == 0)
+        return error.ExpectedReferenceEffectMissing;
     return .{ .call_specialization = .{
         .function = function_name,
         .raw_calls = raw.internal_calls,
