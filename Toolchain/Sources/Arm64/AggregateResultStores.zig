@@ -86,7 +86,9 @@ pub fn optimize(
                         continue;
 
                     var updated_load = machine_load;
-                    updated_load.result = machine_result;
+                    updated_load.result.start = machine_result.start;
+                    updated_load.result.width = machine_result.width;
+                    updated_load.result.aggregate = machine_result.aggregate;
                     updated_load.forwarded_function = machine_call.function;
                     instructions[load_index] = .{ .collection_load = updated_load };
                     var updated_call = machine_call;
