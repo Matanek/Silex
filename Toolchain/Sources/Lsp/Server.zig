@@ -501,15 +501,114 @@ fn mergeCompletionItems(
     const unique = Completion.deduplicateCallableShapes(result.items);
     Completion.disambiguateCallableLabels(unique);
     std.mem.sort(Types.CompletionItem, unique, {}, completionItemLessThan);
+    for (unique, 0..) |*item, index| {
+        item.sortText = try std.fmt.allocPrint(allocator, "{s}-{d:0>6}", .{
+            completionPriority(item.*),
+            index,
+        });
+    }
     return allocator.dupe(Types.CompletionItem, unique);
 }
 
 fn completionItemLessThan(_: void, left: Types.CompletionItem, right: Types.CompletionItem) bool {
-    const left_sort = left.sortText orelse "999";
-    const right_sort = right.sortText orelse "999";
-    const order = std.mem.order(u8, left_sort, right_sort);
+    const order = std.mem.order(u8, completionPriority(left), completionPriority(right));
     if (order != .eq) return order == .lt;
-    return std.mem.lessThan(u8, left.label, right.label);
+    const label_order = std.mem.order(u8, left.label, right.label);
+    if (label_order != .eq) return label_order == .lt;
+    const detail_order = std.mem.order(u8, left.detail, right.detail);
+    if (detail_order != .eq) return detail_order == .lt;
+    if (left.kind != right.kind) return left.kind < right.kind;
+    const filter_order = optionalTextOrder(left.filterText, right.filterText);
+    if (filter_order != .eq) return filter_order == .lt;
+    const insert_order = optionalTextOrder(left.insertText, right.insertText);
+    if (insert_order != .eq) return insert_order == .lt;
+    return (left.insertTextFormat orelse 0) < (right.insertTextFormat orelse 0);
+}
+
+fn completionPriority(item: Types.CompletionItem) []const u8 {
+    const sort_text = item.sortText orelse return "999";
+    const separator = std.mem.indexOfScalar(u8, sort_text, '-') orelse return sort_text;
+    return sort_text[0..separator];
+}
+
+fn optionalTextOrder(left: ?[]const u8, right: ?[]const u8) std.math.Order {
+    if (left == null and right == null) return .eq;
+    if (left == null) return .lt;
+    if (right == null) return .gt;
+    return std.mem.order(u8, left.?, right.?);
+}
+
+test "completion merge is invariant to input order and upstream sort suffixes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const first_input = [_]Types.CompletionItem{
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint(color:int) void",
+            .sortText = "010-999999",
+            .filterText = "paint",
+            .insertText = "paint(${1:color})$0",
+            .insertTextFormat = 2,
+        },
+        .{
+            .label = "alpha",
+            .kind = 6,
+            .detail = "alpha:int",
+            .sortText = "010-000001",
+            .filterText = "alpha",
+            .insertText = "alpha",
+        },
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint() void",
+            .sortText = "010-000000",
+            .filterText = "paint",
+            .insertText = "paint()",
+        },
+    };
+    const second_input = [_]Types.CompletionItem{
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint() void",
+            .sortText = "010-654321",
+            .filterText = "paint",
+            .insertText = "paint()",
+        },
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint(color:int) void",
+            .sortText = "010-000002",
+            .filterText = "paint",
+            .insertText = "paint(${1:color})$0",
+            .insertTextFormat = 2,
+        },
+        .{
+            .label = "alpha",
+            .kind = 6,
+            .detail = "alpha:int",
+            .sortText = "010-888888",
+            .filterText = "alpha",
+            .insertText = "alpha",
+        },
+    };
+
+    const first = try mergeCompletionItems(allocator, &first_input, &.{});
+    const second = try mergeCompletionItems(allocator, &.{}, &second_input);
+    try std.testing.expectEqual(first.len, second.len);
+    for (first, second) |left, right| {
+        try std.testing.expectEqualStrings(left.label, right.label);
+        try std.testing.expectEqual(left.kind, right.kind);
+        try std.testing.expectEqualStrings(left.detail, right.detail);
+        try std.testing.expectEqualStrings(left.sortText.?, right.sortText.?);
+        try std.testing.expectEqualStrings(left.filterText.?, right.filterText.?);
+        try std.testing.expectEqualStrings(left.insertText.?, right.insertText.?);
+        try std.testing.expectEqual(left.insertTextFormat, right.insertTextFormat);
+    }
 }
 
 fn needsWorkspaceCompletion(source: []const u8, decision: Completion.Decision) bool {

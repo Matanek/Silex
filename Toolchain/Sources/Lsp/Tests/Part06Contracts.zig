@@ -2,6 +2,7 @@ const std = @import("std");
 const Protocol = @import("../Protocol.zig");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
+const Types = @import("../Types.zig");
 
 test "part 06 every advertised trigger reaches its exact completion context" {
     const cases = [_]struct {
@@ -151,6 +152,91 @@ test "part 06 contextual alternatives expose exact kinds details snippets and st
     try std.testing.expect(std.mem.lessThan(u8, items[0].sortText.?, items[1].sortText.?));
 }
 
+test "part 06 insertion distinguishes calls existing parentheses labels constructors and references" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    const uri = "file:///Part06-Insertion.sx";
+    const declarations =
+        \\class Widget { init(name:str) {} }
+        \\func paint() {}
+        \\func tint(color:int, intensity:float = 1.0) {}
+        \\func accept(callback:func()) {}
+    ;
+
+    const plain = try Support.removeMarker(
+        allocator,
+        declarations ++ "\nfunc main() { pai<|> }",
+    );
+    try Support.openDocument(&server, allocator, uri, 1, plain.text);
+    const plain_items = try Support.serverCompletionInOpenDocument(&server, allocator, uri, plain);
+    try Support.expectExactLabels(&.{"paint"}, plain_items);
+    try Support.expectItem(.{
+        .label = "paint",
+        .kind = 3,
+        .detail = "paint() void",
+        .insert_text = "paint()",
+    }, plain_items);
+
+    const existing_call = try Support.removeMarker(
+        allocator,
+        declarations ++ "\nfunc main() { paint<|>() }",
+    );
+    try Support.changeDocument(&server, allocator, uri, 2, existing_call.text);
+    const existing_items = try Support.serverCompletionInOpenDocument(&server, allocator, uri, existing_call);
+    try Support.expectExactLabels(&.{"paint"}, existing_items);
+    try Support.expectItem(.{
+        .label = "paint",
+        .kind = 3,
+        .detail = "paint() void",
+        .insert_text = "paint",
+    }, existing_items);
+
+    const callback = try Support.removeMarker(
+        allocator,
+        declarations ++ "\nfunc main() { accept(callback:pai<|>) }",
+    );
+    try Support.changeDocument(&server, allocator, uri, 3, callback.text);
+    const callback_items = try Support.serverCompletionInOpenDocument(&server, allocator, uri, callback);
+    try Support.expectExactLabels(&.{"paint"}, callback_items);
+    try Support.expectItem(.{
+        .label = "paint",
+        .kind = 3,
+        .detail = "paint() void",
+        .insert_text = "paint",
+    }, callback_items);
+
+    const labeled = try Support.removeMarker(
+        allocator,
+        declarations ++ "\nfunc main() { tin<|> }",
+    );
+    try Support.changeDocument(&server, allocator, uri, 4, labeled.text);
+    const labeled_items = try Support.serverCompletionInOpenDocument(&server, allocator, uri, labeled);
+    try Support.expectExactLabels(&.{ "tint(color:int)", "tint(color:int, intensity:float = 1.0)" }, labeled_items);
+    try expectCompletionForm(labeled_items, "tint", "tint(${1:color})$0", 2);
+    try expectCompletionForm(labeled_items, "tint", "tint(${1:color}, ${2:intensity})$0", 2);
+
+    const constructor = try Support.removeMarker(
+        allocator,
+        declarations ++ "\nfunc main() { Wid<|> }",
+    );
+    try Support.changeDocument(&server, allocator, uri, 5, constructor.text);
+    const constructor_items = try Support.serverCompletionInOpenDocument(&server, allocator, uri, constructor);
+    try expectCompletionForm(constructor_items, "Widget", "Widget(${1:name})$0", 2);
+    try Support.expectNoDuplicates(constructor_items);
+
+    const type_name = try Support.removeMarker(
+        allocator,
+        declarations ++ "\nfunc inspect(widget:Wid<|>) {}",
+    );
+    try Support.changeDocument(&server, allocator, uri, 6, type_name.text);
+    const type_items = try Support.serverCompletionInOpenDocument(&server, allocator, uri, type_name);
+    try Support.expectExactLabels(&.{"Widget"}, type_items);
+    try expectCompletionForm(type_items, "Widget", "Widget", null);
+}
+
 fn rawCompletionResponse(
     server: *ServerModule.Server,
     allocator: std.mem.Allocator,
@@ -170,4 +256,26 @@ fn rawCompletionResponse(
         },
     }, .{});
     return (try server.handleBody(allocator, request)) orelse error.MissingLspResponse;
+}
+
+fn expectCompletionForm(
+    items: []const Types.CompletionItem,
+    filter: []const u8,
+    insertion: []const u8,
+    format: ?u8,
+) !void {
+    for (items) |item| {
+        if (item.filterText == null or !std.mem.eql(u8, item.filterText.?, filter)) continue;
+        if (item.insertText == null or !std.mem.eql(u8, item.insertText.?, insertion)) continue;
+        try std.testing.expectEqual(format, item.insertTextFormat);
+        return;
+    }
+    std.debug.print("missing completion form filter='{s}' insertion='{s}'\n", .{ filter, insertion });
+    for (items) |item| std.debug.print("  label='{s}' filter='{s}' insert='{s}' detail='{s}'\n", .{
+        item.label,
+        item.filterText orelse "<none>",
+        item.insertText orelse "<none>",
+        item.detail,
+    });
+    return error.MissingCompletionForm;
 }
