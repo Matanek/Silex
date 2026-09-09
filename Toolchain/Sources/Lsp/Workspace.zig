@@ -1938,6 +1938,27 @@ fn importedConstructorTypePath(
     type_path: []const u8,
     arity: usize,
 ) !?[]const u8 {
+    return importedConstructorTypePathDepth(
+        allocator,
+        io,
+        documents,
+        project,
+        type_path,
+        arity,
+        0,
+    );
+}
+
+fn importedConstructorTypePathDepth(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    type_path: []const u8,
+    arity: usize,
+    depth: usize,
+) !?[]const u8 {
+    if (depth > project.index.providers.len) return null;
     const target = declarationTarget(project.index, type_path) orelse return null;
     const provider = project.index.providers[target.provider];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
@@ -1951,6 +1972,20 @@ fn importedConstructorTypePath(
             if (parametersAcceptArity(constructor.parameters, arity)) return type_path;
         }
         return null;
+    }
+    for (loaded.program.uses) |use| {
+        const alias = use.alias orelse lastSegment(use.path);
+        if (!use.is_public or !std.mem.eql(u8, alias, target.declaration)) continue;
+        const use_path = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
+        return importedConstructorTypePathDepth(
+            allocator,
+            io,
+            documents,
+            project,
+            use_path,
+            arity,
+            depth + 1,
+        );
     }
     return null;
 }

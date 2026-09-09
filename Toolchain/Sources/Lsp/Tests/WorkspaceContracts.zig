@@ -629,6 +629,147 @@ test "server preserves imported roots throughout incomplete cascade editing" {
     }
 }
 
+test "server completes a cascade on an imported homonymous principal type" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Canvas/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX.Canvas\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Canvas\":{\"suite\":true}}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/@Module.sx",
+        .data = "public func root() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Canvas/Package.json",
+        .data = "{\"name\":\"GFX.Canvas\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Canvas/Module/@Module.sx",
+        .data = "public use GFX.Canvas.Canvas.Canvas",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Canvas/Module/Canvas.sx",
+        .data =
+        \\public class Canvas {
+        \\    func paint(callback:func()) Canvas { return self }
+        \\    func clear() {}
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const items = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        main_uri,
+        \\use GFX.Canvas
+        \\func draw_player() Canvas {
+        \\    return Canvas()..<|>
+        \\}
+    ,
+        ".",
+    );
+    try Support.expectPresent("paint", items);
+    try Support.expectPresent("clear", items);
+    try Support.expectNoDuplicates(items);
+}
+
+test "server preserves imported field types through incomplete conditions" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const files = [_]struct { path: []const u8, source: []const u8 }{
+        .{ .path = "Kit/Package.json", .source = "{\"name\":\"Kit\",\"version\":\"1.0.0\"}" },
+        .{ .path = "Kit/Module/ECS/Query.sx", .source = "public class Query<T> {}" },
+        .{ .path = "Kit/Module/Math/Vec2.sx", .source =
+        \\public struct Vec2 {
+        \\    var x:float
+        \\    var y:float
+        \\    func length() float { return 0.0 }
+        \\}
+        },
+        .{ .path = "Kit/Module/Transform/Transform2D.sx", .source =
+        \\use Kit.Math
+        \\public struct Transform2D { var position:Math.Vec2 }
+        },
+    };
+    for (files) |file| {
+        try temporary.dir.createDirPath(std.testing.io, std.fs.path.dirname(file.path).?);
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.source });
+    }
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Kit\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const field_items = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        main_uri,
+        \\use Kit.ECS
+        \\struct PlayerTarget {}
+        \\func update(query:ECS.Query<(&PlayerTarget, &Kit.Transform.Transform2D)>) {
+        \\    for (target, transform) in query {
+        \\        if transform.position.<|>
+        \\    }
+        \\}
+    ,
+        ".",
+    );
+    try Support.expectPresent("length", field_items);
+    try Support.expectPresent("x", field_items);
+    try Support.expectAbsent("position", field_items);
+    try Support.expectNoDuplicates(field_items);
+
+    const local_items = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        main_uri,
+        \\use Kit.ECS
+        \\struct PlayerTarget {}
+        \\func update(query:ECS.Query<(&PlayerTarget, &Kit.Transform.Transform2D)>) {
+        \\    for (target, transform) in query {
+        \\        var pos:Kit.Math.Vec2 = transform.position
+        \\        if pos.<|>
+        \\    }
+        \\}
+    ,
+        ".",
+    );
+    try Support.expectPresent("length", local_items);
+    try Support.expectPresent("x", local_items);
+    try Support.expectAbsent("position", local_items);
+    try Support.expectNoDuplicates(local_items);
+}
+
 test "server navigates package extensions call chains fields and cascades" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
