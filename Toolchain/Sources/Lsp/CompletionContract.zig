@@ -456,7 +456,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"BufferType"},
         .forbidden = &.{"DiskType"},
         .provenance = "unsaved imported document overlay",
-        .status = .{ .protected = "Lsp.Tests.WorkspaceContracts: workspace completion uses the unsaved contents of imported documents" },
+        .status = .{ .protected = "Lsp.Tests.Part05Contracts: part 05 imported overlays are authoritative ordered and recover without stale members" },
     },
     .{
         .id = "lsp-utf16-trigger-metadata",

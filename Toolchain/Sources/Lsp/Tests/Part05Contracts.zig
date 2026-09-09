@@ -219,6 +219,119 @@ test "part 05 imported overlays are authoritative ordered and recover without st
     const recovered = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
     try Support.expectExactLabels(&.{"recovered_overlay"}, recovered);
     try Support.expectNoDuplicates(recovered);
+
+    try Support.changeDocument(
+        &server,
+        allocator,
+        widget_uri,
+        15,
+        "public class Widget { func visibility_member() {} }",
+    );
+    const visible = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+    try Support.expectExactLabels(&.{"visibility_member"}, visible);
+
+    try Support.changeDocument(
+        &server,
+        allocator,
+        widget_uri,
+        16,
+        "public class Widget { private func visibility_member() {} }",
+    );
+    const hidden = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+    try Support.expectExactLabels(&.{}, hidden);
+
+    try Support.changeDocument(
+        &server,
+        allocator,
+        widget_uri,
+        17,
+        "public class Widget {} extend Widget { func extension_member() {} }",
+    );
+    const extended = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+    try Support.expectExactLabels(&.{"extension_member"}, extended);
+
+    try Support.changeDocument(&server, allocator, widget_uri, 18, "public class Widget {}");
+    const extension_removed = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+    try Support.expectExactLabels(&.{}, extension_removed);
+}
+
+test "part 05 live reexports replace disk aliases and navigate to canonical declarations" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Api/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Api\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api/Package.json",
+        .data = "{\"name\":\"Api\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api/Module/Widget.sx",
+        .data = "public class Widget { func paint() {} }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api/Module/Facade.sx",
+        .data = "public use Api.Widget.Widget as DiskWidget",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const facade_uri = try std.fmt.allocPrint(allocator, "file://{s}/Api/Module/Facade.sx", .{root});
+    const widget_uri = try std.fmt.allocPrint(allocator, "file://{s}/Api/Module/Widget.sx", .{root});
+    const marked = try Support.removeMarker(
+        allocator,
+        "use Api.Facade\nfunc inspect(widget:&Facade.LiveWidget) { widget.<|> }",
+    );
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    try Support.openDocument(&server, allocator, main_uri, 1, marked.text);
+    try Support.openDocument(
+        &server,
+        allocator,
+        facade_uri,
+        20,
+        "public use Api.Widget.Widget as LiveWidget",
+    );
+
+    const live = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+    try Support.expectExactLabels(&.{"paint"}, live);
+    const definition = (try Support.serverDefinition(
+        &server,
+        allocator,
+        main_uri,
+        "use Api.Facade\nfunc inspect(widget:&Facade.Live<|>Widget) {}",
+    )).?;
+    try std.testing.expectEqualStrings(widget_uri, definition.uri);
+    try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
+    try Support.changeDocument(&server, allocator, main_uri, 2, marked.text);
+
+    try Support.changeDocument(
+        &server,
+        allocator,
+        facade_uri,
+        21,
+        "public use Api.Widget.Widget as RenamedWidget",
+    );
+    const removed = try Support.serverCompletionInOpenDocument(&server, allocator, main_uri, marked);
+    try Support.expectExactLabels(&.{}, removed);
+
+    try Support.changeDocument(&server, allocator, facade_uri, 22, "public use Api.Widget.");
+    const invalid = try Support.serverCompletion(
+        &server,
+        allocator,
+        main_uri,
+        "use Api.Facade\nfunc inspect(widget:&Facade.<|>) {}",
+    );
+    try Support.expectExactLabels(&.{}, invalid);
 }
 
 test "part 05 enforces private and protected visibility in the current file" {
