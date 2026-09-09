@@ -133,7 +133,6 @@ fn localSummary(program: Ir.Program, function: Ir.Function) Summary {
 }
 
 fn classifyInstruction(program: Ir.Program, summary: *Summary, instruction: Ir.Instruction) void {
-    _ = program;
     switch (instruction) {
         .call => summary.direct_calls += 1,
         .global_load, .field_load, .collection_count, .local_load, .reference_load, .address_load => summary.effects.reads_memory = true,
@@ -156,7 +155,12 @@ fn classifyInstruction(program: Ir.Program, summary: *Summary, instruction: Ir.I
         }) markChecked(summary),
         .convert => |value| if (value.checked) markChecked(summary),
         .optional_unwrap, .assert => markChecked(summary),
-        .boundary_call, .boundary_indirect_call, .indirect_call, .dynamic_call => {
+        .boundary_call => |call| {
+            if (call.function < program.boundary_effects.len and program.boundary_effects[call.function] == .pure) return;
+            summary.effects.crosses_boundary = true;
+            summary.may_fail = true;
+        },
+        .boundary_indirect_call, .indirect_call, .dynamic_call => {
             summary.effects.crosses_boundary = true;
             summary.may_fail = true;
         },
@@ -276,6 +280,43 @@ test "inlining cost accounts for effects pressure and hot call sites" {
     try std.testing.expect(!shouldInline(.{ .effects = .{ .observes_output = true } }, 1, true, false));
     try std.testing.expect(!shouldInline(.{ .aggregate_values = 64 }, 96, true, false));
     try std.testing.expect(shouldInline(.{ .effects = .{ .observes_output = true } }, 1, false, true));
+}
+
+test "only proven pure direct boundaries are transparent to call summaries" {
+    const mixed_calls = [_]Ir.Instruction{
+        .{ .boundary_call = .{ .result = 0, .function = 0, .arguments = &.{} } },
+        .{ .boundary_call = .{ .result = 1, .function = 1, .arguments = &.{} } },
+    };
+    const mixed_functions = [_]Ir.Function{.{
+        .name = "boundaries",
+        .parameter_types = &.{},
+        .return_type = .void,
+        .value_types = &.{ .float32, .float32 },
+        .blocks = &.{.{ .instructions = &mixed_calls, .terminator = .return_void }},
+    }};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const mixed = try analyze(arena.allocator(), .{
+        .functions = &mixed_functions,
+        .boundary_effects = &.{ .pure, .unknown },
+    });
+    try std.testing.expect(mixed[0].effects.crosses_boundary);
+    try std.testing.expect(mixed[0].may_fail);
+
+    const pure_calls = [_]Ir.Instruction{mixed_calls[0]};
+    const pure_functions = [_]Ir.Function{.{
+        .name = "pure_boundary",
+        .parameter_types = &.{},
+        .return_type = .void,
+        .value_types = &.{.float32},
+        .blocks = &.{.{ .instructions = &pure_calls, .terminator = .return_void }},
+    }};
+    const pure = try analyze(arena.allocator(), .{
+        .functions = &pure_functions,
+        .boundary_effects = &.{.pure},
+    });
+    try std.testing.expect(!pure[0].effects.crosses_boundary);
+    try std.testing.expect(!pure[0].may_fail);
 }
 
 test "backedges classify only their loop range as hot" {

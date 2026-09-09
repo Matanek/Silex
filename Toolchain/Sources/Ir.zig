@@ -590,6 +590,12 @@ pub const Program = struct {
     function_types: []const FunctionType = &.{},
     functions: []const Function,
     files: []const []const u8 = &.{"<source>"},
+    boundary_effects: []const BoundaryEffect = &.{},
+};
+
+pub const BoundaryEffect = enum {
+    unknown,
+    pure,
 };
 
 pub const FunctionType = struct {

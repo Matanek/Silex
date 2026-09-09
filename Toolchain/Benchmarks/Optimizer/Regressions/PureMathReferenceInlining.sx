@@ -1,0 +1,29 @@
+use STD.Math
+
+struct Direction {
+    var x:float
+    var y:float
+}
+
+// The system sqrt boundary is pure in Silex's observable model. Keeping that
+// proof in portable IR lets this bounded branching helper inline at a hot site
+// without admitting arbitrary native calls or larger pressure-heavy helpers.
+func normalize(direction:&Direction) {
+    let magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y)
+    var inverse = 0.0
+    if magnitude > 0.0 { inverse = 1.0 / magnitude }
+    direction.x *= inverse
+    direction.y *= inverse
+}
+
+func main() {
+    var direction = Direction(x:3.0, y:4.0)
+    var step = 0
+    while step < 16 {
+        normalize(direction)
+        step++
+    }
+    assert(direction.x > 0.59 && direction.x < 0.61)
+    assert(direction.y > 0.79 && direction.y < 0.81)
+    print("pure math reference call preserved")
+}

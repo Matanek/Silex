@@ -313,6 +313,11 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .specializes_branching_reference_calls = "main" },
     },
     .{
+        .name = "Regressions/PureMathReferenceInlining.sx",
+        .concern = "small branching reference callees retain proven pure scalar-math effects and inline at hot loop sites",
+        .contract = .{ .specializes_branching_reference_calls = "main" },
+    },
+    .{
         .name = "Regressions/DynamicFieldClearAppend.sx",
         .concern = "a loop-local class call bound stays defined before clearing and rebuilding a dynamic field",
     },

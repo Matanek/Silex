@@ -309,6 +309,11 @@ pub const Compiler = struct {
             self.files = all_files;
         }
         ir.files = self.files;
+        const boundary_effects = try self.allocator.alloc(Ir.BoundaryEffect, analyzer.external_functions.len);
+        for (analyzer.external_functions, 0..) |boundary, index| {
+            boundary_effects[index] = if (Boundary.isPureScalarMath(boundary)) .pure else .unknown;
+        }
+        ir.boundary_effects = boundary_effects;
 
         var dependency_files: std.ArrayList([]const u8) = .empty;
         for (self.units, 0..) |unit, module| {
