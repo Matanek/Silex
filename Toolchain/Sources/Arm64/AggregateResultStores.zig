@@ -85,11 +85,19 @@ pub fn optimize(
                         !spanUsed(instructions, machine_result, replace_index))
                         continue;
 
-                    var updated_load = machine_load;
-                    updated_load.result.start = machine_result.start;
-                    updated_load.result.width = machine_result.width;
-                    updated_load.result.aggregate = machine_result.aggregate;
-                    updated_load.forwarded_function = machine_call.function;
+                    const updated_load: Machine.Instruction.CollectionLoad = .{
+                        .result = machine_result,
+                        .collection = machine_load.collection,
+                        .index = machine_load.index,
+                        .count = machine_load.count,
+                        .dynamic = machine_load.dynamic,
+                        .view = machine_load.view,
+                        .checked = machine_load.checked,
+                        .element_stride = machine_load.element_stride,
+                        .header = machine_load.header,
+                        .tail = machine_load.tail,
+                        .forwarded_function = machine_call.function,
+                    };
                     instructions[load_index] = .{ .collection_load = updated_load };
                     var updated_call = machine_call;
                     updated_call.result_forwarded = true;
