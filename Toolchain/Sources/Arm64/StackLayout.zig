@@ -116,33 +116,15 @@ pub fn build(
         return error.FrameTooLarge;
     const recycle = naive_slots > Machine.max_slots;
     const values = try allocator.alloc(Machine.Span, value_count);
-    const locals = try allocator.alloc(Machine.Span, function.local_types.len);
-    const abi_value_count = function.capture_types.len + function.parameter_types.len;
-    if (abi_value_count > value_count) return error.InvalidMachineProgram;
-    const place_locals_before_temporaries = !recycle and hasAggregateParameter(program, function);
     var next: usize = 0;
     if (!recycle) {
-        const leading_value_count = if (place_locals_before_temporaries) abi_value_count else value_count;
-        for (0..leading_value_count) |value| {
+        for (0..value_count) |value| {
             values[value] = .{
                 .start = try Machine.checkedSlot(next),
                 .width = widths[value],
                 .aggregate = aggregates[value],
             };
             next += widths[value];
-        }
-        if (place_locals_before_temporaries) {
-            for (function.local_types, 0..) |type_value, local| {
-                locals[local] = try appendSpan(program, type_value, &next);
-            }
-            for (leading_value_count..value_count) |value| {
-                values[value] = .{
-                    .start = try Machine.checkedSlot(next),
-                    .width = widths[value],
-                    .aggregate = aggregates[value],
-                };
-                next += widths[value];
-            }
         }
     } else {
         const pinned = try allocator.alloc(bool, value_count);
@@ -187,10 +169,9 @@ pub fn build(
         }
     }
 
-    if (!place_locals_before_temporaries) {
-        for (function.local_types, 0..) |type_value, local| {
-            locals[local] = try appendSpan(program, type_value, &next);
-        }
+    const locals = try allocator.alloc(Machine.Span, function.local_types.len);
+    for (function.local_types, 0..) |type_value, local| {
+        locals[local] = try appendSpan(program, type_value, &next);
     }
     const environments = try allocator.alloc(?Machine.Span, value_count);
     @memset(environments, null);
@@ -237,13 +218,6 @@ pub fn build(
 fn residenceClass(type_value: Ir.Type, aggregate: bool) ResidenceClass {
     if (aggregate) return .aggregate;
     return if (type_value.isFloat()) .float else .integer;
-}
-
-fn hasAggregateParameter(program: Ir.Program, function: Ir.Function) bool {
-    for (function.parameter_types) |type_value| {
-        if (TypeLayout.isAggregate(program, type_value)) return true;
-    }
-    return false;
 }
 
 fn firstAvailable(
@@ -690,40 +664,4 @@ test "prune unused declarations without dropping ABI parameters" {
     try std.testing.expectEqual(@as(u12, 1), layout.capture_parameters[0].width);
     try std.testing.expect(layout.parameters[0].start != layout.capture_parameters[0].start);
     try std.testing.expectEqual(@as(u12, 0), layout.values[2].width);
-}
-
-test "place aggregate parameter locals before register-only temporaries" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const pair_type = Ir.Type.structure(0);
-    const structures = [_]Ir.Structure{.{
-        .name = "Pair",
-        .fields = &.{
-            .{ .name = "x", .type = .float32, .mutable = true },
-            .{ .name = "y", .type = .float32, .mutable = true },
-        },
-    }};
-    const function: Ir.Function = .{
-        .name = "aggregate_parameter_local",
-        .parameter_types = &.{pair_type},
-        .return_type = .int,
-        .value_types = &.{ pair_type, .int, .int },
-        .local_types = &.{pair_type},
-        .blocks = &.{.{
-            .instructions = &.{
-                .{ .constant_int = .{ .result = 1, .bits = 20 } },
-                .{ .unary = .{ .result = 2, .operator = .negate, .operand = 1 } },
-            },
-            .terminator = .{ .return_value = 2 },
-        }},
-    };
-    const program: Ir.Program = .{ .structures = &structures, .functions = &.{function} };
-    const layout = try build(allocator, program, function);
-
-    try std.testing.expectEqual(@as(Machine.Slot, 0), layout.parameters[0].start);
-    try std.testing.expectEqual(@as(Machine.Slot, 2), layout.locals[0].start);
-    try std.testing.expectEqual(@as(Machine.Slot, 4), layout.values[1].start);
-    try std.testing.expectEqual(@as(Machine.Slot, 5), layout.values[2].start);
-    try std.testing.expectEqual(@as(Machine.Slot, 6), layout.slot_count);
 }

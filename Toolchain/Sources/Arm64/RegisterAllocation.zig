@@ -267,9 +267,9 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     };
 }
 
-/// A call-free function needs stack storage only through its highest
-/// participating spill. Trailing virtual slots backed by a general,
-/// scalar-float, or lane residence do not need physical frame space.
+/// A call-free function needs no local frame when every materialized value has
+/// a general, scalar-float, or lane residence. Any participating spill keeps
+/// the complete deterministic frame and its original slot offsets.
 fn residentFrameSize(
     function: Machine.Function,
     residences: []const ?u5,
@@ -277,14 +277,13 @@ fn residentFrameSize(
     float_lane_residences: []const ?Machine.FloatLaneResidence,
 ) Machine.Error!u32 {
     if (function.parameters.len > Machine.max_register_arguments) return function.frame_size;
-    var required_slots: usize = 0;
     for (0..function.slot_count) |slot| {
         if (residences[slot] != null or float_residences[slot] != null or
             float_lane_residences[slot] != null) continue;
         if (!slotParticipates(function, slot)) continue;
-        required_slots = slot + 1;
+        return function.frame_size;
     }
-    return Machine.frameSize(required_slots);
+    return 0;
 }
 
 fn slotParticipates(function: Machine.Function, slot: usize) bool {
@@ -1358,32 +1357,6 @@ test "resident frame keeps the complete frame when one participant spills" {
         try residentFrameSize(
             function,
             &.{ 0, 1, null },
-            &.{ null, null, null },
-            &.{ null, null, null },
-        ),
-    );
-}
-
-test "resident frame omits a registered suffix after the final spill" {
-    const instructions = [_]Machine.Instruction{
-        .{ .constant_int = .{ .result = 0, .bits = 20 } },
-        .{ .constant_int = .{ .result = 1, .bits = 22 } },
-        .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
-        .{ .return_value = .{ .start = 2, .width = 1 } },
-    };
-    const function: Machine.Function = .{
-        .name = "prefix_spill",
-        .parameter_count = 0,
-        .return_type = .int,
-        .slot_count = 3,
-        .frame_size = try Machine.frameSize(3),
-        .instructions = &instructions,
-    };
-    try std.testing.expectEqual(
-        try Machine.frameSize(1),
-        try residentFrameSize(
-            function,
-            &.{ null, 1, 0 },
             &.{ null, null, null },
             &.{ null, null, null },
         ),
