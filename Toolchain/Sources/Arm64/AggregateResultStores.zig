@@ -56,7 +56,6 @@ pub fn optimize(
                 };
                 const machine_result = machine_call.result orelse continue;
                 if (machine_result.width != machine_load.result.width or !machine_result.aggregate) continue;
-
                 for (block.instructions[call_offset + 1 ..], call_offset + 1..) |possible_replace, replace_offset| {
                     const source_replace = switch (possible_replace) {
                         .collection_replace => |value| value,
@@ -82,9 +81,8 @@ pub fn optimize(
                         !sameSpan(machine_replace.replacement, machine_result) or
                         machine_replace.index != machine_load.index or
                         machine_replace.element_stride != machine_load.element_stride or
-                        !spanUsed(instructions, machine_result, replace_index))
+                        spanUsed(instructions, machine_result, replace_index))
                         continue;
-
                     const updated_load: Machine.Instruction.CollectionLoad = .{
                         .result = machine_result,
                         .collection = machine_load.collection,
@@ -343,6 +341,8 @@ fn testPrograms(allocator: Allocator, address_collection: Ir.ValueId) !struct { 
         .{ .structure_init = .{ .result = 5, .structure = 1, .fields = callee_fields } },
     });
     const callee_blocks = try allocator.dupe(Ir.Block, &.{.{ .instructions = callee_instructions, .terminator = .{ .return_value = 5 } }});
+    const callee_parameter_types = try allocator.dupe(Ir.Type, &.{.address});
+    const callee_value_types = try allocator.dupe(Ir.Type, &.{ .address, .address, .float32, .address, .float32, .structure(1) });
     const caller_arguments = try allocator.dupe(Ir.ValueId, &.{4});
     const caller_instructions = try allocator.dupe(Ir.Instruction, &.{
         .{ .local_load = .{ .result = 2, .local = 0 } },
@@ -353,23 +353,27 @@ fn testPrograms(allocator: Allocator, address_collection: Ir.ValueId) !struct { 
         .{ .collection_replace = .{ .result = 7, .collection = 6, .index = 1, .replacement = 5, .position = test_position } },
     });
     const caller_blocks = try allocator.dupe(Ir.Block, &.{.{ .instructions = caller_instructions, .terminator = .return_void }});
+    const caller_parameter_types = try allocator.dupe(Ir.Type, &.{ .structure(2), .int });
+    const caller_value_types = try allocator.dupe(Ir.Type, &.{ .structure(2), .int, .structure(3), .structure(1), .address, .structure(1), .structure(3), .structure(3) });
+    const caller_local_types = try allocator.dupe(Ir.Type, &.{.structure(3)});
     const functions = try allocator.dupe(Ir.Function, &.{
         .{
             .name = "make",
-            .parameter_types = &.{.address},
+            .parameter_types = callee_parameter_types,
             .return_type = .structure(1),
-            .value_types = &.{ .address, .address, .float32, .address, .float32, .structure(1) },
+            .value_types = callee_value_types,
             .blocks = callee_blocks,
         },
         .{
             .name = "fill",
-            .parameter_types = &.{ .structure(2), .int },
+            .parameter_types = caller_parameter_types,
             .return_type = .void,
-            .value_types = &.{ .structure(2), .int, .structure(3), .structure(1), .address, .structure(1), .structure(3), .structure(3) },
-            .local_types = &.{.structure(3)},
+            .value_types = caller_value_types,
+            .local_types = caller_local_types,
             .blocks = caller_blocks,
         },
     });
+    const machine_parameters = try allocator.dupe(Machine.Span, &.{ .{ .start = 0, .width = 2, .aggregate = true }, .{ .start = 2, .width = 1 } });
     const machine_arguments = try allocator.dupe(Machine.Span, &.{.{ .start = 9, .width = 1 }});
     const machine_instructions = try allocator.dupe(Machine.Instruction, &.{
         .{ .copy_range = .{ .result = .{ .start = 5, .width = 2, .aggregate = true }, .operand = .{ .start = 3, .width = 2, .aggregate = true } } },
@@ -419,7 +423,7 @@ fn testPrograms(allocator: Allocator, address_collection: Ir.ValueId) !struct { 
         .{
             .name = "fill",
             .parameter_count = 2,
-            .parameters = &.{ .{ .start = 0, .width = 2, .aggregate = true }, .{ .start = 2, .width = 1 } },
+            .parameters = machine_parameters,
             .return_type = .void,
             .slot_count = 16,
             .frame_size = 128,
