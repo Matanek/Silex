@@ -6,6 +6,7 @@ const Parser = @import("../Parser.zig");
 const LspTypes = @import("Types.zig");
 const Axes = @import("CompletionContract/Axes.zig");
 const WorkspaceFixtures = @import("CompletionContract/WorkspaceFixtures.zig");
+pub const Composition = @import("CompletionContract/Composition.zig");
 
 pub const marker = "<|>";
 
@@ -1097,6 +1098,24 @@ fn hasScenario(comptime identifier: []const u8) bool {
     return false;
 }
 
+fn scenarioIndex(identifier: []const u8) ?usize {
+    for (scenarios, 0..) |scenario, index| {
+        if (std.mem.eql(u8, scenario.id, identifier)) return index;
+    }
+    return null;
+}
+
+comptime {
+    for (Composition.proofs) |proof| {
+        if (!hasScenario(proof.scenario_id)) {
+            @compileError(std.fmt.comptimePrint(
+                "semantic completion proof '{s}' names missing scenario '{s}'",
+                .{ @tagName(proof.id), proof.scenario_id },
+            ));
+        }
+    }
+}
+
 pub fn audit(registry: []const Scenario) !void {
     var covered = [_]bool{false} ** @typeInfo(Capability).@"enum".fields.len;
     var workspace_fixtures = [_]bool{false} ** @typeInfo(WorkspaceFixtures.Id).@"enum".fields.len;
@@ -1277,6 +1296,7 @@ test "closed compiler and completion inventories require exhaustive policies" {
 }
 
 test "registry mutations expose missing rows and missing proofs" {
+    const workspace_scenario = scenarioIndex("type-qualified-import") orelse return error.MissingWorkspaceScenario;
     var without_declarations: std.ArrayList(Scenario) = .empty;
     defer without_declarations.deinit(std.testing.allocator);
     for (scenarios) |scenario| {
@@ -1285,18 +1305,18 @@ test "registry mutations expose missing rows and missing proofs" {
     try std.testing.expectError(error.MissingCapability, audit(without_declarations.items));
     try std.testing.expectError(error.MissingAxisWitness, audit(scenarios[1..]));
     var missing_proof = scenarios;
-    missing_proof[3].status = .{ .protected = "" };
+    missing_proof[workspace_scenario].status = .{ .protected = "" };
     try std.testing.expectError(error.MissingProof, audit(&missing_proof));
     var assigned_gap = scenarios;
-    assigned_gap[3].status = .{ .assigned_gap = .part_02 };
+    assigned_gap[workspace_scenario].status = .{ .assigned_gap = .part_02 };
     try std.testing.expectError(error.UnresolvedCompletionGap, auditRelease(&assigned_gap));
     var missing_negative = scenarios;
-    missing_negative[3].forbidden = &.{};
+    missing_negative[workspace_scenario].forbidden = &.{};
     try std.testing.expectError(error.MissingForbiddenCandidate, audit(&missing_negative));
     var missing_cursor = scenarios;
     missing_cursor[0].partial_source = "public";
     try std.testing.expectError(error.InvalidCursorCount, audit(&missing_cursor));
     var missing_fixture = scenarios;
-    missing_fixture[2].workspace_fixture = null;
+    missing_fixture[workspace_scenario].workspace_fixture = null;
     try std.testing.expectError(error.MissingWorkspaceFixture, audit(&missing_fixture));
 }
