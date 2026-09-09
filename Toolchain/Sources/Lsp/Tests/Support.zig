@@ -158,9 +158,12 @@ fn serverCompletionRequest(
         },
     }, .{});
     const response = (try server.handleBody(allocator, request)) orelse return error.MissingLspResponse;
-    const parsed = try std.json.parseFromSliceLeaky(CompletionResponse, allocator, response, .{
+    const parsed = std.json.parseFromSliceLeaky(CompletionResponse, allocator, response, .{
         .ignore_unknown_fields = true,
-    });
+    }) catch |err| {
+        std.debug.print("unexpected completion response: {s}\n", .{response});
+        return err;
+    };
     try std.testing.expect(!parsed.result.isIncomplete);
     return parsed.result.items;
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+pub const CompletionSites = @import("Parser/CompletionSites.zig");
 const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
 const Source = @import("Source.zig");

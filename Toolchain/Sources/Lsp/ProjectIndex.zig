@@ -167,7 +167,8 @@ pub fn loadProgram(
     }
     if (source) |overlay| {
         var parser = ParserModule.Parser.init(allocator, overlay);
-        if (parser.parse()) |program| return .{ .source = overlay, .program = program } else |_| {}
+        const program = parser.parse() catch return null;
+        return .{ .source = overlay, .program = program };
     }
     const disk = Io.Dir.cwd().readFileAlloc(io, provider.path, allocator, .limited(1024 * 1024)) catch return null;
     var parser = ParserModule.Parser.init(allocator, disk);

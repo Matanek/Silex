@@ -1,4 +1,5 @@
 const std = @import("std");
+const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
 const fundamental_types = [_][]const u8{
@@ -251,6 +252,56 @@ test "completion is deterministic for incomplete source" {
     try Support.expectEqualItems(first, second);
     try Support.expectPresent("error", first);
     try Support.expectNoDuplicates(first);
+}
+
+test "server keeps member completion across independent syntax errors" {
+    const sources = [_][]const u8{
+        "struct Input { func pressed() bool { return true } }\nfunc helper( { }\nfunc main() {\n    let input = Input()\n    input.<|>\n}",
+        "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    if (input.<|>\n}",
+        "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    input.<|>\n}\nfunc helper( { }",
+        "struct Input { func pressed() bool { return true } }\nfunc helper() { if }\nfunc main() {\n    let input = Input()\n    input.<|>\n}",
+    };
+    for (sources, 0..) |source, index| {
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Recovery-{d}.sx", .{index});
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectPresent("pressed", items);
+        try Support.expectAbsent("unknown", items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
+test "server invalidates completion across deletion and retyping" {
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const uri = "file:///Editing.sx";
+    const partial = try Support.removeMarker(allocator,
+        \\func paint() {}
+        \\func main() { pai<|> }
+    );
+    try Support.openDocument(&server, allocator, uri, 1, partial.text);
+    const first = try Support.serverCompletionInOpenDocument(&server, allocator, uri, partial);
+    try Support.expectPresent("paint", first);
+
+    const deleted = try Support.removeMarker(allocator,
+        \\func paint() {}
+        \\func main() { <|> }
+    );
+    try Support.changeDocument(&server, allocator, uri, 2, deleted.text);
+    const empty = try Support.serverCompletionInOpenDocument(&server, allocator, uri, deleted);
+    try Support.expectPresent("paint", empty);
+
+    try Support.changeDocument(&server, allocator, uri, 3, partial.text);
+    const retyped = try Support.serverCompletionInOpenDocument(&server, allocator, uri, partial);
+    try Support.expectPresent("paint", retyped);
+    try Support.expectNoDuplicates(retyped);
+    try Support.expectEqualItems(first, retyped);
 }
 
 test "incomplete control conditions preserve every lexical parameter" {
