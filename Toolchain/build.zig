@@ -497,10 +497,75 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lsp_test_module.addOptions("build_options", build_options);
+
+    const lsp_admission_module = b.createModule(.{
+        .root_source_file = b.path("Sources/LspAdmissionTests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lsp_admission_module.addOptions("build_options", build_options);
+    const lsp_admission_tests = b.addTest(.{ .root_module = lsp_admission_module });
+    const lsp_admission_command = b.addRunArtifact(lsp_admission_tests);
+    // Default builds must reject structural or clean-matrix completion gaps.
+    // The heavier deterministic mutation campaign remains in LspTests and is
+    // therefore mandatory in the ordinary `check`/`silex-dev test` portal.
+    b.getInstallStep().dependOn(&lsp_admission_command.step);
+
     const lsp_tests = b.addTest(.{ .root_module = lsp_test_module });
     const lsp_test_command = b.addRunArtifact(lsp_tests);
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");
     lsp_test_step.dependOn(&lsp_test_command.step);
+    const lsp_completion_gate_step = b.step(
+        "check-lsp-completion",
+        "Run the autonomous exhaustive completion admission gate",
+    );
+    lsp_completion_gate_step.dependOn(&lsp_test_command.step);
+
+    const lsp_completion_audit_module = b.createModule(.{
+        .root_source_file = b.path("Tools/LspCompletionAudit/Main.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    const lsp_audit_api_module = b.createModule(.{
+        .root_source_file = b.path("Sources/LspAuditApi.zig"),
+    });
+    lsp_audit_api_module.addOptions("build_options", build_options);
+    lsp_completion_audit_module.addImport("silex_lsp_audit", lsp_audit_api_module);
+    const lsp_completion_audit = b.addExecutable(.{
+        .name = "silex-lsp-completion-audit",
+        .root_module = lsp_completion_audit_module,
+    });
+    const lsp_completion_audit_command = b.addRunArtifact(lsp_completion_audit);
+    if (b.args) |args| lsp_completion_audit_command.addArgs(args);
+    const lsp_completion_audit_step = b.step(
+        "audit-lsp-completion",
+        "Qualify the completion corpus in a Silex workspace",
+    );
+    lsp_completion_audit_step.dependOn(&lsp_completion_audit_command.step);
+
+    const lsp_completion_benchmark_module = b.createModule(.{
+        .root_source_file = b.path("Tools/LspCompletionBenchmark/Main.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    lsp_completion_benchmark_module.addOptions("build_options", build_options);
+    const lsp_benchmark_api_module = b.createModule(.{
+        .root_source_file = b.path("Sources/LspBenchmarkApi.zig"),
+    });
+    lsp_benchmark_api_module.addOptions("build_options", build_options);
+    lsp_completion_benchmark_module.addImport("silex_lsp", lsp_benchmark_api_module);
+    const lsp_completion_benchmark = b.addExecutable(.{
+        .name = "silex-lsp-completion-benchmark",
+        .root_module = lsp_completion_benchmark_module,
+    });
+    const lsp_completion_benchmark_command = b.addRunArtifact(lsp_completion_benchmark);
+    lsp_completion_benchmark_command.addDirectoryArg(b.path("Benchmarks/LspCompletion/Fixture"));
+    if (b.args) |args| lsp_completion_benchmark_command.addArgs(args);
+    const lsp_completion_benchmark_step = b.step(
+        "benchmark-lsp-completion",
+        "Measure fresh, warm, and edited-overlay completion requests",
+    );
+    lsp_completion_benchmark_step.dependOn(&lsp_completion_benchmark_command.step);
 
     const check_step = b.step("check", "Build and test the toolchain");
     // Validation must never replace the compiler used by `silex` or Zed.
@@ -510,7 +575,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&cycle_test_command.step);
     check_step.dependOn(&language_test_command.step);
-    check_step.dependOn(&lsp_test_command.step);
+    check_step.dependOn(lsp_completion_gate_step);
     check_step.dependOn(optimizer_admission_quick_step);
     if (native_math_validation) |validation| check_step.dependOn(validation);
 }

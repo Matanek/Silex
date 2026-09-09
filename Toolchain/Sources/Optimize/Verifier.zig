@@ -525,7 +525,7 @@ fn verifyInstructionUses(
     switch (instruction) {
         .constant_int, .constant_bool, .constant_str, .constant_bytes, .constant_float32, .constant_float64, .optional_null, .global_load, .storage_init, .local_load, .local_address, .mutex_lock, .mutex_unlock => {},
         .function_reference => |value| try context.many(value.captures),
-        inline .optional_some, .optional_unwrap, .copy, .deep_copy, .class_cast, .class_retain, .class_drop, .list_retain, .list_drop, .string_retain, .string_drop, .global_store, .protocol_init, .protocol_test, .protocol_extract, .enum_test, .enum_payload, .enum_raw, .string_address, .string_byte_count, .convert, .format_value, .string_count, .unary => |value| try context.one(value.operand),
+        inline .optional_some, .optional_unwrap, .copy, .deep_copy, .class_cast, .class_test, .class_retain, .class_drop, .list_retain, .list_drop, .string_retain, .string_drop, .global_store, .protocol_init, .protocol_test, .protocol_extract, .enum_test, .enum_payload, .enum_raw, .string_address, .string_byte_count, .convert, .format_value, .string_count, .unary => |value| try context.one(value.operand),
         .field_load => |value| try context.one(value.base),
         .string_from_bytes => |value| try context.one(value.bytes),
         .local_store => |value| try context.one(value.operand),

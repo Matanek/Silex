@@ -131,7 +131,7 @@
     },
     {
       "family": "ownership-and-copies",
-      "operations": ["copy", "deep_copy", "class_cast", "class_retain", "class_drop", "list_retain", "list_drop", "string_retain", "string_drop"]
+      "operations": ["copy", "deep_copy", "class_cast", "class_test", "class_retain", "class_drop", "list_retain", "list_drop", "string_retain", "string_drop"]
     },
     {
       "family": "globals-and-aggregates",
@@ -155,7 +155,7 @@
     },
     {
       "family": "memory-references-and-aggregates",
-      "operations": ["global_load", "global_store", "local_address", "reference_load", "address_load", "address_store", "reference_store", "reference_offset", "reference_indirect_offset", "storage_init", "aggregate_init", "protocol_init", "protocol_test", "protocol_extract", "class_init", "class_load", "class_store", "class_retain", "class_drop", "list_retain", "list_drop", "string_retain", "string_drop"]
+      "operations": ["global_load", "global_store", "local_address", "reference_load", "address_load", "address_store", "reference_store", "reference_offset", "reference_indirect_offset", "storage_init", "aggregate_init", "protocol_init", "protocol_test", "protocol_extract", "class_init", "class_load", "class_test", "class_store", "class_retain", "class_drop", "list_retain", "list_drop", "string_retain", "string_drop"]
     },
     {
       "family": "collections-and-text",

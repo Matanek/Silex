@@ -37,7 +37,7 @@ pub fn definitionAtForTarget(
     const document_path = try ProjectIndex.pathFromUri(allocator, document_uri);
     if (std.mem.indexOfScalar(u8, request.path, '.') == null) {
         for (program.functions) |function| {
-            if (!std.mem.eql(u8, function.name, request.path)) continue;
+            if (function.operator != null or !std.mem.eql(u8, function.name, request.path)) continue;
             return location(
                 allocator,
                 document_path,
@@ -208,7 +208,7 @@ fn declarationPosition(
         break;
     }
     for (program.functions) |function| {
-        if (!std.mem.eql(u8, function.name, declaration)) continue;
+        if (function.operator != null or !std.mem.eql(u8, function.name, declaration)) continue;
         if (!visible(graph, function.is_public, function.is_internal, function.is_local, provider, current_owner, current_module, current_path)) return null;
         return .{ .position = function.name_position, .name = function.name };
     }

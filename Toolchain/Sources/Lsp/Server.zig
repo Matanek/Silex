@@ -11,6 +11,13 @@ const TargetModule = @import("../Target.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+pub const CompletionRequestDecision = struct {
+    document_uri: []const u8,
+    document_version: i64,
+    trigger_character: []const u8,
+    edit: Completion.Decision,
+};
+
 pub const Server = struct {
     allocator: Allocator,
     io: Io,
@@ -20,6 +27,7 @@ pub const Server = struct {
     workspace_root_uri: ?[]const u8 = null,
     position_encoding: Types.PositionEncoding = .utf16,
     exit_requested: bool = false,
+    completion_failure_for_testing: bool = false,
 
     pub fn init(allocator: Allocator, io: Io) Server {
         return .{ .allocator = allocator, .io = io, .target = TargetModule.Target.host() orelse .macos_arm64 };
@@ -59,7 +67,9 @@ pub const Server = struct {
 
     pub fn handleBodySafely(self: *Server, allocator: Allocator, body: []const u8) !?[]const u8 {
         return self.handleBody(allocator, body) catch |err| {
-            std.log.err("LSP request failed: {s}", .{@errorName(err)});
+            if (!self.completion_failure_for_testing or err != error.InjectedCompletionFailure) {
+                std.log.err("LSP request failed: {s}", .{@errorName(err)});
+            }
             const request = std.json.parseFromSliceLeaky(Types.Request, allocator, body, .{
                 .ignore_unknown_fields = true,
             }) catch return null;
@@ -123,7 +133,7 @@ pub const Server = struct {
         if (std.mem.eql(u8, request.method, "textDocument/didChange")) {
             const params = request.params orelse return null;
             const document = Protocol.documentFromChange(params) orelse return null;
-            try self.setDocument(document);
+            if (!try self.setDocumentIfNewer(document)) return null;
             return try self.diagnosticsNotification(allocator, document.uri);
         }
         if (std.mem.eql(u8, request.method, "textDocument/didClose")) {
@@ -150,14 +160,20 @@ pub const Server = struct {
             };
             const trigger_kind = Protocol.completionTriggerKind(params);
             const trigger_character = Protocol.completionTriggerCharacter(params) orelse "";
-            const function_value_expected = self.functionValueExpectedAt(
+            const request_decision = try self.completionRequestDecision(
                 allocator,
                 uri,
                 source,
                 cursor,
-            ) catch false;
+                trigger_kind,
+                trigger_character,
+            );
+            if (self.completion_failure_for_testing) return error.InjectedCompletionFailure;
+            const decision = request_decision.edit;
+            const function_value_expected = Completion.expectsFunctionValueAt(allocator, source, decision) or
+                try self.functionValueExpectedAt(allocator, uri, source, decision);
             const assignment_expected_type = if (self.workspace_root_uri != null)
-                Workspace.assignmentExpectedTypeAtForTarget(
+                try Workspace.assignmentExpectedTypeAtForTargetWithDecision(
                     allocator,
                     self.io,
                     self.global_packages_root,
@@ -166,16 +182,16 @@ pub const Server = struct {
                     uri,
                     self.documents.items,
                     source,
-                    cursor,
-                ) catch null
+                    decision,
+                )
             else
                 null;
-            const completing_try_error = Completion.isTryErrorBindingPositionAt(allocator, source, cursor) catch false;
-            const completing_try_alternative = Completion.isTryAlternativePositionAt(allocator, source, cursor) catch false;
-            const completing_member = Completion.isMemberCompletionAt(allocator, source, cursor) catch false;
-            const local_parameters = try Completion.parameterItemsAt(allocator, source, cursor);
+            const completing_try_error = decision.completing_try_error;
+            const completing_try_alternative = decision.completing_try_alternative;
+            const completing_member = decision.kind == .member;
+            const local_parameters = try Completion.parameterItemsAtWithDecision(allocator, source, decision);
             const imported_parameters = if (self.workspace_root_uri != null)
-                Workspace.parameterItemsAtForTarget(
+                try Workspace.parameterItemsAtForTargetWithDecision(
                     allocator,
                     self.io,
                     self.global_packages_root,
@@ -184,8 +200,8 @@ pub const Server = struct {
                     uri,
                     self.documents.items,
                     source,
-                    cursor,
-                ) catch &.{}
+                    decision,
+                )
             else
                 &.{};
             const parameters = try mergeCompletionItems(allocator, local_parameters, imported_parameters);
@@ -201,9 +217,9 @@ pub const Server = struct {
                 });
             }
             const needs_workspace = self.workspace_root_uri != null and
-                needsWorkspaceCompletion(allocator, source, cursor);
+                needsWorkspaceCompletion(source, decision);
             if (needs_workspace) {
-                const project_items = Workspace.itemsAtForTarget(
+                const project_outcome = try Workspace.completionOutcomeAtForTargetWithDecision(
                     allocator,
                     self.io,
                     self.global_packages_root,
@@ -212,29 +228,37 @@ pub const Server = struct {
                     uri,
                     self.documents.items,
                     source,
-                    cursor,
-                ) catch null;
-                if (project_items) |items| {
-                    const merged = if (completing_member)
-                        items
-                    else
-                        try mergeCompletionItems(allocator, parameters, items);
-                    const contextual = if (function_value_expected)
-                        try Completion.insertFunctionReferences(allocator, merged)
-                    else
-                        merged;
-                    return try self.reply(allocator, id, .{ .isIncomplete = false, .items = contextual });
+                    decision,
+                );
+                switch (project_outcome) {
+                    .items => |items| {
+                        const typed_items = try Completion.filterCallableItemsAt(
+                            allocator,
+                            source,
+                            decision,
+                            items,
+                        );
+                        const merged = if (completing_member)
+                            typed_items
+                        else
+                            try mergeCompletionItems(allocator, parameters, typed_items);
+                        const contextual = if (function_value_expected)
+                            try Completion.insertFunctionReferences(allocator, merged)
+                        else
+                            merged;
+                        return try self.reply(allocator, id, .{ .isIncomplete = false, .items = contextual });
+                    },
+                    .not_applicable, .unresolved_receiver => {},
                 }
             }
-            const items = try Completion.itemsAtWithExpectedType(
+            const items = try Completion.itemsAtWithDecision(
                 allocator,
                 source,
-                cursor,
-                trigger_kind,
+                decision,
                 assignment_expected_type,
             );
             if (needs_workspace and !completing_member) {
-                const imported = Workspace.scopeItemsAtForTargetExpected(
+                const imported = try Workspace.scopeItemsAtForTargetDecisionExpected(
                     allocator,
                     self.io,
                     self.global_packages_root,
@@ -243,10 +267,16 @@ pub const Server = struct {
                     uri,
                     self.documents.items,
                     source,
-                    cursor,
+                    decision,
                     assignment_expected_type,
-                ) catch &.{};
-                const scoped = try mergeCompletionItems(allocator, items, imported);
+                );
+                const typed_imported = try Completion.filterCallableItemsAt(
+                    allocator,
+                    source,
+                    decision,
+                    imported,
+                );
+                const scoped = try mergeCompletionItems(allocator, items, typed_imported);
                 const merged = try mergeCompletionItems(allocator, parameters, scoped);
                 const contextual = if (function_value_expected)
                     try Completion.insertFunctionReferences(allocator, merged)
@@ -362,15 +392,25 @@ pub const Server = struct {
     }
 
     fn setDocument(self: *Server, document: Types.Document) !void {
-        const text = try self.allocator.dupe(u8, document.text);
-        errdefer self.allocator.free(text);
+        _ = try self.storeDocument(document, false);
+    }
+
+    fn setDocumentIfNewer(self: *Server, document: Types.Document) !bool {
+        return self.storeDocument(document, true);
+    }
+
+    fn storeDocument(self: *Server, document: Types.Document, reject_stale: bool) !bool {
         for (self.documents.items) |*current| {
             if (!std.mem.eql(u8, current.uri, document.uri)) continue;
+            if (reject_stale and document.version <= current.version) return false;
+            const text = try self.allocator.dupe(u8, document.text);
             self.allocator.free(current.text);
             current.text = text;
             current.version = document.version;
-            return;
+            return true;
         }
+        const text = try self.allocator.dupe(u8, document.text);
+        errdefer self.allocator.free(text);
         const uri = try self.allocator.dupe(u8, document.uri);
         errdefer self.allocator.free(uri);
         try self.documents.append(self.allocator, .{
@@ -378,6 +418,7 @@ pub const Server = struct {
             .text = text,
             .version = document.version,
         });
+        return true;
     }
 
     fn removeDocument(self: *Server, uri: []const u8) void {
@@ -409,10 +450,10 @@ pub const Server = struct {
         allocator: Allocator,
         uri: []const u8,
         source: []const u8,
-        cursor: usize,
+        decision: Completion.Decision,
     ) !bool {
-        const argument = try Completion.activeArgumentAt(allocator, source, cursor) orelse return false;
-        const lookup_source = try Completion.sourceForArgumentLookup(allocator, source, cursor, argument);
+        const argument = decision.active_argument orelse return false;
+        const lookup_source = try Completion.sourceForArgumentLookup(allocator, source, decision.cursor, argument);
         const local = try Completion.itemsAt(allocator, lookup_source, argument.callee_end, .invoked);
         if (Completion.callablesExpectFunctionArgument(local, argument)) return true;
         if (self.workspace_root_uri == null) return false;
@@ -428,6 +469,23 @@ pub const Server = struct {
             argument.callee_end,
         )) orelse return false;
         return Completion.callablesExpectFunctionArgument(imported, argument);
+    }
+
+    fn completionRequestDecision(
+        self: *const Server,
+        allocator: Allocator,
+        uri: []const u8,
+        source: []const u8,
+        cursor: usize,
+        trigger_kind: Types.CompletionTriggerKind,
+        trigger_character: []const u8,
+    ) !CompletionRequestDecision {
+        return .{
+            .document_uri = uri,
+            .document_version = self.documentVersion(uri) orelse return error.MissingDocumentVersion,
+            .trigger_character = trigger_character,
+            .edit = try Completion.decisionAt(allocator, source, cursor, trigger_kind),
+        };
     }
 };
 
@@ -451,48 +509,141 @@ fn mergeCompletionItems(
     const unique = Completion.deduplicateCallableShapes(result.items);
     Completion.disambiguateCallableLabels(unique);
     std.mem.sort(Types.CompletionItem, unique, {}, completionItemLessThan);
+    for (unique, 0..) |*item, index| {
+        item.sortText = try std.fmt.allocPrint(allocator, "{s}-{d:0>6}", .{
+            completionPriority(item.*),
+            index,
+        });
+    }
     return allocator.dupe(Types.CompletionItem, unique);
 }
 
 fn completionItemLessThan(_: void, left: Types.CompletionItem, right: Types.CompletionItem) bool {
-    const left_sort = left.sortText orelse "999";
-    const right_sort = right.sortText orelse "999";
-    const order = std.mem.order(u8, left_sort, right_sort);
+    const order = std.mem.order(u8, completionPriority(left), completionPriority(right));
     if (order != .eq) return order == .lt;
-    return std.mem.lessThan(u8, left.label, right.label);
+    const label_order = std.mem.order(u8, left.label, right.label);
+    if (label_order != .eq) return label_order == .lt;
+    const detail_order = std.mem.order(u8, left.detail, right.detail);
+    if (detail_order != .eq) return detail_order == .lt;
+    if (left.kind != right.kind) return left.kind < right.kind;
+    const filter_order = optionalTextOrder(left.filterText, right.filterText);
+    if (filter_order != .eq) return filter_order == .lt;
+    const insert_order = optionalTextOrder(left.insertText, right.insertText);
+    if (insert_order != .eq) return insert_order == .lt;
+    return (left.insertTextFormat orelse 0) < (right.insertTextFormat orelse 0);
 }
 
-fn needsWorkspaceCompletion(allocator: Allocator, source: []const u8, cursor: usize) bool {
-    if (std.mem.indexOf(u8, source, "use ") != null) return true;
-    if (cursor > source.len) return false;
-    var prefix_start = cursor;
-    while (prefix_start != 0 and
-        (std.ascii.isAlphanumeric(source[prefix_start - 1]) or source[prefix_start - 1] == '_'))
-    {
-        prefix_start -= 1;
+fn completionPriority(item: Types.CompletionItem) []const u8 {
+    const sort_text = item.sortText orelse return "999";
+    const separator = std.mem.indexOfScalar(u8, sort_text, '-') orelse return sort_text;
+    return sort_text[0..separator];
+}
+
+fn optionalTextOrder(left: ?[]const u8, right: ?[]const u8) std.math.Order {
+    if (left == null and right == null) return .eq;
+    if (left == null) return .lt;
+    if (right == null) return .gt;
+    return std.mem.order(u8, left.?, right.?);
+}
+
+test "completion merge is invariant to input order and upstream sort suffixes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const first_input = [_]Types.CompletionItem{
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint(color:int) void",
+            .sortText = "010-999999",
+            .filterText = "paint",
+            .insertText = "paint(${1:color})$0",
+            .insertTextFormat = 2,
+        },
+        .{
+            .label = "alpha",
+            .kind = 6,
+            .detail = "alpha:int",
+            .sortText = "010-000001",
+            .filterText = "alpha",
+            .insertText = "alpha",
+        },
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint() void",
+            .sortText = "010-000000",
+            .filterText = "paint",
+            .insertText = "paint()",
+        },
+    };
+    const second_input = [_]Types.CompletionItem{
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint() void",
+            .sortText = "010-654321",
+            .filterText = "paint",
+            .insertText = "paint()",
+        },
+        .{
+            .label = "paint",
+            .kind = 3,
+            .detail = "paint(color:int) void",
+            .sortText = "010-000002",
+            .filterText = "paint",
+            .insertText = "paint(${1:color})$0",
+            .insertTextFormat = 2,
+        },
+        .{
+            .label = "alpha",
+            .kind = 6,
+            .detail = "alpha:int",
+            .sortText = "010-888888",
+            .filterText = "alpha",
+            .insertText = "alpha",
+        },
+    };
+
+    const first = try mergeCompletionItems(allocator, &first_input, &.{});
+    const second = try mergeCompletionItems(allocator, &.{}, &second_input);
+    try std.testing.expectEqual(first.len, second.len);
+    for (first, second) |left, right| {
+        try std.testing.expectEqualStrings(left.label, right.label);
+        try std.testing.expectEqual(left.kind, right.kind);
+        try std.testing.expectEqualStrings(left.detail, right.detail);
+        try std.testing.expectEqualStrings(left.sortText.?, right.sortText.?);
+        try std.testing.expectEqualStrings(left.filterText.?, right.filterText.?);
+        try std.testing.expectEqualStrings(left.insertText.?, right.insertText.?);
+        try std.testing.expectEqual(left.insertTextFormat, right.insertTextFormat);
     }
-    if (Completion.isTypePositionAt(allocator, source, prefix_start) catch false) return true;
-    if (prefix_start != 0 and source[prefix_start - 1] == '.' and
-        (prefix_start < 2 or source[prefix_start - 2] != '.')) return true;
-    if (prefix_start >= 2 and source[prefix_start - 2] == '.' and source[prefix_start - 1] == '.') return true;
-    if (prefix_start != 0 and source[prefix_start - 1] == '.' and
-        (Completion.isQualifiedTypePositionAt(allocator, source, prefix_start) catch false)) return true;
-    if (Completion.isReturnExpressionAt(allocator, source, cursor) catch false) return true;
-    const prefix = source[prefix_start..cursor];
+}
+
+fn needsWorkspaceCompletion(source: []const u8, decision: Completion.Decision) bool {
+    if (decision.has_use) return true;
+    if (decision.kind == .none) return false;
+    if (decision.kind == .type_name or decision.kind == .member or decision.kind == .use_path) return true;
+    if (decision.return_expression) return true;
+    const prefix = decision.prefix;
     if (prefix.len != 0 and std.ascii.isUpper(prefix[0])) return true;
-    const before = source[0..prefix_start];
+    const before = source[0..decision.prefix_start];
     return std.mem.endsWith(u8, before, "Platform.") or std.mem.endsWith(u8, before, "Target.");
+}
+
+fn needsWorkspaceCompletionAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
+    const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
+    return needsWorkspaceCompletion(source, decision);
 }
 
 test "contextual qualifiers request workspace completion without an import" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Pla }", 17));
-    try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Platform. }", 23));
-    try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Target. }", 21));
-    try std.testing.expect(needsWorkspaceCompletion(allocator, "func main() { STD. }", 18));
-    try std.testing.expect(needsWorkspaceCompletion(allocator, "func main() { STD.Math. }", 23));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, "func seed() { Pla }", 17));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, "func seed() { Platform. }", 23));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, "func seed() { Target. }", 21));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, "func main() { STD. }", 18));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, "func main() { STD.Math. }", 23));
     const cascade_source =
         \\func main() {
         \\    var window = GFX.Window()
@@ -500,18 +651,18 @@ test "contextual qualifiers request workspace completion without an import" {
         \\}
     ;
     const cascade_cursor = std.mem.indexOf(u8, cascade_source, "..\n").? + "..".len;
-    try std.testing.expect(needsWorkspaceCompletion(allocator, cascade_source, cascade_cursor));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, cascade_source, cascade_cursor));
     const package_prefix_source = "func main() { var value = S }";
     const package_prefix_cursor = std.mem.indexOf(u8, package_prefix_source, "S }").? + 1;
-    try std.testing.expect(needsWorkspaceCompletion(allocator, package_prefix_source, package_prefix_cursor));
-    try std.testing.expect(needsWorkspaceCompletion(allocator, "func test() Res", 15));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, package_prefix_source, package_prefix_cursor));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, "func test() Res", 15));
     const return_source =
         \\func test() Result<int, str> {
         \\    return Re
         \\}
     ;
     const return_cursor = std.mem.indexOf(u8, return_source, "return Re").? + "return Re".len;
-    try std.testing.expect(needsWorkspaceCompletion(allocator, return_source, return_cursor));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, return_source, return_cursor));
     const result_argument_source =
         \\struct Error {}
         \\func test() Result<int, Error> {
@@ -519,8 +670,8 @@ test "contextual qualifiers request workspace completion without an import" {
         \\}
     ;
     const result_argument_cursor = std.mem.indexOf(u8, result_argument_source, "failure(Er").? + "failure(Er".len;
-    try std.testing.expect(needsWorkspaceCompletion(allocator, result_argument_source, result_argument_cursor));
-    try std.testing.expect(!needsWorkspaceCompletion(allocator, "func seed() { local }", 19));
+    try std.testing.expect(try needsWorkspaceCompletionAt(allocator, result_argument_source, result_argument_cursor));
+    try std.testing.expect(!try needsWorkspaceCompletionAt(allocator, "func seed() { local }", 19));
 }
 
 test "qualified type paths request workspace completion inside generic arguments" {
@@ -528,7 +679,92 @@ test "qualified type paths request workspace completion inside generic arguments
     defer arena.deinit();
     const source = "func test() Result<Math.>";
     const cursor = std.mem.indexOf(u8, source, "Math.").? + "Math.".len;
-    try std.testing.expect(needsWorkspaceCompletion(arena.allocator(), source, cursor));
+    try std.testing.expect(try needsWorkspaceCompletionAt(arena.allocator(), source, cursor));
+}
+
+test "completion request decision preserves version trigger recovery and Unicode offsets" {
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const uri = "file:///Decision.sx";
+    const source =
+        \\struct Input { func pressed() bool { return true } }
+        \\func main() {
+        \\    print("prêt")
+        \\    let input = Input()
+        \\    input.
+        \\}
+    ;
+    try server.setDocument(.{ .uri = uri, .text = source, .version = 41 });
+    const cursor = std.mem.indexOf(u8, source, "input.\n").? + "input.".len;
+    const first = try server.completionRequestDecision(allocator, uri, source, cursor, .trigger_character, ".");
+    const repeated = try server.completionRequestDecision(allocator, uri, source, cursor, .trigger_character, ".");
+    const invoked = try server.completionRequestDecision(allocator, uri, source, cursor, .invoked, "");
+
+    try std.testing.expectEqual(@as(i64, 41), first.document_version);
+    try std.testing.expectEqualStrings(uri, first.document_uri);
+    try std.testing.expectEqualStrings(".", first.trigger_character);
+    try std.testing.expectEqual(Types.CompletionTriggerKind.trigger_character, first.edit.trigger_kind);
+    try std.testing.expectEqual(Completion.ContextKind.member, first.edit.kind);
+    try std.testing.expectEqual(cursor, first.edit.cursor);
+    try std.testing.expectEqualStrings("input", first.edit.receiver.?);
+    try std.testing.expectEqual(Completion.Recovery.completion_site, first.edit.recovery);
+    try std.testing.expectEqual(first.edit.kind, repeated.edit.kind);
+    try std.testing.expectEqual(first.edit.recovery, repeated.edit.recovery);
+    try std.testing.expectEqualStrings(first.edit.receiver.?, repeated.edit.receiver.?);
+    try std.testing.expectEqual(first.edit.kind, invoked.edit.kind);
+    try std.testing.expectEqual(first.edit.recovery, invoked.edit.recovery);
+    try std.testing.expectEqualStrings(first.edit.receiver.?, invoked.edit.receiver.?);
+
+    const changed = "func main() { print(\"prêt\") }";
+    try server.setDocument(.{ .uri = uri, .text = changed, .version = 42 });
+    const changed_decision = try server.completionRequestDecision(
+        allocator,
+        uri,
+        changed,
+        changed.len - 1,
+        .invoked,
+        "",
+    );
+    try std.testing.expectEqual(@as(i64, 42), changed_decision.document_version);
+    try std.testing.expect(changed_decision.edit.kind != .member);
+}
+
+test "internal completion failure is a JSON-RPC error instead of an empty success" {
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const uri = "file:///Failure.sx";
+    const source = "func main() { }";
+    try server.setDocument(.{ .uri = uri, .text = source, .version = 1 });
+    server.completion_failure_for_testing = true;
+    const request = try std.json.Stringify.valueAlloc(arena.allocator(), .{
+        .jsonrpc = Types.protocol_version,
+        .id = 91,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = Protocol.positionAtByteOffset(source, source.len - 1, .utf16).?,
+        },
+    }, .{});
+    const response = (try server.handleBodySafely(arena.allocator(), request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"code\":-32603") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "internal language server error") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"items\":[]") == null);
+}
+
+test "completion request handler contains no silent error conversion" {
+    const server_source = @embedFile("Server.zig");
+    const start = std.mem.indexOf(u8, server_source, "if (std.mem.eql(u8, request.method, \"textDocument/completion\"))").?;
+    const end = std.mem.indexOfPos(u8, server_source, start, "if (std.mem.eql(u8, request.method, \"textDocument/documentColor\"))").?;
+    const handler = server_source[start..end];
+    try std.testing.expect(std.mem.indexOf(u8, handler, " catch ") == null);
+    try std.testing.expect(std.mem.indexOf(u8, handler, "catch false") == null);
+    try std.testing.expect(std.mem.indexOf(u8, handler, "catch null") == null);
+    try std.testing.expect(std.mem.indexOf(u8, handler, "catch &.{}") == null);
 }
 
 test "initialize advertises completion colors and definition navigation" {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
 const fundamental_types = [_][]const u8{
@@ -169,6 +170,71 @@ test "field initializer expressions complete compatible values" {
     try Support.expectNoDuplicates(items);
 }
 
+test "typed initializers preserve prefixed expression roots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const items = try Support.complete(allocator,
+        \\struct Recipe {}
+        \\class World {
+        \\    func recipe() Recipe { return Recipe() }
+        \\}
+        \\func world_factory() World { return World() }
+        \\func make(world:World) Recipe {
+        \\    var result:Recipe = worl<|>
+        \\    return result
+        \\}
+    );
+
+    try Support.expectExactLabels(&.{ "world", "world_factory" }, items);
+    try Support.expectItem(.{
+        .label = "world",
+        .kind = 6,
+        .detail = "world:World",
+        .insert_text = "world",
+    }, items);
+    try Support.expectItem(.{
+        .label = "world_factory",
+        .kind = 3,
+        .detail = "world_factory() World",
+        .insert_text = "world_factory()",
+        .insert_text_format = null,
+    }, items);
+    try Support.expectNoDuplicates(items);
+
+    const local_items = try Support.complete(allocator,
+        \\struct Recipe {}
+        \\class World {}
+        \\func make(world:World) Recipe {
+        \\    let world_copy:World = world
+        \\    var result:Recipe = world_c<|>
+        \\    return result
+        \\}
+    );
+    try Support.expectExactLabels(&.{"world_copy"}, local_items);
+    try Support.expectItem(.{
+        .label = "world_copy",
+        .kind = 6,
+        .detail = "world_copy:World",
+        .insert_text = "world_copy",
+    }, local_items);
+    try Support.expectNoDuplicates(local_items);
+
+    const empty_items = try Support.complete(allocator,
+        \\struct Recipe {}
+        \\class World {}
+        \\func world_factory() World { return World() }
+        \\func make(world:World, recipe:Recipe) Recipe {
+        \\    var result:Recipe = <|>
+        \\    return result
+        \\}
+    );
+    try Support.expectPresent("recipe", empty_items);
+    try Support.expectAbsent("world", empty_items);
+    try Support.expectAbsent("world_factory", empty_items);
+    try Support.expectNoDuplicates(empty_items);
+}
+
 test "completion is deterministic for incomplete source" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -186,6 +252,56 @@ test "completion is deterministic for incomplete source" {
     try Support.expectEqualItems(first, second);
     try Support.expectPresent("error", first);
     try Support.expectNoDuplicates(first);
+}
+
+test "server keeps member completion across independent syntax errors" {
+    const sources = [_][]const u8{
+        "struct Input { func pressed() bool { return true } }\nfunc helper( { }\nfunc main() {\n    let input = Input()\n    input.<|>\n}",
+        "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    if (input.<|>\n}",
+        "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    input.<|>\n}\nfunc helper( { }",
+        "struct Input { func pressed() bool { return true } }\nfunc helper() { if }\nfunc main() {\n    let input = Input()\n    input.<|>\n}",
+    };
+    for (sources, 0..) |source, index| {
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Recovery-{d}.sx", .{index});
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectPresent("pressed", items);
+        try Support.expectAbsent("unknown", items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
+test "server invalidates completion across deletion and retyping" {
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const uri = "file:///Editing.sx";
+    const partial = try Support.removeMarker(allocator,
+        \\func paint() {}
+        \\func main() { pai<|> }
+    );
+    try Support.openDocument(&server, allocator, uri, 1, partial.text);
+    const first = try Support.serverCompletionInOpenDocument(&server, allocator, uri, partial);
+    try Support.expectPresent("paint", first);
+
+    const deleted = try Support.removeMarker(allocator,
+        \\func paint() {}
+        \\func main() { <|> }
+    );
+    try Support.changeDocument(&server, allocator, uri, 2, deleted.text);
+    const empty = try Support.serverCompletionInOpenDocument(&server, allocator, uri, deleted);
+    try Support.expectPresent("paint", empty);
+
+    try Support.changeDocument(&server, allocator, uri, 3, partial.text);
+    const retyped = try Support.serverCompletionInOpenDocument(&server, allocator, uri, partial);
+    try Support.expectPresent("paint", retyped);
+    try Support.expectNoDuplicates(retyped);
+    try Support.expectEqualItems(first, retyped);
 }
 
 test "incomplete control conditions preserve every lexical parameter" {

@@ -322,18 +322,18 @@ test "server completes additive parent and extension module declarations" {
     try std.testing.expectEqualStrings(extension_uri, extension.uri);
 }
 
-test "server completes and navigates authorized umbrella contributions" {
+test "server completes and navigates external umbrella contributions" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
-    try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
+    try temporary.dir.createDirPath(std.testing.io, "AI/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
-        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"AI\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Components\",\"GFX.Plugins\",\"GFX.Resources\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[\"GFX.Components\",\"GFX.Plugins\",\"GFX.Resources\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Components.sx",
@@ -348,37 +348,37 @@ test "server completes and navigates authorized umbrella contributions" {
         .data = "public struct CoreResource {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Package.json",
-        .data = "{\"name\":\"GFX.Physics\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+        .sub_path = "AI/Package.json",
+        .data = "{\"name\":\"AI\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/@Module.sx",
+        .sub_path = "AI/Module/@Module.sx",
         .data =
         \\contribute GFX.Plugins {
-        \\    public use GFX.Physics.Plugin as Physics
+        \\    public use AI.Plugin as BehaviourTree
         \\}
         \\contribute GFX.Components {
-        \\    public use GFX.Physics.Body as RigidBody
+        \\    public use AI.Behaviour as Behaviour
         \\}
         \\contribute GFX.Resources {
-        \\    public use GFX.Physics.World as World
+        \\    public use AI.Trees as BehaviourTrees
         \\}
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/Plugin.sx",
+        .sub_path = "AI/Module/Plugin.sx",
         .data = "public struct Plugin {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/Body.sx",
-        .data = "public struct Body {}",
+        .sub_path = "AI/Module/Behaviour.sx",
+        .data = "public struct Behaviour {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX.Physics/Module/World.sx",
+        .sub_path = "AI/Module/Trees.sx",
         .data =
-        \\public class World {
-        \\    func spawn() int { return 0 }
-        \\    func is_alive() bool { return true }
+        \\public class Trees {
+        \\    func count() int { return 0 }
+        \\    func is_empty() bool { return true }
         \\    private func hidden() {}
         \\}
         ,
@@ -391,7 +391,7 @@ test "server completes and navigates authorized umbrella contributions" {
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
     const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
-    const plugin_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Physics/Module/Plugin.sx", .{root});
+    const plugin_uri = try std.fmt.allocPrint(allocator, "file://{s}/AI/Module/Plugin.sx", .{root});
 
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
@@ -405,31 +405,31 @@ test "server completes and navigates authorized umbrella contributions" {
         \\func main() { Plugins.<|> }
     );
     try Support.expectPresent("Core", items);
-    try Support.expectPresent("Physics", items);
+    try Support.expectPresent("BehaviourTree", items);
     try Support.expectNoDuplicates(items);
 
-    const world_members = try Support.serverCompletion(&server, allocator, main_uri,
+    const resource_members = try Support.serverCompletion(&server, allocator, main_uri,
         \\use GFX.Resources
-        \\func circle(world:&Resources.World) { world.<|> }
+        \\func inspect(trees:&Resources.BehaviourTrees) { trees.<|> }
     );
-    try Support.expectExactLabels(&.{ "is_alive", "spawn" }, world_members);
+    try Support.expectExactLabels(&.{ "count", "is_empty" }, resource_members);
 
     const definition = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use GFX.Plugins
-        \\func main() { Plugins.Phys<|>ics() }
+        \\func main() { Plugins.Behaviour<|>Tree() }
     )).?;
     try std.testing.expectEqualStrings(plugin_uri, definition.uri);
     try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Plugins.sx",
-        .data = "public struct Physics {}",
+        .data = "public struct BehaviourTree {}",
     });
     const colliding = try Support.serverCompletion(&server, allocator, main_uri,
         \\use GFX.Plugins
         \\func main() { Plugins.<|> }
     );
-    try Support.expectPresent("Physics", colliding);
+    try Support.expectPresent("BehaviourTree", colliding);
     try Support.expectNoDuplicates(colliding);
 }
 
@@ -495,6 +495,282 @@ test "server completes and navigates a merged child catalog contribution" {
     )).?;
     try std.testing.expectEqualStrings(manager_uri, definition.uri);
     try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
+}
+
+test "server preserves imported roots throughout incomplete cascade editing" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data =
+        \\public enum Schedule { startup; update }
+        \\public class Application {
+        \\    func add_system(schedule:Schedule, callback:func()) Application { return self }
+        \\    func run() {}
+        \\}
+        ,
+    });
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/ECS");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/EntityRecipe.sx",
+        .data =
+        \\public class EntityRecipe {
+        \\    func with(value:int) EntityRecipe { return self }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const source =
+        \\use GFX.Application
+        \\use GFX.Application.Schedule
+        \\func callback() {}
+        \\func main() {
+        \\    Application()
+        \\        ..add_system(Sc<|>, callback)
+        \\        ..run()
+        \\}
+    ;
+    const items = try Support.serverCompletion(&server, allocator, main_uri, source);
+    try Support.expectExactLabels(&.{"Schedule"}, items);
+    try Support.expectItem(.{
+        .label = "Schedule",
+        .kind = 13,
+        .detail = "enum Schedule",
+        .insert_text = "Schedule",
+    }, items);
+    try Support.expectNoDuplicates(items);
+
+    const repeated = try Support.serverCompletion(&server, allocator, main_uri, source);
+    try Support.expectEqualItems(items, repeated);
+
+    const alias_items = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Application
+        \\use GFX.Application.Schedule as FrameSchedule
+        \\func callback() {}
+        \\func main() {
+        \\    Application()
+        \\        ..add_system(FrameS<|>, callback)
+        \\        ..run()
+        \\}
+    );
+    try Support.expectExactLabels(&.{"FrameSchedule"}, alias_items);
+    try Support.expectItem(.{
+        .label = "FrameSchedule",
+        .kind = 13,
+        .detail = "enum Schedule",
+        .insert_text = "FrameSchedule",
+    }, alias_items);
+    try Support.expectNoDuplicates(alias_items);
+
+    const cascade_sources = [_][]const u8{
+        \\use GFX.ECS
+        \\class World { func spawn(recipe:ECS.EntityRecipe) {} }
+        \\func make(world:World) {
+        \\    world.spawn(ECS.EntityRecipe()
+        \\        ..<|>
+        \\    )
+        \\}
+        ,
+        \\class World { func spawn(recipe:GFX.ECS.EntityRecipe) {} }
+        \\func make(world:World) {
+        \\    world.spawn(GFX.ECS.EntityRecipe()
+        \\        ..<|>
+        \\    )
+        \\}
+        ,
+        \\use GFX.ECS.EntityRecipe
+        \\class World { func spawn(recipe:EntityRecipe) {} }
+        \\func make(world:World) {
+        \\    world.spawn(EntityRecipe()
+        \\        ..<|>
+        \\    )
+        \\}
+        ,
+    };
+    for (cascade_sources) |cascade_source| {
+        const cascade_items = try Support.serverCompletionAfterTrigger(
+            &server,
+            allocator,
+            main_uri,
+            cascade_source,
+            ".",
+        );
+        try Support.expectExactLabels(&.{"with"}, cascade_items);
+        try Support.expectItem(.{
+            .label = "with",
+            .kind = 2,
+            .detail = "with(value:int) EntityRecipe",
+            .insert_text = "with(${1:value})$0",
+            .insert_text_format = 2,
+        }, cascade_items);
+        try Support.expectAbsent("spawn", cascade_items);
+        try Support.expectAbsent("if", cascade_items);
+        try Support.expectNoDuplicates(cascade_items);
+    }
+}
+
+test "server completes a cascade on an imported homonymous principal type" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Canvas/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX.Canvas\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Canvas\":{\"suite\":true}}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/@Module.sx",
+        .data = "public func root() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Canvas/Package.json",
+        .data = "{\"name\":\"GFX.Canvas\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Canvas/Module/@Module.sx",
+        .data = "public use GFX.Canvas.Canvas.Canvas",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Canvas/Module/Canvas.sx",
+        .data =
+        \\public class Canvas {
+        \\    func paint(callback:func()) Canvas { return self }
+        \\    func clear() {}
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const items = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        main_uri,
+        \\use GFX.Canvas
+        \\func broken( { }
+        \\func draw_player() Canvas {
+        \\    return Canvas()..<|>
+        \\}
+    ,
+        ".",
+    );
+    try Support.expectPresent("paint", items);
+    try Support.expectPresent("clear", items);
+    try Support.expectNoDuplicates(items);
+}
+
+test "server preserves imported field types through incomplete conditions" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const files = [_]struct { path: []const u8, source: []const u8 }{
+        .{ .path = "Kit/Package.json", .source = "{\"name\":\"Kit\",\"version\":\"1.0.0\"}" },
+        .{ .path = "Kit/Module/ECS/Query.sx", .source = "public class Query<T> {}" },
+        .{ .path = "Kit/Module/Math/Vec2.sx", .source =
+        \\public struct Vec2 {
+        \\    var x:float
+        \\    var y:float
+        \\    func length() float { return 0.0 }
+        \\}
+        },
+        .{ .path = "Kit/Module/Transform/Transform2D.sx", .source =
+        \\use Kit.Math
+        \\public struct Transform2D { var position:Math.Vec2 }
+        },
+    };
+    for (files) |file| {
+        try temporary.dir.createDirPath(std.testing.io, std.fs.path.dirname(file.path).?);
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.source });
+    }
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Kit\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const field_items = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        main_uri,
+        \\use Kit.ECS
+        \\struct PlayerTarget {}
+        \\func broken( { }
+        \\func update(query:ECS.Query<(&PlayerTarget, &Kit.Transform.Transform2D)>) {
+        \\    for (target, transform) in query {
+        \\        if transform.position.<|>
+        \\    }
+        \\}
+    ,
+        ".",
+    );
+    try Support.expectPresent("length", field_items);
+    try Support.expectPresent("x", field_items);
+    try Support.expectAbsent("position", field_items);
+    try Support.expectNoDuplicates(field_items);
+
+    const local_items = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        main_uri,
+        \\use Kit.ECS
+        \\struct PlayerTarget {}
+        \\func broken( { }
+        \\func update(query:ECS.Query<(&PlayerTarget, &Kit.Transform.Transform2D)>) {
+        \\    for (target, transform) in query {
+        \\        var pos:Kit.Math.Vec2 = transform.position
+        \\        if pos.<|>
+        \\    }
+        \\}
+    ,
+        ".",
+    );
+    try Support.expectPresent("length", local_items);
+    try Support.expectPresent("x", local_items);
+    try Support.expectAbsent("position", local_items);
+    try Support.expectNoDuplicates(local_items);
 }
 
 test "server navigates package extensions call chains fields and cascades" {
@@ -892,6 +1168,66 @@ test "type contexts expose modules as paths without leaking module values" {
     try Support.expectPresent("Axis", provider_items);
     try Support.expectAbsent("make_vector", provider_items);
     try Support.expectNoDuplicates(provider_items);
+}
+
+test "typed initializers preserve prefixed workspace expression roots" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Models.sx",
+        .data = "public struct Recipe {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Factory.sx",
+        .data =
+        \\use Module.Models.Recipe
+        \\public func recipe() Recipe { return Recipe() }
+        ,
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const function_items = try Support.serverCompletion(&server, allocator, uri,
+        \\use Module.Models.Recipe
+        \\use Module.Factory.recipe as world_factory
+        \\func make() Recipe {
+        \\    var result:Recipe = world_f<|>
+        \\    return result
+        \\}
+    );
+    try Support.expectExactLabels(&.{"world_factory"}, function_items);
+    try Support.expectItem(.{
+        .label = "world_factory",
+        .kind = 3,
+        .detail = "world_factory() Recipe",
+        .insert_text = "world_factory()",
+        .insert_text_format = null,
+    }, function_items);
+    try Support.expectNoDuplicates(function_items);
+
+    const module_items = try Support.serverCompletion(&server, allocator, uri,
+        \\use Module.Models.Recipe
+        \\func make() Recipe {
+        \\    var result:Recipe = Mod<|>
+        \\    return result
+        \\}
+    );
+    try Support.expectPresent("Module", module_items);
+    try Support.expectAbsent("true", module_items);
+    try Support.expectNoDuplicates(module_items);
 }
 
 test "field parameter and generic annotations expose module paths to types" {

@@ -50,6 +50,7 @@ const ImportedMemberQuery = struct {
     type_path: []const u8,
     prefix: []const u8,
     cursor: usize,
+    current_program: ?Ast.Program = null,
     static_receiver: bool = false,
     inside_extension: bool = false,
     type_only: bool = false,
@@ -60,6 +61,12 @@ const IndexedProject = ProjectIndex.IndexedProject;
 const RankedItem = struct {
     item: Types.CompletionItem,
     priority: u8,
+};
+
+pub const CompletionOutcome = union(enum) {
+    not_applicable,
+    unresolved_receiver,
+    items: []const Types.CompletionItem,
 };
 
 pub fn itemsAt(
@@ -96,12 +103,65 @@ pub fn itemsAtForTarget(
     source: []const u8,
     cursor: usize,
 ) !?[]const Types.CompletionItem {
+    const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
+    return itemsAtForTargetWithDecision(
+        allocator,
+        io,
+        global_packages_root,
+        selected_target,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        decision,
+    );
+}
+
+pub fn itemsAtForTargetWithDecision(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    decision: Completion.Decision,
+) !?[]const Types.CompletionItem {
+    return switch (try completionOutcomeAtForTargetWithDecision(
+        allocator,
+        io,
+        global_packages_root,
+        selected_target,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        decision,
+    )) {
+        .items => |items| items,
+        .not_applicable, .unresolved_receiver => null,
+    };
+}
+
+pub fn completionOutcomeAtForTargetWithDecision(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    decision: Completion.Decision,
+) !CompletionOutcome {
+    const cursor = decision.cursor;
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
     const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
-    const query = try queryAt(allocator, source, cursor, project, io, documents);
-    if (query == null) return null;
+    const query = try queryAt(allocator, source, decision, project, io, documents);
+    if (query == null) return if (decision.kind == .member) .unresolved_receiver else .not_applicable;
     const completing_use_path = std.meta.activeTag(query.?) == .use_path;
 
     var ranked: std.ArrayList(RankedItem) = .empty;
@@ -123,21 +183,26 @@ pub fn itemsAtForTarget(
                     .type_path = qualified.path,
                     .prefix = qualified.prefix,
                     .cursor = qualified.cursor,
+                    .current_program = decision.program,
                     .static_receiver = true,
                     .type_only = qualified.type_only,
                 },
                 &ranked,
             );
         },
-        .imported_member => |member| try appendImportedMembers(
-            allocator,
-            io,
-            documents,
-            project,
-            source,
-            member,
-            &ranked,
-        ),
+        .imported_member => |member| {
+            var resolved = member;
+            resolved.current_program = decision.program;
+            try appendImportedMembers(
+                allocator,
+                io,
+                documents,
+                project,
+                source,
+                resolved,
+                &ranked,
+            );
+        },
     }
     std.mem.sort(RankedItem, ranked.items, {}, rankedLessThan);
     const result = try allocator.alloc(Types.CompletionItem, ranked.items.len);
@@ -156,7 +221,7 @@ pub fn itemsAtForTarget(
     const expanded = try Completion.expandOptionalCallVariants(allocator, result, source, cursor);
     const unique = Completion.deduplicateCallableShapes(expanded);
     Completion.disambiguateCallableLabels(unique);
-    return unique;
+    return .{ .items = unique };
 }
 
 pub fn parameterItemsAtForTarget(
@@ -170,9 +235,34 @@ pub fn parameterItemsAtForTarget(
     source: []const u8,
     cursor: usize,
 ) ![]const Types.CompletionItem {
-    const call = try Completion.activeCallAt(allocator, source, cursor) orelse
+    const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
+    return parameterItemsAtForTargetWithDecision(
+        allocator,
+        io,
+        global_packages_root,
+        selected_target,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        decision,
+    );
+}
+
+pub fn parameterItemsAtForTargetWithDecision(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    decision: Completion.Decision,
+) ![]const Types.CompletionItem {
+    const call = decision.active_call orelse
         return allocator.alloc(Types.CompletionItem, 0);
-    const lookup_source = try Completion.sourceForParameterLookup(allocator, source, cursor, call);
+    const lookup_source = try Completion.sourceForParameterLookup(allocator, source, decision.cursor, call);
     const callables = (try itemsAtForTarget(
         allocator,
         io,
@@ -209,6 +299,8 @@ pub fn hasProjectReferenceForTarget(
         if (token.tag != .identifier) continue;
         const separator = lexer.next() catch return false;
         if (separator.tag != .dot) {
+            if (!hasLocalNominal(program, token.lexeme) and
+                try hasComposedNominal(allocator, io, project, token.lexeme)) return true;
             const incomplete_expression = switch (separator.tag) {
                 .end, .right_brace, .right_parenthesis, .comma, .semicolon => true,
                 else => false,
@@ -223,6 +315,29 @@ pub fn hasProjectReferenceForTarget(
     }
 }
 
+fn hasComposedNominal(
+    allocator: Allocator,
+    io: Io,
+    project: IndexedProject,
+    name: []const u8,
+) !bool {
+    const current = ProjectIndex.currentProvider(project) orelse return false;
+    for (project.index.providers) |provider| {
+        if (samePath(provider.path, current.path) or
+            Modules.compositionOwner(provider) != Modules.compositionOwner(current) or
+            !std.mem.eql(u8, provider.name, current.name)) continue;
+        const loaded = try ProjectIndex.loadProgram(allocator, io, &.{}, provider) orelse continue;
+        for (loaded.program.structures) |structure| {
+            if (!structure.is_local and !structure.is_private and !structure.is_protected and
+                std.mem.eql(u8, structure.name, name)) return true;
+        }
+        for (loaded.program.enums) |enumeration| {
+            if (!enumeration.is_local and std.mem.eql(u8, enumeration.name, name)) return true;
+        }
+    }
+    return false;
+}
+
 pub fn importedReceiverTypeAt(
     allocator: Allocator,
     io: Io,
@@ -231,7 +346,8 @@ pub fn importedReceiverTypeAt(
     source: []const u8,
     cursor: usize,
 ) !?[]const u8 {
-    const query = try queryAt(allocator, source, cursor, project, io, documents) orelse return null;
+    const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
+    const query = try queryAt(allocator, source, decision, project, io, documents) orelse return null;
     return switch (query) {
         .imported_member => |member| member.type_path,
         else => null,
@@ -284,10 +400,34 @@ pub fn assignmentExpectedTypeAtForTarget(
     source: []const u8,
     cursor: usize,
 ) !?[]const u8 {
-    if (cursor > source.len) return null;
-    const prefix_start = prefixStart(source, cursor);
-    const assignment = assignmentFieldAt(source, prefix_start) orelse return null;
-    const program = try parseCurrentAtScope(allocator, source, cursor, prefix_start, false, false) orelse return null;
+    const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
+    return assignmentExpectedTypeAtForTargetWithDecision(
+        allocator,
+        io,
+        global_packages_root,
+        selected_target,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        decision,
+    );
+}
+
+pub fn assignmentExpectedTypeAtForTargetWithDecision(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    decision: Completion.Decision,
+) !?[]const u8 {
+    if (decision.kind == .none) return null;
+    const assignment = assignmentFieldAt(source, decision.prefix_start) orelse return null;
+    const program = decision.program orelse return null;
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
@@ -305,7 +445,7 @@ pub fn assignmentExpectedTypeAtForTarget(
             project,
             program,
             source,
-            cursor,
+            decision.cursor,
             assignment.receiver,
         );
     const imported_receiver = receiver_type orelse return null;
@@ -410,13 +550,40 @@ pub fn scopeItemsAtForTargetExpected(
     cursor: usize,
     expected_type: ?[]const u8,
 ) ![]const Types.CompletionItem {
-    if (cursor > source.len) return allocator.alloc(Types.CompletionItem, 0);
-    const prefix_start = prefixStart(source, cursor);
-    const prefix = source[prefix_start..cursor];
-    const type_only = try Completion.isTypePositionAt(allocator, source, prefix_start);
-    const return_expression = try Completion.isReturnExpressionAt(allocator, source, cursor);
-    const aggregate = try Completion.aggregateContextAt(allocator, source, cursor);
-    const program = try parseCurrentAtScope(allocator, source, cursor, prefix_start, type_only, aggregate != null) orelse
+    const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
+    return scopeItemsAtForTargetDecisionExpected(
+        allocator,
+        io,
+        global_packages_root,
+        selected_target,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        decision,
+        expected_type,
+    );
+}
+
+pub fn scopeItemsAtForTargetDecisionExpected(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    decision: Completion.Decision,
+    expected_type: ?[]const u8,
+) ![]const Types.CompletionItem {
+    if (decision.kind == .none) return allocator.alloc(Types.CompletionItem, 0);
+    const cursor = decision.cursor;
+    const prefix = decision.prefix;
+    const type_only = decision.kind == .type_name or decision.qualified_type_position;
+    const return_expression = decision.return_expression;
+    const aggregate = decision.aggregate;
+    const program = decision.program orelse
         return allocator.alloc(Types.CompletionItem, 0);
     const wants_platform = !type_only and matchesPrefix("Platform", prefix) and
         !hasLocalNominal(program, "Platform") and findUseByAlias(program, "Platform") == null;
@@ -539,9 +706,11 @@ pub fn scopeItemsAtForTargetExpected(
         else
             use.path;
         if (!matchesPrefix(label, prefix)) continue;
-        if (expected_type) |expected| {
-            if (!std.mem.eql(u8, expected, label) and
-                !(expected.len > label.len and std.mem.startsWith(u8, expected, label) and expected[label.len] == '.')) continue;
+        if (prefix.len == 0) {
+            if (expected_type) |expected| {
+                if (!std.mem.eql(u8, expected, label) and
+                    !(expected.len > label.len and std.mem.startsWith(u8, expected, label) and expected[label.len] == '.')) continue;
+            }
         }
         if (fundamentalAliasTarget(program, use, 0)) |type_target| {
             if (type_only) try appendRanked(allocator, &ranked, .{
@@ -573,17 +742,32 @@ pub fn scopeItemsAtForTargetExpected(
                 );
                 matched = true;
             }
+            for (loaded.program.enums) |enumeration| {
+                if (!std.mem.eql(u8, enumeration.name, target.declaration)) continue;
+                if (enumeration.is_local) continue;
+                if (enumeration.is_internal) {
+                    if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
+                } else if (!enumeration.is_public and !providerInCurrentModule(project, provider)) continue;
+                try appendRanked(allocator, &ranked, .{
+                    .label = label,
+                    .kind = CompletionKind.enum_type,
+                    .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
+                }, 18, false);
+                matched = true;
+            }
             if (!type_only) for (loaded.program.functions) |function| {
-                if (!std.mem.eql(u8, function.name, target.declaration)) continue;
+                if (function.operator != null or !std.mem.eql(u8, function.name, target.declaration)) continue;
                 if (function.is_local) continue;
                 if (function.is_internal) {
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
+                var displayed = function;
+                displayed.name = label;
                 try appendRanked(allocator, &ranked, .{
                     .label = label,
                     .kind = CompletionKind.function,
-                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, displayed),
                 }, 35, true);
                 matched = true;
             };
@@ -651,43 +835,32 @@ fn hasLocalNominal(program: Ast.Program, name: []const u8) bool {
 fn queryAt(
     allocator: Allocator,
     source: []const u8,
-    cursor: usize,
+    decision: Completion.Decision,
     project: IndexedProject,
     io: Io,
     documents: []const Types.Document,
 ) !?Query {
-    if (cursor > source.len) return null;
-    const prefix_start = prefixStart(source, cursor);
-    const prefix = source[prefix_start..cursor];
+    const cursor = decision.cursor;
+    if (decision.kind == .none) return null;
+    const prefix_start = decision.prefix_start;
+    const prefix = decision.prefix;
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..prefix_start], '\n')) |newline| newline + 1 else 0;
     const line = std.mem.trimStart(u8, source[line_start..prefix_start], " \t");
-    const after_use = if (std.mem.startsWith(u8, line, "use "))
-        line["use ".len..]
-    else
-        null;
-    if (after_use) |path_before_prefix| return .{ .use_path = .{
-        .qualifier = trimPathQualifier(path_before_prefix),
-        .prefix = prefix,
-    } };
+    if (decision.kind == .use_path) {
+        const path_before_prefix = if (std.mem.startsWith(u8, line, "use "))
+            line["use ".len..]
+        else
+            return null;
+        return .{ .use_path = .{
+            .qualifier = trimPathQualifier(path_before_prefix),
+            .prefix = prefix,
+        } };
+    }
 
-    if (prefix_start == 0 or source[prefix_start - 1] != '.') return null;
-    const cascade = prefix_start >= 2 and source[prefix_start - 2] == '.';
-    const partial_cascade = if (!cascade)
-        Completion.partialCascadeReceiver(source, prefix_start - 1)
-    else
-        null;
-    const receiver = (if (cascade)
-        Completion.cascadeReceiver(source, prefix_start - 2)
-    else
-        partial_cascade orelse Completion.memberReceiver(source, prefix_start - 1)) orelse return null;
-    const qualified_type = try Completion.isQualifiedTypePositionAt(allocator, source, prefix_start);
-    const current_program = try parseCurrentAtCompletion(
-        allocator,
-        source,
-        cursor,
-        prefix,
-        qualified_type,
-    );
+    if (decision.kind != .member) return null;
+    const receiver = decision.receiver orelse return null;
+    const qualified_type = decision.qualified_type_position;
+    const current_program = decision.program;
     if (current_program) |program| {
         if (findUseByAlias(program, receiver)) |use| {
             const use_path = if (ProjectIndex.currentProvider(project)) |provider|
@@ -809,8 +982,22 @@ fn queryAt(
                 .type_only = qualified_type,
             } };
         }
-        if (Completion.resolveReceiverType(allocator, source, program, cursor, receiver)) |local_type| {
-            if (try importedNominalTypePath(allocator, io, documents, program, project, local_type)) |resolved| {
+        if (Completion.resolveReceiverTypeForAccess(
+            allocator,
+            source,
+            program,
+            cursor,
+            receiver,
+            decision.safe_member_access,
+        )) |local_type| {
+            if (try importedNominalTypePath(
+                allocator,
+                io,
+                documents,
+                program,
+                project,
+                Completion.nominalReceiverName(local_type),
+            )) |resolved| {
                 return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
             }
         }
@@ -1021,7 +1208,7 @@ fn appendPathItems(
         }
         if (!query.type_only) {
             for (loaded.program.functions) |function| {
-                if (function.is_local) continue;
+                if (function.is_local or function.operator != null) continue;
                 if (function.is_internal) {
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!module_context and contextual_provider == null and !function.is_public) continue;
@@ -1206,7 +1393,7 @@ fn hasPublicDeclaration(program: Ast.Program, name: []const u8) bool {
         if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
     }
     for (program.functions) |function| {
-        if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
+        if (function.operator == null and function.is_public and std.mem.eql(u8, function.name, name)) return true;
     }
     for (program.uses) |use| {
         if (use.is_public and use.alias != null and std.mem.eql(u8, use.alias.?, name)) return true;
@@ -1412,7 +1599,7 @@ fn appendReexportTarget(
         var found_function = false;
         if (!type_only) {
             for (loaded.program.functions) |function| {
-                if (!function.is_public or !std.mem.eql(u8, function.name, target.declaration)) continue;
+                if (function.operator != null or !function.is_public or !std.mem.eql(u8, function.name, target.declaration)) continue;
                 if (call_source) |text| if (!Completion.callAcceptsParameters(
                     text,
                     call_cursor,
@@ -1491,7 +1678,18 @@ fn appendImportedMembersDepth(
 ) !void {
     if (depth > project.index.providers.len) return;
     const target = declarationTarget(project.index, query.type_path) orelse return;
-    const provider = project.index.providers[target.provider];
+    var provider_index = target.provider;
+    const module_name = project.index.providers[target.provider].name;
+    for (project.index.providers, 0..) |candidate, candidate_index| {
+        if (!std.mem.eql(u8, candidate.name, module_name) or
+            !project.graph.canAccess(project.current_owner, candidate.owner, candidate.name)) continue;
+        const candidate_program = try loadProgram(allocator, io, documents, candidate) orelse continue;
+        if (programProvidesDeclaration(candidate_program.program, target.declaration)) {
+            provider_index = candidate_index;
+            break;
+        }
+    }
+    const provider = project.index.providers[provider_index];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return;
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
     for (loaded.program.structures) |structure| {
@@ -1655,6 +1853,16 @@ fn appendImportedMembersDepth(
     }
 }
 
+fn programProvidesDeclaration(program: Ast.Program, declaration: []const u8) bool {
+    for (program.structures) |structure| if (std.mem.eql(u8, structure.name, declaration)) return true;
+    for (program.enums) |enumeration| if (std.mem.eql(u8, enumeration.name, declaration)) return true;
+    for (program.uses) |use| {
+        const alias = use.alias orelse lastSegment(use.path);
+        if (use.is_public and std.mem.eql(u8, alias, declaration)) return true;
+    }
+    return false;
+}
+
 fn appendProviderExtensionMethods(
     allocator: Allocator,
     project: IndexedProject,
@@ -1699,13 +1907,7 @@ fn appendCurrentExtensionMethods(
     query: ImportedMemberQuery,
     ranked: *std.ArrayList(RankedItem),
 ) !void {
-    const program = try parseCurrentAtCompletion(
-        allocator,
-        source,
-        query.cursor,
-        query.prefix,
-        false,
-    ) orelse return;
+    const program = query.current_program orelse return;
     for (program.extensions) |extension| {
         const local_target = Completion.typeName(program, extension.target);
         const resolved = try importedTypePath(allocator, program, project, local_target) orelse continue;
@@ -1737,100 +1939,6 @@ fn loadProgram(
 fn parseCurrent(allocator: Allocator, source: []const u8) !?Ast.Program {
     var parser = ParserModule.Parser.init(allocator, source);
     return parser.parse() catch null;
-}
-
-fn parseCurrentAtCompletion(
-    allocator: Allocator,
-    source: []const u8,
-    cursor: usize,
-    prefix: []const u8,
-    type_position: bool,
-) !?Ast.Program {
-    if (try parseCurrent(allocator, source)) |program| return program;
-    if (try Completion.recoverCascadeForParsing(allocator, source, cursor)) |recovered| {
-        if (try parseCurrent(allocator, recovered)) |program| return program;
-    }
-    const completion_line_start = if (std.mem.lastIndexOfScalar(u8, source[0..cursor], '\n')) |newline| newline + 1 else 0;
-    const before_cursor = std.mem.trim(u8, source[completion_line_start..cursor], " \t\r");
-    const control_body_missing = Completion.lineStartsControlCondition(before_cursor) and
-        !blockFollowsCursor(source, cursor);
-    const placeholder = if (type_position)
-        if (prefix.len == 0) "__Completion" else ""
-    else if (Completion.callFollows(source, cursor))
-        if (prefix.len == 0) "__completion" else ""
-    else if (prefix.len == 0)
-        if (control_body_missing) "__completion() {}" else "__completion()"
-    else
-        "()";
-    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
-        source[0..cursor],
-        placeholder,
-        source[cursor..],
-    });
-    if (try parseCurrent(allocator, recovered)) |program| return program;
-    if (!type_position or prefix.len > cursor) return null;
-
-    const prefix_start = cursor - prefix.len;
-    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..prefix_start], '\n')) |newline|
-        newline + 1
-    else
-        0;
-
-    const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
-        newline + 1
-    else
-        source.len;
-    const without_incomplete_declaration = try std.fmt.allocPrint(allocator, "{s}{s}", .{
-        source[0..line_start],
-        source[line_end..],
-    });
-    return parseCurrent(allocator, without_incomplete_declaration);
-}
-
-fn blockFollowsCursor(source: []const u8, cursor: usize) bool {
-    var index = cursor;
-    while (index < source.len and (source[index] == ' ' or source[index] == '\t' or source[index] == '\r' or
-        source[index] == '\n')) index += 1;
-    return index < source.len and source[index] == '{';
-}
-
-fn parseCurrentAtScope(
-    allocator: Allocator,
-    source: []const u8,
-    cursor: usize,
-    prefix_start: usize,
-    type_only: bool,
-    aggregate_field: bool,
-) !?Ast.Program {
-    if (try parseCurrent(allocator, source)) |program| return program;
-    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..prefix_start], '\n')) |newline|
-        newline + 1
-    else
-        0;
-    const before_prefix = std.mem.trim(u8, source[line_start..prefix_start], " \t\r");
-    const placeholder = if (aggregate_field)
-        "__completion:true"
-    else if (type_only)
-        "int"
-    else if (before_prefix.len == 0)
-        "print(true)"
-    else
-        "true";
-    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
-        source[0..prefix_start],
-        placeholder,
-        source[cursor..],
-    });
-    if (try parseCurrent(allocator, recovered)) |program| return program;
-    const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
-        newline + 1
-    else
-        source.len;
-    const without_incomplete_declaration = try std.fmt.allocPrint(allocator, "{s}{s}", .{
-        source[0..line_start],
-        source[line_end..],
-    });
-    return parseCurrent(allocator, without_incomplete_declaration);
 }
 
 fn findUseByAlias(program: Ast.Program, alias: []const u8) ?Ast.Use {
@@ -1921,19 +2029,57 @@ fn importedConstructorTypePath(
     type_path: []const u8,
     arity: usize,
 ) !?[]const u8 {
+    return importedConstructorTypePathDepth(
+        allocator,
+        io,
+        documents,
+        project,
+        type_path,
+        arity,
+        0,
+    );
+}
+
+fn importedConstructorTypePathDepth(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    type_path: []const u8,
+    arity: usize,
+    depth: usize,
+) !?[]const u8 {
+    if (depth > project.index.providers.len) return null;
     const target = declarationTarget(project.index, type_path) orelse return null;
-    const provider = project.index.providers[target.provider];
-    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
-    const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
-    for (loaded.program.structures) |structure| {
-        if (!structure.is_public or structure.is_protocol or structure.is_static or
-            !std.mem.eql(u8, structure.name, target.declaration)) continue;
-        if (structure.constructors.len == 0) return if (arity == 0) type_path else null;
-        for (structure.constructors) |constructor| {
-            if (!importedMemberVisible(project, provider, constructor)) continue;
-            if (parametersAcceptArity(constructor.parameters, arity)) return type_path;
+    const module_name = project.index.providers[target.provider].name;
+    for (project.index.providers) |provider| {
+        if (!std.mem.eql(u8, provider.name, module_name) or
+            !project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        for (loaded.program.structures) |structure| {
+            if (!structure.is_public or structure.is_protocol or structure.is_static or
+                !std.mem.eql(u8, structure.name, target.declaration)) continue;
+            if (structure.constructors.len == 0) return if (arity == 0) type_path else null;
+            for (structure.constructors) |constructor| {
+                if (!importedMemberVisible(project, provider, constructor)) continue;
+                if (parametersAcceptArity(constructor.parameters, arity)) return type_path;
+            }
+            return null;
         }
-        return null;
+        for (loaded.program.uses) |use| {
+            const alias = use.alias orelse lastSegment(use.path);
+            if (!use.is_public or !std.mem.eql(u8, alias, target.declaration)) continue;
+            const use_path = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
+            return importedConstructorTypePathDepth(
+                allocator,
+                io,
+                documents,
+                project,
+                use_path,
+                arity,
+                depth + 1,
+            );
+        }
     }
     return null;
 }
@@ -1967,7 +2113,7 @@ fn declaredCallReturnTypePath(
             const arity = callArity(tokens.items, index + 4) orelse continue;
             var result: ?[]const u8 = null;
             for (current.functions) |function| {
-                if (!std.mem.eql(u8, function.name, tokens.items[index + 3].lexeme) or
+                if (function.operator != null or !std.mem.eql(u8, function.name, tokens.items[index + 3].lexeme) or
                     !parametersAcceptArity(function.parameters, arity)) continue;
                 const local_type = returnTypeName(current, function.return_type) orelse continue;
                 const resolved = try importedTypePath(allocator, current, project, local_type) orelse continue;
@@ -2030,7 +2176,8 @@ fn importedQualifiedCallReturnTypePath(
     current: Ast.Program,
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
-    const owner_path = try importedTypePath(allocator, current, project, call.owner) orelse return null;
+    const owner_path = (try importedTypePath(allocator, current, project, call.owner)) orelse
+        (try importedQualifierPath(allocator, current, project, call.owner)) orelse return null;
     const qualified_type = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ owner_path, call.name });
     if (try importedConstructorTypePath(allocator, io, documents, project, qualified_type, call.arity)) |type_path| {
         return type_path;
@@ -2042,7 +2189,7 @@ fn importedQualifiedCallReturnTypePath(
     var return_name: ?[]const u8 = null;
 
     for (loaded.program.functions) |function| {
-        if (function.is_local or !std.mem.eql(u8, function.name, call.name) or
+        if (function.is_local or function.operator != null or !std.mem.eql(u8, function.name, call.name) or
             !parametersAcceptArity(function.parameters, call.arity)) continue;
         if (function.is_internal) {
             if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
@@ -2164,6 +2311,28 @@ fn importedTypePath(
     else
         try std.fmt.allocPrint(allocator, "{s}.{s}", .{ use.path, suffix });
     return if (declarationTarget(project.index, full) != null) full else null;
+}
+
+fn importedQualifierPath(
+    allocator: Allocator,
+    program: Ast.Program,
+    project: IndexedProject,
+    local_path: []const u8,
+) !?[]const u8 {
+    if (findProvider(project.index, local_path) != null or project.index.isNamespace(local_path)) return local_path;
+    const separator = std.mem.indexOfScalar(u8, local_path, '.');
+    const first = if (separator) |index| local_path[0..index] else local_path;
+    const use = findUseByAlias(program, first) orelse return null;
+    const use_path = if (ProjectIndex.currentProvider(project)) |provider|
+        try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path)
+    else
+        use.path;
+    const suffix = if (separator) |index| local_path[index + 1 ..] else "";
+    const full = if (suffix.len == 0)
+        use_path
+    else
+        try std.fmt.allocPrint(allocator, "{s}.{s}", .{ use_path, suffix });
+    return if (findProvider(project.index, full) != null or project.index.isNamespace(full)) full else null;
 }
 
 fn importedNominalTypePath(
@@ -4000,6 +4169,84 @@ test "respect closed package namespaces during completion" {
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
     for (items) |item| if (completionNameMatches(item, label)) return true;
     return false;
+}
+
+test "module atoms provide project context to isolated diagnostics" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Nodes");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Nodes/@Node.sx",
+        .data = "public class Node {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Nodes/@Node2D.sx",
+        .data = "public class Node2D:Node {}",
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const path = try std.fs.path.join(allocator, &.{ root, "Nodes", "@Node2D.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{path});
+
+    try std.testing.expect(try hasProjectReferenceForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        uri,
+        "public class Node2D:Node {}",
+    ));
+}
+
+test "workspace distinguishes a non-applicable context from an unresolved receiver" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const target: TargetModule.Target = TargetModule.Target.host() orelse .macos_arm64;
+
+    const statement_source = "func main() {\n    \n}";
+    const statement_cursor = std.mem.indexOf(u8, statement_source, "\n}").?;
+    const statement_decision = try Completion.decisionAt(allocator, statement_source, statement_cursor, .invoked);
+    const not_applicable = try completionOutcomeAtForTargetWithDecision(
+        allocator,
+        std.testing.io,
+        null,
+        target,
+        root_uri,
+        uri,
+        &.{},
+        statement_source,
+        statement_decision,
+    );
+    try std.testing.expectEqual(.not_applicable, std.meta.activeTag(not_applicable));
+
+    const member_source = "func main() {\n    missing.\n}";
+    const member_cursor = std.mem.indexOf(u8, member_source, "missing.").? + "missing.".len;
+    const member_decision = try Completion.decisionAt(allocator, member_source, member_cursor, .invoked);
+    const unresolved = try completionOutcomeAtForTargetWithDecision(
+        allocator,
+        std.testing.io,
+        null,
+        target,
+        root_uri,
+        uri,
+        &.{},
+        member_source,
+        member_decision,
+    );
+    try std.testing.expectEqual(.unresolved_receiver, std.meta.activeTag(unresolved));
 }
 
 test "workspace indexes the selected package platform root" {

@@ -1833,7 +1833,7 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "package 'GFX.Physics' cannot contribute to 'GFX.Plugins'; its parent must declare that existing module in catalogs",
+        "package 'GFX.Physics' cannot contribute to 'GFX.Plugins'; the target package must open that catalog and be a direct dependency",
         compiler.diagnostic.?.message,
     );
 
@@ -1911,6 +1911,66 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
         "umbrella contributions must be declared in a named package's portable principal module",
+        compiler.diagnostic.?.message,
+    );
+}
+
+test "compose external package reexports into open umbrella catalogs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "AI/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"AI\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[\"GFX.Plugins\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public struct Core { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "AI/Package.json",
+        .data = "{\"name\":\"AI\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "AI/Module/@Module.sx",
+        .data =
+        \\contribute GFX.Plugins {
+        \\    public use AI.Plugin as BehaviourTree
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "AI/Module/Plugin.sx",
+        .data = "public struct Plugin { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Plugins\nfunc main() { print(Plugins.BehaviourTree(value:42).value) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "AI/Package.json",
+        .data = "{\"name\":\"AI\",\"version\":\"1.0.0\"}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "package 'AI' cannot contribute to 'GFX.Plugins'; the target package must open that catalog and be a direct dependency",
         compiler.diagnostic.?.message,
     );
 }

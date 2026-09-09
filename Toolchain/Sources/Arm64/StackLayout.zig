@@ -498,6 +498,7 @@ fn addInstructionUses(instruction: Ir.Instruction, set: ValueSet) void {
         .optional_some => |value| set.add(value.operand),
         .optional_unwrap => |value| set.add(value.operand),
         .copy, .deep_copy, .class_cast => |value| set.add(value.operand),
+        .class_test => |value| set.add(value.operand),
         .class_retain => |value| set.add(value.operand),
         .class_drop => |value| set.add(value.operand),
         .list_retain, .list_drop, .string_retain, .string_drop => |value| set.add(value.operand),

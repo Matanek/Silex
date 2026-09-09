@@ -530,7 +530,6 @@ fn encodeFunction(
                 try emitStoreStack(allocator, bytes, .rax, address.result);
             },
             .reference_load => |load| {
-                if (load.result.width == 0) return error.InvalidMachineProgram;
                 try emitLoadStack(allocator, bytes, .rcx, load.reference);
                 for (0..load.result.width) |leaf| {
                     try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));
@@ -619,6 +618,7 @@ fn encodeFunction(
             .protocol_init => |value| try emitProtocolInit(allocator, bytes, value),
             .protocol_test => |value| try emitProtocolTest(allocator, bytes, value),
             .protocol_extract => |value| try emitProtocolExtract(allocator, bytes, value),
+            .class_test => |value| try emitClassTest(allocator, bytes, value),
             .list_init => |value| try emitListInit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .collection_load => |value| {
                 if (value.dynamic or value.view) {
@@ -1105,6 +1105,18 @@ fn emitConstantDivision(
     } else {
         try emitStoreValue(allocator, bytes, function.register_slots, .rdx, binary.result);
     }
+}
+
+fn emitClassTest(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    value: Machine.Instruction.ClassTest,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .rax, value.operand);
+    try emitLoadMemory(allocator, bytes, .rax, .rax, 0);
+    try emitImmediate(allocator, bytes, .rcx, value.structure);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x94, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 });
+    try emitStoreStack(allocator, bytes, .rax, value.result);
 }
 
 fn emitDynamicCall(

@@ -27,7 +27,7 @@ pub fn parse(self: anytype) ![]const Ast.Function {
     var statements: std.ArrayList(Ast.Statement) = .empty;
     while (self.current.tag != .right_brace and self.current.tag != .end) {
         if (self.current.tag == .keyword_func) {
-            try functions.append(self.allocator, try self.parseFunction(false, false, false));
+            try functions.append(self.allocator, try self.parseFunction(false, false, false, false));
         } else {
             try statements.append(self.allocator, try self.parseStatement());
         }

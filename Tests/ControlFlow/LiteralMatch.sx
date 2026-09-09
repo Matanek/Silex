@@ -1,0 +1,59 @@
+class Counter {
+    var count:int
+
+    init() {
+        self.count = 0
+    }
+
+    func next() int {
+        self.count++
+        return 404
+    }
+}
+
+func status(code:int) str {
+    return match code {
+        200 => "ok"
+        404 => "missing"
+        else => "other"
+    }
+}
+
+test "literal match evaluates its subject once and selects integer values" {
+    var counter = Counter()
+    assert(status(counter.next()) == "missing")
+    assert(counter.count == 1)
+
+    let narrow:int8 = -1 as int8
+    let category = match narrow {
+        -1 => "negative"
+        127 => "maximum"
+        else => "middle"
+    }
+    assert(category == "negative")
+}
+
+test "literal match selects strings and proves exhaustive booleans" {
+    let command = match "st" + "op" {
+        "start" => 1
+        "stop" => 2
+        else => 0
+    }
+    assert(command == 2)
+
+    let enabled = match false {
+        true => 1
+        false => 0
+    }
+    assert(enabled == 0)
+}
+
+test "imperative literal match uses isolated branches without fallthrough" {
+    var selected = "none"
+    match 2 {
+        1 => { selected = "one" }
+        2 => { selected = "two" }
+        else => { selected = "other" }
+    }
+    assert(selected == "two")
+}

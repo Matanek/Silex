@@ -22,6 +22,21 @@ fn expectCompileError(source: []const u8, message: []const u8) !void {
     try std.testing.expectEqualStrings(message, frontend.diagnostic.?.message);
 }
 
+test "primitive type spellings remain available as contextual method names" {
+    const output = try run(
+        \\struct DType {
+        \\    private let code:int
+        \\    private init(code:int) { self.code = code }
+        \\    static func float32() DType { return DType(code:4) }
+        \\    static func int8() DType { return DType(code:1) }
+        \\    func width() int { return self.code }
+        \\}
+        \\func main() { print(DType.float32().width(), " ", DType.int8().width()) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("4 1\n", output);
+}
+
 test "classes preserve shared identity through transport and containers" {
     const output = try run(
         \\class Player {
@@ -129,8 +144,8 @@ test "read-reference class parameters reject direct transitive and dynamic mutat
         "cannot pass 'value' as both a read reference and a mutation-capable class value",
     );
     try expectCompileError(
-        "class Base { func inspect() {} } class Child : Base { var value:int = 0; override func inspect() { self.value++ } } func main() {}",
-        "an override cannot introduce receiver mutation",
+        "class Node { protected func hook() {} func dispatch() { self.hook() } } class Leaf:Node { var count:int = 0; override func hook() { self.count++ } } func inspect(node:@Node) { node.dispatch() } func main() {}",
+        "mutating method 'dispatch' cannot be called through a read reference",
     );
 }
 
@@ -151,7 +166,23 @@ test "classes allow recursive optional links" {
     try std.testing.expectEqualStrings("1\n", output);
 }
 
-test "class references require mutable initialized storage" {
+test "class references require mutable storage while immutable value wrappers remain readable" {
+    const output = try run(
+        \\class Player { let score:int; func current() int { return self.score } }
+        \\enum Roster { selected(Player); empty }
+        \\struct Team {
+        \\    private var roster:Roster
+        \\    init(player:Player) { self.roster = Roster.selected(player) }
+        \\    func score() int { return match self.roster { selected(player) => player.current(); empty => 0 } }
+        \\}
+        \\func main() {
+        \\    var player = Player(score:7)
+        \\    let team = Team(player)
+        \\    print(team.score())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("7\n", output);
     try expectCompileError(
         "class Player {} func main() { let player = Player() }",
         "a binding that can reach a class reference must use 'var'",
@@ -159,10 +190,6 @@ test "class references require mutable initialized storage" {
     try expectCompileError(
         "class Player {} func main() { var player:Player }",
         "a class binding requires an initializer; use an optional to start at null",
-    );
-    try expectCompileError(
-        "class Player {} struct Holder { let player:Player } func main() {}",
-        "a field that can reach a class reference must use 'var'",
     );
     try expectCompileError(
         "class Player {} func main() { let players:Player[] = [Player()] }",
@@ -421,6 +448,32 @@ test "nonmutating override bodies preserve a mutating receiver contract" {
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("child\n1\n", output);
+}
+
+test "mutating final overrides propagate through the virtual family" {
+    const output = try run(
+        \\class Node {
+        \\    protected var count:int = 0
+        \\    protected func hook() {}
+        \\    func dispatch() { self.hook() }
+        \\    func current() int { return self.count }
+        \\}
+        \\class Branch:Node {
+        \\    override func hook() {}
+        \\}
+        \\class Leaf:Branch {
+        \\    override func hook() { self.count++ }
+        \\}
+        \\func dispatch(node:Node) { node.dispatch() }
+        \\func main() {
+        \\    var leaf = Leaf()
+        \\    var node:Node = leaf
+        \\    dispatch(node)
+        \\    print(leaf.current())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1\n", output);
 }
 
 test "static members use type-qualified shared storage" {
@@ -907,6 +960,76 @@ test "unreachable cycles crossing dynamic collections finalize every class once"
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("drop first links=1\ndrop second links=1\n", output);
+}
+
+test "class constructors keep a returned cyclic graph alive through local cleanup" {
+    const output = try run(
+        \\class Child {
+        \\    var parent:Parent? = null
+        \\    drop { print("drop child") }
+        \\}
+        \\class Parent {
+        \\    var children:Child[]
+        \\    init() {
+        \\        self.children = []
+        \\        var child = Child()
+        \\        child.parent = self
+        \\        self.children.append(child)
+        \\    }
+        \\    drop { print("drop parent children=", self.children.count()) }
+        \\}
+        \\func main() { var parent = Parent() }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop parent children=1\ndrop child\n", output);
+}
+
+test "derived constructors keep composed child cycles alive" {
+    const output = try run(
+        \\class Node {
+        \\    var parent:Node? = null
+        \\    var children:Node[]
+        \\    init() { self.children = [] }
+        \\    func add_child(child:Node) {
+        \\        child.parent = self
+        \\        self.children.append(child)
+        \\    }
+        \\}
+        \\class Leaf : Node { init() : super() {} }
+        \\class Parent : Node {
+        \\    var owned:Leaf
+        \\    init() : super() {
+        \\        self.owned = Leaf()
+        \\        self.add_child(self.owned)
+        \\    }
+        \\}
+        \\func main() {
+        \\    var parent = Parent()
+        \\    print(parent.children.count())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1\n", output);
+}
+
+test "inherited mutating methods restore the derived receiver type" {
+    const output = try run(
+        \\class Counter {
+        \\    var value:int = 0
+        \\    func add(amount:int) int {
+        \\        self.value += amount
+        \\        return self.value
+        \\    }
+        \\}
+        \\class SpecialCounter : Counter { init() : super() {} }
+        \\func main() {
+        \\    var counter = SpecialCounter()
+        \\    print(counter.add(amount:3))
+        \\    print(counter.value)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("3\n3\n", output);
 }
 
 test "unreachable cycles crossing protocol values finalize every class once" {

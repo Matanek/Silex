@@ -209,10 +209,16 @@ pub const Graph = struct {
 
     pub fn canContributeToCatalog(self: Graph, contributor: usize, catalog_owner: usize, catalog: []const u8) bool {
         if (contributor >= self.packages.len or catalog_owner >= self.packages.len or contributor == catalog_owner) return false;
-        const contributor_name = self.packages[contributor].name orelse return false;
-        const owner_name = self.packages[catalog_owner].name orelse return false;
-        const separator = std.mem.lastIndexOfScalar(u8, contributor_name, '.') orelse return false;
-        if (!std.mem.eql(u8, contributor_name[0..separator], owner_name)) return false;
+        if (self.packages[contributor].name == null or self.packages[catalog_owner].name == null) return false;
+
+        var depends_on_owner = false;
+        for (self.packages[contributor].dependencies) |dependency| {
+            if (dependency.package != catalog_owner) continue;
+            depends_on_owner = true;
+            break;
+        }
+        if (!depends_on_owner) return false;
+
         for (self.packages[catalog_owner].catalogs) |allowed| {
             if (std.mem.eql(u8, allowed, catalog)) return true;
         }

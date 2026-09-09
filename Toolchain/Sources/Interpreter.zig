@@ -343,6 +343,14 @@ fn executeInstruction(
             value.static_type = function.value_types[cast.result];
             try store(function, values, cast.result, .{ .class = value });
         },
+        .class_test => |test_value| {
+            const class = switch (try load(values, test_value.operand)) {
+                .class => |value| value,
+                else => return error.InvalidProgram,
+            };
+            const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
+            try store(function, values, test_value.result, .{ .boolean = dynamic_type == test_value.structure });
+        },
         .class_retain => |retain| {
             const class = switch (try load(values, retain.operand)) {
                 .class => |value| value,
@@ -550,7 +558,9 @@ fn executeInstruction(
                 .class => |value| value.instance.*,
                 else => return error.InvalidProgram,
             };
-            if (structure.type.structureIndex() != field.structure or field.field >= structure.fields.len) return error.InvalidProgram;
+            const structure_index = structure.type.structureIndex() orelse return error.InvalidProgram;
+            if (!structureSupportsField(program, structure_index, field.structure) or field.field >= structure.fields.len)
+                return error.InvalidProgram;
             try store(function, values, field.result, .{ .reference = .{ .value = &structure.fields[field.field] } });
         },
         .reference_optional => |optional| {
@@ -659,6 +669,16 @@ fn executeInstruction(
         },
     }
     return null;
+}
+
+fn structureSupportsField(program: Ir.Program, candidate: usize, expected: usize) bool {
+    if (candidate >= program.structures.len or expected >= program.structures.len) return false;
+    var current: ?usize = candidate;
+    while (current) |index| : (current = program.structures[index].base) {
+        if (index == expected) return true;
+        if (!program.structures[index].is_class) return false;
+    }
+    return false;
 }
 
 pub fn supportsBoundary(boundary: Boundary.Function) bool {

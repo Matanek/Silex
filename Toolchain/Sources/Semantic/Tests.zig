@@ -327,11 +327,25 @@ test "diagnose invalid constructor initialization and calls" {
     );
     try expectSemanticError(
         "struct Value { let number:int; init() { observe(self); self.number = 1 } } func observe(value:Value) {} func main() {}",
-        "self cannot be used before all fields are initialized",
+        "the complete object 'self' cannot escape before all fields are initialized",
     );
     try expectSemanticError(
         "struct Value { let number:int; init(number:int) { self.number = number } } func main() { Value(true) }",
         "no constructor of 'Value' matches the argument types",
+    );
+}
+
+test "reject pending field initialization confined to a possibly empty constructor loop" {
+    try expectSemanticError(
+        \\struct Value {
+        \\    let number:int
+        \\    init(enabled:bool) {
+        \\        while enabled { self.number = 1 }
+        \\    }
+        \\}
+        \\func main() {}
+    ,
+        "field 'number' cannot be initialized only inside a loop that may not execute",
     );
 }
 

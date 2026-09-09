@@ -2504,6 +2504,11 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .copy => |value| .{ .copy = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
         .deep_copy => |value| .{ .deep_copy = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
         .class_cast => |value| .{ .class_cast = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
+        .class_test => |value| .{ .class_test = .{
+            .result = value.result,
+            .operand = canonical(aliases, value.operand),
+            .structure = value.structure,
+        } },
         .class_retain => |value| .{ .class_retain = .{ .operand = canonical(aliases, value.operand), .ownership = value.ownership } },
         .class_drop => |value| .{ .class_drop = .{
             .operand = canonical(aliases, value.operand),
@@ -3091,6 +3096,7 @@ fn removableResult(instruction: Ir.Instruction) ?Ir.ValueId {
         .optional_some => |value| value.result,
         .optional_unwrap => |value| value.result,
         .copy => |value| value.result,
+        .class_test => |value| value.result,
         .protocol_test => |value| value.result,
         .protocol_extract => |value| value.result,
         .enum_test => |value| value.result,
@@ -3136,6 +3142,7 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
         .copy => |value| useValue(uses, value.operand),
         .deep_copy => |value| useValue(uses, value.operand),
         .class_cast => |value| useValue(uses, value.operand),
+        .class_test => |value| useValue(uses, value.operand),
         .class_retain => |value| useValue(uses, value.operand),
         .class_drop => |value| useValue(uses, value.operand),
         .list_retain, .list_drop, .string_retain, .string_drop => |value| useValue(uses, value.operand),

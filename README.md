@@ -14,9 +14,10 @@ func main() {
 
 Read the
 [public language documentation](https://github.com/Matanek/Silex-Documentation/blob/main/EN/Language/README.md)
-to learn the implemented source forms. Compiler contributors can consult the
-[compiler architecture](Docs/README.md) for the current compilation path
-and its limits.
+to learn the implemented source forms, and review the
+[release notes](CHANGELOG.md) before upgrading. Compiler contributors can
+consult the [compiler architecture](Docs/README.md) for the current compilation
+path and its limits.
 
 ## Install
 

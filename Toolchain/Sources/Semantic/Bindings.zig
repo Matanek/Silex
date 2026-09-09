@@ -77,11 +77,11 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         });
         return;
     }
-    const immutable_protocol_collection = if (Collections.collectionForType(self.structures, declared_type)) |collection|
-        Resources.isProtocolValue(self, collection.element)
-    else
-        false;
-    if (!declaration.mutable and Resources.containsClass(self, declared_type) and !immutable_protocol_collection) {
+    const collection = Collections.collectionForType(self.structures, declared_type);
+    const immutable_protocol_collection = if (collection) |value| Resources.isProtocolValue(self, value.element) else false;
+    const direct_mutation_capability = Resources.isClassType(self, declared_type) or Resources.isProtocolValue(self, declared_type);
+    const class_collection = collection != null and Resources.containsClass(self, declared_type) and !immutable_protocol_collection;
+    if (!declaration.mutable and (direct_mutation_capability or class_collection)) {
         return self.fail(declaration.name_position, "a binding that can reach a class reference must use 'var'");
     }
     if (declaration.initializer == null and Resources.isClassType(self, declared_type)) {

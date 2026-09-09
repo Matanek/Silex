@@ -63,6 +63,7 @@ jobs:
           fi
           manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' Toolchain/build.zig.zon)
           test "$manifest_version" = "$RELEASE_VERSION"
+          python3 .github/scripts/release-notes.py validate "$RELEASE_VERSION"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           if [ "$RELEASE_TARGET" = "all" ]; then
             test -z "$REUSE_RUN_ID"
@@ -390,8 +391,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$tag" "$GITHUB_SHA" -m "Silex $tag"
           git push origin "$tag"
+          python3 .github/scripts/release-notes.py extract "$RELEASE_VERSION" \
+            --locale en > "$RUNNER_TEMP/release-notes.md"
           gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --title "Silex $tag" --generate-notes
+            --verify-tag --title "Silex $tag" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
       - name: Refresh the Silex website
         env:
           GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}

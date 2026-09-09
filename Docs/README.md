@@ -99,5 +99,7 @@ Choose the subsystem that matches the question you are investigating:
   classification, protected baselines, target campaigns, and external sentries.
 - [Cache and editor tooling](Cache-and-editor-tooling.md): reusable compilation
   artifacts and the LSP boundary.
+- [LSP completion contract](LSP-completion-contract.md): exhaustive completion
+  inventories, independent oracles, recovery invariants, and admission gates.
 - [Implementation status](Implementation-status.md): portable coverage and the
   runtime, native, serialization, and editor limits that remain.

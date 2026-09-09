@@ -560,6 +560,11 @@ fn lowerInstruction(
         else
             lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
+        .class_test => |test_value| .{ .class_test = .{
+            .result = layout.values[test_value.result].start,
+            .operand = layout.values[test_value.operand].start,
+            .structure = test_value.structure,
+        } },
         .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
         .list_retain => |retain| .{ .list_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
         .string_retain => |retain| .{ .string_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
@@ -1412,6 +1417,10 @@ fn collectionForType(program: Ir.Program, type_value: Ir.Type) ?@import("../Type
 }
 
 fn collectionElementStride(program: Ir.Program, element: Ir.Type, width: u12) Machine.Error!u12 {
+    // Zero-sized values still need a non-zero physical stride so list counts,
+    // references and capacity remain distinguishable without inventing a
+    // language-visible field for marker structures.
+    if (width == 0) return 1;
     if (try compactFloat32CollectionElement(program, element)) return std.math.mul(u12, width, 4) catch error.FrameTooLarge;
     return std.math.mul(u12, width, Machine.slot_size) catch error.FrameTooLarge;
 }

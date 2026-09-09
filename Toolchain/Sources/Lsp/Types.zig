@@ -67,9 +67,41 @@ pub const CompletionItem = struct {
     insertTextFormat: ?u8 = null,
 };
 
+pub const CompletionTriggerCharacter = enum {
+    dot,
+    colon,
+    less,
+    comma,
+    space,
+    closing_parenthesis,
+    else_prefix,
+
+    pub fn text(self: CompletionTriggerCharacter) []const u8 {
+        return switch (self) {
+            .dot => ".",
+            .colon => ":",
+            .less => "<",
+            .comma => ",",
+            .space => " ",
+            .closing_parenthesis => ")",
+            .else_prefix => "e",
+        };
+    }
+};
+
+pub const completion_trigger_characters = block: {
+    const fields = std.meta.fields(CompletionTriggerCharacter);
+    var values: [fields.len][]const u8 = undefined;
+    for (fields, 0..) |field, index| {
+        const trigger: CompletionTriggerCharacter = @enumFromInt(field.value);
+        values[index] = trigger.text();
+    }
+    break :block values;
+};
+
 pub const CompletionOptions = struct {
     resolveProvider: bool = false,
-    triggerCharacters: []const []const u8 = &.{ ".", ":", "<", ",", " ", ")", "e" },
+    triggerCharacters: []const []const u8 = &completion_trigger_characters,
 };
 
 pub const CompletionTriggerKind = enum(u8) {

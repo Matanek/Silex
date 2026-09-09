@@ -20,6 +20,10 @@ class Actor {
     private func secret() {}
 }
 
+class ReflectionRoot {}
+class ReflectionBranch : ReflectionRoot {}
+class ReflectionLeaf : ReflectionBranch {}
+
 func callback(value:int) bool { return value > 0 }
 
 test "reflect enums structures and functions" {
@@ -53,6 +57,21 @@ test "reflect enums structures and functions" {
     assert(class_info.fields[0] == "label")
     assert(class_info.methods.count() == 1)
     assert(class_info.methods[0] == "act")
+
+    var polymorphic:ReflectionRoot = ReflectionLeaf()
+    let dynamic_class = reflect(polymorphic)
+    assert(dynamic_class.type == "ReflectionLeaf")
+    assert(dynamic_class.name == "ReflectionLeaf")
+    assert(dynamic_class.types.count() == 3)
+    assert(dynamic_class.types[0] == "ReflectionRoot")
+    assert(dynamic_class.types[1] == "ReflectionBranch")
+    assert(dynamic_class.types[2] == "ReflectionLeaf")
+
+    var root:ReflectionRoot = ReflectionRoot()
+    let root_class = reflect(root)
+    assert(root_class.type == "ReflectionRoot")
+    assert(root_class.types.count() == 1)
+    assert(root_class.types[0] == "ReflectionRoot")
 
     let function = reflect(callback)
     assert(function.type == "func(int)bool")

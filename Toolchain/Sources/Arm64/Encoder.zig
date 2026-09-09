@@ -1334,6 +1334,18 @@ fn encodeFunction(
                 },
                 initialization,
             ),
+            .class_test => |test_value| {
+                try words.append(allocator, loadStack(.x9, test_value.operand));
+                try words.append(allocator, load64(.x9, .x9, 0));
+                try emitImmediate64(allocator, words, .x10, test_value.structure);
+                try words.append(allocator, compareRegisters(.x9, .x10));
+                try words.append(allocator, moveWideZero32(.x11, 0));
+                const skip_true = words.items.len;
+                try words.append(allocator, conditionalBranch(.not_equal));
+                try words.append(allocator, moveWideZero32(.x11, 1));
+                try patch19(words.items, skip_true, words.items.len);
+                try words.append(allocator, storeStack(.x11, test_value.result));
+            },
             .class_load => |load| try ClassRuntime.emitLoad(allocator, words, load),
             .class_store => |store| try ClassRuntime.emitStore(allocator, words, store),
             .class_retain => |retain| {

@@ -56,9 +56,16 @@ pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]co
         flat = 0;
         for (program.structures, 0..) |structure, structure_index| {
             for (structure.methods) |method| {
-                if (!mutating[flat] and method.is_override and inheritedOverrideMutates(program, structure_index, method, mutating)) {
-                    mutating[flat] = true;
-                    changed = true;
+                if (method.is_override) {
+                    if (inheritedOverrideIndex(program, structure_index, method)) |base_flat| {
+                        if (mutating[flat] and !mutating[base_flat]) {
+                            mutating[base_flat] = true;
+                            changed = true;
+                        } else if (!mutating[flat] and mutating[base_flat]) {
+                            mutating[flat] = true;
+                            changed = true;
+                        }
+                    }
                 }
                 flat += 1;
             }
@@ -79,25 +86,24 @@ pub fn validateAccessors(self: anytype) !void {
     }
 }
 
-fn inheritedOverrideMutates(
+fn inheritedOverrideIndex(
     program: Ast.Program,
     structure_index: usize,
     method: Ast.Function,
-    mutating: []const bool,
-) bool {
+) ?usize {
     var current = program.structures[structure_index].base;
     while (current) |base_type| {
-        const base_index = base_type.structureIndex() orelse return false;
-        if (base_index >= program.structures.len) return false;
+        const base_index = base_type.structureIndex() orelse return null;
+        if (base_index >= program.structures.len) return null;
         const base = program.structures[base_index];
         for (base.methods, 0..) |candidate, method_index| {
             if (!candidate.is_static and Inheritance.sameSignature(candidate, method)) {
-                return mutating[flatMethodIndex(program, base_index, method_index)];
+                return flatMethodIndex(program, base_index, method_index);
             }
         }
         current = base.base;
     }
-    return false;
+    return null;
 }
 
 pub fn extendStructures(
@@ -636,7 +642,16 @@ pub fn analyzeCallWithReceiver(
     }
     if (method.return_type == .void) {
         if (class_receiver) {
-            if (place) |target| try writePlace(self, builder, target, call_result.?);
+            if (place) |target| {
+                const updated_receiver = try restoreClassReceiver(
+                    self,
+                    builder,
+                    call_result.?,
+                    structure_index,
+                    receiver_structure_index,
+                );
+                try writePlace(self, builder, target, updated_receiver);
+            }
             return null;
         }
         const replacement = if (safe_receiver_type) |optional_type|
@@ -648,8 +663,15 @@ pub fn analyzeCallWithReceiver(
     }
     if (class_receiver) {
         if (place) |target| {
-            const updated_receiver = try self.newValue(builder, receiver.type);
-            try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+            const returned_receiver = try self.newValue(builder, .structure(structure_index));
+            try self.emit(builder, .{ .field_load = .{ .result = returned_receiver, .base = call_result.?, .field = 0 } });
+            const updated_receiver = try restoreClassReceiver(
+                self,
+                builder,
+                returned_receiver,
+                structure_index,
+                receiver_structure_index,
+            );
             try writePlace(self, builder, target, updated_receiver);
         }
         const value = try self.newValue(builder, method.return_type);
@@ -855,7 +877,16 @@ fn analyzeNamedCall(
     }
     if (method.return_type == .void) {
         if (class_receiver) {
-            if (place) |target| try writePlace(self, builder, target, call_result.?);
+            if (place) |target| {
+                const updated_receiver = try restoreClassReceiver(
+                    self,
+                    builder,
+                    call_result.?,
+                    structure_index,
+                    receiver_structure_index,
+                );
+                try writePlace(self, builder, target, updated_receiver);
+            }
             return null;
         }
         const replacement = if (safe_receiver_type) |optional_type|
@@ -867,8 +898,15 @@ fn analyzeNamedCall(
     }
     if (class_receiver) {
         if (place) |target| {
-            const updated_receiver = try self.newValue(builder, receiver.type);
-            try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+            const returned_receiver = try self.newValue(builder, .structure(structure_index));
+            try self.emit(builder, .{ .field_load = .{ .result = returned_receiver, .base = call_result.?, .field = 0 } });
+            const updated_receiver = try restoreClassReceiver(
+                self,
+                builder,
+                returned_receiver,
+                structure_index,
+                receiver_structure_index,
+            );
             try writePlace(self, builder, target, updated_receiver);
         }
         const value = try self.newValue(builder, method.return_type);
@@ -1149,6 +1187,19 @@ fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: 
         } });
     }
     if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement } });
+}
+
+fn restoreClassReceiver(
+    self: anytype,
+    builder: anytype,
+    returned_receiver: Ir.ValueId,
+    owner: usize,
+    receiver: usize,
+) !Ir.ValueId {
+    if (owner == receiver) return returned_receiver;
+    const restored = try self.newValue(builder, .structure(receiver));
+    try self.emit(builder, .{ .class_cast = .{ .result = restored, .operand = returned_receiver } });
+    return restored;
 }
 
 fn analyzeMutatingStatements(

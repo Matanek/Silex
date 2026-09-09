@@ -133,7 +133,7 @@ pub fn discoverCatalogContributions(self: anytype) !void {
             const target = catalogTarget(self, provider.owner, contribution.target) orelse {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
-                    "package '{s}' cannot contribute to '{s}'; its parent must declare that existing module in catalogs",
+                    "package '{s}' cannot contribute to '{s}'; the target package must open that catalog and be a direct dependency",
                     .{ package_name, contribution.target },
                 );
                 return self.fail(contribution.target_position, message);

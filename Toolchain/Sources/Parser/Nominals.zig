@@ -3,13 +3,26 @@ const Ast = @import("../Ast.zig");
 const Generics = @import("Generics.zig");
 
 pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool, is_class: bool) !Ast.Structure {
-    return parseType(self, is_public, is_internal, is_local, false, false, is_class, false, false);
+    return parseType(self, is_public, is_internal, is_local, false, false, is_class, false, false, true);
 }
 
 pub fn parseIntrinsicClass(self: anytype, is_public: bool) !Ast.Structure {
     try self.advance();
     if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'intrinsic'");
-    return parseType(self, is_public, false, false, false, false, true, false, true);
+    return parseType(self, is_public, false, false, false, false, true, false, true, true);
+}
+
+pub fn parseNocopyClass(
+    self: anytype,
+    is_public: bool,
+    is_internal: bool,
+    is_local: bool,
+    is_private: bool,
+    is_protected: bool,
+) !Ast.Structure {
+    try self.advance();
+    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'nocopy'");
+    return parseType(self, is_public, is_internal, is_local, is_private, is_protected, true, false, false, false);
 }
 
 pub fn parseStaticType(self: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Structure {
@@ -19,7 +32,7 @@ pub fn parseStaticType(self: anytype, is_public: bool, is_internal: bool, is_loc
         .keyword_struct => false,
         else => return self.fail("expected 'class' or 'struct' after 'static'"),
     };
-    return parseType(self, is_public, is_internal, is_local, false, false, is_class, true, false);
+    return parseType(self, is_public, is_internal, is_local, false, false, is_class, true, false, true);
 }
 
 fn parseType(
@@ -32,6 +45,7 @@ fn parseType(
     is_class: bool,
     is_static_container: bool,
     is_intrinsic: bool,
+    is_copyable: bool,
 ) !Ast.Structure {
     const position = self.current.position;
     try self.advance();
@@ -136,6 +150,38 @@ fn parseType(
             try self.advance();
         }
         const member_static = is_static_container or member_static_explicit;
+        if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "nocopy")) {
+            if (member_override or member_static_explicit) return self.fail("nocopy nested classes cannot declare override or static");
+            const nested_short_name = blk: {
+                var lexer = self.lexer;
+                _ = try lexer.next();
+                const token = try lexer.next();
+                break :blk token.lexeme;
+            };
+            for (static_fields.items) |field| if (std.mem.eql(u8, field.name, nested_short_name)) {
+                return self.fail("a nested type and static member cannot share a name");
+            };
+            for (methods.items) |method| if (method.is_static and std.mem.eql(u8, method.name, nested_short_name)) {
+                return self.fail("a nested type and static member cannot share a name");
+            };
+            try nested_names.append(self.allocator, nested_short_name);
+            try self.advance();
+            if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'nocopy'");
+            const nested = try parseType(
+                self,
+                member_public,
+                member_internal,
+                member_local,
+                member_private,
+                member_protected,
+                true,
+                false,
+                false,
+                false,
+            );
+            try self.nested_structures.append(self.allocator, nested);
+            continue;
+        }
         if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
             if (member_override) return self.fail("nested types cannot declare override");
             const nested_is_class = self.current.tag == .keyword_class;
@@ -165,6 +211,7 @@ fn parseType(
                 nested_is_class,
                 nested_is_static,
                 false,
+                true,
             );
             try self.nested_structures.append(self.allocator, nested);
             continue;
@@ -192,7 +239,7 @@ fn parseType(
             var method = if (is_intrinsic)
                 try self.parseIntrinsicMethod(member_public, member_internal, member_local)
             else
-                try self.parseFunction(member_public, member_internal, member_local);
+                try self.parseFunction(member_public, member_internal, member_local, false);
             method.is_static = member_static;
             method.is_override = member_override;
             method.is_private = member_private;
@@ -306,6 +353,7 @@ fn parseType(
         .is_private = is_private,
         .is_protected = is_protected,
         .is_class = is_class,
+        .is_copyable = is_copyable,
         .is_intrinsic = is_intrinsic,
         .is_static = is_static_container,
         .enclosing = enclosing,

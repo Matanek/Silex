@@ -78,7 +78,7 @@ fn useDirectlyOwned(
         if (provider.owner != owner or !std.mem.eql(u8, provider.name, module)) continue;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
         for (loaded.program.functions) |function| {
-            if (function.is_public and std.mem.eql(u8, function.name, declaration)) return true;
+            if (function.operator == null and function.is_public and std.mem.eql(u8, function.name, declaration)) return true;
         }
         for (loaded.program.structures) |structure| {
             if (Reexports.structureExported(loaded.program, structure) and std.mem.eql(u8, structure.name, declaration)) return true;
@@ -167,7 +167,8 @@ pub fn loadProgram(
     }
     if (source) |overlay| {
         var parser = ParserModule.Parser.init(allocator, overlay);
-        if (parser.parse()) |program| return .{ .source = overlay, .program = program } else |_| {}
+        const program = parser.parse() catch return null;
+        return .{ .source = overlay, .program = program };
     }
     const disk = Io.Dir.cwd().readFileAlloc(io, provider.path, allocator, .limited(1024 * 1024)) catch return null;
     var parser = ParserModule.Parser.init(allocator, disk);

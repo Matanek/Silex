@@ -1,0 +1,5 @@
+use Module.Math
+
+public struct Transform2D {
+    var position:Math.Vec2
+}

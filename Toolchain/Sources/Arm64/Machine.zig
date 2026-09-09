@@ -98,6 +98,7 @@ pub const Instruction = union(enum) {
     protocol_test: ProtocolTest,
     protocol_extract: ProtocolExtract,
     class_init: ClassInit,
+    class_test: ClassTest,
     class_load: ClassLoad,
     class_store: ClassStore,
     class_retain: ClassRetain,
@@ -271,6 +272,12 @@ pub const Instruction = union(enum) {
         result: Slot,
         structure: u64,
         fields: []const Span,
+    };
+
+    pub const ClassTest = struct {
+        result: Slot,
+        operand: Slot,
+        structure: u64,
     };
 
     pub const ClassLoad = struct {
@@ -792,7 +799,7 @@ pub fn validate(program: Program) Error!void {
                 .constant_float64 => |value| try requireSlot(function, value.result),
                 .optional_null => |value| {
                     try requireSpan(function, value.result);
-                    if (!value.result.aggregate or value.result.width < 2) return error.InvalidMachineProgram;
+                    if (!value.result.aggregate or value.result.width == 0) return error.InvalidMachineProgram;
                 },
                 .optional_some => |value| {
                     try requireSpan(function, value.result);
@@ -894,6 +901,10 @@ pub fn validate(program: Program) Error!void {
                     try requireSlot(function, value.result);
                     for (value.fields) |field| try requireSpan(function, field);
                 },
+                .class_test => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                },
                 .class_load => |value| {
                     try requireSpan(function, value.result);
                     try requireSlot(function, value.base);
@@ -913,7 +924,7 @@ pub fn validate(program: Program) Error!void {
                 },
                 .list_init => |value| {
                     try requireSlot(function, value.result);
-                    if (value.element_width == 0) return error.InvalidMachineProgram;
+                    if (value.element_width == 0 and value.element_stride == 0) return error.InvalidMachineProgram;
                     for (value.values) |item| {
                         try requireSpan(function, item);
                         if (item.width != value.element_width) return error.InvalidMachineProgram;
@@ -956,7 +967,7 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.collection);
                     if (value.reference) |reference| try requireSlot(function, reference);
                     try requireSlot(function, value.index);
-                    if (value.element_width == 0 or
+                    if ((value.element_width == 0 and value.element_stride == 0) or
                         (!value.dynamic and (value.reference == null or value.collection.width != value.element_width * value.count)) or
                         (value.dynamic and ((value.collection.aggregate != value.view) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
                         value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
@@ -986,14 +997,14 @@ pub fn validate(program: Program) Error!void {
                     if (value.index) |slot| try requireSlot(function, slot);
                     if (value.argument) |span| try requireSpan(function, span);
                     if (value.removed) |span| try requireSpan(function, span);
-                    if (value.element_width == 0 or value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+                    if ((value.element_width == 0 and value.element_stride == 0) or value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
                 },
                 .collection_slice => |value| {
                     try requireSlot(function, value.result);
                     try requireSpan(function, value.collection);
                     try requireSlot(function, value.start);
                     try requireSlot(function, value.end);
-                    if (value.element_width == 0) return error.InvalidMachineProgram;
+                    if (value.element_width == 0 and value.element_stride == 0) return error.InvalidMachineProgram;
                 },
                 .collection_view => |value| {
                     try requireSpan(function, value.result);
@@ -1001,7 +1012,8 @@ pub fn validate(program: Program) Error!void {
                     if (value.reference) |reference| try requireSlot(function, reference);
                     try requireSlot(function, value.start);
                     try requireSlot(function, value.end);
-                    if (!value.result.aggregate or value.result.width != 2 or value.element_width == 0) return error.InvalidMachineProgram;
+                    if (!value.result.aggregate or value.result.width != 2 or
+                        (value.element_width == 0 and value.element_stride == 0)) return error.InvalidMachineProgram;
                 },
                 .aggregate_equal => |value| {
                     try requireSlot(function, value.result);

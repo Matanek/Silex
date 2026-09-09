@@ -18,6 +18,10 @@ pub fn containsClass(self: anytype, type_value: Ast.Type) bool {
     return containsClassInner(self, type_value, 0);
 }
 
+pub fn containsNocopyClass(self: anytype, type_value: Ast.Type) bool {
+    return containsNocopyClassInner(self, type_value, 0);
+}
+
 pub fn requiresRetain(self: anytype, type_value: Ast.Type) bool {
     return requiresRetainInner(self, type_value, 0);
 }
@@ -69,6 +73,32 @@ fn containsClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
         return false;
     };
     for (structure.fields) |field| if (containsClassInner(self, field.type, depth + 1)) return true;
+    return false;
+}
+
+fn containsNocopyClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (depth > self.structures.len + self.enums.len + 1) return false;
+    if (type_value.optionalChild()) |child| return containsNocopyClassInner(self, child, depth + 1);
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.structures.len) return false;
+    const structure = self.structures[index];
+    if (structure.is_protocol) return false;
+    if (structure.is_class) {
+        if (!structure.is_copyable) return true;
+        if (structure.base) |base| return containsNocopyClassInner(self, .structure(base), depth + 1);
+        return false;
+    }
+    if (structure.collection) |collection| {
+        if (collection.view) return false;
+        return containsNocopyClassInner(self, collection.element, depth + 1);
+    }
+    for (self.enums) |enumeration| if (enumeration.type_index == index) {
+        for (enumeration.variants) |variant| for (variant.associated_types) |associated| {
+            if (containsNocopyClassInner(self, associated, depth + 1)) return true;
+        };
+        return false;
+    };
+    for (structure.fields) |field| if (containsNocopyClassInner(self, field.type, depth + 1)) return true;
     return false;
 }
 
@@ -244,6 +274,29 @@ pub fn emitReadTemporaryDrops(self: anytype, builder: anytype, values: []const M
 /// the resource roots carried by the temporary are released.
 pub fn releaseTransferredRoot(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
     return emitDropOwnedInner(self, builder, type_value, value, .root, false);
+}
+
+/// Discards the temporary base-class allocation after its retained fields have
+/// been transferred into a newly allocated derived instance. User `drop` hooks
+/// belong to the derived instance and must not run for this construction detail.
+pub fn releaseConstructedBase(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
+    const type_index = type_value.structureIndex() orelse return error.InvalidSource;
+    if (type_index >= self.structures.len or !self.structures[type_index].is_class) return error.InvalidSource;
+    const functions = try self.allocator.dupe(Ir.Instruction.ClassDrop.Finalizer, &.{.{
+        .structure = type_index,
+        .function = classFieldDropFunctionId(self, type_index),
+    }});
+    const plans = try self.allocator.dupe(Ir.Instruction.ClassDrop.Plan, &.{.{
+        .structure = type_index,
+        .functions = functions,
+    }});
+    try self.emit(builder, .{ .class_drop = .{
+        .operand = value,
+        .ownership = .root,
+        .skip_cycle = true,
+        .static_type = type_index,
+        .plans = plans,
+    } });
 }
 
 fn emitDropOwnedInner(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {

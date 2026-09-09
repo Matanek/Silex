@@ -37,6 +37,31 @@ class ChannelOwner {
     }
 }
 
+class PreparedList {
+    var values:int[]
+    let requested_count:int
+
+    init(count:int) {
+        self.values = []
+        var index = 0
+        while index < count {
+            self.values.append(index)
+            index++
+        }
+        self.requested_count = count
+    }
+}
+
+class PreparedRange {
+    var total:int
+
+    init(count:int) {
+        var total = 0
+        for value in 0...count { total += value }
+        self.total = total
+    }
+}
+
 test "field initializer expressions run for each instance" {
     var first = Defaults()
     var second = Defaults()
@@ -66,4 +91,17 @@ test "constructors initialize non-intrinsic class fields" {
     assert(owner.second.current == 5.0)
     assert(owner.first.history.count() == 2)
     assert(owner.second.history.count() == 1)
+}
+
+test "constructors may loop while later fields remain pending" {
+    var prepared = PreparedList(4)
+    var prepared_range = PreparedRange(4)
+
+    assert(prepared.values.count() == 4, "constructor loop appends every value")
+    assert(prepared.values[0] == 0, "constructor loop keeps the first value")
+    assert(prepared.values[1] == 1, "constructor loop keeps the second value")
+    assert(prepared.values[2] == 2, "constructor loop keeps the third value")
+    assert(prepared.values[3] == 3, "constructor loop keeps the fourth value")
+    assert(prepared.requested_count == 4, "constructor completes fields after the loop")
+    assert(prepared_range.total == 6, "constructor for loop executes after field initialization")
 }

@@ -1,0 +1,46 @@
+protocol MarkerValue {
+    func present() bool
+}
+
+struct Marker:MarkerValue {
+    func present() bool { return true }
+}
+
+struct MarkerBox<T> {
+    private var value:T?
+
+    init(value:T) { self.value = value }
+
+    func clear() { self.value = null }
+}
+
+test "zero-sized structures can be stored in lists" {
+    var markers:Marker[] = []
+    markers.append(Marker())
+
+    assert(markers.count() == 1)
+    assert(markers[0] == Marker())
+
+    markers[0] = Marker()
+    let copied = markers[0:1]
+    assert(copied.count() == 1)
+    assert(copied[0] == Marker())
+
+    let removed = markers.take_last()
+    assert(removed == Marker())
+    assert(markers.count() == 0)
+}
+
+test "zero-sized structures cross protocol erasure" {
+    var values:MarkerValue[] = []
+    values.append(Marker())
+
+    assert(values.count() == 1)
+    var value = values[0]
+    assert(value.present())
+}
+
+test "zero-sized structures inhabit generic optionals" {
+    var box = MarkerBox<Marker>(Marker())
+    box.clear()
+}

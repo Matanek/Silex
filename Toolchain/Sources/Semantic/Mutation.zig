@@ -14,6 +14,7 @@ const Inheritance = @import("Inheritance.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const Methods = @import("Methods.zig");
 const Model = @import("Model.zig");
+const Operators = @import("Operators.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
@@ -766,19 +767,61 @@ fn analyzeReplacement(
     }
 
     if (!target_type.isNumeric()) {
-        const message = if (field_target)
-            try std.fmt.allocPrint(
+        const operator: Ast.FunctionOperator = switch (assignment.operator) {
+            .add => .add,
+            .subtract => .subtract,
+            .multiply => .multiply,
+            .divide => .divide,
+            else => {
+                const message = if (field_target)
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "operator '{s}' requires a numeric field, found '{s}'",
+                        .{ operatorText(assignment.operator), self.typeName(target_type) },
+                    )
+                else
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "operator '{s}' requires a numeric variable, found '{s}'",
+                        .{ operatorText(assignment.operator), self.typeName(target_type) },
+                    );
+                return self.fail(assignment.position, message);
+            },
+        };
+        const right = try self.analyzeExpression(builder, assignment.value.?);
+        const result = (try Operators.analyzeValues(
+            self,
+            builder,
+            operator,
+            assignment.position,
+            self.owner_context orelse 0,
+            self.module_context orelse "",
+            &.{ assignment.position, assignment.value.?.position },
+            &.{
+                .{ .type = target_type, .value = current.? },
+                right,
+            },
+        )) orelse {
+            const message = try std.fmt.allocPrint(
                 self.allocator,
-                "operator '{s}' requires a numeric field, found '{s}'",
-                .{ operatorText(assignment.operator), self.typeName(target_type) },
-            )
-        else
-            try std.fmt.allocPrint(
-                self.allocator,
-                "operator '{s}' requires a numeric variable, found '{s}'",
-                .{ operatorText(assignment.operator), self.typeName(target_type) },
+                "operator '{s}' requires a numeric {s}, found '{s}'",
+                .{ operatorText(assignment.operator), if (field_target) "field" else "variable", self.typeName(target_type) },
             );
-        return self.fail(assignment.position, message);
+            return self.fail(assignment.position, message);
+        };
+        var replacement = result;
+        if (replacement.type != target_type and self.canImplicitlyConvert(replacement.type, target_type)) {
+            replacement = try self.coerce(builder, replacement, target_type, assignment.position);
+        }
+        if (replacement.type != target_type) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "operator '{s}' produces '{s}', which cannot be assigned to '{s}'",
+                .{ operatorText(assignment.operator), self.typeName(replacement.type), self.typeName(target_type) },
+            );
+            return self.fail(assignment.position, message);
+        }
+        return .{ .value = replacement.value, .transferred = replacement.transferred };
     }
     if (assignment.operator == .remainder and target_type.isFloat()) {
         const message = try std.fmt.allocPrint(
