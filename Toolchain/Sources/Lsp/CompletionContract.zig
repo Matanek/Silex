@@ -516,7 +516,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"paint"},
         .forbidden = &.{"private compiler symbol"},
         .provenance = "empty explicitly invoked completion",
-        .status = .{ .protected = "Lsp.ContextContracts: server preserves member completion with an error before the cursor" },
+        .status = .{ .protected = "Lsp.ContextContracts: server invalidates completion across deletion and retyping" },
     },
     .{
         .id = "editing-delete-and-retype",
@@ -526,7 +526,7 @@ pub const scenarios = [_]Scenario{
         .required = &.{"paint"},
         .forbidden = &.{"stale deleted candidate"},
         .provenance = "didChange deletion followed by retyping",
-        .status = .{ .protected = "Lsp.ContextContracts: server preserves member completion while the expression at the cursor is incomplete" },
+        .status = .{ .protected = "Lsp.ContextContracts: server invalidates completion across deletion and retyping" },
     },
     .{
         .id = "editing-interpolation-expression",

@@ -583,6 +583,7 @@ test "completion request decision preserves version trigger recovery and Unicode
     const cursor = std.mem.indexOf(u8, source, "input.\n").? + "input.".len;
     const first = try server.completionRequestDecision(allocator, uri, source, cursor, .trigger_character, ".");
     const repeated = try server.completionRequestDecision(allocator, uri, source, cursor, .trigger_character, ".");
+    const invoked = try server.completionRequestDecision(allocator, uri, source, cursor, .invoked, "");
 
     try std.testing.expectEqual(@as(i64, 41), first.document_version);
     try std.testing.expectEqualStrings(uri, first.document_uri);
@@ -595,6 +596,9 @@ test "completion request decision preserves version trigger recovery and Unicode
     try std.testing.expectEqual(first.edit.kind, repeated.edit.kind);
     try std.testing.expectEqual(first.edit.recovery, repeated.edit.recovery);
     try std.testing.expectEqualStrings(first.edit.receiver.?, repeated.edit.receiver.?);
+    try std.testing.expectEqual(first.edit.kind, invoked.edit.kind);
+    try std.testing.expectEqual(first.edit.recovery, invoked.edit.recovery);
+    try std.testing.expectEqualStrings(first.edit.receiver.?, invoked.edit.receiver.?);
 
     const changed = "func main() { print(\"prêt\") }";
     try server.setDocument(.{ .uri = uri, .text = changed, .version = 42 });

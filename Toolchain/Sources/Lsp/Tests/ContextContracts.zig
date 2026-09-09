@@ -274,6 +274,36 @@ test "server keeps member completion across independent syntax errors" {
     }
 }
 
+test "server invalidates completion across deletion and retyping" {
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const uri = "file:///Editing.sx";
+    const partial = try Support.removeMarker(allocator,
+        \\func paint() {}
+        \\func main() { pai<|> }
+    );
+    try Support.openDocument(&server, allocator, uri, 1, partial.text);
+    const first = try Support.serverCompletionInOpenDocument(&server, allocator, uri, partial);
+    try Support.expectPresent("paint", first);
+
+    const deleted = try Support.removeMarker(allocator,
+        \\func paint() {}
+        \\func main() { <|> }
+    );
+    try Support.changeDocument(&server, allocator, uri, 2, deleted.text);
+    const empty = try Support.serverCompletionInOpenDocument(&server, allocator, uri, deleted);
+    try Support.expectPresent("paint", empty);
+
+    try Support.changeDocument(&server, allocator, uri, 3, partial.text);
+    const retyped = try Support.serverCompletionInOpenDocument(&server, allocator, uri, partial);
+    try Support.expectPresent("paint", retyped);
+    try Support.expectNoDuplicates(retyped);
+    try Support.expectEqualItems(first, retyped);
+}
+
 test "incomplete control conditions preserve every lexical parameter" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
