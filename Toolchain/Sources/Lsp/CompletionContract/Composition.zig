@@ -128,15 +128,36 @@ pub const ExclusionReason = enum {
     transform_invalid_at_consumer,
 };
 
-pub const ProofId = enum {
-    lexical_member_access,
-    self_member_access,
-    tuple_member_access,
-    imported_field_chain,
-    local_cascade_member,
-    lexical_argument_value,
-    destructured_initializer_value,
-    match_subject_parameter,
+pub const SchemaId = enum {
+    receiver_member_surface,
+    value_flow_surface,
+};
+
+pub const SchemaPredicate = enum {
+    receiver_member_surface,
+    value_flow_surface,
+    none,
+    all_applicable,
+};
+
+pub const OracleProjection = enum {
+    declared_member_surface,
+    typed_value_identity,
+};
+
+pub const PartialTransform = enum {
+    member_cursor,
+    value_cursor,
+};
+
+pub const AssertionMode = enum {
+    exact_surface,
+    compatible_ranked,
+};
+
+pub const RunnerTier = enum {
+    local,
+    server,
 };
 
 pub const Key = struct {
@@ -146,14 +167,19 @@ pub const Key = struct {
     transform: TransformKind,
 };
 
-pub const Proof = struct {
-    id: ProofId,
-    key: Key,
-    scenario_id: []const u8,
+pub const ProofSchema = struct {
+    id: SchemaId,
+    predicate: SchemaPredicate,
+    canonical_template: []const u8,
+    oracle_projection: OracleProjection,
+    partial_transform: PartialTransform,
+    assertions: AssertionMode,
+    runner_tier: RunnerTier,
+    scenario_ids: []const []const u8,
 };
 
 pub const Status = union(enum) {
-    proved: ProofId,
+    proved: SchemaId,
     required: DeliveryPart,
     excluded: ExclusionReason,
 };
@@ -163,48 +189,39 @@ pub const Statistics = struct {
     proved: usize = 0,
     required: usize = 0,
     excluded: usize = 0,
+    schemas: usize = 0,
 };
 
-pub const proofs = [_]Proof{
+pub const schemas = [_]ProofSchema{
     .{
-        .id = .lexical_member_access,
-        .key = .{ .demand = .member, .producer = .lexical_local, .consumer = .member_access, .transform = .direct },
-        .scenario_id = "member-local-incomplete-if",
+        .id = .receiver_member_surface,
+        .predicate = .receiver_member_surface,
+        .canonical_template = "typed receiver member access",
+        .oracle_projection = .declared_member_surface,
+        .partial_transform = .member_cursor,
+        .assertions = .exact_surface,
+        .runner_tier = .server,
+        .scenario_ids = &.{
+            "member-local-incomplete-if",
+            "member-self-receiver",
+            "member-named-tuple",
+            "member-imported-field-chain",
+            "cascade-local-incomplete",
+        },
     },
     .{
-        .id = .self_member_access,
-        .key = .{ .demand = .member, .producer = .self_value, .consumer = .member_access, .transform = .direct },
-        .scenario_id = "member-self-receiver",
-    },
-    .{
-        .id = .tuple_member_access,
-        .key = .{ .demand = .member, .producer = .tuple_value, .consumer = .member_access, .transform = .direct },
-        .scenario_id = "member-named-tuple",
-    },
-    .{
-        .id = .imported_field_chain,
-        .key = .{ .demand = .member, .producer = .field, .consumer = .member_access, .transform = .field_chain },
-        .scenario_id = "member-imported-field-chain",
-    },
-    .{
-        .id = .local_cascade_member,
-        .key = .{ .demand = .member, .producer = .constructor_result, .consumer = .member_access, .transform = .cascade },
-        .scenario_id = "cascade-local-incomplete",
-    },
-    .{
-        .id = .lexical_argument_value,
-        .key = .{ .demand = .value, .producer = .lexical_local, .consumer = .argument_value, .transform = .direct },
-        .scenario_id = "call-argument-expression",
-    },
-    .{
-        .id = .destructured_initializer_value,
-        .key = .{ .demand = .value, .producer = .destructured_element, .consumer = .initializer, .transform = .destructured },
-        .scenario_id = "lexical-query-destructuring",
-    },
-    .{
-        .id = .match_subject_parameter,
-        .key = .{ .demand = .value, .producer = .parameter, .consumer = .match_subject, .transform = .direct },
-        .scenario_id = "expression-match-subject-parameter",
+        .id = .value_flow_surface,
+        .predicate = .value_flow_surface,
+        .canonical_template = "typed value in a compatible demand",
+        .oracle_projection = .typed_value_identity,
+        .partial_transform = .value_cursor,
+        .assertions = .compatible_ranked,
+        .runner_tier = .server,
+        .scenario_ids = &.{
+            "call-argument-expression",
+            "lexical-query-destructuring",
+            "expression-match-subject-parameter",
+        },
     },
 };
 
@@ -221,13 +238,13 @@ pub fn statusFor(key: Key) Status {
     if (!transformFitsConsumer(key.transform, key.consumer)) {
         return .{ .excluded = .transform_invalid_at_consumer };
     }
-    if (proofForKey(key)) |proof| return .{ .proved = proof.id };
+    if (schemaOwnerForKey(&schemas, key) catch unreachable) |schema| return .{ .proved = schema };
     return .{ .required = deliveryPart(key) };
 }
 
 pub fn audit() !Statistics {
-    try auditProofRegistry(&proofs);
-    var statistics = Statistics{};
+    try auditSchemaRegistry(&schemas);
+    var statistics = Statistics{ .schemas = schemas.len };
     for (std.enums.values(DemandKind)) |demand| {
         for (std.enums.values(ProducerKind)) |producer| {
             for (std.enums.values(ConsumerKind)) |consumer| {
@@ -247,7 +264,6 @@ pub fn audit() !Statistics {
             }
         }
     }
-    if (statistics.proved != proofs.len) return error.ProofKeyCollision;
     if (statistics.total != statistics.proved + statistics.required + statistics.excluded) {
         return error.UnclassifiedComposition;
     }
@@ -259,25 +275,82 @@ pub fn auditRelease() !void {
     if (statistics.required != 0) return error.MissingCompositionProof;
 }
 
-pub fn auditProofRegistry(registry: []const Proof) !void {
-    for (proofs) |declared| {
+pub fn auditSchemaRegistry(registry: []const ProofSchema) !void {
+    for (schemas) |declared| {
         var found = false;
         for (registry) |candidate| {
             if (candidate.id != declared.id) continue;
-            if (found) return error.DuplicateProof;
-            if (!keyEqual(candidate.key, declared.key)) return error.ProofKeyMismatch;
-            if (candidate.scenario_id.len == 0) return error.MissingScenario;
+            if (found) return error.DuplicateSchema;
+            if (candidate.predicate != declared.predicate) return error.SchemaPredicateMismatch;
             found = true;
         }
-        if (!found) return error.MissingDeclaredProof;
+        if (!found) return error.MissingDeclaredSchema;
     }
-    for (registry) |candidate| {
-        if (candidate.scenario_id.len == 0) return error.MissingScenario;
-        switch (statusFor(candidate.key)) {
-            .proved => |id| if (id != candidate.id) return error.ProofKeyMismatch,
-            .required, .excluded => return error.InvalidProofKey,
+    try auditSchemaCoverage(registry);
+}
+
+pub fn auditSchemaCoverage(registry: []const ProofSchema) !void {
+    for (registry, 0..) |candidate, index| {
+        if (candidate.canonical_template.len == 0) return error.MissingCanonicalTemplate;
+        if (candidate.scenario_ids.len == 0) return error.MissingScenario;
+        for (registry[index + 1 ..]) |other| {
+            if (candidate.id == other.id) return error.DuplicateSchema;
         }
+        var owned: usize = 0;
+        for (std.enums.values(DemandKind)) |demand| {
+            for (std.enums.values(ProducerKind)) |producer| {
+                for (std.enums.values(ConsumerKind)) |consumer| {
+                    for (std.enums.values(TransformKind)) |transform| {
+                        const key: Key = .{
+                            .demand = demand,
+                            .producer = producer,
+                            .consumer = consumer,
+                            .transform = transform,
+                        };
+                        if (!isApplicable(key)) continue;
+                        if (try schemaOwnerForKey(registry, key) == candidate.id) owned += 1;
+                    }
+                }
+            }
+        }
+        if (owned == 0) return error.EmptySchema;
     }
+}
+
+fn schemaOwnerForKey(registry: []const ProofSchema, key: Key) !?SchemaId {
+    var owner: ?SchemaId = null;
+    for (registry) |schema| {
+        if (!schemaOwns(schema.predicate, key)) continue;
+        if (owner != null) return error.OverlappingSchemas;
+        owner = schema.id;
+    }
+    return owner;
+}
+
+fn schemaOwns(predicate: SchemaPredicate, key: Key) bool {
+    return switch (predicate) {
+        .receiver_member_surface => key.demand == .member and key.consumer == .member_access and switch (key.producer) {
+            .lexical_local, .self_value, .tuple_value => key.transform == .direct,
+            .field => key.transform == .field_chain,
+            .constructor_result => key.transform == .cascade,
+            else => false,
+        },
+        .value_flow_surface => key.demand == .value and switch (key.producer) {
+            .lexical_local => key.consumer == .argument_value and key.transform == .direct,
+            .destructured_element => key.consumer == .initializer and key.transform == .destructured,
+            .parameter => key.consumer == .match_subject and key.transform == .direct,
+            else => false,
+        },
+        .none => false,
+        .all_applicable => isApplicable(key),
+    };
+}
+
+fn isApplicable(key: Key) bool {
+    return consumerRequests(key.consumer, key.demand) and
+        producerSatisfies(key.producer, key.demand) and
+        transformFollows(key.transform, key.producer, key.demand) and
+        transformFitsConsumer(key.transform, key.consumer);
 }
 
 fn consumerRequests(consumer: ConsumerKind, demand: DemandKind) bool {
@@ -511,21 +584,10 @@ fn deliveryPart(key: Key) DeliveryPart {
     };
 }
 
-fn proofForKey(key: Key) ?Proof {
-    for (proofs) |proof| if (keyEqual(proof.key, key)) return proof;
-    return null;
-}
-
-fn keyEqual(left: Key, right: Key) bool {
-    return left.demand == right.demand and
-        left.producer == right.producer and
-        left.consumer == right.consumer and
-        left.transform == right.transform;
-}
-
 test "semantic completion compositions are all classified" {
     const statistics = try audit();
-    try std.testing.expectEqual(proofs.len, statistics.proved);
+    try std.testing.expectEqual(@as(usize, 8), statistics.proved);
+    try std.testing.expectEqual(schemas.len, statistics.schemas);
     try std.testing.expect(statistics.required != 0);
     try std.testing.expect(statistics.excluded != 0);
 }
@@ -534,8 +596,19 @@ test "semantic completion release remains closed while compositions lack proof" 
     try std.testing.expectError(error.MissingCompositionProof, auditRelease());
 }
 
-test "removing a declared composition proof is rejected" {
-    try std.testing.expectError(error.MissingDeclaredProof, auditProofRegistry(proofs[1..]));
+test "removing a declared quantified schema is rejected" {
+    try std.testing.expectError(error.MissingDeclaredSchema, auditSchemaRegistry(schemas[1..]));
+}
+
+test "empty and overlapping quantified schemas are rejected" {
+    var empty = schemas;
+    empty[0].predicate = .none;
+    try std.testing.expectError(error.EmptySchema, auditSchemaCoverage(&empty));
+
+    var overlapping = schemas;
+    overlapping[0].predicate = .all_applicable;
+    overlapping[1].predicate = .all_applicable;
+    try std.testing.expectError(error.OverlappingSchemas, auditSchemaCoverage(&overlapping));
 }
 
 test "semantic domains require exhaustive policies" {

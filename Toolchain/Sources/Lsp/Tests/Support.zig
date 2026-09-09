@@ -207,7 +207,11 @@ pub fn expectExactLabels(
 
 pub fn expectFirst(label: []const u8, items: []const Types.CompletionItem) !void {
     if (items.len == 0) return error.MissingCompletionItem;
-    try std.testing.expectEqualStrings(label, items[0].label);
+    if (!std.mem.eql(u8, label, items[0].label)) return error.UnexpectedFirstCompletionItem;
+}
+
+pub fn containsLabel(label: []const u8, items: []const Types.CompletionItem) bool {
+    return itemWithLabel(items, label) != null;
 }
 
 pub fn expectPresent(label: []const u8, items: []const Types.CompletionItem) !void {
@@ -229,11 +233,19 @@ pub fn expectItem(expected: ExpectedItem, items: []const Types.CompletionItem) !
         printLabels(items);
         return error.MissingCompletionItem;
     };
-    try std.testing.expectEqual(expected.kind, actual.kind);
-    try std.testing.expectEqualStrings(expected.detail, actual.detail);
-    try std.testing.expectEqualStrings(expected.label, actual.filterText.?);
-    try std.testing.expectEqualStrings(expected.insert_text, actual.insertText.?);
-    try std.testing.expectEqual(expected.insert_text_format, actual.insertTextFormat);
+    try validateItem(expected, actual);
+}
+
+pub fn validateItem(expected: ExpectedItem, actual: Types.CompletionItem) !void {
+    if (expected.kind != actual.kind) return error.CompletionKindMismatch;
+    if (!std.mem.eql(u8, expected.detail, actual.detail)) return error.CompletionDetailMismatch;
+    if (actual.filterText == null or !std.mem.eql(u8, expected.label, actual.filterText.?)) {
+        return error.CompletionFilterMismatch;
+    }
+    if (actual.insertText == null or !std.mem.eql(u8, expected.insert_text, actual.insertText.?)) {
+        return error.CompletionInsertionMismatch;
+    }
+    if (expected.insert_text_format != actual.insertTextFormat) return error.CompletionInsertFormatMismatch;
 }
 
 pub fn expectNoDuplicates(items: []const Types.CompletionItem) !void {

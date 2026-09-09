@@ -1192,12 +1192,14 @@ fn scenarioIndex(identifier: []const u8) ?usize {
 }
 
 comptime {
-    for (Composition.proofs) |proof| {
-        if (!hasScenario(proof.scenario_id)) {
-            @compileError(std.fmt.comptimePrint(
-                "semantic completion proof '{s}' names missing scenario '{s}'",
-                .{ @tagName(proof.id), proof.scenario_id },
-            ));
+    for (Composition.schemas) |schema| {
+        for (schema.scenario_ids) |scenario_id| {
+            if (!hasScenario(scenario_id)) {
+                @compileError(std.fmt.comptimePrint(
+                    "semantic completion schema '{s}' names missing scenario '{s}'",
+                    .{ @tagName(schema.id), scenario_id },
+                ));
+            }
         }
     }
 }

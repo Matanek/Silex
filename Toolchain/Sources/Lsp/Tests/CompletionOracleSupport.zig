@@ -7,6 +7,14 @@ pub const Parameter = struct {
     type_name: []const u8,
 };
 
+pub const InstanceMember = struct {
+    name: []const u8,
+    kind: u8,
+    detail: []const u8,
+    insert_text: []const u8,
+    insert_text_format: ?u8 = null,
+};
+
 pub fn parameter(
     allocator: std.mem.Allocator,
     source: []const u8,
@@ -53,6 +61,47 @@ pub fn publicInstanceMembers(
             }
         }.lessThan);
         return labels.toOwnedSlice(allocator);
+    }
+    return error.MissingOracleType;
+}
+
+pub fn publicInstanceMember(
+    allocator: std.mem.Allocator,
+    source: []const u8,
+    type_name: []const u8,
+    member_name: []const u8,
+) !InstanceMember {
+    var frontend = FrontendModule.Frontend.init(allocator);
+    const program = (try frontend.compile(source)).ast;
+    for (program.structures) |structure| {
+        if (!matchesType(structure.name, type_name)) continue;
+        for (structure.fields) |field| {
+            if (field.is_static or !field.is_public or field.is_private or field.is_protected or field.is_local or
+                !std.mem.eql(u8, field.name, member_name)) continue;
+            const member_type = if (field.property) |property| property.value_type else field.type;
+            return .{
+                .name = field.name,
+                .kind = if (field.property != null) 10 else 5,
+                .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ field.name, typeName(program, member_type) }),
+                .insert_text = field.name,
+            };
+        }
+        for (structure.methods) |method| {
+            if (method.is_static or !method.is_public or method.is_private or method.is_protected or method.is_local or
+                method.accessor != null or !std.mem.eql(u8, method.name, member_name)) continue;
+            if (method.parameters.len != 0) return error.OracleSnippetNotImplemented;
+            return .{
+                .name = method.name,
+                .kind = 2,
+                .detail = try std.fmt.allocPrint(
+                    allocator,
+                    "{s}() {s}",
+                    .{ method.name, typeName(program, method.return_type) },
+                ),
+                .insert_text = try std.fmt.allocPrint(allocator, "{s}()", .{method.name}),
+            };
+        }
+        return error.MissingOracleMember;
     }
     return error.MissingOracleType;
 }
