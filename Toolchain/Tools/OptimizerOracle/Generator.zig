@@ -236,6 +236,11 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .removes_collection_bounds = "sum" },
     },
     .{
+        .name = "Regressions/SequentialBoundedLoops.sx",
+        .concern = "zero-origin recovery after a sequential loop resets its reused induction variable",
+        .contract = .{ .removes_collection_bounds = "sum_sequential" },
+    },
+    .{
         .name = "Regressions/DenseScalarLoop.sx",
         .concern = "class count accessor inlining and redundant scalar loads inside a dense loop",
         .contract = .{ .scalarizes_dense_loop = "integrate" },

@@ -379,27 +379,75 @@ fn provenZeroOriginInduction(
     header: Ir.BlockId,
     local: Ir.LocalId,
 ) !bool {
-    var initialization_count: usize = 0;
     for (function.blocks, 0..) |block, block_id| for (block.instructions) |instruction| {
         const store = switch (instruction) {
             .local_store => |value| value,
             else => continue,
         };
-        if (store.local != local) continue;
-        if (loop_blocks[block_id]) {
-            if (!isUnitIncrement(function, store.operand, local)) return false;
-            continue;
-        }
-        if (!(try reachesAvoiding(allocator, function.blocks, block_id, header, null))) continue;
-        const definition = findDefinition(function, store.operand) orelse return false;
-        const constant = switch (definition.value) {
-            .constant_int => |value| value,
-            else => return false,
-        };
-        if (constant.bits != 0) return false;
-        initialization_count += 1;
+        if (store.local == local and loop_blocks[block_id] and !isUnitIncrement(function, store.operand, local))
+            return false;
     };
-    return initialization_count == 1;
+    return loopEntriesStartAtZero(allocator, function, loop_blocks, header, local);
+}
+
+const ZeroOriginState = enum { unresolved, visiting, proven, rejected };
+
+fn loopEntriesStartAtZero(
+    allocator: Allocator,
+    function: Ir.Function,
+    loop_blocks: []const bool,
+    header: Ir.BlockId,
+    local: Ir.LocalId,
+) !bool {
+    const states = try allocator.alloc(ZeroOriginState, function.blocks.len);
+    defer allocator.free(states);
+    @memset(states, .unresolved);
+    var entries: usize = 0;
+    for (function.blocks, 0..) |block, predecessor| {
+        if (loop_blocks[predecessor] or !hasSuccessor(block.terminator, header)) continue;
+        entries += 1;
+        if (!lastStoreOnEveryPathIsZero(function, loop_blocks, local, predecessor, states)) return false;
+    }
+    return entries != 0;
+}
+
+fn lastStoreOnEveryPathIsZero(
+    function: Ir.Function,
+    loop_blocks: []const bool,
+    local: Ir.LocalId,
+    block_id: Ir.BlockId,
+    states: []ZeroOriginState,
+) bool {
+    switch (states[block_id]) {
+        .proven => return true,
+        .rejected, .visiting => return false,
+        .unresolved => states[block_id] = .visiting,
+    }
+    var instruction_index = function.blocks[block_id].instructions.len;
+    while (instruction_index != 0) {
+        instruction_index -= 1;
+        const store = switch (function.blocks[block_id].instructions[instruction_index]) {
+            .local_store => |value| value,
+            else => continue,
+        };
+        if (store.local != local) continue;
+        const zero = isIntegerConstant(function, store.operand, 0);
+        states[block_id] = if (zero) .proven else .rejected;
+        return zero;
+    }
+
+    var predecessors: usize = 0;
+    for (function.blocks, 0..) |block, predecessor| {
+        if (loop_blocks[predecessor] or !hasSuccessor(block.terminator, block_id)) continue;
+        predecessors += 1;
+        if (!lastStoreOnEveryPathIsZero(function, loop_blocks, local, predecessor, states)) {
+            states[block_id] = .rejected;
+            return false;
+        }
+    }
+    const proven = predecessors != 0;
+    states[block_id] = if (proven) .proven else .rejected;
+    return proven;
 }
 
 fn isUnitIncrement(function: Ir.Function, value: Ir.ValueId, local: Ir.LocalId) bool {

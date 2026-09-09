@@ -1,0 +1,26 @@
+// The first loop deliberately indexes a different view, so its check remains
+// observable. The second loop reuses the counter after an explicit reset and
+// must recover the bound established from its own view.
+func sum_sequential(values:@int[..], other:@int[..]) int {
+    var total = 0
+    var index = 0
+    while index < values.count() {
+        total += other[index]
+        index++
+    }
+    index = 0
+    while index < values.count() {
+        total += values[index]
+        index++
+    }
+    return total
+}
+
+func main() {
+    let values = [1, 2, 3, 4]
+    let other = [5, 6, 7, 8]
+    let values_view = @values[0:values.count()]
+    let other_view = @other[0:other.count()]
+    assert(sum_sequential(values_view, other_view) == 36)
+    print("sequential loop bounds preserved")
+}
