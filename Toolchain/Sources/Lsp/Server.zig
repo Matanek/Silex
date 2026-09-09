@@ -133,7 +133,7 @@ pub const Server = struct {
         if (std.mem.eql(u8, request.method, "textDocument/didChange")) {
             const params = request.params orelse return null;
             const document = Protocol.documentFromChange(params) orelse return null;
-            try self.setDocument(document);
+            if (!try self.setDocumentIfNewer(document)) return null;
             return try self.diagnosticsNotification(allocator, document.uri);
         }
         if (std.mem.eql(u8, request.method, "textDocument/didClose")) {
@@ -384,15 +384,25 @@ pub const Server = struct {
     }
 
     fn setDocument(self: *Server, document: Types.Document) !void {
-        const text = try self.allocator.dupe(u8, document.text);
-        errdefer self.allocator.free(text);
+        _ = try self.storeDocument(document, false);
+    }
+
+    fn setDocumentIfNewer(self: *Server, document: Types.Document) !bool {
+        return self.storeDocument(document, true);
+    }
+
+    fn storeDocument(self: *Server, document: Types.Document, reject_stale: bool) !bool {
         for (self.documents.items) |*current| {
             if (!std.mem.eql(u8, current.uri, document.uri)) continue;
+            if (reject_stale and document.version <= current.version) return false;
+            const text = try self.allocator.dupe(u8, document.text);
             self.allocator.free(current.text);
             current.text = text;
             current.version = document.version;
-            return;
+            return true;
         }
+        const text = try self.allocator.dupe(u8, document.text);
+        errdefer self.allocator.free(text);
         const uri = try self.allocator.dupe(u8, document.uri);
         errdefer self.allocator.free(uri);
         try self.documents.append(self.allocator, .{
@@ -400,6 +410,7 @@ pub const Server = struct {
             .text = text,
             .version = document.version,
         });
+        return true;
     }
 
     fn removeDocument(self: *Server, uri: []const u8) void {
