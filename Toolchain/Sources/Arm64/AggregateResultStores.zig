@@ -38,12 +38,8 @@ pub fn optimize(
             if (!machine_load.dynamic or !machine_load.view or !machine_load.checked or
                 !machine_load.result.aggregate or machine_load.result.width < 2 or
                 spanUsed(instructions, machine_load.result, null)) break :candidate;
-            const diagnose = machine_load.result.width == 26;
-            if (diagnose) std.debug.print("aggregate-result-store: load accepted in {s}\n", .{source.name});
-
             const load_origin = localCollectionOrigin(block.instructions, source_load.collection, load_offset) orelse
                 break :candidate;
-            if (diagnose) std.debug.print("aggregate-result-store: local origin {d}\n", .{load_origin});
             for (block.instructions[load_offset + 1 ..], load_offset + 1..) |possible_call, call_offset| {
                 const source_call = switch (possible_call) {
                     .call => |value| value,
@@ -52,11 +48,7 @@ pub fn optimize(
                 const call_result = source_call.result orelse continue;
                 const safe_call = call_result < source.value_types.len and source.value_types[call_result] == result_type and
                     safeCallee(program, source, block, call_offset, source_call, result_type);
-                if (!safe_call) {
-                    if (diagnose) std.debug.print("aggregate-result-store: call rejected at {d}\n", .{call_offset});
-                    continue;
-                }
-                if (diagnose) std.debug.print("aggregate-result-store: call accepted at {d}\n", .{call_offset});
+                if (!safe_call) continue;
                 const call_index = block_start + call_offset;
                 const machine_call = switch (instructions[call_index]) {
                     .call => |value| value,
@@ -70,26 +62,16 @@ pub fn optimize(
                         .collection_replace => |value| value,
                         else => continue,
                     };
-                    if (diagnose) std.debug.print("aggregate-result-store: replacement seen at {d}\n", .{replace_offset});
                     if (!source_replace.checked or source_replace.replacement != call_result or
                         source_replace.index != source_load.index or
                         valueDefinedBetween(block.instructions, source_load.index, load_offset + 1, replace_offset))
-                    {
-                        if (diagnose) std.debug.print("aggregate-result-store: replacement source mismatch\n", .{});
                         continue;
-                    }
                     const replace_origin = localCollectionOrigin(block.instructions, source_replace.collection, replace_offset) orelse
                         continue;
                     if (replace_origin != load_origin or
                         localStoredBetween(block.instructions, load_origin, load_offset + 1, replace_offset))
-                    {
-                        if (diagnose) std.debug.print("aggregate-result-store: replacement origin mismatch\n", .{});
                         continue;
-                    }
-                    if (!transparentAfterCall(block.instructions, call_offset + 1, replace_offset)) {
-                        if (diagnose) std.debug.print("aggregate-result-store: post-call effect\n", .{});
-                        continue;
-                    }
+                    if (!transparentAfterCall(block.instructions, call_offset + 1, replace_offset)) continue;
 
                     const replace_index = block_start + replace_offset;
                     const machine_replace = switch (instructions[replace_index]) {
@@ -101,11 +83,7 @@ pub fn optimize(
                         machine_replace.index != machine_load.index or
                         machine_replace.element_stride != machine_load.element_stride or
                         !spanUsed(instructions, machine_result, replace_index))
-                    {
-                        if (diagnose) std.debug.print("aggregate-result-store: machine mismatch\n", .{});
                         continue;
-                    }
-                    if (diagnose) std.debug.print("aggregate-result-store: forwarding enabled\n", .{});
 
                     var updated_load = machine_load;
                     updated_load.forwarded_result = Machine.Instruction.ForwardedAggregateResult{
@@ -161,8 +139,15 @@ fn safeCallee(
 }
 
 fn plainValueCallee(program: Ir.Program, function: Ir.Function) bool {
+    if (function.capture_types.len != 0) return false;
     if (!plainDetachedValue(program, function.return_type)) return false;
-    for (function.parameter_types) |parameter| if (!plainDetachedValue(program, parameter)) return false;
+    // Borrowed parameters are safe only because the caller separately proves
+    // that every address originates in a differently typed collection. Inside
+    // the callee, admit projections rooted in those parameters and loads, but
+    // no fresh reference root or memory-writing operation.
+    for (function.parameter_types) |parameter| {
+        if (parameter != .address and !plainDetachedValue(program, parameter)) return false;
+    }
     for (function.blocks) |block| {
         for (block.instructions) |instruction| switch (instruction) {
             .constant_int,
@@ -182,6 +167,8 @@ fn plainValueCallee(program: Ir.Program, function: Ir.Function) bool {
             .enum_payload,
             .enum_raw,
             .field_load,
+            .reference_field,
+            .reference_load,
             .unary,
             .binary,
             .convert,
@@ -339,13 +326,15 @@ fn testPrograms(allocator: Allocator, address_collection: Ir.ValueId) !struct { 
         .{ .name = "InputView", .fields = &.{}, .collection = .{ .element = .structure(0), .length = null, .view = true } },
         .{ .name = "OutputView", .fields = &.{}, .collection = .{ .element = .structure(1), .length = null, .view = true } },
     });
-    const callee_fields = try allocator.dupe(Ir.ValueId, &.{ 1, 2 });
+    const callee_fields = try allocator.dupe(Ir.ValueId, &.{ 2, 4 });
     const callee_instructions = try allocator.dupe(Ir.Instruction, &.{
-        .{ .field_load = .{ .result = 1, .base = 0, .field = 0 } },
-        .{ .field_load = .{ .result = 2, .base = 0, .field = 1 } },
-        .{ .structure_init = .{ .result = 3, .structure = 1, .fields = callee_fields } },
+        .{ .reference_field = .{ .result = 1, .reference = 0, .structure = 0, .field = 0 } },
+        .{ .reference_load = .{ .result = 2, .reference = 1 } },
+        .{ .reference_field = .{ .result = 3, .reference = 0, .structure = 0, .field = 1 } },
+        .{ .reference_load = .{ .result = 4, .reference = 3 } },
+        .{ .structure_init = .{ .result = 5, .structure = 1, .fields = callee_fields } },
     });
-    const callee_blocks = try allocator.dupe(Ir.Block, &.{.{ .instructions = callee_instructions, .terminator = .{ .return_value = 3 } }});
+    const callee_blocks = try allocator.dupe(Ir.Block, &.{.{ .instructions = callee_instructions, .terminator = .{ .return_value = 5 } }});
     const caller_arguments = try allocator.dupe(Ir.ValueId, &.{4});
     const caller_instructions = try allocator.dupe(Ir.Instruction, &.{
         .{ .local_load = .{ .result = 2, .local = 0 } },
@@ -359,9 +348,9 @@ fn testPrograms(allocator: Allocator, address_collection: Ir.ValueId) !struct { 
     const functions = try allocator.dupe(Ir.Function, &.{
         .{
             .name = "make",
-            .parameter_types = &.{.structure(0)},
+            .parameter_types = &.{.address},
             .return_type = .structure(1),
-            .value_types = &.{ .structure(0), .float32, .float32, .structure(1) },
+            .value_types = &.{ .address, .address, .float32, .address, .float32, .structure(1) },
             .blocks = callee_blocks,
         },
         .{
