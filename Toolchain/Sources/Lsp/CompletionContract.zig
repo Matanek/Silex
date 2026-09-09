@@ -1297,6 +1297,6 @@ test "registry mutations expose missing rows and missing proofs" {
     missing_cursor[0].partial_source = "public";
     try std.testing.expectError(error.InvalidCursorCount, audit(&missing_cursor));
     var missing_fixture = scenarios;
-    missing_fixture[2].workspace_fixture = null;
+    missing_fixture[3].workspace_fixture = null;
     try std.testing.expectError(error.MissingWorkspaceFixture, audit(&missing_fixture));
 }
