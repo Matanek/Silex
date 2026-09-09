@@ -284,3 +284,105 @@ test "part 04 rejects members from the wrong receiver category" {
         try Support.expectNoDuplicates(items);
     }
 }
+
+test "part 04 preserves read mutable static and conformance receivers" {
+    const sources = [_][]const u8{
+        "struct Payload { func paint() int { return 1 } }\nfunc inspect(payload:&Payload) { payload.<|> }",
+        "struct Payload { func paint() int { return 1 } }\nfunc inspect(payload:@Payload) { payload.<|> }",
+        "struct Payload { func paint() int { return 1 } }\nstruct Factory { static func make() Payload { return Payload() } }\nfunc inspect() { Factory.make().<|> }",
+        "protocol Drawable { func paint() int }\nstruct Payload {}\nextend Payload : Drawable { func paint() int { return 1 } }\nfunc inspect(payload:Payload) { payload.<|> }",
+    };
+
+    for (sources, 0..) |source, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Part04-Receiver-Kind-{d}.sx", .{index});
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectExactLabels(&.{"paint"}, items);
+        try Support.expectItem(.{ .label = "paint", .kind = 2, .detail = "paint() int", .insert_text = "paint()" }, items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
+test "part 04 keeps the correct root through cascade nesting and continuation" {
+    const cases = [_]struct {
+        source: []const u8,
+        expected: []const Support.ExpectedItem,
+    }{
+        .{
+            .source = "class Canvas { var opacity:float; func paint() Canvas { return self } }\nfunc draw() { Canvas()..<|> }",
+            .expected = &.{
+                .{ .label = "opacity", .kind = 5, .detail = "opacity:float", .insert_text = "opacity" },
+                .{ .label = "paint", .kind = 2, .detail = "paint() Canvas", .insert_text = "paint()" },
+            },
+        },
+        .{
+            .source = "class Canvas { var opacity:float; func paint() Canvas { return self } }\nfunc draw() { Canvas()\n    ..paint()\n    ..<|>\n}",
+            .expected = &.{
+                .{ .label = "opacity", .kind = 5, .detail = "opacity:float", .insert_text = "opacity" },
+                .{ .label = "paint", .kind = 2, .detail = "paint() Canvas", .insert_text = "paint()" },
+            },
+        },
+        .{
+            .source = "struct Settings { var title:str; var width:int }\nfunc configure() { Settings()..ti<|> = \"Silex\" }",
+            .expected = &.{
+                .{ .label = "title", .kind = 5, .detail = "title:str", .insert_text = "title" },
+            },
+        },
+        .{
+            .source = "class Plugin { func configure() Plugin { return self } }\nclass Application { func install(plugin:Plugin) Application { return self }\nfunc run() int { return 0 } }\nfunc launch() { Application()\n    ..install(Plugin()\n        ..<|>\n    )\n}",
+            .expected = &.{
+                .{ .label = "configure", .kind = 2, .detail = "configure() Plugin", .insert_text = "configure()" },
+            },
+        },
+        .{
+            .source = "class Plugin { func configure() Plugin { return self } }\nclass Application { func install(plugin:Plugin) Application { return self }\nfunc run() int { return 0 } }\nfunc launch() { Application()\n    ..install(Plugin()\n        ..configure()\n    )\n    ..<|>\n}",
+            .expected = &.{
+                .{ .label = "install", .kind = 2, .detail = "install(plugin:Plugin) Application", .insert_text = "install(${1:plugin})$0", .insert_text_format = 2 },
+                .{ .label = "run", .kind = 2, .detail = "run() int", .insert_text = "run()" },
+            },
+        },
+    };
+
+    for (cases, 0..) |case, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Part04-Cascade-{d}.sx", .{index});
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, case.source, ".");
+        const labels = try arena.allocator().alloc([]const u8, case.expected.len);
+        for (case.expected, 0..) |expected, expected_index| labels[expected_index] = expected.label;
+        Support.expectExactLabels(labels, items) catch |err| {
+            std.debug.print("Part 04 cascade case {d} failed\n", .{index});
+            return err;
+        };
+        for (case.expected) |expected| try Support.expectItem(expected, items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
+test "part 04 resolves homogeneous member chains at every generated depth" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var expression = try allocator.dupe(u8, "node");
+    for (0..16) |depth| {
+        const source = try std.fmt.allocPrint(
+            allocator,
+            "class Node {{ var value:int; func next() Node {{ return self }} }}\nfunc inspect(node:Node) {{ {s}.<|> }}",
+            .{expression},
+        );
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(allocator, "file:///Part04-Depth-{d}.sx", .{depth});
+        const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+        try Support.expectExactLabels(&.{ "value", "next" }, items);
+        try Support.expectItem(.{ .label = "value", .kind = 5, .detail = "value:int", .insert_text = "value" }, items);
+        try Support.expectItem(.{ .label = "next", .kind = 2, .detail = "next() Node", .insert_text = "next()" }, items);
+        try Support.expectNoDuplicates(items);
+        expression = try std.fmt.allocPrint(allocator, "{s}.next()", .{expression});
+    }
+}
