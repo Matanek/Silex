@@ -3852,17 +3852,24 @@ fn comparisonBranchIndex(
     if (!isComparison(binary.operator) or binary.type == .str or index + 1 >= function.instructions.len) return null;
     var branch_index = index + 1;
     var branch_condition = binary.result;
-    if (function.instructions[index + 1] == .copy) {
-        const copy = function.instructions[index + 1].copy;
-        if (copy.operand != binary.result or index + 2 >= function.instructions.len) return null;
-        branch_index = index + 2;
-        branch_condition = copy.result;
-        if (!slotUsedOnlyAt(function.instructions, binary.result, index + 1)) return null;
-    }
-    const branch_value = switch (function.instructions[branch_index]) {
-        .branch => |value| value,
-        else => return null,
-    };
+    const branch_value = while (branch_index < function.instructions.len and
+        branch_index <= index + max_comparison_branch_copy_distance + 1) : (branch_index += 1)
+    {
+        switch (function.instructions[branch_index]) {
+            .copy => |copy| {
+                if (copy.operand == branch_condition) {
+                    if (!slotUsedOnlyAt(function.instructions, branch_condition, branch_index)) return null;
+                    branch_condition = copy.result;
+                } else if (copy.result == branch_condition or copy.result == binary.left or
+                    copy.result == binary.right)
+                {
+                    return null;
+                }
+            },
+            .branch => |value| break value,
+            else => return null,
+        }
+    } else return null;
     if (branch_value.condition != branch_condition or
         !slotUsedOnlyAt(function.instructions, branch_condition, branch_index)) return null;
     for (function.instructions, 0..) |instruction, other_index| {
@@ -3900,23 +3907,101 @@ fn localAddressOnlyFeedsViewReferences(function: Machine.Function, slot: Machine
 
 fn copyBelongsToFusedComparison(function: Machine.Function, index: usize) bool {
     if (index == 0) return false;
+    const copy = switch (function.instructions[index]) {
+        .copy => |value| value,
+        else => return false,
+    };
     const binary = switch (function.instructions[index - 1]) {
         .binary => |value| value,
         else => return false,
     };
-    return comparisonBranchIndex(function, index - 1, binary) == index + 1;
+    return copy.operand == binary.result and comparisonBranchIndex(function, index - 1, binary) != null;
 }
 
 fn comparisonForBranch(function: Machine.Function, branch_index: usize) ?Machine.Instruction.Binary {
-    if (branch_index != 0) switch (function.instructions[branch_index - 1]) {
-        .binary => |binary| if (comparisonBranchIndex(function, branch_index - 1, binary) == branch_index) return binary,
-        else => {},
-    };
-    if (branch_index >= 2) switch (function.instructions[branch_index - 2]) {
-        .binary => |binary| if (comparisonBranchIndex(function, branch_index - 2, binary) == branch_index) return binary,
-        else => {},
-    };
+    var distance: usize = 1;
+    while (distance <= max_comparison_branch_copy_distance + 1 and distance <= branch_index) : (distance += 1) {
+        const comparison_index = branch_index - distance;
+        switch (function.instructions[comparison_index]) {
+            .binary => |binary| if (comparisonBranchIndex(function, comparison_index, binary) == branch_index) return binary,
+            .copy => {},
+            else => return null,
+        }
+    }
     return null;
+}
+
+const max_comparison_branch_copy_distance = 8;
+
+test "fuse an ARM64 comparison across phi initialization copies" {
+    const instructions = [_]Machine.Instruction{
+        .{ .binary = .{ .result = 2, .operator = .greater, .left = 0, .right = 1, .type = .float32 } },
+        .{ .copy = .{ .result = 3, .operand = 0 } },
+        .{ .copy = .{ .result = 4, .operand = 1 } },
+        .{ .branch = .{ .condition = 2, .then_instruction = 4, .else_instruction = 5 } },
+        .return_void,
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "comparison_phi_copies",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .float_register_slots = &.{ 16, 17, null, 18, 19 },
+        .instructions = &instructions,
+    };
+    try std.testing.expectEqual(@as(?usize, 3), comparisonBranchIndex(function, 0, instructions[0].binary));
+    try std.testing.expectEqual(instructions[0].binary, comparisonForBranch(function, 3).?);
+    try std.testing.expect(!copyBelongsToFusedComparison(function, 1));
+    try std.testing.expect(!copyBelongsToFusedComparison(function, 2));
+}
+
+test "elide a copied ARM64 comparison across phi initialization copies" {
+    const instructions = [_]Machine.Instruction{
+        .{ .binary = .{ .result = 2, .operator = .greater, .left = 0, .right = 1, .type = .float32 } },
+        .{ .copy = .{ .result = 3, .operand = 2 } },
+        .{ .copy = .{ .result = 4, .operand = 0 } },
+        .{ .branch = .{ .condition = 3, .then_instruction = 4, .else_instruction = 5 } },
+        .return_void,
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "copied_comparison_phi_copies",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .float_register_slots = &.{ 16, 17, null, null, 18 },
+        .instructions = &instructions,
+    };
+    try std.testing.expectEqual(@as(?usize, 3), comparisonBranchIndex(function, 0, instructions[0].binary));
+    try std.testing.expect(copyBelongsToFusedComparison(function, 1));
+    try std.testing.expectEqual(instructions[0].binary, comparisonForBranch(function, 3).?);
+}
+
+test "do not fuse an ARM64 comparison across an operand redefinition" {
+    const instructions = [_]Machine.Instruction{
+        .{ .binary = .{ .result = 2, .operator = .greater, .left = 0, .right = 1, .type = .float32 } },
+        .{ .copy = .{ .result = 0, .operand = 1 } },
+        .{ .branch = .{ .condition = 2, .then_instruction = 3, .else_instruction = 4 } },
+        .return_void,
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "comparison_operand_redefined",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 3,
+        .frame_size = try Machine.frameSize(3),
+        .float_register_slots = &.{ 16, 17, null },
+        .instructions = &instructions,
+    };
+    try std.testing.expectEqual(@as(?usize, null), comparisonBranchIndex(function, 0, instructions[0].binary));
+    try std.testing.expectEqual(@as(?Machine.Instruction.Binary, null), comparisonForBranch(function, 2));
 }
 
 const LoopBackedgeComparison = struct {
