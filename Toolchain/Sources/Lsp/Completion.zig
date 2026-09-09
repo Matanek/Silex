@@ -3129,10 +3129,23 @@ fn cascadeReceiverAt(source: []const u8, dot: usize) ?[]const u8 {
         source[end - 1] == '\n')) end -= 1;
     if (end == 0) return null;
 
+    const receiver = memberReceiver(source, end) orelse return null;
+    const receiver_start = end - receiver.len;
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..end], '\n')) |newline| newline + 1 else 0;
-    const line = std.mem.trimStart(u8, source[line_start..end], " \t");
-    if (bindingName(line)) |name| return name;
-    return memberReceiver(source, end);
+    const raw_line = source[line_start..end];
+    const line = std.mem.trimStart(u8, raw_line, " \t");
+    const content_start = line_start + raw_line.len - line.len;
+    if (bindingName(line)) |name| {
+        const equal = std.mem.indexOfScalar(u8, line, '=') orelse return receiver;
+        var initializer_start = equal + 1;
+        while (initializer_start < line.len and (line[initializer_start] == ' ' or line[initializer_start] == '\t')) {
+            initializer_start += 1;
+        }
+        // A cascade rooted at the complete initializer continues through its binding.
+        // A receiver nested inside that initializer remains the nested expression itself.
+        if (content_start + initializer_start == receiver_start) return name;
+    }
+    return receiver;
 }
 
 pub fn recoverCascadeForParsing(
@@ -3598,6 +3611,39 @@ test "complete members of the original receiver in a cascade" {
     const continued = try itemsAt(arena.allocator(), continued_source, continued_cursor, .trigger_character);
     try std.testing.expectEqual(@as(usize, 1), continued.len);
     try std.testing.expectEqualStrings("run", continued[0].label);
+}
+
+test "keep a nested call argument as the cascade receiver without a following statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\class Recipe {
+        \\    func with(value:int) Recipe { return self }
+        \\}
+        \\class World {
+        \\    func spawn(recipe:Recipe) int { return 0 }
+        \\    func wrong_receiver() {}
+        \\}
+        \\func make(world:World) Recipe {
+        \\    var entity:Recipe = world.spawn(Recipe()
+        \\        ..
+        \\    )
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "        ..\n").? + "        ..".len;
+    const context = try classifyContext(arena.allocator(), source, cursor);
+    try std.testing.expectEqualStrings("Recipe()", context.receiver.?);
+
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    try std.testing.expectEqualStrings("with", items[0].label);
+    try std.testing.expectEqual(CompletionKind.method, items[0].kind);
+    try std.testing.expectEqualStrings("with(value:int) Recipe", items[0].detail);
+    try std.testing.expectEqualStrings("with(${1:value})$0", items[0].insertText.?);
+    try std.testing.expectEqual(@as(?u8, 2), items[0].insertTextFormat);
+    try std.testing.expect(!contains(items, "spawn"));
+    try std.testing.expect(!contains(items, "wrong_receiver"));
+    try std.testing.expect(!contains(items, "if"));
 }
 
 test "resume an outer cascade after a nested cascade argument" {

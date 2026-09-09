@@ -497,6 +497,138 @@ test "server completes and navigates a merged child catalog contribution" {
     try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
 }
 
+test "server preserves imported roots throughout incomplete cascade editing" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data =
+        \\public enum Schedule { startup; update }
+        \\public class Application {
+        \\    func add_system(schedule:Schedule, callback:func()) Application { return self }
+        \\    func run() {}
+        \\}
+        ,
+    });
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/ECS");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/EntityRecipe.sx",
+        .data =
+        \\public class EntityRecipe {
+        \\    func with(value:int) EntityRecipe { return self }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const source =
+        \\use GFX.Application
+        \\use GFX.Application.Schedule
+        \\func callback() {}
+        \\func main() {
+        \\    Application()
+        \\        ..add_system(Sc<|>, callback)
+        \\        ..run()
+        \\}
+    ;
+    const items = try Support.serverCompletion(&server, allocator, main_uri, source);
+    try Support.expectExactLabels(&.{"Schedule"}, items);
+    try Support.expectItem(.{
+        .label = "Schedule",
+        .kind = 13,
+        .detail = "enum Schedule",
+        .insert_text = "Schedule",
+    }, items);
+    try Support.expectNoDuplicates(items);
+
+    const repeated = try Support.serverCompletion(&server, allocator, main_uri, source);
+    try Support.expectEqualItems(items, repeated);
+
+    const alias_items = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Application
+        \\use GFX.Application.Schedule as FrameSchedule
+        \\func callback() {}
+        \\func main() {
+        \\    Application()
+        \\        ..add_system(FrameS<|>, callback)
+        \\        ..run()
+        \\}
+    );
+    try Support.expectExactLabels(&.{"FrameSchedule"}, alias_items);
+    try Support.expectItem(.{
+        .label = "FrameSchedule",
+        .kind = 13,
+        .detail = "enum Schedule",
+        .insert_text = "FrameSchedule",
+    }, alias_items);
+    try Support.expectNoDuplicates(alias_items);
+
+    const cascade_sources = [_][]const u8{
+        \\use GFX.ECS
+        \\class World { func spawn(recipe:ECS.EntityRecipe) {} }
+        \\func make(world:World) {
+        \\    world.spawn(ECS.EntityRecipe()
+        \\        ..<|>
+        \\    )
+        \\}
+        ,
+        \\class World { func spawn(recipe:GFX.ECS.EntityRecipe) {} }
+        \\func make(world:World) {
+        \\    world.spawn(GFX.ECS.EntityRecipe()
+        \\        ..<|>
+        \\    )
+        \\}
+        ,
+        \\use GFX.ECS.EntityRecipe
+        \\class World { func spawn(recipe:EntityRecipe) {} }
+        \\func make(world:World) {
+        \\    world.spawn(EntityRecipe()
+        \\        ..<|>
+        \\    )
+        \\}
+        ,
+    };
+    for (cascade_sources) |cascade_source| {
+        const cascade_items = try Support.serverCompletionAfterTrigger(
+            &server,
+            allocator,
+            main_uri,
+            cascade_source,
+            ".",
+        );
+        try Support.expectExactLabels(&.{"with"}, cascade_items);
+        try Support.expectItem(.{
+            .label = "with",
+            .kind = 2,
+            .detail = "with(value:int) EntityRecipe",
+            .insert_text = "with(${1:value})$0",
+            .insert_text_format = 2,
+        }, cascade_items);
+        try Support.expectAbsent("spawn", cascade_items);
+        try Support.expectAbsent("if", cascade_items);
+        try Support.expectNoDuplicates(cascade_items);
+    }
+}
+
 test "server navigates package extensions call chains fields and cascades" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
