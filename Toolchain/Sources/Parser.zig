@@ -75,7 +75,7 @@ pub const Parser = struct {
                 .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, false, false, false)),
                 .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false, false)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false, false)),
-                .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false, false)),
+                .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false, false, true)),
                 .identifier => if (std.mem.eql(u8, self.current.lexeme, "test"))
                     try functions.appendSlice(self.allocator, try TestBlocks.parse(self))
                 else if (std.mem.eql(u8, self.current.lexeme, "intrinsic"))
@@ -102,7 +102,7 @@ pub const Parser = struct {
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, true, false, false)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false, false)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false, false)),
-                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false, false)),
+                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false, false, true)),
                         else => return self.fail("expected use, enum, struct, class, intrinsic class, protocol, or function declaration after 'public'"),
                     }
                 },
@@ -127,7 +127,7 @@ pub const Parser = struct {
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, false, is_internal, is_local)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, is_internal, is_local)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, is_internal, is_local)),
-                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, is_internal, is_local)),
+                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, is_internal, is_local, true)),
                         else => {
                             const message = try std.fmt.allocPrint(
                                 self.allocator,
@@ -235,28 +235,47 @@ pub const Parser = struct {
         return true;
     }
 
-    pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool, is_local: bool) ParseError!Ast.Function {
-        return self.parseFunctionDeclaration(is_public, is_internal, is_local, false);
+    pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool, is_local: bool, allow_operator: bool) ParseError!Ast.Function {
+        return self.parseFunctionDeclaration(is_public, is_internal, is_local, false, allow_operator);
     }
 
     pub fn parseIntrinsicMethod(self: *Parser, is_public: bool, is_internal: bool, is_local: bool) ParseError!Ast.Function {
-        return self.parseFunctionDeclaration(is_public, is_internal, is_local, true);
+        return self.parseFunctionDeclaration(is_public, is_internal, is_local, true, false);
     }
 
-    fn parseFunctionDeclaration(self: *Parser, is_public: bool, is_internal: bool, is_local: bool, allow_bodyless: bool) ParseError!Ast.Function {
+    fn parseFunctionDeclaration(self: *Parser, is_public: bool, is_internal: bool, is_local: bool, allow_bodyless: bool, allow_operator: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
-        if (!isMemberName(self.current.tag)) return self.fail("expected function name");
-        const source_name = self.current.lexeme;
-        const name = self.testLocalFunctionName(source_name) orelse source_name;
-        const name_position = self.current.position;
-        if (std.mem.eql(u8, source_name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
-        if (std.mem.eql(u8, source_name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
-        if (std.mem.eql(u8, source_name, "reflect")) return self.failAt(name_position, "'reflect' is a reserved intrinsic function name");
-        if (std.mem.eql(u8, source_name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
-        if (std.mem.eql(u8, source_name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
-        try self.advance();
+        const function_operator: ?Ast.FunctionOperator = if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "operator")) operator: {
+            if (!allow_operator) return self.fail("operator functions must be declared at module scope");
+            try self.advance();
+            const parsed: Ast.FunctionOperator = switch (self.current.tag) {
+                .plus => .add,
+                .minus => .subtract,
+                .star => .multiply,
+                .slash => .divide,
+                else => return self.fail("expected '+', '-', '*', or '/' after 'operator'"),
+            };
+            try self.advance();
+            break :operator parsed;
+        } else null;
+        const source_name = if (function_operator) |operator| operator.name() else name: {
+            if (!isMemberName(self.current.tag)) return self.fail("expected function name");
+            const parsed = self.current.lexeme;
+            const name_position = self.current.position;
+            if (std.mem.eql(u8, parsed, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
+            if (std.mem.eql(u8, parsed, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+            if (std.mem.eql(u8, parsed, "reflect")) return self.failAt(name_position, "'reflect' is a reserved intrinsic function name");
+            if (std.mem.eql(u8, parsed, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
+            if (std.mem.eql(u8, parsed, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
+            if (std.mem.startsWith(u8, parsed, "__silex_operator_")) return self.failAt(name_position, "operator implementation names are reserved for the compiler");
+            try self.advance();
+            break :name parsed;
+        };
+        const name = if (function_operator != null) source_name else self.testLocalFunctionName(source_name) orelse source_name;
+        const name_position = self.previous.position;
         const type_parameters = try Generics.parseTypeParameters(self);
+        if (function_operator != null and type_parameters.len != 0) return self.failAt(name_position, "operator functions cannot declare type parameters yet");
         const enclosing_type_parameters = self.type_parameters;
         if (type_parameters.len != 0 and enclosing_type_parameters.len != 0) {
             return self.failAt(name_position, "generic methods in generic structures are not supported");
@@ -282,6 +301,22 @@ pub const Parser = struct {
         }
         try self.expect(.right_parenthesis, "expected ')' after parameters");
 
+        if (function_operator) |operator| {
+            for (parameters.items) |parameter| {
+                if (parameter.default != null) return self.failAt(parameter.position, "operator functions cannot declare default arguments");
+                if (parameter.mode != .value) return self.failAt(parameter.position, "operator function parameters must be passed by value");
+            }
+            const valid_arity = switch (operator) {
+                .subtract => parameters.items.len == 1 or parameters.items.len == 2,
+                .add, .multiply, .divide => parameters.items.len == 2,
+            };
+            if (!valid_arity) {
+                const requirement = if (operator == .subtract) "one or two parameters" else "two parameters";
+                const message = try std.fmt.allocPrint(self.allocator, "operator '{s}' requires {s}", .{ operator.text(), requirement });
+                return self.failAt(name_position, message);
+            }
+        }
+
         var return_mode: Ast.Parameter.Mode = .value;
         var return_provenance: ?[]const u8 = null;
         if (self.current.tag == .at or self.current.tag == .amp) {
@@ -300,6 +335,9 @@ pub const Parser = struct {
         const bodyless_void = allow_bodyless and
             (self.current.tag == .semicolon or self.current.tag == .right_brace or self.current.position.line > self.previous.position.line);
         const return_type: Ast.Type = if (self.current.tag == .left_brace or bodyless_void) .void else try self.parseType();
+        if (function_operator != null and (return_mode != .value or return_type == .void)) {
+            return self.failAt(name_position, "operator functions must return an owned value");
+        }
         if (return_mode != .value and return_type == .void) return self.failAt(name_position, "a borrowed return cannot be 'void'");
         if (return_mode != .value and return_provenance == null) {
             var compatible: ?[]const u8 = null;
@@ -327,6 +365,7 @@ pub const Parser = struct {
             .position = position,
             .name_position = name_position,
             .name = name,
+            .operator = function_operator,
             .type_parameters = type_parameters,
             .parameters = try parameters.toOwnedSlice(self.allocator),
             .return_type = return_type,
@@ -1697,6 +1736,39 @@ test "parse public functions and keep functions module-visible by default" {
     const program = try parser.parse();
     try std.testing.expect(program.functions[0].is_public);
     try std.testing.expect(!program.functions[1].is_public);
+}
+
+test "parse module operator functions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Vec2 { var x:float; var y:float }
+        \\public func operator +(left:Vec2, right:Vec2) Vec2 { return left }
+        \\public func operator *(left:Vec2, right:float) Vec2 { return left }
+        \\public func operator -(value:Vec2) Vec2 { return value }
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(Ast.FunctionOperator.add, program.functions[0].operator.?);
+    try std.testing.expectEqual(Ast.FunctionOperator.multiply, program.functions[1].operator.?);
+    try std.testing.expectEqual(Ast.FunctionOperator.subtract, program.functions[2].operator.?);
+    try std.testing.expectEqual(@as(usize, 2), program.functions[0].parameters.len);
+    try std.testing.expectEqual(@as(usize, 1), program.functions[2].parameters.len);
+}
+
+test "reject malformed operator declarations" {
+    try expectParseError(
+        "func operator +(value:int) int { return value } func main() {}",
+        "operator '+' requires two parameters",
+    );
+    try expectParseError(
+        "func operator *(left:int = 1, right:int = 2) int { return left } func main() {}",
+        "operator functions cannot declare default arguments",
+    );
+    try expectParseError(
+        "struct Value { func operator +(left:Value, right:Value) Value { return left } } func main() {}",
+        "operator functions must be declared at module scope",
+    );
 }
 
 test "parse package module local and inherited structure members" {

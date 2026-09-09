@@ -756,7 +756,7 @@ pub fn scopeItemsAtForTargetDecisionExpected(
                 matched = true;
             }
             if (!type_only) for (loaded.program.functions) |function| {
-                if (!std.mem.eql(u8, function.name, target.declaration)) continue;
+                if (function.operator != null or !std.mem.eql(u8, function.name, target.declaration)) continue;
                 if (function.is_local) continue;
                 if (function.is_internal) {
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
@@ -1208,7 +1208,7 @@ fn appendPathItems(
         }
         if (!query.type_only) {
             for (loaded.program.functions) |function| {
-                if (function.is_local) continue;
+                if (function.is_local or function.operator != null) continue;
                 if (function.is_internal) {
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!module_context and contextual_provider == null and !function.is_public) continue;
@@ -1393,7 +1393,7 @@ fn hasPublicDeclaration(program: Ast.Program, name: []const u8) bool {
         if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
     }
     for (program.functions) |function| {
-        if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
+        if (function.operator == null and function.is_public and std.mem.eql(u8, function.name, name)) return true;
     }
     for (program.uses) |use| {
         if (use.is_public and use.alias != null and std.mem.eql(u8, use.alias.?, name)) return true;
@@ -1599,7 +1599,7 @@ fn appendReexportTarget(
         var found_function = false;
         if (!type_only) {
             for (loaded.program.functions) |function| {
-                if (!function.is_public or !std.mem.eql(u8, function.name, target.declaration)) continue;
+                if (function.operator != null or !function.is_public or !std.mem.eql(u8, function.name, target.declaration)) continue;
                 if (call_source) |text| if (!Completion.callAcceptsParameters(
                     text,
                     call_cursor,
@@ -2113,7 +2113,7 @@ fn declaredCallReturnTypePath(
             const arity = callArity(tokens.items, index + 4) orelse continue;
             var result: ?[]const u8 = null;
             for (current.functions) |function| {
-                if (!std.mem.eql(u8, function.name, tokens.items[index + 3].lexeme) or
+                if (function.operator != null or !std.mem.eql(u8, function.name, tokens.items[index + 3].lexeme) or
                     !parametersAcceptArity(function.parameters, arity)) continue;
                 const local_type = returnTypeName(current, function.return_type) orelse continue;
                 const resolved = try importedTypePath(allocator, current, project, local_type) orelse continue;
@@ -2189,7 +2189,7 @@ fn importedQualifiedCallReturnTypePath(
     var return_name: ?[]const u8 = null;
 
     for (loaded.program.functions) |function| {
-        if (function.is_local or !std.mem.eql(u8, function.name, call.name) or
+        if (function.is_local or function.operator != null or !std.mem.eql(u8, function.name, call.name) or
             !parametersAcceptArity(function.parameters, call.arity)) continue;
         if (function.is_internal) {
             if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;

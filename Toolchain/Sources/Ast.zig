@@ -35,6 +35,31 @@ pub const BinaryOperator = enum {
     coalesce,
 };
 
+pub const FunctionOperator = enum {
+    add,
+    subtract,
+    multiply,
+    divide,
+
+    pub fn text(self: FunctionOperator) []const u8 {
+        return switch (self) {
+            .add => "+",
+            .subtract => "-",
+            .multiply => "*",
+            .divide => "/",
+        };
+    }
+
+    pub fn name(self: FunctionOperator) []const u8 {
+        return switch (self) {
+            .add => "__silex_operator_add",
+            .subtract => "__silex_operator_subtract",
+            .multiply => "__silex_operator_multiply",
+            .divide => "__silex_operator_divide",
+        };
+    }
+};
+
 pub const Expression = struct {
     position: Source.Position,
     value: Value,
@@ -153,6 +178,8 @@ pub const Expression = struct {
         operator_position: Source.Position,
         operand: *Expression,
         try_alternative: ?TryAlternative = null,
+        owner: usize = 0,
+        module: []const u8 = "",
     };
 
     pub const TryAlternative = struct {
@@ -167,6 +194,8 @@ pub const Expression = struct {
         operator: BinaryOperator,
         operator_position: Source.Position,
         right: *Expression,
+        owner: usize = 0,
+        module: []const u8 = "",
     };
 
     pub const Conversion = struct {
@@ -580,6 +609,7 @@ pub const Function = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    operator: ?FunctionOperator = null,
     type_parameters: []const TypeParameter = &.{},
     parameters: []const Parameter,
     return_type: Type,

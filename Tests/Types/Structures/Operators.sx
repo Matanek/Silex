@@ -1,0 +1,59 @@
+struct Vec2 {
+    let x:float
+    let y:float
+
+    init(x:float, y:float) {
+        self.x = x
+        self.y = y
+    }
+}
+
+func operator +(left:Vec2, right:Vec2) Vec2 {
+    return Vec2(left.x + right.x, left.y + right.y)
+}
+
+func operator -(left:Vec2, right:Vec2) Vec2 {
+    return Vec2(left.x - right.x, left.y - right.y)
+}
+
+func operator *(left:Vec2, right:Vec2) Vec2 {
+    return Vec2(left.x * right.x, left.y * right.y)
+}
+
+func operator *(left:Vec2, right:float) Vec2 {
+    return Vec2(left.x * right, left.y * right)
+}
+
+func operator *(left:float, right:Vec2) Vec2 {
+    return right * left
+}
+
+func operator /(left:Vec2, right:float) Vec2 {
+    return Vec2(left.x / right, left.y / right)
+}
+
+func operator -(value:Vec2) Vec2 {
+    return Vec2(-value.x, -value.y)
+}
+
+test "operator functions cover vector arithmetic and scalar orientation" {
+    let first = Vec2(1.0, 5.0)
+    let second = Vec2(2.0, 10.0)
+
+    if first + second != Vec2(3.0, 15.0) { panic("operator addition") }
+    if second - first != Vec2(1.0, 5.0) { panic("operator subtraction") }
+    if first * second != Vec2(2.0, 50.0) { panic("component multiplication") }
+    if first * 10 != Vec2(10.0, 50.0) { panic("right scalar multiplication") }
+    if 10 * first != Vec2(10.0, 50.0) { panic("left scalar multiplication") }
+    if second / 2 != Vec2(1.0, 5.0) { panic("scalar division") }
+    if -first != Vec2(-1.0, -5.0) { panic("unary negation") }
+}
+
+test "compound assignments derive from binary operator functions" {
+    var value = Vec2(1.0, 5.0)
+    value += Vec2(3.0, 7.0)
+    value *= 2
+    value -= Vec2(2.0, 4.0)
+    value /= 2
+    if value != Vec2(3.0, 10.0) { panic("derived compound assignment") }
+}

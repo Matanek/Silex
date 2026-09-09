@@ -239,7 +239,7 @@ fn parseType(
             var method = if (is_intrinsic)
                 try self.parseIntrinsicMethod(member_public, member_internal, member_local)
             else
-                try self.parseFunction(member_public, member_internal, member_local);
+                try self.parseFunction(member_public, member_internal, member_local, false);
             method.is_static = member_static;
             method.is_override = member_override;
             method.is_private = member_private;

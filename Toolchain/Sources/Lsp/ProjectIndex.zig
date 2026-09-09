@@ -78,7 +78,7 @@ fn useDirectlyOwned(
         if (provider.owner != owner or !std.mem.eql(u8, provider.name, module)) continue;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
         for (loaded.program.functions) |function| {
-            if (function.is_public and std.mem.eql(u8, function.name, declaration)) return true;
+            if (function.operator == null and function.is_public and std.mem.eql(u8, function.name, declaration)) return true;
         }
         for (loaded.program.structures) |structure| {
             if (Reexports.structureExported(loaded.program, structure) and std.mem.eql(u8, structure.name, declaration)) return true;

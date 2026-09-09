@@ -21,6 +21,7 @@ const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
 const Optionals = @import("Optionals.zig");
+const Operators = @import("Operators.zig");
 const Constructors = @import("Constructors.zig");
 const Collections = @import("Collections.zig");
 const Callbacks = @import("Callbacks.zig");
@@ -349,6 +350,7 @@ pub const Analyzer = struct {
     fn validateDeclarations(self: *Analyzer, require_entry: bool) AnalyzeError!void {
         var main: ?Ast.Function = null;
         for (self.program.functions) |function| {
+            if (function.operator != null) try self.validateOperatorFunction(function);
             if (std.mem.eql(u8, function.name, "main")) {
                 if (function.is_public) return self.fail(function.name_position, "'main' cannot be public");
                 if (main != null) return self.fail(function.name_position, "'main' cannot be overloaded");
@@ -388,13 +390,17 @@ pub const Analyzer = struct {
                         Support.requiredParameterCount(function.parameters) == function.parameters.len and
                         Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
                     {
-                        const message = try std.fmt.allocPrint(self.allocator, "function '{s}' with these parameter types is already declared", .{function.name});
+                        const message = if (function.operator) |operator|
+                            try std.fmt.allocPrint(self.allocator, "operator '{s}' with these operand types is already declared", .{operator.text()})
+                        else
+                            try std.fmt.allocPrint(self.allocator, "function '{s}' with these parameter types is already declared", .{function.name});
                         return self.fail(function.name_position, message);
                     }
                     const signature = try self.effectiveSignature(function.name, function.parameters, arity);
                     const message = try std.fmt.allocPrint(self.allocator, "function '{s}' is already exposed by the declaration at {d}:{d}", .{ signature, previous.name_position.line, previous.name_position.column });
                     return self.fail(function.name_position, message);
                 }
+                if (function.operator != null) continue;
                 if (Arguments.arityRangesOverlap(function.parameters, previous.parameters) and
                     !Arguments.labelsCompatible(function.parameters, previous.parameters))
                 {
@@ -491,6 +497,51 @@ pub const Analyzer = struct {
         };
         if (entry.parameters.len != 0) return self.fail(entry.name_position, "'main' must have no parameters");
         if (entry.return_type != .void and !MainBoundary.accepts(self.enums, entry.return_type)) return self.fail(entry.name_position, "'main' must return 'void' or 'Result<void,str>'");
+    }
+
+    fn validateOperatorFunction(self: *Analyzer, function: Ast.Function) AnalyzeError!void {
+        const operator = function.operator.?;
+        if (function.type_parameters.len != 0) return self.fail(function.name_position, "operator functions cannot declare type parameters yet");
+        if (function.return_mode != .value or function.return_type == .void) {
+            return self.fail(function.name_position, "operator functions must return an owned value");
+        }
+        const valid_arity = switch (operator) {
+            .subtract => function.parameters.len == 1 or function.parameters.len == 2,
+            .add, .multiply, .divide => function.parameters.len == 2,
+        };
+        if (!valid_arity) return self.fail(function.name_position, "operator function has invalid arity");
+        var owns_operand = false;
+        for (function.parameters) |parameter| {
+            if (parameter.mode != .value) return self.fail(parameter.position, "operator function parameters must be passed by value");
+            if (parameter.default != null) return self.fail(parameter.position, "operator functions cannot declare default arguments");
+            owns_operand = owns_operand or self.typeOwnedBy(parameter.type, function.owner);
+        }
+        if (!owns_operand) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "operator '{s}' must use at least one nominal operand owned by its package",
+                .{operator.text()},
+            );
+            return self.fail(function.name_position, message);
+        }
+    }
+
+    fn typeOwnedBy(self: *Analyzer, type_value: Ast.Type, owner: usize) bool {
+        if (type_value.optionalChild()) |child| return self.typeOwnedBy(child, owner);
+        if (type_value.genericInstantiationIndex()) |index| {
+            if (index >= self.program.generic_types.len) return false;
+            return self.typeOwnedBy(self.program.generic_types[index].base, owner);
+        }
+        const index = type_value.structureIndex() orelse return false;
+        if (index >= self.program.type_names.len) return false;
+        const name = self.program.type_names[index];
+        for (self.program.structures) |structure| {
+            if (std.mem.eql(u8, structure.name, name)) return structure.owner == owner;
+        }
+        for (self.program.enums) |enumeration| {
+            if (std.mem.eql(u8, enumeration.name, name)) return enumeration.owner == owner;
+        }
+        return false;
     }
 
     fn isAccessPattern(self: *Analyzer, type_value: Ast.Type) bool {
@@ -880,6 +931,7 @@ pub const Analyzer = struct {
 
         const operand = try self.analyzeExpressionExpected(builder, unary.operand, if (expected != null and expected.?.isNumeric()) expected else null);
         if (!operand.type.isNumeric()) {
+            if (try Operators.analyzeUnary(self, builder, unary, operand)) |result| return result;
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "operator '-' expects a numeric value, found '{s}'",
@@ -972,6 +1024,7 @@ pub const Analyzer = struct {
         else
             same_numeric and (!left.type.isFloat() or binary.operator != .remainder);
         if (!valid) {
+            if (try Operators.analyzeBinary(self, builder, binary, left, right)) |result| return result;
             const message = if (!equality)
                 try std.fmt.allocPrint(
                     self.allocator,

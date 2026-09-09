@@ -179,6 +179,31 @@ pub fn itemsAtWithDecision(
     else
         null;
     const completing_try_error = context.completing_try_error;
+    const operator_completion = if (context.kind == .module_declaration)
+        try operatorDeclarationCompletionAt(allocator, source, context.prefix_start)
+    else
+        .none;
+
+    switch (operator_completion) {
+        .keyword => try appendCandidate(allocator, &candidates, context, .{
+            .label = "operator",
+            .kind = CompletionKind.keyword,
+            .detail = "Silex operator overload declaration",
+        }, 0, false),
+        .symbol => for ([_][]const u8{ "+", "-", "*", "/" }) |symbol| try appendCandidate(
+            allocator,
+            &candidates,
+            context,
+            .{
+                .label = symbol,
+                .kind = CompletionKind.keyword,
+                .detail = "Silex overloadable operator",
+            },
+            0,
+            false,
+        ),
+        .none => {},
+    }
 
     if (completing_try_error) {
         const error_type: ?[]const u8 = if (program) |parsed|
@@ -226,7 +251,7 @@ pub fn itemsAtWithDecision(
         }, 1, false);
     }
 
-    if (!contextual_try_alternative and !completing_try_error) switch (context.kind) {
+    if (!contextual_try_alternative and !completing_try_error and operator_completion == .none) switch (context.kind) {
         .member => if (program) |parsed| try appendMembers(
             allocator,
             &candidates,
@@ -1954,7 +1979,7 @@ fn appendExpressionSymbols(
     }
 
     for (program.functions) |function| {
-        if (function.is_anonymous or std.mem.eql(u8, function.name, "main")) continue;
+        if (function.is_anonymous or function.operator != null or std.mem.eql(u8, function.name, "main")) continue;
         if (function.is_test) {
             if (function.is_test_entry) continue;
             const current = callable orelse continue;
@@ -3753,6 +3778,22 @@ fn tokensUntil(allocator: Allocator, source: []const u8, end: usize) ![]const To
     return tokens.toOwnedSlice(allocator);
 }
 
+const OperatorDeclarationCompletion = enum { none, keyword, symbol };
+
+fn operatorDeclarationCompletionAt(
+    allocator: Allocator,
+    source: []const u8,
+    prefix_start: usize,
+) !OperatorDeclarationCompletion {
+    const tokens = try tokensUntil(allocator, source, prefix_start);
+    if (tokens.len == 0) return .none;
+    if (tokens[tokens.len - 1].tag == .keyword_func) return .keyword;
+    if (tokens.len >= 2 and tokens[tokens.len - 2].tag == .keyword_func and
+        tokens[tokens.len - 1].tag == .identifier and
+        std.mem.eql(u8, tokens[tokens.len - 1].lexeme, "operator")) return .symbol;
+    return .none;
+}
+
 fn identifierPrefixStart(source: []const u8, cursor: usize) usize {
     var start = cursor;
     while (start != 0 and isIdentifierContinue(source[start - 1])) start -= 1;
@@ -5009,6 +5050,36 @@ test "complete declaration keywords from partial module input" {
     try std.testing.expect(contains(nocopy_items, "nocopy"));
     const nocopy_item = nocopy_items[indexOf(nocopy_items, "nocopy").?];
     try std.testing.expectEqualStrings("nocopy", nocopy_item.insertText.?);
+}
+
+test "complete contextual operator declarations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const keyword_items = try itemsAt(arena.allocator(), "public func op", "public func op".len, .invoked);
+    try std.testing.expectEqual(@as(usize, 1), keyword_items.len);
+    try std.testing.expect(contains(keyword_items, "operator"));
+
+    const symbol_source = "public func operator ";
+    const symbol_items = try itemsAt(arena.allocator(), symbol_source, symbol_source.len, .invoked);
+    try std.testing.expectEqual(@as(usize, 4), symbol_items.len);
+    try std.testing.expect(contains(symbol_items, "+"));
+    try std.testing.expect(contains(symbol_items, "-"));
+    try std.testing.expect(contains(symbol_items, "*"));
+    try std.testing.expect(contains(symbol_items, "/"));
+
+    const member_source = "struct Vec2 { func operator ";
+    const member_items = try itemsAt(arena.allocator(), member_source, member_source.len, .invoked);
+    try std.testing.expect(!contains(member_items, "+"));
+
+    const expression_source =
+        \\struct Vec2 { let x:float }
+        \\func operator +(left:Vec2, right:Vec2) Vec2 { return left }
+        \\func main() { __silex_operator_ }
+    ;
+    const expression_cursor = std.mem.indexOf(u8, expression_source, "__silex_operator_").? + "__silex_operator_".len;
+    const expression_items = try itemsAt(arena.allocator(), expression_source, expression_cursor, .invoked);
+    try std.testing.expect(!contains(expression_items, "__silex_operator_add"));
 }
 
 test "complete every accessible local type after a colon" {

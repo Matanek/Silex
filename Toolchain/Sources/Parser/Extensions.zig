@@ -42,7 +42,7 @@ pub fn parse(self: anytype) !Ast.Extension {
             try self.advance();
         }
         if (self.current.tag != .keyword_func) return self.fail("an extension may declare methods only");
-        var method = try self.parseFunction(is_public, is_internal, is_local);
+        var method = try self.parseFunction(is_public, is_internal, is_local, false);
         method.is_static = is_static;
         method.is_private = is_private;
         method.visibility_explicit = explicit;
