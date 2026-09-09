@@ -211,7 +211,7 @@ test "diagnose invalid exhaustive match patterns" {
     );
     try expectCompileError(
         "func main() { let value = match 1 { left => 1 } }",
-        "match requires an enum subject, found 'int'",
+        "literal match requires literal branches",
     );
 }
 
@@ -251,6 +251,89 @@ test "keep match bindings scoped to their branch" {
     try expectCompileError(
         "enum Choice { value(int); empty } func main() { let result = match Choice.value(1) { value(number) => number; empty => 0 }; print(number) }",
         "unknown variable 'number'",
+    );
+}
+
+test "evaluate ordered integer string and boolean literal matches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func observed_code() int { print("code"); return 404 }
+        \\func status(code:int) str {
+        \\    return match code { 200 => "ok"; 404 => "missing"; else => "other" }
+        \\}
+        \\func narrow(value:int8) str {
+        \\    return match value { -1 => "negative"; 127 => "maximum"; else => "middle" }
+        \\}
+        \\func command(value:str) int {
+        \\    return match value { "start" => 1; "stop" => 2; else => 0 }
+        \\}
+        \\func truth(value:bool) int { return match value { true => 1; false => 0 } }
+        \\func permits() bool { print("guard"); return false }
+        \\func guarded(value:int) str {
+        \\    return match value { 7 if permits() => "guarded"; 7 => "fallback"; else => "other" }
+        \\}
+        \\func main() {
+        \\    print(status(observed_code()))
+        \\    print(narrow(-1 as int8))
+        \\    print(narrow(127 as int8))
+        \\    print(command("stop"))
+        \\    print(truth(false))
+        \\    print(guarded(7))
+        \\    match "run" { "run" => { print("imperative") }; else => { print("other") } }
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings(
+        "code\nmissing\nnegative\nmaximum\n2\n0\nguard\nfallback\nimperative\n",
+        result.stdout,
+    );
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, " = eq ") != null);
+}
+
+test "diagnose incomplete incompatible and unreachable literal matches" {
+    try expectCompileError(
+        "func main() { let value = match 1 { 1 => true } }",
+        "match on 'int' requires an else branch",
+    );
+    try expectCompileError(
+        "func main() { let value = match true { true => 1 } }",
+        "match is missing literal 'false'",
+    );
+    try expectCompileError(
+        "func main() { let value = match true { true => 1; false => 0; else => -1 } }",
+        "else match branch is unreachable because every boolean value is already covered",
+    );
+    try expectCompileError(
+        "func main() { let value = match 1 { 1 => true; 0x1 => false; else => false } }",
+        "literal is matched more than once",
+    );
+    try expectCompileError(
+        "func main() { let value = match 1 { 1 => true; 1 if true => false; else => false } }",
+        "guarded branch for literal is unreachable after its unguarded branch",
+    );
+    try expectCompileError(
+        "func main() { let value = match 1 { \"1\" => true; else => false } }",
+        "match branch expects a literal of type 'int', found 'str'",
+    );
+    try expectCompileError(
+        "func main() { let value = match 1.0 { 1 => true; else => false } }",
+        "literal match requires a bool, integer, or str subject, found 'float'",
+    );
+    try expectCompileError(
+        "enum Choice { one; other } func main() { let value = match Choice.one { 1 => true; else => false } }",
+        "enum match requires enum variant branches",
+    );
+    try expectCompileError(
+        "func main() { let value = match 1 { one => true; else => false } }",
+        "literal match requires literal branches",
+    );
+    try expectCompileError(
+        "func narrow() int8 { return 0 } func main() { let value = match narrow() { 128 => true; else => false } }",
+        "integer literal is outside the range of 'int8'",
     );
 }
 

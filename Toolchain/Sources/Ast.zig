@@ -157,9 +157,21 @@ pub const Expression = struct {
         ignored: bool = false,
     };
 
+    pub const MatchLiteral = union(enum) {
+        integer: Integer,
+        boolean: bool,
+        string: []const u8,
+
+        pub const Integer = struct {
+            lexeme: []const u8,
+            negative: bool = false,
+        };
+    };
+
     pub const MatchBranch = struct {
         position: Source.Position,
         variant: []const u8 = "",
+        literal: ?MatchLiteral = null,
         is_else: bool = false,
         bindings: []const MatchBinding = &.{},
         guard: ?*Expression = null,

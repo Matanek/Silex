@@ -102,6 +102,13 @@ does not expose a source tag field or apply an implicit convergence cast.
 A terminal `else` is simply the final CFG destination after the named tests;
 it creates neither a synthetic variant nor a catch-all payload binding.
 
+Literal matches accept boolean, integer and string subjects. Integer patterns
+are checked and represented in the exact integer type of the subject; boolean
+coverage is exhaustive only when both values have an unguarded branch, while
+the open integer and string domains require `else`. Ordered literal equality
+tests use the same portable scalar operations as ordinary source comparisons;
+the language exposes no jump table, hash dispatch or fallthrough behavior.
+
 Imperative matches reuse the same selection CFG and payload extraction, but
 place ordinary statement blocks at each destination and produce no value.
 Branch terminators connect directly to the surrounding return or loop
