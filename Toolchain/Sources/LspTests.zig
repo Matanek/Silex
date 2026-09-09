@@ -1,6 +1,7 @@
 test {
     _ = @import("Lsp/Completion.zig");
     _ = @import("Lsp/CompletionContract.zig");
+    _ = @import("Lsp/CorpusAudit.zig");
     _ = @import("Lsp/Diagnostics.zig");
     _ = @import("Lsp/ExtensionCompletionTests.zig");
     _ = @import("Lsp/Navigation.zig");
@@ -9,6 +10,7 @@ test {
     _ = @import("Lsp/Workspace.zig");
     _ = @import("Lsp/Tests/ContextContracts.zig");
     _ = @import("Lsp/Tests/CompletionOracle.zig");
+    _ = @import("Lsp/Tests/SealedCompletionCorpus.zig");
     _ = @import("Lsp/Tests/CallbackCompletion.zig");
     _ = @import("Lsp/Tests/WorkspaceContracts.zig");
     _ = @import("Lsp/Tests/LoosePackages.zig");

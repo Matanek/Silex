@@ -1,35 +1,7 @@
 const std = @import("std");
-const FrontendModule = @import("../../Frontend.zig");
+const Oracle = @import("CompletionOracleSupport.zig");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
-
-fn publicInstanceMembers(
-    allocator: std.mem.Allocator,
-    source: []const u8,
-    type_name: []const u8,
-) ![]const []const u8 {
-    var frontend = FrontendModule.Frontend.init(allocator);
-    const program = (try frontend.compile(source)).ast;
-    var labels: std.ArrayList([]const u8) = .empty;
-    for (program.structures) |structure| {
-        if (!std.mem.eql(u8, structure.name, type_name)) continue;
-        for (structure.fields) |field| {
-            if (field.is_static or !field.is_public or field.is_private or field.is_protected or field.is_local) continue;
-            try labels.append(allocator, field.name);
-        }
-        for (structure.methods) |method| {
-            if (method.is_static or !method.is_public or method.is_private or method.is_protected or method.is_local) continue;
-            try labels.append(allocator, method.name);
-        }
-        std.mem.sort([]const u8, labels.items, {}, struct {
-            fn lessThan(_: void, left: []const u8, right: []const u8) bool {
-                return std.mem.lessThan(u8, left, right);
-            }
-        }.lessThan);
-        return labels.toOwnedSlice(allocator);
-    }
-    return error.MissingOracleType;
-}
 
 test "complete source syntax provides an oracle independent from LSP recovery" {
     const canonical =
@@ -64,7 +36,7 @@ test "complete source syntax provides an oracle independent from LSP recovery" {
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
     const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
-    const expected = try publicInstanceMembers(allocator, canonical, "Widget");
+    const expected = try Oracle.publicInstanceMembers(allocator, canonical, "Widget");
 
     var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
@@ -87,7 +59,7 @@ test "semantic oracle rejects a parsed but ill-typed canonical source" {
     defer arena.deinit();
     try std.testing.expectError(
         error.InvalidSource,
-        publicInstanceMembers(
+        Oracle.publicInstanceMembers(
             arena.allocator(),
             "public class Widget { public func value() int { return false } } func main() {}",
             "Widget",

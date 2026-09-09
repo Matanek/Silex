@@ -14,14 +14,16 @@ candidates, provenance, and a mechanical status:
 
 - `protected` names the executable proof already in the LSP suite;
 - `assigned_gap` records a reproduced omission and its owning implementation
-  Part while the completion guarantees are being built;
+  Part while a repair is in progress;
 - `irrelevant` requires a checked reason why completion cannot apply.
 
-The audit rejects duplicate identifiers, absent cursor markers, missing
+The structural audit rejects duplicate identifiers, absent cursor markers, missing
 positive or negative assertions, missing provenance, missing proof text, and
 an unrepresented capability family. It also rejects runtime data tied to
 `.specs/`, `.agents/`, or an absolute user path. Mutation tests remove a family,
-a proof, and a cursor to demonstrate that those omissions turn the gate red.
+a proof, a negative assertion, and a cursor to demonstrate that those omissions
+turn the gate red. The release audit additionally rejects every
+`assigned_gap`: the admission gate can only be green with zero known gap.
 
 The matrix axes are closed enums: syntax position, symbol origin and kind,
 receiver shape, project topology, visibility, editing state, trigger, and
@@ -55,12 +57,22 @@ fixture, a local row tied to one, and a fixture enum value that no scenario
 exercises. These graphs cover qualified imports, aliases, source atoms,
 principal reexports, catalogues, development dependencies, friend visibility,
 submodules, merged extensions, and platform-selected sources without reading
-sibling repositories. Remaining completion defects stay explicit
-`assigned_gap` rows until their owning Parts close them.
+sibling repositories. Any newly reproduced completion defect must stay as an
+explicit `assigned_gap` row until its repair and executable proof land
+together.
 
 Semantic, workspace, and protocol cases keep both a low-level proof and a
 server proof. Real package or example failures are reduced to autonomous
 fixtures; their original path is retained only as provenance.
+
+`Lsp/Tests/SealedCompletionCorpus.zig` supplies a held-out semantic boundary.
+Its fixed cases cover a value surface, a GFX-style cascade, an optional call
+chain, a specialized generic and a protocol receiver. Each complete source is
+compiled by the frontend oracle; the corresponding incomplete source is sent
+through the server. The test compares the entire public instance surface,
+checks forbidden candidates and duplicates, then repeats the request to prove
+stable output. A failure is repaired in the engine, not by deleting an
+expected member from the case.
 
 ## Error recovery invariant
 
@@ -130,14 +142,28 @@ tests next to `Lsp/Completion.zig`; they do not depend on the construction Spec.
 From `Silex/Toolchain`, run:
 
 ```text
-zig build test-lsp
+zig build check-lsp-completion
 zig build check
+zig build audit-lsp-completion -- /path/to/SilexProject
 zig build benchmark-lsp-completion -- 101
 ```
 
-The ordinary `check` step already depends on the LSP suite. A change to the
-parser catalogue, compiler enums, registry schema, or protected behaviour is
-therefore rejected by the normal Silex validation path.
+`check-lsp-completion` is the autonomous admission portal. It runs the complete
+LSP contract suite, including registry, mutation, recovery, workspace,
+protocol, oracle and sealed-corpus tests. The ordinary `check` step depends on
+this named portal. A change to the parser catalogue, compiler enums, registry
+schema, or protected behaviour is therefore rejected by the normal Silex
+validation path.
+
+`audit-lsp-completion` is the external corpus classifier. It accepts exactly
+one workspace root, walks sorted `.sx` paths under `Silex`, `Silex-Examples`,
+`Packages` and `Sandbox`, lexes every source, and prints a deterministic byte
+fingerprint plus counts for every closed syntax/visibility signal. The command
+fails on a lexical error, an empty corpus or an absent signal. This wide scan
+detects new shapes and makes the qualified input reproducible; semantic
+correctness remains proven by the reduced registry fixtures and the independent
+frontend oracle rather than inferred from token counts. The latest recorded
+campaign is in `LSP-completion-qualification.md`.
 
 The benchmark remains separate from `check`: it validates the expected member
 for every sample, then reports fresh, warmed, and edited-overlay latency,
@@ -145,7 +171,11 @@ dispersion, and request-arena backing allocations. Its committed observation is
 documented under `Toolchain/Benchmarks/LspCompletion`; timing values are
 comparison data, not nondeterministic test thresholds.
 
-During construction of the contract, `assigned_gap` rows are allowed only with
-an owner and an exact reproduction. Release qualification requires the count
-to reach zero; a green registry audit alone does not claim that the recorded
-gaps are fixed.
+When adding a completion capability, first add its closed parser/contract
+classification and an autonomous positive-and-negative server proof. For a
+real omission, preserve the failing edit as a reduced fixture with provenance,
+mark it `assigned_gap`, repair the shared inference or recovery rule, then turn
+the row `protected` in the same green change. If the external audit reports a
+new signal class, add a closed enum value and a witness before admitting the
+language change. Never special-case a package, example, identifier or absolute
+workspace path.

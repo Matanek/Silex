@@ -425,6 +425,32 @@ pub fn build(b: *std.Build) void {
     const lsp_test_command = b.addRunArtifact(lsp_tests);
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");
     lsp_test_step.dependOn(&lsp_test_command.step);
+    const lsp_completion_gate_step = b.step(
+        "check-lsp-completion",
+        "Run the autonomous exhaustive completion admission gate",
+    );
+    lsp_completion_gate_step.dependOn(&lsp_test_command.step);
+
+    const lsp_completion_audit_module = b.createModule(.{
+        .root_source_file = b.path("Tools/LspCompletionAudit/Main.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    const lsp_audit_api_module = b.createModule(.{
+        .root_source_file = b.path("Sources/LspAuditApi.zig"),
+    });
+    lsp_completion_audit_module.addImport("silex_lsp_audit", lsp_audit_api_module);
+    const lsp_completion_audit = b.addExecutable(.{
+        .name = "silex-lsp-completion-audit",
+        .root_module = lsp_completion_audit_module,
+    });
+    const lsp_completion_audit_command = b.addRunArtifact(lsp_completion_audit);
+    if (b.args) |args| lsp_completion_audit_command.addArgs(args);
+    const lsp_completion_audit_step = b.step(
+        "audit-lsp-completion",
+        "Qualify the completion corpus in a Silex workspace",
+    );
+    lsp_completion_audit_step.dependOn(&lsp_completion_audit_command.step);
 
     const lsp_completion_benchmark_module = b.createModule(.{
         .root_source_file = b.path("Tools/LspCompletionBenchmark/Main.zig"),
@@ -458,7 +484,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&cycle_test_command.step);
     check_step.dependOn(&language_test_command.step);
-    check_step.dependOn(&lsp_test_command.step);
+    check_step.dependOn(lsp_completion_gate_step);
     check_step.dependOn(&optimizer_oracle_test_command.step);
     if (native_math_validation) |validation| check_step.dependOn(validation);
 }

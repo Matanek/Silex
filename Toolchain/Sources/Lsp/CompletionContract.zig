@@ -985,6 +985,14 @@ pub fn audit(registry: []const Scenario) !void {
     try auditAxisWitnesses(registry);
 }
 
+pub fn auditRelease(registry: []const Scenario) !void {
+    try audit(registry);
+    for (registry) |scenario| switch (scenario.status) {
+        .assigned_gap => return error.UnresolvedCompletionGap,
+        .protected, .irrelevant => {},
+    };
+}
+
 fn auditAxisWitnesses(registry: []const Scenario) !void {
     inline for (std.meta.fields(Position)) |field| try requireScenario(
         registry,
@@ -1056,7 +1064,7 @@ fn containsInfrastructurePath(scenario: Scenario) bool {
 }
 
 test "completion registry is classified and self contained" {
-    try audit(&scenarios);
+    try auditRelease(&scenarios);
 }
 
 test "canonical completion sources pass their declared frontend boundary" {
@@ -1127,6 +1135,12 @@ test "registry mutations expose missing rows and missing proofs" {
     var missing_proof = scenarios;
     missing_proof[3].status = .{ .protected = "" };
     try std.testing.expectError(error.MissingProof, audit(&missing_proof));
+    var assigned_gap = scenarios;
+    assigned_gap[3].status = .{ .assigned_gap = .part_02 };
+    try std.testing.expectError(error.UnresolvedCompletionGap, auditRelease(&assigned_gap));
+    var missing_negative = scenarios;
+    missing_negative[3].forbidden = &.{};
+    try std.testing.expectError(error.MissingForbiddenCandidate, audit(&missing_negative));
     var missing_cursor = scenarios;
     missing_cursor[0].partial_source = "public";
     try std.testing.expectError(error.InvalidCursorCount, audit(&missing_cursor));
