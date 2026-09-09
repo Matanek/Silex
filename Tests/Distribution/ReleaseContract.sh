@@ -7,8 +7,12 @@ workflow="$repository_root/.github/workflows/release.yml"
 installer_workflow="$repository_root/.github/workflows/install-smoke.yml"
 windows_builder="$repository_root/.github/scripts/build-release-windows.ps1"
 windows_smoke="$repository_root/.github/scripts/smoke-release-windows.ps1"
+release_notes="$repository_root/.github/scripts/release-notes.py"
 
 "$repository_root/Tests/Distribution/InstallerUnixContract.sh"
+manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' "$repository_root/Toolchain/build.zig.zon")
+python3 "$release_notes" validate "$manifest_version"
+python3 "$release_notes" extract "$manifest_version" --locale en | grep -Fq '### Impact and migration'
 
 python3 - "$workflow" "$installer_workflow" "$windows_builder" "$windows_smoke" <<'PYTHON'
 import re
@@ -79,6 +83,11 @@ if "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00" not in win
     raise SystemExit("Windows ARM64 cross-build must pin the Linux Zig archive checksum")
 if 'release target $Target does not match host $osArchitecture' not in windows_smoke:
     raise SystemExit("Windows release smoke must reject a mismatched native host")
+
+if 'release-notes.py validate "$RELEASE_VERSION"' not in workflow:
+    raise SystemExit("release preflight must validate the canonical release notes")
+if '--notes-file "$RUNNER_TEMP/release-notes.md"' not in workflow or "--generate-notes" in workflow:
+    raise SystemExit("GitHub releases must use the canonical release notes")
 
 print("Release workflow contract passed")
 PYTHON
