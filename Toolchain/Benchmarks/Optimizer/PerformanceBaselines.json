@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "policy": "A compiler implementation change cannot modify this file in the same admission slice.",
+  "accepted": [
+    {
+      "id": "boids-part05-fixed-workload",
+      "compiler_revision": "65471f1",
+      "benchmark_revision": "50f6dc9",
+      "evidence": "Silex-Benchmarks/Sources/Boids2D/Baselines/2026-09-07-170658-arm64-boids.log",
+      "silex_median_fps": 87.165,
+      "silex_to_architectural_percent": 98.63,
+      "steady_paired_silex_to_architectural_percent": 98.064
+    }
+  ],
+  "known_residuals": [
+    {
+      "id": "boids-final-candidate-regression-lead",
+      "compiler_revision": "ecec32216e5e1965386ab5bfbfc8aa900274e250",
+      "benchmark_revision": "44eab2fc43700f2a76b9c5a816fa8bafb084517f",
+      "steady_paired_silex_to_architectural_percent": 96.798,
+      "verdict": "red-transfer-to-silex-optimization-parity-completion"
+    },
+    {
+      "id": "physics-preparation-arm64",
+      "compiler_revision": "ecec32216e5e1965386ab5bfbfc8aa900274e250",
+      "workflow_run": "34401548842",
+      "paired_ratio_interval": "1.774266..1.828517",
+      "verdict": "red-transfer-to-silex-optimization-parity-completion"
+    }
+  ]
+}
