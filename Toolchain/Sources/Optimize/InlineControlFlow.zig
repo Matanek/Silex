@@ -8,6 +8,7 @@ const maximum_cost = 128;
 const Info = struct {
     state: enum { unresolved, visiting, rejected, eligible } = .unresolved,
     cost: usize = 0,
+    previously_eligible: bool = false,
 };
 
 /// Inlines small direct callees with arbitrary control flow. Returns are
@@ -45,14 +46,21 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
         info.state = .rejected;
         return;
     }
-    for (function.parameter_types) |parameter_type| if (!isParameterType(program, parameter_type)) {
-        info.state = .rejected;
-        return;
-    };
-    for (function.value_types) |value_type| if (!isInlineValueType(program, value_type)) {
-        info.state = .rejected;
-        return;
-    };
+    var previously_eligible = true;
+    for (function.parameter_types) |parameter_type| {
+        if (!isParameterType(program, parameter_type)) {
+            info.state = .rejected;
+            return;
+        }
+        previously_eligible = previously_eligible and parameter_type != .address;
+    }
+    for (function.value_types) |value_type| {
+        if (!isInlineValueType(program, value_type)) {
+            info.state = .rejected;
+            return;
+        }
+        previously_eligible = previously_eligible and value_type != .address;
+    }
 
     var cost: usize = function.blocks.len;
     var returns: usize = 0;
@@ -89,10 +97,6 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                 .local_store,
                 .local_address,
                 .field_load,
-                .reference_load,
-                .reference_store,
-                .reference_field,
-                .reference_optional,
                 .collection_count,
                 .structure_init,
                 .unary,
@@ -101,6 +105,14 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                 .address_load,
                 .address_store,
                 => cost += 1,
+                .reference_load,
+                .reference_store,
+                .reference_field,
+                .reference_optional,
+                => {
+                    previously_eligible = false;
+                    cost += 1;
+                },
                 .boundary_call => |call| {
                     if (call.result == null) {
                         info.state = .rejected;
@@ -139,6 +151,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
         return;
     }
     info.cost = cost;
+    info.previously_eligible = previously_eligible;
     info.state = .eligible;
 }
 
@@ -188,7 +201,7 @@ fn inlineOnce(
                 summaries[call.function],
                 information[call.function].cost,
                 CallSummary.isHotBlock(function, block_index),
-                true,
+                information[call.function].previously_eligible,
             )) continue;
         return try expandCall(allocator, program, function, block_index, instruction_index, call);
     };
@@ -474,4 +487,49 @@ test "inline branching reference updates without losing their addresses" {
     try std.testing.expect(optimized.functions[1].blocks[1].instructions[0] == .reference_field);
     try std.testing.expect(optimized.functions[1].blocks[2].instructions[0] == .reference_store);
     try std.testing.expect(optimized.functions[1].blocks[3].instructions[0] == .reference_load);
+}
+
+test "keep newly supported branching references behind the effect cost model" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const update_blocks = [_]Ir.Block{
+        .{
+            .instructions = &.{},
+            .terminator = .{ .branch = .{ .condition = 1, .then_block = 1, .else_block = 2 } },
+        },
+        .{
+            .instructions = &.{
+                .{ .boundary_call = .{ .result = 3, .function = 0, .arguments = &.{2} } },
+                .{ .reference_store = .{ .reference = 0, .operand = 3 } },
+            },
+            .terminator = .return_void,
+        },
+        .{
+            .instructions = &.{.{ .reference_store = .{ .reference = 0, .operand = 2 } }},
+            .terminator = .return_void,
+        },
+    };
+    const caller_blocks = [_]Ir.Block{.{
+        .instructions = &.{.{ .call = .{ .result = null, .function = 0, .arguments = &.{ 0, 1, 2 } } }},
+        .terminator = .return_void,
+    }};
+    const program: Ir.Program = .{ .functions = &.{
+        .{
+            .name = "update_with_boundary",
+            .parameter_types = &.{ .address, .bool, .float32 },
+            .return_type = .void,
+            .value_types = &.{ .address, .bool, .float32, .float32 },
+            .blocks = &update_blocks,
+        },
+        .{
+            .name = "caller",
+            .parameter_types = &.{ .address, .bool, .float32 },
+            .return_type = .void,
+            .value_types = &.{ .address, .bool, .float32 },
+            .blocks = &caller_blocks,
+        },
+    } };
+    const optimized = try optimize(allocator, program);
+    try std.testing.expect(optimized.functions[1].blocks[0].instructions[0] == .call);
 }
