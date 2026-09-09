@@ -1,0 +1,120 @@
+name: Optimizer admission
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optimizer-admission-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick:
+    name: quick
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the exact candidate
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz -o "$archive"
+          echo "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489  $archive" | shasum -a 256 -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Resolve changed paths
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) base="$PULL_REQUEST_BASE" ;;
+            push)
+              base="$PUSH_BASE"
+              if test -z "$base" || test "$base" = "0000000000000000000000000000000000000000"; then
+                base="HEAD^"
+              fi
+              ;;
+            *) base="HEAD^" ;;
+          esac
+          git diff --name-only "$base" "$GITHUB_SHA" > "$RUNNER_TEMP/optimizer-changed-paths.txt"
+          sed -n '1,200p' "$RUNNER_TEMP/optimizer-changed-paths.txt"
+
+      - name: Classify required optimizer checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=()
+          while IFS= read -r path; do
+            test -z "$path" || paths+=("$path")
+          done < "$RUNNER_TEMP/optimizer-changed-paths.txt"
+          if test "${#paths[@]}" -eq 0; then
+            echo "No changed paths to classify." | tee "$RUNNER_TEMP/optimizer-admission-plan.txt"
+          else
+            cd Toolchain
+            zig build optimizer-admission -- admission-plan "${paths[@]}" \
+              | tee "$RUNNER_TEMP/optimizer-admission-plan.txt"
+          fi
+
+      - name: Reject baseline self-validation in every commit
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) base="$PULL_REQUEST_BASE" ;;
+            push)
+              base="$PUSH_BASE"
+              if test -z "$base" || test "$base" = "0000000000000000000000000000000000000000"; then
+                base="HEAD^"
+              fi
+              ;;
+            *) base="HEAD^" ;;
+          esac
+          while IFS= read -r commit; do
+            paths=()
+            while IFS= read -r path; do
+              test -z "$path" || paths+=("$path")
+            done < <(git diff-tree --no-commit-id --name-only -r "$commit")
+            test "${#paths[@]}" -eq 0 || (
+              cd Toolchain
+              zig build optimizer-admission -- admission-impact "${paths[@]}"
+            )
+          done < <(git rev-list "$base..$GITHUB_SHA" -- Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json)
+
+      - name: Run the mandatory autonomous gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd Toolchain
+          zig build check
+
+      - name: Preserve the impact plan
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: optimizer-admission-${{ github.sha }}
+          path: ${{ runner.temp }}/optimizer-admission-plan.txt
+          if-no-files-found: error
+          retention-days: 14

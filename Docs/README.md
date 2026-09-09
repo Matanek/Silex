@@ -95,6 +95,8 @@ Choose the subsystem that matches the question you are investigating:
 - [Optimizer oracle and coverage registry](Optimizer-oracle.md): pinned LLVM
   comparison, exhaustive inventories, pass bisection, reproducibility, and
   machine reports.
+- [Optimizer admission](Optimizer-admission.md): mandatory quick checks, impact
+  classification, protected baselines, target campaigns, and external sentries.
 - [Cache and editor tooling](Cache-and-editor-tooling.md): reusable compilation
   artifacts and the LSP boundary.
 - [Implementation status](Implementation-status.md): portable coverage and the

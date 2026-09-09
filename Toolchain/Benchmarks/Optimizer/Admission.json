@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "relevant_roots": ["Toolchain/", "Docs/", ".github/workflows/"],
+  "protected_contracts": ["Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json"],
+  "checks": [
+    {"id": "optimizer-admission-quick", "kind": "local", "command": "cd Toolchain && zig build check", "status_context": "optimizer admission / quick"},
+    {"id": "optimizer-qualified-internal", "kind": "qualified", "command": "cd Toolchain && zig build optimizer-gate", "status_context": "optimizer admission / qualified internal"},
+    {"id": "optimizer-robustness-qualified", "kind": "qualified", "command": "cd Toolchain && zig build optimizer-robustness-qualified", "status_context": "optimizer admission / robustness"},
+    {"id": "native-portability-matrix", "kind": "target", "command": "run native-portability.yml for every affected target", "status_context": "optimizer admission / native portability"},
+    {"id": "external-qualification-selected", "kind": "external", "command": "run the Silex-Benchmarks qualification selected by this matrix against the exact Silex SHA", "status_context": "optimizer admission / external qualification"}
+  ],
+  "rules": [
+    {"id": "compiler-semantics-ir-runtime", "prefixes": ["Toolchain/Sources/", "Toolchain/Runtime/"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "optimizer-robustness-qualified", "native-portability-matrix", "external-qualification-selected"], "implementation_change": true},
+    {"id": "optimizer-oracle-and-corpus", "prefixes": ["Toolchain/Tools/OptimizerOracle/", "Toolchain/Benchmarks/Optimizer/"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "optimizer-robustness-qualified", "native-portability-matrix", "external-qualification-selected"], "implementation_change": false},
+    {"id": "toolchain-build-and-manifest", "prefixes": ["Toolchain/build.zig", "Toolchain/build.zig.zon"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "native-portability-matrix"], "implementation_change": true},
+    {"id": "optimizer-documentation", "prefixes": ["Docs/"], "required_checks": ["optimizer-admission-quick"], "implementation_change": false},
+    {"id": "admission-workflows", "prefixes": [".github/workflows/"], "required_checks": ["optimizer-admission-quick", "native-portability-matrix"], "implementation_change": false}
+  ]
+}

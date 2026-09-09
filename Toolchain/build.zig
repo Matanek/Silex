@@ -363,6 +363,28 @@ pub fn build(b: *std.Build) void {
     optimizer_oracle_test_step.dependOn(&optimizer_oracle_test_command.step);
     optimizer_gate_step.dependOn(&optimizer_oracle_test_command.step);
 
+    const optimizer_admission_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_admission_command.addArtifactArg(executable);
+    optimizer_admission_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    if (b.args) |args| optimizer_admission_command.addArgs(args);
+    const optimizer_admission_step = b.step(
+        "optimizer-admission",
+        "Audit or classify changes with the permanent optimizer admission matrix",
+    );
+    optimizer_admission_step.dependOn(&optimizer_oracle_test_command.step);
+    optimizer_admission_step.dependOn(&optimizer_admission_command.step);
+
+    const optimizer_admission_quick_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_admission_quick_command.addArtifactArg(executable);
+    optimizer_admission_quick_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    optimizer_admission_quick_command.addArg("admission-quick");
+    const optimizer_admission_quick_step = b.step(
+        "optimizer-admission-quick",
+        "Run the autonomous per-commit optimizer correctness and structure gate",
+    );
+    optimizer_admission_quick_step.dependOn(&optimizer_oracle_test_command.step);
+    optimizer_admission_quick_step.dependOn(&optimizer_admission_quick_command.step);
+
     const optimizer_parity_gate_command = b.addRunArtifact(optimizer_oracle);
     optimizer_parity_gate_command.addArtifactArg(executable);
     optimizer_parity_gate_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
@@ -489,7 +511,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&cycle_test_command.step);
     check_step.dependOn(&language_test_command.step);
     check_step.dependOn(&lsp_test_command.step);
-    check_step.dependOn(&optimizer_oracle_test_command.step);
+    check_step.dependOn(optimizer_admission_quick_step);
     if (native_math_validation) |validation| check_step.dependOn(validation);
 }
 

@@ -70,7 +70,17 @@ zig build optimizer-oracle -- fuzz-llvm 16 1
 zig build optimizer-oracle -- compare 11
 zig build optimizer-gate
 zig build optimizer-parity-gate
+zig build optimizer-admission -- admission-audit
+zig build optimizer-admission -- admission-impact Toolchain/Sources/Optimize/Release.zig
+zig build optimizer-admission -- admission-plan Toolchain/Sources/Optimize/Release.zig
+zig build optimizer-admission-quick
 ```
+
+The permanent admission contract and the distinction between the mandatory
+quick gate and impact-selected qualified campaigns are documented in
+[`Optimizer-admission.md`](Optimizer-admission.md). `zig build check` depends on
+the autonomous quick gate; full performance timing remains separate from
+correctness assertions.
 
 `audit` verifies the checked-in schema, the exact workspace and sealed-corpus
 baseline recorded in Git history, exact sealed source hashes, and writes a

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Silex = @import("silex_optimizer_api");
+const Admission = @import("Admission.zig");
 const Advisor = @import("Advisor.zig");
 const Benchmark = @import("Benchmark.zig");
 const CacheStress = @import("CacheStress.zig");
@@ -44,6 +45,12 @@ const usage =
     \\                      Execute all pairwise/triplet sources and one native case per pair
     \\  robustness-soak [rounds] [seed]
     \\                      Repeat the adversarial plan across deterministic seed windows
+    \\  admission-audit     Validate the permanent optimizer impact matrix
+    \\  admission-impact PATH...
+    \\                      List the checks required by changed repository paths
+    \\  admission-plan PATH...
+    \\                      List the union of checks for a multi-commit range
+    \\  admission-quick     Run the autonomous per-commit optimizer admission gate
     \\  gate                Run the complete optimizer qualification before integration
     \\  parity-audit        Refuse open coverage or LLVM-transposition gaps
     \\  parity-gate         Run the blocking closure and statistically qualified comparison
@@ -74,6 +81,37 @@ fn run(init: std.process.Init) !u8 {
     const command = arguments[3];
     const registry = try Registry.load(allocator, init.io, corpus_directory);
     try Registry.audit(registry);
+    if (std.mem.eql(u8, command, "admission-audit")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        const admission = try Admission.load(allocator, init.io, corpus_directory);
+        try Admission.audit(admission);
+        try Report.heading(init.io, allocator, "optimizer admission matrix valid");
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "admission-impact")) {
+        if (arguments.len < 5) return error.InvalidArguments;
+        const admission = try Admission.load(allocator, init.io, corpus_directory);
+        try Admission.audit(admission);
+        const selection = try Admission.select(allocator, admission, arguments[4..]);
+        try Admission.report(init.io, allocator, admission, selection);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "admission-plan")) {
+        if (arguments.len < 5) return error.InvalidArguments;
+        const admission = try Admission.load(allocator, init.io, corpus_directory);
+        try Admission.audit(admission);
+        const selection = try Admission.plan(allocator, admission, arguments[4..]);
+        try Admission.report(init.io, allocator, admission, selection);
+        return 0;
+    }
+    if (std.mem.eql(u8, command, "admission-quick")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        const admission = try Admission.load(allocator, init.io, corpus_directory);
+        try Admission.audit(admission);
+        try verifyCorpus(init.io, allocator, corpus_directory);
+        try Report.heading(init.io, allocator, "optimizer quick admission passed");
+        return 0;
+    }
     if (std.mem.eql(u8, command, "audit")) {
         if (arguments.len != 4) return error.InvalidArguments;
         try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
