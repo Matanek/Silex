@@ -34,6 +34,14 @@ completion productions are mapped with exhaustive switches and no catch-all
 branch. Adding a variant without a completion policy therefore fails
 compilation of the LSP suite.
 
+The record-shaped semantic surface is guarded as well. Every field of
+`Ast.Program`, `Ast.Function`, `Ast.Structure` and `Ast.StructureField` has an
+ordered decision naming either an existing completion witness or a precise
+irrelevance reason. Adding, removing, renaming or reordering one of those
+fields fails compilation before tests run. This closes the gap left by enum
+switches alone: a new declaration category represented as record metadata
+cannot silently bypass the completion inventory.
+
 The completion characters announced to clients are generated from the closed
 protocol enum in `Lsp/Types.zig`. The contract maps that same enum, so adding a
 trigger cannot update server capabilities while silently bypassing the

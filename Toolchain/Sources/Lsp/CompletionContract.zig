@@ -952,6 +952,140 @@ pub fn statementCapability(tag: std.meta.Tag(Ast.Statement)) Capability {
     };
 }
 
+const AstFieldDecision = struct {
+    name: []const u8,
+    witness: ?[]const u8 = null,
+    irrelevant_reason: ?[]const u8 = null,
+};
+
+const program_field_decisions = [_]AstFieldDecision{
+    .{ .name = "uses", .witness = "use-path-qualified" },
+    .{ .name = "catalog_contributions", .witness = "topology-catalog-fragment-field-chain" },
+    .{ .name = "type_names", .witness = "type-qualified-import" },
+    .{ .name = "test_only_type_names", .irrelevant_reason = "test-only semantic filtering does not create completion symbols" },
+    .{ .name = "generic_types", .witness = "member-specialized-generic" },
+    .{ .name = "function_types", .witness = "observable-metadata-and-insertion" },
+    .{ .name = "structures", .witness = "declaration-structure-member" },
+    .{ .name = "enums", .witness = "symbol-enum-case" },
+    .{ .name = "extensions", .witness = "member-local-extension" },
+    .{ .name = "external_functions", .witness = "origin-current-module" },
+    .{ .name = "functions", .witness = "origin-current-module" },
+};
+
+const function_field_decisions = [_]AstFieldDecision{
+    .{ .name = "is_anonymous", .witness = "call-argument-expression" },
+    .{ .name = "is_test", .irrelevant_reason = "test execution metadata does not change the public completion surface" },
+    .{ .name = "is_test_entry", .irrelevant_reason = "test entry metadata does not change the public completion surface" },
+    .{ .name = "test_name", .irrelevant_reason = "test display metadata does not change the public completion surface" },
+    .{ .name = "test_owner", .irrelevant_reason = "test ownership metadata does not change the public completion surface" },
+    .{ .name = "test_source_name", .irrelevant_reason = "test source metadata does not change the public completion surface" },
+    .{ .name = "is_static", .witness = "member-static-type" },
+    .{ .name = "is_override", .witness = "visibility-protected-member" },
+    .{ .name = "is_public", .witness = "origin-current-module" },
+    .{ .name = "is_internal", .witness = "visibility-package-member" },
+    .{ .name = "is_local", .witness = "visibility-local-member" },
+    .{ .name = "is_private", .witness = "visibility-imported-private-negative" },
+    .{ .name = "is_protected", .witness = "visibility-protected-member" },
+    .{ .name = "visibility_explicit", .witness = "visibility-module-member" },
+    .{ .name = "extension", .witness = "member-local-extension" },
+    .{ .name = "specialization_file", .witness = "member-specialized-generic" },
+    .{ .name = "owner", .witness = "origin-current-module" },
+    .{ .name = "position", .irrelevant_reason = "source coordinates affect navigation, not symbol classification" },
+    .{ .name = "name_position", .irrelevant_reason = "source coordinates affect navigation, not symbol classification" },
+    .{ .name = "name", .witness = "origin-current-module" },
+    .{ .name = "type_parameters", .witness = "member-specialized-generic" },
+    .{ .name = "parameters", .witness = "symbol-parameter-binding" },
+    .{ .name = "return_type", .witness = "member-imported-field-chain" },
+    .{ .name = "return_mode", .witness = "member-self-receiver" },
+    .{ .name = "return_provenance", .witness = "member-self-receiver" },
+    .{ .name = "intrinsic", .witness = "intrinsic-expression-root" },
+    .{ .name = "is_intrinsic_declaration", .witness = "intrinsic-expression-root" },
+    .{ .name = "accessor", .witness = "member-imported-field-chain" },
+    .{ .name = "statements", .witness = "lexical-query-destructuring" },
+};
+
+const stored_field_decisions = [_]AstFieldDecision{
+    .{ .name = "is_static", .witness = "member-static-type" },
+    .{ .name = "is_public", .witness = "member-imported-field-chain" },
+    .{ .name = "is_internal", .witness = "visibility-package-member" },
+    .{ .name = "is_local", .witness = "visibility-local-member" },
+    .{ .name = "is_private", .witness = "visibility-imported-private-negative" },
+    .{ .name = "is_protected", .witness = "visibility-protected-member" },
+    .{ .name = "visibility_explicit", .witness = "visibility-module-member" },
+    .{ .name = "position", .irrelevant_reason = "source coordinates affect navigation, not symbol classification" },
+    .{ .name = "name_position", .irrelevant_reason = "source coordinates affect navigation, not symbol classification" },
+    .{ .name = "name", .witness = "member-imported-field-chain" },
+    .{ .name = "mutable", .witness = "member-self-receiver" },
+    .{ .name = "access_mode", .witness = "lexical-query-destructuring" },
+    .{ .name = "type", .witness = "member-imported-field-chain" },
+    .{ .name = "default", .witness = "aggregate-remaining-field" },
+    .{ .name = "property", .witness = "member-imported-field-chain" },
+};
+
+const structure_decisions = [_]AstFieldDecision{
+    .{ .name = "is_test", .irrelevant_reason = "test ownership metadata does not change the public completion surface" },
+    .{ .name = "is_public", .witness = "type-qualified-import" },
+    .{ .name = "is_internal", .witness = "visibility-package-member" },
+    .{ .name = "is_local", .witness = "visibility-local-member" },
+    .{ .name = "is_private", .witness = "visibility-imported-private-negative" },
+    .{ .name = "is_protected", .witness = "visibility-protected-member" },
+    .{ .name = "is_class", .witness = "member-imported-alias" },
+    .{ .name = "is_copyable", .witness = "member-local-incomplete-if" },
+    .{ .name = "is_intrinsic", .witness = "intrinsic-expression-root" },
+    .{ .name = "is_static", .witness = "member-static-type" },
+    .{ .name = "is_protocol", .witness = "member-dynamic-protocol" },
+    .{ .name = "is_tuple", .witness = "member-named-tuple" },
+    .{ .name = "tuple_named", .witness = "member-named-tuple" },
+    .{ .name = "tuple_placeholder", .irrelevant_reason = "frontend placeholder metadata is never an editor-visible declaration" },
+    .{ .name = "query_pattern", .witness = "lexical-query-destructuring" },
+    .{ .name = "enclosing", .witness = "topology-submodule" },
+    .{ .name = "owner", .witness = "origin-current-module" },
+    .{ .name = "position", .irrelevant_reason = "source coordinates affect navigation, not symbol classification" },
+    .{ .name = "name_position", .irrelevant_reason = "source coordinates affect navigation, not symbol classification" },
+    .{ .name = "name", .witness = "type-qualified-import" },
+    .{ .name = "base", .witness = "nominal-relation-type" },
+    .{ .name = "base_position", .irrelevant_reason = "source coordinates affect navigation, not symbol classification" },
+    .{ .name = "conformances", .witness = "member-dynamic-protocol" },
+    .{ .name = "extension_conformances", .witness = "member-local-extension" },
+    .{ .name = "type_parameters", .witness = "member-specialized-generic" },
+    .{ .name = "fields", .witness = "member-imported-field-chain" },
+    .{ .name = "static_fields", .witness = "member-static-type" },
+    .{ .name = "constructors", .witness = "symbol-constructor-root" },
+    .{ .name = "methods", .witness = "member-local-incomplete-if" },
+    .{ .name = "drop", .irrelevant_reason = "destructor bodies never contribute callable completion symbols" },
+    .{ .name = "collection", .witness = "lexical-query-destructuring" },
+};
+
+fn assertAstFieldDecisions(comptime T: type, comptime decisions: []const AstFieldDecision) void {
+    const fields = std.meta.fields(T);
+    if (fields.len != decisions.len) {
+        @compileError(std.fmt.comptimePrint(
+            "completion contract has {d} decisions for {s}, but the AST exposes {d} fields; classify every new field and add its witness",
+            .{ decisions.len, @typeName(T), fields.len },
+        ));
+    }
+    inline for (fields, decisions) |field, decision| {
+        if (!std.mem.eql(u8, field.name, decision.name)) {
+            @compileError(std.fmt.comptimePrint(
+                "completion contract expected {s}.{s}, found {s}; update the explicit field decision and its witness",
+                .{ @typeName(T), decision.name, field.name },
+            ));
+        }
+        if (decision.witness) |witness| {
+            if (!hasScenario(witness)) {
+                @compileError(std.fmt.comptimePrint("AST field {s}.{s} names missing completion witness '{s}'", .{ @typeName(T), field.name, witness }));
+            }
+        } else if (decision.irrelevant_reason == null or decision.irrelevant_reason.?.len == 0) {
+            @compileError(std.fmt.comptimePrint("AST field {s}.{s} needs a completion witness or an irrelevance reason", .{ @typeName(T), field.name }));
+        }
+    }
+}
+
+fn hasScenario(comptime identifier: []const u8) bool {
+    inline for (scenarios) |scenario| if (std.mem.eql(u8, scenario.id, identifier)) return true;
+    return false;
+}
+
 pub fn audit(registry: []const Scenario) !void {
     var covered = [_]bool{false} ** @typeInfo(Capability).@"enum".fields.len;
     var workspace_fixtures = [_]bool{false} ** @typeInfo(WorkspaceFixtures.Id).@"enum".fields.len;
@@ -1098,6 +1232,13 @@ test "canonical completion sources pass their declared frontend boundary" {
 }
 
 test "closed compiler and completion inventories require exhaustive policies" {
+    comptime {
+        @setEvalBranchQuota(100_000);
+        assertAstFieldDecisions(Ast.Program, &program_field_decisions);
+        assertAstFieldDecisions(Ast.Function, &function_field_decisions);
+        assertAstFieldDecisions(Ast.StructureField, &stored_field_decisions);
+        assertAstFieldDecisions(Ast.Structure, &structure_decisions);
+    }
     inline for (@typeInfo(Position).@"enum".fields) |field| _ = positionCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Origin).@"enum".fields) |field| _ = originCapability(@enumFromInt(field.value));
     inline for (@typeInfo(Receiver).@"enum".fields) |field| _ = receiverCapability(@enumFromInt(field.value));
