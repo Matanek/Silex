@@ -936,6 +936,76 @@ test "unreachable cycles crossing dynamic collections finalize every class once"
     try std.testing.expectEqualStrings("drop first links=1\ndrop second links=1\n", output);
 }
 
+test "class constructors keep a returned cyclic graph alive through local cleanup" {
+    const output = try run(
+        \\class Child {
+        \\    var parent:Parent? = null
+        \\    drop { print("drop child") }
+        \\}
+        \\class Parent {
+        \\    var children:Child[]
+        \\    init() {
+        \\        self.children = []
+        \\        var child = Child()
+        \\        child.parent = self
+        \\        self.children.append(child)
+        \\    }
+        \\    drop { print("drop parent children=", self.children.count()) }
+        \\}
+        \\func main() { var parent = Parent() }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop parent children=1\ndrop child\n", output);
+}
+
+test "derived constructors keep composed child cycles alive" {
+    const output = try run(
+        \\class Node {
+        \\    var parent:Node? = null
+        \\    var children:Node[]
+        \\    init() { self.children = [] }
+        \\    func add_child(child:Node) {
+        \\        child.parent = self
+        \\        self.children.append(child)
+        \\    }
+        \\}
+        \\class Leaf : Node { init() : super() {} }
+        \\class Parent : Node {
+        \\    var owned:Leaf
+        \\    init() : super() {
+        \\        self.owned = Leaf()
+        \\        self.add_child(self.owned)
+        \\    }
+        \\}
+        \\func main() {
+        \\    var parent = Parent()
+        \\    print(parent.children.count())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1\n", output);
+}
+
+test "inherited mutating methods restore the derived receiver type" {
+    const output = try run(
+        \\class Counter {
+        \\    var value:int = 0
+        \\    func add(amount:int) int {
+        \\        self.value += amount
+        \\        return self.value
+        \\    }
+        \\}
+        \\class SpecialCounter : Counter { init() : super() {} }
+        \\func main() {
+        \\    var counter = SpecialCounter()
+        \\    print(counter.add(amount:3))
+        \\    print(counter.value)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("3\n3\n", output);
+}
+
 test "unreachable cycles crossing protocol values finalize every class once" {
     const output = try run(
         \\protocol Link { func label() str }

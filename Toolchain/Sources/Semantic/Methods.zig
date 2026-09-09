@@ -636,7 +636,16 @@ pub fn analyzeCallWithReceiver(
     }
     if (method.return_type == .void) {
         if (class_receiver) {
-            if (place) |target| try writePlace(self, builder, target, call_result.?);
+            if (place) |target| {
+                const updated_receiver = try restoreClassReceiver(
+                    self,
+                    builder,
+                    call_result.?,
+                    structure_index,
+                    receiver_structure_index,
+                );
+                try writePlace(self, builder, target, updated_receiver);
+            }
             return null;
         }
         const replacement = if (safe_receiver_type) |optional_type|
@@ -648,8 +657,15 @@ pub fn analyzeCallWithReceiver(
     }
     if (class_receiver) {
         if (place) |target| {
-            const updated_receiver = try self.newValue(builder, receiver.type);
-            try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+            const returned_receiver = try self.newValue(builder, .structure(structure_index));
+            try self.emit(builder, .{ .field_load = .{ .result = returned_receiver, .base = call_result.?, .field = 0 } });
+            const updated_receiver = try restoreClassReceiver(
+                self,
+                builder,
+                returned_receiver,
+                structure_index,
+                receiver_structure_index,
+            );
             try writePlace(self, builder, target, updated_receiver);
         }
         const value = try self.newValue(builder, method.return_type);
@@ -855,7 +871,16 @@ fn analyzeNamedCall(
     }
     if (method.return_type == .void) {
         if (class_receiver) {
-            if (place) |target| try writePlace(self, builder, target, call_result.?);
+            if (place) |target| {
+                const updated_receiver = try restoreClassReceiver(
+                    self,
+                    builder,
+                    call_result.?,
+                    structure_index,
+                    receiver_structure_index,
+                );
+                try writePlace(self, builder, target, updated_receiver);
+            }
             return null;
         }
         const replacement = if (safe_receiver_type) |optional_type|
@@ -867,8 +892,15 @@ fn analyzeNamedCall(
     }
     if (class_receiver) {
         if (place) |target| {
-            const updated_receiver = try self.newValue(builder, receiver.type);
-            try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+            const returned_receiver = try self.newValue(builder, .structure(structure_index));
+            try self.emit(builder, .{ .field_load = .{ .result = returned_receiver, .base = call_result.?, .field = 0 } });
+            const updated_receiver = try restoreClassReceiver(
+                self,
+                builder,
+                returned_receiver,
+                structure_index,
+                receiver_structure_index,
+            );
             try writePlace(self, builder, target, updated_receiver);
         }
         const value = try self.newValue(builder, method.return_type);
@@ -1149,6 +1181,19 @@ fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: 
         } });
     }
     if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement } });
+}
+
+fn restoreClassReceiver(
+    self: anytype,
+    builder: anytype,
+    returned_receiver: Ir.ValueId,
+    owner: usize,
+    receiver: usize,
+) !Ir.ValueId {
+    if (owner == receiver) return returned_receiver;
+    const restored = try self.newValue(builder, .structure(receiver));
+    try self.emit(builder, .{ .class_cast = .{ .result = restored, .operand = returned_receiver } });
+    return restored;
 }
 
 fn analyzeMutatingStatements(

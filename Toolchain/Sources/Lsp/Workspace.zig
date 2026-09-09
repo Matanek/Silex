@@ -209,6 +209,8 @@ pub fn hasProjectReferenceForTarget(
         if (token.tag != .identifier) continue;
         const separator = lexer.next() catch return false;
         if (separator.tag != .dot) {
+            if (!hasLocalNominal(program, token.lexeme) and
+                try hasComposedNominal(allocator, io, project, token.lexeme)) return true;
             const incomplete_expression = switch (separator.tag) {
                 .end, .right_brace, .right_parenthesis, .comma, .semicolon => true,
                 else => false,
@@ -221,6 +223,29 @@ pub fn hasProjectReferenceForTarget(
         if ((findProvider(project.index, token.lexeme) != null or project.index.isNamespace(token.lexeme)) and
             try modulePathVisible(allocator, io, &.{}, project, token.lexeme)) return true;
     }
+}
+
+fn hasComposedNominal(
+    allocator: Allocator,
+    io: Io,
+    project: IndexedProject,
+    name: []const u8,
+) !bool {
+    const current = ProjectIndex.currentProvider(project) orelse return false;
+    for (project.index.providers) |provider| {
+        if (samePath(provider.path, current.path) or
+            Modules.compositionOwner(provider) != Modules.compositionOwner(current) or
+            !std.mem.eql(u8, provider.name, current.name)) continue;
+        const loaded = try ProjectIndex.loadProgram(allocator, io, &.{}, provider) orelse continue;
+        for (loaded.program.structures) |structure| {
+            if (!structure.is_local and !structure.is_private and !structure.is_protected and
+                std.mem.eql(u8, structure.name, name)) return true;
+        }
+        for (loaded.program.enums) |enumeration| {
+            if (!enumeration.is_local and std.mem.eql(u8, enumeration.name, name)) return true;
+        }
+    }
+    return false;
 }
 
 pub fn importedReceiverTypeAt(
@@ -4040,6 +4065,39 @@ test "respect closed package namespaces during completion" {
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
     for (items) |item| if (completionNameMatches(item, label)) return true;
     return false;
+}
+
+test "module atoms provide project context to isolated diagnostics" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Nodes");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Nodes/@Node.sx",
+        .data = "public class Node {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Nodes/@Node2D.sx",
+        .data = "public class Node2D:Node {}",
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const path = try std.fs.path.join(allocator, &.{ root, "Nodes", "@Node2D.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{path});
+
+    try std.testing.expect(try hasProjectReferenceForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        uri,
+        "public class Node2D:Node {}",
+    ));
 }
 
 test "workspace indexes the selected package platform root" {
