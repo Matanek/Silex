@@ -1,4 +1,5 @@
 const std = @import("std");
+const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
 const fundamental_types = [_][]const u8{
@@ -251,6 +252,26 @@ test "completion is deterministic for incomplete source" {
     try Support.expectEqualItems(first, second);
     try Support.expectPresent("error", first);
     try Support.expectNoDuplicates(first);
+}
+
+test "server keeps member completion across independent syntax errors" {
+    const sources = [_][]const u8{
+        "struct Input { func pressed() bool { return true } }\nfunc helper( { }\nfunc main() {\n    let input = Input()\n    input.<|>\n}",
+        "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    if (input.<|>\n}",
+        "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    input.<|>\n}\nfunc helper( { }",
+        "struct Input { func pressed() bool { return true } }\nfunc helper() { if }\nfunc main() {\n    let input = Input()\n    input.<|>\n}",
+    };
+    for (sources, 0..) |source, index| {
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Recovery-{d}.sx", .{index});
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectPresent("pressed", items);
+        try Support.expectAbsent("unknown", items);
+        try Support.expectNoDuplicates(items);
+    }
 }
 
 test "incomplete control conditions preserve every lexical parameter" {

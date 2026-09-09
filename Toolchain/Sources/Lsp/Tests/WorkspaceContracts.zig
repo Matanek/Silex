@@ -680,6 +680,7 @@ test "server completes a cascade on an imported homonymous principal type" {
         allocator,
         main_uri,
         \\use GFX.Canvas
+        \\func broken( { }
         \\func draw_player() Canvas {
         \\    return Canvas()..<|>
         \\}
@@ -736,6 +737,7 @@ test "server preserves imported field types through incomplete conditions" {
         main_uri,
         \\use Kit.ECS
         \\struct PlayerTarget {}
+        \\func broken( { }
         \\func update(query:ECS.Query<(&PlayerTarget, &Kit.Transform.Transform2D)>) {
         \\    for (target, transform) in query {
         \\        if transform.position.<|>
@@ -755,6 +757,7 @@ test "server preserves imported field types through incomplete conditions" {
         main_uri,
         \\use Kit.ECS
         \\struct PlayerTarget {}
+        \\func broken( { }
         \\func update(query:ECS.Query<(&PlayerTarget, &Kit.Transform.Transform2D)>) {
         \\    for (target, transform) in query {
         \\        var pos:Kit.Math.Vec2 = transform.position

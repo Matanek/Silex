@@ -9,6 +9,7 @@ const ParserModule = @import("../Parser.zig");
 const Completion = @import("Completion.zig");
 const LexerModule = @import("../Lexer.zig");
 const ProjectIndex = @import("ProjectIndex.zig");
+const Recovery = @import("Recovery.zig");
 const Types = @import("Types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -1766,6 +1767,13 @@ fn parseCurrentAtCompletion(
     if (try parseCurrent(allocator, source)) |program| return program;
     if (try Completion.recoverCascadeForParsing(allocator, source, cursor)) |recovered| {
         if (try parseCurrent(allocator, recovered)) |program| return program;
+        if (try Recovery.isolateInvalidTopLevelDeclarations(
+            allocator,
+            recovered,
+            @min(cursor, recovered.len),
+        )) |isolated| {
+            if (try parseCurrent(allocator, isolated)) |program| return program;
+        }
     }
     const completion_line_start = if (std.mem.lastIndexOfScalar(u8, source[0..cursor], '\n')) |newline| newline + 1 else 0;
     const before_cursor = std.mem.trim(u8, source[completion_line_start..cursor], " \t\r");
@@ -1785,6 +1793,13 @@ fn parseCurrentAtCompletion(
         source[cursor..],
     });
     if (try parseCurrent(allocator, recovered)) |program| return program;
+    if (try Recovery.isolateInvalidTopLevelDeclarations(
+        allocator,
+        recovered,
+        cursor + placeholder.len,
+    )) |isolated| {
+        if (try parseCurrent(allocator, isolated)) |program| return program;
+    }
     if (!type_position or prefix.len > cursor) return null;
 
     const prefix_start = cursor - prefix.len;
@@ -1839,6 +1854,13 @@ fn parseCurrentAtScope(
         source[cursor..],
     });
     if (try parseCurrent(allocator, recovered)) |program| return program;
+    if (try Recovery.isolateInvalidTopLevelDeclarations(
+        allocator,
+        recovered,
+        prefix_start + placeholder.len,
+    )) |isolated| {
+        if (try parseCurrent(allocator, isolated)) |program| return program;
+    }
     const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
         newline + 1
     else

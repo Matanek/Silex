@@ -70,6 +70,16 @@ cursor, and in a neighbouring block. Completion recovery must isolate the
 invalid region, retain the last reliable scope and receiver type, and keep an
 internal recovery failure distinct from a valid empty result.
 
+The first recovery boundary is owned by `Lsp/Recovery.zig`. Once the completion
+site has received its typed placeholder, independently invalid top-level
+declarations are replaced with whitespace while preserving every byte offset
+and line break. The current declaration is never discarded. Missing closing
+parentheses or brackets immediately before the containing block are supplied
+only to the parser view. Tests observe a closed recovery reason (`complete`,
+`completion_site`, `isolated_invalid_declaration`,
+`discarded_completion_line`, or `unavailable`) and exercise all four error
+positions through the server protocol.
+
 ## Running the gate
 
 From `Silex/Toolchain`, run:

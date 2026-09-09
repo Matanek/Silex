@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const LexerModule = @import("../Lexer.zig");
 const ParserModule = @import("../Parser.zig");
 const ExtensionMerger = @import("../Extensions.zig");
+const RecoveryModule = @import("Recovery.zig");
 const Types = @import("Types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -53,6 +54,13 @@ const Context = struct {
     system_callback: bool = false,
     static_container: bool = false,
     aggregate: ?AggregateContext = null,
+};
+
+pub const Recovery = RecoveryModule.Kind;
+
+const ParseOutcome = struct {
+    program: ?Ast.Program,
+    recovery: Recovery,
 };
 
 pub const AggregateContext = struct {
@@ -110,7 +118,8 @@ pub fn itemsAtWithExpectedType(
 
     var candidates: std.ArrayList(Candidate) = .empty;
     const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
-    const program = try parseForCompletion(allocator, source, cursor, context);
+    const outcome = try parseForCompletionObserved(allocator, source, cursor, context);
+    const program = outcome.program;
     const expected_type: ?ExpectedType = if (contextual_expected_type) |name|
         .{ .name = name, .strict = true }
     else if (program) |parsed|
@@ -2705,14 +2714,49 @@ fn parseForCompletion(
     cursor: usize,
     context: Context,
 ) !?Ast.Program {
+    return (try parseForCompletionObserved(allocator, source, cursor, context)).program;
+}
+
+pub fn recoveryAt(allocator: Allocator, source: []const u8, cursor: usize) !Recovery {
+    if (cursor > source.len or !cursorAllowsCode(source, cursor)) return .unavailable;
+    const context = try classifyContext(allocator, source, cursor);
+    return (try parseForCompletionObserved(allocator, source, cursor, context)).recovery;
+}
+
+fn parseForCompletionObserved(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    context: Context,
+) !ParseOutcome {
     var parser = ParserModule.Parser.init(allocator, source);
-    if (parser.parse()) |program| return mergeExtensionsForCompletion(allocator, program) else |_| {}
+    if (parser.parse()) |program| return .{
+        .program = mergeExtensionsForCompletion(allocator, program),
+        .recovery = .complete,
+    } else |_| {}
 
     if (context.cascade) {
-        const recovered = try recoverCascadeForParsing(allocator, source, cursor) orelse return null;
+        const recovered = try recoverCascadeForParsing(allocator, source, cursor) orelse return .{
+            .program = null,
+            .recovery = .unavailable,
+        };
         parser = ParserModule.Parser.init(allocator, recovered);
-        const program = parser.parse() catch return null;
-        return mergeExtensionsForCompletion(allocator, program);
+        if (parser.parse()) |program| return .{
+            .program = mergeExtensionsForCompletion(allocator, program),
+            .recovery = .completion_site,
+        } else |_| {}
+        if (try RecoveryModule.isolateInvalidTopLevelDeclarations(
+            allocator,
+            recovered,
+            @min(cursor, recovered.len),
+        )) |isolated| {
+            parser = ParserModule.Parser.init(allocator, isolated);
+            if (parser.parse()) |program| return .{
+                .program = mergeExtensionsForCompletion(allocator, program),
+                .recovery = .isolated_invalid_declaration,
+            } else |_| {}
+        }
+        return .{ .program = null, .recovery = .unavailable };
     }
 
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..context.prefix_start], '\n')) |newline|
@@ -2722,7 +2766,8 @@ fn parseForCompletion(
     const before_prefix = std.mem.trim(u8, source[line_start..context.prefix_start], " \t\r");
     const for_source = isForSourceLine(before_prefix);
     const for_body_follows = for_source and blockFollowsCompletion(source, cursor);
-    const control_body_missing = lineStartsControlCondition(before_prefix) and !blockFollowsCompletion(source, cursor);
+    const control_body_missing = (lineStartsControlCondition(before_prefix) or
+        lineHasUnclosedControlCondition(before_prefix)) and !blockFollowsCompletion(source, cursor);
     const completing_try_error = try isTryErrorBindingPositionAt(allocator, source, context.prefix_start);
     const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
     const placeholder: []const u8 = if (completing_try_error)
@@ -2749,19 +2794,38 @@ fn parseForCompletion(
             "print(true)"
         else
             "true",
-        else => return null,
+        else => return .{ .program = null, .recovery = .unavailable },
     };
     const replacement_start = if (context.kind == .member or context.prefix.len == 0)
         cursor
     else
         context.prefix_start;
-    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+    const closers = try RecoveryModule.unmatchedLineClosers(allocator, source, line_start, cursor);
+    const block_suffix: []const u8 = if (std.mem.endsWith(u8, placeholder, " {}")) " {}" else "";
+    const placeholder_expression = placeholder[0 .. placeholder.len - block_suffix.len];
+    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}", .{
         source[0..replacement_start],
-        placeholder,
+        placeholder_expression,
+        closers,
+        block_suffix,
         source[cursor..],
     });
+    const recovered_cursor = replacement_start + placeholder.len + closers.len;
     parser = ParserModule.Parser.init(allocator, recovered);
-    const program = parser.parse() catch blk: {
+    if (parser.parse()) |program| return .{
+        .program = mergeExtensionsForCompletion(allocator, program),
+        .recovery = .completion_site,
+    } else |_| {}
+
+    if (try RecoveryModule.isolateInvalidTopLevelDeclarations(allocator, recovered, recovered_cursor)) |isolated| {
+        parser = ParserModule.Parser.init(allocator, isolated);
+        if (parser.parse()) |program| return .{
+            .program = mergeExtensionsForCompletion(allocator, program),
+            .recovery = .isolated_invalid_declaration,
+        } else |_| {}
+    }
+
+    const program = blk: {
         const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
             newline + 1
         else
@@ -2774,15 +2838,21 @@ fn parseForCompletion(
             parser = ParserModule.Parser.init(allocator, without_incomplete_cascade);
             if (parser.parse()) |parsed| break :blk parsed else |_| {}
         }
-        if (context.kind != .type_name and !context.nominal_relation) return null;
+        if (context.kind != .type_name and !context.nominal_relation) return .{
+            .program = null,
+            .recovery = .unavailable,
+        };
         const without_incomplete_declaration = try std.fmt.allocPrint(allocator, "{s}{s}", .{
             source[0..line_start],
             source[line_end..],
         });
         parser = ParserModule.Parser.init(allocator, without_incomplete_declaration);
-        break :blk parser.parse() catch return null;
+        break :blk parser.parse() catch return .{ .program = null, .recovery = .unavailable };
     };
-    return mergeExtensionsForCompletion(allocator, program);
+    return .{
+        .program = mergeExtensionsForCompletion(allocator, program),
+        .recovery = .discarded_completion_line,
+    };
 }
 
 fn isForSourceLine(line: []const u8) bool {
@@ -2793,6 +2863,20 @@ fn isForSourceLine(line: []const u8) bool {
         const token = lexer.next() catch return false;
         if (token.tag == .end) return false;
         if (token.tag == .keyword_in) return true;
+    }
+}
+
+fn lineHasUnclosedControlCondition(line: []const u8) bool {
+    var lexer = LexerModule.Lexer.init(line);
+    var found = false;
+    while (true) {
+        const token = lexer.next() catch return false;
+        switch (token.tag) {
+            .keyword_if, .keyword_elif, .keyword_while => found = true,
+            .left_brace => found = false,
+            .end => return found,
+            else => {},
+        }
     }
 }
 
@@ -5125,4 +5209,34 @@ test "do not complete ordinary string text or comments" {
     try std.testing.expectEqual(@as(usize, 0), (try itemsAt(arena.allocator(), string_source, string_source.len, .invoked)).len);
     const comment_source = "func main() { // val";
     try std.testing.expectEqual(@as(usize, 0), (try itemsAt(arena.allocator(), comment_source, comment_source.len, .invoked)).len);
+}
+
+test "isolate syntax errors before after and beside member completion" {
+    const Case = struct { source: []const u8, recovery: Recovery };
+    const cases = [_]Case{
+        .{
+            .source = "struct Input { func pressed() bool { return true } }\nfunc helper( { }\nfunc main() {\n    let input = Input()\n    input.\n}",
+            .recovery = .isolated_invalid_declaration,
+        },
+        .{
+            .source = "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    if (input.\n}",
+            .recovery = .completion_site,
+        },
+        .{
+            .source = "struct Input { func pressed() bool { return true } }\nfunc main() {\n    let input = Input()\n    input.\n}\nfunc helper( { }",
+            .recovery = .isolated_invalid_declaration,
+        },
+        .{
+            .source = "struct Input { func pressed() bool { return true } }\nfunc helper() { if }\nfunc main() {\n    let input = Input()\n    input.\n}",
+            .recovery = .isolated_invalid_declaration,
+        },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const cursor = std.mem.lastIndexOf(u8, case.source, "input.").? + "input.".len;
+        const items = try itemsAt(arena.allocator(), case.source, cursor, .trigger_character);
+        try std.testing.expect(contains(items, "pressed"));
+        try std.testing.expectEqual(case.recovery, try recoveryAt(arena.allocator(), case.source, cursor));
+    }
 }
