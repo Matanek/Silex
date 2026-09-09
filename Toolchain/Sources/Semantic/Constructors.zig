@@ -59,6 +59,7 @@ pub fn analyze(
     const initialized = try self.allocator.alloc(bool, declaration.fields.len);
     var initial_fields: std.ArrayList(Ir.ValueId) = .empty;
     var initial_transfers: std.ArrayList(bool) = .empty;
+    var constructed_base: ?Model.TypedValue = null;
     if (self.structures[nominal_index].base) |base_index| {
         const base_declaration = Inheritance.findDeclaration(self, base_index) orelse return error.InvalidSource;
         const base_value = if (base_declaration.constructors.len == 0) implicit: {
@@ -69,6 +70,7 @@ pub fn analyze(
             .name_position = constructor.position,
             .arguments = constructor.super_arguments,
         });
+        constructed_base = base_value;
         for (self.structures[base_index].fields, 0..) |field, field_index| {
             const value = try self.newValue(&builder, field.type);
             try self.emit(&builder, .{ .field_load = .{ .result = value, .base = base_value.value, .field = field_index } });
@@ -117,6 +119,12 @@ pub fn analyze(
         .structure = nominal_index,
         .fields = try initial_fields.toOwnedSlice(self.allocator),
     } });
+    if (self.structures[nominal_index].is_class) {
+        try Resources.retainValue(self, &builder, structure_type, initial_self);
+        if (constructed_base) |base| {
+            try Resources.releaseConstructedBase(self, &builder, base.type, base.value);
+        }
+    }
     const self_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, structure_type);
     try self.emit(&builder, .{ .local_store = .{ .local = self_local, .operand = initial_self } });
@@ -304,7 +312,7 @@ pub fn analyzeCall(
     return .{
         .type = result_type,
         .value = result,
-        .transferred = Resources.ownsValue(self, result_type) and !Resources.isClassType(self, result_type),
+        .transferred = Resources.ownsValue(self, result_type),
         .lexical_captures = lexical_captures,
         .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
     };
@@ -426,7 +434,7 @@ fn analyzeNamedCall(
     return .{
         .type = result_type,
         .value = result,
-        .transferred = Resources.ownsValue(self, result_type) and !Resources.isClassType(self, result_type),
+        .transferred = Resources.ownsValue(self, result_type),
         .lexical_captures = lexical_captures,
         .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
     };

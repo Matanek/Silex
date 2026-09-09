@@ -1915,6 +1915,37 @@ test "native class cycles finalize once across direct list and protocol edges" {
         \\    func label() str { return self.name }
         \\    drop { print("protocol ", self.name) }
         \\}
+        \\class ConstructorChild {
+        \\    var parent:ConstructorParent? = null
+        \\    drop { print("constructor child") }
+        \\}
+        \\class ConstructorParent {
+        \\    var children:ConstructorChild[]
+        \\    init() {
+        \\        self.children = []
+        \\        var child = ConstructorChild()
+        \\        child.parent = self
+        \\        self.children.append(child)
+        \\    }
+        \\    drop { print("constructor parent ", self.children.count()) }
+        \\}
+        \\class ConstructorNode {
+        \\    var parent:ConstructorNode? = null
+        \\    var children:ConstructorNode[]
+        \\    init() { self.children = [] }
+        \\    func add_child(child:ConstructorNode) {
+        \\        child.parent = self
+        \\        self.children.append(child)
+        \\    }
+        \\}
+        \\class ConstructorLeaf : ConstructorNode { init() : super() {} }
+        \\class ConstructorTree : ConstructorNode {
+        \\    var owned:ConstructorLeaf
+        \\    init() : super() {
+        \\        self.owned = ConstructorLeaf()
+        \\        self.add_child(self.owned)
+        \\    }
+        \\}
         \\func direct_cycle() {
         \\    var first = DirectNode(name:"first")
         \\    var second = DirectNode(name:"second")
@@ -1933,7 +1964,12 @@ test "native class cycles finalize once across direct list and protocol edges" {
         \\    first.next = second
         \\    second.next = first
         \\}
-        \\func main() { direct_cycle(); collection_cycle(); protocol_cycle() }
+        \\func constructor_cycle() { var parent = ConstructorParent() }
+        \\func inherited_constructor_cycle() {
+        \\    var tree = ConstructorTree()
+        \\    print("inherited constructor ", tree.children.count())
+        \\}
+        \\func main() { direct_cycle(); collection_cycle(); protocol_cycle(); constructor_cycle(); inherited_constructor_cycle() }
     ;
     var frontend = Frontend.Frontend.init(allocator);
     const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
@@ -1942,7 +1978,7 @@ test "native class cycles finalize once across direct list and protocol edges" {
     try std.testing.expectEqual(reference.exit_code, exitCode(native));
     try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
     try std.testing.expectEqualStrings(
-        "direct first\ndirect second\ncollection first\ncollection second\nprotocol first\nprotocol second\n",
+        "direct first\ndirect second\ncollection first\ncollection second\nprotocol first\nprotocol second\nconstructor parent 1\nconstructor child\ninherited constructor 1\n",
         native.stdout,
     );
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);

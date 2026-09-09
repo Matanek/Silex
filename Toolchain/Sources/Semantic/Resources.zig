@@ -276,6 +276,29 @@ pub fn releaseTransferredRoot(self: anytype, builder: anytype, type_value: Ast.T
     return emitDropOwnedInner(self, builder, type_value, value, .root, false);
 }
 
+/// Discards the temporary base-class allocation after its retained fields have
+/// been transferred into a newly allocated derived instance. User `drop` hooks
+/// belong to the derived instance and must not run for this construction detail.
+pub fn releaseConstructedBase(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
+    const type_index = type_value.structureIndex() orelse return error.InvalidSource;
+    if (type_index >= self.structures.len or !self.structures[type_index].is_class) return error.InvalidSource;
+    const functions = try self.allocator.dupe(Ir.Instruction.ClassDrop.Finalizer, &.{.{
+        .structure = type_index,
+        .function = classFieldDropFunctionId(self, type_index),
+    }});
+    const plans = try self.allocator.dupe(Ir.Instruction.ClassDrop.Plan, &.{.{
+        .structure = type_index,
+        .functions = functions,
+    }});
+    try self.emit(builder, .{ .class_drop = .{
+        .operand = value,
+        .ownership = .root,
+        .skip_cycle = true,
+        .static_type = type_index,
+        .plans = plans,
+    } });
+}
+
 fn emitDropOwnedInner(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {
     if (type_value.optionalChild()) |child| {
         if (!needsDrop(self, child) and !containsClass(self, child)) return;
