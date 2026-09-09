@@ -4,6 +4,7 @@ const MemoryResidence = @import("MemoryResidence.zig");
 const FloatPairs = @import("FloatPairs.zig");
 const LoopCursor = @import("LoopCursor.zig");
 const ResidenceLiveness = @import("ResidenceLiveness.zig");
+const InternalAbi = @import("InternalAbi.zig");
 const VectorCost = @import("../Optimize/VectorCost.zig");
 const successorLive = ResidenceLiveness.successorLive;
 const instructionUses = ResidenceLiveness.instructionUses;
@@ -287,6 +288,29 @@ fn precolorCallFreeParameters(
     forced: []const bool,
     float_slots: []const bool,
 ) void {
+    const flattened = InternalAbi.flattensSmallAggregates(function.parameters);
+    if (flattened) {
+        var incoming_index: usize = 0;
+        for (function.parameters) |parameter| {
+            if (InternalAbi.isDirectAggregate(parameter, true)) {
+                for (0..parameter.width) |leaf| {
+                    const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+                    if (incoming_index <= 5 and !forced[slot] and !float_slots[slot]) {
+                        residences[slot] = @intCast(incoming_index);
+                    }
+                    incoming_index += 1;
+                }
+                continue;
+            }
+            if (incoming_index <= 5 and !parameter.aggregate and parameter.width == 1 and
+                !forced[parameter.start] and !float_slots[parameter.start])
+            {
+                residences[parameter.start] = @intCast(incoming_index);
+            }
+            incoming_index += 1;
+        }
+        return;
+    }
     var candidates: [21]u5 = undefined;
     var candidate_count: usize = 0;
     for ([_]u5{ 16, 17, 8 }) |register| {
@@ -1483,7 +1507,8 @@ test "collection view parameters and scalar accumulators use registers" {
     defer std.testing.allocator.free(result.residences);
     defer std.testing.allocator.free(result.float_residences);
     defer std.testing.allocator.free(result.float_lane_residences);
-    for (0..2) |slot| try std.testing.expect(result.residences[slot] != null);
+    try std.testing.expectEqual(@as(?u5, 0), result.residences[0]);
+    try std.testing.expectEqual(@as(?u5, 1), result.residences[1]);
     try std.testing.expect(result.residences[2] != null);
     try std.testing.expect(result.residences[3] != null);
     try std.testing.expect(result.residences[4] != null);

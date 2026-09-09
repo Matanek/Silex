@@ -20,6 +20,7 @@ const ResidenceLiveness = @import("ResidenceLiveness.zig");
 const Allocation = @import("Allocation.zig");
 const Pairing = @import("Pairing.zig");
 const LoopCursor = @import("LoopCursor.zig");
+const InternalAbi = @import("InternalAbi.zig");
 const Register = A64.Register;
 const Condition = A64.Condition;
 const enable_cycle_collector = true;
@@ -839,11 +840,25 @@ fn encodeFunction(
         Machine.direct_stack_slots * Machine.slot_size,
     );
     if (function.hidden_return_slot) |slot| try words.append(allocator, storeStack(.x15, slot));
-    for (function.parameters, 0..) |parameter, index| {
-        const incoming: Register = if (index < Machine.max_register_arguments) @enumFromInt(index) else .x10;
-        if (index >= Machine.max_register_arguments) {
+    const flattened_parameters = InternalAbi.flattensSmallAggregates(function.parameters);
+    var incoming_index: usize = 0;
+    for (function.parameters) |parameter| {
+        if (InternalAbi.isDirectAggregate(parameter, flattened_parameters)) {
+            for (0..parameter.width) |leaf| {
+                const incoming: Register = @enumFromInt(incoming_index + leaf);
+                const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+                if (floatResidence(function, slot) != null or floatLaneResidence(function, slot) != null) {
+                    try words.append(allocator, moveGeneralToFloat(.x9, incoming, true));
+                    try storeFloatValue(allocator, words, function, .x9, slot, true);
+                } else try storeValue(allocator, words, function, incoming, slot);
+            }
+            incoming_index += parameter.width;
+            continue;
+        }
+        const incoming: Register = if (incoming_index < Machine.max_register_arguments) @enumFromInt(incoming_index) else .x10;
+        if (incoming_index >= Machine.max_register_arguments) {
             const incoming_offset = 2 * Machine.slot_size +
-                (index - Machine.max_register_arguments) * Machine.slot_size;
+                (incoming_index - Machine.max_register_arguments) * Machine.slot_size;
             try emitLoadAtOffset(allocator, words, incoming, .x29, incoming_offset);
         }
         if (!parameter.aggregate) {
@@ -879,6 +894,7 @@ fn encodeFunction(
                 leaf += 1;
             }
         }
+        incoming_index += 1;
     }
     for (function.capture_parameters, 0..) |capture, index| {
         if (capture.aggregate or capture.width != 1) return error.InvalidMachineProgram;
@@ -1732,13 +1748,14 @@ fn encodeFunction(
                 try words.append(allocator, storeStack(.x9, address.result.start + 1));
             },
             .call => |call| {
-                if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+                const argument_count = InternalAbi.registerArgumentCount(call.arguments);
+                if (argument_count > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
                     } else try emitStackAddress(allocator, words, .x15, result.start);
                 };
                 const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, true);
-                if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+                if (argument_count <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
                     } else try emitStackAddress(allocator, words, .x15, result.start);
@@ -1757,11 +1774,12 @@ fn encodeFunction(
                 };
             },
             .indirect_call => |call| {
-                if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+                const argument_count = InternalAbi.registerArgumentCount(call.arguments);
+                if (argument_count > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
                 const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
-                if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+                if (argument_count <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
                 if (outgoing_stack_size == 0) {
@@ -2461,14 +2479,15 @@ fn encodeDynamicCall(
     function: Machine.Function,
     call: Machine.Instruction.DynamicCall,
 ) Error!void {
-    const discriminator: Register = if (call.arguments.len <= Machine.max_register_arguments) .x9 else .x12;
+    const argument_count = InternalAbi.registerArgumentCount(call.arguments);
+    const discriminator: Register = if (argument_count <= Machine.max_register_arguments) .x9 else .x12;
     try words.append(allocator, loadStack(discriminator, call.receiver));
     try words.append(allocator, load64(discriminator, discriminator, 0));
-    if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+    if (argument_count > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
         if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
     };
     const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
-    if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+    if (argument_count <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
         if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
     };
     var done: std.ArrayList(usize) = .empty;
@@ -2500,6 +2519,35 @@ fn emitCallArguments(
     arguments: []const Machine.Span,
     use_residences: bool,
 ) Error!u16 {
+    if (InternalAbi.flattensSmallAggregates(arguments)) {
+        var register_index: usize = 0;
+        for (arguments) |argument| {
+            if (InternalAbi.isDirectAggregate(argument, true)) {
+                for (0..argument.width) |leaf| {
+                    const outgoing: Register = @enumFromInt(register_index);
+                    try words.append(allocator, loadStack(
+                        outgoing,
+                        @intCast(@as(usize, argument.start) + leaf),
+                    ));
+                    register_index += 1;
+                }
+                continue;
+            }
+            const outgoing: Register = @enumFromInt(register_index);
+            if (argument.aggregate) {
+                if (argument.width == 0) {
+                    try words.append(allocator, moveWideZero64(outgoing, 0, 0));
+                } else try emitStackAddress(allocator, words, outgoing, argument.start);
+            } else if (use_residences and floatResidence(function, argument.start) != null) {
+                try loadFloatValue(allocator, words, function, .x9, argument.start, false);
+                try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
+            } else if (use_residences) {
+                try loadValue(allocator, words, function, outgoing, argument.start);
+            } else try words.append(allocator, loadStack(outgoing, argument.start));
+            register_index += 1;
+        }
+        return 0;
+    }
     const register_count = @min(arguments.len, Machine.max_register_arguments);
     for (arguments[0..register_count], 0..) |argument, index| {
         const outgoing: Register = @enumFromInt(index);
@@ -5930,7 +5978,8 @@ test "materialize aggregate copies before direct calls" {
         storeStack(.x9, 2),
         loadStack(.x9, 1),
         storeStack(.x9, 3),
-        addSubtractImmediate(.x0, .zero_or_sp, 16, true),
+        loadStack(.x0, 2),
+        loadStack(.x1, 3),
     };
     var found: usize = 0;
     var offset: usize = 0;
