@@ -4,18 +4,20 @@ const Ast = @import("../Ast.zig");
 pub fn parse(parser: anytype) !*Ast.Expression {
     const position = parser.current.position;
     try parser.advance();
-    const subject = try parser.parseExpression(false);
-    try parser.expect(.left_brace, "expected '{' after match subject");
+    const subject = if (parser.current.tag == .left_brace) null else try parser.parseExpression(false);
+    try parser.expect(.left_brace, if (subject == null) "expected '{' after match" else "expected '{' after match subject");
 
     var branches: std.ArrayList(Ast.Expression.MatchBranch) = .empty;
-    var imperative: ?bool = null;
     while (parser.current.tag != .right_brace and parser.current.tag != .end) {
         const is_else = parser.current.tag == .keyword_else;
         const branch_position = parser.current.position;
+        var condition: ?*Ast.Expression = null;
         var variant: []const u8 = "";
         var literal: ?Ast.Expression.MatchLiteral = null;
         if (is_else) {
             try parser.advance();
+        } else if (subject == null) {
+            condition = try parser.parseExpression(false);
         } else switch (parser.current.tag) {
             .identifier, .keyword_in => {
                 variant = parser.current.lexeme;
@@ -44,6 +46,7 @@ pub fn parse(parser: anytype) !*Ast.Expression {
 
         var bindings: std.ArrayList(Ast.Expression.MatchBinding) = .empty;
         if (parser.current.tag == .left_parenthesis) {
+            if (subject == null) return parser.fail("condition match branch cannot bind associated values");
             if (is_else) return parser.fail("else match branch cannot bind associated values");
             if (literal != null) return parser.fail("literal match branch cannot bind associated values");
             try parser.advance();
@@ -76,20 +79,19 @@ pub fn parse(parser: anytype) !*Ast.Expression {
             try parser.expect(.right_parenthesis, "expected ')' after match bindings");
         }
         const guard = if (parser.current.tag == .keyword_if) guard: {
+            if (subject == null) return parser.fail("condition match branch cannot have a guard");
             if (is_else) return parser.fail("else match branch cannot have a guard");
             try parser.advance();
             break :guard try parser.parseExpression(false);
         } else null;
         try parser.expect(.fat_arrow, "expected '=>' after match pattern or guard");
         const branch_imperative = parser.current.tag == .left_brace;
-        if (imperative) |expected| {
-            if (expected != branch_imperative) return parser.fail("match cannot mix expression and block branches");
-        } else imperative = branch_imperative;
         const statements = if (branch_imperative) try parser.parseBlock() else null;
         const value = if (branch_imperative) null else try parser.parseExpression(false);
         try parser.expectStatementTerminator();
         try branches.append(parser.allocator, .{
             .position = branch_position,
+            .condition = condition,
             .variant = variant,
             .literal = literal,
             .is_else = is_else,
@@ -105,6 +107,5 @@ pub fn parse(parser: anytype) !*Ast.Expression {
     return parser.newExpression(.{ .position = position, .value = .{ .match_expression = .{
         .subject = subject,
         .branches = try branches.toOwnedSlice(parser.allocator),
-        .imperative = imperative.?,
     } } });
 }

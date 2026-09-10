@@ -429,18 +429,128 @@ test "preserve enclosing break and continue through imperative match" {
 test "diagnose mixed and misplaced match branch forms" {
     try expectCompileError(
         "enum Choice { left; right } func main() { match Choice.left() { left => { print(1) }; right => 2 } }",
-        "match cannot mix expression and block branches",
+        "match statement expression branch must be a call, cascade, propagated result, or nested match",
     );
     try expectCompileError(
         "enum Choice { left; right } func main() { let value = match Choice.left() { left => { print(1) }; right => { print(2) } } }",
-        "imperative match cannot be used as a value",
+        "value-producing match block must end with 'yield value'",
     );
     try expectCompileError(
         "enum Choice { left; right } func main() { match Choice.left() { left => 1; right => 2 } }",
-        "match statement requires block branches",
+        "match statement expression branch must be a call, cascade, propagated result, or nested match",
     );
     try expectCompileError(
         "enum Choice { value(int); empty } func main() { match Choice.value(1) { value(number) => { print(number) }; empty => {} }; print(number) }",
         "unknown variable 'number'",
+    );
+}
+
+test "evaluate ordered condition matches and short statement branches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func category(score:int) str {
+        \\    return match {
+        \\        score >= 16 => "excellent"
+        \\        score >= 10 => "admitted"
+        \\        else => "insufficient"
+        \\    }
+        \\}
+        \\func accept() { print("accepted") }
+        \\func reject() { print("rejected") }
+        \\class Probe {
+        \\    var checks:int
+        \\    init() { self.checks = 0 }
+        \\    func check(result:bool) bool { self.checks++; return result }
+        \\}
+        \\func announce(condition:bool) {
+        \\    match condition { true => accept(); else => reject() }
+        \\}
+        \\func main() {
+        \\    print(category(18))
+        \\    print(category(12))
+        \\    print(category(4))
+        \\    announce(true)
+        \\    announce(false)
+        \\    var probe = Probe()
+        \\    let selected = match {
+        \\        probe.check(true) => 1
+        \\        probe.check(true) => 2
+        \\        else => 0
+        \\    }
+        \\    assert(selected == 1)
+        \\    assert(probe.checks == 1)
+        \\    let value = 41
+        \\    let available = match {
+        \\        true => value + 1
+        \\        move value == 0 => 0
+        \\        else => -1
+        \\    }
+        \\    assert(available == 42)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("excellent\nadmitted\ninsufficient\naccepted\nrejected\n", result.stdout);
+}
+
+test "yield values from recursive match branch blocks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func predicted(condition:bool, x:float) float {
+        \\    return match condition {
+        \\        true => {
+        \\            var result = 0.0
+        \\            result += x * 10.0
+        \\            result /= 2.0
+        \\            yield match result > 5.0 {
+        \\                true => {
+        \\                    let bonus = 0.5
+        \\                    yield result + bonus
+        \\                }
+        \\                else => result
+        \\            }
+        \\        }
+        \\        else => 0.0
+        \\    }
+        \\}
+        \\func main() {
+        \\    assert(predicted(true, 2.0) == 10.5, "recursive yield")
+        \\    assert(predicted(true, 1.0) == 5.0, "expression sibling")
+        \\    assert(predicted(false, 2.0) == 0.0, "outer fallback")
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "diagnose invalid condition matches and yield placement" {
+    try expectCompileError(
+        "func main() { let value = match { true => 1 } }",
+        "condition match requires an else branch",
+    );
+    try expectCompileError(
+        "func main() { let value = match { 1 => true; else => false } }",
+        "condition match branch requires bool, found 'int'",
+    );
+    try expectCompileError(
+        "func main() { yield 1 }",
+        "yield is only valid as the final statement of a value-producing match block",
+    );
+    try expectCompileError(
+        "func main() { let value = match true { true => { let result = 1 }; else => 0 } }",
+        "value-producing match block must end with 'yield value'",
+    );
+    try expectCompileError(
+        "func main() { let value = match true { true => { yield 1; print(1) }; else => 0 } }",
+        "value-producing match block must end with 'yield value'",
+    );
+    try expectCompileError(
+        "func main() { let value = match true { true => { yield 1 as int8 }; else => 0 } }",
+        "match branch expects exact type 'int8', found 'int'",
     );
 }

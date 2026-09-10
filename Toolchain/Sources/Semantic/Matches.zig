@@ -15,38 +15,48 @@ const Literal = union(enum) {
 };
 
 const Prepared = struct {
-    subject: Model.TypedValue,
+    subject: ?Model.TypedValue,
     enum_index: ?usize,
     variant_indices: []const ?usize,
     literals: []const ?Literal,
     branch_blocks: []const Ir.BlockId,
+    branch_availabilities: []const []const bool,
     next_blocks: []const ?Ir.BlockId,
     merge_block: Ir.BlockId,
 };
 
 pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !Model.TypedValue {
-    if (match_value.imperative) return self.fail(match_value.subject.position, "imperative match cannot be used as a value");
     const prepared = try prepare(self, builder, match_value);
     const availability_count = builder.bindings.items.len;
-    const branch_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     var exit_availabilities: std.ArrayList([]const bool) = .empty;
     var result: ?Ir.ValueId = null;
     var result_type: ?Ast.Type = null;
     for (match_value.branches, prepared.branch_blocks, prepared.variant_indices, 0..) |branch, branch_block, variant_index, branch_index| {
-        Availability.restore(builder.bindings.items, branch_availability);
+        Availability.restore(builder.bindings.items, prepared.branch_availabilities[branch_index]);
         builder.current_block = branch_block;
         const binding_count = builder.bindings.items.len;
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
         try bindBranch(self, builder, prepared, branch, variant_index);
         try enterGuardedBody(self, builder, prepared, branch, branch_index, binding_count);
         try releaseLiteralSubject(self, builder, prepared);
-        const branch_value = try self.analyzeExpression(builder, branch.value.?);
+        const branch_expression = if (branch.value) |value| value else yielded: {
+            const statements = branch.statements.?;
+            if (statements.len == 0 or statements[statements.len - 1] != .yield_statement) {
+                return self.fail(branch.position, "value-producing match block must end with 'yield value'");
+            }
+            const function = self.function_context orelse return self.fail(branch.position, "yield requires an enclosing function");
+            if (try self.analyzeStatements(builder, function, statements[0 .. statements.len - 1])) {
+                return self.fail(statements[statements.len - 1].position(), "yield is unreachable");
+            }
+            break :yielded statements[statements.len - 1].yield_statement.value.?;
+        };
+        const branch_value = try self.analyzeExpression(builder, branch_expression);
         if (result_type) |expected| {
             if (branch_value.type != expected) {
                 const message = try std.fmt.allocPrint(self.allocator, "match branch expects exact type '{s}', found '{s}'", .{
                     self.typeName(expected), self.typeName(branch_value.type),
                 });
-                return self.fail(branch.value.?.position, message);
+                return self.fail(branch_expression.position, message);
             }
         } else {
             result_type = branch_value.type;
@@ -98,21 +108,30 @@ pub fn analyzeStatementUsing(
     context: anytype,
     comptime analyze_branch: anytype,
 ) !bool {
-    if (!match_value.imperative) return self.fail(match_value.subject.position, "match statement requires block branches");
     const prepared = try prepare(self, builder, match_value);
     const availability_count = builder.bindings.items.len;
-    const branch_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     var exit_availabilities: std.ArrayList([]const bool) = .empty;
     var all_terminated = true;
     for (match_value.branches, prepared.branch_blocks, prepared.variant_indices, 0..) |branch, branch_block, variant_index, branch_index| {
-        Availability.restore(builder.bindings.items, branch_availability);
+        Availability.restore(builder.bindings.items, prepared.branch_availabilities[branch_index]);
         builder.current_block = branch_block;
         const binding_count = builder.bindings.items.len;
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
         try bindBranch(self, builder, prepared, branch, variant_index);
         try enterGuardedBody(self, builder, prepared, branch, branch_index, binding_count);
         try releaseLiteralSubject(self, builder, prepared);
-        const terminated = try analyze_branch(context, self, builder, function, branch.statements.?);
+        const statements = if (branch.statements) |statements| statements else expression: {
+            if (!isStatementExpression(branch.value.?)) {
+                return self.fail(branch.value.?.position, "match statement expression branch must be a call, cascade, propagated result, or nested match");
+            }
+            const one = try self.allocator.alloc(Ast.Statement, 1);
+            one[0] = .{ .expression_statement = branch.value.? };
+            break :expression one;
+        };
+        for (statements) |statement| if (statement == .yield_statement) {
+            return self.fail(statement.position(), "yield is only valid as the final statement of a value-producing match block");
+        };
+        const terminated = try analyze_branch(context, self, builder, function, statements);
         if (!terminated) {
             try Resources.emitActiveDrops(self, builder, binding_count);
             all_terminated = false;
@@ -139,8 +158,8 @@ pub fn analyzeStatementUsing(
 }
 
 fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !Prepared {
-    const subject = try self.analyzeExpression(builder, match_value.subject);
-    const enum_index = Enums.findByType(self, subject.type);
+    const subject = if (match_value.subject) |expression| try self.analyzeExpression(builder, expression) else null;
+    const enum_index = if (subject) |value| Enums.findByType(self, value.type) else null;
     var else_index: ?usize = null;
     for (match_value.branches, 0..) |branch, branch_index| if (branch.is_else) {
         if (else_index != null) return self.fail(branch.position, "match can contain only one else branch");
@@ -151,39 +170,64 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
     @memset(variant_indices, null);
     const literals = try self.allocator.alloc(?Literal, match_value.branches.len);
     @memset(literals, null);
-    if (enum_index) |index| {
+    if (subject == null) {
+        if (else_index == null) return self.fail(match_value.branches[0].position, "condition match requires an else branch");
+    } else if (enum_index) |index| {
         try prepareEnum(self, builder, match_value, index, else_index, variant_indices);
     } else {
-        try prepareLiterals(self, match_value, subject.type, else_index, literals);
+        try prepareLiterals(self, match_value, subject.?.type, else_index, literals);
     }
 
     const branch_blocks = try self.allocator.alloc(Ir.BlockId, match_value.branches.len);
+    const branch_availabilities = try self.allocator.alloc([]const bool, match_value.branches.len);
     const next_blocks = try self.allocator.alloc(?Ir.BlockId, match_value.branches.len);
     @memset(next_blocks, null);
     for (branch_blocks) |*block| block.* = try self.newBlock(builder);
+    const subject_availability = if (subject != null)
+        try Availability.snapshot(self.allocator, builder.bindings.items, builder.bindings.items.len)
+    else
+        null;
     for (branch_blocks[0 .. branch_blocks.len - 1], 0..) |branch_block, branch_index| {
-        const test_value = try self.newValue(builder, .bool);
-        if (enum_index) |index| {
-            try self.emit(builder, .{ .enum_test = .{
-                .result = test_value,
-                .operand = subject.value,
-                .enumeration = index,
-                .variant = variant_indices[branch_index].?,
-            } });
-        } else {
-            const pattern_value = try emitLiteral(self, builder, subject.type, literals[branch_index].?);
-            try self.emit(builder, .{ .binary = .{
-                .result = test_value,
-                .operator = .equal,
-                .left = subject.value,
-                .right = pattern_value,
-            } });
-        }
+        const test_value = if (subject == null) condition: {
+            const expression = match_value.branches[branch_index].condition orelse
+                return self.fail(match_value.branches[branch_index].position, "condition match branch requires a condition");
+            const value = try self.analyzeExpression(builder, expression);
+            if (value.type != .bool) {
+                const message = try std.fmt.allocPrint(self.allocator, "condition match branch requires bool, found '{s}'", .{self.typeName(value.type)});
+                return self.fail(expression.position, message);
+            }
+            branch_availabilities[branch_index] = try Availability.snapshot(self.allocator, builder.bindings.items, builder.bindings.items.len);
+            break :condition value.value;
+        } else pattern_test: {
+            branch_availabilities[branch_index] = subject_availability.?;
+            const value = try self.newValue(builder, .bool);
+            if (enum_index) |index| {
+                try self.emit(builder, .{ .enum_test = .{
+                    .result = value,
+                    .operand = subject.?.value,
+                    .enumeration = index,
+                    .variant = variant_indices[branch_index].?,
+                } });
+            } else {
+                const pattern_value = try emitLiteral(self, builder, subject.?.type, literals[branch_index].?);
+                try self.emit(builder, .{ .binary = .{
+                    .result = value,
+                    .operator = .equal,
+                    .left = subject.?.value,
+                    .right = pattern_value,
+                } });
+            }
+            break :pattern_test value;
+        };
         const next = try self.newBlock(builder);
         next_blocks[branch_index] = next;
         self.terminate(builder, .{ .branch = .{ .condition = test_value, .then_block = branch_block, .else_block = next } });
         builder.current_block = next;
     }
+    branch_availabilities[branch_availabilities.len - 1] = if (subject_availability) |availability|
+        availability
+    else
+        try Availability.snapshot(self.allocator, builder.bindings.items, builder.bindings.items.len);
     self.terminate(builder, .{ .jump = branch_blocks[branch_blocks.len - 1] });
     const merge_block = try self.newBlock(builder);
     return .{
@@ -192,6 +236,7 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
         .variant_indices = variant_indices,
         .literals = literals,
         .branch_blocks = branch_blocks,
+        .branch_availabilities = branch_availabilities,
         .next_blocks = next_blocks,
         .merge_block = merge_block,
     };
@@ -261,7 +306,7 @@ fn prepareEnum(
                 try std.fmt.allocPrint(self.allocator, "match is missing unguarded branch for variant '{s}'", .{variant.name})
             else
                 try std.fmt.allocPrint(self.allocator, "match is missing variant '{s}'", .{variant.name});
-            return self.fail(match_value.subject.position, message);
+            return self.fail(match_value.subject.?.position, message);
         };
     }
     var every_variant_covered = true;
@@ -284,7 +329,7 @@ fn prepareLiterals(
             "literal match requires a bool, integer, or str subject, found '{s}'",
             .{self.typeName(subject_type)},
         );
-        return self.fail(match_value.subject.position, message);
+        return self.fail(match_value.subject.?.position, message);
     }
     var true_covered = false;
     var false_covered = false;
@@ -312,13 +357,13 @@ fn prepareLiterals(
     const exhaustive = subject_type == .bool and true_covered and false_covered;
     if (else_index == null and !exhaustive) {
         if (subject_type == .bool) {
-            return self.fail(match_value.subject.position, if (!true_covered)
+            return self.fail(match_value.subject.?.position, if (!true_covered)
                 "match is missing literal 'true'"
             else
                 "match is missing literal 'false'");
         }
         const message = try std.fmt.allocPrint(self.allocator, "match on '{s}' requires an else branch", .{self.typeName(subject_type)});
-        return self.fail(match_value.subject.position, message);
+        return self.fail(match_value.subject.?.position, message);
     }
     if (else_index != null and exhaustive) {
         return self.fail(match_value.branches[else_index.?].position, "else match branch is unreachable because every boolean value is already covered");
@@ -422,13 +467,13 @@ fn bindBranch(
         const payload = try self.newValue(builder, binding_type);
         try self.emit(builder, .{ .enum_payload = .{
             .result = payload,
-            .operand = prepared.subject.value,
+            .operand = prepared.subject.?.value,
             .enumeration = enum_index,
             .variant = optional_variant_index.?,
             .index = payload_index,
         } });
         if (binding.ignored) {
-            if (!prepared.subject.transferred and Resources.requiresRetain(self, binding_type)) {
+            if (!prepared.subject.?.transferred and Resources.requiresRetain(self, binding_type)) {
                 try Resources.retainValue(self, builder, binding_type, payload);
             }
             try builder.bindings.append(self.allocator, .{
@@ -439,7 +484,7 @@ fn bindBranch(
             continue;
         }
         if (binding.mutable) {
-            if (!prepared.subject.transferred and Resources.requiresRetain(self, binding_type)) {
+            if (!prepared.subject.?.transferred and Resources.requiresRetain(self, binding_type)) {
                 try Resources.retainValue(self, builder, binding_type, payload);
             }
             const local = builder.local_types.items.len;
@@ -447,7 +492,7 @@ fn bindBranch(
             try self.emit(builder, .{ .local_store = .{ .local = local, .operand = payload } });
             try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .local = local, .mutable = true });
         } else {
-            if (!prepared.subject.transferred and Resources.requiresRetain(self, binding_type)) {
+            if (!prepared.subject.?.transferred and Resources.requiresRetain(self, binding_type)) {
                 try Resources.retainValue(self, builder, binding_type, payload);
             }
             try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .value = payload });
@@ -456,7 +501,16 @@ fn bindBranch(
 }
 
 fn releaseLiteralSubject(self: anytype, builder: anytype, prepared: Prepared) !void {
-    if (prepared.enum_index == null and prepared.subject.transferred and Resources.needsDrop(self, prepared.subject.type)) {
-        try Resources.emitDrop(self, builder, prepared.subject.type, prepared.subject.value);
+    const subject = prepared.subject orelse return;
+    if (prepared.enum_index == null and subject.transferred and Resources.needsDrop(self, subject.type)) {
+        try Resources.emitDrop(self, builder, subject.type, subject.value);
     }
+}
+
+fn isStatementExpression(expression: *const Ast.Expression) bool {
+    return switch (expression.value) {
+        .call, .cascade, .match_expression => true,
+        .unary => |unary| unary.operator == .propagate,
+        else => false,
+    };
 }

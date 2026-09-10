@@ -102,6 +102,16 @@ does not expose a source tag field or apply an implicit convergence cast.
 A terminal `else` is simply the final CFG destination after the named tests;
 it creates neither a synthetic variant nor a catch-all payload binding.
 
+A subjectless condition match lowers ordered boolean expressions into the
+same CFG shape. Each condition remains in its fallthrough block, so evaluation
+stops after the first true condition; a required terminal `else` supplies the
+last destination.
+
+A value-match branch block lowers its ordinary statements before its direct
+terminal `yield`. The yielded exact-typed value is copied into the match merge
+value after branch-local ownership cleanup. Nested matches keep independent
+merge values: each `yield` belongs to the nearest value-producing match block.
+
 Literal matches accept boolean, integer and string subjects. Integer patterns
 are checked and represented in the exact integer type of the subject; boolean
 coverage is exhaustive only when both values have an unguarded branch, while
@@ -109,10 +119,11 @@ the open integer and string domains require `else`. Ordered literal equality
 tests use the same portable scalar operations as ordinary source comparisons;
 the language exposes no jump table, hash dispatch or fallthrough behavior.
 
-Imperative matches reuse the same selection CFG and payload extraction, but
-place ordinary statement blocks at each destination and produce no value.
-Branch terminators connect directly to the surrounding return or loop
-context; continuing branches alone join the post-match block.
+Statement matches reuse the same selection CFG and payload extraction, but
+discard the result of a concise call, cascade, propagated result or nested
+match branch. A branch may instead contain an ordinary statement block.
+Branch terminators connect directly to the surrounding return or loop context;
+continuing branches alone join the post-match block.
 
 Optional values remain typed in portable IR through explicit `optional.null`
 and `optional.some` instructions. A branch-local presence proof emits an

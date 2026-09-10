@@ -735,7 +735,7 @@ pub fn validateDrop(self: anytype, drop: Ast.Drop) !void {
 
 fn statementForbidden(statement: Ast.Statement) bool {
     return switch (statement) {
-        .return_statement => true,
+        .return_statement, .yield_statement => true,
         .variable_declaration => |value| if (value.initializer) |expression| expressionHasTry(expression) else false,
         .assignment_statement => |value| if (value.value) |expression| expressionHasTry(expression) else false,
         .expression_statement => |value| expressionHasTry(value),

@@ -448,6 +448,11 @@ pub const Specializer = struct {
                 if (copy.value) |expression| copy.value = try self.rewriteExpression(expression, arguments, locals);
                 break :value .{ .return_statement = copy };
             },
+            .yield_statement => |statement_value| value: {
+                var copy = statement_value;
+                if (copy.value) |expression| copy.value = try self.rewriteExpression(expression, arguments, locals);
+                break :value .{ .yield_statement = copy };
+            },
             .expression_statement => |expression| .{ .expression_statement = try self.rewriteExpression(expression, arguments, locals) },
             .print_statement => |print_statement| value: {
                 var copy = print_statement;
@@ -815,11 +820,12 @@ pub const Specializer = struct {
             },
             .match_expression => |match_value| value: {
                 var copy = match_value;
-                copy.subject = try self.rewriteExpression(match_value.subject, arguments, locals);
+                if (match_value.subject) |subject| copy.subject = try self.rewriteExpression(subject, arguments, locals);
                 const branches = try self.allocator.alloc(Ast.Expression.MatchBranch, match_value.branches.len);
                 for (match_value.branches, 0..) |branch, index| {
                     branches[index] = branch;
                     const local_count = locals.items.len;
+                    if (branch.condition) |condition| branches[index].condition = try self.rewriteExpression(condition, arguments, locals);
                     if (branch.guard) |guard| branches[index].guard = try self.rewriteExpression(guard, arguments, locals);
                     if (branch.value) |nested| branches[index].value = try self.rewriteExpression(nested, arguments, locals);
                     if (branch.statements) |statements| branches[index].statements = try self.rewriteStatements(statements, arguments, locals);

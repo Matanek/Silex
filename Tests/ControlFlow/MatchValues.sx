@@ -1,0 +1,91 @@
+func category(score:int) str {
+    return match {
+        score >= 16 => "excellent"
+        score >= 10 => "admitted"
+        else => "insufficient"
+    }
+}
+
+func predicted(condition:bool, x:float) float {
+    return match condition {
+        true => {
+            var result = 0.0
+            result += x * 10.0
+            result /= 2.0
+            yield match result > 5.0 {
+                true => {
+                    let bonus = 0.5
+                    yield result + bonus
+                }
+                else => result
+            }
+        }
+        else => 0.0
+    }
+}
+
+class Decision {
+    var accepted:bool
+
+    init() {
+        self.accepted = false
+    }
+
+    func accept() {
+        self.accepted = true
+    }
+
+    func reject() {
+        self.accepted = false
+    }
+}
+
+struct Counter {
+    var value:int
+
+    init() {
+        self.value = 0
+    }
+
+    func choose(early:bool) int {
+        return match true {
+            true => {
+                self.value = 5
+                if early { return 7 }
+                yield self.value
+            }
+            else => 0
+        }
+    }
+}
+
+test "ordered conditions select the first true branch" {
+    assert(category(18) == "excellent")
+    assert(category(12) == "admitted")
+    assert(category(4) == "insufficient")
+}
+
+test "yield resolves recursive value matches at their nearest level" {
+    assert(predicted(true, 2.0) == 10.5)
+    assert(predicted(true, 1.0) == 5.0)
+    assert(predicted(false, 2.0) == 0.0)
+}
+
+test "statement matches accept concise call branches" {
+    var decision = Decision()
+    match true {
+        true => decision.accept()
+        else => decision.reject()
+    }
+    assert(decision.accepted)
+}
+
+test "return exits a mutating method while yield resolves its nearest match" {
+    var early = Counter()
+    assert(early.choose(true) == 7)
+    assert(early.value == 5)
+
+    var yielded = Counter()
+    assert(yielded.choose(false) == 5)
+    assert(yielded.value == 5)
+}

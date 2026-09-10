@@ -245,8 +245,9 @@ fn conflictsWithRead(expression: *const Ast.Expression, root: []const u8) bool {
             else => {},
         } else false,
         .match_expression => |match_value| match_conflict: {
-            if (conflictsWithRead(match_value.subject, root)) break :match_conflict true;
+            if (match_value.subject) |subject| if (conflictsWithRead(subject, root)) break :match_conflict true;
             for (match_value.branches) |branch| {
+                if (branch.condition) |condition| if (conflictsWithRead(condition, root)) break :match_conflict true;
                 if (branch.guard) |guard| if (conflictsWithRead(guard, root)) break :match_conflict true;
                 if (branch.value) |value| if (conflictsWithRead(value, root)) break :match_conflict true;
             }

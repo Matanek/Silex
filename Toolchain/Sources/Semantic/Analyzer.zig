@@ -782,9 +782,13 @@ pub const Analyzer = struct {
                 break :assignment_statement false;
             },
             .return_statement => |return_statement| return_value: {
-                try Bindings.analyzeReturn(self, builder, function, return_statement);
+                if (builder.mutating_return) |context|
+                    try Methods.analyzeMutatingReturnStatement(self, builder, function, context, return_statement)
+                else
+                    try Bindings.analyzeReturn(self, builder, function, return_statement);
                 break :return_value true;
             },
+            .yield_statement => |yield_statement| self.fail(yield_statement.position, "yield is only valid as the final statement of a value-producing match block"),
             .expression_statement => |expression| switch (expression.value) {
                 .call => |call| {
                     if (try self.analyzeCall(builder, call)) |value| if (value.transferred and (Resources.needsDrop(self, value.type) or Resources.containsClass(self, value.type)))
@@ -2114,6 +2118,9 @@ fn statementsMentionFreeName(
         .return_statement => |return_value| if (return_value.value) |value| {
             if (!shadowed and expressionMentionsName(program, value, name)) return true;
         },
+        .yield_statement => |yield_value| if (yield_value.value) |value| {
+            if (!shadowed and expressionMentionsName(program, value, name)) return true;
+        },
         .expression_statement => |expression| if (!shadowed and expressionMentionsName(program, expression, name)) return true,
         .print_statement => |print_value| for (print_value.values) |value| {
             if (!shadowed and expressionMentionsName(program, value, name)) return true;
@@ -2214,8 +2221,9 @@ fn expressionMentionsName(program: Ast.Program, expression: *const Ast.Expressio
             break :mentions false;
         },
         .match_expression => |match_value| mentions: {
-            if (expressionMentionsName(program, match_value.subject, name)) break :mentions true;
+            if (match_value.subject) |subject| if (expressionMentionsName(program, subject, name)) break :mentions true;
             for (match_value.branches) |branch| {
+                if (branch.condition) |condition| if (expressionMentionsName(program, condition, name)) break :mentions true;
                 if (branch.guard) |guard| if (expressionMentionsName(program, guard, name)) break :mentions true;
                 if (branch.value) |value| if (expressionMentionsName(program, value, name)) break :mentions true;
                 if (branch.statements) |statements| if (statementsMentionName(program, statements, name)) break :mentions true;

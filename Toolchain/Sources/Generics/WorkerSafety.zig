@@ -228,6 +228,7 @@ fn Checker(comptime Self: type) type {
                     if (assignment.value) |value| try checker.validateExpression(value, bindings, synchronized);
                 },
                 .return_statement => |returned| if (returned.value) |value| try checker.validateExpression(value, bindings, synchronized),
+                .yield_statement => |yielded| if (yielded.value) |value| try checker.validateExpression(value, bindings, synchronized),
                 .expression_statement => |expression| try checker.validateExpression(expression, bindings, synchronized),
                 .print_statement => |effect| {
                     return checker.unsafe(effect.position, "print requires the main thread");
@@ -309,8 +310,9 @@ fn Checker(comptime Self: type) type {
                     try checker.validateExpression(access.end, bindings, synchronized);
                 },
                 .match_expression => |match| {
-                    try checker.validateExpression(match.subject, bindings, synchronized);
+                    if (match.subject) |subject| try checker.validateExpression(subject, bindings, synchronized);
                     for (match.branches) |branch| {
+                        if (branch.condition) |condition| try checker.validateExpression(condition, bindings, synchronized);
                         if (branch.guard) |guard| try checker.validateExpression(guard, bindings, synchronized);
                         if (branch.value) |value| try checker.validateExpression(value, bindings, synchronized);
                         if (branch.statements) |body| try checker.validateStatements(body, bindings, synchronized);
