@@ -97,6 +97,8 @@ pub fn activateStatement(self: anytype, module: usize, statement: Ast.Statement)
         },
         .return_statement => |value| if (value.value) |expression|
             try self.activateExpression(module, expression),
+        .yield_statement => |value| if (value.value) |expression|
+            try self.activateExpression(module, expression),
         .expression_statement => |expression| try self.activateExpression(module, expression),
         .print_statement => |print_statement| for (print_statement.values) |value| try self.activateExpression(module, value),
         .panic_statement => |effect| try self.activateExpression(module, effect.value),
@@ -198,8 +200,9 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
             .expression => |value| try self.activateExpression(module, value),
         },
         .match_expression => |match_value| {
-            try self.activateExpression(module, match_value.subject);
+            if (match_value.subject) |subject| try self.activateExpression(module, subject);
             for (match_value.branches) |branch| {
+                if (branch.condition) |condition| try self.activateExpression(module, condition);
                 if (branch.guard) |guard| try self.activateExpression(module, guard);
                 if (branch.value) |value| try self.activateExpression(module, value);
                 if (branch.statements) |statements| for (statements) |statement| try self.activateStatement(module, statement);

@@ -475,6 +475,7 @@ pub const Parser = struct {
             .keyword_let => self.parseVariableDeclaration(false),
             .keyword_var => self.parseVariableDeclaration(true),
             .keyword_return => self.parseReturn(),
+            .keyword_yield => self.parseYield(),
             .keyword_print => self.parsePrint(),
             .keyword_assert => self.parseAssert(),
             .keyword_panic => self.parseEffectStatement(.panic),
@@ -505,6 +506,19 @@ pub const Parser = struct {
         const expression = try self.parseExpression(false);
         try self.expectStatementTerminator();
         return .{ .expression_statement = expression };
+    }
+
+    fn parseYield(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        if (self.current.tag == .right_brace or self.current.tag == .end or
+            self.current.position.line > self.previous.position.line)
+        {
+            return self.fail("yield expects a value");
+        }
+        const value = try self.parseExpression(false);
+        try self.expectStatementTerminator();
+        return .{ .yield_statement = .{ .position = position, .value = value } };
     }
 
     fn parsePrint(self: *Parser) ParseError!Ast.Statement {

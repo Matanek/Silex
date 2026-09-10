@@ -200,6 +200,11 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
         self_local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, receiver_type);
         try self.emit(&builder, .{ .local_store = .{ .local = self_local.?, .operand = 0 } });
+        builder.mutating_return = .{
+            .structure_index = structure_index,
+            .flat = flat,
+            .self_local = self_local.?,
+        };
         try builder.bindings.append(self.allocator, .{
             .name = "self",
             .type = receiver_type,
@@ -1214,26 +1219,11 @@ fn analyzeMutatingStatements(
     for (statements) |statement| {
         const terminated = switch (statement) {
             .return_statement => |return_statement| returned: {
-                var value: ?Model.TypedValue = null;
-                if (return_statement.value) |expression| {
-                    if (method.return_type == .void) return self.fail(return_statement.position, "a void method cannot return a value");
-                    value = try self.analyzeExpressionExpected(
-                        builder,
-                        expression,
-                        Optionals.expectedContext(method.return_type, expression),
-                    );
-                    if (value.?.type != method.return_type and self.canImplicitlyConvert(value.?.type, method.return_type)) {
-                        value = try self.coerce(builder, value.?, method.return_type, expression.position);
-                    }
-                    if (value.?.type != method.return_type) {
-                        const message = try std.fmt.allocPrint(self.allocator, "return expects '{s}', found '{s}'", .{ self.typeName(method.return_type), self.typeName(value.?.type) });
-                        return self.fail(expression.position, message);
-                    }
-                } else if (method.return_type != .void) {
-                    const message = try std.fmt.allocPrint(self.allocator, "expected return value of type '{s}'", .{self.typeName(method.return_type)});
-                    return self.fail(return_statement.position, message);
-                }
-                try emitMutatingReturn(self, builder, structure_index, flat, self_local, method, value);
+                try analyzeMutatingReturnStatement(self, builder, method, .{
+                    .structure_index = structure_index,
+                    .flat = flat,
+                    .self_local = self_local,
+                }, return_statement);
                 break :returned true;
             },
             .if_statement => |conditional| try analyzeMutatingIf(self, builder, method, structure_index, flat, self_local, conditional),
@@ -1396,6 +1386,35 @@ fn analyzeMutatingWhile(
     return false;
 }
 
+pub fn analyzeMutatingReturnStatement(
+    self: anytype,
+    builder: anytype,
+    method: Ast.Function,
+    context: Model.MutatingReturnContext,
+    return_statement: Ast.ReturnStatement,
+) !void {
+    var value: ?Model.TypedValue = null;
+    if (return_statement.value) |expression| {
+        if (method.return_type == .void) return self.fail(return_statement.position, "a void method cannot return a value");
+        value = try self.analyzeExpressionExpected(
+            builder,
+            expression,
+            Optionals.expectedContext(method.return_type, expression),
+        );
+        if (value.?.type != method.return_type and self.canImplicitlyConvert(value.?.type, method.return_type)) {
+            value = try self.coerce(builder, value.?, method.return_type, expression.position);
+        }
+        if (value.?.type != method.return_type) {
+            const message = try std.fmt.allocPrint(self.allocator, "return expects '{s}', found '{s}'", .{ self.typeName(method.return_type), self.typeName(value.?.type) });
+            return self.fail(expression.position, message);
+        }
+    } else if (method.return_type != .void) {
+        const message = try std.fmt.allocPrint(self.allocator, "expected return value of type '{s}'", .{self.typeName(method.return_type)});
+        return self.fail(return_statement.position, message);
+    }
+    try emitMutatingReturn(self, builder, context.structure_index, context.flat, context.self_local, method, value);
+}
+
 fn emitMutatingReturn(
     self: anytype,
     builder: anytype,
@@ -1479,7 +1498,12 @@ fn intrinsicMutates(intrinsic: ?Ast.FunctionIntrinsic) bool {
 fn statementsWriteSelf(statements: []const Ast.Statement) bool {
     for (statements) |statement| switch (statement) {
         .assignment_statement => |assignment| if (std.mem.eql(u8, assignment.target.name, "self")) return true,
-        .expression_statement => |expression| if (expressionMutatesSelfCollection(expression)) return true,
+        .expression_statement => |expression| {
+            if (expressionMutatesSelfCollection(expression)) return true;
+            if (expression.value == .match_expression) for (expression.value.match_expression.branches) |branch| {
+                if (branch.statements) |nested| if (statementsWriteSelf(nested)) return true;
+            };
+        },
         .if_statement => |conditional| {
             for (conditional.branches) |branch| if (statementsWriteSelf(branch.statements)) return true;
             if (conditional.else_statements) |nested| if (statementsWriteSelf(nested)) return true;
@@ -1506,6 +1530,7 @@ fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, stat
         .variable_declaration => |declaration| if (declaration.initializer) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
         .assignment_statement => |assignment| if (assignment.value) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
         .return_statement => |returned| if (returned.value) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
+        .yield_statement => |yielded| if (yielded.value) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
         .expression_statement => |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
         .print_statement => |printed| for (printed.values) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
         .assert_statement => |assertion| if (expressionCallsMutatingSelf(program, structure_index, assertion.condition, mutating) or expressionCallsMutatingSelf(program, structure_index, assertion.message, mutating)) return true,
@@ -1578,6 +1603,18 @@ fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, exp
                 .expression => |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) break :parts true,
             };
             break :parts false;
+        },
+        .match_expression => |match_value| calls: {
+            if (match_value.subject) |subject| if (expressionCallsMutatingSelf(program, structure_index, subject, mutating)) break :calls true;
+            for (match_value.branches) |branch| {
+                if (branch.condition) |condition| if (expressionCallsMutatingSelf(program, structure_index, condition, mutating)) break :calls true;
+                if (branch.guard) |guard| if (expressionCallsMutatingSelf(program, structure_index, guard, mutating)) break :calls true;
+                if (branch.value) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) break :calls true;
+                if (branch.statements) |statements| {
+                    if (statementsWriteSelf(statements) or statementsCallMutatingSelf(program, structure_index, statements, mutating)) break :calls true;
+                }
+            }
+            break :calls false;
         },
         else => false,
     };

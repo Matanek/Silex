@@ -2003,10 +2003,11 @@ pub const Compiler = struct {
                 .expression => |value| try self.rewriteExpression(module, value, type_map),
             },
             .match_expression => |*match_value| {
-                try self.rewriteExpression(module, match_value.subject, type_map);
+                if (match_value.subject) |subject| try self.rewriteExpression(module, subject, type_map);
                 const branches = try self.allocator.alloc(Ast.Expression.MatchBranch, match_value.branches.len);
                 for (match_value.branches, 0..) |branch, branch_index| {
                     branches[branch_index] = branch;
+                    if (branch.condition) |condition| try self.rewriteExpression(module, condition, type_map);
                     if (branch.guard) |guard| try self.rewriteExpression(module, guard, type_map);
                     if (branch.value) |value| try self.rewriteExpression(module, value, type_map);
                     if (branch.statements) |statements| {

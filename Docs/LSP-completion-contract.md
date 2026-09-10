@@ -126,6 +126,11 @@ cover module and structure declarations, nominal relations, type positions,
 statement and expression roots, call labels and values, aggregate fields, and
 lexical bindings.
 
+The statement catalogue exposes `yield` only in the direct block of a match
+branch. Ordinary function blocks and nested control-flow blocks do not suggest
+it; semantic analysis then decides whether the enclosing match is used as a
+value and requires the direct terminal `yield expression` form.
+
 The lexical collector models parameters, ordinary declarations, nested and
 shadowed scopes, direct tuple `for` bindings, indexed traversal bindings, local
 tuple destructuring and implicit `match`/`try` bindings. Tuple element types

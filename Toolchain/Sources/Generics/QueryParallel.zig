@@ -112,6 +112,7 @@ fn statementsAreIndependent(
         },
         .continue_statement => {},
         .return_statement,
+        .yield_statement,
         .print_statement,
         .assert_statement,
         .panic_statement,
@@ -228,6 +229,9 @@ fn helperStatementsAreReadOnly(self: anytype, statements: []const Ast.Statement,
             for (assignment.target.indices) |index| if (!helperExpressionIsReadOnly(self, index.value, bindings.items, depth)) return false;
         },
         .return_statement => |returned| if (returned.value) |value| {
+            if (!helperExpressionIsReadOnly(self, value, bindings.items, depth)) return false;
+        },
+        .yield_statement => |yielded| if (yielded.value) |value| {
             if (!helperExpressionIsReadOnly(self, value, bindings.items, depth)) return false;
         },
         .if_statement => |conditional| {

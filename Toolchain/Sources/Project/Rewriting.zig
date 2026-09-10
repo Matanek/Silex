@@ -22,6 +22,10 @@ pub fn statements(self: anytype, module: usize, source: []const Ast.Statement, t
             if (value.value) |expression| try self.rewriteExpression(module, expression, type_map);
             break :return_statement .{ .return_statement = value };
         },
+        .yield_statement => |value| yield_statement: {
+            if (value.value) |expression| try self.rewriteExpression(module, expression, type_map);
+            break :yield_statement .{ .yield_statement = value };
+        },
         .expression_statement => |expression| expression_statement: {
             try self.rewriteExpression(module, expression, type_map);
             break :expression_statement .{ .expression_statement = expression };

@@ -19,6 +19,7 @@ pub fn statementTypes(statements: []const Ast.Statement, map: []const ?Ast.Type)
             for (assignment.target.indices) |target_index| expressionTypes(target_index.value, map);
         },
         .return_statement => |return_statement| if (return_statement.value) |value| expressionTypes(value, map),
+        .yield_statement => |yield_statement| if (yield_statement.value) |value| expressionTypes(value, map),
         .expression_statement => |expression| expressionTypes(expression, map),
         .print_statement => |print_statement| for (print_statement.values) |value| expressionTypes(value, map),
         .assert_statement => |assertion| {
@@ -114,8 +115,9 @@ pub fn expressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void
             .expression => |nested| expressionTypes(nested, map),
         },
         .match_expression => |match_value| {
-            expressionTypes(match_value.subject, map);
+            if (match_value.subject) |subject| expressionTypes(subject, map);
             for (match_value.branches) |branch| {
+                if (branch.condition) |condition| expressionTypes(condition, map);
                 if (branch.guard) |guard| expressionTypes(guard, map);
                 if (branch.value) |value| expressionTypes(value, map);
                 if (branch.statements) |statements| statementTypes(statements, map);

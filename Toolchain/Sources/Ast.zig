@@ -170,6 +170,7 @@ pub const Expression = struct {
 
     pub const MatchBranch = struct {
         position: Source.Position,
+        condition: ?*Expression = null,
         variant: []const u8 = "",
         literal: ?MatchLiteral = null,
         is_else: bool = false,
@@ -180,9 +181,8 @@ pub const Expression = struct {
     };
 
     pub const Match = struct {
-        subject: *Expression,
+        subject: ?*Expression,
         branches: []const MatchBranch,
-        imperative: bool = false,
     };
 
     pub const Unary = struct {
@@ -406,6 +406,7 @@ pub const Statement = union(enum) {
     variable_declaration: VariableDeclaration,
     assignment_statement: AssignmentStatement,
     return_statement: ReturnStatement,
+    yield_statement: ReturnStatement,
     expression_statement: *Expression,
     print_statement: PrintStatement,
     assert_statement: AssertStatement,
@@ -422,6 +423,7 @@ pub const Statement = union(enum) {
             .variable_declaration => |declaration| declaration.position,
             .assignment_statement => |assignment| assignment.position,
             .return_statement => |statement| statement.position,
+            .yield_statement => |statement| statement.position,
             .expression_statement => |expression| expression.position,
             .print_statement => |statement| statement.position,
             .assert_statement => |statement| statement.position,

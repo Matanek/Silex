@@ -52,6 +52,7 @@ pub const Decision = struct {
     receiver: ?[]const u8 = null,
     nominal_relation: bool = false,
     in_loop: bool = false,
+    in_match_branch_block: bool = false,
     after_conditional: bool = false,
     allow_conversion: bool = false,
     cascade: bool = false,
@@ -140,6 +141,7 @@ pub fn decisionAt(
     decision.cursor = cursor;
     decision.trigger_kind = trigger_kind;
     decision.match_subject = try isMatchSubjectPositionAt(allocator, source, decision.prefix_start);
+    decision.in_match_branch_block = try isDirectMatchBranchBlockAt(allocator, source, decision.prefix_start);
     if (decision.has_try) {
         decision.completing_try_error = try isTryErrorBindingPositionAt(allocator, source, decision.prefix_start);
         decision.completing_try_alternative = try isTryAlternativePositionAt(allocator, source, decision.prefix_start);
@@ -2409,6 +2411,9 @@ fn appendStatementKeywords(allocator: Allocator, candidates: *std.ArrayList(Cand
         .{ "assert", "Silex assertion" },
         .{ "panic", "Silex failure effect" },
     }, 70);
+    if (context.in_match_branch_block) try appendKeywords(allocator, candidates, context, &.{
+        .{ "yield", "Silex match branch value" },
+    }, 68);
     if (context.in_loop) try appendKeywords(allocator, candidates, context, &.{
         .{ "break", "Silex loop exit" },
         .{ "continue", "Silex loop continuation" },
@@ -2417,6 +2422,25 @@ fn appendStatementKeywords(allocator: Allocator, candidates: *std.ArrayList(Cand
         .{ "elif", "Silex conditional branch" },
         .{ "else", "Silex fallback branch" },
     }, 68);
+}
+
+fn isDirectMatchBranchBlockAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
+    const tokens = try tokensUntil(allocator, source, cursor);
+    var nesting: usize = 0;
+    var index = tokens.len;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .right_brace => nesting += 1,
+            .left_brace => if (nesting == 0) {
+                return index != 0 and tokens[index - 1].tag == .fat_arrow;
+            } else {
+                nesting -= 1;
+            },
+            else => {},
+        }
+    }
+    return false;
 }
 
 fn appendExpressionIntroducers(
@@ -6062,6 +6086,30 @@ test "complete mutex in statement position" {
     const cursor = std.mem.indexOf(u8, source, "mut").? + 3;
     const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
     try std.testing.expect(contains(items, "mutex"));
+}
+
+test "complete yield only in a direct match branch block" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const branch_source =
+        \\func main() {
+        \\    let value = match true {
+        \\        true => {
+        \\            yi
+        \\        }
+        \\        else => 0
+        \\    }
+        \\}
+    ;
+    const branch_cursor = std.mem.indexOf(u8, branch_source, "yi\n").? + "yi".len;
+    const branch_items = try itemsAt(allocator, branch_source, branch_cursor, .invoked);
+    try std.testing.expect(contains(branch_items, "yield"));
+
+    const ordinary_source = "func main() { yi }";
+    const ordinary_cursor = std.mem.indexOf(u8, ordinary_source, "yi").? + "yi".len;
+    const ordinary_items = try itemsAt(allocator, ordinary_source, ordinary_cursor, .invoked);
+    try std.testing.expect(!contains(ordinary_items, "yield"));
 }
 
 test "treat interpolation as an expression rather than a statement" {

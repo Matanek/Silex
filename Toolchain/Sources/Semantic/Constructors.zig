@@ -486,6 +486,7 @@ fn analyzeStatements(
             },
             .if_statement => |conditional| try analyzeIf(self, builder, function, structure, self_local, conditional, initialized),
             .return_statement => return self.fail(statement.position(), "constructors return 'self' implicitly"),
+            .yield_statement => return self.fail(statement.position(), "yield is only valid as the final statement of a value-producing match block"),
             .while_statement => while_statement: {
                 try validateStatementReads(self, structure, statement, initialized);
                 const one = [_]Ast.Statement{statement};
@@ -762,6 +763,7 @@ fn validateStatementReads(self: anytype, structure: Ast.Structure, statement: As
             if (assignment.value) |value| try validateExpressionReads(self, structure, value, initialized);
         },
         .return_statement => |statement_value| if (statement_value.value) |value| try validateExpressionReads(self, structure, value, initialized),
+        .yield_statement => |statement_value| if (statement_value.value) |value| try validateExpressionReads(self, structure, value, initialized),
         .expression_statement => |value| try validateExpressionReads(self, structure, value, initialized),
         .print_statement => |print_statement| for (print_statement.values) |value| try validateExpressionReads(self, structure, value, initialized),
         .assert_statement => |assertion| {
@@ -849,8 +851,9 @@ fn validateExpressionReads(self: anytype, structure: Ast.Structure, expression: 
             try validateExpressionReads(self, structure, access.end, initialized);
         },
         .match_expression => |match_expression| {
-            try validateExpressionReads(self, structure, match_expression.subject, initialized);
+            if (match_expression.subject) |subject| try validateExpressionReads(self, structure, subject, initialized);
             for (match_expression.branches) |branch| {
+                if (branch.condition) |condition| try validateExpressionReads(self, structure, condition, initialized);
                 if (branch.guard) |guard| try validateExpressionReads(self, structure, guard, initialized);
                 if (branch.value) |value| try validateExpressionReads(self, structure, value, initialized);
                 if (branch.statements) |statements| {

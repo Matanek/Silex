@@ -55,8 +55,15 @@ pub const LoopContext = struct {
     mutex_depth: usize = 0,
 };
 
+pub const MutatingReturnContext = struct {
+    structure_index: usize,
+    flat: usize,
+    self_local: Ir.LocalId,
+};
+
 pub const FunctionBuilder = struct {
     return_type: ?Types.Type = null,
+    mutating_return: ?MutatingReturnContext = null,
     value_types: std.ArrayList(Types.Type) = .empty,
     local_types: std.ArrayList(Types.Type) = .empty,
     blocks: std.ArrayList(BlockBuilder) = .empty,
