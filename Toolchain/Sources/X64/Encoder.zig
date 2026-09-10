@@ -1700,11 +1700,13 @@ fn emitPrintInteger(
 ) Error!void {
     try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, 40 });
     try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x74, 0x24, 39 });
+    // The regional allocator may keep the printed value in r8. Preserve it in
+    // rax before r8 becomes the output-buffer length.
+    try emitLoadValue(allocator, bytes, residences, .rax, slot);
     if (newline) {
         try bytes.appendSlice(allocator, &.{ 0xc6, 0x06, '\n' });
         try emitImmediate(allocator, bytes, .r8, 1);
     } else try emitImmediate(allocator, bytes, .r8, 0);
-    try emitLoadValue(allocator, bytes, residences, .rax, slot);
     try emitImmediate(allocator, bytes, .r9, 0);
     if (signed) {
         try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x89 });
@@ -3948,6 +3950,31 @@ test "encode X64 floating-point print with the bundled formatter" {
         if (site.symbol == .crt_write) writes += 1;
     }
     try std.testing.expectEqual(@as(usize, 2), writes);
+}
+
+test "preserve an X64 integer print operand resident in r8" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    var imports: std.ArrayList(WindowsImports.X64Site) = .empty;
+    defer imports.deinit(std.testing.allocator);
+
+    try emitPrintInteger(
+        std.testing.allocator,
+        &bytes,
+        &imports,
+        .darwin,
+        &.{8},
+        0,
+        true,
+        true,
+    );
+
+    const preserve = std.mem.indexOf(u8, bytes.items, &.{ 0x4c, 0x89, 0xc0 }) orelse
+        return error.TestUnexpectedResult;
+    const initialize_count = std.mem.indexOf(u8, bytes.items, &.{
+        0x49, 0xb8, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    }) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(preserve < initialize_count);
 }
 
 test "encode ABI callback thunks for Silex function addresses" {
