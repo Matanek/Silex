@@ -126,7 +126,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: Matanek/Silex-Lib-STD
-          ref: 5a018305fb470dfe00e94466150b3c04f207e252
+          # v0.22.0 includes the isolated System provider for macOS X64.
+          ref: 80aabd9a2de919af52dc0b8bf2d0f9de50aa75c5
           path: Dependencies/STD
 
       - name: Install Zig 0.16.0
