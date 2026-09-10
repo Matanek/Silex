@@ -6,6 +6,58 @@ const Model = @import("Model.zig");
 const resources_name = "GFX.ECS.ComponentStore.ComponentPools";
 const pool_prefix = "GFX.ECS.ComponentPool<";
 
+pub const QueryPool = struct {
+    structure: usize,
+    components_field: usize,
+    resources_field: usize,
+    resources_type: Ast.Type,
+    getter: Ir.FunctionId,
+};
+
+pub fn mutableQueryPool(self: anytype, world: Ast.Structure, component: Ast.Type) !QueryPool {
+    const components_field = fieldNamed(world, "components") orelse return error.InvalidSource;
+    const store = self.program.structures[world.fields[components_field].type.structureIndex() orelse return error.InvalidSource];
+    const resources_field = fieldNamed(store, "resources") orelse return error.InvalidSource;
+    const resources_type = store.fields[resources_field].type;
+    const resources_index = resources_type.structureIndex() orelse return error.InvalidSource;
+    const resources = self.program.structures[resources_index];
+    if (!std.mem.eql(u8, resources.name, resources_name)) return error.InvalidSource;
+    const slot = poolSlot(self, resources, component) orelse return error.InvalidSource;
+    const pool_type = resources.fields[slot].type.optionalChild() orelse return error.InvalidSource;
+    const pool_index = pool_type.structureIndex() orelse return error.InvalidSource;
+    const getter = methodPrefixed(resources, "get_mut<", self.program.structures[pool_index].name) orelse return error.InvalidSource;
+    return .{
+        .structure = pool_index,
+        .components_field = components_field,
+        .resources_field = resources_field,
+        .resources_type = resources_type,
+        .getter = methodFunctionId(self.program, resources_index, getter),
+    };
+}
+
+pub fn emitQueryPoolReference(self: anytype, builder: anytype, world_index: usize, world: Ir.ValueId, pool: QueryPool) !Ir.ValueId {
+    // ComponentPools is a reference object. Keep its checked typed-resource
+    // getter and the resulting reference provenance, rather than borrowing a
+    // copy of the ComponentPool value or manufacturing a raw element pointer.
+    const store_type = self.program.structures[world_index].fields[pool.components_field].type;
+    const store = try self.newValue(builder, store_type);
+    try self.emit(builder, .{ .field_load = .{ .result = store, .base = world, .field = pool.components_field } });
+    const resources = try self.newValue(builder, pool.resources_type);
+    try self.emit(builder, .{ .field_load = .{ .result = resources, .base = store, .field = pool.resources_field } });
+    const resources_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, pool.resources_type);
+    try self.emit(builder, .{ .local_store = .{ .local = resources_local, .operand = resources } });
+    const resources_reference = try self.newValue(builder, .address);
+    try self.emit(builder, .{ .local_address = .{ .result = resources_reference, .local = resources_local } });
+    const reference = try self.newValue(builder, .address);
+    try self.emit(builder, .{ .call = .{
+        .result = reference,
+        .function = pool.getter,
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{resources_reference}),
+    } });
+    return reference;
+}
+
 pub fn analyze(self: anytype, structure_index: usize, method: Ast.Function) !Ir.Function {
     const intrinsic = method.intrinsic orelse return error.InvalidSource;
     if (intrinsic == .world_component_get_mut) return analyzeWorld(self, structure_index, method);

@@ -733,7 +733,7 @@ test "structure methods register system callbacks declared later in their module
     try std.testing.expectEqualStrings("flushed\n", result.stdout);
 }
 
-test "query iteration does not allocate a component filter list" {
+test "query iteration caches pools and preserves mutable component ownership" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -760,8 +760,37 @@ test "query iteration does not allocate a component filter list" {
         \\public struct ComponentPool<T> {
         \\    private var sparse:int[]
         \\    private var values:T[]
-        \\    init() { self.sparse = []; self.values = [] }
+        \\    init(value:T) { self.sparse = [2, 1]; self.values = [value, value] }
         \\    func get_known(entity:Entity) @self:T { return @self.values[self.sparse[entity.index] - 1] }
+        \\    func get_mut(entity:Entity) &self:T { return &self.values[self.sparse[entity.index] - 1] }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/ComponentStore.sx",
+        .data =
+        \\use GFX.ECS.Entity.Entity
+        \\use GFX.ECS.ComponentPool.ComponentPool
+        \\intrinsic class ComponentPools {
+        \\    func insert<T>(value:T)
+        \\    func has<T>() bool
+        \\    func get<T>() @T
+        \\    func get_mut<T>() &T
+        \\    func try_get<T>() @T?
+        \\    func try_get_mut<T>() &T?
+        \\    func remove<T>() T?
+        \\    func clear()
+        \\}
+        \\public struct ComponentStore {
+        \\    private var resources:ComponentPools
+        \\    init() { self.resources = ComponentPools() }
+        \\    func seed<T>(value:T) { self.resources.insert(ComponentPool<T>(value)) }
+        \\    func has<T>() bool { return self.resources.has<ComponentPool<T>>() }
+        \\    func query_pool<T>() @self:ComponentPool<T> { return self.resources.get<ComponentPool<T>>() }
+        \\    func get_mut<T>(entity:Entity) &self:T {
+        \\        var pool:&ComponentPool<T> = self.resources.get_mut<ComponentPool<T>>()
+        \\        return pool.get_mut(entity)
+        \\    }
         \\}
         ,
     });
@@ -770,16 +799,22 @@ test "query iteration does not allocate a component filter list" {
         .data =
         \\use GFX.ECS.Entity.Entity
         \\use GFX.ECS.ComponentPool.ComponentPool
+        \\use GFX.ECS.ComponentStore.ComponentStore
         \\public class World {
+        \\    private var components:ComponentStore
+        \\    init() { self.components = ComponentStore() }
+        \\    func seed<T>(value:T) { self.components.seed(value) }
+        \\    func read<T>(index:int) @self:T { return self.components.query_pool<T>().get_known(Entity(index:index)) }
+        \\    module func query_get_mut<T>(entity:Entity) &self:T { return self.components.get_mut<T>(entity) }
         \\    package func query_count(required:int[]) int { return 0 }
-        \\    package func query_archetype_count() int { return 0 }
-        \\    package func query_entity_count(archetype:int) int { return 0 }
-        \\    package func query_entity(archetype:int, row:int) Entity { return Entity(index:0) }
+        \\    package func query_archetype_count() int { return 1 }
+        \\    package func query_entity_count(archetype:int) int { return 2 }
+        \\    package func query_entity(archetype:int, row:int) Entity { return Entity(index:row) }
         \\    package func query_range_start(base:int, count:int, range_start:int) int { return 0 }
-        \\    package func query_range_end(base:int, count:int, range_end:int) int { return 0 }
+        \\    package func query_range_end(base:int, count:int, range_end:int) int { return count }
         \\    module func query_component_id<T>() int { return 0 }
-        \\    package func query_archetype_has<T>(archetype:int) bool { return false }
-        \\    module func query_pool<T>() ComponentPool<T> { return ComponentPool<T>() }
+        \\    package func query_archetype_has<T>(archetype:int) bool { return self.components.has<T>() }
+        \\    module func query_pool<T>() @self:ComponentPool<T> { return self.components.query_pool<T>() }
         \\}
         ,
     });
@@ -811,7 +846,7 @@ test "query iteration does not allocate a component filter list" {
         \\    module func __silex_run_query(count:int, system_order:int, commands_address:uint, callback:func(Scene, int, int, int, uint)) { callback(self, system_order, 0, count, commands_address) }
         \\    drop { self.store.clear() }
         \\}
-        \\struct Position { let x:int }
+        \\struct Position { var x:int; var items:int[] }
         \\func inspect(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {
         \\    for (first, second) in query {
         \\        if first.index == second.index { return }
@@ -825,8 +860,32 @@ test "query iteration does not allocate a component filter list" {
         \\func parallel_inspect(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {
         \\    for (first, second) in query {}
         \\}
-        \\func main() {
+        \\func mutate_components(query:ECS.Query<(ECS.Entity, &Position)>) {
+        \\    var visited = 0
+        \\    for (entity, position) in query {
+        \\        position.x += entity.index + 1
+        \\        position.items[0] += entity.index + 1
+        \\        visited++
+        \\    }
+        \\    assert(visited == 2)
+        \\}
+        \\func sample() int {
         \\    var application = Application()
+        \\    var world = ECS.World()
+        \\    let before = Position(x:40, items:[9])
+        \\    world.seed(before)
+        \\    application.resources().insert(world)
+        \\    application.add_system(0, mutate_components)
+        \\    assert(before.x == 40 && before.items[0] == 9)
+        \\    assert(world.read<Position>(0).x == 41)
+        \\    assert(world.read<Position>(0).items[0] == 10)
+        \\    assert(world.read<Position>(1).items[0] == 11)
+        \\    return world.read<Position>(1).x
+        \\}
+        \\func main() {
+        \\    print(sample())
+        \\    var application = Application()
+        \\    application.resources().insert(ECS.World())
         \\    application.add_system(0, inspect)
         \\    application.add_system(0, inspect_components)
         \\    var scene = Scene(application.resources())
@@ -851,7 +910,47 @@ test "query iteration does not allocate a component filter list" {
     const component_text = component_tail[0 .. component_finish + 3];
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, component_text, ".get_known#"));
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, component_text, "collection.load"));
+    const mutable_start = std.mem.indexOf(u8, text, "func @GFX.Smokes.Main.mutate_components(") orelse return error.TestUnexpectedResult;
+    const mutable_tail = text[mutable_start..];
+    const mutable_finish = std.mem.indexOf(u8, mutable_tail, "\n}\n") orelse return error.TestUnexpectedResult;
+    const mutable_text = mutable_tail[0 .. mutable_finish + 3];
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, mutable_text, "query_get_mut<"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, mutable_text, "ComponentPools.get_mut<"));
+    const mutable_function = for (compilation.ir.functions) |candidate| {
+        if (std.mem.eql(u8, candidate.name, "GFX.Smokes.Main.mutate_components")) break candidate;
+    } else return error.TestUnexpectedResult;
+    var pool_block: ?usize = null;
+    var entity_block: ?usize = null;
+    for (mutable_function.blocks, 0..) |block, block_index| {
+        for (block.instructions) |instruction| switch (instruction) {
+            .call => |call| {
+                const name = compilation.ir.functions[call.function].name;
+                if (std.mem.indexOf(u8, name, "ComponentPools.get_mut<") != null) pool_block = block_index;
+                if (std.mem.indexOf(u8, name, "World.query_entity#") != null) entity_block = block_index;
+            },
+            .collection_load => |load| try std.testing.expect(load.checked),
+            .collection_reference => |reference| {
+                try std.testing.expect(reference.checked);
+                try std.testing.expect(reference.reference != null);
+            },
+            else => {},
+        };
+    }
+    try std.testing.expect(pool_block != null and entity_block != null);
+    try std.testing.expect(pool_block.? != entity_block.?);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
     _ = try Lower.lower(allocator, compilation.ir);
+    if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
+        const function = for (compilation.ir.functions, 0..) |candidate, index| {
+            if (std.mem.eql(u8, candidate.name, "GFX.Smokes.Main.sample")) break @as(Ir.FunctionId, @intCast(index));
+        } else return error.TestUnexpectedResult;
+        const machine = try Lower.lowerWithMode(allocator, compilation.ir, .release);
+        const native = try Runner.invoke(allocator, machine, function, &.{});
+        try std.testing.expectEqual(@as(@TypeOf(native.status), .success), native.status);
+        try std.testing.expectEqual(@as(i64, 42), native.value);
+    }
 }
 
 test "ECS queries cannot escape their injected system function" {

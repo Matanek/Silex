@@ -1,4 +1,5 @@
 const std = @import("std");
+const EcsComponents = @import("EcsComponents.zig");
 const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Source = @import("../Source.zig");
@@ -560,20 +561,33 @@ fn analyzeQueryFor(
         return missingQueryRegistration(self, loop.name_position);
     const row_end_method = methodNamed(world, "query_range_end") orelse
         return missingQueryRegistration(self, loop.name_position);
-    const ReadPool = struct {
+    const QueryPool = struct {
         component: Ast.Type,
         structure: usize,
         local: Ir.LocalId,
-        world_method: usize,
+        world_method: ?usize = null,
+        mutable_pool: ?EcsComponents.QueryPool = null,
     };
-    var read_pools: std.ArrayList(ReadPool) = .empty;
+    var query_pools: std.ArrayList(QueryPool) = .empty;
     for (pattern.fields) |field| {
-        if (isEntityType(self, field.type) or field.access_mode != .read) continue;
+        if (isEntityType(self, field.type)) continue;
         var already_cached = false;
-        for (read_pools.items) |pool| if (pool.component == field.type) {
+        for (query_pools.items) |pool| if (pool.component == field.type) {
             already_cached = true;
         };
         if (already_cached) continue;
+        if (field.access_mode == .mutable) {
+            const pool = try EcsComponents.mutableQueryPool(self, world, field.type);
+            const pool_local = builder.local_types.items.len;
+            try builder.local_types.append(self.allocator, .address);
+            try query_pools.append(self.allocator, .{
+                .component = field.type,
+                .structure = pool.structure,
+                .local = pool_local,
+                .mutable_pool = pool,
+            });
+            continue;
+        }
         const method_name = try std.fmt.allocPrint(self.allocator, "query_pool<{s}>", .{self.typeName(field.type)});
         const method_index = methodNamed(world, method_name) orelse
             return missingQueryRegistration(self, loop.name_position);
@@ -581,7 +595,7 @@ fn analyzeQueryFor(
         const pool_structure = pool_type.structureIndex() orelse return error.InvalidSource;
         const pool_local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, pool_type);
-        try read_pools.append(self.allocator, .{
+        try query_pools.append(self.allocator, .{
             .component = field.type,
             .structure = pool_structure,
             .local = pool_local,
@@ -663,11 +677,22 @@ fn analyzeQueryFor(
     self.terminate(builder, .{ .jump = row_initialize });
 
     builder.current_block = row_initialize;
-    for (read_pools.items) |pool| {
+    for (query_pools.items) |pool| {
+        if (pool.mutable_pool) |mutable_pool| {
+            const reference = try EcsComponents.emitQueryPoolReference(
+                self,
+                builder,
+                world_index,
+                try loadLocalValue(self, builder, world_local, world_type),
+                mutable_pool,
+            );
+            try self.emit(builder, .{ .local_store = .{ .local = pool.local, .operand = reference } });
+            continue;
+        }
         const pool_value = try self.newValue(builder, .structure(pool.structure));
         try self.emit(builder, .{ .call = .{
             .result = pool_value,
-            .function = methodFunctionId(self.program, world_index, pool.world_method),
+            .function = methodFunctionId(self.program, world_index, pool.world_method.?),
             .arguments = try self.allocator.dupe(Ir.ValueId, &.{try loadLocalValue(self, builder, world_local, world_type)}),
         } });
         try self.emit(builder, .{ .local_store = .{ .local = pool.local, .operand = pool_value } });
@@ -740,45 +765,36 @@ fn analyzeQueryFor(
             try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = field.type, .value = entity });
             continue;
         }
+        var cached_pool: ?QueryPool = null;
+        for (query_pools.items) |pool| if (pool.component == field.type) {
+            cached_pool = pool;
+        };
+        const pool = cached_pool orelse return error.InvalidSource;
+        const component = try emitKnownQueryComponent(
+            self,
+            builder,
+            pool.structure,
+            pool.local,
+            field.access_mode == .mutable,
+            entity_type,
+            entity,
+            field.type,
+            loop.name_position,
+        );
         if (field.access_mode == .mutable) {
-            const getter_name = try std.fmt.allocPrint(self.allocator, "query_get_mut<{s}>", .{self.typeName(field.type)});
-            const getter_index = methodNamed(world, getter_name) orelse return error.InvalidSource;
-            const world_reference = try self.newValue(builder, .address);
-            try self.emit(builder, .{ .local_address = .{ .result = world_reference, .local = world_local } });
-            const reference = try self.newValue(builder, .address);
-            try self.emit(builder, .{ .call = .{
-                .result = reference,
-                .function = methodFunctionId(self.program, world_index, getter_index),
-                .arguments = try self.allocator.dupe(Ir.ValueId, &.{ world_reference, entity }),
-            } });
             try builder.bindings.append(self.allocator, .{
                 .name = binding.name,
                 .type = field.type,
-                .reference = reference,
+                .reference = component,
                 .mutable = true,
                 .borrowed_root = root,
                 .borrowed_mode = .mutable,
             });
         } else {
-            var cached_pool: ?ReadPool = null;
-            for (read_pools.items) |pool| if (pool.component == field.type) {
-                cached_pool = pool;
-            };
-            const pool = cached_pool orelse return error.InvalidSource;
-            const value = try emitKnownQueryComponent(
-                self,
-                builder,
-                pool.structure,
-                pool.local,
-                entity_type,
-                entity,
-                field.type,
-                loop.name_position,
-            );
             try builder.bindings.append(self.allocator, .{
                 .name = binding.name,
                 .type = field.type,
-                .value = value,
+                .value = component,
                 .borrowed_root = root,
                 .borrowed_mode = .read,
             });
@@ -850,6 +866,7 @@ fn emitKnownQueryComponent(
     builder: anytype,
     pool_index: usize,
     pool_local: Ir.LocalId,
+    mutable: bool,
     entity_type: Ast.Type,
     entity: Ir.ValueId,
     component_type: Ast.Type,
@@ -865,7 +882,12 @@ fn emitKnownQueryComponent(
     const entity_structure = self.program.structures[entity_index];
     const index_field = fieldNamed(entity_structure, "index") orelse return error.InvalidSource;
 
-    const pool_value = try loadLocalValue(self, builder, pool_local, .structure(pool_index));
+    const pool_reference = if (mutable) try loadLocalValue(self, builder, pool_local, .address) else null;
+    const pool_value = if (pool_reference) |reference| value: {
+        const value = try self.newValue(builder, .structure(pool_index));
+        try self.emit(builder, .{ .reference_load = .{ .result = value, .reference = reference } });
+        break :value value;
+    } else try loadLocalValue(self, builder, pool_local, .structure(pool_index));
     const sparse = try self.newValue(builder, pool.fields[sparse_field].type);
     try self.emit(builder, .{ .field_load = .{
         .result = sparse,
@@ -899,6 +921,24 @@ fn emitKnownQueryComponent(
         .base = pool_value,
         .field = values_field,
     } });
+    if (pool_reference) |reference| {
+        const values_reference = try self.newValue(builder, .address);
+        try self.emit(builder, .{ .reference_field = .{
+            .result = values_reference,
+            .reference = reference,
+            .structure = pool_index,
+            .field = values_field,
+        } });
+        const component = try self.newValue(builder, .address);
+        try self.emit(builder, .{ .collection_reference = .{
+            .result = component,
+            .collection = values,
+            .reference = values_reference,
+            .index = dense_index,
+            .position = position,
+        } });
+        return component;
+    }
     const component = try self.newValue(builder, component_type);
     try self.emit(builder, .{ .collection_load = .{
         .result = component,
