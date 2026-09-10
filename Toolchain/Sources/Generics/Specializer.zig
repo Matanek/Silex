@@ -137,14 +137,20 @@ pub const Specializer = struct {
 
         for (self.functions.items) |*function| {
             var locals: std.ArrayList(Binding) = .empty;
-            function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
-            function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
+            // Structure rewriting can instantiate free functions before this
+            // pass. Their signatures already use the concrete function-type
+            // table and must not be interpreted as source generic types again.
+            if (function.specialization_file == null) {
+                function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
+                function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
+            }
             _ = try self.internFunctionType(function.*);
         }
 
         var function_index: usize = 0;
         while (function_index < self.functions.items.len) : (function_index += 1) {
             var function = self.functions.items[function_index];
+            if (function.specialization_file != null) continue;
             var locals: std.ArrayList(Binding) = .empty;
             for (function.parameters) |parameter| try locals.append(self.allocator, .{ .name = parameter.name, .type = parameter.type });
             function.statements = try self.rewriteStatements(function.statements, &.{}, &locals);

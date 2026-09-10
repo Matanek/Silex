@@ -727,6 +727,65 @@ test "compose a public structure from a direct local package dependency" {
     try std.testing.expect(compilation.interfaces[1].structures[0].id.owner.eql(.{ .package = "Vectors" }));
 }
 
+test "specialize a dependency generic with a nominal type from another dependency" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Algorithms/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Model/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Algorithms\":\"=1.0.0\",\"Model\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Algorithms/Package.json",
+        .data = "{\"name\":\"Algorithms\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Algorithms/Module/Sort.sx",
+        .data =
+        \\func before<T>(left:@T, right:@T, compare:func(@T, @T) int) bool { return compare(left, right) < 0 }
+        \\public func sort<T>(values:&T[..], compare:func(@T, @T) int) {
+        \\    if values.count() > 1 && before<T>(@values[1], @values[0], compare) {
+        \\        let temporary = values[0]
+        \\        values[0] = values[1]
+        \\        values[1] = temporary
+        \\    }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Model/Package.json",
+        .data = "{\"name\":\"Model\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Model/Module/Item.sx",
+        .data = "public struct Item { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Algorithms.Sort
+        \\use Model.Item.Item
+        \\func compare(left:@Item, right:@Item) int { return left.value - right.value }
+        \\func main() {
+        \\    var values:Item[] = [Item(value:2), Item(value:1)]
+        \\    Sort.sort<Item>(&values[0:values.count()], compare)
+        \\    print(values[0].value)
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("1\n", result.stdout);
+}
+
 test "use a package child namespace without a principal module" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
