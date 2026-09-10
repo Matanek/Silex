@@ -35,12 +35,18 @@ pub fn verify(
     if (include_debug) {
         const debug_path = try std.fmt.allocPrint(allocator, "{s}-debug", .{artifact_stem});
         const debug_run = try compileAndRun(allocator, io, silex_binary, source_path, debug_path, .debug);
-        if (!equal(expected_result, debug_run)) return error.NativeDebugMismatch;
+        if (!equal(expected_result, debug_run)) {
+            reportMismatch("Debug", source_path, expected_result, debug_run);
+            return error.NativeDebugMismatch;
+        }
         result.debug_size = (try std.Io.Dir.cwd().statFile(io, debug_path, .{})).size;
     }
     const release_path = try std.fmt.allocPrint(allocator, "{s}-release", .{artifact_stem});
     const release_run = try compileAndRun(allocator, io, silex_binary, source_path, release_path, .release);
-    if (!equal(expected_result, release_run)) return error.NativeReleaseMismatch;
+    if (!equal(expected_result, release_run)) {
+        reportMismatch("Release", source_path, expected_result, release_run);
+        return error.NativeReleaseMismatch;
+    }
     result.release_size = (try std.Io.Dir.cwd().statFile(io, release_path, .{})).size;
     return result;
 }
@@ -86,6 +92,29 @@ fn equal(expected: anytype, actual: std.process.RunResult) bool {
     return expected.exit_code == exit_code and
         std.mem.eql(u8, expected.stdout, actual.stdout) and
         std.mem.eql(u8, expected.stderr, actual.stderr);
+}
+
+fn reportMismatch(
+    mode: []const u8,
+    source_path: []const u8,
+    expected: anytype,
+    actual: std.process.RunResult,
+) void {
+    std.debug.print(
+        "native {s} mismatch for {s}\n" ++
+            "  expected exit={d} stdout={any} stderr={any}\n" ++
+            "  actual term={any} stdout={any} stderr={any}\n",
+        .{
+            mode,
+            source_path,
+            expected.exit_code,
+            expected.stdout,
+            expected.stderr,
+            actual.term,
+            actual.stdout,
+            actual.stderr,
+        },
+    );
 }
 
 fn successful(term: std.process.Child.Term) bool {
