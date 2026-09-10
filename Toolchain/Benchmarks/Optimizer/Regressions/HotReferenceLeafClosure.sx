@@ -83,8 +83,8 @@ func integrate(bodies:&Body[..], forces:&Forces[..]) {
 }
 
 func main() {
-    var bodies = [Body(vx:3.0, vy:4.0, w:0.5, px:0.0, py:0.0, c:0.6, s:0.8)]
-    var forces = [Forces(
+    var bodies:Body[] = [Body(vx:3.0, vy:4.0, w:0.5, px:0.0, py:0.0, c:0.6, s:0.8)]
+    var forces:Forces[] = [Forces(
         x:0.25, y:0.5, torque:0.125,
         inverse_mass:0.5, inverse_inertia:0.25, gravity_scale:1.0,
         linear_damping:0.25, angular_damping:0.125,

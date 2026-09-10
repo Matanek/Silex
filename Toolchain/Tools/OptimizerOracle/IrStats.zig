@@ -1,3 +1,4 @@
+const std = @import("std");
 const Silex = @import("silex_optimizer_api");
 
 pub const Counts = struct {
@@ -132,30 +133,30 @@ fn markReachable(reachable: []bool, function: usize, changed: *bool) void {
 }
 
 fn profileFunction(result: *Profile, function: Silex.Ir.Function) void {
-        result.counts.blocks += function.blocks.len;
-        result.counts.values += function.value_types.len;
-        result.counts.locals += function.local_types.len;
-        for (function.blocks, 0..) |block, block_index| {
-            result.counts.instructions += block.instructions.len;
-            for (block.instructions) |instruction| {
-                profileInstruction(result, instruction, function.value_types);
-                if (instruction == .print and valueIsDirectConstant(function, instruction.print.value))
-                    result.constant_prints += 1;
-            }
-            switch (block.terminator) {
-                .jump => |target| {
-                    result.jumps += 1;
-                    if (target <= block_index) result.loop_back_edges += 1;
-                },
-                .branch => |branch_value| {
-                    result.branches += 1;
-                    if (branch_value.then_block <= block_index or branch_value.else_block <= block_index)
-                        result.loop_back_edges += 1;
-                },
-                .return_value, .return_void => result.returns += 1,
-                .panic => result.panics += 1,
-            }
+    result.counts.blocks += function.blocks.len;
+    result.counts.values += function.value_types.len;
+    result.counts.locals += function.local_types.len;
+    for (function.blocks, 0..) |block, block_index| {
+        result.counts.instructions += block.instructions.len;
+        for (block.instructions) |instruction| {
+            profileInstruction(result, instruction, function.value_types);
+            if (instruction == .print and valueIsDirectConstant(function, instruction.print.value))
+                result.constant_prints += 1;
         }
+        switch (block.terminator) {
+            .jump => |target| {
+                result.jumps += 1;
+                if (target <= block_index) result.loop_back_edges += 1;
+            },
+            .branch => |branch_value| {
+                result.branches += 1;
+                if (branch_value.then_block <= block_index or branch_value.else_block <= block_index)
+                    result.loop_back_edges += 1;
+            },
+            .return_value, .return_void => result.returns += 1,
+            .panic => result.panics += 1,
+        }
+    }
 }
 
 pub fn compare(allocator: @import("std").mem.Allocator, raw: Silex.Ir.Program, optimized: Silex.Ir.Program) !Comparison {
@@ -332,18 +333,30 @@ fn binaryHasSafetyGuard(binary: Silex.Ir.Instruction.Binary, value_types: []cons
 }
 
 pub fn countFunction(program: Silex.Ir.Program, name: []const u8) ?Counts {
+    var matched: ?Silex.Ir.Function = null;
     for (program.functions) |function| {
-        if (!@import("std").mem.eql(u8, function.name, name)) continue;
-        var result: Counts = .{
-            .functions = 1,
-            .blocks = function.blocks.len,
-            .values = function.value_types.len,
-            .locals = function.local_types.len,
-        };
-        for (function.blocks) |block| result.instructions += block.instructions.len;
-        return result;
+        if (std.mem.eql(u8, function.name, name)) return functionCounts(function);
+        if (!qualifiedNameMatches(function.name, name)) continue;
+        if (matched != null) return null;
+        matched = function;
     }
-    return null;
+    return if (matched) |function| functionCounts(function) else null;
+}
+
+fn functionCounts(function: Silex.Ir.Function) Counts {
+    var result: Counts = .{
+        .functions = 1,
+        .blocks = function.blocks.len,
+        .values = function.value_types.len,
+        .locals = function.local_types.len,
+    };
+    for (function.blocks) |block| result.instructions += block.instructions.len;
+    return result;
+}
+
+fn qualifiedNameMatches(candidate: []const u8, leaf: []const u8) bool {
+    if (candidate.len <= leaf.len or candidate[candidate.len - leaf.len - 1] != '.') return false;
+    return std.mem.endsWith(u8, candidate, leaf);
 }
 
 test "IR counts aggregate all functions and blocks" {

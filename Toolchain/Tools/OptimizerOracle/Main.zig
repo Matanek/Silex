@@ -282,15 +282,20 @@ fn qualifyNative(
     try Report.heading(io, allocator, "native optimizer regression qualification");
     for (Generator.regressions) |entry| {
         const source_path = try std.fs.path.join(allocator, &.{ corpus_directory, entry.name });
-        const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
-        const differential = try Differential.verify(allocator, source);
+        const differential = try Differential.verifyPath(io, allocator, source_path);
+        if (differential.execution == .failed) {
+            std.debug.print("optimizer regression interpreter failed for {s}: {t}\n", .{
+                entry.name,
+                differential.execution.failed,
+            });
+        }
         const evidence = Qualification.verifyContract(allocator, entry.contract, differential) catch |err| {
             std.debug.print("optimizer regression contract failed for {s}: {t}\n", .{ entry.name, err });
             return err;
         };
         var ssa_counter: ?Qualification.SsaValueCounter = null;
         if (entry.contract == .simplifies_ssa_values) {
-            const without = try Differential.verifyWithOptions(allocator, source, .{
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
                 .disabled = .ssa_value_simplification,
             });
@@ -302,7 +307,7 @@ fn qualifyNative(
         }
         var conversion_counter: ?Qualification.IntegerConversionCounter = null;
         if (entry.contract == .folds_integer_conversions) {
-            const without = try Differential.verifyWithOptions(allocator, source, .{
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
                 .disabled = .ssa_value_simplification,
             });
@@ -320,7 +325,7 @@ fn qualifyNative(
             else => null,
         };
         if (promotion_function) |function_name| {
-            const without = try Differential.verifyWithOptions(allocator, source, .{
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
                 .disabled = .ssa_promotion_post,
             });
@@ -332,7 +337,7 @@ fn qualifyNative(
         }
         var range_counter: ?Qualification.IntegerRangeCounter = null;
         if (entry.contract == .proves_integer_ranges) {
-            const without = try Differential.verifyWithOptions(allocator, source, .{
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
                 .disabled = .value_range_analysis,
             });
@@ -350,7 +355,7 @@ fn qualifyNative(
             else => null,
         };
         if (memory_function) |function_name| {
-            const without = try Differential.verifyWithOptions(allocator, source, .{
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
                 .disabled = .reference_memory_elision,
             });
@@ -372,7 +377,7 @@ fn qualifyNative(
             else => null,
         };
         if (call_requirement) |requirement| {
-            const without = try Differential.verifyWithOptions(allocator, source, .{
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
                 .disabled = requirement.disabled,
             });

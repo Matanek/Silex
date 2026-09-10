@@ -2,5 +2,8 @@
   "sources": ".",
   "requires": {
     "silex": ">=0.40.0"
+  },
+  "dependencies": {
+    "STD": "^0.21.0"
   }
 }

@@ -213,22 +213,24 @@ fn recognizeReference(
 
     const stable_collection = stableCursorCollection(function, initialization.index, reference_index, reference.collection) orelse return null;
 
-    var count_slot: ?Machine.Slot = null;
-    var comparison_index: ?usize = null;
-    for (function.instructions[header..reference_index], header..) |instruction, index| switch (instruction) {
-        .collection_count => |count| if (count.view and (!require_matching_count or sameSpan(count.collection, reference.collection))) {
-            if (count_slot != null) return null;
-            count_slot = count.result;
-        },
-        .binary => |binary| {
-            if (count_slot != null and binary.operator == .less and binary.type == .int and
-                binary.left == reference.index and binary.right == count_slot.?) comparison_index = index;
-        },
-        else => {},
-    };
-    const comparison = comparison_index orelse return null;
-    if (comparison + 1 >= function.instructions.len or function.instructions[comparison + 1] != .branch or
-        function.instructions[comparison + 1].branch.condition != function.instructions[comparison].binary.result) return null;
+    if (require_matching_count) {
+        var count_slot: ?Machine.Slot = null;
+        var comparison_index: ?usize = null;
+        for (function.instructions[header..reference_index], header..) |instruction, index| switch (instruction) {
+            .collection_count => |count| if (count.view and sameSpan(count.collection, reference.collection)) {
+                if (count_slot != null) return null;
+                count_slot = count.result;
+            },
+            .binary => |binary| {
+                if (count_slot != null and binary.operator == .less and binary.type == .int and
+                    binary.left == reference.index and binary.right == count_slot.?) comparison_index = index;
+            },
+            else => {},
+        };
+        const comparison = comparison_index orelse return null;
+        if (comparison + 1 >= function.instructions.len or function.instructions[comparison + 1] != .branch or
+            function.instructions[comparison + 1].branch.condition != function.instructions[comparison].binary.result) return null;
+    }
 
     for (function.instructions, 0..) |instruction, index| {
         if (definesSlot(instruction, reference.index) and index != initialization.index and index != increment.update) return null;
@@ -267,7 +269,47 @@ fn stableCursorCollection(
         available = definition.index < initialize;
     }
     if (!available) return null;
-    for (function.instructions[initialize..]) |instruction| if (definesSpan(instruction, current)) return null;
+    for (function.instructions[initialize..], initialize..) |instruction, index| {
+        if (definesSpan(instruction, current) and
+            !viewReplacementPreservesCollection(function.instructions, initialize, index, current)) return null;
+    }
+    return current;
+}
+
+fn viewReplacementPreservesCollection(
+    instructions: []const Machine.Instruction,
+    initialize: usize,
+    copy_index: usize,
+    collection: Machine.Span,
+) bool {
+    if (copy_index == 0) return false;
+    const copy = switch (instructions[copy_index]) {
+        .copy_range => |value| value,
+        else => return false,
+    };
+    if (!sameSpan(copy.result, collection)) return false;
+    const replacement = switch (instructions[copy_index - 1]) {
+        .collection_replace => |value| value,
+        else => return false,
+    };
+    if (!replacement.view or !replacement.dynamic or !sameSpan(copy.operand, replacement.result)) return false;
+    return sameSpan(collectionOriginSince(instructions, initialize, copy_index - 1, replacement.collection), collection);
+}
+
+fn collectionOriginSince(
+    instructions: []const Machine.Instruction,
+    initialize: usize,
+    before: usize,
+    collection: Machine.Span,
+) Machine.Span {
+    var current = collection;
+    var limit = before;
+    for (0..instructions.len) |_| {
+        const definition = definingCopyRangeBefore(instructions, limit, current) orelse break;
+        if (definition.index < initialize) break;
+        current = definition.copy.operand;
+        limit = definition.index;
+    }
     return current;
 }
 
@@ -1028,6 +1070,65 @@ test "recognize multiple checked references carried by one loop" {
         @as(?ReferenceCursor, null),
         try findCheckedReference(std.testing.allocator, function),
     );
+}
+
+test "recognize a checked reference cursor across in-place view replacement" {
+    const instructions = [_]Machine.Instruction{
+        .{ .copy_range = .{
+            .result = .{ .start = 3, .width = 2, .aggregate = true },
+            .operand = .{ .start = 0, .width = 2, .aggregate = true },
+        } },
+        .{ .constant_int = .{ .result = 15, .bits = 0 } },
+        .{ .copy = .{ .result = 2, .operand = 15 } },
+        .{ .jump = 4 },
+        .{ .binary = .{ .result = 5, .operator = .less, .left = 2, .right = 17, .type = .int } },
+        .{ .branch = .{ .condition = 5, .then_instruction = 6, .else_instruction = 14 } },
+        .{ .copy_range = .{
+            .result = .{ .start = 6, .width = 2, .aggregate = true },
+            .operand = .{ .start = 3, .width = 2, .aggregate = true },
+        } },
+        .{ .collection_reference = referenceInstruction(true, 6, 8) },
+        .{ .collection_replace = .{
+            .result = .{ .start = 9, .width = 2, .aggregate = true },
+            .collection = .{ .start = 6, .width = 2, .aggregate = true },
+            .index = 2,
+            .replacement = .{ .start = 11, .width = 1 },
+            .count = 0,
+            .dynamic = true,
+            .view = true,
+            .checked = true,
+            .element_stride = 16,
+            .header = 0,
+            .tail = 0,
+        } },
+        .{ .copy_range = .{
+            .result = .{ .start = 3, .width = 2, .aggregate = true },
+            .operand = .{ .start = 9, .width = 2, .aggregate = true },
+        } },
+        .{ .constant_int = .{ .result = 12, .bits = 1 } },
+        .{ .binary = .{ .result = 13, .operator = .add, .left = 2, .right = 12, .type = .int } },
+        .{ .copy = .{ .result = 2, .operand = 13 } },
+        .{ .jump = 4 },
+        .return_void,
+    };
+    const parameters = [_]Machine.Span{
+        .{ .start = 0, .width = 2, .aggregate = true },
+        .{ .start = 17, .width = 1 },
+    };
+    const function: Machine.Function = .{
+        .name = "checked_view_replacement_cursor",
+        .parameter_count = parameters.len,
+        .parameters = &parameters,
+        .return_type = .void,
+        .slot_count = 18,
+        .frame_size = try Machine.frameSize(18),
+        .instructions = &instructions,
+    };
+    const cursors = try findReferenceCursors(std.testing.allocator, function, true);
+    defer std.testing.allocator.free(cursors);
+    try std.testing.expectEqual(@as(usize, 1), cursors.len);
+    try std.testing.expectEqual(@as(usize, 7), cursors[0].reference);
+    try std.testing.expectEqual(@as(Machine.Slot, 8), cursors[0].result);
 }
 
 test "reject a view reference cursor whose index advances by more than one" {

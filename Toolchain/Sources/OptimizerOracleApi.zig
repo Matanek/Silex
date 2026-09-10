@@ -2,6 +2,7 @@ pub const Frontend = @import("Frontend.zig").Frontend;
 pub const Arm64Lower = @import("Arm64/Lower.zig");
 pub const Arm64Machine = @import("Arm64/Machine.zig");
 pub const Arm64LoopCursor = @import("Arm64/LoopCursor.zig");
+pub const Boundary = @import("Boundary.zig");
 pub const Interpreter = @import("Interpreter.zig");
 pub const Ir = @import("Ir.zig");
 pub const Project = @import("Project.zig");

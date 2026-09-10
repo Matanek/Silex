@@ -867,8 +867,13 @@ fn verifyArm64ReferenceCursors(
     defer allocator.free(unchecked);
     const checked = try Silex.Arm64LoopCursor.findReferenceCursors(allocator, function, true);
     defer allocator.free(checked);
-    if (unchecked.len != expected_unchecked or checked.len != expected_checked)
+    if (unchecked.len != expected_unchecked or checked.len != expected_checked) {
+        std.debug.print(
+            "optimizer reference-cursor contract: {s} expected unchecked={d}, checked={d}; observed unchecked={d}, checked={d}\n",
+            .{ function_name, expected_unchecked, expected_checked, unchecked.len, checked.len },
+        );
         return error.ExpectedArm64ReferenceCursorsMissing;
+    }
     return .{ .reference_cursors = .{
         .function = function_name,
         .unchecked = unchecked.len,
@@ -1095,15 +1100,28 @@ fn findMachineFunction(
     program: Silex.Arm64Machine.Program,
     name: []const u8,
 ) ?Silex.Arm64Machine.Function {
+    var qualified: ?Silex.Arm64Machine.Function = null;
     for (program.functions) |function| {
         if (std.mem.eql(u8, function.name, name)) return function;
+        if (!qualifiedNameMatches(function.name, name)) continue;
+        if (qualified != null) return null;
+        qualified = function;
     }
-    return null;
+    return qualified;
 }
 
 fn findFunction(program: Silex.Ir.Program, name: []const u8) ?Silex.Ir.Function {
+    var qualified: ?Silex.Ir.Function = null;
     for (program.functions) |function| {
         if (std.mem.eql(u8, function.name, name)) return function;
+        if (!qualifiedNameMatches(function.name, name)) continue;
+        if (qualified != null) return null;
+        qualified = function;
     }
-    return null;
+    return qualified;
+}
+
+fn qualifiedNameMatches(candidate: []const u8, leaf: []const u8) bool {
+    if (candidate.len <= leaf.len or candidate[candidate.len - leaf.len - 1] != '.') return false;
+    return std.mem.endsWith(u8, candidate, leaf);
 }

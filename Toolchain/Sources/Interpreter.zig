@@ -740,15 +740,26 @@ fn supportsMathBoundary(boundary: Boundary.Function) bool {
 }
 
 fn mathBoundary(boundary: Boundary.Function) ?MathBoundary.Function {
-    const provider = std.mem.eql(u8, boundary.provider, "MacOS.lib_system") or
-        std.mem.eql(u8, boundary.provider, "Linux.kernel") or std.mem.eql(u8, boundary.provider, "Windows.ucrtbase");
-    if (!provider) return null;
+    if (!Boundary.isPureScalarMath(boundary)) return null;
     const math = MathBoundary.identify(boundary.source_name) orelse return null;
     const expected: Ir.Type = if (math.precision == .float32) .float32 else .float64;
     const count: usize = if (math.arity == .unary) 1 else 2;
     if (boundary.parameters.len != count or boundary.return_type != expected) return null;
     for (boundary.parameters) |parameter| if (parameter != expected) return null;
     return math;
+}
+
+test "interpreter accepts trusted package aliases for system math" {
+    const boundary: Boundary.Function = .{
+        .name = "sqrt",
+        .provider = "Boundary.System",
+        .source_name = "sqrtf",
+        .parameters = &.{.float32},
+        .return_type = .float32,
+        .package_private = true,
+        .system_math = true,
+    };
+    try std.testing.expect(supportsBoundary(boundary));
 }
 
 fn store(function: Ir.Function, values: []?Value, id: Ir.ValueId, value: Value) Error!void {

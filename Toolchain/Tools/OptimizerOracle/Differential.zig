@@ -18,6 +18,21 @@ pub fn verify(allocator: std.mem.Allocator, source: []const u8) !Result {
     return verifyWithOptions(allocator, source, .{ .verify_each_pass = true });
 }
 
+pub fn verifyPath(io: std.Io, allocator: std.mem.Allocator, source_path: []const u8) !Result {
+    return verifyPathWithOptions(io, allocator, source_path, .{ .verify_each_pass = true });
+}
+
+pub fn verifyPathWithOptions(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    source_path: []const u8,
+    options: Silex.ReleaseOptimizer.Options,
+) !Result {
+    var compiler = Silex.Project.Compiler.init(allocator, io);
+    const compilation = try compiler.compile(source_path);
+    return verifyIr(allocator, compilation.ir, compilation.boundaries, options);
+}
+
 pub fn verifyWithOptions(
     allocator: std.mem.Allocator,
     source: []const u8,
@@ -25,21 +40,39 @@ pub fn verifyWithOptions(
 ) !Result {
     var frontend = Silex.Frontend.init(allocator);
     const compilation = try frontend.compile(source);
-    try Silex.ReleaseVerifier.verify(allocator, compilation.ir);
-    const raw = execute(allocator, compilation.ir);
-    const optimized_ir = try Silex.ReleaseOptimizer.optimizeWithOptions(allocator, compilation.ir, options);
+    return verifyIr(allocator, compilation.ir, &.{}, options);
+}
+
+fn verifyIr(
+    allocator: std.mem.Allocator,
+    ir: Silex.Ir.Program,
+    boundaries: []const Silex.Boundary.Function,
+    options: Silex.ReleaseOptimizer.Options,
+) !Result {
+    try Silex.ReleaseVerifier.verify(allocator, ir);
+    const raw = execute(allocator, ir, boundaries);
+    const optimized_ir = try Silex.ReleaseOptimizer.optimizeWithOptions(allocator, ir, options);
     try Silex.ReleaseVerifier.verify(allocator, optimized_ir);
-    const optimized = execute(allocator, optimized_ir);
+    const optimized = execute(allocator, optimized_ir, boundaries);
     if (!equal(raw, optimized)) return error.SemanticMismatch;
     return .{
-        .raw_ir = compilation.ir,
+        .raw_ir = ir,
         .optimized_ir = optimized_ir,
         .execution = raw,
     };
 }
 
-fn execute(allocator: std.mem.Allocator, program: Silex.Ir.Program) Execution {
-    return .{ .completed = Silex.Interpreter.runCapture(allocator, program) catch |err| return .{ .failed = err } };
+fn execute(
+    allocator: std.mem.Allocator,
+    program: Silex.Ir.Program,
+    boundaries: []const Silex.Boundary.Function,
+) Execution {
+    return .{ .completed = Silex.Interpreter.runCaptureWithBoundaries(
+        allocator,
+        null,
+        program,
+        boundaries,
+    ) catch |err| return .{ .failed = err } };
 }
 
 fn equal(left: Execution, right: Execution) bool {
