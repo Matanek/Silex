@@ -122,6 +122,13 @@ jobs:
       - name: Check out Silex
         uses: actions/checkout@v6
 
+      - name: Check out the pinned STD optimizer fixture dependency
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-STD
+          ref: 5a018305fb470dfe00e94466150b3c04f207e252
+          path: Dependencies/STD
+
       - name: Install Zig 0.16.0
         shell: bash
         run: |
@@ -146,6 +153,19 @@ jobs:
             echo "cpu=$(sysctl -n machdep.cpu.brand_string)"
             clang --version | sed -n '1p'
           } | tee .zig-cache/optimizer-x64/environment.txt
+
+      - name: Isolate the optimizer fixture workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/silex-prefix"
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/silex-prefix/bin/silex" link \
+            "$GITHUB_WORKSPACE/Dependencies/STD" \
+            --workspace "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/silex-prefix/bin/silex" packages resolve \
+            "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer"
 
       - name: Qualify native optimizer regressions
         shell: bash
