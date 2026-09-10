@@ -270,6 +270,44 @@ test "specialize a generic function with a generic nominal type argument" {
     try std.testing.expectEqualStrings("1\n", result.stdout);
 }
 
+test "specialize an anonymous callback with a nominal parameter from a generic method" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Api
+        \\func main() { var source = Api.Source<int>([40, 2]); let batch = source.collect(); print(batch.values.count()) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public struct Item<T> { let value:T }
+        \\public struct Batch<T> { let values:Item<T>[] }
+        \\public func visit<T>(values:T[], observe:func(@T)) { for value in values { observe(value) } }
+        \\public class Source<T> {
+        \\    let values:T[]
+        \\    init(values:T[]) { self.values = values }
+        \\    func collect() Batch<T> {
+        \\        var items:Item<T>[] = []
+        \\        for value in self.values { items.append(Item<T>(value:value)) }
+        \\        visit<Item<T>>(items, func(item:@Item<T>) { print(item.value) })
+        \\        return Batch<T>(values:items)
+        \\    }
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("40\n2\n2\n", result.stdout);
+}
+
 test "compose nested generic callback specialization through a module" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
