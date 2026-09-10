@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Project = @import("Project.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
 const Lower = @import("Arm64/Lower.zig");
+const Runner = @import("Arm64/Runner.zig");
 
 const resources_source =
     \\public intrinsic class Resources {
@@ -59,6 +61,63 @@ test "scoped typed resources shadow and fall back without mutating their parent"
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
     try std.testing.expectEqualStrings("3\n2\n", result.stdout);
     _ = try Lower.lower(allocator, compilation.ir);
+}
+
+test "ARM64 release preserves pointer-backed ECS component stores" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/ECS");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/ComponentStore.sx",
+        .data =
+        \\intrinsic class ComponentPools {
+        \\    func insert<T>(value:T)
+        \\    func has<T>() bool
+        \\    func get<T>() @T
+        \\    func get_mut<T>() &T
+        \\    func try_get<T>() @T?
+        \\    func try_get_mut<T>() &T?
+        \\    func remove<T>() T?
+        \\    func clear()
+        \\}
+        \\public struct ComponentStore {
+        \\    private var resources:ComponentPools
+        \\    private var kinds:int[]
+        \\    init() { self.resources = ComponentPools(); self.kinds = [] }
+        \\    func insert<T>(value:T) { self.resources.insert(value); self.kinds.append(1) }
+        \\    func get<T>() @self:T { return self.resources.get<T>() }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.ECS.ComponentStore.ComponentStore
+        \\struct Bucket { let id:int; var values:int[] }
+        \\func sample() int {
+        \\    var store = ComponentStore()
+        \\    store.insert(Bucket(id:40, values:[2]))
+        \\    let bucket = store.get<Bucket>()
+        \\    return bucket.id + bucket.values[0]
+        \\}
+        \\func main() {}
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const function = for (compilation.ir.functions, 0..) |candidate, index| {
+        if (std.mem.eql(u8, candidate.name, "GFX.Smokes.Main.sample")) break @as(Ir.FunctionId, @intCast(index));
+    } else return error.TestUnexpectedResult;
+    const machine = try Lower.lowerWithMode(allocator, compilation.ir, .release);
+    const result = try Runner.invoke(allocator, machine, function, &.{});
+    try std.testing.expectEqual(@as(@TypeOf(result.status), .success), result.status);
+    try std.testing.expectEqual(@as(i64, 42), result.value);
 }
 
 test "invalidated resource aliases refuse every operation and lower to native code" {

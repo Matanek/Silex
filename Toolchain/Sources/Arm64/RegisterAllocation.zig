@@ -127,14 +127,15 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             for (0..parameter.width) |leaf| {
                 touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
             }
-        } else if (parameter.aggregate) {
-            // Aggregate arguments arrive through a stable ABI pointer. Let
-            // scalar leaves participate in coloring; operations that need the
-            // aggregate's address or whole storage pin them again below.
+        } else if (parameter.aggregate and aggregateParameterCanRemainResident(parameter, has_calls, float_slots)) {
+            // The proven fast path is deliberately narrow: a call-free,
+            // float-only aggregate can be consumed leaf by leaf without
+            // exposing or forwarding its pointer-backed storage. Resource and
+            // mixed aggregates retain their stable stack representation.
             for (0..parameter.width) |leaf| {
                 touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
             }
-        } else if (parameter.width != 1) {
+        } else if (parameter.aggregate or parameter.width != 1) {
             forceSpan(parameter, forced);
         } else touch(parameter.start, 0, first, last, weights, 1);
     }
@@ -1177,6 +1178,14 @@ fn forceSpan(span: Machine.Span, forced: []bool) void {
     for (0..span.width) |leaf| forced[@as(usize, span.start) + leaf] = true;
 }
 
+fn aggregateParameterCanRemainResident(parameter: Machine.Span, has_calls: bool, float_slots: []const bool) bool {
+    if (has_calls or parameter.width == 0) return false;
+    for (0..parameter.width) |leaf| {
+        if (!float_slots[@as(usize, parameter.start) + leaf]) return false;
+    }
+    return true;
+}
+
 fn visit(
     instruction: Machine.Instruction,
     index: usize,
@@ -1609,6 +1618,32 @@ test "addressed aggregate parameter leaves remain stack resident" {
     defer std.testing.allocator.free(result.float_residences);
     defer std.testing.allocator.free(result.float_lane_residences);
     for (0..4) |slot| {
+        try std.testing.expectEqual(@as(?u5, null), result.residences[slot]);
+        try std.testing.expectEqual(@as(?u5, null), result.float_residences[slot]);
+        try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[slot]);
+    }
+}
+
+test "pointer-backed non-float aggregate parameter leaves remain stack resident" {
+    const instructions = [_]Machine.Instruction{
+        .{ .binary = .{ .result = 3, .operator = .add, .left = 0, .right = 1, .type = .int } },
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 3, .right = 2, .type = .int } },
+        .{ .return_value = .{ .start = 4, .width = 1 } },
+    };
+    const function: Machine.Function = .{
+        .name = "resource_like_aggregate_parameter",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 3, .aggregate = true }},
+        .return_type = .int,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+    for (0..3) |slot| {
         try std.testing.expectEqual(@as(?u5, null), result.residences[slot]);
         try std.testing.expectEqual(@as(?u5, null), result.float_residences[slot]);
         try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[slot]);
