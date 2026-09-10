@@ -406,6 +406,7 @@ pub const Parser = struct {
             .position = position,
             .name_position = position,
             .name = name,
+            .type_parameters = self.type_parameters,
             .parameters = try parameters.toOwnedSlice(self.allocator),
             .return_type = return_type,
             .statements = try self.parseBlock(),

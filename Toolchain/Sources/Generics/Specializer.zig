@@ -849,6 +849,17 @@ pub const Specializer = struct {
                     try self.instantiateStructure(base, type_arguments, expression.position);
                 break :value .{ .identifier = self.typeName(specialized) };
             },
+            .identifier => |name| value: {
+                if (arguments.len != 0) {
+                    for (self.source.functions) |function| {
+                        if (!function.is_anonymous or !functionNameMatches(function.name, name) or
+                            !samePosition(function.position, expression.position) or
+                            function.type_parameters.len != arguments.len) continue;
+                        break :value .{ .identifier = try self.instantiate(function, arguments, expression.position) };
+                    }
+                }
+                break :value expression.value;
+            },
             else => expression.value,
         };
         return result;
