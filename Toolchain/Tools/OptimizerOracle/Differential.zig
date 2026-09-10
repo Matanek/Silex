@@ -29,7 +29,19 @@ pub fn verifyPathWithOptions(
     options: Silex.ReleaseOptimizer.Options,
 ) !Result {
     var compiler = Silex.Project.Compiler.init(allocator, io);
-    const compilation = try compiler.compile(source_path);
+    const compilation = compiler.compile(source_path) catch |err| {
+        if (compiler.diagnostic) |diagnostic| {
+            std.debug.print("{s}:{d}:{d}: optimizer differential compile error: {s}\n", .{
+                compiler.diagnosticPath(source_path),
+                diagnostic.position.line,
+                diagnostic.position.column,
+                diagnostic.message,
+            });
+        } else {
+            std.debug.print("optimizer differential compile error for {s}: {t}\n", .{ source_path, err });
+        }
+        return err;
+    };
     return verifyIr(allocator, compilation.ir, compilation.boundaries, options);
 }
 

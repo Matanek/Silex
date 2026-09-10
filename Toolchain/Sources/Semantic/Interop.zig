@@ -774,7 +774,7 @@ fn mathFunctionAvailable(library: []const u8, name: []const u8, parameters: []co
 fn systemMathProvider(self: anytype, external: Ast.ExternalFunction) bool {
     const packages = self.packages orelse return false;
     const target = self.target orelse return false;
-    if (!std.mem.eql(u8, target.name(), "macos-arm64")) return false;
+    if (target.platform != .macos) return false;
     const provider = packages.boundaryProvider(external.owner, external.library) orelse return false;
     return provider.archive == null and provider.requires.len == 0 and
         provider.frameworks.len == 0 and provider.libraries.len == 1 and

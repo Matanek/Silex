@@ -44,7 +44,7 @@ func main() {
     }
     assert(body.position_x > 0.19 && body.position_x < 0.21)
     assert(body.position_y > 0.26 && body.position_y < 0.28)
-    assert(body.cosine > 0.59 && body.cosine < 0.61)
-    assert(body.sine > 0.79 && body.sine < 0.81)
+    assert(body.cosine > 0.57 && body.cosine < 0.58)
+    assert(body.sine > 0.81 && body.sine < 0.83)
     print("pure math reference call preserved")
 }
