@@ -1,0 +1,6 @@
+1/5 FloatMemoryProbe.test_0...OK
+2/5 X64.RegisterAllocation.test.X64 scalar floats retain temporaries but pin call and addressed values...OK
+3/5 X64.RegisterAllocation.test.X64 scalar floats cross stack copies while every input and output leaf stays pinned...OK
+4/5 Arm64.RegisterAllocation.test_0...OK
+5/5 Arm64.MemoryResidence.test_0...OK
+All 5 tests passed.

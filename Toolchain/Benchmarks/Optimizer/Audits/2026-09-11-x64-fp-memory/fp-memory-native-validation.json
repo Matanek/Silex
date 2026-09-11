@@ -1,0 +1,194 @@
+[
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-macos-arm64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-macos-arm64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-macos-x64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-macos-x64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-linux-arm64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-linux-arm64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-linux-x64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-linux-x64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-windows-arm64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-windows-arm64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-windows-x64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-windows-x64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": ""
+  }
+]

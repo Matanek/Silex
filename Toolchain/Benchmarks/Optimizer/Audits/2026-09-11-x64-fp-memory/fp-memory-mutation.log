@@ -1,0 +1,14 @@
+1/5 FloatMemoryProbe.test_0...OK
+2/5 X64.RegisterAllocation.test.X64 scalar floats retain temporaries but pin call and addressed values...OK
+3/5 X64.RegisterAllocation.test.X64 scalar floats cross stack copies while every input and output leaf stays pinned...FAIL (TestUnexpectedResult)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:615:14: 0x10249985b in expect (root)
+    if (!ok) return error.TestUnexpectedResult;
+             ^
+/private/tmp/silex-part03-evidence/FpMemoryMutationSources/X64/RegisterAllocation.zig:896:9: 0x10249a0c7 in test.X64 scalar floats cross stack copies while every input and output leaf stays pinned (root)
+        try std.testing.expect(residences[0] != null);
+        ^
+4/5 Arm64.RegisterAllocation.test_0...OK
+5/5 Arm64.MemoryResidence.test_0...OK
+4 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/2d2d998dfa9debe380af3f6904212c57/root --seed=0x52feee41

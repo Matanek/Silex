@@ -1,0 +1,67 @@
+{
+  "yaml": true,
+  "bash_bodies": [
+    [
+      "macos-x64",
+      1
+    ],
+    [
+      "macos-x64",
+      2
+    ],
+    [
+      "optimizer-x64",
+      2
+    ],
+    [
+      "optimizer-x64",
+      3
+    ],
+    [
+      "optimizer-x64",
+      4
+    ],
+    [
+      "optimizer-x64",
+      5
+    ],
+    [
+      "optimizer-x64",
+      7
+    ],
+    [
+      "optimizer-x64",
+      8
+    ],
+    [
+      "linux-arm64",
+      1
+    ],
+    [
+      "linux-arm64",
+      2
+    ],
+    [
+      "linux-arm64",
+      3
+    ],
+    [
+      "linux-x64",
+      2
+    ],
+    [
+      "linux-x64",
+      3
+    ],
+    [
+      "windows-arm64-build",
+      1
+    ],
+    [
+      "windows-arm64-build",
+      2
+    ]
+  ],
+  "fixture_jobs": 5,
+  "powershell": "manually inspected; native execution pending"
+}

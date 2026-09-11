@@ -1,0 +1,32 @@
+[
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-macos-arm64-debug"
+    ],
+    "compile_exit": 1,
+    "compile_output": "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx:9:18: error: operator '+=' does not accept 'float' and 'float64'\n"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/fp-memory-macos-x64-debug"
+    ],
+    "compile_exit": 1,
+    "compile_output": "/private/tmp/silex-part03-evidence/FloatMemoryFixture/Main.sx:9:18: error: operator '+=' does not accept 'float' and 'float64'\n"
+  }
+]

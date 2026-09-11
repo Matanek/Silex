@@ -1,0 +1,10 @@
+{
+  "compiler_sha256": "ed4cf646c0977bce791c545aa55b9f0bfebcbba1015f7addb18b5b7812f5f6fc",
+  "baseline": "225ba12f8d8b4f2e434c0ae18bd0b6269c909373",
+  "full_gate": "49/49; 2158 tests; 183 language",
+  "optimizer_gate": "31/31; 74 oracle tests; 53 fixed + 8 generated; 64 integer failures; 43 conversions",
+  "robustness": "144 pairs; 5 triplets; 41 native; 4 negative; cache and graph stress pass",
+  "mutation": "FP stack barrier restored: 1 structural failure; positive 5/5",
+  "native_fixture": "12 emissions; four local executions; seven true lines each",
+  "performance": "Not yet measured on physical Intel"
+}
