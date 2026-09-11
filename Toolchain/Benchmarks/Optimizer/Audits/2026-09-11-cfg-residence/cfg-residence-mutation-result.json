@@ -1,0 +1,7 @@
+{
+  "mutation": "restore pre-CFG ARM64 allocation and liveness in independent source tree",
+  "expected_failure": "allocation has zero residences instead of ten slots",
+  "exit": 1,
+  "detected": true,
+  "initial_test_note": "Initial assertion indexed an empty result and aborted; explicit length assertion now reports ordinary test failure."
+}

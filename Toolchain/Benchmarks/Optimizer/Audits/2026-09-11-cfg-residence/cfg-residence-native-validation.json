@@ -1,0 +1,74 @@
+[
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "compile": 0,
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\n",
+    "execution": "physical ARM64"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "compile": 0,
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\n",
+    "execution": "physical ARM64"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "compile": 0,
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\n",
+    "execution": "Rosetta"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "compile": 0,
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\n",
+    "execution": "Rosetta"
+  },
+  {
+    "target": "linux-arm64",
+    "mode": "debug",
+    "compile": 0
+  },
+  {
+    "target": "linux-arm64",
+    "mode": "release",
+    "compile": 0
+  },
+  {
+    "target": "linux-x64",
+    "mode": "debug",
+    "compile": 0
+  },
+  {
+    "target": "linux-x64",
+    "mode": "release",
+    "compile": 0
+  },
+  {
+    "target": "windows-arm64",
+    "mode": "debug",
+    "compile": 0
+  },
+  {
+    "target": "windows-arm64",
+    "mode": "release",
+    "compile": 0
+  },
+  {
+    "target": "windows-x64",
+    "mode": "debug",
+    "compile": 0
+  },
+  {
+    "target": "windows-x64",
+    "mode": "release",
+    "compile": 0
+  }
+]

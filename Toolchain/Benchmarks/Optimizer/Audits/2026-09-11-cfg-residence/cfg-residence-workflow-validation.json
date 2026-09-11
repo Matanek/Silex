@@ -1,0 +1,6 @@
+{
+  "yaml": true,
+  "bash_bodies": 15,
+  "loop_exit_fixture_jobs": 5,
+  "powershell": "manual inspection; native remote execution pending"
+}

@@ -1,0 +1,17 @@
+{
+  "arithmetic": {
+    "before_sha256": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
+    "after_sha256": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
+    "identical": true
+  },
+  "objects": {
+    "before_sha256": "6a283d65f140dc97932e86dd75ddec8b29eab03d1b068b86bd992c42e9b06ff3",
+    "after_sha256": "357dfaccf8f349090307261caa4e377b7bdae459d45d7587ba25f3830eb2be51",
+    "identical": false
+  },
+  "flocking": {
+    "before_sha256": "cda996604e707451cd4c2cfc855e741d9df9a42bebbc9c773e34d1def4b528e7",
+    "after_sha256": "cda996604e707451cd4c2cfc855e741d9df9a42bebbc9c773e34d1def4b528e7",
+    "identical": true
+  }
+}

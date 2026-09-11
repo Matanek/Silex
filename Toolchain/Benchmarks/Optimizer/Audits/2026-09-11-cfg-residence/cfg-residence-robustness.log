@@ -1,0 +1,38 @@
+optimizer oracle: unknown command 'robustness'
+
+Usage: zig build optimizer-oracle -- <command> [options]
+
+Commands:
+  audit               Validate coverage, baselines, passes and LLVM pins
+  coverage-audit      Audit bounded evidence and LLVM bridge coverage without packages
+  coverage-scan       Probe raw/Release LLVM emission for every registered case
+  verify              Compare raw and Release IR through the interpreter
+  passes              List the stable Release pass registry
+  verify-prefix PASS  Verify the corpus through one Release pass
+  verify-without PASS Verify the corpus with exactly one pass disabled
+  cache-proof         Compare cold, primed and warm Release artifacts
+  metamorphic        Qualify equivalent source-shape variants
+  hot-budget SOURCE FUNCTION
+                      Profile one real Release function through ARM64 lowering
+  compare [samples]   Compare Silex Release with LLVM -O3 (default: 11)
+  fuzz [count] [seed] Generate deterministic typed numeric programs
+  fuzz-llvm [count] [seed]
+                      Execute generated programs through LLVM (default: 16)
+  qualify [count] [seed]
+                      Verify native Debug/Release regressions and generated scenarios
+  robustness-quick    Execute all pairwise/triplet sources with sampled native modes
+  robustness-qualified
+                      Execute all pairwise/triplet sources and one native case per pair
+  robustness-soak [rounds] [seed]
+                      Repeat the adversarial plan across deterministic seed windows
+  admission-audit     Validate the permanent optimizer impact matrix
+  admission-impact PATH...
+                      List the checks required by changed repository paths
+  admission-plan PATH...
+                      List the union of checks for a multi-commit range
+  admission-quick     Run the autonomous per-commit optimizer admission gate
+  gate                Run the complete optimizer qualification before integration
+  parity-audit        Refuse open coverage or LLVM-transposition gaps
+  parity-gate         Run the blocking closure and statistically qualified comparison
+
+LLVM is a development oracle only. The Silex compiler never consumes its output.

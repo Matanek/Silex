@@ -1,0 +1,881 @@
+{
+  "name": "calculate",
+  "source_position": {
+    "offset": 347,
+    "line": 29,
+    "column": 6,
+    "file": 0
+  },
+  "parameter_count": 1,
+  "parameters": [
+    {
+      "start": 0,
+      "width": 1,
+      "aggregate": false
+    }
+  ],
+  "capture_parameters": [],
+  "return_type": "int",
+  "return_width": 1,
+  "return_aggregate": false,
+  "recoverable_entry_result": false,
+  "hidden_return_slot": null,
+  "slot_count": 45,
+  "frame_size": 368,
+  "reuses_slots": false,
+  "register_slots": [],
+  "stack_slot_base": 0,
+  "float_register_slots": [],
+  "float_lane_slots": [],
+  "float_lane_groups": [],
+  "instructions": [
+    {
+      "constant_int": {
+        "result": 1,
+        "bits": 0,
+        "type": "int"
+      }
+    },
+    {
+      "class_init": {
+        "result": 2,
+        "structure": 2,
+        "fields": [
+          {
+            "start": 1,
+            "width": 1,
+            "aggregate": false
+          }
+        ]
+      }
+    },
+    {
+      "class_retain": {
+        "operand": 2,
+        "ownership": "root"
+      }
+    },
+    {
+      "copy": {
+        "result": 42,
+        "operand": 2
+      }
+    },
+    {
+      "constant_int": {
+        "result": 3,
+        "bits": 3,
+        "type": "int"
+      }
+    },
+    {
+      "constant_int": {
+        "result": 4,
+        "bits": 5,
+        "type": "int"
+      }
+    },
+    {
+      "constant_int": {
+        "result": 5,
+        "bits": 7,
+        "type": "int"
+      }
+    },
+    {
+      "constant_int": {
+        "result": 6,
+        "bits": 11,
+        "type": "int"
+      }
+    },
+    {
+      "list_init": {
+        "result": 7,
+        "values": [
+          {
+            "start": 3,
+            "width": 1,
+            "aggregate": false
+          },
+          {
+            "start": 4,
+            "width": 1,
+            "aggregate": false
+          },
+          {
+            "start": 5,
+            "width": 1,
+            "aggregate": false
+          },
+          {
+            "start": 6,
+            "width": 1,
+            "aggregate": false
+          }
+        ],
+        "element_width": 1,
+        "element_stride": 8
+      }
+    },
+    {
+      "constant_int": {
+        "result": 8,
+        "bits": 0,
+        "type": "int"
+      }
+    },
+    {
+      "copy": {
+        "result": 39,
+        "operand": 8
+      }
+    },
+    {
+      "jump": 12
+    },
+    {
+      "binary": {
+        "result": 9,
+        "operator": "less",
+        "left": 39,
+        "right": 0,
+        "type": "int",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "branch": {
+        "condition": 9,
+        "then_instruction": 14,
+        "else_instruction": 19
+      }
+    },
+    {
+      "constant_int": {
+        "result": 10,
+        "bits": 2,
+        "type": "int"
+      }
+    },
+    {
+      "binary": {
+        "result": 11,
+        "operator": "remainder",
+        "left": 39,
+        "right": 10,
+        "type": "int",
+        "checked": false,
+        "left_non_negative": true
+      }
+    },
+    {
+      "constant_int": {
+        "result": 12,
+        "bits": 0,
+        "type": "int"
+      }
+    },
+    {
+      "binary": {
+        "result": 13,
+        "operator": "equal",
+        "left": 11,
+        "right": 12,
+        "type": "int",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "branch": {
+        "condition": 13,
+        "then_instruction": 25,
+        "else_instruction": 32
+      }
+    },
+    {
+      "copy": {
+        "result": 24,
+        "operand": 42
+      }
+    },
+    {
+      "class_load": {
+        "result": {
+          "start": 40,
+          "width": 1,
+          "aggregate": false
+        },
+        "base": 24,
+        "byte_offset": 0
+      }
+    },
+    {
+      "aggregate_init": {
+        "result": {
+          "start": 25,
+          "width": 1,
+          "aggregate": true
+        },
+        "fields": [
+          {
+            "start": 40,
+            "width": 1,
+            "aggregate": false
+          }
+        ]
+      }
+    },
+    {
+      "protocol_init": {
+        "result": {
+          "start": 26,
+          "width": 2,
+          "aggregate": true
+        },
+        "operand": {
+          "start": 25,
+          "width": 1,
+          "aggregate": true
+        },
+        "structure": 1,
+        "class_operand": false
+      }
+    },
+    {
+      "protocol_test": {
+        "result": 28,
+        "operand": 26,
+        "structure": 1
+      }
+    },
+    {
+      "branch": {
+        "condition": 28,
+        "then_instruction": 41,
+        "else_instruction": 41
+      }
+    },
+    {
+      "copy": {
+        "result": 14,
+        "operand": 42
+      }
+    },
+    {
+      "collection_count": {
+        "result": 15,
+        "collection": {
+          "start": 7,
+          "width": 1,
+          "aggregate": false
+        },
+        "view": false
+      }
+    },
+    {
+      "binary": {
+        "result": 16,
+        "operator": "remainder",
+        "left": 39,
+        "right": 15,
+        "type": "int",
+        "checked": true,
+        "left_non_negative": true
+      }
+    },
+    {
+      "collection_load": {
+        "result": {
+          "start": 17,
+          "width": 1,
+          "aggregate": false
+        },
+        "collection": {
+          "start": 7,
+          "width": 1,
+          "aggregate": false
+        },
+        "index": 16,
+        "count": 0,
+        "dynamic": true,
+        "view": false,
+        "checked": true,
+        "element_stride": 8,
+        "header": 4,
+        "tail": 5,
+        "forwarded_function": null
+      }
+    },
+    {
+      "call": {
+        "result": {
+          "start": 18,
+          "width": 1,
+          "aggregate": false
+        },
+        "function": 4,
+        "arguments": [
+          {
+            "start": 14,
+            "width": 1,
+            "aggregate": false
+          },
+          {
+            "start": 17,
+            "width": 1,
+            "aggregate": false
+          }
+        ],
+        "result_forwarded": false
+      }
+    },
+    {
+      "copy": {
+        "result": 42,
+        "operand": 18
+      }
+    },
+    {
+      "jump": 37
+    },
+    {
+      "copy": {
+        "result": 19,
+        "operand": 42
+      }
+    },
+    {
+      "constant_int": {
+        "result": 20,
+        "bits": 1,
+        "type": "int"
+      }
+    },
+    {
+      "call": {
+        "result": {
+          "start": 21,
+          "width": 1,
+          "aggregate": false
+        },
+        "function": 4,
+        "arguments": [
+          {
+            "start": 19,
+            "width": 1,
+            "aggregate": false
+          },
+          {
+            "start": 20,
+            "width": 1,
+            "aggregate": false
+          }
+        ],
+        "result_forwarded": false
+      }
+    },
+    {
+      "copy": {
+        "result": 42,
+        "operand": 21
+      }
+    },
+    {
+      "jump": 37
+    },
+    {
+      "constant_int": {
+        "result": 22,
+        "bits": 1,
+        "type": "int"
+      }
+    },
+    {
+      "binary": {
+        "result": 23,
+        "operator": "add",
+        "left": 39,
+        "right": 22,
+        "type": "int",
+        "checked": false,
+        "left_non_negative": false
+      }
+    },
+    {
+      "copy": {
+        "result": 39,
+        "operand": 23
+      }
+    },
+    {
+      "jump": 12
+    },
+    {
+      "copy_range": {
+        "result": {
+          "start": 29,
+          "width": 2,
+          "aggregate": true
+        },
+        "operand": {
+          "start": 26,
+          "width": 2,
+          "aggregate": true
+        }
+      }
+    },
+    {
+      "protocol_test": {
+        "result": 33,
+        "operand": 29,
+        "structure": 1
+      }
+    },
+    {
+      "branch": {
+        "condition": 33,
+        "then_instruction": 47,
+        "else_instruction": 44
+      }
+    },
+    {
+      "copy_range": {
+        "result": {
+          "start": 35,
+          "width": 2,
+          "aggregate": true
+        },
+        "operand": {
+          "start": 31,
+          "width": 2,
+          "aggregate": true
+        }
+      }
+    },
+    {
+      "protocol_test": {
+        "result": 37,
+        "operand": 35,
+        "structure": 1
+      }
+    },
+    {
+      "branch": {
+        "condition": 37,
+        "then_instruction": 51,
+        "else_instruction": 51
+      }
+    },
+    {
+      "protocol_extract": {
+        "result": {
+          "start": 34,
+          "width": 1,
+          "aggregate": true
+        },
+        "operand": {
+          "start": 29,
+          "width": 2,
+          "aggregate": true
+        }
+      }
+    },
+    {
+      "copy": {
+        "result": 41,
+        "operand": 34
+      }
+    },
+    {
+      "protocol_init": {
+        "result": {
+          "start": 31,
+          "width": 2,
+          "aggregate": true
+        },
+        "operand": {
+          "start": 34,
+          "width": 1,
+          "aggregate": true
+        },
+        "structure": 1,
+        "class_operand": false
+      }
+    },
+    {
+      "jump": 44
+    },
+    {
+      "list_drop": {
+        "operand": 7,
+        "ownership": "root",
+        "deallocate": false
+      }
+    },
+    {
+      "copy": {
+        "result": 38,
+        "operand": 42
+      }
+    },
+    {
+      "class_drop": {
+        "operand": 38,
+        "ownership": "root",
+        "skip_cycle": false,
+        "static_type": 2,
+        "plans": [
+          {
+            "structure": 2,
+            "byte_count": 40,
+            "functions": [
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "return_value": {
+        "start": 41,
+        "width": 1,
+        "aggregate": false
+      }
+    }
+  ],
+  "instruction_positions": [
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    },
+    {
+      "offset": 347,
+      "line": 29,
+      "column": 6,
+      "file": 0
+    }
+  ]
+}

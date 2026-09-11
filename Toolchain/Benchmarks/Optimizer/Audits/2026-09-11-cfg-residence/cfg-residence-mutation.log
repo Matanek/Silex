@@ -1,0 +1,17 @@
+1/5 LoopExitProbe.test_0...OK
+2/5 Arm64.LoopExitResidenceTests.test.loop exit layout keeps dead-on-exit indices resident and crossing sums pinned...thread 22190438 panic: index out of bounds: index 2, len 0
+/private/tmp/silex-part03-evidence/CfgMutationSources/Arm64/LoopExitResidenceTests.zig:41:49: 0x104fbce73 in test.loop exit layout keeps dead-on-exit indices resident and crossing sums pinned (root)
+    try std.testing.expect(allocation.residences[2] != null);
+                                                ^
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/compiler/test_runner.zig:291:25: 0x104f5bd1f in mainTerminal (root)
+        if (test_fn.func()) |_| {
+                        ^
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/compiler/test_runner.zig:73:28: 0x104f5b7fb in main (root)
+        return mainTerminal(init);
+                           ^
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/start.zig:699:88: 0x104f595a3 in callMain (root)
+    if (fn_info.params[0].type.? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                       ^
+???:?:?: 0x1878a04e3 in start (/usr/lib/dyld)
+error: the following test command terminated with signal ABRT:
+.zig-cache/o/38874176ffcd20e5f044f7bb08cfdcd1/root --seed=0x18ce884f
