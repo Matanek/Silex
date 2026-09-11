@@ -2,10 +2,11 @@ const std = @import("std");
 const Ir = @import("../Ir.zig");
 
 const Key = struct {
-    kind: enum { binary, field },
+    kind: enum { binary, field, reference_field },
     type: Ir.Type,
     left: Ir.ValueId,
     right: usize,
+    structure: usize = 0,
     operator: Ir.BinaryOperator = .add,
     checked: bool = false,
     left_non_negative: bool = false,
@@ -13,10 +14,11 @@ const Key = struct {
 const Location = struct { block: usize, value: Ir.ValueId };
 
 // This bounded global value numbering accepts only functions without calls,
-// writes to addressable values, address formation or resource operations.
+// writes to addressable values, local address formation or resource operations.
 // Ordered scalar output does not mutate those values. Aggregate reads
 // must project a stable value parameter, never a class, collection or local
-// home. A replacement stays below an existing dominating evaluation.
+// home. Scalar reference reads may project a stable address parameter in this
+// same read-only region. A replacement stays below a dominating evaluation.
 pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
     if (function.blocks.len < 2) return function;
     for (function.blocks) |block| for (block.instructions) |instruction| {
@@ -24,10 +26,15 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
     };
     const definitions = try allocator.alloc(usize, function.value_types.len);
     @memset(definitions, 0);
+    const projections = try allocator.alloc(?Ir.Instruction.ReferenceField, function.value_types.len);
+    @memset(projections, null);
     const parameter_count = function.parameter_types.len + function.capture_types.len;
     for (0..parameter_count) |value| definitions[value] += 1;
     for (function.blocks) |block| for (block.instructions) |instruction| {
-        if (instruction != .local_store) {
+        if (instruction == .reference_field) projections[instruction.reference_field.result] = instruction.reference_field;
+        if (instruction == .local_store) {
+            definitions[instruction.local_store.local] += 1;
+        } else {
             const result: ?Ir.ValueId = switch (instruction) {
                 inline else => |value| if (@TypeOf(value) == void) null else if (@hasField(@TypeOf(value), "result")) value.result else null,
             };
@@ -72,6 +79,7 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
             const result: Ir.ValueId = switch (instruction.*) {
                 .binary => |value| value.result,
                 .field_load => |value| value.result,
+                .reference_load => |value| value.result,
                 else => continue,
             };
             if (definitions[result] != 1 or !scalar(function.value_types[result])) continue;
@@ -87,6 +95,17 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
                     if (structure >= program.structures.len or program.structures[structure].is_class or
                         program.structures[structure].is_static or program.structures[structure].collection != null) continue;
                     break :blk .{ .kind = .field, .type = function.value_types[result], .left = load.base, .right = load.field };
+                },
+                .reference_load => |load| blk: {
+                    if (definitions[load.reference] != 1) continue;
+                    const field = projections[load.reference] orelse continue;
+                    if (field.reference >= parameter_count or definitions[field.reference] != 1 or
+                        function.value_types[field.reference] != .address or
+                        field.structure >= program.structures.len) continue;
+                    const structure = program.structures[field.structure];
+                    if (structure.is_class or structure.is_static or structure.collection != null or
+                        field.field >= structure.fields.len or structure.fields[field.field].type != function.value_types[result]) continue;
+                    break :blk .{ .kind = .reference_field, .type = function.value_types[result], .left = field.reference, .right = field.field, .structure = field.structure };
                 },
                 else => unreachable,
             };
@@ -122,6 +141,8 @@ fn readOnly(program: Ir.Program, function: Ir.Function, instruction: Ir.Instruct
             !program.structures[value.structure].is_class and program.structures[value.structure].collection == null,
         .deep_copy => |copy| scalar(function.value_types[copy.result]) and
             function.value_types[copy.result] == function.value_types[copy.operand],
+        .reference_field => true,
+        .reference_load => |load| scalar(function.value_types[load.result]),
         .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .local_load, .local_store, .field_load, .unary, .binary, .convert => true,
         else => false,
     };

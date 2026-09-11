@@ -87,6 +87,7 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "Regressions/DominatedReferenceReads.sx", .timing = false },
     .{ .name = "Regressions/LateScalarClosure.sx", .timing = false },
     .{ .name = "Regressions/ValueModules/Main.sx", .timing = false, .project = true },
     .{ .name = "Regressions/AggregatePreparation.sx", .timing = false },
@@ -116,6 +117,7 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{ .name = "Regressions/DominatedReferenceReads.sx", .concern = "dominated borrowed fields preserve branches, mutable aliases, signed zero, NaN and mixed scalar widths" },
     .{
         .name = "Regressions/LateScalarClosure.sx",
         .concern = "helpers exposed as scalar leaves after collection cleanup preserve loop results and checked initialization",

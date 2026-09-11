@@ -159,3 +159,46 @@ test "dominated expressions preserve ordered scalar output" {
     }
     try std.testing.expectEqual(@as(usize, 1), divisions);
 }
+
+test "dominated reference reads require stable parameters and a read-only region" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const aggregate: Ir.Structure = .{ .name = "Pair", .fields = &.{
+        .{ .name = "x", .type = .float64, .mutable = true },
+        .{ .name = "y", .type = .float64, .mutable = true },
+    } };
+    // Plain reuse, possible aliasing write, reassigned address parameter,
+    // another root, another field, a call, and conditional availability.
+    for (0..7) |variant| {
+        var middle: std.ArrayList(Ir.Instruction) = .empty;
+        switch (variant) {
+            1 => try middle.append(allocator, .{ .reference_store = .{ .reference = 1, .operand = 4 } }),
+            2 => try middle.append(allocator, .{ .local_store = .{ .local = 0, .operand = 1 } }),
+            5 => try middle.append(allocator, .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } }),
+            else => {},
+        }
+        try middle.appendSlice(allocator, &.{
+            .{ .reference_field = .{ .result = 5, .reference = if (variant == 3) 1 else 0, .structure = 0, .field = if (variant == 4) 1 else 0 } },
+            .{ .reference_load = .{ .result = 6, .reference = 5 } },
+        });
+        const function: Ir.Function = .{
+            .name = "reference_region",
+            .parameter_types = &.{ .address, .address, .bool },
+            .return_type = .float64,
+            .value_types = &.{ .address, .address, .bool, .address, .float64, .address, .float64 },
+            .blocks = &.{
+                .{ .instructions = &.{}, .terminator = if (variant == 6) .{ .branch = .{ .condition = 2, .then_block = 1, .else_block = 2 } } else .{ .jump = 1 } },
+                .{ .instructions = &.{
+                    .{ .reference_field = .{ .result = 3, .reference = 0, .structure = 0, .field = 0 } },
+                    .{ .reference_load = .{ .result = 4, .reference = 3 } },
+                }, .terminator = .{ .jump = 2 } },
+                .{ .instructions = middle.items, .terminator = .{ .return_value = 6 } },
+            },
+        };
+        const optimized = try DominatedValues.optimize(allocator, .{ .structures = &.{aggregate}, .functions = &.{function} }, function);
+        const last = optimized.blocks[2].instructions[optimized.blocks[2].instructions.len - 1];
+        try std.testing.expectEqual(variant == 0, last == .copy);
+        if (variant == 0) try std.testing.expectEqual(@as(Ir.ValueId, 4), last.copy.operand);
+    }
+}
