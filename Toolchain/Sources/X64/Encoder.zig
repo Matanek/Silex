@@ -2,6 +2,7 @@ const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const ResidenceLiveness = @import("../Arm64/ResidenceLiveness.zig");
 const Numeric = @import("../Numeric.zig");
+const IntegerArithmetic = @import("IntegerArithmetic.zig");
 const ConstantDivision = @import("../ConstantDivision.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
@@ -161,12 +162,16 @@ fn encode(
         .darwin => {
             try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
             try appendCall(allocator, &bytes, &calls, main_id);
+            // The process boundary exposes success/failure, not the internal status enum.
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 });
             try emitMoveRegister(allocator, &bytes, .rax, .rdx);
             try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
         },
         .linux => {
             if (linked) try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
             try appendCall(allocator, &bytes, &calls, main_id);
+            // The process boundary exposes success/failure, not the internal status enum.
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 });
             if (linked) {
                 try emitMoveRegister(allocator, &bytes, .rax, .rdx);
                 try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
@@ -185,6 +190,8 @@ fn encode(
                 try ExternalCalls.emitWindowsImportCall(allocator, &bytes, &windows_import_sites, .initialize_critical_section);
             }
             try appendCall(allocator, &bytes, &calls, main_id);
+            // The process boundary exposes success/failure, not the internal status enum.
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 });
             if (linked) {
                 try bytes.appendSlice(allocator, &.{ 0x89, 0xd0, 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5f, 0x5e, 0x5b, 0xc3 });
             } else try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, 40, 0x89, 0xd0, 0xc3 });
@@ -772,7 +779,7 @@ fn encodeFunction(
                     try emitImmediate(allocator, bytes, .rcx, 0x8000_0000_0000_0000);
                     try bytes.appendSlice(allocator, &.{ 0x48, 0x31, 0xc8 });
                 } else {
-                    try bytes.appendSlice(allocator, &.{ 0x48, 0xf7, 0xd8 });
+                    try IntegerArithmetic.negate(allocator, bytes, unary.type, &epilogue_fixups);
                 }
                 try emitStoreValue(allocator, bytes, function.register_slots, .rax, unary.result);
             },
@@ -780,7 +787,7 @@ fn encodeFunction(
                 if (try FloatPairs.emit(allocator, bytes, function, binary)) continue;
                 if (constantDivisionConstant(function, instruction_index, binary)) |constant| {
                     try emitConstantDivision(allocator, bytes, function, binary, constant);
-                } else try emitBinary(allocator, bytes, function.register_slots, binary);
+                } else try emitBinary(allocator, bytes, function.register_slots, binary, &epilogue_fixups);
             },
             .string_byte_at => |access| {
                 try emitLoadStack(allocator, bytes, .rax, access.operand);
@@ -1161,53 +1168,13 @@ fn emitBinary(
     bytes: *std.ArrayList(u8),
     residences: []const ?u5,
     binary: Machine.Instruction.Binary,
+    epilogue: *std.ArrayList(EpilogueFixup),
 ) Error!void {
     if (binary.type.isFloat()) return emitFloatBinary(allocator, bytes, binary);
     if (binary.type == .str) return emitStringBinary(allocator, bytes, binary);
     try emitLoadValue(allocator, bytes, residences, .rax, binary.left);
     try emitLoadValue(allocator, bytes, residences, .rcx, binary.right);
-    switch (binary.operator) {
-        .add => try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc8 }),
-        .subtract => try bytes.appendSlice(allocator, &.{ 0x48, 0x29, 0xc8 }),
-        .multiply => try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xc1 }),
-        .bit_and => try bytes.appendSlice(allocator, &.{ 0x48, 0x21, 0xc8 }),
-        .bit_xor => try bytes.appendSlice(allocator, &.{ 0x48, 0x31, 0xc8 }),
-        .shift_left, .shift_right => {
-            // Machine integers carry normalized typed bits. Constants and prior
-            // operations can nevertheless leave sign-extended bits in a 64-bit
-            // X64 register, so normalize before and after shifting. Silex right
-            // shifts are logical for signed and unsigned integer types.
-            try emitIntegerWidthMask(allocator, bytes, .rax, .rdx, binary.type.bitWidth());
-            try bytes.appendSlice(allocator, if (binary.operator == .shift_left)
-                &.{ 0x48, 0xd3, 0xe0 }
-            else
-                &.{ 0x48, 0xd3, 0xe8 });
-            try emitIntegerWidthMask(allocator, bytes, .rax, .rdx, binary.type.bitWidth());
-        },
-        .divide, .remainder => {
-            if (binary.type.isSignedInteger()) {
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x99, 0x48, 0xf7, 0xf9 });
-            } else {
-                try bytes.appendSlice(allocator, &.{ 0x31, 0xd2, 0x48, 0xf7, 0xf1 });
-            }
-            if (binary.operator == .remainder) try emitMoveRegister(allocator, bytes, .rax, .rdx);
-        },
-        .minimum, .maximum => return error.UnsupportedInstruction,
-        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
-            try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f });
-            const signed = binary.type.isSignedInteger();
-            const condition: u8 = switch (binary.operator) {
-                .less => if (signed) 0x9c else 0x92,
-                .less_equal => if (signed) 0x9e else 0x96,
-                .greater => if (signed) 0x9f else 0x97,
-                .greater_equal => if (signed) 0x9d else 0x93,
-                .equal => 0x94,
-                .not_equal => 0x95,
-                else => unreachable,
-            };
-            try bytes.appendSlice(allocator, &.{ condition, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 });
-        },
-    }
+    try IntegerArithmetic.binary(allocator, bytes, binary, epilogue);
     try emitStoreValue(allocator, bytes, residences, .rax, binary.result);
 }
 
@@ -1256,6 +1223,8 @@ fn emitAggregateEqual(
     bytes: *std.ArrayList(u8),
     value: Machine.Instruction.AggregateEqual,
 ) Error!void {
+    var epilogue: std.ArrayList(EpilogueFixup) = .empty;
+    defer epilogue.deinit(allocator);
     if (value.left.width != value.right.width) return error.InvalidMachineProgram;
     try emitImmediate(allocator, bytes, .r13, @intFromBool(value.equal));
     var mismatches: std.ArrayList(usize) = .empty;
@@ -1276,7 +1245,7 @@ fn emitAggregateEqual(
             .left = value.left.start + leaf.offset,
             .right = value.right.start + leaf.offset,
             .type = leaf.type,
-        });
+        }, &epilogue);
         try emitLoadStack(allocator, bytes, .rax, value.result);
         try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x84 });
         try mismatches.append(allocator, bytes.items.len);
@@ -3834,9 +3803,10 @@ test "encode a no-op Silex main for the X64 process and Mach-O entry contracts" 
 
     const darwin = try encodeDarwin(std.testing.allocator, .{ .functions = &functions });
     defer darwin.deinit(std.testing.allocator);
-    const darwin_entry = darwin.code[darwin.entry_offset..][0..27];
+    const darwin_entry = darwin.code[darwin.entry_offset..][0..36];
     try std.testing.expectEqualSlices(u8, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 }, darwin_entry[0..9]);
-    try std.testing.expectEqualSlices(u8, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 }, darwin_entry[17..27]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 }, darwin_entry[14..23]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 }, darwin_entry[26..36]);
     try std.testing.expect(std.mem.indexOf(u8, darwin_entry, &.{ 0x0f, 0x05 }) == null);
 
     const windows = try encodeWindows(std.testing.allocator, .{ .functions = &functions });
@@ -4265,6 +4235,8 @@ test "encode narrow X64 right shifts with typed logical semantics" {
     var bytes: std.ArrayList(u8) = .empty;
     defer bytes.deinit(std.testing.allocator);
     const residences = [_]?u5{ null, null, null };
+    var epilogue: std.ArrayList(EpilogueFixup) = .empty;
+    defer epilogue.deinit(std.testing.allocator);
     try emitBinary(std.testing.allocator, &bytes, &residences, .{
         .result = 2,
         .operator = .shift_right,
@@ -4272,12 +4244,9 @@ test "encode narrow X64 right shifts with typed logical semantics" {
         .right = 1,
         .type = .uint32,
         .checked = true,
-    });
-    const mask = &.{
-        0x48, 0xba, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
-        0x48, 0x21, 0xd0,
-    };
-    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, bytes.items, mask));
+    }, &epilogue);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, bytes.items, &.{ 0x89, 0xc0 }));
+    try std.testing.expectEqual(@as(usize, 1), epilogue.items.len);
     try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0xd3, 0xe8 }) != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0xd3, 0xf8 }) == null);
 }

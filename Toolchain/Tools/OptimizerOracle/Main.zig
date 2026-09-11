@@ -8,6 +8,7 @@ const CacheStress = @import("CacheStress.zig");
 const Differential = @import("Differential.zig");
 const Generator = @import("Generator.zig");
 const HotBudget = @import("HotBudget.zig");
+const IntegerFailures = @import("IntegerFailures.zig");
 const IrStats = @import("IrStats.zig");
 const Llvm = @import("Llvm.zig");
 const LlvmStats = @import("LlvmStats.zig");
@@ -527,6 +528,8 @@ fn qualifyNative(
             native.release_size,
         });
     }
+    const failure_count = try IntegerFailures.qualify(allocator, io, silex_binary, output_directory ++ "/integer-failures");
+    try Report.line(io, allocator, "qualified: {d} integer failures with ordered output in Debug/Release", .{failure_count});
     try qualifyGeneratedNative(io, allocator, silex_binary, generated_count, initial_seed);
     try Report.line(io, allocator, "qualified: {d} fixed regressions and {d} generated native scenarios", .{
         Generator.regressions.len,
@@ -1665,6 +1668,7 @@ test {
     _ = Differential;
     _ = Generator;
     _ = HotBudget;
+    _ = IntegerFailures;
     _ = IrStats;
     _ = Llvm;
     _ = LlvmStats;
