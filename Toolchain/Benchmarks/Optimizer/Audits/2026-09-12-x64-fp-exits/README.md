@@ -26,9 +26,10 @@ et de 176 à 166 accès pile. Il ne suffit pas à établir un gain temporel.
 Les exécutables et désassemblages exacts sont conservés.
 
 La [matrice native](https://github.com/Matanek/Silex/actions/runs/34652524590)
-et la [campagne Intel appariée](https://github.com/Matanek/Silex/actions/runs/34652525960)
-sont lancées sur ce SHA exact. Leurs verdicts ne sont pas encore disponibles
-à la création de cet audit local. Aucun gain Intel physique n’est revendiqué
-ici et la Part 03 reste active.
+est verte sur les six jobs : macOS X64, Linux X64/ARM64, Windows X64/ARM64
+et bootstrap Windows ARM64. Leurs journaux et identifiants sont joints.
+La [campagne Intel appariée](https://github.com/Matanek/Silex/actions/runs/34652525960)
+reste en cours. Aucun gain Intel physique n’est encore revendiqué ici et
+la Part 03 reste active.
 
 `manifest.json` scelle les fichiers de cette preuve, hors manifest lui-même.
