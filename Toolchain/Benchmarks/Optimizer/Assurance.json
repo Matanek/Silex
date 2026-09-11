@@ -159,11 +159,13 @@
         "ReferenceDeadStores.sx",
         "ReadonlyViewMemory.sx",
         "MutableViewMemory.sx",
-        "AggregateViewAliasing.sx"
+        "AggregateViewAliasing.sx",
+        "Regressions/KnownViewElements.sx"
       ],
       "negative_cases": [
         "ReferenceAliasing.sx",
-        "Regressions/MultipleReferenceCursors.sx"
+        "Regressions/MultipleReferenceCursors.sx",
+        "Regressions/KnownViewElements.sx"
       ],
       "passes": [
         "reference_memory_elision"
@@ -186,9 +188,9 @@
       "preconditions": "Distinct roots can alias; calls, unknown effects and control boundaries invalidate local facts.",
       "scope": "bounded-corpus",
       "open_questions": [
-        "LLVM still folds the readonly-view probe to a constant where Silex does not; cross-block effects are not generally covered."
+        "The readonly-view numeric result now folds, but allocation/lifetime cost and general cross-block effects remain unqualified; the bounded local loop timing shows no significant gain."
       ],
-      "next_experiment": "Use ReadonlyViewMemory.sx to distinguish call specialization, range information and memory forwarding.",
+      "next_experiment": "Separate scalar collection allocation, view forwarding and helper-call cost; extend cross-block facts only with alias invalidation and physical cost evidence.",
       "owner": "optimizer",
       "targets": [
         "arm64",

@@ -144,8 +144,8 @@ contracts exclude graph lookup, ownership and multi-point contact assembly.
 
 | General mechanism | Existing discriminant | Next proof and present limitation |
 | --- | --- | --- |
-| Constant and memory propagation | `ReadonlyViewMemory.sx` | LLVM folds an observed result to a constant; separate call specialization, bounds information and load forwarding |
-| Range and signedness | `BranchingLoop.sx` | Advisor observes different signed/unsigned remainder operations; compare proven nonnegative variants with overflow and negative counterexamples |
+| Constant and memory propagation | `ReadonlyViewMemory.sx`, `Regressions/KnownViewElements.sx` | Numeric view reads now fold; allocation/lifetime cost and general inter-block propagation remain open |
+| Range and signedness | `BranchingLoop.sx` | Three induction dividends already carry a nonnegative proof; advisor/LLVM signed counts omit it, so inspect target consumption before attributing a portable gap |
 | Reference helpers and target pressure | `Regressions/PureMathReferenceInlining.sx`, `Regressions/HotReferenceLeafClosure.sx` | Both execute through LLVM and cover the linear/angular caps; obtain physical X64 pressure before changing the current out-of-line policy |
 | Aggregate preparation | No autonomous full preparation reduction yet | Extract fixed/dynamic body, zero denominator, warm-start and alias variants; observe every prepared field and separate output-reduction cost |
 | Register residence and barriers | `Regressions/X64RegionalBarriers.sx`, `Regressions/X64IndirectAggregate.sx` | Structural witnesses do not replace physical X64 execution or dynamic spill measurements |
@@ -161,6 +161,22 @@ and differs from some production Physics operations. Preparation times both
 preparation and observation. Matching-slot and packed C layouts answer different
 questions. Importing those witnesses requires preserving these boundaries and
 numerical contracts; comparing whole engines alone cannot attribute the gap.
+
+## Known scalar views
+
+The [known-view audit](../Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-known-views/README.md)
+records block-local forwarding through nested, clamped and empty views, with
+alias and effect invalidation. The new regression raises the executable corpus
+to 22 cases and the source union to 54; 29 sources emit both LLVM modes. It also
+corrects the bridge's former trap on view bounds that Silex clamps.
+
+The fixed helper loses four memory operations under the enabled pass; disabling
+it restores all four. Three arithmetic checks remain. ARM64 and Rosetta X64
+Debug/Release executions agree with interpretation and LLVM. The separate
+21-pair allocation-bearing loop has a median after/before ratio of 0.999180
+and does not show a significant speedup. These proofs close a bounded numeric
+gap and preserve the wider cost questions; they do not establish general
+optimizer parity.
 
 ## Timing and qualification
 

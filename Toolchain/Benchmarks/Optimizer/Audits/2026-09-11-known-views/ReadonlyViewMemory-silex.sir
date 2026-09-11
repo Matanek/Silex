@@ -1,0 +1,32 @@
+struct @int[..] {
+}
+
+struct @int[] {
+}
+
+func @select(%0:@int[..], %1:int) -> int {
+entry:
+    %2:int = collection.load %0, %1
+    %6:int = collection.count %0
+    %7:int = const 1
+    %8:int = sub %6, %7
+    %4:int = collection.load %0, %8 bounded
+    %5:int = add %2, %4
+    return %5
+}
+
+func @main() -> void {
+entry:
+    %0:int = const 3
+    %1:int = const 5
+    %2:int = const 8
+    %3:int = const 13
+    %4:@int[] = list.init [%0, %1, %2, %3]
+    %5:int = const 0
+    %6:int = const 4
+    %7:@int[..] = collection.view %4, %5, %6
+    %15:int = const 18
+    print %15
+    list.drop %4
+    return
+}
