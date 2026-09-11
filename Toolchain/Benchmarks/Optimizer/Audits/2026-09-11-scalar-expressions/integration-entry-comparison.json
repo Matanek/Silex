@@ -1,0 +1,29 @@
+[
+  {
+    "configuration": "repeated",
+    "binary_sha256": "b722fe86a85b5e3a5b5c079529fb952afff82cd62ebf3d3fa111416a3b245a5f",
+    "scope": "first emitted function, velocity; entry through first return",
+    "instructions": 45,
+    "fmul": 7,
+    "fmadd": 6,
+    "calls": 0
+  },
+  {
+    "configuration": "shared",
+    "binary_sha256": "d7c7915c6d9461632eaed37dbf50a0c187963eb78c2cf4406020d8c4dce407f6",
+    "scope": "first emitted function, velocity; entry through first return",
+    "instructions": 44,
+    "fmul": 6,
+    "fmadd": 6,
+    "calls": 0
+  },
+  {
+    "configuration": "cse",
+    "binary_sha256": "943200b6ef946eadd0968e1a66a63c05bc69debde602f6cee479a73614fe4f1a",
+    "scope": "first emitted function, velocity; entry through first return",
+    "instructions": 44,
+    "fmul": 6,
+    "fmadd": 6,
+    "calls": 0
+  }
+]

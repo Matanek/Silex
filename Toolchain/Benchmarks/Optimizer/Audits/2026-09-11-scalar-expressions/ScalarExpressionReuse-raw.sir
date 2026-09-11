@@ -1,0 +1,181 @@
+struct @Pair {
+    var .x:float64
+    var .y:float64
+}
+
+func @product(%0:float64, %1:float64) -> float64 {
+entry:
+    %2:float64 = mul %0, %1
+    return %2
+}
+
+func @repeated(%0:float64, %1:float64) -> float64 {
+entry:
+    %2:float64 = mul %0, %1
+    %3:float64 = mul %0, %1
+    %4:float64 = add %2, %3
+    return %4
+}
+
+func @fromHelper(%0:float64, %1:float64) -> float64 {
+entry:
+    %2:float64 = call @product(%0, %1)
+    %3:float64 = call @product(%0, %1)
+    %4:float64 = add %2, %3
+    return %4
+}
+
+func @storeBetween(%0:internal address, %1:float64, %2:float64) -> void {
+entry:
+    %3:@Pair = reference.load %0
+    %4:float64 = field %3, .x
+    %5:float64 = mul %1, %2
+    %6:@Pair = reference.load %0
+    %7:float64 = field %6, .x
+    %8:float64 = field %6, .y
+    %9:@Pair = struct.init @Pair(.x=%5, .y=%8)
+    reference.store %0, %9
+    %10:@Pair = reference.load %0
+    %11:float64 = field %10, .y
+    %12:float64 = mul %1, %2
+    %13:@Pair = reference.load %0
+    %14:float64 = field %13, .y
+    %15:float64 = field %13, .x
+    %16:@Pair = struct.init @Pair(.x=%15, .y=%12)
+    reference.store %0, %16
+    return
+}
+
+func @reloadBetween(%0:internal address, %1:float64) -> void {
+entry:
+    %2:@Pair = reference.load %0
+    %3:float64 = field %2, .x
+    %4:@Pair = reference.load %0
+    %5:float64 = field %4, .x
+    %6:internal address = reference.field %0, x
+    %7:float64 = mul %5, %1
+    %8:@Pair = reference.load %0
+    %9:float64 = field %8, .x
+    %10:float64 = field %8, .y
+    %11:@Pair = struct.init @Pair(.x=%7, .y=%10)
+    reference.store %0, %11
+    %12:@Pair = reference.load %0
+    %13:float64 = field %12, .y
+    %14:@Pair = reference.load %0
+    %15:float64 = field %14, .x
+    %16:internal address = reference.field %0, x
+    %17:float64 = mul %15, %1
+    %18:@Pair = reference.load %0
+    %19:float64 = field %18, .y
+    %20:float64 = field %18, .x
+    %21:@Pair = struct.init @Pair(.x=%20, .y=%17)
+    reference.store %0, %21
+    return
+}
+
+func @checked(%0:int, %1:int) -> int {
+entry:
+    %2:int = div %0, %1
+    %3:int = div %0, %1
+    %4:int = add %2, %3
+    return %4
+}
+
+func @main() -> void {
+entry:
+    %0:float64 = const 1.5
+    %1:float64 = const 2
+    %2:float64 = call @repeated(%0, %1)
+    %3:float64 = const 6
+    %4:bool = eq %2, %3
+    print %4
+    %5:float64 = call @fromHelper(%0, %1)
+    %6:float64 = call @repeated(%0, %1)
+    %7:bool = eq %5, %6
+    print %7
+    %8:float64 = call @repeatedGeneric<float64>(%0, %1)
+    %9:float64 = call @repeated(%0, %1)
+    %10:bool = eq %8, %9
+    print %10
+    %11:float64 = const 0
+    %12:float64 = const 0
+    %13:@Pair = struct.init @Pair(.x=%11, .y=%12)
+    store $0:structure, %13
+    %14:@Pair = load $0:structure
+    %15:float64 = const 2
+    %16:float64 = const 3
+    %17:internal address = address $0:structure
+    %18:@Pair = load $0:structure
+    call @storeBetween(%17, %15, %16)
+    %19:@Pair = load $0:structure
+    %20:float64 = field %19, .x
+    %21:float64 = const 6
+    %22:bool = eq %20, %21
+    branch %22, bb1, bb2
+bb1:
+    %24:@Pair = load $0:structure
+    %25:float64 = field %24, .y
+    %26:float64 = const 6
+    %27:bool = eq %25, %26
+    %23:bool = copy %27
+    jump bb3
+bb2:
+    %23:bool = const false
+    jump bb3
+bb3:
+    print %23
+    %28:@Pair = load $0:structure
+    %29:float64 = const 2
+    %30:internal address = address $0:structure
+    %31:@Pair = load $0:structure
+    call @reloadBetween(%30, %29)
+    %32:@Pair = load $0:structure
+    %33:float64 = field %32, .x
+    %34:float64 = const 12
+    %35:bool = eq %33, %34
+    branch %35, bb4, bb5
+bb4:
+    %37:@Pair = load $0:structure
+    %38:float64 = field %37, .y
+    %39:float64 = const 24
+    %40:bool = eq %38, %39
+    %36:bool = copy %40
+    jump bb6
+bb5:
+    %36:bool = const false
+    jump bb6
+bb6:
+    print %36
+    %41:int = const 12
+    %42:int = const 3
+    %43:int = call @checked(%41, %42)
+    %44:int = const 8
+    %45:bool = eq %43, %44
+    print %45
+    %46:float = const 1
+    %47:float64 = const 0
+    %48:float64 = neg %47
+    %49:float64 = const 2
+    %50:float64 = call @repeated(%48, %49)
+    %51:float64 = convert %46 to float64
+    %52:float64 = div %51, %50
+    %53:float64 = const 0
+    %54:bool = lt %52, %53
+    print %54
+    %55:float64 = const 0
+    %56:float64 = const 1
+    %57:float64 = const 0
+    %58:float64 = div %56, %57
+    %59:float64 = call @repeated(%55, %58)
+    %60:bool = ne %59, %59
+    print %60
+    return
+}
+
+func @repeatedGeneric<float64>(%0:float64, %1:float64) -> float64 {
+entry:
+    %2:float64 = mul %0, %1
+    %3:float64 = mul %0, %1
+    %4:float64 = add %2, %3
+    return %4
+}

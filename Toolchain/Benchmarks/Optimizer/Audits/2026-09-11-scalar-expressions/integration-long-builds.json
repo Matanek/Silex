@@ -1,0 +1,45 @@
+{
+  "compiler_sha256": "27c0eba21a90e3baa9814b2b80feba610321c4e181380110d31f2a9b75466bd2",
+  "records": [
+    {
+      "kind": "repeated",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/IntegrationRepeatedLong.sx",
+        "--release",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part02-evidence/integration-repeated-long"
+      ],
+      "build_exit": 0,
+      "build_stderr": "",
+      "source_sha256": "b3f3a7f7a96643bc68cea68f9ed38e531df399f196ba788e55503d37c03a2a67",
+      "binary_sha256": "b722fe86a85b5e3a5b5c079529fb952afff82cd62ebf3d3fa111416a3b245a5f",
+      "binary_bytes": 32952,
+      "exit": 0,
+      "stdout": "true\n",
+      "stderr": ""
+    },
+    {
+      "kind": "shared",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/IntegrationSharedLong.sx",
+        "--release",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part02-evidence/integration-shared-long"
+      ],
+      "build_exit": 0,
+      "build_stderr": "",
+      "source_sha256": "6a74f99456b1efb9027651a013d28199e67b0c7f6408c1d1ee89ac10cd4e4122",
+      "binary_sha256": "d7c7915c6d9461632eaed37dbf50a0c187963eb78c2cf4406020d8c4dce407f6",
+      "binary_bytes": 32952,
+      "exit": 0,
+      "stdout": "true\n",
+      "stderr": ""
+    }
+  ]
+}

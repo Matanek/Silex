@@ -1,0 +1,1428 @@
+{
+  "name": "IntegrationRepeatedLong.velocity",
+  "source_position": {
+    "offset": 441,
+    "line": 10,
+    "column": 6,
+    "file": 1
+  },
+  "parameter_count": 3,
+  "parameters": [
+    {
+      "start": 0,
+      "width": 1,
+      "aggregate": false
+    },
+    {
+      "start": 1,
+      "width": 8,
+      "aggregate": true
+    },
+    {
+      "start": 9,
+      "width": 1,
+      "aggregate": false
+    }
+  ],
+  "capture_parameters": [],
+  "return_type": "void",
+  "return_width": 0,
+  "return_aggregate": false,
+  "recoverable_entry_result": false,
+  "hidden_return_slot": null,
+  "slot_count": 62,
+  "frame_size": 0,
+  "reuses_slots": false,
+  "register_slots": [
+    16,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    2,
+    3,
+    0,
+    4,
+    3,
+    0,
+    1,
+    0,
+    1,
+    5,
+    4,
+    1,
+    null,
+    null,
+    null,
+    2,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    2,
+    0,
+    0,
+    null,
+    null,
+    null,
+    2,
+    2,
+    0,
+    null
+  ],
+  "stack_slot_base": 0,
+  "float_register_slots": [
+    null,
+    23,
+    24,
+    25,
+    22,
+    26,
+    27,
+    null,
+    null,
+    21,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    17,
+    22,
+    18,
+    null,
+    27,
+    22,
+    18,
+    23,
+    18,
+    19,
+    20,
+    18,
+    18,
+    24,
+    18,
+    17,
+    19,
+    17,
+    19,
+    18,
+    17,
+    19,
+    18,
+    26,
+    21,
+    25,
+    21,
+    17,
+    16,
+    21,
+    null,
+    null,
+    null,
+    19,
+    17,
+    17,
+    null,
+    null,
+    null,
+    17
+  ],
+  "float_lane_slots": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+      "register": 16,
+      "lane": 0,
+      "partner": 8
+    },
+    {
+      "register": 16,
+      "lane": 1,
+      "partner": 7
+    },
+    null,
+    {
+      "register": 17,
+      "lane": 0,
+      "partner": 16
+    },
+    {
+      "register": 18,
+      "lane": 0,
+      "partner": 17
+    },
+    {
+      "register": 16,
+      "lane": 0,
+      "partner": 18
+    },
+    {
+      "register": 19,
+      "lane": 0,
+      "partner": 19
+    },
+    {
+      "register": 20,
+      "lane": 0,
+      "partner": 20
+    },
+    {
+      "register": 16,
+      "lane": 0,
+      "partner": 21
+    },
+    {
+      "register": 17,
+      "lane": 1,
+      "partner": 10
+    },
+    {
+      "register": 18,
+      "lane": 1,
+      "partner": 11
+    },
+    {
+      "register": 16,
+      "lane": 1,
+      "partner": 12
+    },
+    {
+      "register": 19,
+      "lane": 1,
+      "partner": 13
+    },
+    {
+      "register": 20,
+      "lane": 1,
+      "partner": 14
+    },
+    {
+      "register": 16,
+      "lane": 1,
+      "partner": 15
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "float_lane_groups": [
+    {
+      "slots": [
+        15,
+        21,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 25,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        14,
+        20,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 17,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        36,
+        48,
+        48,
+        17
+      ],
+      "width": 2,
+      "priority": 17,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        30,
+        36,
+        47,
+        17
+      ],
+      "width": 2,
+      "priority": 16,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        30,
+        36,
+        48,
+        17
+      ],
+      "width": 3,
+      "priority": 16,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        13,
+        19,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 9,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        28,
+        46,
+        46,
+        17
+      ],
+      "width": 2,
+      "priority": 9,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        34,
+        46,
+        48,
+        17
+      ],
+      "width": 2,
+      "priority": 9,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        28,
+        34,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 8,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        28,
+        34,
+        46,
+        17
+      ],
+      "width": 3,
+      "priority": 8,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        10,
+        11,
+        1216,
+        8190
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        10,
+        11,
+        16,
+        17
+      ],
+      "width": 4,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        10,
+        16,
+        16,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        10,
+        16,
+        17,
+        17
+      ],
+      "width": 3,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        10,
+        17,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        11,
+        16,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        11,
+        17,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        12,
+        18,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        16,
+        17,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        22,
+        24,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        27,
+        45,
+        17,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        29,
+        35,
+        46,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        29,
+        35,
+        47,
+        17
+      ],
+      "width": 3,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    },
+    {
+      "slots": [
+        35,
+        47,
+        48,
+        17
+      ],
+      "width": 2,
+      "priority": 1,
+      "recurrence": false,
+      "in_loop": false
+    }
+  ],
+  "instructions": [
+    {
+      "constant_float32": {
+        "result": 10,
+        "bits": 1065353216
+      }
+    },
+    {
+      "constant_float32": {
+        "result": 11,
+        "bits": 1065353216
+      }
+    },
+    {
+      "copy": {
+        "result": 12,
+        "operand": 7
+      }
+    },
+    {
+      "copy": {
+        "result": 18,
+        "operand": 8
+      }
+    },
+    {
+      "binary": {
+        "result": 13,
+        "operator": "multiply",
+        "left": 9,
+        "right": 12,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "binary": {
+        "result": 19,
+        "operator": "multiply",
+        "left": 9,
+        "right": 18,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "constant_float32": {
+        "result": 17,
+        "bits": 1065353216
+      }
+    },
+    {
+      "binary": {
+        "result": 14,
+        "operator": "add",
+        "left": 11,
+        "right": 13,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "binary": {
+        "result": 20,
+        "operator": "add",
+        "left": 17,
+        "right": 19,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "constant_float32": {
+        "result": 16,
+        "bits": 1065353216
+      }
+    },
+    {
+      "binary": {
+        "result": 15,
+        "operator": "divide",
+        "left": 10,
+        "right": 14,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "binary": {
+        "result": 21,
+        "operator": "divide",
+        "left": 16,
+        "right": 20,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "constant_float32": {
+        "result": 22,
+        "bits": 0
+      }
+    },
+    {
+      "copy": {
+        "result": 23,
+        "operand": 4
+      }
+    },
+    {
+      "constant_float32": {
+        "result": 24,
+        "bits": 0
+      }
+    },
+    {
+      "binary": {
+        "result": 25,
+        "operator": "greater",
+        "left": 23,
+        "right": 24,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "copy": {
+        "result": 61,
+        "operand": 22
+      }
+    },
+    {
+      "branch": {
+        "condition": 25,
+        "then_instruction": 18,
+        "else_instruction": 21
+      }
+    },
+    {
+      "copy": {
+        "result": 26,
+        "operand": 6
+      }
+    },
+    {
+      "copy": {
+        "result": 61,
+        "operand": 26
+      }
+    },
+    {
+      "jump": 21
+    },
+    {
+      "copy": {
+        "result": 27,
+        "operand": 4
+      }
+    },
+    {
+      "binary": {
+        "result": 28,
+        "operator": "multiply",
+        "left": 9,
+        "right": 27,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "copy": {
+        "result": 29,
+        "operand": 1
+      }
+    },
+    {
+      "binary": {
+        "result": 30,
+        "operator": "multiply",
+        "left": 28,
+        "right": 29,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "reference_offset": {
+        "result": 58,
+        "reference": 0,
+        "byte_offset": 0
+      }
+    },
+    {
+      "reference_load": {
+        "result": {
+          "start": 55,
+          "width": 1,
+          "aggregate": false
+        },
+        "reference": 58,
+        "scalar_type": "float32"
+      }
+    },
+    {
+      "copy": {
+        "result": 31,
+        "operand": 55
+      }
+    },
+    {
+      "binary": {
+        "result": 32,
+        "operator": "multiply",
+        "left": 15,
+        "right": 31,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "binary": {
+        "result": 33,
+        "operator": "add",
+        "left": 30,
+        "right": 32,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "reference_offset": {
+        "result": 52,
+        "reference": 0,
+        "byte_offset": 0
+      }
+    },
+    {
+      "reference_store": {
+        "reference": 52,
+        "operand": {
+          "start": 33,
+          "width": 1,
+          "aggregate": false
+        },
+        "scalar_type": "float32"
+      }
+    },
+    {
+      "binary": {
+        "result": 34,
+        "operator": "multiply",
+        "left": 9,
+        "right": 27,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "copy": {
+        "result": 35,
+        "operand": 2
+      }
+    },
+    {
+      "binary": {
+        "result": 36,
+        "operator": "multiply",
+        "left": 34,
+        "right": 35,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "copy": {
+        "result": 37,
+        "operand": 61
+      }
+    },
+    {
+      "binary": {
+        "result": 38,
+        "operator": "multiply",
+        "left": 9,
+        "right": 37,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "constant_float32": {
+        "result": 39,
+        "bits": 3240099840
+      }
+    },
+    {
+      "binary": {
+        "result": 40,
+        "operator": "multiply",
+        "left": 38,
+        "right": 39,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "binary": {
+        "result": 41,
+        "operator": "add",
+        "left": 36,
+        "right": 40,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "reference_offset": {
+        "result": 59,
+        "reference": 0,
+        "byte_offset": 8
+      }
+    },
+    {
+      "reference_load": {
+        "result": {
+          "start": 56,
+          "width": 1,
+          "aggregate": false
+        },
+        "reference": 59,
+        "scalar_type": "float32"
+      }
+    },
+    {
+      "copy": {
+        "result": 42,
+        "operand": 56
+      }
+    },
+    {
+      "binary": {
+        "result": 43,
+        "operator": "multiply",
+        "left": 15,
+        "right": 42,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "binary": {
+        "result": 44,
+        "operator": "add",
+        "left": 41,
+        "right": 43,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "reference_offset": {
+        "result": 53,
+        "reference": 0,
+        "byte_offset": 8
+      }
+    },
+    {
+      "reference_store": {
+        "reference": 53,
+        "operand": {
+          "start": 44,
+          "width": 1,
+          "aggregate": false
+        },
+        "scalar_type": "float32"
+      }
+    },
+    {
+      "copy": {
+        "result": 45,
+        "operand": 5
+      }
+    },
+    {
+      "binary": {
+        "result": 46,
+        "operator": "multiply",
+        "left": 9,
+        "right": 45,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "copy": {
+        "result": 47,
+        "operand": 3
+      }
+    },
+    {
+      "binary": {
+        "result": 48,
+        "operator": "multiply",
+        "left": 46,
+        "right": 47,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "reference_offset": {
+        "result": 60,
+        "reference": 0,
+        "byte_offset": 16
+      }
+    },
+    {
+      "reference_load": {
+        "result": {
+          "start": 57,
+          "width": 1,
+          "aggregate": false
+        },
+        "reference": 60,
+        "scalar_type": "float32"
+      }
+    },
+    {
+      "copy": {
+        "result": 49,
+        "operand": 57
+      }
+    },
+    {
+      "binary": {
+        "result": 50,
+        "operator": "multiply",
+        "left": 21,
+        "right": 49,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "binary": {
+        "result": 51,
+        "operator": "add",
+        "left": 48,
+        "right": 50,
+        "type": "float32",
+        "checked": true,
+        "left_non_negative": false
+      }
+    },
+    {
+      "reference_offset": {
+        "result": 54,
+        "reference": 0,
+        "byte_offset": 16
+      }
+    },
+    {
+      "reference_store": {
+        "reference": 54,
+        "operand": {
+          "start": 51,
+          "width": 1,
+          "aggregate": false
+        },
+        "scalar_type": "float32"
+      }
+    },
+    {
+      "return_void": {}
+    }
+  ],
+  "instruction_positions": [
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    },
+    {
+      "offset": 441,
+      "line": 10,
+      "column": 6,
+      "file": 1
+    }
+  ]
+}

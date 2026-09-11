@@ -193,6 +193,23 @@ and Release, including on the original compiler. The portable failure remains
 present; machine-quality work owns the reduced case. Its red X64 observation
 is preserved and is not counted as interpreter/native error parity.
 
+## Local scalar expression reuse
+
+The [scalar-expression audit](../Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-scalar-expressions/README.md)
+adds exact block-local value numbering for immutable numeric and boolean
+snapshots. Calls and resource releases end availability; a fresh load after a
+store remains distinct. Direct, helper and generic forms, signed zero and NaN
+agree across interpretation, native modes and LLVM O0/O3. Disabling SSA value
+simplification restores four products instead of two in the guarded helpers.
+
+The scan now covers 55 interpreter comparisons and 30 dual-mode LLVM emissions.
+The long Integration reduction falls from 248.362 ms to 231.481 ms on ARM64,
+matching an independently shared source control. One native multiplication is
+removed, with unchanged value-frame size and call count. This is a bounded
+6.8% reduction, not full-stage or physical X64 qualification. The cumulative
+known-view helper now retains two checked additions because an identical third
+evaluation shares the first result; no initial failure is removed.
+
 ## Timing and qualification
 
 `compare 11` is diagnostic. Qualified timing requires at least 21 paired samples,

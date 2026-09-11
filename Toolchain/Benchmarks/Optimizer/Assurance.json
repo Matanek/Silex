@@ -45,13 +45,16 @@
       "id": "scalar-floating-point",
       "positive_cases": [
         "FloatArithmetic.sx",
-        "Regressions/FloatSsaLoop.sx"
+        "Regressions/FloatSsaLoop.sx",
+        "Regressions/ScalarExpressionReuse.sx"
       ],
       "negative_cases": [
-        "Regressions/FloatSsaDiamond.sx"
+        "Regressions/FloatSsaDiamond.sx",
+        "Regressions/ScalarExpressionReuse.sx"
       ],
       "passes": [
-        "scalar_math_intrinsics"
+        "scalar_math_intrinsics",
+        "ssa_value_simplification"
       ],
       "ir_families": [],
       "interaction_axes": ["type", "control", "call"],
@@ -69,9 +72,9 @@
       "preconditions": "Strict floating operations; no fast-math; preserve signed zero, NaN and exact conversions.",
       "scope": "bounded-corpus",
       "open_questions": [
-        "One recurrence timing does not qualify math calls, branch selection or exceptional operands."
+        "Bounded local expression reuse covers immutable snapshots and exceptional floating values; inter-block availability, full-stage cost and physical X64 profitability remain open."
       ],
-      "next_experiment": "Add NaN/signed-zero and math-helper equivalent probes; inspect native selection and call expansion.",
+      "next_experiment": "Extend the sealed scalar-expression reduction to full-stage consumers and physical X64 while retaining call barriers and strict floating rules.",
       "owner": "optimizer",
       "targets": [
         "arm64",

@@ -1,0 +1,90 @@
+[
+  {
+    "mode": "raw",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/ScalarExpressionReuse-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/scalar-expressions-raw-O0"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "f7aa8a3e2f470eb797d2b973760471eb8a86fd52c2148f42b80dae645623c251",
+    "binary_sha256": "d17f16593f99d080a80d75d6a206d65de012ce7f6fb7cae246cb1f934a4704d9",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "mode": "raw",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/ScalarExpressionReuse-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/scalar-expressions-raw-O3"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "f7aa8a3e2f470eb797d2b973760471eb8a86fd52c2148f42b80dae645623c251",
+    "binary_sha256": "2bd2707814f81ddfafadda217dd698a7ab5c2a5d57f5e077078274d83e228b40",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "mode": "silex",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/ScalarExpressionReuse-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/scalar-expressions-silex-O0"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "ec29eb9cccf0cb8a082f1be023f6389d4e3431a73fd34f928e860dca308312a2",
+    "binary_sha256": "9f739b070ff2d6c99d6d66732740db9d2c6f77ab00052e312ef7b6dfcccdace8",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "mode": "silex",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/ScalarExpressionReuse-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/scalar-expressions-silex-O3"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "ec29eb9cccf0cb8a082f1be023f6389d4e3431a73fd34f928e860dca308312a2",
+    "binary_sha256": "55595b49b22a34dd7663d309a1a3c5f196b14163542519e5e11ee8852d848895",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  }
+]

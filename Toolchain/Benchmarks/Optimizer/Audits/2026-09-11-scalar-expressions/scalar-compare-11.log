@@ -1,0 +1,230 @@
+optimizer oracle: Silex Release versus LLVM -O3
+artifacts: .zig-cache/optimizer-oracle
+timing host: macos aarch64 on arm64, CPU Apple M3 Pro, translated=false, mode=diagnostic
+  PASS Regressions/ScalarExpressionReuse.sx
+  IR: 125 -> 96 instructions, 14 -> 14 blocks, 123 -> 171 values
+  LLVM guidance:
+    [high 89] scalar replacement of value aggregates
+      evidence: LLVM retains 0 value-aggregate operation(s); Silex retains 5.
+      action: Decompose non-escaping value aggregates into scalar leaves while preserving snapshots and observable copies.
+    [low 69] redundant conversion elimination
+      evidence: LLVM retains 0 conversion(s); Silex retains 1.
+      action: Compose consecutive conversions and remove those whose source range already fits the target.
+  size: Silex 32952 bytes, LLVM 33704 bytes
+  timing: skipped correctness probe
+  PASS Regressions/KnownViewElements.sx
+  IR: 167 -> 103 instructions, 12 -> 11 blocks, 155 -> 179 values
+  LLVM guidance:
+    [high 87] proven safety-check elimination
+      evidence: LLVM retains 8 safety guard(s); Silex retains 11.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [high 84] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 8.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 32952 bytes, LLVM 33720 bytes
+  timing: skipped correctness probe
+  PASS DampedIntegration.sx
+  IR: 386 -> 436 instructions, 55 -> 46 blocks, 351 -> 554 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 87 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 97] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 24.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 16 block(s) with 4 added PHI node(s); Silex retains 42 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 78] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 2.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 49368 bytes, LLVM 33576 bytes
+  timing: skipped correctness probe
+  PASS PreparationMasses.sx
+  IR: 1034 -> 889 instructions, 156 -> 107 blocks, 938 -> 1329 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 95 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 98] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 65.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 53 block(s) with 22 added PHI node(s); Silex retains 107 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 2 internal call(s); Silex retains 3.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 65784 bytes, LLVM 33640 bytes
+  timing: skipped correctness probe
+  PASS AggregateViewAliasing.sx
+  IR: 304 -> 410 instructions, 46 -> 32 blocks, 264 -> 457 values
+  LLVM guidance:
+    [critical 98] proven safety-check elimination
+      evidence: LLVM retains 6 safety guard(s); Silex retains 50.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 95] alias-aware reference-memory elimination
+      evidence: LLVM retains at most 24 comparable reference-memory operation(s); Silex retains 34.
+      action: Remove dead reference reads and stores without forwarding values across writes that may alias.
+    [high 84] control-flow graph simplification
+      evidence: LLVM retains 18 block(s); Silex retains 30.
+      action: Merge equivalent blocks and branches after propagation while preserving reused values.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 1.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+    [medium 70] redundant conversion elimination
+      evidence: LLVM retains 1 conversion(s); Silex retains 3.
+      action: Compose consecutive conversions and remove those whose source range already fits the target.
+  size: Silex 65784 bytes, LLVM 33608 bytes
+  timing: skipped correctness probe
+  PASS IntegerArithmetic.sx
+  IR: 22 -> 29 instructions, 5 -> 8 blocks, 19 -> 37 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  Silex Release: median 15225863 ns, MAD 1835 ppm, p10..p90 15193815..15271131 ns
+  LLVM -O3: median 17739946 ns, MAD 652 ppm, p10..p90 17728375..17817547 ns
+  relative median: Silex 85% of LLVM time
+  paired median interval: 856400..858675 ppm at 967285 ppm one-sided confidence (1000000 = parity)
+  half-window shifts: Silex 1460 ppm, LLVM 589 ppm, ratio 2211 ppm (qualified maximum 100000 ppm)
+  PASS BranchingLoop.sx
+  IR: 35 -> 48 instructions, 8 -> 14 blocks, 29 -> 61 values
+  LLVM guidance:
+    [medium 70] range and signedness analysis
+      evidence: LLVM retains 2 signed and 6 unsigned remainder operation(s); Silex retains 4 signed and 0 unsigned.
+      action: Propagate ranges, signedness, and non-negativity to select simpler operations and prove checks.
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  Silex Release: median 15270089 ns, MAD 2078 ppm, p10..p90 15235047..15340065 ns
+  LLVM -O3: median 16769773 ns, MAD 696 ppm, p10..p90 16750214..16805029 ns
+  relative median: Silex 91% of LLVM time
+  paired median interval: 908739..913179 ppm at 967285 ppm one-sided confidence (1000000 = parity)
+  half-window shifts: Silex 1689 ppm, LLVM 1003 ppm, ratio 2408 ppm (qualified maximum 100000 ppm)
+  PASS FloatArithmetic.sx
+  IR: 22 -> 34 instructions, 5 -> 8 blocks, 19 -> 35 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  Silex Release: median 10213620 ns, MAD 1566 ppm, p10..p90 10197616..10271154 ns
+  LLVM -O3: median 10272854 ns, MAD 3190 ppm, p10..p90 10237979..10357079 ns
+  relative median: Silex 99% of LLVM time
+  paired median interval: 991703..997792 ppm at 967285 ppm one-sided confidence (1000000 = parity)
+  half-window shifts: Silex 1184 ppm, LLVM 2906 ppm, ratio 2213 ppm (qualified maximum 100000 ppm)
+  PASS IntegerControlFlow.sx
+  IR: 20 -> 12 instructions, 5 -> 5 blocks, 17 -> 38 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS IntegerWidths.sx
+  IR: 9 -> 7 instructions, 2 -> 2 blocks, 10 -> 15 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  timing: skipped correctness probe
+  PASS UnsignedBitwise.sx
+  IR: 10 -> 9 instructions, 2 -> 2 blocks, 10 -> 17 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS AggregateScalarization.sx
+  IR: 72 -> 24 instructions, 6 -> 9 blocks, 67 -> 262 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33544 bytes
+  timing: skipped correctness probe
+  PASS ReferenceAliasing.sx
+  IR: 58 -> 29 instructions, 4 -> 4 blocks, 57 -> 159 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33576 bytes
+  timing: skipped correctness probe
+  PASS ReferenceDeadStores.sx
+  IR: 63 -> 15 instructions, 3 -> 3 blocks, 60 -> 93 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33544 bytes
+  timing: skipped correctness probe
+  PASS ReadonlyViewMemory.sx
+  IR: 16 -> 8 instructions, 2 -> 2 blocks, 16 -> 25 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS MutableViewMemory.sx
+  IR: 34 -> 15 instructions, 2 -> 2 blocks, 32 -> 35 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS NestedAggregateWidths.sx
+  IR: 72 -> 17 instructions, 2 -> 2 blocks, 67 -> 81 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS OwningCollectionCopy.sx
+  IR: 28 -> 14 instructions, 1 -> 1 blocks, 21 -> 21 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33480 bytes
+  timing: skipped correctness probe
+  PASS Regressions/LoopExitFloatLaneXY.sx
+  LLVM oracle: float vector width 2 (required >= 2)
+  Silex ARM64: finish has 15 native XY pair(s)
+  IR: 67 -> 90 instructions, 5 -> 8 blocks, 58 -> 122 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS Regressions/FloatLaneXYZ.sx
+  IR: 35 -> 19 instructions, 2 -> 2 blocks, 33 -> 52 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  timing: skipped correctness probe
+  PASS Regressions/LoopExitFloatLaneXYZW.sx
+  LLVM oracle: float vector width 4 (required >= 4)
+  Silex ARM64: finish has 30 native XY pair(s)
+  IR: 118 -> 160 instructions, 5 -> 8 blocks, 101 -> 249 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS Regressions/PureMathReferenceInlining.sx
+  IR: 4445 -> 7390 instructions, 939 -> 1614 blocks, 4753 -> 12141 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 21 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 6 block(s) with 5 added PHI node(s); Silex retains 19 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [critical 93] alias-aware reference-memory elimination
+      evidence: LLVM retains at most 5 comparable reference-memory operation(s); Silex retains 13.
+      action: Remove dead reference reads and stores without forwarding values across writes that may alias.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 1.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 51056 bytes, LLVM 33616 bytes
+  timing: skipped correctness probe
+  PASS Regressions/HotReferenceLeafClosure.sx
+  IR: 4796 -> 7695 instructions, 953 -> 1623 blocks, 5078 -> 12555 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 101 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 94] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 17.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 90] alias-aware reference-memory elimination
+      evidence: LLVM retains at most 43 comparable reference-memory operation(s); Silex retains 48.
+      action: Remove dead reference reads and stores without forwarding values across writes that may alias.
+    [high 86] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 24 block(s) with 6 added PHI node(s); Silex retains 28 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 78] interprocedural specialization and inlining
+      evidence: LLVM retains 1 internal call(s); Silex retains 3.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 67632 bytes, LLVM 33792 bytes
+  timing: skipped correctness probe
+machine report: .zig-cache/optimizer-oracle/report.tsv
+parity report: .zig-cache/optimizer-oracle/parity.tsv
+ordered timing observations: .zig-cache/optimizer-oracle/timing-observations.tsv
+timing profile: .zig-cache/optimizer-oracle/timing-profile.tsv
+optimizer oracle: ranked Silex optimization priorities
+  1. proven safety-check elimination (5 workloads, score 474)
+  2. interprocedural specialization and inlining (6 workloads, score 471)
+  3. loop and lane vectorization (4 workloads, score 400)
+  4. loop induction variables and PHI nodes (4 workloads, score 368)
+  5. alias-aware reference-memory elimination (3 workloads, score 278)
+  6. redundant conversion elimination (2 workloads, score 139)
+  7. scalar replacement of value aggregates (1 workloads, score 89)
+  8. control-flow graph simplification (1 workloads, score 84)
+  9. range and signedness analysis (1 workloads, score 70)
+optimization guidance: .zig-cache/optimizer-oracle/opportunities.tsv

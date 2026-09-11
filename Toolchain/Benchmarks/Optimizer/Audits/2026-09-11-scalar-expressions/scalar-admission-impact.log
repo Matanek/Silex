@@ -1,0 +1,14 @@
+CLASSIFICATION compiler-semantics-ir-runtime
+CLASSIFICATION optimizer-oracle-and-corpus
+CLASSIFICATION optimizer-documentation
+REQUIRED_CHECK optimizer-admission-quick	optimizer admission / quick	cd Toolchain && zig build check
+REQUIRED_CHECK optimizer-qualified-internal	optimizer admission / qualified internal	cd Toolchain && zig build optimizer-gate
+REQUIRED_CHECK optimizer-robustness-qualified	optimizer admission / robustness	cd Toolchain && zig build optimizer-robustness-qualified
+REQUIRED_CHECK native-portability-matrix	optimizer admission / native portability	run native-portability.yml for every affected target
+REQUIRED_CHECK external-qualification-selected	optimizer admission / external qualification	run the Silex-Benchmarks qualification selected by this matrix against the exact Silex SHA
+optimizer-admission
++- run test w
+parity registry: coverage gap 'known-gap' owned by silex-llvm-opt-02
+parity registry: required LLVM family missing: instcombine-and-simplifycfg
+failed command: ./.zig-cache/o/eeb6498f72148cef72def36cd7f0199b/test --cache-dir=./.zig-cache --seed=0xf9ef1db6 --listen=-
+
