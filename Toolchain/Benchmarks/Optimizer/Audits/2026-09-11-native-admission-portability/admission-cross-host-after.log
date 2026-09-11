@@ -1,0 +1,6 @@
+Build Summary: 4/4 steps succeeded; 177/177 tests passed
+test-lsp-admission success
++- run test 177 pass (177 total) 6s MaxRSS:15M
+   +- compile test Debug native success 47s MaxRSS:520M
+      +- options cached
+

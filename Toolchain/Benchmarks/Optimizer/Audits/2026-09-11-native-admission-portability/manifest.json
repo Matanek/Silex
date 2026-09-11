@@ -1,0 +1,94 @@
+{
+  "artifacts": [
+    {
+      "path": "41a99f1-artifacts.json",
+      "sha256": "9f8a7da22a286ba007c7af02ec02afa97b65abcf759d9ce041ccc8c560df06fb",
+      "bytes": 850
+    },
+    {
+      "path": "41a99f1-dispatch-all.json",
+      "sha256": "f3c7fc17663e9a542566884e497c9e84d98ac20a06e56ddf226d1a52e0f06c65",
+      "bytes": 82
+    },
+    {
+      "path": "41a99f1-final-jobs.json",
+      "sha256": "645a56d8a488a7d099bd9ac5470dd8923e2686f25f4151dcbd74297f1018c67f",
+      "bytes": 8021
+    },
+    {
+      "path": "41a99f1-final-run.json",
+      "sha256": "e093b9586cc816ec4bade02158968c4752d8dcfc8decda957073bde601fabb7b",
+      "bytes": 362
+    },
+    {
+      "path": "41a99f1-job-103331938471.log",
+      "sha256": "8219fb54bc60375a44a6e7d9fd2464140618057d2cb5b195e5e220323160e4a9",
+      "bytes": 19404
+    },
+    {
+      "path": "41a99f1-job-103331938804.log",
+      "sha256": "e3c173c2cc095ba20f84c3c029c3986cbb1ce5783a7e47b3d9182a703d774e80",
+      "bytes": 37074
+    },
+    {
+      "path": "41a99f1-job-103331938838.log",
+      "sha256": "d4f61fc55f8ab67752cc4fb9702747cb6e681442deda3d5ea832126038541bf1",
+      "bytes": 24932
+    },
+    {
+      "path": "41a99f1-job-103331938890.log",
+      "sha256": "2ea9229538d486a2c9af36f3fdd216fd5118781c86c215f708c31b33b039d298",
+      "bytes": 36071
+    },
+    {
+      "path": "41a99f1-job-103331938914.log",
+      "sha256": "1c6875fb9883d2e7f1e1821da0fbf973671a65c00fd567e7da97f013e5cb683c",
+      "bytes": 24322
+    },
+    {
+      "path": "41a99f1-job-103333275489.log",
+      "sha256": "c2302c30d28c15bcbf4643299aec95e9f3c4b93bd37b43e9acd17a14d579dec7",
+      "bytes": 43709
+    },
+    {
+      "path": "README.md",
+      "sha256": "4d440681c682dff774677f0b8fa6e2e227103e157f404d59e43b9970f0e3bc91",
+      "bytes": 2981
+    },
+    {
+      "path": "admission-all-targets-before.log",
+      "sha256": "3114fc405db6d4c1f7101cb9a120dcc4b0983ab359993f09cc735fb58c0d2fdf",
+      "bytes": 3448
+    },
+    {
+      "path": "admission-cross-host-after.log",
+      "sha256": "3455b497faabe932b4727ff61b9ff0dc5bddb171561bb876392e193f50eaf628",
+      "bytes": 212
+    },
+    {
+      "path": "ci-repair-final-validation.log",
+      "sha256": "bc0add607f7b26e8143d6e639b3acd32f0459874948902aae4d7682b35c45532",
+      "bytes": 23057
+    },
+    {
+      "path": "ci-repair-full-validation.log",
+      "sha256": "813f53e43e2fcef12dc84d29243a97747ac1dd406d4e46d7cdfed4f2825cfa27",
+      "bytes": 23856
+    },
+    {
+      "path": "ci-repair-lsp-isolated.log",
+      "sha256": "98c89708664c75643f3af747a02e494b68b554d5123c3fecb6e3f17dad7554b6",
+      "bytes": 207
+    },
+    {
+      "path": "ci-repair-pre-push.log",
+      "sha256": "8d80fab6f252b0f6ec95856aa127d25b17f545888b7cf24f5fcfacbf39a326b6",
+      "bytes": 239
+    },
+    {
+      "path": "ci-repair-workflow-validation.json",
+      "sha256": "a1e2b73cb5b7e3d1c490d8dbdaf8bf6c563e4945f7b9036a459414ab096f834a",
+      "bytes": 387
+    }
+  ]
+}
