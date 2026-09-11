@@ -19,6 +19,12 @@ on:
           - windows-arm64
           - windows-x64
 
+      baseline_ref:
+        description: Optional full Silex SHA for a paired optimizer-x64 baseline
+        required: false
+        type: string
+        default: ''
+
 permissions:
   contents: read
 
@@ -148,6 +154,7 @@ jobs:
           mkdir -p .zig-cache/optimizer-x64
           {
             echo "commit=$(git -C .. rev-parse HEAD)"
+            echo "bootstrap=-Doptimize=ReleaseFast -Dcpu=baseline"
             echo "system=$(uname -s)"
             echo "architecture=$(uname -m)"
             echo "os=$(sw_vers -productVersion)"
@@ -173,15 +180,51 @@ jobs:
         run: |
           set -euo pipefail
           set -o pipefail
-          zig build optimizer-oracle -- qualify 8 1 2>&1 | tee .zig-cache/optimizer-x64/qualification.log
+          zig build optimizer-oracle -Doptimize=ReleaseFast -Dcpu=baseline -- qualify 8 1 2>&1 | tee .zig-cache/optimizer-x64/qualification.log
+
+      - name: Check out the frozen compiler baseline
+        if: inputs.baseline_ref != ''
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.baseline_ref }}
+          path: Baseline
+
+      - name: Build the frozen baseline executables
+        if: inputs.baseline_ref != ''
+        shell: bash
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$BASELINE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C ../Baseline rev-parse HEAD)" = "$BASELINE_REF"
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+            --build-file ../Baseline/Toolchain/build.zig \
+            --prefix "$RUNNER_TEMP/silex-baseline-prefix" \
+            2>&1 | tee .zig-cache/optimizer-x64/baseline-build.log
+          baseline_output="$GITHUB_WORKSPACE/Toolchain/.zig-cache/benchmark-before"
+          mkdir -p "$baseline_output"
+          cd "$GITHUB_WORKSPACE"
+          for workload in Arithmetic Objects Flocking; do
+            stem=$(echo "$workload" | tr '[:upper:]' '[:lower:]')
+            "$RUNNER_TEMP/silex-baseline-prefix/bin/silex" compile \
+              "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Native/$workload.sx" \
+              --release --nocache -o "$baseline_output/$stem-release"
+          done
 
       - name: Run the native X64 campaign
         shell: bash
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref }}
         run: |
           set -euo pipefail
           set -o pipefail
           python3 -m unittest discover -s Benchmarks/Native -p 'test_campaign.py'
-          zig build benchmark-native 2>&1 | tee .zig-cache/optimizer-x64/benchmark-build.log
+          zig build benchmark-native -Doptimize=ReleaseFast -Dcpu=baseline 2>&1 | tee .zig-cache/optimizer-x64/benchmark-build.log
+          baseline_args=()
+          if [ -n "$BASELINE_REF" ]; then
+            baseline_args=(--baseline-directory .zig-cache/benchmark-before --baseline-sha "$BASELINE_REF")
+          fi
           python3 Benchmarks/Native/campaign.py \
             .zig-cache/benchmark-native \
             .zig-cache/optimizer-x64/campaign.json \
@@ -189,7 +232,7 @@ jobs:
             --warmups 6 \
             --candidate-sha "$(git -C .. rev-parse HEAD)" \
             --require-native-x64 \
-            --require-parity
+            --require-parity "${baseline_args[@]}"
           cat .zig-cache/optimizer-x64/campaign.json
 
       - name: Upload X64 evidence
@@ -199,7 +242,8 @@ jobs:
           name: optimizer-x64-${{ github.sha }}
           path: |
             Toolchain/.zig-cache/optimizer-x64
-            Toolchain/.zig-cache/benchmark-native/report.txt
+            Toolchain/.zig-cache/benchmark-native
+            Toolchain/.zig-cache/benchmark-before
           if-no-files-found: error
           retention-days: 14
 
@@ -291,6 +335,13 @@ jobs:
             test "$(printf '%s\n' "$scalar_output" | wc -l)" -eq 9
             test "$(printf '%s\n' "$scalar_output" | grep -c '^true$')" -eq 9
           done
+          branch_fixture="$scalar_root/BranchComparisons.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx" "$branch_fixture"
+          for mode in debug release; do
+            "$silex" compile "$branch_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/branch-comparisons-$mode"
+            test "$("$RUNNER_TEMP/branch-comparisons-$mode")" = "true"
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -368,6 +419,13 @@ jobs:
             scalar_output=$("$RUNNER_TEMP/scalar-float-residence-$mode")
             test "$(printf '%s\n' "$scalar_output" | wc -l)" -eq 9
             test "$(printf '%s\n' "$scalar_output" | grep -c '^true$')" -eq 9
+          done
+          branch_fixture="$scalar_root/BranchComparisons.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx" "$branch_fixture"
+          for mode in debug release; do
+            "$silex" compile "$branch_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/branch-comparisons-$mode"
+            test "$("$RUNNER_TEMP/branch-comparisons-$mode")" = "true"
           done
 
   windows-x64:
@@ -469,6 +527,17 @@ jobs:
             $scalarOutput = @(& $scalarBinary)
             if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar float residence $mode regression failed"
+            }
+          }
+          $branchFixture = Join-Path $scalarRoot "BranchComparisons.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx") $branchFixture
+          foreach ($mode in @("debug", "release")) {
+            $branchBinary = Join-Path $env:RUNNER_TEMP "branch-comparisons-$mode.exe"
+            & $silex compile $branchFixture "--$mode" --nocache -o $branchBinary
+            if ($LASTEXITCODE -ne 0) { throw "branch comparison compilation failed" }
+            $branchOutput = @(& $branchBinary)
+            if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {
+              throw "branch comparison $mode regression failed"
             }
           }
 
@@ -748,5 +817,16 @@ jobs:
             $scalarOutput = @(Invoke-NativeCapture $scalarBinary)
             if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar float residence $mode regression failed"
+            }
+          }
+          $branchFixture = Join-Path $scalarRoot "BranchComparisons.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx") $branchFixture
+          foreach ($mode in @("debug", "release")) {
+            $branchBinary = Join-Path $env:RUNNER_TEMP "branch-comparisons-$mode.exe"
+            & $silex compile $branchFixture "--$mode" --nocache -o $branchBinary
+            if ($LASTEXITCODE -ne 0) { throw "branch comparison compilation failed" }
+            $branchOutput = @(& $branchBinary)
+            if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {
+              throw "branch comparison $mode regression failed"
             }
           }

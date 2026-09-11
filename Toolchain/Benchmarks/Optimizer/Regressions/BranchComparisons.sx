@@ -1,0 +1,53 @@
+func mask<T>(left:T, right:T) int {
+    var result = 0
+    if left < right { result += 1 }
+    if left <= right { result += 2 }
+    if left > right { result += 4 }
+    if left >= right { result += 8 }
+    if left == right { result += 16 }
+    if left != right { result += 32 }
+    return result
+}
+
+func shared(left:float64, right:float64) bool {
+    let predicate = left < right
+    var result = 0
+    if predicate { result = 1 }
+    return (result == 1) == predicate
+}
+
+func bool_mask(left:bool, right:bool) int {
+    var result = 0
+    if left == right { result += 1 }
+    if left != right { result += 2 }
+    return result
+}
+
+func main() {
+    let values:float64[] = [-1.0 / 0.0, -1.0, -0.0, 0.0, 1.0, 1.0 / 0.0, 0.0 / 0.0]
+    let values32:float32[] = [-1.0 / 0.0, -1.0, -0.0, 0.0, 1.0, 1.0 / 0.0, 0.0 / 0.0]
+    var valid = true
+    for left in 0...values.count() {
+        for right in 0...values.count() {
+            var expected = 26
+            if left == 6 || right == 6 { expected = 32 }
+            else if (left == 2 || left == 3) && (right == 2 || right == 3) { expected = 26 }
+            else if left < right { expected = 35 }
+            else if left > right { expected = 44 }
+            valid = valid && mask(values[left], values[right]) == expected
+            valid = valid && mask(values32[left], values32[right]) == expected
+            valid = valid && shared(values[left], values[right])
+        }
+    }
+    valid = valid && mask((-128) as int8, 127 as int8) == 35
+    valid = valid && mask(255 as uint8, 1 as uint8) == 44
+    valid = valid && mask((-32768) as int16, 32767 as int16) == 35
+    valid = valid && mask(65535 as uint16, 1 as uint16) == 44
+    valid = valid && mask((-2147483648) as int32, 2147483647 as int32) == 35
+    valid = valid && mask(4294967295 as uint32, 1 as uint32) == 44
+    valid = valid && mask((-9223372036854775807) as int64, 1 as int64) == 35
+    let largest:uint64 = 18446744073709551615
+    valid = valid && mask(largest, 1 as uint64) == 44
+    valid = valid && bool_mask(false, true) == 2 && bool_mask(true, true) == 1
+    print(valid)
+}

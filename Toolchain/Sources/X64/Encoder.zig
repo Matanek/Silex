@@ -11,6 +11,7 @@ const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
 const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const FloatPairs = @import("FloatPairs.zig");
+const BranchSelection = @import("BranchSelection.zig");
 const Reachability = @import("Reachability.zig");
 const TextRuntime = @import("TextRuntime.zig");
 
@@ -788,6 +789,7 @@ fn encodeFunction(
                 try emitStoreScalar(allocator, bytes, function, .rax, unary.result);
             },
             .binary => |binary| {
+                if (BranchSelection.comparison(function, instruction_index) != null) continue;
                 if (try FloatPairs.emit(allocator, bytes, function, binary)) continue;
                 if (binary.type.isFloat()) {
                     try emitFloatBinary(allocator, bytes, function.float_register_slots, binary);
@@ -917,12 +919,32 @@ fn encodeFunction(
                 try appendBranch(allocator, bytes, &branches, target);
             },
             .branch => |branch| {
-                try emitLoadValue(allocator, bytes, function.register_slots, .rax, branch.condition);
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
-                const then_at = bytes.items.len;
-                try bytes.appendNTimes(allocator, 0, 4);
-                try branches.append(allocator, .{ .displacement_at = then_at, .instruction = branch.then_instruction });
-                try appendBranch(allocator, bytes, &branches, branch.else_instruction);
+                var condition: u8 = 0x85;
+                const comparison = if (instruction_index > 0) BranchSelection.comparison(function, instruction_index - 1) else null;
+                if (comparison) |binary| {
+                    if (binary.type.isFloat()) {
+                        const double = binary.type == .float64;
+                        try emitLoadFloatValue(allocator, bytes, function.float_register_slots, 0, binary.left, double);
+                        try emitLoadFloatValue(allocator, bytes, function.float_register_slots, 1, binary.right, double);
+                        if (double) try bytes.append(allocator, 0x66);
+                        try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc1 });
+                    } else {
+                        try emitLoadValue(allocator, bytes, function.register_slots, .rax, binary.left);
+                        try emitLoadValue(allocator, bytes, function.register_slots, .rcx, binary.right);
+                        const width = if (binary.type.isInteger()) binary.type.bitWidth() else 64;
+                        try IntegerArithmetic.normalize(allocator, bytes, 0, width, binary.type.isSignedInteger());
+                        try IntegerArithmetic.normalize(allocator, bytes, 1, width, binary.type.isSignedInteger());
+                        try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8 });
+                    }
+                    condition = BranchSelection.condition(binary).?;
+                    if (BranchSelection.unorderedResult(binary)) |unordered| {
+                        try appendConditionalBranch(allocator, bytes, &branches, 0x8a, if (unordered) branch.then_instruction else branch.else_instruction);
+                    }
+                } else {
+                    try emitLoadValue(allocator, bytes, function.register_slots, .rax, branch.condition);
+                    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0 });
+                }
+                try emitConditionalFlow(allocator, bytes, &branches, condition, instruction_index + 1, branch.then_instruction, branch.else_instruction);
             },
         }
     }
@@ -3201,6 +3223,39 @@ fn appendBranch(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.Ar
     const displacement_at = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     try fixups.append(allocator, .{ .displacement_at = displacement_at, .instruction = instruction });
+}
+
+fn appendConditionalBranch(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(BranchFixup), condition: u8, target: usize) Allocator.Error!void {
+    try bytes.appendSlice(allocator, &.{ 0x0f, condition });
+    const displacement_at = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try fixups.append(allocator, .{ .displacement_at = displacement_at, .instruction = target });
+}
+
+fn emitConditionalFlow(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(BranchFixup), condition: u8, next: usize, then_target: usize, else_target: usize) Allocator.Error!void {
+    if (then_target == else_target) {
+        if (then_target != next) try appendBranch(allocator, bytes, fixups, then_target);
+    } else if (then_target == next) {
+        try appendConditionalBranch(allocator, bytes, fixups, condition ^ 1, else_target);
+    } else {
+        try appendConditionalBranch(allocator, bytes, fixups, condition, then_target);
+        if (else_target != next) try appendBranch(allocator, bytes, fixups, else_target);
+    }
+}
+
+test "X64 conditional flow inverts the predicate for a true fallthrough" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    var fixups: std.ArrayList(BranchFixup) = .empty;
+    defer fixups.deinit(std.testing.allocator);
+    try emitConditionalFlow(std.testing.allocator, &bytes, &fixups, 0x87, 5, 5, 8);
+    try std.testing.expectEqualSlices(u8, &.{ 0x0f, 0x86, 0, 0, 0, 0 }, bytes.items);
+    try std.testing.expectEqual(@as(usize, 8), fixups.items[0].instruction);
+    bytes.clearRetainingCapacity();
+    fixups.clearRetainingCapacity();
+    try emitConditionalFlow(std.testing.allocator, &bytes, &fixups, 0x8c, 5, 8, 5);
+    try std.testing.expectEqualSlices(u8, &.{ 0x0f, 0x8c, 0, 0, 0, 0 }, bytes.items);
+    try std.testing.expectEqual(@as(usize, 8), fixups.items[0].instruction);
 }
 
 fn jumpFallsThrough(instruction_index: usize, target: usize) bool {

@@ -66,6 +66,24 @@ class CampaignTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "outputs differ"):
                     campaign.measure_workload(root, 5, 1, "arithmetic")
 
+    def test_baseline_is_paired_and_its_output_checked(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            before = root / "before"
+            before.mkdir()
+            for configuration in campaign.CONFIGURATIONS:
+                (root / f"arithmetic-{configuration}").touch()
+            (before / "arithmetic-release").touch()
+            def execute(path):
+                return b"same\n", 200 if path.parent == before else 100
+            with patch.object(campaign, "execute", side_effect=execute):
+                result = campaign.measure_workload(root, 21, 0, "arithmetic", before)
+            self.assertEqual(result["release_vs_baseline"]["upper_bound_ppm"], 500_000)
+            self.assertTrue(all("baseline" in item["order"] for item in result["observations"]))
+            with patch.object(campaign, "execute", side_effect=lambda path: (b"wrong" if path.parent == before else b"same", 100)):
+                with self.assertRaisesRegex(RuntimeError, "outputs differ"):
+                    campaign.measure_workload(root, 5, 0, "arithmetic", before)
+
     def test_native_x64_rejects_arm_and_translation(self) -> None:
         self.assertIsNotNone(
             campaign.native_x64_failure({"machine": "arm64", "translated": False})

@@ -28,6 +28,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--samples", type=int, default=11)
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--candidate-sha")
+    parser.add_argument("--baseline-directory", type=Path)
+    parser.add_argument("--baseline-sha")
     parser.add_argument("--require-native-x64", action="store_true")
     parser.add_argument("--require-parity", action="store_true")
     arguments = parser.parse_args()
@@ -41,6 +43,8 @@ def parse_arguments() -> argparse.Namespace:
         )
     if arguments.require_parity and not arguments.candidate_sha:
         parser.error("--require-parity needs --candidate-sha")
+    if bool(arguments.baseline_directory) != bool(arguments.baseline_sha):
+        parser.error("--baseline-directory and --baseline-sha are required together")
     return arguments
 
 
@@ -197,30 +201,33 @@ def qualification_failures(workload: dict[str, object], reference: str = "clang"
 
 
 def measure_workload(
-    binary_directory: Path, samples: int, warmups: int, workload: str
+    binary_directory: Path, samples: int, warmups: int, workload: str, baseline_directory: Path | None = None
 ) -> dict[str, object]:
     executables = {
         configuration: binary_directory / f"{workload}-{configuration}"
         for configuration in CONFIGURATIONS
     }
+    if baseline_directory is not None:
+        executables["baseline"] = baseline_directory / f"{workload}-release"
+    configurations = tuple(executables)
     for executable in executables.values():
         if not executable.is_file():
             raise FileNotFoundError(executable)
 
     expected_output: bytes | None = None
     for _ in range(warmups):
-        for configuration in CONFIGURATIONS:
+        for configuration in configurations:
             output, _ = execute(executables[configuration])
             if expected_output is None:
                 expected_output = output
             elif output != expected_output:
                 raise RuntimeError(f"{workload} outputs differ during warmup")
 
-    measurements = {configuration: [] for configuration in CONFIGURATIONS}
+    measurements = {configuration: [] for configuration in configurations}
     observations: list[dict[str, object]] = []
     for sample in range(samples):
-        rotation = sample % len(CONFIGURATIONS)
-        order = CONFIGURATIONS[rotation:] + CONFIGURATIONS[:rotation]
+        rotation = sample % len(configurations)
+        order = configurations[rotation:] + configurations[:rotation]
         timings: dict[str, int] = {}
         for configuration in order:
             output, elapsed = execute(executables[configuration])
@@ -246,7 +253,7 @@ def measure_workload(
         "observations": observations,
         "configurations": {
             configuration: summarize(measurements[configuration])
-            for configuration in CONFIGURATIONS
+            for configuration in configurations
         },
         "release_vs_clang": analyze_release_vs_clang(observations),
         "release_vs_references": {reference: analyze_release_vs_clang(observations, reference) for reference in REFERENCES},
@@ -256,6 +263,8 @@ def measure_workload(
         for reference in REFERENCES
         for failure in qualification_failures(result, reference)
     ]
+    if baseline_directory is not None:
+        result["release_vs_baseline"] = analyze_release_vs_clang(observations, "baseline")
     result["qualified"] = not result["qualification_failures"]
     return result
 
@@ -270,6 +279,7 @@ def main() -> None:
             arguments.samples,
             arguments.warmups,
             workload,
+            arguments.baseline_directory,
         )
         for workload in WORKLOADS
     ]
@@ -294,6 +304,7 @@ def main() -> None:
         },
         "evidence_mode": "qualified" if arguments.require_parity else "diagnostic",
         "candidate_sha": arguments.candidate_sha,
+        "baseline_sha": arguments.baseline_sha,
         "host": host,
         "clang": command_output(["clang++", "--version"]),
         "contract": {
