@@ -1,0 +1,58 @@
+{
+  "baseline": {
+    "function_start": "0x100002840",
+    "function_end": "0x100003450",
+    "backedge_spans": [
+      {
+        "start": "0x1000029f5",
+        "end": "0x100002c14",
+        "instructions": 85,
+        "stack_accesses": 55,
+        "sse_stack_accesses": 17
+      },
+      {
+        "start": "0x100002bdd",
+        "end": "0x100002e62",
+        "instructions": 108,
+        "stack_accesses": 63,
+        "sse_stack_accesses": 16
+      },
+      {
+        "start": "0x100002bdd",
+        "end": "0x100002ff0",
+        "instructions": 169,
+        "stack_accesses": 107,
+        "sse_stack_accesses": 30
+      }
+    ],
+    "note": "Static address spans may include exit blocks. No timing attribution from static counts."
+  },
+  "floats": {
+    "function_start": "0x1000025d9",
+    "function_end": "0x100003019",
+    "backedge_spans": [
+      {
+        "start": "0x10000278e",
+        "end": "0x100002956",
+        "instructions": 85,
+        "stack_accesses": 33,
+        "sse_stack_accesses": 0
+      },
+      {
+        "start": "0x10000291f",
+        "end": "0x100002b8c",
+        "instructions": 108,
+        "stack_accesses": 57,
+        "sse_stack_accesses": 12
+      },
+      {
+        "start": "0x10000291f",
+        "end": "0x100002cc6",
+        "instructions": 162,
+        "stack_accesses": 85,
+        "sse_stack_accesses": 20
+      }
+    ],
+    "note": "Static address spans may include exit blocks. No timing attribution from static counts."
+  }
+}

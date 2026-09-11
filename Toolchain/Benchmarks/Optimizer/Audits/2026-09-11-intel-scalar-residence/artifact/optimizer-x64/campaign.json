@@ -1,0 +1,1336 @@
+{
+  "schema_version": 2,
+  "evidence_mode": "qualified",
+  "candidate_sha": "ebc20fb3bb2c397ee577f21b3a31083cc0f49c65",
+  "host": {
+    "system": "Darwin",
+    "release": "24.6.0",
+    "machine": "x86_64",
+    "processor": "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+    "translated": false
+  },
+  "clang": "Apple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: x86_64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+  "contract": {
+    "minimum_samples": 21,
+    "maximum_spread_ppm": 200000,
+    "maximum_half_window_shift_ppm": 100000,
+    "parity_limit_ppm": 1000000,
+    "middle_observation_excluded_from_half_windows": true
+  },
+  "samples": 21,
+  "warmups": 6,
+  "workloads": [
+    {
+      "id": "arithmetic",
+      "output_sha256": "c57938e04137c1bbe1d8d371af5d8cb94c7501d94bb6e6d8829e202bfed11030",
+      "executables": {
+        "debug": {
+          "path": ".zig-cache/benchmark-native/arithmetic-debug",
+          "sha256": "f8f024319ca628418f82c50ff75b2e13fb66609c9e1270a58089a5d7d7cb194c"
+        },
+        "release": {
+          "path": ".zig-cache/benchmark-native/arithmetic-release",
+          "sha256": "f6f953cc4fdd09c057b76f604d343985cfe26b5912836ffed0dde0d2cbb720a2"
+        },
+        "clang": {
+          "path": ".zig-cache/benchmark-native/arithmetic-clang",
+          "sha256": "5c96f3547b32c4de6d3369083416e4ff3fef67dc21695e5794d3f23bd753673d"
+        }
+      },
+      "observations": [
+        {
+          "index": 0,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 14431620,
+            "release": 12101298,
+            "clang": 7790196
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 12013045,
+            "clang": 7937467,
+            "debug": 16186719
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 9047450,
+            "debug": 14845746,
+            "release": 11665789
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 15777975,
+            "release": 10357893,
+            "clang": 7291364
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 10521826,
+            "clang": 7336063,
+            "debug": 12466085
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 7294495,
+            "debug": 12926761,
+            "release": 9689954
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 12794256,
+            "release": 10895173,
+            "clang": 7102976
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 10037596,
+            "clang": 7864530,
+            "debug": 12714960
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 8087793,
+            "debug": 13704541,
+            "release": 12759968
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 15683547,
+            "release": 14173773,
+            "clang": 8734786
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 13134099,
+            "clang": 7483582,
+            "debug": 14169163
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 8631236,
+            "debug": 13342981,
+            "release": 11476335
+          }
+        },
+        {
+          "index": 12,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 15167447,
+            "release": 12849084,
+            "clang": 9728647
+          }
+        },
+        {
+          "index": 13,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 13171747,
+            "clang": 8980126,
+            "debug": 13592629
+          }
+        },
+        {
+          "index": 14,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 8399025,
+            "debug": 14019057,
+            "release": 12303798
+          }
+        },
+        {
+          "index": 15,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 13557918,
+            "release": 13229407,
+            "clang": 8668873
+          }
+        },
+        {
+          "index": 16,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 11208483,
+            "clang": 7982390,
+            "debug": 12508767
+          }
+        },
+        {
+          "index": 17,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 7476111,
+            "debug": 12726248,
+            "release": 12770984
+          }
+        },
+        {
+          "index": 18,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 14955791,
+            "release": 11029942,
+            "clang": 7786748
+          }
+        },
+        {
+          "index": 19,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 11957401,
+            "clang": 8431669,
+            "debug": 15577078
+          }
+        },
+        {
+          "index": 20,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 7937002,
+            "debug": 13726679,
+            "release": 14033126
+          }
+        }
+      ],
+      "configurations": {
+        "debug": {
+          "minimum_ns": 12466085,
+          "p10_ns": 12714960,
+          "median_ns": 13726679,
+          "p90_ns": 15683547,
+          "maximum_ns": 16186719,
+          "mad_ns": 1000431,
+          "mad_ppm": 72882,
+          "spread_ppm": 216264,
+          "samples_ns": [
+            14431620,
+            16186719,
+            14845746,
+            15777975,
+            12466085,
+            12926761,
+            12794256,
+            12714960,
+            13704541,
+            15683547,
+            14169163,
+            13342981,
+            15167447,
+            13592629,
+            14019057,
+            13557918,
+            12508767,
+            12726248,
+            14955791,
+            15577078,
+            13726679
+          ]
+        },
+        "release": {
+          "minimum_ns": 9689954,
+          "p10_ns": 10357893,
+          "median_ns": 12013045,
+          "p90_ns": 13229407,
+          "maximum_ns": 14173773,
+          "mad_ns": 983103,
+          "mad_ppm": 81836,
+          "spread_ppm": 239032,
+          "samples_ns": [
+            12101298,
+            12013045,
+            11665789,
+            10357893,
+            10521826,
+            9689954,
+            10895173,
+            10037596,
+            12759968,
+            14173773,
+            13134099,
+            11476335,
+            12849084,
+            13171747,
+            12303798,
+            13229407,
+            11208483,
+            12770984,
+            11029942,
+            11957401,
+            14033126
+          ]
+        },
+        "clang": {
+          "minimum_ns": 7102976,
+          "p10_ns": 7294495,
+          "median_ns": 7937467,
+          "p90_ns": 8980126,
+          "maximum_ns": 9728647,
+          "mad_ns": 494202,
+          "mad_ppm": 62261,
+          "spread_ppm": 212363,
+          "samples_ns": [
+            7790196,
+            7937467,
+            9047450,
+            7291364,
+            7336063,
+            7294495,
+            7102976,
+            7864530,
+            8087793,
+            8734786,
+            7483582,
+            8631236,
+            9728647,
+            8980126,
+            8399025,
+            8668873,
+            7982390,
+            7476111,
+            7786748,
+            8431669,
+            7937002
+          ]
+        }
+      },
+      "release_vs_clang": {
+        "samples": 21,
+        "lower_bound_ppm": 1416501,
+        "median_ppm": 1464907,
+        "upper_bound_ppm": 1533888,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 94738,
+        "clang_half_shift_ppm": 72113,
+        "ratio_half_shift_ppm": 32080,
+        "ratios_ppm": [
+          1553400,
+          1513460,
+          1289400,
+          1420570,
+          1434260,
+          1328392,
+          1533888,
+          1276312,
+          1577682,
+          1622681,
+          1755055,
+          1329628,
+          1320747,
+          1466766,
+          1464907,
+          1526081,
+          1404151,
+          1708238,
+          1416501,
+          1418153,
+          1768063
+        ]
+      },
+      "qualification_failures": [
+        "release spread exceeds 200000 ppm",
+        "clang spread exceeds 200000 ppm",
+        "Silex/Clang upper bound exceeds 1000000 ppm"
+      ],
+      "qualified": false
+    },
+    {
+      "id": "objects",
+      "output_sha256": "1c7cd8ac9fb27ed65519b199e36de4575a0f257dc0c204e2b4f9bb3c1d75e210",
+      "executables": {
+        "debug": {
+          "path": ".zig-cache/benchmark-native/objects-debug",
+          "sha256": "0c938e08f19bd74f95819b0c9cd873fafe79228f84a9c517feafcf8922ea503b"
+        },
+        "release": {
+          "path": ".zig-cache/benchmark-native/objects-release",
+          "sha256": "a5239bf6d3cde6c0b7bcf6bb0c20afcca6f92cf4719b0fff932d5b256afea508"
+        },
+        "clang": {
+          "path": ".zig-cache/benchmark-native/objects-clang",
+          "sha256": "5e414125170d15913f8bf8400b696485029d90cbf57756ee7ee99df1bbc813e0"
+        }
+      },
+      "observations": [
+        {
+          "index": 0,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 48414254,
+            "release": 39174722,
+            "clang": 8399844
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 34394460,
+            "clang": 7555142,
+            "debug": 47660629
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 8937476,
+            "debug": 49758949,
+            "release": 35483414
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 51303813,
+            "release": 40299747,
+            "clang": 7838434
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 35882580,
+            "clang": 10056616,
+            "debug": 44102129
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 6793131,
+            "debug": 143899433,
+            "release": 37158162
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 57372819,
+            "release": 34620237,
+            "clang": 6641065
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 33408065,
+            "clang": 8930221,
+            "debug": 196067153
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 46645054,
+            "debug": 175497084,
+            "release": 42897309
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 64149036,
+            "release": 55077821,
+            "clang": 15181495
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 54524864,
+            "clang": 12238659,
+            "debug": 66909032
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 9454431,
+            "debug": 53775858,
+            "release": 44383614
+          }
+        },
+        {
+          "index": 12,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 58185985,
+            "release": 43912260,
+            "clang": 10618554
+          }
+        },
+        {
+          "index": 13,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 41287623,
+            "clang": 7024798,
+            "debug": 49026818
+          }
+        },
+        {
+          "index": 14,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 7255876,
+            "debug": 48870156,
+            "release": 38783699
+          }
+        },
+        {
+          "index": 15,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 51567504,
+            "release": 37408023,
+            "clang": 8307437
+          }
+        },
+        {
+          "index": 16,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 36282649,
+            "clang": 9867063,
+            "debug": 55503193
+          }
+        },
+        {
+          "index": 17,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 7852169,
+            "debug": 45596286,
+            "release": 35708289
+          }
+        },
+        {
+          "index": 18,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 42257785,
+            "release": 33997865,
+            "clang": 8531642
+          }
+        },
+        {
+          "index": 19,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 35593076,
+            "clang": 6765297,
+            "debug": 43922593
+          }
+        },
+        {
+          "index": 20,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 6360141,
+            "debug": 42238656,
+            "release": 32986711
+          }
+        }
+      ],
+      "configurations": {
+        "debug": {
+          "minimum_ns": 42238656,
+          "p10_ns": 43922593,
+          "median_ns": 51303813,
+          "p90_ns": 143899433,
+          "maximum_ns": 196067153,
+          "mad_ns": 6069006,
+          "mad_ppm": 118295,
+          "spread_ppm": 1948721,
+          "samples_ns": [
+            48414254,
+            47660629,
+            49758949,
+            51303813,
+            44102129,
+            143899433,
+            57372819,
+            196067153,
+            175497084,
+            64149036,
+            66909032,
+            53775858,
+            58185985,
+            49026818,
+            48870156,
+            51567504,
+            55503193,
+            45596286,
+            42257785,
+            43922593,
+            42238656
+          ]
+        },
+        "release": {
+          "minimum_ns": 32986711,
+          "p10_ns": 33997865,
+          "median_ns": 37158162,
+          "p90_ns": 44383614,
+          "maximum_ns": 55077821,
+          "mad_ns": 2763702,
+          "mad_ppm": 74376,
+          "spread_ppm": 279501,
+          "samples_ns": [
+            39174722,
+            34394460,
+            35483414,
+            40299747,
+            35882580,
+            37158162,
+            34620237,
+            33408065,
+            42897309,
+            55077821,
+            54524864,
+            44383614,
+            43912260,
+            41287623,
+            38783699,
+            37408023,
+            36282649,
+            35708289,
+            33997865,
+            35593076,
+            32986711
+          ]
+        },
+        "clang": {
+          "minimum_ns": 6360141,
+          "p10_ns": 6765297,
+          "median_ns": 8399844,
+          "p90_ns": 12238659,
+          "maximum_ns": 46645054,
+          "mad_ns": 1375046,
+          "mad_ppm": 163698,
+          "spread_ppm": 651602,
+          "samples_ns": [
+            8399844,
+            7555142,
+            8937476,
+            7838434,
+            10056616,
+            6793131,
+            6641065,
+            8930221,
+            46645054,
+            15181495,
+            12238659,
+            9454431,
+            10618554,
+            7024798,
+            7255876,
+            8307437,
+            9867063,
+            7852169,
+            8531642,
+            6765297,
+            6360141
+          ]
+        }
+      },
+      "release_vs_clang": {
+        "samples": 21,
+        "lower_bound_ppm": 3984914,
+        "median_ppm": 4547570,
+        "upper_bound_ppm": 5141300,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 6724,
+        "clang_half_shift_ppm": 69738,
+        "ratio_half_shift_ppm": 31196,
+        "ratios_ppm": [
+          4663743,
+          4552457,
+          3970182,
+          5141300,
+          3568057,
+          5469961,
+          5213054,
+          3741012,
+          919653,
+          3627957,
+          4455133,
+          4694477,
+          4135427,
+          5877410,
+          5345143,
+          4502955,
+          3677147,
+          4547570,
+          3984914,
+          5261125,
+          5186474
+        ]
+      },
+      "qualification_failures": [
+        "release spread exceeds 200000 ppm",
+        "clang spread exceeds 200000 ppm",
+        "Silex/Clang upper bound exceeds 1000000 ppm"
+      ],
+      "qualified": false
+    },
+    {
+      "id": "flocking",
+      "output_sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+      "executables": {
+        "debug": {
+          "path": ".zig-cache/benchmark-native/flocking-debug",
+          "sha256": "e0708e5d2e170faf73043463f120d7d976136deec86badd6806f5412ad13f5f4"
+        },
+        "release": {
+          "path": ".zig-cache/benchmark-native/flocking-release",
+          "sha256": "268c0c902a729d79cf145ec8d880abd7047be090c37d71c62b1e9160ff46da3f"
+        },
+        "clang": {
+          "path": ".zig-cache/benchmark-native/flocking-clang",
+          "sha256": "34f2788a3d96ae9fe9e53c71b77a81a1986be584bc16673d04de8affad934c06"
+        }
+      },
+      "observations": [
+        {
+          "index": 0,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 5750023623,
+            "release": 3593147156,
+            "clang": 546762016
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 3792891406,
+            "clang": 469392094,
+            "debug": 5642015455
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 466044248,
+            "debug": 5989783609,
+            "release": 3637669640
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 5951602672,
+            "release": 3678356987,
+            "clang": 500129070
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 3533474757,
+            "clang": 466160555,
+            "debug": 5954261864
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 507548629,
+            "debug": 5843367518,
+            "release": 3567903486
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 5951039955,
+            "release": 4091013889,
+            "clang": 449526976
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 3719725355,
+            "clang": 460231861,
+            "debug": 5852161080
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 460898424,
+            "debug": 5692519039,
+            "release": 3701128216
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 6077841994,
+            "release": 3578468675,
+            "clang": 450083653
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 3928130212,
+            "clang": 494942262,
+            "debug": 5882476817
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 434659993,
+            "debug": 5966017112,
+            "release": 3683662180
+          }
+        },
+        {
+          "index": 12,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 6217607741,
+            "release": 3708327943,
+            "clang": 435458353
+          }
+        },
+        {
+          "index": 13,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 3498647323,
+            "clang": 474926082,
+            "debug": 6808625052
+          }
+        },
+        {
+          "index": 14,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 450286781,
+            "debug": 5648662112,
+            "release": 3842711531
+          }
+        },
+        {
+          "index": 15,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 5703696297,
+            "release": 3826159259,
+            "clang": 494366575
+          }
+        },
+        {
+          "index": 16,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 3507623224,
+            "clang": 491039339,
+            "debug": 6211110948
+          }
+        },
+        {
+          "index": 17,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 699421113,
+            "debug": 6212595442,
+            "release": 3700083169
+          }
+        },
+        {
+          "index": 18,
+          "order": [
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "debug": 6031720698,
+            "release": 3680545662,
+            "clang": 515800390
+          }
+        },
+        {
+          "index": 19,
+          "order": [
+            "release",
+            "clang",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 3878144982,
+            "clang": 516890366,
+            "debug": 7001028852
+          }
+        },
+        {
+          "index": 20,
+          "order": [
+            "clang",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 632573117,
+            "debug": 9458415419,
+            "release": 4922469871
+          }
+        }
+      ],
+      "configurations": {
+        "debug": {
+          "minimum_ns": 5642015455,
+          "p10_ns": 5692519039,
+          "median_ns": 5954261864,
+          "p90_ns": 6808625052,
+          "maximum_ns": 9458415419,
+          "mad_ns": 204238241,
+          "mad_ppm": 34301,
+          "spread_ppm": 187446,
+          "samples_ns": [
+            5750023623,
+            5642015455,
+            5989783609,
+            5951602672,
+            5954261864,
+            5843367518,
+            5951039955,
+            5852161080,
+            5692519039,
+            6077841994,
+            5882476817,
+            5966017112,
+            6217607741,
+            6808625052,
+            5648662112,
+            5703696297,
+            6211110948,
+            6212595442,
+            6031720698,
+            7001028852,
+            9458415419
+          ]
+        },
+        "release": {
+          "minimum_ns": 3498647323,
+          "p10_ns": 3533474757,
+          "median_ns": 3700083169,
+          "p90_ns": 3928130212,
+          "maximum_ns": 4922469871,
+          "mad_ns": 121614494,
+          "mad_ppm": 32868,
+          "spread_ppm": 106661,
+          "samples_ns": [
+            3593147156,
+            3792891406,
+            3637669640,
+            3678356987,
+            3533474757,
+            3567903486,
+            4091013889,
+            3719725355,
+            3701128216,
+            3578468675,
+            3928130212,
+            3683662180,
+            3708327943,
+            3498647323,
+            3842711531,
+            3826159259,
+            3507623224,
+            3700083169,
+            3680545662,
+            3878144982,
+            4922469871
+          ]
+        },
+        "clang": {
+          "minimum_ns": 434659993,
+          "p10_ns": 449526976,
+          "median_ns": 474926082,
+          "p90_ns": 546762016,
+          "maximum_ns": 699421113,
+          "mad_ns": 24842429,
+          "mad_ppm": 52307,
+          "spread_ppm": 204737,
+          "samples_ns": [
+            546762016,
+            469392094,
+            466044248,
+            500129070,
+            466160555,
+            507548629,
+            449526976,
+            460231861,
+            460898424,
+            450083653,
+            494942262,
+            434659993,
+            435458353,
+            474926082,
+            450286781,
+            494366575,
+            491039339,
+            699421113,
+            515800390,
+            516890366,
+            632573117
+          ]
+        }
+      },
+      "release_vs_clang": {
+        "samples": 21,
+        "lower_bound_ppm": 7366719,
+        "median_ppm": 7781661,
+        "upper_bound_ppm": 8030247,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 8147,
+        "clang_half_shift_ppm": 60507,
+        "ratio_half_shift_ppm": 26558,
+        "ratios_ppm": [
+          6571683,
+          8080433,
+          7805416,
+          7354815,
+          7579952,
+          7029678,
+          9100708,
+          8082285,
+          8030247,
+          7950674,
+          7936542,
+          8474813,
+          8515918,
+          7366719,
+          8533920,
+          7739518,
+          7143263,
+          5290208,
+          7135600,
+          7502838,
+          7781661
+        ]
+      },
+      "qualification_failures": [
+        "clang spread exceeds 200000 ppm",
+        "Silex/Clang upper bound exceeds 1000000 ppm"
+      ],
+      "qualified": false
+    }
+  ],
+  "qualification": {
+    "requested": true,
+    "passed": false,
+    "failures": [
+      "arithmetic: release spread exceeds 200000 ppm",
+      "arithmetic: clang spread exceeds 200000 ppm",
+      "arithmetic: Silex/Clang upper bound exceeds 1000000 ppm",
+      "objects: release spread exceeds 200000 ppm",
+      "objects: clang spread exceeds 200000 ppm",
+      "objects: Silex/Clang upper bound exceeds 1000000 ppm",
+      "flocking: clang spread exceeds 200000 ppm",
+      "flocking: Silex/Clang upper bound exceeds 1000000 ppm"
+    ]
+  }
+}
