@@ -3,6 +3,50 @@ const Completion = @import("../Completion.zig");
 const Support = @import("Support.zig");
 const Frontend = @import("../../Frontend.zig").Frontend;
 const Server = @import("../Server.zig").Server;
+const Project = @import("../../Project.zig");
+
+test "system registration completes imported process modes in positional and named arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Application");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Package.json", .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Application/ProcessMode.sx", .data = "public enum ProcessMode { inherit; pausable; always; when_paused; disabled }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Application/@Module.sx", .data =
+        \\public use GFX.Application.ProcessMode.ProcessMode
+        \\public enum Schedule { update; render }
+        \\public class Application {
+        \\    func add_system(schedule:Schedule, callback:func(), process_mode:ProcessMode = ProcessMode.inherit) Application { return self }
+        \\    func add_after_system(schedule:Schedule, callback:func(), process_mode:ProcessMode = ProcessMode.inherit) Application { return self }
+        \\    module func __hidden() {}
+        \\}
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "{s}/Main.sx", .{root_uri});
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use GFX.Application\nfunc tick() {}\nfunc main() { Application().add_system(Application.Schedule.update, tick, process_mode:Application.ProcessMode.always) }" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    _ = try compiler.compile(try std.fs.path.join(allocator, &.{ root, "Main.sx" }));
+
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    for ([_][]const u8{ "add_system", "add_after_system" }) |method| {
+        for ([_][]const u8{ "", "process_mode:" }) |argument| {
+            for ([_][]const u8{ ")", "" }) |closing| {
+                const source = try std.fmt.allocPrint(allocator, "use GFX.Application\nfunc tick() {{}}\nfunc main() {{\n var application = Application()\n application.{s}(Application.Schedule.update, tick, {s}Application.ProcessMode.<|>{s}\n}}", .{ method, argument, closing });
+                const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+                try Support.expectExactLabels(&.{ "always", "disabled", "inherit", "pausable", "when_paused" }, items);
+                try Support.expectNoDuplicates(items);
+                try Support.expectEqualItems(items, try Support.serverCompletion(&server, allocator, uri, source));
+            }
+        }
+    }
+}
 
 test "inherited call results complete in conditions and ordinary expressions" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

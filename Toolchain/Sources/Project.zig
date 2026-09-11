@@ -1712,7 +1712,7 @@ pub const Compiler = struct {
                 }
                 if (call.receiver != null and
                     (std.mem.eql(u8, call.name, "add_system") or std.mem.eql(u8, call.name, "add_after_system")) and
-                    call.arguments.len == 2 and call.arguments[1].value == .identifier)
+                    call.arguments.len >= 2 and call.arguments.len <= 3 and call.arguments[1].value == .identifier)
                 {
                     try self.qualifyFunctionReference(module, &call.arguments[1].value.identifier);
                 }

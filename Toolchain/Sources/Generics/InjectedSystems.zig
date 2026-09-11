@@ -269,7 +269,7 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     });
     call.arguments[1].value = .{ .identifier = adapter_name };
     if (world_mutable) ecs_access = true;
-    const arguments = try self.allocator.alloc(*Ast.Expression, 6);
+    const arguments = try self.allocator.alloc(*Ast.Expression, if (call.arguments.len == 3) 7 else 6);
     arguments[0] = call.arguments[0];
     arguments[1] = call.arguments[1];
     arguments[2] = try booleanExpression(self, std.mem.eql(u8, call.name, "add_after_system"), callback.position);
@@ -280,6 +280,7 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         (if (worker_safe) @as(usize, 4) else 0) |
         (if (parallel_dependency != null) @as(usize, 32) else 0);
     arguments[5] = try integerExpression(self, flags, callback.position);
+    if (call.arguments.len == 3) arguments[6] = call.arguments[2];
     call.name = "__silex_add_system";
     call.compiler_generated = true;
     call.arguments = arguments;
@@ -327,23 +328,27 @@ fn typeNameMatches(candidate: []const u8, requested: []const u8) bool {
 }
 
 fn registrationArguments(allocator: std.mem.Allocator, call: Ast.Expression.Call) !?[]const *Ast.Expression {
-    if (call.arguments.len + call.named_arguments.len != 2 or call.arguments.len > 2) return null;
-    var ordered = [_]?*Ast.Expression{ null, null };
+    const count = call.arguments.len + call.named_arguments.len;
+    if (count < 2 or count > 3 or call.arguments.len > 3) return null;
+    var ordered = [_]?*Ast.Expression{ null, null, null };
     for (call.arguments, 0..) |argument, index| ordered[index] = argument;
     for (call.named_arguments) |argument| {
         const index: usize = if (std.mem.eql(u8, argument.name, "schedule"))
             0
         else if (std.mem.eql(u8, argument.name, "callback"))
             1
+        else if (std.mem.eql(u8, argument.name, "process_mode"))
+            2
         else
             return null;
         if (ordered[index] != null) return null;
         ordered[index] = argument.value;
     }
     if (ordered[0] == null or ordered[1] == null) return null;
-    const result = try allocator.alloc(*Ast.Expression, 2);
+    const result = try allocator.alloc(*Ast.Expression, if (ordered[2] != null) 3 else 2);
     result[0] = ordered[0].?;
     result[1] = ordered[1].?;
+    if (ordered[2]) |mode| result[2] = mode;
     return result;
 }
 
