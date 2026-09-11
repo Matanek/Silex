@@ -43,3 +43,8 @@ avec DefinitionDoesNotDominateUse, en sélectionnant calculate puis main.
 Ces refus sont conservés ; ils ne sont pas utilisés comme preuve de ce
 candidat. Les appels sont vérifiés dans les exécutables réellement compilés,
 et l’oracle cumulatif reste vert.
+
+The native matrix run 34657769771 passed all six executed jobs on the exact
+6b3f302 candidate: Linux X64/ARM64, macOS X64, Windows X64/ARM64 and the
+Windows ARM64 bootstrap. Job logs are decoded connector text with LF line
+endings. The separate physical Intel timing campaign remains pending.
