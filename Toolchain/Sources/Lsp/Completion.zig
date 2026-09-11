@@ -58,6 +58,8 @@ pub const Decision = struct {
     cascade: bool = false,
     system_callback: bool = false,
     static_container: bool = false,
+    override_start: ?usize = null,
+    override_has_func: bool = false,
     aggregate: ?AggregateContext = null,
     return_expression: bool = false,
     match_subject: bool = false,
@@ -183,6 +185,7 @@ pub fn itemsAtWithDecision(
 ) ![]const CompletionItem {
     const cursor = context.cursor;
     if (context.kind == .none or context.kind == .use_path) return allocator.alloc(CompletionItem, 0);
+    if (context.override_start != null) return overrideItems(allocator, source, context);
 
     var candidates: std.ArrayList(Candidate) = .empty;
     const completing_try_alternative = context.completing_try_alternative;
@@ -455,6 +458,17 @@ pub fn itemsAtWithDecision(
         else => {},
     };
 
+    if (context.kind == .structure_declaration) if (program) |parsed| {
+        if (enclosingClass(source, parsed, cursor)) |structure| {
+            if (structure.base) |base| {
+                const parent = localStructure(parsed, baseTypeName(parsed, base));
+                if (parent == null or parent.?.is_class) try appendKeywords(allocator, &candidates, context, &.{
+                    .{ "override", "Silex inherited method override" },
+                }, 70);
+            }
+        }
+    };
+
     std.mem.sort(Candidate, candidates.items, {}, candidateLessThan);
     const result = try allocator.alloc(CompletionItem, candidates.items.len);
     for (candidates.items, 0..) |candidate, index| {
@@ -474,6 +488,179 @@ pub fn itemsAtWithDecision(
     const unique = deduplicateCallableShapes(expanded);
     disambiguateCallableLabels(unique);
     return unique;
+}
+
+pub fn enclosingClass(source: []const u8, program: Ast.Program, cursor: usize) ?Ast.Structure {
+    var result: ?Ast.Structure = null;
+    for (program.structures) |structure| {
+        if (bodyContainsCursor(source, structure.position.offset, cursor) and
+            (result == null or structure.position.offset > result.?.position.offset)) result = structure;
+    }
+    const structure = result orelse return null;
+    return if (structure.is_class and !structure.is_static) structure else null;
+}
+
+pub fn localStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
+    for (program.structures) |structure| if (std.mem.eql(u8, structure.name, nominalReceiverName(name))) return structure;
+    return null;
+}
+
+pub fn declaredReceiverType(allocator: Allocator, structure: Ast.Structure) ![]const u8 {
+    var name = structure.name;
+    for (structure.type_parameters, 0..) |parameter, index| name = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+        name, if (index == 0) "<" else ", ", parameter.name,
+    });
+    return if (structure.type_parameters.len == 0) name else std.fmt.allocPrint(allocator, "{s}>", .{name});
+}
+
+pub fn overridable(method: Ast.Function) bool {
+    return !method.is_static and !method.is_private and method.extension == null and
+        method.accessor == null and method.operator == null;
+}
+
+pub fn overrideItem(allocator: Allocator, signature: []const u8, name: []const u8, has_func: bool) !CompletionItem {
+    const declaration = if (std.mem.endsWith(u8, signature, " void")) signature[0 .. signature.len - 5] else signature;
+    return .{
+        .label = name,
+        .kind = CompletionKind.method,
+        .detail = signature,
+        .filterText = name,
+        .insertText = try std.fmt.allocPrint(allocator, "{s}{s} {{\n    $0\n}}", .{ if (has_func) "" else "func ", declaration }),
+        .insertTextFormat = 2,
+    };
+}
+
+fn declaresOverrideSignature(allocator: Allocator, program: Ast.Program, structure: Ast.Structure, signature: []const u8) !bool {
+    for (structure.methods) |method| {
+        const existing = try overrideSignature(allocator, program, structure, structure.name, method);
+        if (sameOverrideSignature(existing, signature)) return true;
+    }
+    return false;
+}
+
+pub fn sameOverrideSignature(left: []const u8, right: []const u8) bool {
+    // Parameter labels may change in an override; types and borrow modes may not.
+    var lhs = LexerModule.Lexer.init(left);
+    var rhs = LexerModule.Lexer.init(right);
+    while (true) {
+        const a = signatureToken(&lhs) orelse return false;
+        const b = signatureToken(&rhs) orelse return false;
+        if (a.tag != b.tag or !std.mem.eql(u8, a.lexeme, b.lexeme)) return false;
+        if (a.tag == .end) return true;
+    }
+}
+
+fn signatureToken(lexer: *LexerModule.Lexer) ?Token {
+    var token = lexer.next() catch return null;
+    if (token.tag == .identifier) {
+        var lookahead = lexer.*;
+        const next = lookahead.next() catch return null;
+        if (next.tag == .colon) {
+            lexer.* = lookahead;
+            token = lexer.next() catch return null;
+        }
+    }
+    return token;
+}
+
+pub fn overrideSignature(allocator: Allocator, program: Ast.Program, structure: Ast.Structure, receiver_type: []const u8, method: Ast.Function) ![]const u8 {
+    var signature = try allocator.dupe(u8, method.name);
+    for (method.type_parameters, 0..) |parameter, index| {
+        signature = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ signature, if (index == 0) "<" else ", ", parameter.name });
+        if (parameter.constraint) |constraint| signature = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
+            signature, try overrideTypeName(allocator, program, structure, receiver_type, method, constraint),
+        });
+    }
+    if (method.type_parameters.len != 0) signature = try std.fmt.allocPrint(allocator, "{s}>", .{signature});
+    signature = try std.fmt.allocPrint(allocator, "{s}(", .{signature});
+    for (method.parameters, 0..) |parameter, index| signature = try std.fmt.allocPrint(allocator, "{s}{s}{s}:{s}{s}", .{
+        signature,
+        if (index == 0) "" else ", ",
+        parameter.name,
+        parameterModeText(parameter.mode),
+        try overrideTypeName(allocator, program, structure, receiver_type, method, parameter.type),
+    });
+    return std.fmt.allocPrint(allocator, "{s}) {s}{s}{s}{s}", .{
+        signature,
+        parameterModeText(method.return_mode),
+        method.return_provenance orelse "",
+        if (method.return_provenance != null) ":" else "",
+        try overrideTypeName(allocator, program, structure, receiver_type, method, method.return_type),
+    });
+}
+
+fn overrideTypeName(allocator: Allocator, program: Ast.Program, structure: Ast.Structure, receiver_type: []const u8, method: Ast.Function, value: Ast.Type) ![]const u8 {
+    if (value.optionalChild()) |child| return std.fmt.allocPrint(allocator, "{s}?", .{
+        try overrideTypeName(allocator, program, structure, receiver_type, method, child),
+    });
+    if (value.genericParameterIndex()) |index| {
+        if (index < method.type_parameters.len) return method.type_parameters[index].name;
+        if (genericArgumentSpelling(structure, receiver_type, index)) |argument| return argument;
+        if (index < structure.type_parameters.len) return structure.type_parameters[index].name;
+    }
+    if (value.functionIndex()) |index| {
+        const function = program.function_types[index];
+        var text: []const u8 = "func(";
+        for (function.parameters, 0..) |parameter, parameter_index| text = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}", .{
+            text,
+            if (parameter_index == 0) "" else ", ",
+            parameterModeText(parameter.mode),
+            try overrideTypeName(allocator, program, structure, receiver_type, method, parameter.type),
+        });
+        return std.fmt.allocPrint(allocator, "{s}) {s}{s}", .{ text, parameterModeText(function.return_mode), try overrideTypeName(allocator, program, structure, receiver_type, method, function.return_type) });
+    }
+    if (value.genericInstantiationIndex()) |index| {
+        const generic = program.generic_types[index];
+        var text = typeName(program, generic.base);
+        for (generic.arguments, 0..) |argument, argument_index| text = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+            text, if (argument_index == 0) "<" else ", ", try overrideTypeName(allocator, program, structure, receiver_type, method, argument),
+        });
+        return std.fmt.allocPrint(allocator, "{s}>", .{text});
+    }
+    return typeName(program, value);
+}
+
+fn parameterModeText(mode: Ast.Parameter.Mode) []const u8 {
+    return switch (mode) {
+        .value => "",
+        .read => "@",
+        .mutable => "&",
+    };
+}
+
+fn overrideItems(allocator: Allocator, source: []const u8, context: Decision) ![]const CompletionItem {
+    var result: std.ArrayList(CompletionItem) = .empty;
+    const program = context.program orelse return result.toOwnedSlice(allocator);
+    const child = enclosingClass(source, program, context.cursor) orelse return result.toOwnedSlice(allocator);
+    var current = child;
+    var current_type = try declaredReceiverType(allocator, child);
+    var depth: usize = 0;
+    while (depth < program.structures.len) : (depth += 1) {
+        const base = current.base orelse break;
+        current_type = try specializedTypeName(allocator, program, current, current_type, base);
+        current = localStructure(program, current_type) orelse break;
+        if (!current.is_class) break;
+        for (current.methods) |method| {
+            if (!overridable(method) or !std.mem.startsWith(u8, method.name, context.prefix)) continue;
+            const signature = try overrideSignature(allocator, program, current, current_type, method);
+            if (try declaresOverrideSignature(allocator, program, child, signature)) continue;
+            var duplicate = false;
+            for (result.items) |item| if (sameOverrideSignature(item.detail, signature)) {
+                duplicate = true;
+                break;
+            };
+            if (!duplicate) try result.append(allocator, try overrideItem(allocator, signature, method.name, context.override_has_func));
+        }
+    }
+    const items = try result.toOwnedSlice(allocator);
+    std.mem.sort(CompletionItem, items, {}, struct {
+        fn lessThan(_: void, left: CompletionItem, right: CompletionItem) bool {
+            return std.mem.lessThan(u8, left.detail, right.detail);
+        }
+    }.lessThan);
+    for (items, 0..) |*item, index| item.sortText = try std.fmt.allocPrint(allocator, "010-{d:0>6}", .{index});
+    disambiguateCallableLabels(items);
+    return items;
 }
 
 fn appendLiteralMatchPatterns(
@@ -1246,6 +1433,20 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
     const current_line = lineAtOffset(source, prefix_start);
     const line_start = currentLineTokenStart(tokens, current_line);
     const line_tokens = tokens[line_start..];
+
+    if (scope.in_structure and !scope.in_callable) {
+        var last = tokens.len;
+        const has_func = last != 0 and tokens[last - 1].tag == .keyword_func;
+        if (has_func) last -= 1;
+        if (last != 0 and tokens[last - 1].tag == .keyword_override) return .{
+            .kind = .structure_declaration,
+            .prefix = prefix,
+            .prefix_start = prefix_start,
+            .has_use = has_use,
+            .override_start = tokens[last - 1].start,
+            .override_has_func = has_func,
+        };
+    }
 
     if (isUsePath(line_tokens)) return .{
         .kind = .use_path,
@@ -4132,6 +4333,31 @@ fn parseForCompletionObserved(
         .recovery = .complete,
     } else |_| {}
 
+    if (context.kind == .structure_declaration) {
+        // Erase only the declaration being typed, keeping all source offsets
+        // and the following members intact for inheritance and override lookup.
+        const recovered = try allocator.dupe(u8, source);
+        var start = context.override_start orelse context.prefix_start;
+        const preceding = try tokensUntil(allocator, source, start);
+        var index = preceding.len;
+        while (index != 0) {
+            const token = preceding[index - 1];
+            switch (token.tag) {
+                .keyword_public, .keyword_private, .keyword_protected, .keyword_package, .keyword_module, .keyword_local => start = token.start,
+                else => break,
+            }
+            index -= 1;
+        }
+        for (recovered[start..cursor]) |*character| {
+            if (character.* != '\n' and character.* != '\r') character.* = ' ';
+        }
+        parser = ParserModule.Parser.init(allocator, recovered);
+        if (parser.parse()) |program| return .{
+            .program = mergeExtensionsForCompletion(allocator, program),
+            .recovery = .completion_site,
+        } else |_| {}
+    }
+
     if (context.cascade) {
         const recovered = try recoverCascadeForParsing(allocator, source, cursor) orelse return .{
             .program = null,
@@ -4465,7 +4691,7 @@ pub fn functionSignature(
     return std.fmt.allocPrint(allocator, "{s}) {s}", .{ result, typeName(program, function.return_type) });
 }
 
-fn functionSignatureForReceiver(
+pub fn functionSignatureForReceiver(
     allocator: Allocator,
     source: []const u8,
     program: Ast.Program,
@@ -4491,7 +4717,7 @@ fn functionSignatureForReceiver(
     });
 }
 
-fn specializedTypeName(
+pub fn specializedTypeName(
     allocator: Allocator,
     program: Ast.Program,
     structure: Ast.Structure,
@@ -6171,6 +6397,42 @@ test "complete fundamental and nominal names only in a type position" {
     try std.testing.expect(contains(items, "float32"));
     try std.testing.expect(contains(items, "float64"));
     try std.testing.expect(!contains(items, "func"));
+}
+
+test "complete inherited override declarations with signatures and exclusions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const header =
+        \\class Base<T> {
+        \\    protected func update(delta:T) {}
+        \\    func done() {}
+        \\    private func secret() {}
+        \\    static func factory() {}
+        \\}
+        \\class Player:Base<float> {
+        \\    override func done() {}
+        \\
+    ;
+    for ([_][]const u8{ "over", "override ", "override func ", "override func up" }) |editing| {
+        const source = try std.fmt.allocPrint(allocator, "{s}    {s}\n}}", .{ header, editing });
+        const cursor = source.len - 2;
+        const items = try itemsAt(allocator, source, cursor, .invoked);
+        if (std.mem.eql(u8, editing, "over")) {
+            try std.testing.expect(contains(items, "override"));
+        } else {
+            try std.testing.expectEqual(@as(usize, 1), items.len);
+            try std.testing.expect(contains(items, "update"));
+            const item = items[0];
+            try std.testing.expectEqual(@as(u8, 2), item.kind);
+            try std.testing.expectEqualStrings("update(delta:float) void", item.detail);
+            try std.testing.expectEqualStrings(if (std.mem.eql(u8, editing, "override "))
+                "func update(delta:float) {\n    $0\n}"
+            else
+                "update(delta:float) {\n    $0\n}", item.insertText.?);
+            try std.testing.expectEqual(@as(?u8, 2), item.insertTextFormat);
+        }
+    }
 }
 
 test "complete declaration keywords from partial module input" {

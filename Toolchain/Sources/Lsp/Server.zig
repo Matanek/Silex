@@ -210,6 +210,7 @@ pub const Server = struct {
                 (std.mem.eql(u8, trigger_character, " ") or std.mem.eql(u8, trigger_character, ")")) and
                 !completing_try_error and
                 !completing_try_alternative and
+                decision.override_start == null and
                 decision.kind != .use_path and
                 parameters.len == 0)
             {
@@ -639,6 +640,7 @@ test "completion merge is invariant to input order and upstream sort suffixes" {
 }
 
 fn needsWorkspaceCompletion(source: []const u8, decision: Completion.Decision) bool {
+    if (decision.override_start != null) return true;
     if (decision.has_use) return true;
     if (decision.kind == .none) return false;
     if (decision.kind == .type_name or decision.kind == .member or decision.kind == .use_path) return true;
