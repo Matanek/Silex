@@ -884,11 +884,20 @@ fn encodeFunction(
                     leaf += 2;
                     continue;
                 }
-                try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
                 if (floatResidence(function, slot) != null or floatLaneResidence(function, slot) != null) {
-                    try words.append(allocator, moveGeneralToFloat(.x10, .x9, true));
-                    try storeFloatValue(allocator, words, function, .x10, slot, true);
-                } else try storeValue(allocator, words, function, .x9, slot);
+                    const destination: Register = if (floatResidence(function, slot)) |number| @enumFromInt(number) else .x10;
+                    const byte_offset = leaf * Machine.slot_size;
+                    if (byte_offset <= std.math.maxInt(u15)) {
+                        try words.append(allocator, A64.loadVector64(destination, incoming, @intCast(byte_offset)));
+                    } else {
+                        try emitLoadAtOffset(allocator, words, .x9, incoming, byte_offset);
+                        try words.append(allocator, moveGeneralToFloat(destination, .x9, true));
+                    }
+                    try storeFloatValue(allocator, words, function, destination, slot, true);
+                } else {
+                    try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
+                    try storeValue(allocator, words, function, .x9, slot);
+                }
                 leaf += 1;
             }
         }

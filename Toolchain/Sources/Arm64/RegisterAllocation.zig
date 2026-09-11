@@ -127,13 +127,15 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             for (0..parameter.width) |leaf| {
                 touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
             }
-        } else if (parameter.aggregate and aggregateParameterCanRemainResident(parameter, has_calls, float_slots)) {
-            // The proven fast path is deliberately narrow: a call-free,
-            // float-only aggregate can be consumed leaf by leaf without
-            // exposing or forwarding its pointer-backed storage. Resource and
-            // mixed aggregates retain their stable stack representation.
+        } else if (parameter.aggregate and !has_calls) {
+            // Capture each proven floating leaf independently. A passthrough
+            // or resource field must not pin unrelated numeric fields; their
+            // address uses are still pinned below before graph allocation.
             for (0..parameter.width) |leaf| {
-                touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
+                const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+                if (float_slots[slot]) {
+                    touch(slot, 0, first, last, weights, 1);
+                } else forced[slot] = true;
             }
         } else if (parameter.aggregate or parameter.width != 1) {
             forceSpan(parameter, forced);
@@ -1178,14 +1180,6 @@ fn forceSpan(span: Machine.Span, forced: []bool) void {
     for (0..span.width) |leaf| forced[@as(usize, span.start) + leaf] = true;
 }
 
-fn aggregateParameterCanRemainResident(parameter: Machine.Span, has_calls: bool, float_slots: []const bool) bool {
-    if (has_calls or parameter.width == 0) return false;
-    for (0..parameter.width) |leaf| {
-        if (!float_slots[@as(usize, parameter.start) + leaf]) return false;
-    }
-    return true;
-}
-
 fn visit(
     instruction: Machine.Instruction,
     index: usize,
@@ -1597,6 +1591,38 @@ test "unaddressed aggregate parameter leaves use scalar float registers" {
     defer std.testing.allocator.free(result.float_lane_residences);
     for (0..4) |slot| try std.testing.expect(result.float_residences[slot] != null or
         result.float_lane_residences[slot] != null);
+}
+
+test "mixed aggregate parameters retain only unaddressed proven float leaves" {
+    for ([_]bool{ false, true }) |addressed| {
+        var instructions: std.ArrayList(Machine.Instruction) = .empty;
+        defer instructions.deinit(std.testing.allocator);
+        try instructions.appendSlice(std.testing.allocator, &.{
+            .{ .constant_float32 = .{ .result = 3, .bits = 0x3f800000 } },
+            .{ .binary = .{ .result = 4, .operator = .add, .left = 0, .right = 3, .type = .float32 } },
+            .{ .constant_int = .{ .result = 5, .bits = 7 } },
+            .{ .binary = .{ .result = 6, .operator = .add, .left = 1, .right = 5, .type = .int } },
+            .{ .binary = .{ .result = 7, .operator = .add, .left = 2, .right = 3, .type = .float32 } },
+        });
+        if (addressed) try instructions.append(std.testing.allocator, .{ .local_address = .{ .result = 8, .local = 0, .width = 3 } });
+        try instructions.append(std.testing.allocator, .return_void);
+        const function: Machine.Function = .{
+            .name = "mixed_parameter",
+            .parameter_count = 1,
+            .parameters = &.{.{ .start = 0, .width = 3, .aggregate = true }},
+            .return_type = .void,
+            .slot_count = 9,
+            .frame_size = try Machine.frameSize(9),
+            .instructions = instructions.items,
+        };
+        const result = try allocate(std.testing.allocator, function);
+        defer std.testing.allocator.free(result.residences);
+        defer std.testing.allocator.free(result.float_residences);
+        defer std.testing.allocator.free(result.float_lane_residences);
+        try std.testing.expectEqual(@as(?u5, null), result.residences[1]);
+        try std.testing.expectEqual(@as(?u5, null), result.float_residences[1]);
+        for ([_]usize{ 0, 2 }) |slot| try std.testing.expectEqual(!addressed, result.float_residences[slot] != null or result.float_lane_residences[slot] != null);
+    }
 }
 
 test "addressed aggregate parameter leaves remain stack resident" {

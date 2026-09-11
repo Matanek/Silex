@@ -39,6 +39,37 @@ fn exitCode(result: std.process.RunResult) u8 {
     };
 }
 
+test "native mixed parameter leaves preserve snapshots integer fields and float bits" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Input { var x:float; var tag:int; var y:float64; var active:bool; var passthrough:float }
+        \\struct Snapshot { var x:float; var tag:int; var y:float64; var active:bool; var passthrough:float }
+        \\func evaluate(input:@Input) Snapshot {
+        \\    return Snapshot(x:input.x * 2.0, tag:input.tag, y:input.y + 1.0, active:input.active, passthrough:input.passthrough)
+        \\}
+        \\func main() {
+        \\    var input = Input(x:0.0 / 0.0, tag:47, y:16777217.0, active:true, passthrough:-0.0)
+        \\    let first = evaluate(input)
+        \\    input.x = 10.0; input.tag = -3; input.y = 0.5; input.active = false; input.passthrough = 3.0
+        \\    let second = evaluate(input)
+        \\    print(first.x != first.x); print(first.tag == 47); print(first.y == 16777218.0)
+        \\    print(first.active); print(1.0 / first.passthrough < 0.0)
+        \\    print(second.x == 20.0); print(second.tag == -3); print(second.y == 1.5)
+        \\    print(!second.active); print(second.passthrough == 3.0)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    try std.testing.expectEqualStrings("true\n" ** 10, reference.stdout);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualStrings(reference.stdout, native.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, native.stderr);
+}
+
 test "native recursive copy preserves detached graph topology" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
