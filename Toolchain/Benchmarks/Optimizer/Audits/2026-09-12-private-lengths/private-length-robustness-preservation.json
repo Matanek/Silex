@@ -1,0 +1,6 @@
+{
+  "original": ".zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv",
+  "preserved": ".zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587-prior-48f01a5351012bf3.tsv",
+  "sha256": "48f01a5351012bf39a9abf7425b0f62d62523569f5d0518aee74cf7e71b0d430",
+  "reason": "Optimized IR and executable bytes changed; retain the previous immutable proof before generating the current report."
+}

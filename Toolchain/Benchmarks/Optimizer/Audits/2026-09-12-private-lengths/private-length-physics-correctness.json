@@ -1,0 +1,66 @@
+{
+  "preparation": {
+    "exact_before_after_code": true,
+    "exact_before_after_output": true,
+    "records": 32768,
+    "maximum_oracle_difference": 2.700000001354397e-07,
+    "binaries": {
+      "before": {
+        "sha256": "09fabe12474dbb7534678b0db36329da8163cbb6499d265fa542ffc0e3c4a1c1",
+        "output_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+        "signature_interval": [
+          4744923546.294779,
+          32456.933433117374
+        ]
+      },
+      "after": {
+        "sha256": "e8aa8254967ae5be15c0d4eb61f78d36a081ce2def5cd1020ab314bc10bab1e4",
+        "output_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+        "signature_interval": [
+          4744923546.294779,
+          32456.933433117374
+        ]
+      },
+      "clang": {
+        "sha256": "8d7380b05b04989829c693b61d927ec6b34fb2e0b3146aae54e63e887934eb76",
+        "output_sha256": "664117316ce24dd059b592daf4d875bfdb31c45caace9db76340f740273ae491",
+        "signature_interval": [
+          4744923547.477649,
+          32456.933485190275
+        ]
+      }
+    }
+  },
+  "integration": {
+    "exact_before_after_code": true,
+    "exact_before_after_output": true,
+    "records": 32768,
+    "maximum_oracle_difference": 1.1400000005323818e-05,
+    "binaries": {
+      "before": {
+        "sha256": "3f782d2764a1ecb39b7be95649471f101becba514105d8a9223a748cc2e83006",
+        "output_sha256": "f6d5bf68307949686c87a6240d645438fce66653710382e32baf5236610b9725",
+        "signature_interval": [
+          -1454735.8306216497,
+          3.7457540533370017
+        ]
+      },
+      "after": {
+        "sha256": "d4119f04e3c3d3f423eab0a1f6238e4858948854e71b99f64e7c907efb84a76f",
+        "output_sha256": "f6d5bf68307949686c87a6240d645438fce66653710382e32baf5236610b9725",
+        "signature_interval": [
+          -1454735.8306216497,
+          3.7457540533370017
+        ]
+      },
+      "clang": {
+        "sha256": "6e5d43a55e0e2f39abe81482712314fab915e84943864afb4ff9bc0b40a962eb",
+        "output_sha256": "c643f67e4ce6af842e24b6a484fab2a30443a71b46b541a51cb9378c0b590740",
+        "signature_interval": [
+          -1454797.190864043,
+          3.745747222196988
+        ]
+      }
+    }
+  }
+}

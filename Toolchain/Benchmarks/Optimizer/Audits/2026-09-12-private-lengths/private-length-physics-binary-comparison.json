@@ -1,0 +1,30 @@
+[
+  {
+    "stage": "Preparation",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/PreparationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/preparation-private-length"
+    ],
+    "sha256": "e8aa8254967ae5be15c0d4eb61f78d36a081ce2def5cd1020ab314bc10bab1e4",
+    "identical_225ba12": false
+  },
+  {
+    "stage": "Integration",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/IntegrationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/integration-private-length"
+    ],
+    "sha256": "d4119f04e3c3d3f423eab0a1f6238e4858948854e71b99f64e7c907efb84a76f",
+    "identical_225ba12": false
+  }
+]
