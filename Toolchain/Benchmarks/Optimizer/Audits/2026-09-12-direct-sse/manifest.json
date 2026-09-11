@@ -1,9 +1,17 @@
 {
   "candidate": "886cc17e59203c7c6b42190ddfe28239a0ece81d",
   "files": {
+    "886cc17-all-jobs.json": "e7cdc4c00511a14de435099bd495e0a0bb4ae9a4e3d72eea94721b2b0ff18a6c",
+    "886cc17-all-watch.log": "ed4a2d1e6fccadf124d2036db8177f488d3c2bb0681481f4abbba786653747bb",
     "886cc17-dispatch-all.json": "419a60380c7a6d825a7a9d093056f5192131f691c9585afa6940abd7b08ba848",
+    "886cc17-linux-arm64.log": "6383111ba1ee327c79987ee775af23cf70c886bea360369a4e32230b30b70f83",
+    "886cc17-linux-x64.log": "50c7bb336abf924ac6df02cd67cc4e05a382efdb877cd97c53c00b8ac80859c8",
+    "886cc17-macos-x64.log": "0894c4134edd122434faf565387f0cc3ceb57ee886c2c72d527baaed8426e03b",
     "886cc17-runs.json": "cec00b37d5bedef161c0d091cf5796540172a2e6f068b37fa573f0b9964ee86f",
-    "README.md": "ddf5b92d11c0123158581a18eeff37659e312f95f22f0c4daaa23e440635f259",
+    "886cc17-windows-arm64-build.log": "bb17f67f65195b92a4f103e2e297be10e73b69f7d5b40223e1fdaa2be89768a1",
+    "886cc17-windows-arm64.log": "35595d6972839f8607983d02028eeb0ad2b8ea8bc9e248d6b569802315928851",
+    "886cc17-windows-x64.log": "7f31bab3ae96b22d328ef358d74593bb066dcfa41df0a624503ce8fb90bde43b",
+    "README.md": "540a2f2e791d7b6824364c04dfb17c1c4396440fdb41831354a4c8cc35e467d0",
     "direct-sse-arithmetic-macos-arm64": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
     "direct-sse-arithmetic-macos-x64": "a0f3208932b8b1ba80afa53a3c8278d4f6d57d31f134a4f08364f3ffdb162da8",
     "direct-sse-binary-comparison.json": "302649978c813c135c5398179701adf43681dea1cf44e9aa2d0459aaf4ac9d88",

@@ -31,9 +31,12 @@ et de 108 à 38 copies flottantes. Les 166 accès pile restent identiques.
 Ces comptes ne remplacent pas une mesure temporelle physique.
 
 La [matrice native](https://github.com/Matanek/Silex/actions/runs/34653738617)
-est en cours sur ce SHA exact. Aucun gain Intel physique n’est encore
-revendiqué pour ce candidat. La campagne de `7bd153c` continue indépendamment
-avant le lancement de la suivante. La Part 03 demeure active.
+est verte sur ce SHA exact : six jobs macOS X64, Linux X64/ARM64,
+Windows X64/ARM64 et bootstrap Windows ARM64. Leurs journaux sont joints.
+Aucun gain Intel physique n’est encore revendiqué pour ce candidat.
+La campagne suivante comparera au candidat `7bd153c` : la preuve d’identité
+des exécutables permet d’attribuer séparément les opérandes SSE à Flocking
+et les longueurs privées à Objects. La Part 03 demeure active.
 
 `manifest.json` scelle les preuves locales, les désassemblages, les encodages
 LLVM de référence et les exécutables, hors manifest lui-même.

@@ -29,7 +29,20 @@ La [matrice native](https://github.com/Matanek/Silex/actions/runs/34652524590)
 est verte sur les six jobs : macOS X64, Linux X64/ARM64, Windows X64/ARM64
 et bootstrap Windows ARM64. Leurs journaux et identifiants sont joints.
 La [campagne Intel appariée](https://github.com/Matanek/Silex/actions/runs/34652525960)
-reste en cours. Aucun gain Intel physique n’est encore revendiqué ici et
-la Part 03 reste active.
+est terminée : les 53 régressions fixes, huit générées, 64 erreurs et
+43 conversions passent, mais la parité reste rouge. Intel i7-8700B physique,
+macOS 15.7.9, Clang 17 ; six échauffements et 21 rotations appariées contre
+`225ba12`. Les médianes avant/après sont 10,173/10,329 ms (Arithmetic),
+32,150/32,203 ms (Objects) et 2545,952/2587,660 ms (Flocking).
+Les comparaisons avant/après échouent toutes à au moins un critère de stabilité.
+Aucun gain ni régression temporelle n’en est conclu. Les ratios médians
+Silex/Clang -O3 sont 1,215333, 4,312625 et 4,054639, avec des séries -O3
+également instables ; ces valeurs ne constituent pas une qualification.
+La Part 03 reste active.
+
+L’artefact `10284714058` contient 48 fichiers, dont les 15 exécutables dont
+les empreintes ont été vérifiées contre le rapport. SHA-256 du ZIP :
+`82003b8ab06a0a4d168defb776f0c7a73412a582265595933f32b41b039f9b16`.
+Les fichiers extraits, journaux, métadonnées et analyse sont conservés ici.
 
 `manifest.json` scelle les fichiers de cette preuve, hors manifest lui-même.
