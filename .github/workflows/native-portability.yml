@@ -180,12 +180,16 @@ jobs:
         run: |
           set -euo pipefail
           set -o pipefail
+          python3 -m unittest discover -s Benchmarks/Native -p 'test_campaign.py'
           zig build benchmark-native 2>&1 | tee .zig-cache/optimizer-x64/benchmark-build.log
           python3 Benchmarks/Native/campaign.py \
             .zig-cache/benchmark-native \
             .zig-cache/optimizer-x64/campaign.json \
-            --samples 11 \
-            --warmups 2
+            --samples 21 \
+            --warmups 6 \
+            --candidate-sha "$(git -C .. rev-parse HEAD)" \
+            --require-native-x64 \
+            --require-parity
           cat .zig-cache/optimizer-x64/campaign.json
 
       - name: Upload X64 evidence

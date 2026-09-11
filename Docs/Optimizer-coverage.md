@@ -180,6 +180,33 @@ without these artifacts remain historical and cannot acquire the new
 qualification contract retroactively. Do not use them to qualify unmeasured
 families.
 
+### Physical X64 experiment
+
+The `optimizer-x64` target of `native-portability.yml` is the executable X64
+qualification contract. It runs on GitHub's physical `macos-15-intel` host,
+rejects a non-X64 or translated process, records the exact candidate SHA, CPU,
+OS, Clang identity and hashes of all measured binaries, then verifies native
+optimizer regressions before measuring Arithmetic, Objects and Flocking.
+
+The campaign uses six warmup rotations and 21 measured rotations across Silex
+Debug, Silex Release and Clang. Its JSON keeps every acquisition order and raw
+duration. Release/Clang qualification uses the same 95% one-sided median bound,
+200,000 ppm spread ceiling, 100,000 ppm half-window shift ceiling and
+1,000,000 ppm parity limit as the compiler oracle. The JSON is uploaded even
+when a workload is red; a red or missing workload fails the job. Run it with:
+
+```text
+gh workflow run native-portability.yml --ref <candidate-ref> -f target=optimizer-x64
+```
+
+The historical 11-sample Intel campaign remains diagnostic because it predates
+this contract. The physical run belongs to the X64 machine-quality work; this
+coverage Part defines the immutable experiment without claiming that it has
+already passed on the current candidate. Admission classifies every change
+under `Toolchain/Benchmarks/Native/` as a native benchmark campaign and requires
+the internal gates, robust campaign, native matrix and exact-SHA external
+qualification.
+
 The pinned LLVM source identity, actual Clang executable, target triple and CPU
 selection are distinct facts. In this audit Clang targets `apple-m1` on a physical
 Apple M3 Pro; the CPU option is not the host identity. LLVM source-transposition
