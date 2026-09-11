@@ -119,6 +119,15 @@ jobs:
             test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
             test "$(printf '%s\n' "$float_operands_output" | grep -c '^true$')" -eq 18
           done
+          private_length_fixture="$scalar_root/PrivateCollectionLengths.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx" "$private_length_fixture"
+          for mode in debug release; do
+            "$silex" compile "$private_length_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/private-collection-lengths-$mode"
+            private_length_output=$("$RUNNER_TEMP/private-collection-lengths-$mode")
+            test "$(printf '%s\n' "$private_length_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$private_length_output" | grep -c '^true$')" -eq 10
+          done
           run_distribution() {
             executable="$1"
             stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
@@ -417,6 +426,15 @@ jobs:
             test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
             test "$(printf '%s\n' "$float_operands_output" | grep -c '^true$')" -eq 18
           done
+          private_length_fixture="$scalar_root/PrivateCollectionLengths.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx" "$private_length_fixture"
+          for mode in debug release; do
+            "$silex" compile "$private_length_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/private-collection-lengths-$mode"
+            private_length_output=$("$RUNNER_TEMP/private-collection-lengths-$mode")
+            test "$(printf '%s\n' "$private_length_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$private_length_output" | grep -c '^true$')" -eq 10
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -537,6 +555,15 @@ jobs:
             float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")
             test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
             test "$(printf '%s\n' "$float_operands_output" | grep -c '^true$')" -eq 18
+          done
+          private_length_fixture="$scalar_root/PrivateCollectionLengths.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx" "$private_length_fixture"
+          for mode in debug release; do
+            "$silex" compile "$private_length_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/private-collection-lengths-$mode"
+            private_length_output=$("$RUNNER_TEMP/private-collection-lengths-$mode")
+            test "$(printf '%s\n' "$private_length_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$private_length_output" | grep -c '^true$')" -eq 10
           done
 
   windows-x64:
@@ -693,6 +720,17 @@ jobs:
             $floatOperandsOutput = @(& $floatOperandsBinary)
             if ($LASTEXITCODE -ne 0 -or $floatOperandsOutput.Count -ne 18 -or @($floatOperandsOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar float operands $mode regression failed"
+            }
+          }
+          $privateLengthFixture = Join-Path $scalarRoot "PrivateCollectionLengths.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx") $privateLengthFixture
+          foreach ($mode in @("debug", "release")) {
+            $privateLengthBinary = Join-Path $env:RUNNER_TEMP "private-collection-lengths-$mode.exe"
+            & $silex compile $privateLengthFixture "--$mode" --nocache -o $privateLengthBinary
+            if ($LASTEXITCODE -ne 0) { throw "private collection lengths compilation failed" }
+            $privateLengthOutput = @(& $privateLengthBinary)
+            if ($LASTEXITCODE -ne 0 -or $privateLengthOutput.Count -ne 10 -or @($privateLengthOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "private collection lengths $mode regression failed"
             }
           }
 
@@ -1027,5 +1065,16 @@ jobs:
             $floatOperandsOutput = @(& $floatOperandsBinary)
             if ($LASTEXITCODE -ne 0 -or $floatOperandsOutput.Count -ne 18 -or @($floatOperandsOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar float operands $mode regression failed"
+            }
+          }
+          $privateLengthFixture = Join-Path $scalarRoot "PrivateCollectionLengths.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx") $privateLengthFixture
+          foreach ($mode in @("debug", "release")) {
+            $privateLengthBinary = Join-Path $env:RUNNER_TEMP "private-collection-lengths-$mode.exe"
+            & $silex compile $privateLengthFixture "--$mode" --nocache -o $privateLengthBinary
+            if ($LASTEXITCODE -ne 0) { throw "private collection lengths compilation failed" }
+            $privateLengthOutput = @(& $privateLengthBinary)
+            if ($LASTEXITCODE -ne 0 -or $privateLengthOutput.Count -ne 10 -or @($privateLengthOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "private collection lengths $mode regression failed"
             }
           }

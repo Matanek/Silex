@@ -201,6 +201,14 @@ input snapshot; it is never treated as a store through a view. Owning updates
 remain explicit. This is a bounded local forwarding analysis, not inter-block
 alias analysis.
 
+A scalar list literal with exactly one definition also has a known length
+across blocks when every use is a direct count, element read or reference-count
+operation. Copies, views, stores, edits, addresses and calls receiving the list
+reject this proof. A drop is admitted only as the final use in a returning
+block. Unrelated calls therefore cannot invalidate a proven private length,
+while possible escapes and accesses after a drop retain their original count
+operation. This proof propagates lengths only; element snapshots remain local.
+
 Dead-value cleanup removes an unused view descriptor, whose construction clamps
 its bounds without failing. When all data uses of a single-definition list
 literal disappear, cleanup also removes its storage and retains/drops if every

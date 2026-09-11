@@ -5,6 +5,96 @@ const Release = @import("Release.zig");
 const Ir = @import("../Ir.zig");
 const KnownCollections = @import("KnownCollections.zig");
 
+test "private literal lengths cross branches and unrelated class calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Counter {
+        \\    var value:int
+        \\    func add(amount:int) { self.value += amount }
+        \\}
+        \\func calculate(iterations:int) int {
+        \\    var counter = Counter()
+        \\    let values = [3, 5, 7, 11]
+        \\    var index = 0
+        \\    while index < iterations {
+        \\        if index % 2 == 0 { counter.add(values[index % values.count()]) }
+        \\        else { counter.add(1) }
+        \\        index++
+        \\    }
+        \\    return counter.value
+        \\}
+        \\func main() { print(calculate(10)); print(calculate(0)) }
+    );
+    var program = compilation.ir;
+    const functions = try allocator.dupe(Ir.Function, program.functions);
+    program.functions = functions;
+    var found = false;
+    for (functions) |*function| if (std.mem.eql(u8, function.name, "calculate")) {
+        var before: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction == .collection_count) before += 1;
+        };
+        try std.testing.expectEqual(@as(usize, 1), before);
+        function.* = try KnownCollections.optimize(allocator, program, function.*);
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            try std.testing.expect(instruction != .collection_count);
+        };
+        found = true;
+    };
+    try std.testing.expect(found);
+    const before = try Interpreter.runCapture(allocator, compilation.ir);
+    const after = try Interpreter.runCapture(allocator, program);
+    try std.testing.expectEqualStrings("28\n0\n", before.stdout);
+    try std.testing.expectEqualStrings(before.stdout, after.stdout);
+    try std.testing.expectEqualStrings(before.stderr, after.stderr);
+    try std.testing.expectEqual(before.exit_code, after.exit_code);
+}
+
+test "private literal lengths reject escapes copies redefinitions and premature drops" {
+    const list = Ir.Type.structure(0);
+    const barriers = [_]Ir.Instruction{
+        .{ .call = .{ .result = null, .function = 1, .arguments = &.{2} } },
+        .{ .copy = .{ .result = 4, .operand = 2 } },
+        .{ .list_drop = .{ .operand = 2 } },
+        .{ .list_init = .{ .result = 2, .values = &.{0} } },
+    };
+    for (barriers) |barrier| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        const function: Ir.Function = .{
+            .name = "private_length_barrier",
+            .parameter_types = &.{.int},
+            .return_type = .int,
+            .value_types = &.{ .int, .int, list, .int, list },
+            .blocks = &.{
+                .{ .instructions = &.{
+                    .{ .list_init = .{ .result = 2, .values = &.{ 0, 0 } } },
+                    barrier,
+                }, .terminator = .{ .jump = 1 } },
+                .{ .instructions = &.{.{ .collection_count = .{ .result = 3, .collection = 2 } }}, .terminator = .{ .return_value = 3 } },
+            },
+        };
+        const program: Ir.Program = .{ .structures = &.{.{ .name = "int[]", .fields = &.{}, .collection = .{ .element = .int, .length = null, .view = false } }}, .functions = &.{function} };
+        const result = try KnownCollections.optimize(allocator, program, function);
+        try std.testing.expect(result.blocks[1].instructions[0] == .collection_count);
+        // A terminal block is insufficient if a use still follows its drop.
+        if (barrier == .list_drop) {
+            var terminal = function;
+            terminal.blocks = &.{.{ .instructions = &.{
+                function.blocks[0].instructions[0],
+                barrier,
+                function.blocks[1].instructions[0],
+            }, .terminator = .{ .return_value = 3 } }};
+            const dropped = try KnownCollections.optimize(allocator, program, terminal);
+            try std.testing.expect(dropped.blocks[0].instructions[2] == .collection_count);
+        }
+    }
+}
+
 test "known collection snapshots stop at aliases calls lifetime and redefinitions" {
     const position = @import("../Source.zig").Position{ .offset = 0, .line = 1, .column = 1 };
     const barriers = [_]?Ir.Instruction{

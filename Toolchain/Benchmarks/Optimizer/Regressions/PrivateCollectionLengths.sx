@@ -1,0 +1,57 @@
+class Counter {
+    var value:int
+    func add(amount:int) { self.value += amount }
+}
+
+func calculate(iterations:int) int {
+    var counter = Counter()
+    let values = [3, 5, 7, 11]
+    var index = 0
+    while index < iterations {
+        if index % 2 == 0 { counter.add(values[index % values.count()]) }
+        else { counter.add(1) }
+        index++
+    }
+    return counter.value
+}
+
+func length(flag:bool) int {
+    let values = [1, 2, 3]
+    if flag { return values.count() }
+    return values.count()
+}
+
+func append(values:&int[]) { values.append(9) }
+func mutated(flag:bool) int {
+    var values = [1, 2]
+    if flag { append(values) }
+    return values.count()
+}
+
+func copied() int {
+    let values = [1, 2]
+    var duplicate = values
+    append(duplicate)
+    return values.count() * 10 + duplicate.count()
+}
+
+func read_count(values:@int[..]) int { return values.count() }
+func escaped(flag:bool) int {
+    let values = [1, 2, 3]
+    let view = @values[0:2]
+    if flag { return values.count() + read_count(view) }
+    return values.count()
+}
+
+func main() {
+    print(calculate(10) == 28)
+    print(calculate(0) == 0)
+    print(calculate(-1) == 0)
+    print(length(true) == 3)
+    print(length(false) == 3)
+    print(mutated(true) == 3)
+    print(mutated(false) == 2)
+    print(copied() == 23)
+    print(escaped(true) == 5)
+    print(escaped(false) == 3)
+}

@@ -1,8 +1,10 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const ValueOperands = @import("ValueOperands.zig");
 
-// A block-local snapshot of scalar collection elements. No alias independence
-// is inferred from readonly types: any unknown effect discards the snapshots.
+// Element snapshots stay block-local; private literal lengths have a separate
+// whole-function proof. No alias independence is inferred from readonly types:
+// any unknown effect discards the element snapshots.
 // Value identities stored in a snapshot must have exactly one definition.
 pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
     var relevant = false;
@@ -12,6 +14,8 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
     };
     if (!relevant) return function;
     const definitions = try definitionCounts(allocator, function, function.blocks);
+    const private_lengths = try privateLengths(allocator, program, function, definitions);
+    defer allocator.free(private_lengths);
     const integers = try allocator.alloc(?i64, function.value_types.len);
     const collections = try allocator.alloc(?[]const Ir.ValueId, function.value_types.len);
     const blocks = try allocator.dupe(Ir.Block, function.blocks);
@@ -59,7 +63,8 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
                     if (stable) collections[list.result] = list.values;
                 },
                 .collection_count => |count| {
-                    const size = knownLength(program, function.value_types[count.collection], collections[count.collection]) orelse continue;
+                    const size = private_lengths[count.collection] orelse
+                        knownLength(program, function.value_types[count.collection], collections[count.collection]) orelse continue;
                     const length = std.math.cast(i64, size) orelse continue;
                     integers[count.result] = length;
                     instruction.* = .{ .constant_int = .{ .result = count.result, .bits = @intCast(length) } };
@@ -120,6 +125,55 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
     var result = function;
     result.blocks = blocks;
     return result;
+}
+
+// A literal's length is valid across blocks only when every use is a direct
+// observation or reference-count operation. Copies, views, addresses, stores,
+// edits, calls and returns of the collection reject this proof. A drop is
+// admitted only as the final use in a returning block, so folding cannot hide
+// a later access to dead storage. No readonly-type alias assumption is used.
+fn privateLengths(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function, definitions: []const usize) ![]?usize {
+    const lengths = try allocator.alloc(?usize, function.value_types.len);
+    errdefer allocator.free(lengths);
+    @memset(lengths, null);
+    const uses = try allocator.alloc(usize, function.value_types.len);
+    defer allocator.free(uses);
+    const observations = try allocator.alloc(usize, function.value_types.len);
+    defer allocator.free(observations);
+    const suffix = try allocator.alloc(usize, function.value_types.len);
+    defer allocator.free(suffix);
+    @memset(uses, 0);
+    @memset(observations, 0);
+    for (function.blocks) |block| {
+        @memset(suffix, 0);
+        ValueOperands.countTerminatorUses(block.terminator, uses);
+        ValueOperands.countTerminatorUses(block.terminator, suffix);
+        var reverse = block.instructions.len;
+        while (reverse != 0) {
+            reverse -= 1;
+            const instruction = block.instructions[reverse];
+            switch (instruction) {
+                .collection_count => |value| observations[value.collection] += 1,
+                .collection_load => |value| observations[value.collection] += 1,
+                .list_retain => |value| observations[value.operand] += 1,
+                .list_drop => |value| {
+                    const returning = block.terminator == .return_value or block.terminator == .return_void;
+                    if (returning and suffix[value.operand] == 0) observations[value.operand] += 1;
+                },
+                else => {},
+            }
+            ValueOperands.countUses(instruction, uses);
+            ValueOperands.countUses(instruction, suffix);
+        }
+    }
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        if (instruction != .list_init) continue;
+        const list = instruction.list_init;
+        if (definitions[list.result] != 1 or uses[list.result] != observations[list.result] or
+            !scalarCollection(program, function.value_types[list.result])) continue;
+        lengths[list.result] = list.values.len;
+    };
+    return lengths;
 }
 
 // Once every data use has disappeared, scalar list storage has no observable
