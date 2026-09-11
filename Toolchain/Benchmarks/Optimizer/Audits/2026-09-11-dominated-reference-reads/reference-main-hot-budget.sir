@@ -1,0 +1,2330 @@
+struct @GFX.Physics.Benchmarks.PreparationKernel2D.Input {
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .separation:float
+    var .vax:float
+    var .vay:float
+    var .wa:float
+    var .vbx:float
+    var .vby:float
+    var .wb:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+}
+
+struct @GFX.Physics.Benchmarks.PreparationKernel2D.Prepared {
+    var .separation:float
+    var .normal_mass:float
+    var .tangent_mass:float
+    var .relative_velocity:float
+    var .rolling_mass:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+    var .bias_rate:float
+    var .mass_scale:float
+    var .impulse_scale:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .total:float
+}
+
+struct @GFX.Physics.Benchmarks.PreparationKernel2D.Input[] {
+}
+
+struct @GFX.Physics.Benchmarks.PreparationKernel2D.Input[..] {
+}
+
+struct @GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[] {
+}
+
+struct @GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[..] {
+}
+
+struct @STD.Error {
+    let .kind:@STD.Error.Kind
+    let .operation:str
+    let .subject:str?
+    let .detail:str
+}
+
+struct @STD.Path.Parsed {
+    let .succeeded:bool
+    let .absolute:bool
+    let .root:str
+    let .components:@str[]
+    let .detail:str
+}
+
+struct @str[] {
+}
+
+struct @str[..] {
+}
+
+struct @uint8[] {
+}
+
+struct @uint8[..] {
+}
+
+struct @int[512] {
+    var .0:int
+    var .1:int
+    var .2:int
+    var .3:int
+    var .4:int
+    var .5:int
+    var .6:int
+    var .7:int
+    var .8:int
+    var .9:int
+    var .10:int
+    var .11:int
+    var .12:int
+    var .13:int
+    var .14:int
+    var .15:int
+    var .16:int
+    var .17:int
+    var .18:int
+    var .19:int
+    var .20:int
+    var .21:int
+    var .22:int
+    var .23:int
+    var .24:int
+    var .25:int
+    var .26:int
+    var .27:int
+    var .28:int
+    var .29:int
+    var .30:int
+    var .31:int
+    var .32:int
+    var .33:int
+    var .34:int
+    var .35:int
+    var .36:int
+    var .37:int
+    var .38:int
+    var .39:int
+    var .40:int
+    var .41:int
+    var .42:int
+    var .43:int
+    var .44:int
+    var .45:int
+    var .46:int
+    var .47:int
+    var .48:int
+    var .49:int
+    var .50:int
+    var .51:int
+    var .52:int
+    var .53:int
+    var .54:int
+    var .55:int
+    var .56:int
+    var .57:int
+    var .58:int
+    var .59:int
+    var .60:int
+    var .61:int
+    var .62:int
+    var .63:int
+    var .64:int
+    var .65:int
+    var .66:int
+    var .67:int
+    var .68:int
+    var .69:int
+    var .70:int
+    var .71:int
+    var .72:int
+    var .73:int
+    var .74:int
+    var .75:int
+    var .76:int
+    var .77:int
+    var .78:int
+    var .79:int
+    var .80:int
+    var .81:int
+    var .82:int
+    var .83:int
+    var .84:int
+    var .85:int
+    var .86:int
+    var .87:int
+    var .88:int
+    var .89:int
+    var .90:int
+    var .91:int
+    var .92:int
+    var .93:int
+    var .94:int
+    var .95:int
+    var .96:int
+    var .97:int
+    var .98:int
+    var .99:int
+    var .100:int
+    var .101:int
+    var .102:int
+    var .103:int
+    var .104:int
+    var .105:int
+    var .106:int
+    var .107:int
+    var .108:int
+    var .109:int
+    var .110:int
+    var .111:int
+    var .112:int
+    var .113:int
+    var .114:int
+    var .115:int
+    var .116:int
+    var .117:int
+    var .118:int
+    var .119:int
+    var .120:int
+    var .121:int
+    var .122:int
+    var .123:int
+    var .124:int
+    var .125:int
+    var .126:int
+    var .127:int
+    var .128:int
+    var .129:int
+    var .130:int
+    var .131:int
+    var .132:int
+    var .133:int
+    var .134:int
+    var .135:int
+    var .136:int
+    var .137:int
+    var .138:int
+    var .139:int
+    var .140:int
+    var .141:int
+    var .142:int
+    var .143:int
+    var .144:int
+    var .145:int
+    var .146:int
+    var .147:int
+    var .148:int
+    var .149:int
+    var .150:int
+    var .151:int
+    var .152:int
+    var .153:int
+    var .154:int
+    var .155:int
+    var .156:int
+    var .157:int
+    var .158:int
+    var .159:int
+    var .160:int
+    var .161:int
+    var .162:int
+    var .163:int
+    var .164:int
+    var .165:int
+    var .166:int
+    var .167:int
+    var .168:int
+    var .169:int
+    var .170:int
+    var .171:int
+    var .172:int
+    var .173:int
+    var .174:int
+    var .175:int
+    var .176:int
+    var .177:int
+    var .178:int
+    var .179:int
+    var .180:int
+    var .181:int
+    var .182:int
+    var .183:int
+    var .184:int
+    var .185:int
+    var .186:int
+    var .187:int
+    var .188:int
+    var .189:int
+    var .190:int
+    var .191:int
+    var .192:int
+    var .193:int
+    var .194:int
+    var .195:int
+    var .196:int
+    var .197:int
+    var .198:int
+    var .199:int
+    var .200:int
+    var .201:int
+    var .202:int
+    var .203:int
+    var .204:int
+    var .205:int
+    var .206:int
+    var .207:int
+    var .208:int
+    var .209:int
+    var .210:int
+    var .211:int
+    var .212:int
+    var .213:int
+    var .214:int
+    var .215:int
+    var .216:int
+    var .217:int
+    var .218:int
+    var .219:int
+    var .220:int
+    var .221:int
+    var .222:int
+    var .223:int
+    var .224:int
+    var .225:int
+    var .226:int
+    var .227:int
+    var .228:int
+    var .229:int
+    var .230:int
+    var .231:int
+    var .232:int
+    var .233:int
+    var .234:int
+    var .235:int
+    var .236:int
+    var .237:int
+    var .238:int
+    var .239:int
+    var .240:int
+    var .241:int
+    var .242:int
+    var .243:int
+    var .244:int
+    var .245:int
+    var .246:int
+    var .247:int
+    var .248:int
+    var .249:int
+    var .250:int
+    var .251:int
+    var .252:int
+    var .253:int
+    var .254:int
+    var .255:int
+    var .256:int
+    var .257:int
+    var .258:int
+    var .259:int
+    var .260:int
+    var .261:int
+    var .262:int
+    var .263:int
+    var .264:int
+    var .265:int
+    var .266:int
+    var .267:int
+    var .268:int
+    var .269:int
+    var .270:int
+    var .271:int
+    var .272:int
+    var .273:int
+    var .274:int
+    var .275:int
+    var .276:int
+    var .277:int
+    var .278:int
+    var .279:int
+    var .280:int
+    var .281:int
+    var .282:int
+    var .283:int
+    var .284:int
+    var .285:int
+    var .286:int
+    var .287:int
+    var .288:int
+    var .289:int
+    var .290:int
+    var .291:int
+    var .292:int
+    var .293:int
+    var .294:int
+    var .295:int
+    var .296:int
+    var .297:int
+    var .298:int
+    var .299:int
+    var .300:int
+    var .301:int
+    var .302:int
+    var .303:int
+    var .304:int
+    var .305:int
+    var .306:int
+    var .307:int
+    var .308:int
+    var .309:int
+    var .310:int
+    var .311:int
+    var .312:int
+    var .313:int
+    var .314:int
+    var .315:int
+    var .316:int
+    var .317:int
+    var .318:int
+    var .319:int
+    var .320:int
+    var .321:int
+    var .322:int
+    var .323:int
+    var .324:int
+    var .325:int
+    var .326:int
+    var .327:int
+    var .328:int
+    var .329:int
+    var .330:int
+    var .331:int
+    var .332:int
+    var .333:int
+    var .334:int
+    var .335:int
+    var .336:int
+    var .337:int
+    var .338:int
+    var .339:int
+    var .340:int
+    var .341:int
+    var .342:int
+    var .343:int
+    var .344:int
+    var .345:int
+    var .346:int
+    var .347:int
+    var .348:int
+    var .349:int
+    var .350:int
+    var .351:int
+    var .352:int
+    var .353:int
+    var .354:int
+    var .355:int
+    var .356:int
+    var .357:int
+    var .358:int
+    var .359:int
+    var .360:int
+    var .361:int
+    var .362:int
+    var .363:int
+    var .364:int
+    var .365:int
+    var .366:int
+    var .367:int
+    var .368:int
+    var .369:int
+    var .370:int
+    var .371:int
+    var .372:int
+    var .373:int
+    var .374:int
+    var .375:int
+    var .376:int
+    var .377:int
+    var .378:int
+    var .379:int
+    var .380:int
+    var .381:int
+    var .382:int
+    var .383:int
+    var .384:int
+    var .385:int
+    var .386:int
+    var .387:int
+    var .388:int
+    var .389:int
+    var .390:int
+    var .391:int
+    var .392:int
+    var .393:int
+    var .394:int
+    var .395:int
+    var .396:int
+    var .397:int
+    var .398:int
+    var .399:int
+    var .400:int
+    var .401:int
+    var .402:int
+    var .403:int
+    var .404:int
+    var .405:int
+    var .406:int
+    var .407:int
+    var .408:int
+    var .409:int
+    var .410:int
+    var .411:int
+    var .412:int
+    var .413:int
+    var .414:int
+    var .415:int
+    var .416:int
+    var .417:int
+    var .418:int
+    var .419:int
+    var .420:int
+    var .421:int
+    var .422:int
+    var .423:int
+    var .424:int
+    var .425:int
+    var .426:int
+    var .427:int
+    var .428:int
+    var .429:int
+    var .430:int
+    var .431:int
+    var .432:int
+    var .433:int
+    var .434:int
+    var .435:int
+    var .436:int
+    var .437:int
+    var .438:int
+    var .439:int
+    var .440:int
+    var .441:int
+    var .442:int
+    var .443:int
+    var .444:int
+    var .445:int
+    var .446:int
+    var .447:int
+    var .448:int
+    var .449:int
+    var .450:int
+    var .451:int
+    var .452:int
+    var .453:int
+    var .454:int
+    var .455:int
+    var .456:int
+    var .457:int
+    var .458:int
+    var .459:int
+    var .460:int
+    var .461:int
+    var .462:int
+    var .463:int
+    var .464:int
+    var .465:int
+    var .466:int
+    var .467:int
+    var .468:int
+    var .469:int
+    var .470:int
+    var .471:int
+    var .472:int
+    var .473:int
+    var .474:int
+    var .475:int
+    var .476:int
+    var .477:int
+    var .478:int
+    var .479:int
+    var .480:int
+    var .481:int
+    var .482:int
+    var .483:int
+    var .484:int
+    var .485:int
+    var .486:int
+    var .487:int
+    var .488:int
+    var .489:int
+    var .490:int
+    var .491:int
+    var .492:int
+    var .493:int
+    var .494:int
+    var .495:int
+    var .496:int
+    var .497:int
+    var .498:int
+    var .499:int
+    var .500:int
+    var .501:int
+    var .502:int
+    var .503:int
+    var .504:int
+    var .505:int
+    var .506:int
+    var .507:int
+    var .508:int
+    var .509:int
+    var .510:int
+    var .511:int
+}
+
+struct @int[..] {
+}
+
+struct @STD.Text.UTF8.DecodeError {
+    let .kind:@STD.Text.UTF8.DecodeErrorKind
+    let .byte_offset:int
+}
+
+struct @STD.Text.UTF8.ScalarError {
+    let .kind:@STD.Text.UTF8.ScalarErrorKind
+    let .scalar_index:int
+}
+
+struct @uint32[] {
+}
+
+struct @uint32[..] {
+}
+
+struct @STD.Time.LocalTime {
+    let .hour:int
+    let .minute:int
+    let .second:int
+    let .nanosecond:int
+}
+
+struct @int[4] {
+    var .0:int
+    var .1:int
+    var .2:int
+    var .3:int
+}
+
+struct @uint[7] {
+    var .0:uint
+    var .1:uint
+    var .2:uint
+    var .3:uint
+    var .4:uint
+    var .5:uint
+    var .6:uint
+}
+
+struct @uint[..] {
+}
+
+struct @STD.Time.Clock {
+    var .last_microseconds:int
+    var .pending_seconds:float
+    var .total_seconds:float
+    var .time_scale:float
+    var .initialized:bool
+    var .paused:bool
+}
+
+struct @STD.Error.Kind {
+}
+
+struct @STD.Text.UTF8.DecodeErrorKind {
+}
+
+struct @STD.Text.UTF8.ScalarErrorKind {
+}
+
+struct @Result<void,STD.Error> {
+}
+
+struct @Result<str,STD.Error> {
+}
+
+struct @Result<str?,STD.Error> {
+}
+
+struct @Result<bool,STD.Error> {
+}
+
+struct @Result<str[],STD.Error> {
+}
+
+struct @Result<str,STD.Text.UTF8.DecodeError> {
+}
+
+struct @Result<str,STD.Text.UTF8.ScalarError> {
+}
+
+struct @STD.Time.Clock.tick#result0 {
+    let .self:@STD.Time.Clock
+    let .value:float
+}
+
+enum @STD.Error.Kind {
+    .not_found()
+    .already_exists()
+    .permission_denied()
+    .invalid_input()
+    .invalid_data()
+    .name_too_long()
+    .unexpected_end()
+    .limit_exceeded()
+    .not_directory()
+    .is_directory()
+    .directory_not_empty()
+    .resource_busy()
+    .resource_exhausted()
+    .too_many_open_files()
+    .read_only_file_system()
+    .cross_device()
+    .interrupted()
+    .would_block()
+    .timed_out()
+    .broken_pipe()
+    .message_too_large()
+    .address_in_use()
+    .address_unavailable()
+    .network_unreachable()
+    .host_unreachable()
+    .connection_refused()
+    .connection_aborted()
+    .connection_reset()
+    .not_connected()
+    .unsupported()
+    .other()
+}
+
+enum @STD.Text.UTF8.DecodeErrorKind {
+    .invalid_leading_byte()
+    .invalid_continuation()
+    .truncated_sequence()
+    .overlong_sequence()
+    .surrogate()
+    .out_of_range()
+}
+
+enum @STD.Text.UTF8.ScalarErrorKind {
+    .surrogate()
+    .out_of_range()
+}
+
+enum @Result<void,STD.Error> {
+    .success()
+    .failure(@STD.Error)
+}
+
+enum @Result<str,STD.Error> {
+    .success(str)
+    .failure(@STD.Error)
+}
+
+enum @Result<str?,STD.Error> {
+    .success(str?)
+    .failure(@STD.Error)
+}
+
+enum @Result<bool,STD.Error> {
+    .success(bool)
+    .failure(@STD.Error)
+}
+
+enum @Result<str[],STD.Error> {
+    .success(@str[])
+    .failure(@STD.Error)
+}
+
+enum @Result<str,STD.Text.UTF8.DecodeError> {
+    .success(str)
+    .failure(@STD.Text.UTF8.DecodeError)
+}
+
+enum @Result<str,STD.Text.UTF8.ScalarError> {
+    .success(str)
+    .failure(@STD.Text.UTF8.ScalarError)
+}
+
+func @GFX.Physics.Benchmarks.PreparationKernel2D.prepare(%0:internal address, %1:bool) -> @GFX.Physics.Benchmarks.PreparationKernel2D.Prepared {
+entry:
+    %3:float = const 0
+    %4:float = const 0
+    %6:float = const 0
+    %29:float = const 0
+    %1846:float = copy %29
+    branch %1, bb1, bb2
+bb1:
+    %30:float = const 1
+    %1846:float = copy %30
+    jump bb2
+bb2:
+    %1036:internal address = reference.field %0, separation
+    %33:float = reference.load %1036
+    %1037:internal address = reference.field %0, bx
+    %34:float = reference.load %1037
+    %1038:internal address = reference.field %0, ax
+    %35:float = reference.load %1038
+    %36:float = sub %34, %35
+    %1039:internal address = reference.field %0, nx
+    %37:float = reference.load %1039
+    %38:float = mul %36, %37
+    %1040:internal address = reference.field %0, by
+    %39:float = reference.load %1040
+    %1041:internal address = reference.field %0, ay
+    %40:float = reference.load %1041
+    %41:float = sub %39, %40
+    %1042:internal address = reference.field %0, ny
+    %42:float = reference.load %1042
+    %43:float = mul %41, %42
+    %44:float = add %38, %43
+    %45:float = sub %33, %44
+    %76:float = mul %35, %42
+    %79:float = mul %40, %37
+    %80:float = sub %76, %79
+    %83:float = mul %34, %42
+    %86:float = mul %39, %37
+    %87:float = sub %83, %86
+    %1043:internal address = reference.field %0, ma
+    %88:float = reference.load %1043
+    %1044:internal address = reference.field %0, mb
+    %89:float = reference.load %1044
+    %90:float = add %88, %89
+    %1045:internal address = reference.field %0, ia
+    %91:float = reference.load %1045
+    %92:float = mul %91, %80
+    %93:float = mul %92, %80
+    %94:float = add %90, %93
+    %1046:internal address = reference.field %0, ib
+    %95:float = reference.load %1046
+    %96:float = mul %95, %87
+    %97:float = mul %96, %87
+    %98:float = add %94, %97
+    %99:float = const 0
+    %100:bool = gt %98, %99
+    %1847:float = copy %3
+    branch %100, bb3, bb4
+bb3:
+    %103:float = const 1
+    %104:float = div %103, %98
+    %1847:float = copy %104
+    jump bb4
+bb4:
+    %133:float = copy %42
+    %134:float = copy %37
+    %135:float = neg %134
+    %136:float = copy %35
+    %137:float = mul %136, %135
+    %138:float = copy %40
+    %139:float = mul %138, %133
+    %140:float = sub %137, %139
+    %141:float = copy %34
+    %142:float = mul %141, %135
+    %143:float = copy %39
+    %144:float = mul %143, %133
+    %145:float = sub %142, %144
+    %148:float = copy %90
+    %149:float = copy %91
+    %150:float = mul %149, %140
+    %151:float = mul %150, %140
+    %152:float = add %148, %151
+    %153:float = copy %95
+    %154:float = mul %153, %145
+    %155:float = mul %154, %145
+    %156:float = add %152, %155
+    %157:float = const 0
+    %158:bool = gt %156, %157
+    %1848:float = copy %4
+    branch %158, bb5, bb6
+bb5:
+    %161:float = const 1
+    %162:float = div %161, %156
+    %1848:float = copy %162
+    jump bb6
+bb6:
+    %191:float = copy %91
+    %192:float = copy %95
+    %193:float = add %191, %192
+    %194:float = const 0
+    %195:bool = gt %193, %194
+    %1849:float = copy %6
+    branch %195, bb7, bb8
+bb7:
+    %198:float = const 1
+    %199:float = div %198, %193
+    %1849:float = copy %199
+    jump bb8
+bb8:
+    %1059:internal address = reference.field %0, vax
+    %228:float = reference.load %1059
+    %1060:internal address = reference.field %0, vay
+    %230:float = reference.load %1060
+    %1061:internal address = reference.field %0, wa
+    %232:float = reference.load %1061
+    %1062:internal address = reference.field %0, vbx
+    %234:float = reference.load %1062
+    %1063:internal address = reference.field %0, vby
+    %236:float = reference.load %1063
+    %1064:internal address = reference.field %0, wb
+    %238:float = reference.load %1064
+    %240:float = copy %88
+    %241:float = const 0
+    %242:bool = eq %240, %241
+    %1850:float = copy %228
+    %1852:float = copy %232
+    %1851:float = copy %230
+    branch %242, bb9, bb10
+bb9:
+    %243:float = const 0
+    %244:float = const 0
+    %245:float = const 0
+    %1850:float = copy %243
+    %1852:float = copy %245
+    %1851:float = copy %244
+    jump bb10
+bb10:
+    %246:float = copy %89
+    %247:float = const 0
+    %248:bool = eq %246, %247
+    %1853:float = copy %234
+    %1855:float = copy %238
+    %1854:float = copy %236
+    branch %248, bb11, bb12
+bb11:
+    %249:float = const 0
+    %250:float = const 0
+    %251:float = const 0
+    %1853:float = copy %249
+    %1855:float = copy %251
+    %1854:float = copy %250
+    jump bb12
+bb12:
+    %254:float = copy %37
+    %255:float = copy %1853
+    %256:float = copy %1855
+    %257:float = copy %39
+    %258:float = mul %256, %257
+    %259:float = sub %255, %258
+    %260:float = copy %1850
+    %261:float = copy %1852
+    %262:float = copy %40
+    %263:float = mul %261, %262
+    %264:float = sub %260, %263
+    %265:float = sub %259, %264
+    %266:float = mul %254, %265
+    %267:float = copy %42
+    %268:float = copy %1854
+    %270:float = copy %34
+    %271:float = mul %256, %270
+    %272:float = add %268, %271
+    %273:float = copy %1851
+    %275:float = copy %35
+    %276:float = mul %261, %275
+    %277:float = add %273, %276
+    %278:float = sub %272, %277
+    %279:float = mul %267, %278
+    %280:float = add %266, %279
+    %311:float = copy %1846
+    %1073:internal address = reference.field %0, normal
+    %312:float = reference.load %1073
+    %313:float = mul %311, %312
+    %1074:internal address = reference.field %0, tangent
+    %345:float = reference.load %1074
+    %346:float = mul %311, %345
+    %1075:internal address = reference.field %0, rolling
+    %378:float = reference.load %1075
+    %379:float = mul %311, %378
+    %410:float = const 12
+    %441:float = const 0.75
+    %472:float = const 0.25
+    %501:float = copy %88
+    %502:float = const 0
+    %503:bool = eq %501, %502
+    branch %503, bb14, bb13
+bb13:
+    %505:float = copy %89
+    %506:float = const 0
+    %507:bool = eq %505, %506
+    %504:bool = copy %507
+    jump bb15
+bb14:
+    %504:bool = const true
+    jump bb15
+bb15:
+    %1856:float = copy %410
+    %1858:float = copy %472
+    %1857:float = copy %441
+    branch %504, bb16, bb17
+bb16:
+    %510:float = const 24
+    %541:float = const 0.875
+    %572:float = const 0.125
+    %1856:float = copy %510
+    %1858:float = copy %572
+    %1857:float = copy %541
+    jump bb17
+bb17:
+    %1078:internal address = reference.field %0, friction
+    %603:float = reference.load %1078
+    %1079:internal address = reference.field %0, restitution
+    %634:float = reference.load %1079
+    %1080:internal address = reference.field %0, tangent_speed
+    %665:float = reference.load %1080
+    %1081:internal address = reference.field %0, rolling_resistance
+    %696:float = reference.load %1081
+    %727:float = copy %37
+    %758:float = copy %42
+    %789:float = copy %35
+    %820:float = copy %40
+    %851:float = copy %34
+    %882:float = copy %39
+    %913:float = copy %88
+    %944:float = copy %89
+    %975:float = copy %91
+    %1006:float = copy %95
+    %1820:float = copy %45
+    %1821:float = copy %1847
+    %1822:float = copy %1848
+    %1823:float = copy %280
+    %1824:float = copy %1849
+    %1825:float = copy %313
+    %1826:float = copy %346
+    %1827:float = copy %379
+    %1828:float = copy %603
+    %1829:float = copy %634
+    %1830:float = copy %665
+    %1831:float = copy %696
+    %1832:float = copy %1856
+    %1833:float = copy %1857
+    %1834:float = copy %1858
+    %1835:float = copy %727
+    %1836:float = copy %758
+    %1837:float = copy %789
+    %1838:float = copy %820
+    %1839:float = copy %851
+    %1840:float = copy %882
+    %1841:float = copy %913
+    %1842:float = copy %944
+    %1843:float = copy %975
+    %1844:float = copy %1006
+    %1845:float = const 0
+    %1035:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared = struct.init @GFX.Physics.Benchmarks.PreparationKernel2D.Prepared(.separation=%1820, .normal_mass=%1821, .tangent_mass=%1822, .relative_velocity=%1823, .rolling_mass=%1824, .normal=%1825, .tangent=%1826, .rolling=%1827, .friction=%1828, .restitution=%1829, .tangent_speed=%1830, .rolling_resistance=%1831, .bias_rate=%1832, .mass_scale=%1833, .impulse_scale=%1834, .nx=%1835, .ny=%1836, .ax=%1837, .ay=%1838, .bx=%1839, .by=%1840, .ma=%1841, .mb=%1842, .ia=%1843, .ib=%1844, .total=%1845)
+    return %1035
+}
+
+func @GFX.Physics.Benchmarks.PreparationKernel2D.make_input(%0:int, %1:int) -> @GFX.Physics.Benchmarks.PreparationKernel2D.Input {
+entry:
+    %2:int = const 16
+    %3:int = rem %0, %2
+    %4:float = convert %3 to float
+    %5:float = convert %1 to float
+    %6:float = const 1
+    %7:float = const 0.5
+    %8:float = const 0.25
+    %9:float = const 0.5
+    %10:float = const 0.6000000238418579
+    %11:float = const 0.800000011920929
+    %12:float = const 0.125
+    %13:float = const 0.0078125
+    %14:float = mul %5, %13
+    %15:float = add %12, %14
+    %20:float = const 0.0625
+    %21:float = const 0.00390625
+    %22:float = mul %5, %21
+    %23:float = add %20, %22
+    %24:float = const 8
+    %25:float = sub %4, %24
+    %26:float = const 0.03125
+    %27:float = mul %25, %26
+    %28:float = const 0.001953125
+    %29:float = mul %5, %28
+    %30:float = add %27, %29
+    %31:float = const 0.125
+    %32:float = mul %4, %31
+    %34:float = const -0.5
+    %35:float = const 0.0625
+    %36:float = mul %5, %35
+    %37:float = sub %34, %36
+    %41:float = const 0.0625
+    %42:float = mul %4, %41
+    %43:float = const 1
+    %44:float = sub %42, %43
+    %46:float = const -0.5
+    %47:float = const 0.03125
+    %48:float = mul %5, %47
+    %49:float = add %46, %48
+    %50:float = const 0.125
+    %51:float = const 0.015625
+    %52:float = mul %5, %51
+    %53:float = add %50, %52
+    %57:int = const 4
+    %58:int = rem %0, %57
+    %59:float = convert %58 to float
+    %60:float = const 0.25
+    %61:float = mul %59, %60
+    %62:float = const 0.0625
+    %63:float = mul %4, %62
+    %64:float = const 8
+    %65:float = sub %4, %64
+    %66:float = const 0.125
+    %67:float = mul %65, %66
+    %70:int = const 4
+    %71:int = rem %0, %70
+    %72:int = const 0
+    %73:bool = eq %71, %72
+    %426:float = copy %6
+    %427:float = copy %8
+    branch %73, bb1, bb2
+bb1:
+    %76:float = const 0
+    %105:float = const 0
+    %426:float = copy %76
+    %427:float = copy %105
+    jump bb2
+bb2:
+    %132:int = const 8
+    %133:int = rem %0, %132
+    %134:int = const 0
+    %135:bool = eq %133, %134
+    %428:float = copy %7
+    %429:float = copy %9
+    branch %135, bb3, bb4
+bb3:
+    %138:float = const 0
+    %167:float = const 0
+    %428:float = copy %138
+    %429:float = copy %167
+    jump bb4
+bb4:
+    %194:int = const 2
+    %195:int = rem %1, %194
+    %196:int = const 1
+    %197:bool = eq %195, %196
+    %430:float = copy %10
+    %431:float = copy %11
+    branch %197, bb5, bb6
+bb5:
+    %200:float = const 0.800000011920929
+    %230:float = const -0.6000000238418579
+    %430:float = copy %200
+    %431:float = copy %230
+    jump bb6
+bb6:
+    %402:float = copy %426
+    %403:float = copy %428
+    %404:float = copy %427
+    %405:float = copy %429
+    %406:float = copy %430
+    %407:float = copy %431
+    %408:float = copy %15
+    %409:float = const -0.0625
+    %410:float = const -0.125
+    %411:float = copy %23
+    %412:float = copy %30
+    %413:float = copy %32
+    %414:float = copy %37
+    %415:float = const 0.25
+    %416:float = const -0.25
+    %417:float = copy %44
+    %418:float = copy %49
+    %419:float = copy %53
+    %420:float = const 0.03125
+    %421:float = const -0.015625
+    %422:float = copy %61
+    %423:float = copy %63
+    %424:float = copy %67
+    %425:float = const 0.125
+    %257:@GFX.Physics.Benchmarks.PreparationKernel2D.Input = struct.init @GFX.Physics.Benchmarks.PreparationKernel2D.Input(.ma=%402, .mb=%403, .ia=%404, .ib=%405, .nx=%406, .ny=%407, .ax=%408, .ay=%409, .bx=%410, .by=%411, .separation=%412, .vax=%413, .vay=%414, .wa=%415, .vbx=%416, .vby=%417, .wb=%418, .normal=%419, .tangent=%420, .rolling=%421, .friction=%422, .restitution=%423, .tangent_speed=%424, .rolling_resistance=%425)
+    return %257
+}
+
+func @main() -> void {
+entry:
+    %0:bool = const false
+    %1:bool = const false
+    %2:@Result<str[],STD.Error> = call @STD.Process.arguments()
+    %3:bool = enum.test %2, @Result<str[],STD.Error>.failure
+    branch %3, bb1, bb2
+bb1:
+    %4:@STD.Error = enum.payload %2, @Result<str[],STD.Error>.failure[0]
+    %5:str = field %4, .detail
+    panic %5
+bb2:
+    %6:@str[] = enum.payload %2, @Result<str[],STD.Error>.success[0]
+    store $0:structure, %6
+    %7:int = const 0
+    %346:bool = copy %0
+    %348:int = copy %7
+    %347:bool = copy %1
+    jump bb3
+bb3:
+    %9:@str[] = load $0:structure
+    %10:int = collection.count %9
+    %11:bool = lt %348, %10
+    branch %11, bb4, bb5
+bb4:
+    %12:@str[] = load $0:structure
+    %13:str = collection.load %12, %348 bounded
+    str.retain %13
+    %14:str = const "--check"
+    %15:bool = eq %13, %14
+    branch %15, bb6, bb7
+bb5:
+    %24:int = collection.count %6
+    %349:int = copy %24
+    jump bb10
+bb6:
+    %16:bool = const true
+    %346:bool = copy %16
+    jump bb7
+bb7:
+    %17:str = const "--check-full"
+    %18:bool = eq %13, %17
+    branch %18, bb8, bb9
+bb8:
+    %19:bool = const true
+    %20:bool = const true
+    %346:bool = copy %19
+    %347:bool = copy %20
+    jump bb9
+bb9:
+    str.drop %13
+    %23:int = const 1
+    %21:int = add %348, %23
+    %348:int = copy %21
+    jump bb3
+bb10:
+    %26:int = const 0
+    %27:bool = ne %349, %26
+    branch %27, bb11, bb12
+bb11:
+    %28:int = const 1
+    %29:int = sub %349, %28
+    %30:str = collection.load %6, %29
+    str.drop %30
+    %349:int = copy %29
+    jump bb10
+bb12:
+    list.drop %6
+    %31:int = const 8192
+    %32:int = const 2048
+    %350:int = copy %31
+    %351:int = copy %32
+    branch %346, bb13, bb15
+bb13:
+    %34:int = const 16
+    %36:bool = const false
+    %37:bool = eq %347, %36
+    %350:int = copy %34
+    %351:int = copy %32
+    branch %37, bb14, bb15
+bb14:
+    %38:int = const 8
+    %350:int = copy %34
+    %351:int = copy %38
+    jump bb15
+bb15:
+    %39:@GFX.Physics.Benchmarks.PreparationKernel2D.Input[] = list.init []
+    store $1:structure, %39
+    %40:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[] = list.init []
+    store $2:structure, %40
+    %41:int = const 0
+    %352:int = copy %41
+    jump bb16
+bb16:
+    %43:int = const 16
+    %44:bool = lt %352, %43
+    branch %44, bb17, bb18
+bb17:
+    %45:int = const 0
+    %353:int = copy %45
+    jump bb19
+bb18:
+    %60:int = const 0
+    %354:int = copy %60
+    jump bb22
+bb19:
+    %48:bool = lt %353, %350
+    branch %48, bb20, bb21
+bb20:
+    %49:@GFX.Physics.Benchmarks.PreparationKernel2D.Input[] = load $1:structure
+    %52:@GFX.Physics.Benchmarks.PreparationKernel2D.Input = call @GFX.Physics.Benchmarks.PreparationKernel2D.make_input(%353, %352)
+    %53:@GFX.Physics.Benchmarks.PreparationKernel2D.Input[] = list.append %49, %52
+    store $1:structure, %53
+    %55:int = const 1
+    %56:int = add %353, %55
+    %353:int = copy %56
+    jump bb19
+bb21:
+    %58:int = const 1
+    %59:int = add %352, %58
+    %352:int = copy %59
+    jump bb16
+bb22:
+    %63:bool = lt %354, %350
+    branch %63, bb23, bb24
+bb23:
+    %64:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[] = load $2:structure
+    %65:float = const 0
+    %66:float = const 0
+    %67:float = const 0
+    %68:float = const 0
+    %69:float = const 0
+    %70:float = const 0
+    %71:float = const 0
+    %72:float = const 0
+    %73:float = const 0
+    %74:float = const 0
+    %75:float = const 0
+    %76:float = const 0
+    %77:float = const 0
+    %78:float = const 0
+    %79:float = const 0
+    %80:float = const 0
+    %81:float = const 0
+    %82:float = const 0
+    %83:float = const 0
+    %84:float = const 0
+    %85:float = const 0
+    %86:float = const 0
+    %87:float = const 0
+    %88:float = const 0
+    %89:float = const 0
+    %90:float = const 0
+    %91:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared = struct.init @GFX.Physics.Benchmarks.PreparationKernel2D.Prepared(.separation=%65, .normal_mass=%66, .tangent_mass=%67, .relative_velocity=%68, .rolling_mass=%69, .normal=%70, .tangent=%71, .rolling=%72, .friction=%73, .restitution=%74, .tangent_speed=%75, .rolling_resistance=%76, .bias_rate=%77, .mass_scale=%78, .impulse_scale=%79, .nx=%80, .ny=%81, .ax=%82, .ay=%83, .bx=%84, .by=%85, .ma=%86, .mb=%87, .ia=%88, .ib=%89, .total=%90)
+    %92:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[] = list.append %64, %91
+    store $2:structure, %92
+    %94:int = const 1
+    %95:int = add %354, %94
+    %354:int = copy %95
+    jump bb22
+bb24:
+    %96:@GFX.Physics.Benchmarks.PreparationKernel2D.Input[] = load $1:structure
+    %97:int = const 0
+    %98:@GFX.Physics.Benchmarks.PreparationKernel2D.Input[] = load $1:structure
+    %99:int = collection.count %98
+    %100:@GFX.Physics.Benchmarks.PreparationKernel2D.Input[..] = collection.view %96, %97, %99
+    %101:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[] = load $2:structure
+    %102:internal address = address $2:structure
+    %104:int = const 0
+    %105:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[] = load $2:structure
+    %106:int = collection.count %105
+    %107:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[..] = collection.view %101, %104, %106, through %102
+    store $3:structure, %107
+    %108:float64 = const 0
+    %109:int = const 0
+    %113:bool = const false
+    %114:bool = const false
+    %359:float = const 0
+    %360:float = const 0
+    %361:float = const 1
+    %116:@STD.Time.Clock = struct.init @STD.Time.Clock(.last_microseconds=%109, .pending_seconds=%359, .total_seconds=%360, .time_scale=%361, .initialized=%113, .paused=%114)
+    %117:@STD.Time.Clock.tick#result0 = call @STD.Time.Clock.tick#0(%116)
+    %118:@STD.Time.Clock = field %117, .self
+    %364:int = field %118, .last_microseconds
+    %365:float = field %118, .pending_seconds
+    %366:float = field %118, .total_seconds
+    %367:float = field %118, .time_scale
+    %368:bool = field %118, .initialized
+    %369:bool = field %118, .paused
+    %120:int = const 0
+    %355:int = copy %120
+    %435:float64 = copy %108
+    jump bb25
+bb25:
+    %123:bool = lt %355, %351
+    branch %123, bb26, bb27
+bb26:
+    %125:int = const 16
+    %126:int = rem %355, %125
+    %128:int = mul %126, %350
+    %129:int = const 0
+    %356:int = copy %129
+    jump bb28
+bb27:
+    %329:bool = const false
+    %330:bool = eq %346, %329
+    branch %330, bb37, bb38
+bb28:
+    %132:bool = lt %356, %350
+    branch %132, bb29, bb30
+bb29:
+    %133:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[..] = load $3:structure
+    %135:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared = collection.load %133, %356
+    %137:int = add %128, %356
+    %138:internal address = collection.reference %100, %137
+    %140:int = const 2
+    %141:int = rem %355, %140
+    %142:int = const 0
+    %143:bool = eq %141, %142
+    %144:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared = call @GFX.Physics.Benchmarks.PreparationKernel2D.prepare(%138, %143)
+    %145:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[..] = load $3:structure
+    %147:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[..] = collection.replace %145, %356, %144
+    store $3:structure, %147
+    %149:int = const 1
+    %150:int = add %356, %149
+    %356:int = copy %150
+    jump bb28
+bb30:
+    %151:int = const 0
+    %357:int = copy %151
+    %436:float64 = copy %435
+    jump bb31
+bb31:
+    %154:bool = lt %357, %350
+    branch %154, bb32, bb33
+bb32:
+    %155:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[..] = load $3:structure
+    %408:internal address = collection.reference %155, %357
+    %409:internal address = reference.field %408, separation
+    %382:float = reference.load %409
+    %410:internal address = reference.field %408, normal_mass
+    %383:float = reference.load %410
+    %411:internal address = reference.field %408, tangent_mass
+    %384:float = reference.load %411
+    %412:internal address = reference.field %408, relative_velocity
+    %385:float = reference.load %412
+    %413:internal address = reference.field %408, rolling_mass
+    %386:float = reference.load %413
+    %414:internal address = reference.field %408, normal
+    %387:float = reference.load %414
+    %415:internal address = reference.field %408, tangent
+    %388:float = reference.load %415
+    %416:internal address = reference.field %408, rolling
+    %389:float = reference.load %416
+    %417:internal address = reference.field %408, friction
+    %390:float = reference.load %417
+    %418:internal address = reference.field %408, restitution
+    %391:float = reference.load %418
+    %419:internal address = reference.field %408, tangent_speed
+    %392:float = reference.load %419
+    %420:internal address = reference.field %408, rolling_resistance
+    %393:float = reference.load %420
+    %421:internal address = reference.field %408, bias_rate
+    %394:float = reference.load %421
+    %422:internal address = reference.field %408, mass_scale
+    %395:float = reference.load %422
+    %423:internal address = reference.field %408, impulse_scale
+    %396:float = reference.load %423
+    %424:internal address = reference.field %408, nx
+    %397:float = reference.load %424
+    %425:internal address = reference.field %408, ny
+    %398:float = reference.load %425
+    %426:internal address = reference.field %408, ax
+    %399:float = reference.load %426
+    %427:internal address = reference.field %408, ay
+    %400:float = reference.load %427
+    %428:internal address = reference.field %408, bx
+    %401:float = reference.load %428
+    %429:internal address = reference.field %408, by
+    %402:float = reference.load %429
+    %430:internal address = reference.field %408, ma
+    %403:float = reference.load %430
+    %431:internal address = reference.field %408, mb
+    %404:float = reference.load %431
+    %432:internal address = reference.field %408, ia
+    %405:float = reference.load %432
+    %433:internal address = reference.field %408, ib
+    %406:float = reference.load %433
+    %434:internal address = reference.field %408, total
+    %407:float = reference.load %434
+    branch %346, bb34, bb35
+bb33:
+    %326:int = const 1
+    %327:int = add %355, %326
+    %355:int = copy %327
+    %435:float64 = copy %436
+    jump bb25
+bb34:
+    %160:str = const "STATE "
+    %162:str = const " "
+    %164:str = const " "
+    %165:float = copy %382
+    %166:str = const " "
+    %167:float = copy %383
+    %168:str = const " "
+    %169:float = copy %384
+    %170:str = const " "
+    %171:float = copy %385
+    %172:str = const " "
+    %173:float = copy %386
+    %174:str = const " "
+    %175:float = copy %387
+    %176:str = const " "
+    %177:float = copy %388
+    %178:str = const " "
+    %179:float = copy %389
+    %180:str = const " "
+    %181:float = copy %390
+    %182:str = const " "
+    %183:float = copy %391
+    %184:str = const " "
+    %185:float = copy %392
+    %186:str = const " "
+    %187:float = copy %393
+    %188:str = const " "
+    %189:float = copy %394
+    %190:str = const " "
+    %191:float = copy %395
+    %192:str = const " "
+    %193:float = copy %396
+    %194:str = const " "
+    %195:float = copy %397
+    %196:str = const " "
+    %197:float = copy %398
+    %198:str = const " "
+    %199:float = copy %399
+    %200:str = const " "
+    %201:float = copy %400
+    %202:str = const " "
+    %203:float = copy %401
+    %204:str = const " "
+    %205:float = copy %402
+    %206:str = const " "
+    %207:float = copy %403
+    %208:str = const " "
+    %209:float = copy %404
+    %210:str = const " "
+    %211:float = copy %405
+    %212:str = const " "
+    %213:float = copy %406
+    %214:str = const " "
+    %215:float = copy %407
+    print %160 without-newline
+    print %355 without-newline
+    print %162 without-newline
+    print %357 without-newline
+    print %164 without-newline
+    print %165 without-newline
+    print %166 without-newline
+    print %167 without-newline
+    print %168 without-newline
+    print %169 without-newline
+    print %170 without-newline
+    print %171 without-newline
+    print %172 without-newline
+    print %173 without-newline
+    print %174 without-newline
+    print %175 without-newline
+    print %176 without-newline
+    print %177 without-newline
+    print %178 without-newline
+    print %179 without-newline
+    print %180 without-newline
+    print %181 without-newline
+    print %182 without-newline
+    print %183 without-newline
+    print %184 without-newline
+    print %185 without-newline
+    print %186 without-newline
+    print %187 without-newline
+    print %188 without-newline
+    print %189 without-newline
+    print %190 without-newline
+    print %191 without-newline
+    print %192 without-newline
+    print %193 without-newline
+    print %194 without-newline
+    print %195 without-newline
+    print %196 without-newline
+    print %197 without-newline
+    print %198 without-newline
+    print %199 without-newline
+    print %200 without-newline
+    print %201 without-newline
+    print %202 without-newline
+    print %203 without-newline
+    print %204 without-newline
+    print %205 without-newline
+    print %206 without-newline
+    print %207 without-newline
+    print %208 without-newline
+    print %209 without-newline
+    print %210 without-newline
+    print %211 without-newline
+    print %212 without-newline
+    print %213 without-newline
+    print %214 without-newline
+    print %215
+    jump bb36
+bb35:
+    %216:float64 = copy %436
+    %217:float = copy %382
+    %218:float = const 1
+    %219:float = mul %217, %218
+    %220:float = copy %383
+    %221:float = const 2
+    %222:float = mul %220, %221
+    %223:float = add %219, %222
+    %224:float = copy %384
+    %225:float = const 3
+    %226:float = mul %224, %225
+    %227:float = add %223, %226
+    %228:float = copy %385
+    %229:float = const 4
+    %230:float = mul %228, %229
+    %231:float = add %227, %230
+    %232:float = copy %386
+    %233:float = const 5
+    %234:float = mul %232, %233
+    %235:float = add %231, %234
+    %236:float = copy %387
+    %237:float = const 6
+    %238:float = mul %236, %237
+    %239:float = add %235, %238
+    %240:float = copy %388
+    %241:float = const 7
+    %242:float = mul %240, %241
+    %243:float = add %239, %242
+    %244:float = copy %389
+    %245:float = const 8
+    %246:float = mul %244, %245
+    %247:float = add %243, %246
+    %248:float = copy %390
+    %249:float = const 9
+    %250:float = mul %248, %249
+    %251:float = add %247, %250
+    %252:float = copy %391
+    %253:float = const 10
+    %254:float = mul %252, %253
+    %255:float = add %251, %254
+    %256:float = copy %392
+    %257:float = const 11
+    %258:float = mul %256, %257
+    %259:float = add %255, %258
+    %260:float = copy %393
+    %261:float = const 12
+    %262:float = mul %260, %261
+    %263:float = add %259, %262
+    %264:float = copy %394
+    %265:float = const 13
+    %266:float = mul %264, %265
+    %267:float = add %263, %266
+    %268:float = copy %395
+    %269:float = const 14
+    %270:float = mul %268, %269
+    %271:float = add %267, %270
+    %272:float = copy %396
+    %273:float = const 15
+    %274:float = mul %272, %273
+    %275:float = add %271, %274
+    %276:float = copy %397
+    %277:float = const 16
+    %278:float = mul %276, %277
+    %279:float = add %275, %278
+    %280:float = copy %398
+    %281:float = const 17
+    %282:float = mul %280, %281
+    %283:float = add %279, %282
+    %284:float = copy %399
+    %285:float = const 18
+    %286:float = mul %284, %285
+    %287:float = add %283, %286
+    %288:float = copy %400
+    %289:float = const 19
+    %290:float = mul %288, %289
+    %291:float = add %287, %290
+    %292:float = copy %401
+    %293:float = const 20
+    %294:float = mul %292, %293
+    %295:float = add %291, %294
+    %296:float = copy %402
+    %297:float = const 21
+    %298:float = mul %296, %297
+    %299:float = add %295, %298
+    %300:float = copy %403
+    %301:float = const 22
+    %302:float = mul %300, %301
+    %303:float = add %299, %302
+    %304:float = copy %404
+    %305:float = const 23
+    %306:float = mul %304, %305
+    %307:float = add %303, %306
+    %308:float = copy %405
+    %309:float = const 24
+    %310:float = mul %308, %309
+    %311:float = add %307, %310
+    %312:float = copy %406
+    %313:float = const 25
+    %314:float = mul %312, %313
+    %315:float = add %311, %314
+    %316:float = copy %407
+    %317:float = const 26
+    %318:float = mul %316, %317
+    %319:float = add %315, %318
+    %320:float64 = convert %319 to float64
+    %321:float64 = add %216, %320
+    %436:float64 = copy %321
+    jump bb36
+bb36:
+    %323:int = const 1
+    %324:int = add %357, %323
+    %357:int = copy %324
+    jump bb31
+bb37:
+    %371:float = copy %365
+    %372:float = copy %366
+    %373:float = copy %367
+    %331:@STD.Time.Clock = struct.init @STD.Time.Clock(.last_microseconds=%364, .pending_seconds=%371, .total_seconds=%372, .time_scale=%373, .initialized=%368, .paused=%369)
+    %332:@STD.Time.Clock.tick#result0 = call @STD.Time.Clock.tick#0(%331)
+    %334:float = field %332, .value
+    %335:float = const 1000
+    %336:float = mul %334, %335
+    %337:str = const "KERNEL preparation silex slots8 "
+    %339:str = const " "
+    %341:str = const " "
+    %342:str = const " "
+    %343:float64 = copy %435
+    print %337 without-newline
+    print %350 without-newline
+    print %339 without-newline
+    print %351 without-newline
+    print %341 without-newline
+    print %336 without-newline
+    print %342 without-newline
+    print %343
+    jump bb38
+bb38:
+    %344:@GFX.Physics.Benchmarks.PreparationKernel2D.Prepared[] = load $2:structure
+    list.drop %344
+    %345:@GFX.Physics.Benchmarks.PreparationKernel2D.Input[] = load $1:structure
+    list.drop %345
+    return
+}
+
+func @STD.Process.arguments() -> @Result<str[],STD.Error> {
+entry:
+    %0:@str[]? = call @STD.Process.$Platform.arguments()
+    %1:@str[]? = optional.null
+    %2:bool = ne %0, %1
+    branch %2, bb1, bb8
+bb1:
+    %3:@str[] = optional.unwrap %0
+    list.retain %3
+    %4:int = const 0
+    %5:int = collection.count %3
+    %24:int = copy %4
+    jump bb2
+bb2:
+    %7:bool = lt %24, %5
+    branch %7, bb3, bb4
+bb3:
+    %8:str = collection.load %3, %24 bounded
+    str.retain %8
+    %9:int = const 1
+    %10:int = add %24, %9
+    %24:int = copy %10
+    jump bb2
+bb4:
+    %11:@Result<str[],STD.Error> = enum.init @Result<str[],STD.Error>.success(%3)
+    %12:int = collection.count %3
+    %25:int = copy %12
+    jump bb5
+bb5:
+    %14:int = const 0
+    %15:bool = ne %25, %14
+    branch %15, bb6, bb7
+bb6:
+    %16:int = const 1
+    %17:int = sub %25, %16
+    %18:str = collection.load %3, %17
+    str.drop %18
+    %25:int = copy %17
+    jump bb5
+bb7:
+    list.drop %3
+    return %11
+bb8:
+    %19:str = const "process.arguments"
+    %20:str? = optional.null
+    %21:str = const "system argument query failed"
+    str.retain %19
+    str.retain %21
+    %22:@STD.Error = call @STD.Process.process_error(%19, %20, %21)
+    %23:@Result<str[],STD.Error> = enum.init @Result<str[],STD.Error>.failure(%22)
+    return %23
+}
+
+func @STD.Process.process_error(%0:str, %1:str?, %2:str) -> @STD.Error {
+entry:
+    %3:@STD.Error.Kind = enum.init @STD.Error.Kind.other()
+    str.retain %0
+    %4:str? = optional.null
+    %5:bool = ne %1, %4
+    branch %5, bb1, bb2
+bb1:
+    %6:str = optional.unwrap %1
+    str.retain %6
+    jump bb2
+bb2:
+    str.retain %2
+    %7:@STD.Error = struct.init @STD.Error(.kind=%3, .operation=%0, .subject=%1, .detail=%2)
+    str.drop %2
+    %8:str? = optional.null
+    %9:bool = ne %1, %8
+    branch %9, bb3, bb4
+bb3:
+    %10:str = optional.unwrap %1
+    str.drop %10
+    jump bb4
+bb4:
+    str.drop %0
+    return %7
+}
+
+func @STD.Process.$Platform.arguments() -> @str[]? {
+entry:
+    %0:@str[] = list.init []
+    store $0:structure, %0
+    %1:internal address = boundary.call #0()
+    %2:uint = copy %1
+    %3:internal address = boundary.call #1()
+    %4:uint = copy %3
+    %5:uint = const 0
+    %6:bool = eq %2, %5
+    branch %6, bb2, bb1
+bb1:
+    %8:uint = const 0
+    %9:bool = eq %4, %8
+    %7:bool = copy %9
+    jump bb3
+bb2:
+    %7:bool = const true
+    jump bb3
+bb3:
+    branch %7, bb4, bb12
+bb4:
+    %10:@str[] = load $0:structure
+    %11:@str[]? = optional.some %10
+    %12:@str[]? = optional.null
+    %13:bool = ne %11, %12
+    branch %13, bb5, bb6
+bb5:
+    %14:@str[] = optional.unwrap %11
+    list.retain %14
+    %15:int = const 0
+    %16:int = collection.count %14
+    %93:int = copy %15
+    jump bb7
+bb6:
+    %22:@str[] = load $0:structure
+    %23:int = collection.count %22
+    %94:int = copy %23
+    jump bb9
+bb7:
+    %18:bool = lt %93, %16
+    branch %18, bb8, bb6
+bb8:
+    %19:str = collection.load %14, %93 bounded
+    str.retain %19
+    %20:int = const 1
+    %21:int = add %93, %20
+    %93:int = copy %21
+    jump bb7
+bb9:
+    %25:int = const 0
+    %26:bool = ne %94, %25
+    branch %26, bb10, bb11
+bb10:
+    %27:int = const 1
+    %28:int = sub %94, %27
+    %29:str = collection.load %22, %28
+    str.drop %29
+    %94:int = copy %28
+    jump bb9
+bb11:
+    list.drop %22
+    return %11
+bb12:
+    %31:uint = const 0
+    %32:int32 = boundary.load %2, %31
+    %34:uint = const 0
+    %35:uint = boundary.load %4, %34
+    %36:int = const 0
+    %95:int = copy %36
+    jump bb13
+bb13:
+    %38:int = convert %32 to int
+    %39:bool = lt %95, %38
+    branch %39, bb14, bb15
+bb14:
+    %41:uint = convert %95 to uint
+    %42:uint = const 8
+    %43:uint = mul %41, %42
+    %44:uint = boundary.load %35, %43
+    %45:uint = const 0
+    %46:bool = eq %44, %45
+    branch %46, bb16, bb24
+bb15:
+    %73:@str[] = load $0:structure
+    %74:@str[]? = optional.some %73
+    %75:@str[]? = optional.null
+    %76:bool = ne %74, %75
+    branch %76, bb25, bb26
+bb16:
+    %47:@str[] = load $0:structure
+    %48:@str[]? = optional.some %47
+    %49:@str[]? = optional.null
+    %50:bool = ne %48, %49
+    branch %50, bb17, bb18
+bb17:
+    %51:@str[] = optional.unwrap %48
+    list.retain %51
+    %52:int = const 0
+    %53:int = collection.count %51
+    %96:int = copy %52
+    jump bb19
+bb18:
+    %59:@str[] = load $0:structure
+    %60:int = collection.count %59
+    %97:int = copy %60
+    jump bb21
+bb19:
+    %55:bool = lt %96, %53
+    branch %55, bb20, bb18
+bb20:
+    %56:str = collection.load %51, %96 bounded
+    str.retain %56
+    %57:int = const 1
+    %58:int = add %96, %57
+    %96:int = copy %58
+    jump bb19
+bb21:
+    %62:int = const 0
+    %63:bool = ne %97, %62
+    branch %63, bb22, bb23
+bb22:
+    %64:int = const 1
+    %65:int = sub %97, %64
+    %66:str = collection.load %59, %65
+    str.drop %66
+    %97:int = copy %65
+    jump bb21
+bb23:
+    list.drop %59
+    return %48
+bb24:
+    %67:@str[] = load $0:structure
+    %68:str = call @STD.Process.$Platform.text_at(%44)
+    %69:@str[] = list.append %67, %68
+    store $0:structure, %69
+    %71:int = const 1
+    %72:int = add %95, %71
+    %95:int = copy %72
+    jump bb13
+bb25:
+    %77:@str[] = optional.unwrap %74
+    list.retain %77
+    %78:int = const 0
+    %79:int = collection.count %77
+    %98:int = copy %78
+    jump bb27
+bb26:
+    %85:@str[] = load $0:structure
+    %86:int = collection.count %85
+    %99:int = copy %86
+    jump bb29
+bb27:
+    %81:bool = lt %98, %79
+    branch %81, bb28, bb26
+bb28:
+    %82:str = collection.load %77, %98 bounded
+    str.retain %82
+    %83:int = const 1
+    %84:int = add %98, %83
+    %98:int = copy %84
+    jump bb27
+bb29:
+    %88:int = const 0
+    %89:bool = ne %99, %88
+    branch %89, bb30, bb31
+bb30:
+    %90:int = const 1
+    %91:int = sub %99, %90
+    %92:str = collection.load %85, %91
+    str.drop %92
+    %99:int = copy %91
+    jump bb29
+bb31:
+    list.drop %85
+    return %74
+}
+
+func @STD.Process.$Platform.text_at(%0:uint) -> str {
+entry:
+    %1:@uint8[] = list.init []
+    store $0:structure, %1
+    %2:uint = const 0
+    %27:uint = copy %2
+    jump bb1
+bb1:
+    %4:uint = const 4096
+    %5:bool = lt %27, %4
+    branch %5, bb2, bb3
+bb2:
+    %7:uint8 = boundary.load %0, %27
+    %8:uint8 = const 0
+    %9:bool = eq %7, %8
+    branch %9, bb4, bb7
+bb3:
+    %26:str = const "system process text exceeds 4096 bytes"
+    panic %26
+bb4:
+    %10:@uint8[] = load $0:structure
+    %11:int = const 0
+    %12:@uint8[] = load $0:structure
+    %13:int = collection.count %12
+    %14:@uint8[..] = collection.view %10, %11, %13
+    %15:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode(%14)
+    %16:bool = enum.test %15, @Result<str,STD.Text.UTF8.DecodeError>.success
+    branch %16, bb5, bb6
+bb5:
+    %17:str = enum.payload %15, @Result<str,STD.Text.UTF8.DecodeError>.success[0]
+    str.retain %17
+    str.drop %17
+    %18:@uint8[] = load $0:structure
+    list.drop %18
+    return %17
+bb6:
+    %20:str = const "system process text contains invalid UTF-8"
+    panic %20
+bb7:
+    %21:@uint8[] = load $0:structure
+    %22:@uint8[] = list.append %21, %7
+    store $0:structure, %22
+    %24:uint = const 1
+    %25:uint = add %27, %24
+    %27:uint = copy %25
+    jump bb1
+}
+
+func @STD.Text.UTF8.decode(%0:@uint8[..]) -> @Result<str,STD.Text.UTF8.DecodeError> {
+entry:
+    %1:int = const 0
+    %120:int = copy %1
+    jump bb1
+bb1:
+    %3:int = collection.count %0
+    %4:bool = lt %120, %3
+    branch %4, bb2, bb3
+bb2:
+    %6:uint8 = collection.load %0, %120
+    %7:uint8 = const 127
+    %8:bool = le %6, %7
+    branch %8, bb4, bb5
+bb3:
+    %118:str = str.from_bytes %0
+    str.retain %118
+    %119:@Result<str,STD.Text.UTF8.DecodeError> = enum.init @Result<str,STD.Text.UTF8.DecodeError>.success(%118)
+    return %119
+bb4:
+    %10:int = const 1
+    %11:int = add %120, %10
+    %120:int = copy %11
+    jump bb1
+bb5:
+    %13:uint8 = const 194
+    %14:bool = ge %6, %13
+    branch %14, bb6, bb8
+bb6:
+    %16:uint8 = const 223
+    %17:bool = le %6, %16
+    branch %17, bb7, bb8
+bb7:
+    %18:int = const 2
+    %121:int = copy %18
+    jump bb23
+bb8:
+    %19:uint8 = const 224
+    %20:bool = ge %6, %19
+    branch %20, bb9, bb11
+bb9:
+    %22:uint8 = const 239
+    %23:bool = le %6, %22
+    branch %23, bb10, bb11
+bb10:
+    %24:int = const 3
+    %121:int = copy %24
+    jump bb23
+bb11:
+    %25:uint8 = const 240
+    %26:bool = ge %6, %25
+    branch %26, bb12, bb14
+bb12:
+    %28:uint8 = const 244
+    %29:bool = le %6, %28
+    branch %29, bb13, bb14
+bb13:
+    %30:int = const 4
+    %121:int = copy %30
+    jump bb23
+bb14:
+    %31:uint8 = const 192
+    %32:bool = eq %6, %31
+    branch %32, bb16, bb15
+bb15:
+    %34:uint8 = const 193
+    %35:bool = eq %6, %34
+    %33:bool = copy %35
+    jump bb17
+bb16:
+    %33:bool = const true
+    jump bb17
+bb17:
+    branch %33, bb18, bb19
+bb18:
+    %36:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.overlong_sequence()
+    %38:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%36, %120)
+    return %38
+bb19:
+    %39:uint8 = const 245
+    %40:bool = ge %6, %39
+    branch %40, bb20, bb22
+bb20:
+    %42:uint8 = const 247
+    %43:bool = le %6, %42
+    branch %43, bb21, bb22
+bb21:
+    %44:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.out_of_range()
+    %46:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%44, %120)
+    return %46
+bb22:
+    %47:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.invalid_leading_byte()
+    %49:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%47, %120)
+    return %49
+bb23:
+    %52:int = add %120, %121
+    %53:int = collection.count %0
+    %54:bool = gt %52, %53
+    branch %54, bb24, bb25
+bb24:
+    %55:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.truncated_sequence()
+    %57:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%55, %120)
+    return %57
+bb25:
+    %58:int = const 1
+    %122:int = copy %58
+    jump bb26
+bb26:
+    %61:bool = lt %122, %121
+    branch %61, bb27, bb28
+bb27:
+    %64:int = add %120, %122
+    %65:uint8 = collection.load %0, %64
+    %66:uint8 = const 128
+    %67:bool = lt %65, %66
+    branch %67, bb30, bb29
+bb28:
+    %80:int = const 1
+    %81:int = add %120, %80
+    %82:uint8 = collection.load %0, %81
+    %83:uint8 = const 224
+    %84:bool = eq %6, %83
+    branch %84, bb34, bb36
+bb29:
+    %69:uint8 = const 191
+    %70:bool = gt %65, %69
+    %68:bool = copy %70
+    jump bb31
+bb30:
+    %68:bool = const true
+    jump bb31
+bb31:
+    branch %68, bb32, bb33
+bb32:
+    %71:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.invalid_continuation()
+    %74:int = add %120, %122
+    %75:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%71, %74)
+    return %75
+bb33:
+    %77:int = const 1
+    %78:int = add %122, %77
+    %122:int = copy %78
+    jump bb26
+bb34:
+    %86:uint8 = const 160
+    %87:bool = lt %82, %86
+    branch %87, bb35, bb36
+bb35:
+    %88:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.overlong_sequence()
+    %90:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%88, %120)
+    return %90
+bb36:
+    %91:uint8 = const 237
+    %92:bool = eq %6, %91
+    branch %92, bb37, bb39
+bb37:
+    %94:uint8 = const 160
+    %95:bool = ge %82, %94
+    branch %95, bb38, bb39
+bb38:
+    %96:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.surrogate()
+    %98:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%96, %120)
+    return %98
+bb39:
+    %99:uint8 = const 240
+    %100:bool = eq %6, %99
+    branch %100, bb40, bb42
+bb40:
+    %102:uint8 = const 144
+    %103:bool = lt %82, %102
+    branch %103, bb41, bb42
+bb41:
+    %104:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.overlong_sequence()
+    %106:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%104, %120)
+    return %106
+bb42:
+    %107:uint8 = const 244
+    %108:bool = eq %6, %107
+    branch %108, bb43, bb45
+bb43:
+    %110:uint8 = const 143
+    %111:bool = gt %82, %110
+    branch %111, bb44, bb45
+bb44:
+    %112:@STD.Text.UTF8.DecodeErrorKind = enum.init @STD.Text.UTF8.DecodeErrorKind.out_of_range()
+    %114:@Result<str,STD.Text.UTF8.DecodeError> = call @STD.Text.UTF8.decode_failure(%112, %120)
+    return %114
+bb45:
+    %117:int = add %120, %121
+    %120:int = copy %117
+    jump bb1
+}
+
+func @STD.Text.UTF8.decode_failure(%0:@STD.Text.UTF8.DecodeErrorKind, %1:int) -> @Result<str,STD.Text.UTF8.DecodeError> {
+entry:
+    %3:@STD.Text.UTF8.DecodeError = struct.init @STD.Text.UTF8.DecodeError(.kind=%0, .byte_offset=%1)
+    %4:@Result<str,STD.Text.UTF8.DecodeError> = enum.init @Result<str,STD.Text.UTF8.DecodeError>.failure(%3)
+    return %4
+}
+
+func @STD.Time.monotonic_microseconds() -> int {
+entry:
+    %1:uint32 = const 8
+    %2:uint = boundary.call #6(%1)
+    %3:uint = const 1000
+    %4:uint = div %2, %3
+    %5:int = convert %4 to int
+    return %5
+}
+
+func @STD.Time.seconds_between(%0:int, %1:int) -> float {
+entry:
+    %2:int = sub %1, %0
+    %3:int = const 1000000
+    %4:int = div %2, %3
+    %5:int = const 1000000
+    %6:int = rem %2, %5
+    %7:float = convert %4 to float
+    %8:float = convert %6 to float
+    %9:float = const 1000000
+    %10:float = div %8, %9
+    %11:float = add %7, %10
+    return %11
+}
+
+func @STD.Time.$Platform.monotonic_microseconds() -> int {
+entry:
+    %0:uint32 = const 8
+    %1:uint = boundary.call #6(%0)
+    %2:uint = const 1000
+    %3:uint = div %1, %2
+    %4:int = convert %3 to int
+    return %4
+}
+
+func @STD.Time.Clock.tick#0(%0:@STD.Time.Clock) -> @STD.Time.Clock.tick#result0 {
+entry:
+    %78:int = field %0, .last_microseconds
+    %79:float = field %0, .pending_seconds
+    %80:float = field %0, .total_seconds
+    %81:float = field %0, .time_scale
+    %82:bool = field %0, .initialized
+    %83:bool = field %0, .paused
+    branch %83, bb1, bb2
+bb1:
+    %3:float = const 0
+    %91:float = copy %79
+    %92:float = copy %80
+    %93:float = copy %81
+    %4:@STD.Time.Clock = struct.init @STD.Time.Clock(.last_microseconds=%78, .pending_seconds=%91, .total_seconds=%92, .time_scale=%93, .initialized=%82, .paused=%83)
+    %5:@STD.Time.Clock.tick#result0 = struct.init @STD.Time.Clock.tick#result0(.self=%4, .value=%3)
+    return %5
+bb2:
+    %168:uint32 = const 8
+    %169:uint = boundary.call #6(%168)
+    %170:uint = const 1000
+    %171:uint = div %169, %170
+    %172:int = convert %171 to int
+    %9:bool = const false
+    %10:bool = eq %82, %9
+    branch %10, bb3, bb4
+bb3:
+    %23:bool = const true
+    %32:float = const 0
+    %115:float = copy %79
+    %116:float = copy %80
+    %117:float = copy %81
+    %33:@STD.Time.Clock = struct.init @STD.Time.Clock(.last_microseconds=%172, .pending_seconds=%115, .total_seconds=%116, .time_scale=%117, .initialized=%23, .paused=%83)
+    %34:@STD.Time.Clock.tick#result0 = struct.init @STD.Time.Clock.tick#result0(.self=%33, .value=%32)
+    return %34
+bb4:
+    %121:float = copy %79
+    %173:int = sub %172, %78
+    %174:int = const 1000000
+    %175:int = div %173, %174
+    %176:int = const 1000000
+    %177:int = rem %173, %176
+    %178:float = convert %175 to float
+    %179:float = convert %177 to float
+    %180:float = const 1000000
+    %181:float = div %179, %180
+    %182:float = add %178, %181
+    %39:float = copy %182
+    %135:float = copy %81
+    %42:float = mul %39, %135
+    %43:float = add %121, %42
+    %146:float = copy %80
+    %57:float = add %146, %43
+    %163:float = const 0
+    %164:float = copy %57
+    %165:float = copy %81
+    %76:@STD.Time.Clock = struct.init @STD.Time.Clock(.last_microseconds=%172, .pending_seconds=%163, .total_seconds=%164, .time_scale=%165, .initialized=%82, .paused=%83)
+    %77:@STD.Time.Clock.tick#result0 = struct.init @STD.Time.Clock.tick#result0(.self=%76, .value=%43)
+    return %77
+}

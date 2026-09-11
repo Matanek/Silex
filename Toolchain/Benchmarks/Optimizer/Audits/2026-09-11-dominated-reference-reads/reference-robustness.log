@@ -1,0 +1,47 @@
+optimizer oracle: qualified adversarial interaction campaign
+robustness report: .zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv
+campaign record: .zig-cache/optimizer-oracle/robustness/run-qualified-1789134122594307000.tsv (48611627791 ns)
+qualified: 144 pairwise cases, 5 risk triplets, 41 native cases, 4 negative cases
+optimizer oracle: cache invalidation and concurrency stress passed
+optimizer oracle: large package graph and function stress passed
+optimizer-robustness-qualified
++- run test w
+parity registry: coverage gap 'known-gap' owned by silex-llvm-opt-02
+parity registry: required LLVM family missing: instcombine-and-simplifycfg
+failed command: ./.zig-cache/o/a795352e8738fe7c3295a0de7da847ac/test --cache-dir=./.zig-cache --seed=0x7bb8467c --listen=-
+
+Build Summary: 31/31 steps succeeded; 74/74 tests passed
+optimizer-robustness-qualified success
++- run test 74 pass (74 total) 295ms MaxRSS:46M
+|  +- compile test ReleaseFast native cached 113ms MaxRSS:35M
+|     +- options cached
++- run exe silex-optimizer-oracle success 50s
+   +- compile exe silex-optimizer-oracle ReleaseFast native cached 108ms MaxRSS:35M
+   |  +- options (reused)
+   +- compile exe silex ReleaseFast native cached 56ms MaxRSS:35M
+      +- options (reused)
+      +- WriteFile silex-float-runtime.macho cached
+      |  +- compile exe silex-float-runtime ReleaseSmall aarch64-macos cached 42ms MaxRSS:35M
+      +- WriteFile silex-float-runtime-linux-arm64.elf cached
+      |  +- compile exe silex-float-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 100ms MaxRSS:35M
+      +- WriteFile silex-float-runtime-x64.elf cached
+      |  +- compile exe silex-float-runtime-x64 ReleaseSmall x86_64-linux cached 97ms MaxRSS:35M
+      +- WriteFile silex-float-runtime-macos-x64.macho cached
+      |  +- compile exe silex-float-runtime-macos-x64 ReleaseSmall x86_64-macos cached 92ms MaxRSS:35M
+      +- WriteFile silex-deep-copy-runtime.macho cached
+      |  +- compile exe silex-deep-copy-runtime ReleaseSmall aarch64-macos cached 97ms MaxRSS:35M
+      +- WriteFile silex-deep-copy-runtime-linux-arm64.elf cached
+      |  +- compile exe silex-deep-copy-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 88ms MaxRSS:35M
+      +- WriteFile silex-deep-copy-runtime-x64.elf cached
+      |  +- compile exe silex-deep-copy-runtime-x64 ReleaseSmall x86_64-linux cached 91ms MaxRSS:35M
+      +- WriteFile silex-deep-copy-runtime-macos-x64.macho cached
+      |  +- compile exe silex-deep-copy-runtime-macos-x64 ReleaseSmall x86_64-macos cached 101ms MaxRSS:35M
+      +- WriteFile silex-cycle-runtime.macho cached
+      |  +- compile exe silex-cycle-runtime ReleaseSmall aarch64-macos cached 100ms MaxRSS:35M
+      +- WriteFile silex-cycle-runtime-linux-arm64.elf cached
+      |  +- compile exe silex-cycle-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 103ms MaxRSS:35M
+      +- WriteFile silex-cycle-runtime-x64.elf cached
+      |  +- compile exe silex-cycle-runtime-x64 ReleaseSmall x86_64-linux cached 41ms MaxRSS:35M
+      +- WriteFile silex-cycle-runtime-macos-x64.macho cached
+         +- compile exe silex-cycle-runtime-macos-x64 ReleaseSmall x86_64-macos cached 98ms MaxRSS:35M
+
