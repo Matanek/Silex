@@ -1,0 +1,17 @@
+{
+  "unchanged_function_bodies": [
+    "canonical",
+    "rewriteInstruction",
+    "rewriteSlice",
+    "rewriteValues",
+    "rewriteOptional",
+    "countUses",
+    "countTerminatorUses",
+    "useValue",
+    "useValues",
+    "useOptional",
+    "instructionResult"
+  ],
+  "source": "HEAD:Toolchain/Sources/Optimize/Release.zig",
+  "destination": "Toolchain/Sources/Optimize/ValueOperands.zig"
+}

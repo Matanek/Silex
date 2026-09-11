@@ -1,0 +1,43 @@
+{
+  "scope": "Executed valid-index, non-check signature loop body; excludes loop exit and checked-error paths; 8192 * 2048 iterations",
+  "before": {
+    "ranges": [
+      [
+        "0x1000020d0",
+        "0x100002238"
+      ],
+      [
+        "0x100002240",
+        "0x100002240"
+      ],
+      [
+        "0x100002f80",
+        "0x1000030e8"
+      ]
+    ],
+    "instructions": 183,
+    "stack_accesses": 90,
+    "stack_loads": 61,
+    "stack_stores": 29
+  },
+  "after": {
+    "ranges": [
+      [
+        "0x1000020d0",
+        "0x100002100"
+      ],
+      [
+        "0x100002108",
+        "0x100002108"
+      ],
+      [
+        "0x100002f80",
+        "0x100003170"
+      ]
+    ],
+    "instructions": 139,
+    "stack_accesses": 46,
+    "stack_loads": 39,
+    "stack_stores": 7
+  }
+}

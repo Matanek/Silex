@@ -1,0 +1,2 @@
+optimizer X64 qualification: objects: clang: Silex/Clang upper bound exceeds 1000000 ppm
+optimizer X64 qualification: objects: clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm

@@ -1,0 +1,234 @@
+{
+  "compiler_sha256": "c157bb3bcd51eeb4db4edbca79623613b9860d679f6a211705fb8b726461b72c",
+  "source_sha256": "9800610aa86671b66c66e330049328e3d6847a13b004b92b13a0829782e259a0",
+  "observations": [
+    {
+      "target": "macos-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--debug",
+        "--target",
+        "macos-arm64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-macos-arm64-debug"
+      ],
+      "build_status": 0,
+      "binary_sha256": "6b6049bcd6ae8249aa4ee6a310a6d14e8ffb9f810ac1486c7596bad7263d0db7",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-macos-arm64-debug: Mach-O 64-bit executable arm64",
+      "exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+    },
+    {
+      "target": "macos-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--release",
+        "--target",
+        "macos-arm64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-macos-arm64-release"
+      ],
+      "build_status": 0,
+      "binary_sha256": "a298cd9be168dd2fc8bea53b1d155c0a3c0b2b65110d20b994fb8ca206fd2df8",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-macos-arm64-release: Mach-O 64-bit executable arm64",
+      "exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+    },
+    {
+      "target": "macos-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--debug",
+        "--target",
+        "macos-x64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-macos-x64-debug"
+      ],
+      "build_status": 0,
+      "binary_sha256": "d57f9b853ac50910639f2ad7c844b11f0e585e68752da0874e8522080c49364d",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-macos-x64-debug: Mach-O 64-bit executable x86_64",
+      "exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+    },
+    {
+      "target": "macos-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--release",
+        "--target",
+        "macos-x64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-macos-x64-release"
+      ],
+      "build_status": 0,
+      "binary_sha256": "f6c8b2ec0c4009b21fcc8301b9cf4306584d2d9e8e2ab7507955d8c44d7a1580",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-macos-x64-release: Mach-O 64-bit executable x86_64",
+      "exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": ""
+    },
+    {
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--debug",
+        "--target",
+        "linux-arm64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-linux-arm64-debug"
+      ],
+      "build_status": 0,
+      "binary_sha256": "cb7dedf470feb6767d9249ad1b62fd0750a071a6bdc442a19a0120263c10234b",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--release",
+        "--target",
+        "linux-arm64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-linux-arm64-release"
+      ],
+      "build_status": 0,
+      "binary_sha256": "176bc1bef45e283ef53a2e9c5782ccbb2002eaa576eb2b44f3942259c8b85e70",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--debug",
+        "--target",
+        "linux-x64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-linux-x64-debug"
+      ],
+      "build_status": 0,
+      "binary_sha256": "dc4f5d7e0b861e5b0a1dea7330e9efcbe4858282a37752671622daa810eab99e",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--release",
+        "--target",
+        "linux-x64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-linux-x64-release"
+      ],
+      "build_status": 0,
+      "binary_sha256": "685a33bdbb820ddbd633378da7d2520b50c69414fa220a704afec382139558cb",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--debug",
+        "--target",
+        "windows-arm64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-windows-arm64-debug"
+      ],
+      "build_status": 0,
+      "binary_sha256": "d44928f1487bc3a0ffe3797b6c54813a197a9e6c9c2e09b61d691cf5c8257fa3",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--release",
+        "--target",
+        "windows-arm64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-windows-arm64-release"
+      ],
+      "build_status": 0,
+      "binary_sha256": "fcf7e0568a5b6a0de604a3effddbbc271dbebdf476dd19d1583f5375b83baff8",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--debug",
+        "--target",
+        "windows-x64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-windows-x64-debug"
+      ],
+      "build_status": 0,
+      "binary_sha256": "c74bd6a95b527592463de1b1eeb3831d3e37410a4f3aa5371cf7cc4854ca3ad5",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SnapshotFixture/BranchSnapshots.sx",
+        "--release",
+        "--target",
+        "windows-x64",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part03-evidence/snapshot-windows-x64-release"
+      ],
+      "build_status": 0,
+      "binary_sha256": "19fbf7ef17a6346ad2943f70d40052e53f2002b1784d3fe657e2cd5e0da1f5e8",
+      "format": "/private/tmp/silex-part03-evidence/snapshot-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    }
+  ]
+}
