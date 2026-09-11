@@ -33,7 +33,7 @@ pub fn definitionAtForTarget(
 ) !?Types.Location {
     const request = qualifiedPathAt(source, cursor) orelse return null;
     var parser = ParserModule.Parser.init(allocator, source);
-    const program = parser.parse() catch return null;
+    const program = parser.parse() catch (try Completion.decisionAt(allocator, source, request.end, .invoked)).program orelse return null;
     const document_path = try ProjectIndex.pathFromUri(allocator, document_uri);
     if (std.mem.indexOfScalar(u8, request.path, '.') == null) {
         for (program.functions) |function| {
@@ -52,20 +52,24 @@ pub fn definitionAtForTarget(
         const receiver = request.path[0..separator];
         const member_name = request.path[separator + 1 ..];
         if (Completion.resolveReceiverType(allocator, source, program, request.end, receiver)) |receiver_type| {
-            for (program.structures) |structure| {
-                if (!std.mem.eql(u8, structure.name, receiver_type)) continue;
-                for (structure.methods) |method| if (std.mem.eql(u8, method.name, member_name)) {
+            const access_structure = if (Completion.enclosingClass(source, program, request.end)) |access| access.name else null;
+            const static_receiver = std.mem.eql(u8, receiver, Completion.nominalReceiverName(receiver_type));
+            var local_type = receiver_type;
+            for (0..program.structures.len + 1) |_| {
+                const structure = Completion.localStructure(program, local_type) orelse break;
+                for (structure.methods) |method| if (std.mem.eql(u8, method.name, member_name) and Completion.localMemberVisible(program, access_structure, structure, method)) {
                     return location(allocator, document_path, source, method.name_position, method.name.len, encoding);
                 };
-                for (structure.fields) |field| if (std.mem.eql(u8, field.name, member_name)) {
+                for (structure.fields) |field| if (std.mem.eql(u8, field.name, member_name) and Completion.localMemberVisible(program, access_structure, structure, field)) {
                     return location(allocator, document_path, source, field.name_position, field.name.len, encoding);
                 };
                 for (structure.methods) |method| if (method.accessor) |accessor| {
-                    if (std.mem.eql(u8, accessor.property, member_name)) {
+                    if (std.mem.eql(u8, accessor.property, member_name) and Completion.localMemberVisible(program, access_structure, structure, method)) {
                         return location(allocator, document_path, source, method.name_position, accessor.property.len, encoding);
                     }
                 };
-                break;
+                if (static_receiver) break;
+                local_type = try Completion.specializedTypeName(allocator, program, structure, local_type, structure.base orelse break);
             }
         }
     }
@@ -80,18 +84,12 @@ pub fn definitionAtForTarget(
         document_path,
     );
     const member = lastSegment(request.path);
-    const resolved_path = if (try Workspace.importedReceiverTypeAt(
-        allocator,
-        io,
-        documents,
-        project,
-        source,
-        request.end,
-    )) |receiver_type|
-        try std.fmt.allocPrint(allocator, "{s}.{s}", .{ receiver_type, member })
+    const receiver = try Workspace.importedReceiverAt(allocator, io, documents, project, source, request.end);
+    const resolved_path = if (receiver) |resolved|
+        try std.fmt.allocPrint(allocator, "{s}.{s}", .{ resolved.type_path, member })
     else
         try resolveImportedPath(allocator, project, program, request.path);
-    return definitionForPath(allocator, io, documents, project, resolved_path, encoding, 0);
+    return definitionForPath(allocator, io, documents, project, resolved_path, encoding, 0, if (receiver) |resolved| !resolved.static_receiver else false, if (receiver) |resolved| resolved.inherited_access else false);
 }
 
 fn definitionForPath(
@@ -102,8 +100,10 @@ fn definitionForPath(
     path: []const u8,
     encoding: Types.PositionEncoding,
     depth: usize,
-) !?Types.Location {
-    if (depth > 16) return null;
+    instance_access: bool,
+    inherited_access: bool,
+) anyerror!?Types.Location {
+    if (depth > 128) return null;
     const target = declarationTarget(project.index, path) orelse return null;
     const canonical_provider = project.index.providers[target.provider];
     const current_module = currentModule(project);
@@ -119,22 +119,37 @@ fn definitionForPath(
             project.current_owner,
             current_module,
             project.current_path,
+            inherited_access,
         )) |definition| {
             return location(allocator, provider.path, loaded.source, definition.position, definition.name.len, encoding);
         }
+        if (instance_access) {
+            const separator = std.mem.indexOfScalar(u8, target.declaration, '.');
+            const nominal = if (separator) |dot| target.declaration[0..dot] else lastSegment(provider.name);
+            const member_name = if (separator) |dot| target.declaration[dot + 1 ..] else target.declaration;
+            if (structureNamed(loaded.program, nominal)) |structure| {
+                if (!visible(project.graph, structure.is_public, structure.is_internal, structure.is_local, provider, project.current_owner, current_module, project.current_path)) return null;
+                if (structure.base) |base| {
+                    const base_path = try Workspace.providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(try Completion.specializedTypeName(allocator, loaded.program, structure, structure.name, base)));
+                    const member_path = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ base_path, member_name });
+                    return definitionForPath(allocator, io, documents, project, member_path, encoding, depth + 1, true, inherited_access);
+                }
+            }
+        }
         for (loaded.program.uses) |use| {
             const alias = use.alias orelse lastSegment(use.path);
-            if (!std.mem.eql(u8, alias, target.declaration)) continue;
+            if (!std.mem.eql(u8, alias, target.declaration) and !(std.mem.startsWith(u8, target.declaration, alias) and target.declaration.len > alias.len and target.declaration[alias.len] == '.')) continue;
             if (!use.is_public and provider.owner != project.current_owner) return null;
             const use_path = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
-            return definitionForPath(allocator, io, documents, project, use_path, encoding, depth + 1);
+            const forwarded = try std.fmt.allocPrint(allocator, "{s}{s}", .{ use_path, target.declaration[alias.len..] });
+            return definitionForPath(allocator, io, documents, project, forwarded, encoding, depth + 1, instance_access, inherited_access);
         }
     }
     const catalog_uses = try ProjectIndex.catalogUses(allocator, io, documents, project, canonical_provider);
     for (catalog_uses) |catalog_use| {
         const alias = catalog_use.use.alias orelse continue;
         if (!std.mem.eql(u8, alias, target.declaration)) continue;
-        return definitionForPath(allocator, io, documents, project, catalog_use.use.path, encoding, depth + 1);
+        return definitionForPath(allocator, io, documents, project, catalog_use.use.path, encoding, depth + 1, instance_access, inherited_access);
     }
     return null;
 }
@@ -152,6 +167,7 @@ fn declarationPosition(
     current_owner: usize,
     current_module: ?[]const u8,
     current_path: []const u8,
+    inherited_access: bool,
 ) ?Definition {
     const separator = std.mem.indexOfScalar(u8, declaration, '.');
     const nominal_name = if (separator) |index| declaration[0..index] else declaration;
@@ -168,24 +184,24 @@ fn declarationPosition(
             .name = structure.name,
         };
         for (structure.fields) |field| if (std.mem.eql(u8, field.name, requested_member) and
-            memberVisible(graph, field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
+            memberVisible(graph, field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, inherited_access, provider, current_owner, current_module, current_path)) return .{
             .position = field.name_position,
             .name = field.name,
         };
         for (structure.static_fields) |field| if (std.mem.eql(u8, field.name, requested_member) and
-            memberVisible(graph, field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
+            memberVisible(graph, field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, inherited_access, provider, current_owner, current_module, current_path)) return .{
             .position = field.name_position,
             .name = field.name,
         };
         for (structure.methods) |method| if (method.accessor) |accessor| {
             if (std.mem.eql(u8, accessor.property, requested_member) and
-                memberVisible(graph, method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner, current_module, current_path)) return .{
+                memberVisible(graph, method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, inherited_access, provider, current_owner, current_module, current_path)) return .{
                 .position = method.name_position,
                 .name = accessor.property,
             };
         };
         for (structure.methods) |method| if (std.mem.eql(u8, method.name, requested_member) and
-            memberVisible(graph, method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner, current_module, current_path)) return .{
+            memberVisible(graph, method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, inherited_access, provider, current_owner, current_module, current_path)) return .{
             .position = method.name_position,
             .name = method.name,
         };
@@ -231,6 +247,7 @@ fn declarationPosition(
                     method.is_internal,
                     method.is_private,
                     method.is_protected,
+                    inherited_access,
                     provider,
                     current_owner,
                     current_module,
@@ -277,13 +294,15 @@ fn memberVisible(
     is_internal: bool,
     is_private: bool,
     is_protected: bool,
+    inherited_access: bool,
     provider: Modules.Provider,
     current_owner: usize,
     current_module: ?[]const u8,
     current_path: []const u8,
 ) bool {
     if (is_public) return true;
-    if (is_private or is_protected) return false;
+    if (is_private) return false;
+    if (is_protected) return inherited_access;
     if (is_local) return samePath(provider.path, current_path);
     if (is_internal) return graph.canAccessPackage(current_owner, provider.owner);
     return provider.owner == current_owner and current_module != null and std.mem.eql(u8, provider.name, current_module.?);

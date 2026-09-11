@@ -362,10 +362,22 @@ pub fn importedReceiverTypeAt(
     source: []const u8,
     cursor: usize,
 ) !?[]const u8 {
+    const receiver = try importedReceiverAt(allocator, io, documents, project, source, cursor) orelse return null;
+    return receiver.type_path;
+}
+
+pub fn importedReceiverAt(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    source: []const u8,
+    cursor: usize,
+) !?ImportedMemberQuery {
     const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
     const query = try queryAt(allocator, source, decision, project, io, documents) orelse return null;
     return switch (query) {
-        .imported_member => |member| member.type_path,
+        .imported_member => |member| member,
         else => null,
     };
 }
@@ -1946,7 +1958,7 @@ fn appendImportedMembersDepth(
     }
 }
 
-fn providerTypePath(allocator: Allocator, project: IndexedProject, program: Ast.Program, provider: Modules.Provider, nominal: []const u8) ![]const u8 {
+pub fn providerTypePath(allocator: Allocator, project: IndexedProject, program: Ast.Program, provider: Modules.Provider, nominal: []const u8) ![]const u8 {
     const anchored = try ProjectIndex.canonicalUsePath(allocator, project, provider, nominal);
     if (!std.mem.eql(u8, anchored, nominal)) return anchored;
     const separator = std.mem.indexOfScalar(u8, nominal, '.');

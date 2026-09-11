@@ -61,6 +61,30 @@ test "inherited completion server handles aliases atoms overlays and override tr
     const definition = (try Support.serverDefinition(&server, allocator, uri, "use Nodes\nclass Player:Nodes.Node2<|>D {}\nfunc main() {}")).?;
     try std.testing.expect(std.mem.endsWith(u8, try @import("../Workspace.zig").pathFromUri(allocator, definition.uri), "/Nodes/@Node2D.sx"));
 
+    for ([_][]const u8{ "use Nodes\nclass Player:Nodes.Node2D", "use Nodes.Node2D as Parent\nclass Player:Parent" }) |declaration| {
+        for ([_][]const u8{ "add_child", "input", "name" }) |member| {
+            const source = try std.fmt.allocPrint(allocator, "{s} {{ func tick() {{ print(self.{s}<|>) }} }}", .{ declaration, member });
+            const inherited_definition = (try Support.serverDefinition(&server, allocator, uri, source)) orelse return error.MissingInheritedDefinition;
+            try std.testing.expectEqualStrings(try @import("../Workspace.zig").pathFromUri(allocator, node_uri), try @import("../Workspace.zig").pathFromUri(allocator, inherited_definition.uri));
+            const offset = std.mem.indexOf(u8, node, member).?;
+            const expected = @import("../Protocol.zig").positionAtByteOffset(node, offset, .utf16).?;
+            try std.testing.expectEqual(expected, inherited_definition.range.start);
+            try std.testing.expectEqual(expected.character + member.len, inherited_definition.range.end.character);
+        }
+    }
+    const public_member = (try Support.serverDefinition(&server, allocator, uri, "use Nodes\nfunc visit(player:Nodes.Node2D) { player.add_ch<|>ild(player) }")) orelse return error.MissingInheritedDefinition;
+    try std.testing.expectEqualStrings(try @import("../Workspace.zig").pathFromUri(allocator, node_uri), try @import("../Workspace.zig").pathFromUri(allocator, public_member.uri));
+    for ([_][]const u8{
+        "use Nodes\nclass Player:Nodes.Node2D { func tick() { self.sec<|>ret() } }",
+        "use Nodes\nfunc visit(player:Nodes.Node2D) { player.inp<|>ut() }",
+        "use Nodes\nfunc visit() { Nodes.Node2D.fac<|>tory() }",
+    }) |source| try std.testing.expectEqual(@as(?@import("../Types.zig").Location, null), try Support.serverDefinition(&server, allocator, uri, source));
+    const own_override = (try Support.serverDefinition(&server, allocator, uri, "use Nodes\nclass Player:Nodes.Node2D { override func on_ready() {} func tick() { self.on_re<|>ady() } }")) orelse return error.MissingOverrideDefinition;
+    try std.testing.expectEqualStrings(uri, own_override.uri);
+    const local_base = (try Support.serverDefinition(&server, allocator, uri, "class Base<T> { func update(value:T) {} }\nclass Middle:Base<int> {}\nclass Child:Middle { func tick() { self.up<|>date(1) } }")) orelse return error.MissingLocalInheritedDefinition;
+    try std.testing.expectEqualStrings(uri, local_base.uri);
+    try std.testing.expectEqual(@as(usize, 0), local_base.range.start.line);
+
     const changed_node = try std.mem.replaceOwned(u8, allocator, node, "private func secret()", "protected func on_overlay() {}\n    private func secret()");
     try Support.openDocument(&server, allocator, node_uri, 2, changed_node);
     const overlay = try Support.serverCompletionAfterTrigger(&server, allocator, uri, "use Nodes\nclass Player:Nodes.Node2D {\n    override <|>\n}", " ");

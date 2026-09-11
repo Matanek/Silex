@@ -27,7 +27,7 @@ const CompletionResponse = struct {
 };
 
 const DefinitionResponse = struct {
-    result: ?Types.Location,
+    result: ?Types.Location = null,
 };
 
 pub fn removeMarker(allocator: std.mem.Allocator, source: []const u8) !MarkedSource {

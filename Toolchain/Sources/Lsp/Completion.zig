@@ -2168,7 +2168,7 @@ fn functionIsExpectedReference(program: Ast.Program, function: Ast.Function, exp
     return functionMatchesType(program, function, function_type);
 }
 
-fn localMemberVisible(
+pub fn localMemberVisible(
     program: Ast.Program,
     access_structure: ?[]const u8,
     declaration: Ast.Structure,
