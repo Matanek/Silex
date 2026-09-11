@@ -500,12 +500,16 @@ pub fn build(b: *std.Build) void {
 
     const lsp_admission_module = b.createModule(.{
         .root_source_file = b.path("Sources/LspAdmissionTests.zig"),
-        .target = target,
+        // Admission executes during installation, including cross-builds.
+        .target = b.graph.host,
         .optimize = optimize,
     });
     lsp_admission_module.addOptions("build_options", build_options);
     const lsp_admission_tests = b.addTest(.{ .root_module = lsp_admission_module });
     const lsp_admission_command = b.addRunArtifact(lsp_admission_tests);
+    lsp_admission_command.setCwd(b.path(""));
+    const lsp_admission_step = b.step("test-lsp-admission", "Run the host completion admission used by installation");
+    lsp_admission_step.dependOn(&lsp_admission_command.step);
     // Default builds must reject structural or clean-matrix completion gaps.
     // The heavier deterministic mutation campaign remains in LspTests and is
     // therefore mandatory in the ordinary `check`/`silex-dev test` portal.

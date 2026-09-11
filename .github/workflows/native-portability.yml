@@ -278,7 +278,12 @@ jobs:
             -o "$RUNNER_TEMP/boundary"
           test "$("$RUNNER_TEMP/boundary")" = "linux arm64 boundary ready"
 
-          scalar_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          # Compile the exact standalone witness without the optimizer package's STD graph.
+          scalar_root="$RUNNER_TEMP/scalar-float-fixture"
+          mkdir -p "$scalar_root"
+          printf '%s\n' '{"sources":"."}' > "$scalar_root/Package.json"
+          scalar_fixture="$scalar_root/ScalarFloatResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx" "$scalar_fixture"
           for mode in debug release; do
             "$silex" compile "$scalar_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-float-residence-$mode"
@@ -351,7 +356,12 @@ jobs:
               -o "$RUNNER_TEMP/scalar-math-minmax-$mode"
             test "$("$RUNNER_TEMP/scalar-math-minmax-$mode")" = "scalar-math-minmax: pass"
           done
-          scalar_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          # Compile the exact standalone witness without the optimizer package's STD graph.
+          scalar_root="$RUNNER_TEMP/scalar-float-fixture"
+          mkdir -p "$scalar_root"
+          printf '%s\n' '{"sources":"."}' > "$scalar_root/Package.json"
+          scalar_fixture="$scalar_root/ScalarFloatResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx" "$scalar_fixture"
           for mode in debug release; do
             "$silex" compile "$scalar_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-float-residence-$mode"
@@ -447,7 +457,12 @@ jobs:
               throw "scalar math minmax $mode regression failed"
             }
           }
-          $scalarFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          # Copy bytes unchanged into a standalone fixture, without the optimizer's STD graph.
+          $scalarRoot = Join-Path $env:RUNNER_TEMP "scalar-float-fixture"
+          New-Item -ItemType Directory -Force -Path $scalarRoot | Out-Null
+          Set-Content -Path (Join-Path $scalarRoot "Package.json") -Value '{"sources":"."}'
+          $scalarFixture = Join-Path $scalarRoot "ScalarFloatResidence.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx") $scalarFixture
           foreach ($mode in @("debug", "release")) {
             $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"
             & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary
@@ -720,7 +735,12 @@ jobs:
             throw "Windows ARM64 Boundary smoke failed"
           }
 
-          $scalarFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          # Copy bytes unchanged into a standalone fixture, without the optimizer's STD graph.
+          $scalarRoot = Join-Path $env:RUNNER_TEMP "scalar-float-fixture"
+          New-Item -ItemType Directory -Force -Path $scalarRoot | Out-Null
+          Set-Content -Path (Join-Path $scalarRoot "Package.json") -Value '{"sources":"."}'
+          $scalarFixture = Join-Path $scalarRoot "ScalarFloatResidence.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx") $scalarFixture
           foreach ($mode in @("debug", "release")) {
             $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"
             & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary

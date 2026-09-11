@@ -156,7 +156,7 @@ test "find a parent manifest from an entry-directory invocation" {
     const application = try std.fs.path.join(allocator, &.{ workspace, "Application" });
     const entry_directory = try std.fs.path.join(allocator, &.{ application, "Sources", "Demo" });
 
-    try std.testing.expectEqualStrings("../..", try findRootFrom(
+    try std.testing.expectEqualStrings(".." ++ std.fs.path.sep_str ++ "..", try findRootFrom(
         allocator,
         std.testing.io,
         "Main.sx",

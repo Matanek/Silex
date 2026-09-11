@@ -697,10 +697,12 @@ fn pathExists(directory: Io.Dir, io: Io, path: []const u8) bool {
     return true;
 }
 
-fn setModified(directory: Io.Dir, io: Io, path: []const u8, nanoseconds: i96) !void {
-    const file = try directory.openFile(io, path, .{});
+fn setModifiedSeconds(directory: Io.Dir, io: Io, path: []const u8, seconds: i96) !void {
+    // Windows needs a writable handle for timestamps; whole seconds also
+    // preserve ordering on filesystems with coarser than nanosecond precision.
+    const file = try directory.openFile(io, path, .{ .mode = .read_write });
     defer file.close(io);
-    try file.setTimestamps(io, .{ .modify_timestamp = .{ .new = .{ .nanoseconds = nanoseconds } } });
+    try file.setTimestamps(io, .{ .modify_timestamp = .{ .new = .{ .nanoseconds = seconds * std.time.ns_per_s } } });
 }
 
 test "rolling retention admits an oversized current working set and evicts history first" {
@@ -715,12 +717,12 @@ test "rolling retention admits an oversized current working set and evicts histo
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/history", .data = "12345678" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "artifacts/v1/history", .data = "12345678" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "run/current", .data = "123456789012" });
-    try setModified(temporary.dir, std.testing.io, "cache/v4/history", 10);
-    try setModified(temporary.dir, std.testing.io, "artifacts/v1/history", 20);
-    try setModified(temporary.dir, std.testing.io, "run/current", 200);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "cache/v4/history", 10);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "artifacts/v1/history", 20);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "run/current", 200);
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
 
-    maintainRootAfterMutation(allocator, std.testing.io, root, 10, 100);
+    maintainRootAfterMutation(allocator, std.testing.io, root, 10, 100 * std.time.ns_per_s);
 
     try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/history"));
     try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "artifacts/v1/history"));
@@ -737,11 +739,11 @@ test "a later small working set automatically releases an old oversized set" {
     try temporary.dir.createDirPath(std.testing.io, "cache/v4");
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "artifacts/v1/previous-large", .data = "123456789012" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/current-small", .data = "1234" });
-    try setModified(temporary.dir, std.testing.io, "artifacts/v1/previous-large", 200);
-    try setModified(temporary.dir, std.testing.io, "cache/v4/current-small", 400);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "artifacts/v1/previous-large", 200);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "cache/v4/current-small", 400);
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
 
-    maintainRootAfterMutation(allocator, std.testing.io, root, 8, 300);
+    maintainRootAfterMutation(allocator, std.testing.io, root, 8, 300 * std.time.ns_per_s);
 
     try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "artifacts/v1/previous-large"));
     try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/v4/current-small"));
@@ -759,12 +761,12 @@ test "rolling retention bounds one global history across cache classes" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/first", .data = "12345678" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "artifacts/v1/second", .data = "12345678" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/shaders/group/output", .data = "12345678" });
-    try setModified(temporary.dir, std.testing.io, "cache/v4/first", 10);
-    try setModified(temporary.dir, std.testing.io, "artifacts/v1/second", 20);
-    try setModified(temporary.dir, std.testing.io, "cache/shaders/group/output", 30);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "cache/v4/first", 10);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "artifacts/v1/second", 20);
+    try setModifiedSeconds(temporary.dir, std.testing.io, "cache/shaders/group/output", 30);
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
 
-    maintainRootAfterMutation(allocator, std.testing.io, root, 8, 100);
+    maintainRootAfterMutation(allocator, std.testing.io, root, 8, 100 * std.time.ns_per_s);
 
     try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/first"));
     try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "artifacts/v1/second"));

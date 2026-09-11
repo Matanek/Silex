@@ -768,6 +768,11 @@ test "metamorphic mutation campaign is deterministic and stays within pinned bud
     const second_duration: u64 = @intCast(second_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toNanoseconds());
     try expectBudgets(first);
     try expectBudgets(second);
+    if (first_duration > Budgets.max_duration_ns or second_duration > Budgets.max_duration_ns) {
+        std.debug.print("completion campaign duration: {d} ns, {d} ns; limit: {d} ns\n", .{
+            first_duration, second_duration, Budgets.max_duration_ns,
+        });
+    }
     try std.testing.expect(first_duration <= Budgets.max_duration_ns);
     try std.testing.expect(second_duration <= Budgets.max_duration_ns);
     try std.testing.expectEqualDeep(first, second);
