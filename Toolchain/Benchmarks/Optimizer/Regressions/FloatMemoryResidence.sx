@@ -1,0 +1,48 @@
+struct Pair { let x:float64; let y:float64 }
+
+func sum(values:@Pair[..], count:int) float64 {
+    var x:float64 = 1.0
+    var y:float64 = 2.0
+    var round = 0
+    while round < count {
+        for value in values {
+            x += value.x
+            y += value.y
+        }
+        round++
+    }
+    return x + y
+}
+
+func fixed(values:float32[3], count:int) float32 {
+    var total:float32 = 0.5
+    var index = 0
+    while index < count {
+        total += values[index % 3]
+        index++
+    }
+    return total
+}
+
+func edges(values:@Pair[..], zero:float64, nan:float64) {
+    var negative = zero
+    var unordered = nan
+    for value in values {
+        negative *= value.x
+        unordered += value.y
+    }
+    print(1.0 / negative < 0.0)
+    print(unordered != unordered)
+}
+
+func main() {
+    let values:Pair[] = [Pair(x:1.0, y:2.0), Pair(x:3.0, y:4.0)]
+    let view = @values[0:values.count()]
+    print(sum(view, 0) == 3.0)
+    print(sum(view, 1) == 13.0)
+    print(sum(view, 100) == 1003.0)
+    let narrow:float32[3] = [0.5, 1.0, 1.5]
+    print(fixed(narrow, 0) == 0.5)
+    print(fixed(narrow, 9) == 9.5)
+    edges(view, -0.0, 0.0 / 0.0)
+}

@@ -47,6 +47,12 @@ pub fn allocateFloatLanePairsFor(
     return residences;
 }
 
+pub const ScalarFloatAccess = enum {
+    resident,
+    stack_operands,
+    barrier,
+};
+
 /// Allocates scalar FP regions for a backend with an explicit encoder subset.
 /// Unsupported operations retain complete stack intervals; address-taken spans
 /// stay pinned even when their address is consumed outside the scalar region.
@@ -54,7 +60,7 @@ pub fn allocateFloatScalarsFor(
     allocator: Allocator,
     function: Machine.Function,
     registers: []const u5,
-    comptime supported: fn (Machine.Instruction) bool,
+    comptime access: fn (Machine.Instruction) ScalarFloatAccess,
 ) Allocator.Error![]const ?u5 {
     if (function.reuses_slots or function.capture_parameters.len != 0 or registers.len == 0) return &.{};
     const residences = try allocator.alloc(?u5, function.slot_count);
@@ -100,10 +106,17 @@ pub fn allocateFloatScalarsFor(
     }
     extendLoopCarriedIntervals(function.instructions, first, last);
     for (function.instructions, 0..) |instruction, index| {
-        if (!supported(instruction)) {
-            for (first, last, 0..) |start, end, slot| {
+        switch (access(instruction)) {
+            .resident => {},
+            // These emitters preserve the FP bank but read and write stack
+            // homes. Pin their complete spans, not unrelated live values.
+            .stack_operands => for (0..function.slot_count) |slot| {
+                if (instructionUses(instruction, @intCast(slot)) or
+                    instructionDefines(instruction, @intCast(slot))) forced[slot] = true;
+            },
+            .barrier => for (first, last, 0..) |start, end, slot| {
                 if (start <= index and end >= index) forced[slot] = true;
-            }
+            },
         }
     }
     var intervals: std.ArrayList(Interval) = .empty;

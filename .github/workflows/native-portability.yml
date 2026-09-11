@@ -101,6 +101,15 @@ jobs:
             test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
             test "$(printf '%s\n' "$loop_exit_output" | grep -c '^true$')" -eq 5
           done
+          float_memory_fixture="$scalar_root/FloatMemoryResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx" "$float_memory_fixture"
+          for mode in debug release; do
+            "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/float-memory-residence-$mode"
+            float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 7
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 7
+          done
           run_distribution() {
             executable="$1"
             stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
@@ -381,6 +390,15 @@ jobs:
             test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
             test "$(printf '%s\n' "$loop_exit_output" | grep -c '^true$')" -eq 5
           done
+          float_memory_fixture="$scalar_root/FloatMemoryResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx" "$float_memory_fixture"
+          for mode in debug release; do
+            "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/float-memory-residence-$mode"
+            float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 7
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 7
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -483,6 +501,15 @@ jobs:
             loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")
             test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
             test "$(printf '%s\n' "$loop_exit_output" | grep -c '^true$')" -eq 5
+          done
+          float_memory_fixture="$scalar_root/FloatMemoryResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx" "$float_memory_fixture"
+          for mode in debug release; do
+            "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/float-memory-residence-$mode"
+            float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 7
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 7
           done
 
   windows-x64:
@@ -617,6 +644,17 @@ jobs:
             $loopExitOutput = @(& $loopExitBinary)
             if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "loop exit residence $mode regression failed"
+            }
+          }
+          $floatMemoryFixture = Join-Path $scalarRoot "FloatMemoryResidence.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx") $floatMemoryFixture
+          foreach ($mode in @("debug", "release")) {
+            $floatMemoryBinary = Join-Path $env:RUNNER_TEMP "float-memory-residence-$mode.exe"
+            & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
+            if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
+            $floatMemoryOutput = @(& $floatMemoryBinary)
+            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 7 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "float memory residence $mode regression failed"
             }
           }
 
@@ -929,5 +967,16 @@ jobs:
             $loopExitOutput = @(& $loopExitBinary)
             if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "loop exit residence $mode regression failed"
+            }
+          }
+          $floatMemoryFixture = Join-Path $scalarRoot "FloatMemoryResidence.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx") $floatMemoryFixture
+          foreach ($mode in @("debug", "release")) {
+            $floatMemoryBinary = Join-Path $env:RUNNER_TEMP "float-memory-residence-$mode.exe"
+            & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
+            if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
+            $floatMemoryOutput = @(& $floatMemoryBinary)
+            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 7 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "float memory residence $mode regression failed"
             }
           }

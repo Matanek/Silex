@@ -46,12 +46,15 @@ pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocato
     return result;
 }
 
-fn scalarFloatInstruction(instruction: Machine.Instruction) bool {
+fn scalarFloatInstruction(instruction: Machine.Instruction) FloatLaneAllocation.ScalarFloatAccess {
     return switch (instruction) {
-        .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .jump, .branch, .return_void, .unary, .convert => true,
-        .binary => |value| value.type != .str and value.operator != .minimum and value.operator != .maximum,
-        .reference_load => |value| value.result.width == 1,
-        else => false,
+        .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .jump, .branch, .return_void, .unary, .convert => .resident,
+        .binary => |value| if (value.type != .str and value.operator != .minimum and value.operator != .maximum) .resident else .barrier,
+        .reference_load => |value| if (value.result.width == 1) .resident else .barrier,
+        // These stack emitters use only GPR scratch registers. Bounds errors
+        // jump to the epilogue; no returning path calls or clobbers XMM6...15.
+        .copy_range, .aggregate_init, .collection_load, .collection_count => .stack_operands,
+        else => .barrier,
     };
 }
 
@@ -858,4 +861,43 @@ test "X64 scalar floats retain temporaries but pin call and addressed values" {
     try std.testing.expectEqual(@as(?u5, null), residences[1]);
     try std.testing.expectEqual(@as(?u5, null), residences[7]);
     for ([_]usize{ 3, 4, 5, 6 }) |slot| try std.testing.expect(residences[slot] != null);
+}
+
+test "X64 scalar floats cross stack copies while every input and output leaf stays pinned" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const operations = [_]Machine.Instruction{
+        .{ .copy_range = .{ .result = .{ .start = 3, .width = 2 }, .operand = .{ .start = 1, .width = 2 } } },
+        .{ .aggregate_init = .{ .result = .{ .start = 3, .width = 2 }, .fields = &.{.{ .start = 1, .width = 2 }} } },
+        .{ .collection_load = .{ .result = .{ .start = 3, .width = 2 }, .collection = .{ .start = 1, .width = 2, .aggregate = true }, .index = 7, .count = 1, .header = 0, .tail = 0 } },
+    };
+    for (operations) |operation| {
+        var instructions = [_]Machine.Instruction{
+            .{ .constant_float64 = .{ .result = 0, .bits = @bitCast(@as(f64, 1.0)) } },
+            .{ .constant_float64 = .{ .result = 1, .bits = @bitCast(@as(f64, 2.0)) } },
+            .{ .constant_float64 = .{ .result = 2, .bits = @bitCast(@as(f64, 3.0)) } },
+            .{ .constant_int = .{ .result = 7, .bits = 0 } },
+            operation,
+            .{ .binary = .{ .result = 5, .left = 3, .right = 4, .operator = .add, .type = .float64 } },
+            .{ .binary = .{ .result = 6, .left = 0, .right = 5, .operator = .add, .type = .float64 } },
+            .{ .return_value = .{ .start = 6, .width = 1 } },
+        };
+        const function: Machine.Function = .{
+            .name = "stack_memory",
+            .parameter_count = 0,
+            .return_type = .float64,
+            .return_width = 1,
+            .slot_count = 8,
+            .frame_size = try Machine.frameSize(8),
+            .instructions = &instructions,
+        };
+        const residences = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{ 6, 7, 8, 9 }, scalarFloatInstruction);
+        try std.testing.expect(residences[0] != null);
+        for ([_]usize{ 1, 2, 3, 4 }) |slot| try std.testing.expectEqual(@as(?u5, null), residences[slot]);
+        // The same live value must still spill when a real call intervenes.
+        instructions[4] = .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } };
+        const called = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{ 6, 7, 8, 9 }, scalarFloatInstruction);
+        try std.testing.expectEqual(@as(?u5, null), called[0]);
+    }
 }
