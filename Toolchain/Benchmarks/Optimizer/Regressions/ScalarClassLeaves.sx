@@ -1,0 +1,50 @@
+class Counter {
+    var value:int
+    func add(amount:int) { self.value += amount }
+}
+
+class Sample {
+    var value:float32
+    var enabled:bool
+    func update(amount:float32) {
+        self.value += amount
+        self.enabled = !self.enabled
+    }
+}
+
+class Box {
+    var item:Counter
+    func replace(item:Counter) { self.item = item }
+}
+
+func calculate(rounds:int) int {
+    var counter = Counter()
+    var observer = counter
+    var index = 0
+    while index < rounds { counter.add(3); index++ }
+    return observer.value
+}
+
+func main() {
+    print(calculate(4) == 12)
+    print(calculate(0) == 0)
+    print(calculate(-1) == 0)
+    var counter = Counter()
+    var observer = counter
+    counter.add(7)
+    print(observer.value == 7)
+    observer.add(-2)
+    print(counter.value == 5)
+    var sample = Sample()
+    var sample_observer = sample
+    sample.update(0.5)
+    print(sample_observer.value == (0.5 as float32))
+    print(sample_observer.enabled)
+    sample_observer.update(-0.25)
+    print(sample.value == (0.25 as float32))
+    print(!sample.enabled)
+    var replacement = Counter(value:9)
+    var box = Box(item:counter)
+    box.replace(replacement)
+    print(box.item.value == 9 && counter.value == 5)
+}

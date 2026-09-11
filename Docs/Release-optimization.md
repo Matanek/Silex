@@ -273,7 +273,12 @@ semantic change for already-qualified callers.
 
 Release inlines eligible direct callees across branches, loops, and multiple
 returns, in addition to constant-result and small straight-line
-specialization. Before this inlining, exact scalar `STD.Math.min` and
+specialization. A straight-line class leaf may return a parameter-derived class
+identity while reading or updating numeric and boolean fields. All class values
+must have the returned class type; allocations, resource field accesses, retains/drops,
+address derivation, other calls and observable output reject this extension.
+The ordinary effect and pressure budget still applies. Before this inlining,
+exact scalar `STD.Math.min` and
 `STD.Math.max` calls become portable float32 or float64 operations. Native
 lowering emits them directly on ARM64 and X64 while preserving the library
 contract for NaN operands, signed zeros, infinities, and ordinary values.
