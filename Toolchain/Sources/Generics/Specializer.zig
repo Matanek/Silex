@@ -1804,6 +1804,18 @@ pub const Specializer = struct {
                             break :call_type function.return_type;
                         }
                     }
+                    // Concrete methods are rewritten before free functions are
+                    // registered. Their declared concrete results are already
+                    // usable when inferring a nested generic call.
+                    for (self.source.functions) |function| {
+                        if (function.type_parameters.len == 0 and
+                            std.mem.eql(u8, function.name, call.name) and
+                            parametersAcceptArity(function.parameters, call.arguments.len) and
+                            !self.typeNeedsSpecialization(function.return_type))
+                        {
+                            break :call_type function.return_type;
+                        }
+                    }
                     if (self.typeForName(call.name)) |type_value| break :call_type type_value;
                 } else if (call.receiver.?.value == .identifier and self.typeForName(call.receiver.?.value.identifier) != null) {
                     break :call_type self.typeForName(call.receiver.?.value.identifier).?;
