@@ -3,6 +3,7 @@ const std = @import("std");
 pub const CorpusEntry = struct {
     name: []const u8,
     timing: bool,
+    project: bool = false,
     llvm_float_width_minimum: u3 = 0,
     silex_arm64_pair_function: ?[]const u8 = null,
 };
@@ -98,6 +99,8 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "Regressions/LoopExitFloatLaneXY.sx", .timing = false, .llvm_float_width_minimum = 2, .silex_arm64_pair_function = "finish" },
     .{ .name = "Regressions/FloatLaneXYZ.sx", .timing = false },
     .{ .name = "Regressions/LoopExitFloatLaneXYZW.sx", .timing = false, .llvm_float_width_minimum = 4, .silex_arm64_pair_function = "finish" },
+    .{ .name = "Regressions/PureMathReferenceInlining.sx", .timing = false, .project = true },
+    .{ .name = "Regressions/HotReferenceLeafClosure.sx", .timing = false, .project = true },
 };
 
 pub const regressions = [_]RegressionEntry{

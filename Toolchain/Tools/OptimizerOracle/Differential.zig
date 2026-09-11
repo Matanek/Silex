@@ -4,6 +4,7 @@ const Silex = @import("silex_optimizer_api");
 pub const Result = struct {
     raw_ir: Silex.Ir.Program,
     optimized_ir: Silex.Ir.Program,
+    boundaries: []const Silex.Boundary.Function,
     execution: Execution,
 };
 
@@ -70,6 +71,7 @@ fn verifyIr(
     return .{
         .raw_ir = ir,
         .optimized_ir = optimized_ir,
+        .boundaries = boundaries,
         .execution = raw,
     };
 }

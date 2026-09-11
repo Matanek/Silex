@@ -93,9 +93,12 @@ func main() {
     var body_view = &bodies[0:bodies.count()]
     var force_view = &forces[0:forces.count()]
     integrate(body_view, force_view)
-    assert(body_view[0].px > 0.0)
-    assert(body_view[0].py > 0.0)
-    assert(body_view[0].c > 0.0)
-    assert(body_view[0].s > 0.0)
-    print("hot reference leaf closure preserved")
+    // Keep independent observations so the interpreter and both LLVM modes
+    // must agree on position, rotation and the linear speed cap.
+    print(body_view[0].px > 0.0)
+    print(body_view[0].py > 0.0)
+    print(body_view[0].c > 0.0)
+    print(body_view[0].s > 0.0)
+    print(force_view[0].speed_capped)
+    print(body_view[0].vx * body_view[0].vx + body_view[0].vy * body_view[0].vy <= 16.0)
 }

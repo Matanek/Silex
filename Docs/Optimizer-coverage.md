@@ -100,23 +100,50 @@ The compiler regressions are independent of Physics. Remaining full-stage
 observations, resource lifetimes, numerical edge policies and timing contracts
 remain open; the initial audit above is preserved as historical evidence.
 
+## Extension to pure scalar math boundaries
+
+`PureMathReferenceInlining.sx` and `HotReferenceLeafClosure.sx` are now untimed
+members of the executable corpus. The fixed corpus therefore contains 21 cases;
+the corpus/regression union remains 53 distinct sources. All 53 agree in
+raw/Release interpretation, and 28 emit LLVM in both modes. The bridge now
+classifies 26 instruction tags as conditional, abstracts two lifetime tags and
+rejects 41 others.
+
+LLVM emission keeps only the direct execution closure rooted at `main`, using
+the same reachability rule as structural comparison. Unreachable package
+helpers can no longer reject a valid executable surface because they format a
+diagnostic or use another unsupported feature. Calls from a reachable function
+still make their callee reachable, and unsupported reachable operations still
+fail emission.
+
+Direct `boundary_call` emission is limited to the typed scalar system-math
+contract already used by the interpreter and optimizer. The boundary must have
+a recognized math symbol, exact float precision and arity, and a trusted
+provider or explicit system-math provenance. Custom, package-private or
+signature-mismatched boundaries remain unsupported. The differential result
+retains this metadata through raw and Release emission; corpus entries that
+need package composition opt into project compilation explicitly.
+
+Both probes print independent boolean observations rather than relying on the
+runtime assertion/text path. Their interpreter, native Silex, raw LLVM and
+Release LLVM outputs agree. `HotReferenceLeafClosure.sx` now observes position,
+rotation, activation of the linear speed cap and the capped squared speed. It
+does not yet cover the angular cap, relative velocity or softness.
+
 ## Experiments selected by the audit
 
 | General mechanism | Existing discriminant | Next proof and present limitation |
 | --- | --- | --- |
 | Constant and memory propagation | `ReadonlyViewMemory.sx` | LLVM folds an observed result to a constant; separate call specialization, bounds information and load forwarding |
 | Range and signedness | `BranchingLoop.sx` | Advisor observes different signed/unsigned remainder operations; compare proven nonnegative variants with overflow and negative counterexamples |
-| Reference helpers and target pressure | `Regressions/PureMathReferenceInlining.sx`, `Regressions/HotReferenceLeafClosure.sx` | Existing integration reductions preserve semantics, but do not emit through this LLVM bridge; isolate unsupported operations before claiming a direct LLVM comparison |
+| Reference helpers and target pressure | `Regressions/PureMathReferenceInlining.sx`, `Regressions/HotReferenceLeafClosure.sx` | Both execute through LLVM; extend the numeric contract to the angular cap and physical X64 pressure before changing the current out-of-line policy |
 | Aggregate preparation | No autonomous full preparation reduction yet | Extract fixed/dynamic body, zero denominator, warm-start and alias variants; observe every prepared field and separate output-reduction cost |
 | Register residence and barriers | `Regressions/X64RegionalBarriers.sx`, `Regressions/X64IndirectAggregate.sx` | Structural witnesses do not replace physical X64 execution or dynamic spill measurements |
 | Lifetime and effects | `OwningCollectionCopy.sx`, `Regressions/TextOutputIntegrity.sx` | Separate value semantics from destruction, runtime and text costs that the bridge does not model |
 
-The integration scan contains unsupported assertion/text/optional operations
-and `boundary_call`; the larger leaf-closure case also contains
-`collection_reference`. These are operation inventories of the composed program,
-not a causal attribution to each hot helper. `X64IndirectAggregate.sx` isolates
-`function_reference` and `indirect_call` directly. This gives the next reduction
-a concrete starting point while preserving the missing execution proof.
+`X64IndirectAggregate.sx` still isolates `function_reference` and
+`indirect_call` directly. Those callable forms remain outside the bridge and
+preserve a concrete starting point for the physical X64 experiment.
 
 The independent Physics stage witnesses are useful evidence sources, not a
 replacement for this compiler corpus. Their integration ordering follows Box2D

@@ -5,6 +5,7 @@ const Generator = @import("Generator.zig");
 const Differential = @import("Differential.zig");
 const Llvm = @import("Llvm.zig");
 const LlvmCoverage = @import("LlvmCoverage.zig");
+const IrStats = @import("IrStats.zig");
 const Parity = @import("Parity.zig");
 
 const Allocator = std.mem.Allocator;
@@ -242,8 +243,8 @@ fn probe(allocator: Allocator, io: std.Io, directory: []const u8, name: []const 
         std.debug.print("coverage probe failed for {s}: {t}\n", .{ name, err });
         return err;
     };
-    const raw = try emission(a, result.raw_ir);
-    const optimized = try emission(a, result.optimized_ir);
+    const raw = try emission(a, result.raw_ir, result.boundaries);
+    const optimized = try emission(a, result.optimized_ir, result.boundaries);
     try writer.print("{s}\t{s}\tmatched\t{s}\t{s}\t{any}\t{s}\t{s}\n", .{
         name,                                sha256(source),                            raw, optimized, timed,
         try unmodeledTags(a, result.raw_ir), try unmodeledTags(a, result.optimized_ir),
@@ -252,10 +253,14 @@ fn probe(allocator: Allocator, io: std.Io, directory: []const u8, name: []const 
 fn unmodeledTags(allocator: Allocator, program: Silex.Ir.Program) ![]const u8 {
     const Tag = std.meta.Tag(Silex.Ir.Instruction);
     var seen = std.EnumSet(Tag).initEmpty();
-    for (program.functions) |function| for (function.blocks) |block| for (block.instructions) |instruction| {
-        const tag = std.meta.activeTag(instruction);
-        if (LlvmCoverage.classify(tag) == .unsupported) seen.insert(tag);
-    };
+    const reachable = try IrStats.reachableFunctions(allocator, program);
+    for (program.functions, 0..) |function, function_index| {
+        if (!reachable[function_index]) continue;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            const tag = std.meta.activeTag(instruction);
+            if (LlvmCoverage.classify(tag) == .unsupported) seen.insert(tag);
+        };
+    }
     var names: std.Io.Writer.Allocating = .init(allocator);
     defer names.deinit();
     var iterator = seen.iterator();
@@ -266,8 +271,12 @@ fn unmodeledTags(allocator: Allocator, program: Silex.Ir.Program) ![]const u8 {
     return allocator.dupe(u8, names.written());
 }
 
-fn emission(allocator: Allocator, program: Silex.Ir.Program) ![]const u8 {
-    _ = Llvm.emit(allocator, program) catch |err| switch (err) {
+fn emission(
+    allocator: Allocator,
+    program: Silex.Ir.Program,
+    boundaries: []const Silex.Boundary.Function,
+) ![]const u8 {
+    _ = Llvm.emitWithBoundaries(allocator, program, boundaries) catch |err| switch (err) {
         error.UnsupportedInstruction, error.UnsupportedType => return @errorName(err),
         else => return err,
     };

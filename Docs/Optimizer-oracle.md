@@ -229,13 +229,24 @@ loop edge copies without treating portable IR as SSA or applying Silex Release
 optimization to the raw oracle input. LLVM performs its own promotion. Exact
 `float32` to `float64` widening uses `fpext`; narrowing remains unsupported.
 
+Emission follows the closed function graph rooted at `main`. It does not emit
+unreachable package helpers, matching native dead-function removal and the
+reachability basis used by structural statistics. A reachable unsupported
+instruction still rejects the program. Direct boundary calls are emitted only
+when `Boundary.isPureScalarMath` proves a recognized system-math symbol with an
+exact scalar float signature and trusted provenance. Their declarations and
+calls preserve the source symbol and precision. Other native boundaries,
+indirect boundary calls and mismatched signatures remain unsupported.
+
 The autonomous `AggregateViewAliasing.sx`, `DampedIntegration.sx` and
 `PreparationMasses.sx` cases exercise mixed-width padded elements, escaping
 literals, aliasing, independent copies, reference helpers, damping/translation
-and effective masses with warm impulses. They observe deterministic values and
-are not timed. They do not cover full integration (rotation and speed caps) or
-full preparation (relative velocity and softness). Their abstract lifetime model
-cannot qualify allocation, destruction or reference-count costs.
+and effective masses with warm impulses. The `PureMathReferenceInlining.sx` and
+`HotReferenceLeafClosure.sx` corpus cases add scalar square root/copy-sign
+boundaries, rotation and the linear speed cap. They observe deterministic values
+and are not timed. They do not cover the angular cap or full preparation
+(relative velocity and softness). Their abstract lifetime model cannot qualify
+allocation, destruction or reference-count costs.
 
 Generated qualification also combines a nested scalar aggregate, an owning
 copy-on-write snapshot, a temporary mutable view, a loop, and a branch in one

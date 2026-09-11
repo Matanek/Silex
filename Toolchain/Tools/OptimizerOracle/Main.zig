@@ -765,7 +765,10 @@ fn verifyCorpusWithOptions(
     for (Generator.corpus) |entry| {
         const path = try std.fs.path.join(allocator, &.{ corpus_directory, entry.name });
         const source = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
-        const result = try Differential.verifyWithOptions(allocator, source, options);
+        const result = if (entry.project)
+            try Differential.verifyPathWithOptions(io, allocator, path, options)
+        else
+            try Differential.verifyWithOptions(allocator, source, options);
         switch (result.execution) {
             .completed => |outcome| try Report.line(io, allocator, "  PASS {s} ({d} bytes output)", .{
                 entry.name,
@@ -989,7 +992,7 @@ fn fuzzLlvm(
             .completed => |outcome| outcome,
             .failed => return error.UnexpectedRuntimeFailure,
         };
-        try writeFile(io, llvm_path, try Llvm.emit(allocator, differential.raw_ir));
+        try writeFile(io, llvm_path, try Llvm.emitWithBoundaries(allocator, differential.raw_ir, differential.boundaries));
         const cpu_argument = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{oracle.cpu});
         _ = try successfulCommand(allocator, io, &.{
             oracle.executable, oracle.optimization, "-target", oracle.target_triple,
@@ -1065,7 +1068,10 @@ fn compareCorpus(
         const name = entry.name;
         const source_path = try std.fs.path.join(allocator, &.{ corpus_directory, name });
         const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
-        const differential = try Differential.verify(allocator, source);
+        const differential = if (entry.project)
+            try Differential.verifyPath(io, allocator, source_path)
+        else
+            try Differential.verify(allocator, source);
         const expected = switch (differential.execution) {
             .completed => |outcome| outcome,
             .failed => return error.UnexpectedRuntimeFailure,
@@ -1079,8 +1085,8 @@ fn compareCorpus(
         const llvm_binary_path = try artifactPath(allocator, stem, "llvm");
         const native_binary_path = try artifactPath(allocator, stem, "silex");
 
-        const raw_llvm = try Llvm.emit(allocator, differential.raw_ir);
-        const silex_llvm = try Llvm.emit(allocator, differential.optimized_ir);
+        const raw_llvm = try Llvm.emitWithBoundaries(allocator, differential.raw_ir, differential.boundaries);
+        const silex_llvm = try Llvm.emitWithBoundaries(allocator, differential.optimized_ir, differential.boundaries);
         try writeFile(io, raw_silex_path, try Silex.Ir.writeText(allocator, differential.raw_ir));
         try writeFile(io, optimized_silex_path, try Silex.Ir.writeText(allocator, differential.optimized_ir));
         try writeFile(io, raw_llvm_path, raw_llvm);
