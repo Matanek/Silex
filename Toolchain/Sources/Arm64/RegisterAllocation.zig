@@ -46,6 +46,75 @@ pub fn allocateFloatLanePairsFor(
     return residences;
 }
 
+/// Allocates scalar FP regions for a backend with an explicit encoder subset.
+/// Unsupported operations retain complete stack intervals; address-taken spans
+/// stay pinned even when their address is consumed outside the scalar region.
+pub fn allocateFloatScalarsFor(
+    allocator: Allocator,
+    function: Machine.Function,
+    registers: []const u5,
+    comptime supported: fn (Machine.Instruction) bool,
+) Allocator.Error![]const ?u5 {
+    if (function.reuses_slots or function.capture_parameters.len != 0 or registers.len == 0) return &.{};
+    const residences = try allocator.alloc(?u5, function.slot_count);
+    @memset(residences, null);
+    const floats = try allocator.alloc(bool, function.slot_count);
+    defer allocator.free(floats);
+    @memset(floats, false);
+    inferFloatSlots(function, floats);
+    const forced = try allocator.alloc(bool, function.slot_count);
+    defer allocator.free(forced);
+    @memset(forced, false);
+    // The caller supplies a bank disjoint from its packed lanes. Packed
+    // emitters consume stack operands and materialize both results in memory.
+    for (function.float_lane_slots, 0..) |lane, slot| if (lane != null) {
+        forced[slot] = true;
+    };
+    for (function.instructions) |instruction| if (instruction == .binary) {
+        const binary = instruction.binary;
+        if (function.float_lane_slots.len != 0 and function.float_lane_slots[binary.result] != null) {
+            forced[binary.left] = true;
+            forced[binary.right] = true;
+        }
+    };
+    const first = try allocator.alloc(usize, function.slot_count);
+    defer allocator.free(first);
+    const last = try allocator.alloc(usize, function.slot_count);
+    defer allocator.free(last);
+    const weights = try allocator.alloc(u64, function.slot_count);
+    defer allocator.free(weights);
+    const instruction_weights = try allocator.alloc(u64, function.instructions.len);
+    defer allocator.free(instruction_weights);
+    @memset(first, std.math.maxInt(usize));
+    @memset(last, 0);
+    @memset(weights, 0);
+    @memset(instruction_weights, 1);
+    weightLoops(function.instructions, instruction_weights);
+    for (function.parameters) |parameter| {
+        if (parameter.aggregate or parameter.width != 1) forceSpan(parameter, forced) else touch(parameter.start, 0, first, last, weights, 1);
+    }
+    for (function.instructions, 0..) |instruction, index| {
+        visitBarrier(instruction, index, first, last, weights, instruction_weights[index]);
+        MemoryResidence.pin(instruction, forced);
+    }
+    extendLoopCarriedIntervals(function.instructions, first, last);
+    for (function.instructions, 0..) |instruction, index| {
+        if (!supported(instruction)) {
+            for (first, last, 0..) |start, end, slot| {
+                if (start <= index and end >= index) forced[slot] = true;
+            }
+        }
+    }
+    var intervals: std.ArrayList(Interval) = .empty;
+    defer intervals.deinit(allocator);
+    for (first, 0..) |start, slot| {
+        if (start == std.math.maxInt(usize) or forced[slot] or !floats[slot]) continue;
+        try intervals.append(allocator, .{ .slot = @intCast(slot), .first = start, .last = last[slot], .weight = weights[slot] });
+    }
+    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.slot_count, forced, &.{}, &.{}, false);
+    return residences;
+}
+
 /// Keeps scalar values in the callee-saved ARM64 registers x19...x28. Large
 /// frames reserve x28 as the base of their second directly addressed window.
 /// The

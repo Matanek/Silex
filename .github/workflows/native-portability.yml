@@ -278,6 +278,15 @@ jobs:
             -o "$RUNNER_TEMP/boundary"
           test "$("$RUNNER_TEMP/boundary")" = "linux arm64 boundary ready"
 
+          scalar_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          for mode in debug release; do
+            "$silex" compile "$scalar_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/scalar-float-residence-$mode"
+            scalar_output=$("$RUNNER_TEMP/scalar-float-residence-$mode")
+            test "$(printf '%s\n' "$scalar_output" | wc -l)" -eq 9
+            test "$(printf '%s\n' "$scalar_output" | grep -c '^true$')" -eq 9
+          done
+
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
     runs-on: ubuntu-24.04
@@ -341,6 +350,14 @@ jobs:
             "$silex" compile "$minmax_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-math-minmax-$mode"
             test "$("$RUNNER_TEMP/scalar-math-minmax-$mode")" = "scalar-math-minmax: pass"
+          done
+          scalar_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          for mode in debug release; do
+            "$silex" compile "$scalar_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/scalar-float-residence-$mode"
+            scalar_output=$("$RUNNER_TEMP/scalar-float-residence-$mode")
+            test "$(printf '%s\n' "$scalar_output" | wc -l)" -eq 9
+            test "$(printf '%s\n' "$scalar_output" | grep -c '^true$')" -eq 9
           done
 
   windows-x64:
@@ -428,6 +445,15 @@ jobs:
             $minmaxOutput = @(& $minmaxBinary)
             if ($LASTEXITCODE -ne 0 -or $minmaxOutput.Count -ne 1 -or $minmaxOutput[0] -ne "scalar-math-minmax: pass") {
               throw "scalar math minmax $mode regression failed"
+            }
+          }
+          $scalarFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          foreach ($mode in @("debug", "release")) {
+            $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"
+            & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary
+            $scalarOutput = @(& $scalarBinary)
+            if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "scalar float residence $mode regression failed"
             }
           }
 
@@ -692,4 +718,15 @@ jobs:
           if ($boundaryDebugOutput.Count -ne 1 -or $boundaryDebugOutput[0] -ne "windows arm64 boundary ready" -or
               $boundaryReleaseOutput.Count -ne 1 -or $boundaryReleaseOutput[0] -ne "windows arm64 boundary ready") {
             throw "Windows ARM64 Boundary smoke failed"
+          }
+
+          $scalarFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx"
+          foreach ($mode in @("debug", "release")) {
+            $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"
+            & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary
+            Assert-Arm64Pe $scalarBinary
+            $scalarOutput = @(Invoke-NativeCapture $scalarBinary)
+            if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "scalar float residence $mode regression failed"
+            }
           }

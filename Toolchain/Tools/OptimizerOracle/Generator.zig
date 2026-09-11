@@ -117,6 +117,8 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    // Native-only: the strict LLVM oracle does not lower float-to-integer conversions.
+    .{ .name = "Regressions/ScalarFloatResidence.sx", .concern = "scalar FP pressure, loop recurrence, call barriers, addressed aliases, exact conversion, NaN and signed zero" },
     .{ .name = "Regressions/DominatedReferenceReads.sx", .concern = "dominated borrowed fields preserve branches, mutable aliases, signed zero, NaN and mixed scalar widths" },
     .{
         .name = "Regressions/LateScalarClosure.sx",

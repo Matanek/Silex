@@ -32,12 +32,27 @@ pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocato
             .x64,
             &float_lane_registers,
         );
+        functions[index].float_register_slots = try FloatLaneAllocation.allocateFloatScalarsFor(
+            allocator,
+            functions[index],
+            &.{ 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+            scalarFloatInstruction,
+        );
         functions[index].stack_slot_base = residentStackPrefix(functions[index], functions[index].register_slots);
         functions[index].frame_size = try Machine.frameSize(functions[index].slot_count - functions[index].stack_slot_base);
     }
     result.functions = functions;
     try Machine.validate(result);
     return result;
+}
+
+fn scalarFloatInstruction(instruction: Machine.Instruction) bool {
+    return switch (instruction) {
+        .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .jump, .branch, .return_void, .unary, .convert => true,
+        .binary => |value| value.type != .str and value.operator != .minimum and value.operator != .maximum,
+        .reference_load => |value| value.result.width == 1,
+        else => false,
+    };
 }
 
 fn residentStackPrefix(function: Machine.Function, residences: []const ?u5) Machine.Slot {
@@ -813,4 +828,34 @@ test "hot X64 scalar loops retain registers before aggregate and call barriers" 
     }
     try std.testing.expectEqual(@as(Machine.Slot, 13), function.stack_slot_base);
     try std.testing.expectEqual(@as(u32, 16), function.frame_size);
+}
+
+test "X64 scalar floats retain temporaries but pin call and addressed values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const function: Machine.Function = .{
+        .name = "region",
+        .parameter_count = 0,
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 9,
+        .frame_size = try Machine.frameSize(9),
+        .instructions = &.{
+            .{ .constant_float32 = .{ .result = 0, .bits = 0x3f800000 } },
+            .{ .constant_float32 = .{ .result = 1, .bits = 0x40000000 } },
+            .{ .local_address = .{ .result = 2, .local = 1, .width = 1 } },
+            .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } },
+            .{ .constant_float32 = .{ .result = 3, .bits = 0x40400000 } },
+            .{ .binary = .{ .result = 4, .left = 3, .right = 0, .operator = .multiply, .type = .float32 } },
+            .{ .reference_load = .{ .result = .{ .start = 5, .width = 1 }, .reference = 2 } },
+            .{ .binary = .{ .result = 6, .left = 4, .right = 5, .operator = .add, .type = .float32 } },
+            .{ .copy = .{ .result = 7, .operand = 6 } },
+            .{ .return_value = .{ .start = 7, .width = 1 } },
+        },
+    };
+    const residences = try FloatLaneAllocation.allocateFloatScalarsFor(arena.allocator(), function, &.{ 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }, scalarFloatInstruction);
+    try std.testing.expectEqual(@as(?u5, null), residences[0]);
+    try std.testing.expectEqual(@as(?u5, null), residences[1]);
+    try std.testing.expectEqual(@as(?u5, null), residences[7]);
+    for ([_]usize{ 3, 4, 5, 6 }) |slot| try std.testing.expect(residences[slot] != null);
 }

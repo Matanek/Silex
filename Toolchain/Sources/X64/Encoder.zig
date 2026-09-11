@@ -355,7 +355,11 @@ fn encodeFunction(
     infallible_functions: []const bool,
     function: Machine.Function,
 ) Error!void {
-    if (function.float_register_slots.len != 0) return unsupported("X64 scalar floating register allocation");
+    var saved_floats: u16 = 0;
+    for (function.float_register_slots) |residence| if (residence) |register| {
+        if (register < 6 or register >= 16) return error.InvalidMachineProgram;
+        if (platform == .windows) saved_floats |= @as(u16, 1) << @intCast(register);
+    };
     try FloatPairs.validate(function);
     for (function.register_slots) |residence| if (residence) |register| {
         if (register >= 16 or register == @intFromEnum(Register.rsp) or register == @intFromEnum(Register.rbp)) {
@@ -364,7 +368,8 @@ fn encodeFunction(
     };
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
     const runtime_frame_size: u32 = if (enable_cycle_collector) 16 else 0;
-    const required_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const scalar_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const required_frame_size = std.math.add(u32, scalar_frame_size, @as(u32, @popCount(saved_floats)) * 16) catch return error.InvalidMachineProgram;
     const padded_frame_size = std.math.add(u32, required_frame_size, 15) catch return error.InvalidMachineProgram;
     const encoded_frame_size = padded_frame_size & ~@as(u32, 15);
     const stack_slot_bias = std.math.mul(u32, function.stack_slot_base, Machine.slot_size) catch
@@ -375,6 +380,8 @@ fn encodeFunction(
     // calls temporarily move RSP below this frame base.
     try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0xe5 });
     if (stack_slot_bias != 0) try emitSubtractImmediateRegister(allocator, bytes, .rbp, stack_slot_bias);
+    const float_save_offset = std.math.add(u32, stack_slot_bias, scalar_frame_size) catch return error.InvalidMachineProgram;
+    try emitPreservedFloats(allocator, bytes, saved_floats, float_save_offset, false);
     const cycle_context_slot = std.math.add(
         Machine.Slot,
         function.stack_slot_base,
@@ -405,7 +412,7 @@ fn encodeFunction(
             } else {
                 if (parameter.width != 1) return error.InvalidMachineProgram;
                 try emitLoadMemory(allocator, bytes, .rax, .rbp, incoming_displacement);
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, parameter.start);
+                try emitStoreScalar(allocator, bytes, function, .rax, parameter.start);
             }
         } else if (parameter.aggregate) {
             for (0..parameter.width) |leaf| {
@@ -414,7 +421,7 @@ fn encodeFunction(
             }
         } else {
             if (parameter.width != 1) return error.InvalidMachineProgram;
-            try emitStoreValue(allocator, bytes, function.register_slots, argument_registers[index], parameter.start);
+            try emitStoreScalar(allocator, bytes, function, argument_registers[index], parameter.start);
         }
     }
     for (function.capture_parameters, 0..) |capture, index| {
@@ -440,19 +447,19 @@ fn encodeFunction(
                 else
                     value.bits;
                 try emitImmediate(allocator, bytes, .rax, bits);
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .constant_bool => |value| {
                 try emitImmediate(allocator, bytes, .rax, @intFromBool(value.value));
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .constant_float32 => |value| {
                 try emitImmediate(allocator, bytes, .rax, value.bits);
-                try emitStoreStack(allocator, bytes, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .constant_float64 => |value| {
                 try emitImmediate(allocator, bytes, .rax, value.bits);
-                try emitStoreStack(allocator, bytes, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .global_load => |global| {
                 for (0..global.result.width) |leaf| {
@@ -493,8 +500,16 @@ fn encodeFunction(
                 value,
             ),
             .copy => |copy| {
-                try emitLoadValue(allocator, bytes, function.register_slots, .rax, copy.operand);
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, copy.result);
+                if (function.float_register_slots.len != 0) {
+                    const source = function.float_register_slots[copy.operand];
+                    const destination = function.float_register_slots[copy.result];
+                    if (source != null and destination != null) {
+                        try emitMoveFloat(allocator, bytes, destination.?, source.?);
+                        continue;
+                    }
+                }
+                try emitLoadScalar(allocator, bytes, function, .rax, copy.operand);
+                try emitStoreScalar(allocator, bytes, function, .rax, copy.result);
             },
             .copy_range => |copy| try emitCopyRange(allocator, bytes, copy.result, copy.operand),
             .deep_copy => |copy| {
@@ -541,7 +556,7 @@ fn encodeFunction(
                 try emitLoadStack(allocator, bytes, .rcx, load.reference);
                 for (0..load.result.width) |leaf| {
                     try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));
-                    try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, load.result.start) + leaf));
+                    try emitStoreScalar(allocator, bytes, function, .rax, @intCast(@as(usize, load.result.start) + leaf));
                 }
             },
             .address_load => |load| {
@@ -736,9 +751,9 @@ fn encodeFunction(
             .convert => |conversion| {
                 var failures: std.ArrayList(usize) = .empty;
                 defer failures.deinit(allocator);
-                try emitLoadStack(allocator, bytes, .rax, conversion.operand);
+                try emitLoadScalar(allocator, bytes, function, .rax, conversion.operand);
                 try NumericConversion.emit(allocator, bytes, conversion, &failures);
-                try emitStoreStack(allocator, bytes, .rax, conversion.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, conversion.result);
                 if (failures.items.len != 0) {
                     try bytes.append(allocator, 0xe9);
                     const completed = bytes.items.len;
@@ -760,7 +775,7 @@ fn encodeFunction(
                 format,
             ),
             .unary => |unary| {
-                try emitLoadValue(allocator, bytes, function.register_slots, .rax, unary.operand);
+                try emitLoadScalar(allocator, bytes, function, .rax, unary.operand);
                 if (unary.type == .float32) {
                     try bytes.append(allocator, 0x35);
                     try appendInt(allocator, bytes, u32, 0x8000_0000);
@@ -770,10 +785,14 @@ fn encodeFunction(
                 } else {
                     try IntegerArithmetic.negate(allocator, bytes, unary.type, &epilogue_fixups);
                 }
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, unary.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, unary.result);
             },
             .binary => |binary| {
                 if (try FloatPairs.emit(allocator, bytes, function, binary)) continue;
+                if (binary.type.isFloat()) {
+                    try emitFloatBinary(allocator, bytes, function.float_register_slots, binary);
+                    continue;
+                }
                 if (constantDivisionConstant(function, instruction_index, binary)) |constant| {
                     try emitConstantDivision(allocator, bytes, function, binary, constant);
                 } else try emitBinary(allocator, bytes, function.register_slots, binary, &epilogue_fixups);
@@ -909,6 +928,7 @@ fn encodeFunction(
     }
     instruction_offsets[function.instructions.len] = bytes.items.len;
     const epilogue = bytes.items.len;
+    try emitPreservedFloats(allocator, bytes, saved_floats, float_save_offset, true);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0xec });
     const restored_frame_size = std.math.add(u32, encoded_frame_size, stack_slot_bias) catch
         return error.InvalidMachineProgram;
@@ -1159,7 +1179,7 @@ fn emitBinary(
     binary: Machine.Instruction.Binary,
     epilogue: *std.ArrayList(EpilogueFixup),
 ) Error!void {
-    if (binary.type.isFloat()) return emitFloatBinary(allocator, bytes, binary);
+    if (binary.type.isFloat()) return emitFloatBinary(allocator, bytes, &.{}, binary);
     if (binary.type == .str) return emitStringBinary(allocator, bytes, binary);
     try emitLoadValue(allocator, bytes, residences, .rax, binary.left);
     try emitLoadValue(allocator, bytes, residences, .rcx, binary.right);
@@ -1252,10 +1272,10 @@ fn emitAggregateEqual(
     try emitStoreStack(allocator, bytes, .r13, value.result);
 }
 
-fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.Instruction.Binary) Error!void {
+fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, binary: Machine.Instruction.Binary) Error!void {
     const double = binary.type == .float64;
-    try emitLoadFloatStack(allocator, bytes, 0, binary.left, double);
-    try emitLoadFloatStack(allocator, bytes, 1, binary.right, double);
+    try emitLoadFloatValue(allocator, bytes, residences, 0, binary.left, double);
+    try emitLoadFloatValue(allocator, bytes, residences, 1, binary.right, double);
     switch (binary.operator) {
         .add, .subtract, .multiply, .divide => {
             try bytes.append(allocator, if (double) 0xf2 else 0xf3);
@@ -1266,7 +1286,9 @@ fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Mach
                 .divide => 0x5e,
                 else => unreachable,
             }, 0xc1 });
-            try emitStoreFloatStack(allocator, bytes, 0, binary.result, double);
+            if (residences.len != 0 and residences[binary.result] != null) {
+                try emitMoveFloat(allocator, bytes, residences[binary.result].?, 0);
+            } else try emitStoreFloatStack(allocator, bytes, 0, binary.result, double);
         },
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
             if (double) try bytes.append(allocator, 0x66);
@@ -3388,6 +3410,54 @@ fn emitLoadValue(
     try emitLoadStack(allocator, bytes, register, slot);
 }
 
+fn emitMoveFloat(allocator: Allocator, bytes: *std.ArrayList(u8), destination: u5, source: u5) Allocator.Error!void {
+    if (destination == source) return;
+    const rex: u8 = 0x40 | (@as(u8, @intFromBool(destination >= 8)) << 2) | @intFromBool(source >= 8);
+    if (rex != 0x40) try bytes.append(allocator, rex);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x28, 0xc0 | ((@as(u8, destination) & 7) << 3) | (@as(u8, source) & 7) });
+}
+
+fn emitLoadFloatValue(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, destination: u3, slot: Machine.Slot, double: bool) Allocator.Error!void {
+    if (residences.len != 0) if (residences[slot]) |source| {
+        return emitMoveFloat(allocator, bytes, destination, source);
+    };
+    try emitLoadFloatStack(allocator, bytes, destination, slot, double);
+}
+
+fn emitScalarBits(allocator: Allocator, bytes: *std.ArrayList(u8), xmm: u5, general: Register, load: bool) Allocator.Error!void {
+    const register: u8 = @intFromEnum(general);
+    const rex: u8 = 0x48 | (@as(u8, @intFromBool(xmm >= 8)) << 2) | @intFromBool(register >= 8);
+    try bytes.appendSlice(allocator, &.{ 0x66, rex, 0x0f, if (load) @as(u8, 0x7e) else 0x6e, 0xc0 | ((@as(u8, xmm) & 7) << 3) | (register & 7) });
+}
+
+fn emitLoadScalar(allocator: Allocator, bytes: *std.ArrayList(u8), function: Machine.Function, register: Register, slot: Machine.Slot) Allocator.Error!void {
+    if (function.float_register_slots.len != 0) if (function.float_register_slots[slot]) |xmm| {
+        return emitScalarBits(allocator, bytes, xmm, register, true);
+    };
+    try emitLoadValue(allocator, bytes, function.register_slots, register, slot);
+}
+
+fn emitStoreScalar(allocator: Allocator, bytes: *std.ArrayList(u8), function: Machine.Function, register: Register, slot: Machine.Slot) Allocator.Error!void {
+    if (function.float_register_slots.len != 0) if (function.float_register_slots[slot]) |xmm| {
+        return emitScalarBits(allocator, bytes, xmm, register, false);
+    };
+    try emitStoreValue(allocator, bytes, function.register_slots, register, slot);
+}
+
+// Win64 preserves all 128 bits of XMM6...XMM15, including when Silex only
+// uses the scalar low lane. SysV needs no prologue save for these colors.
+fn emitPreservedFloats(allocator: Allocator, bytes: *std.ArrayList(u8), mask: u16, offset: u32, restore: bool) Error!void {
+    var displacement = offset;
+    for (6..16) |xmm| {
+        if (mask & (@as(u16, 1) << @intCast(xmm)) == 0) continue;
+        try bytes.append(allocator, 0xf3);
+        if (xmm >= 8) try bytes.append(allocator, 0x44);
+        try bytes.appendSlice(allocator, &.{ 0x0f, if (restore) @as(u8, 0x6f) else 0x7f, 0x85 | ((@as(u8, @intCast(xmm)) & 7) << 3) });
+        try appendInt(allocator, bytes, i32, std.math.cast(i32, displacement) orelse return error.InvalidMachineProgram);
+        displacement = std.math.add(u32, displacement, 16) catch return error.InvalidMachineProgram;
+    }
+}
+
 fn emitLoadFloatStack(allocator: Allocator, bytes: *std.ArrayList(u8), xmm: u3, slot: Machine.Slot, double: bool) Allocator.Error!void {
     try bytes.append(allocator, if (double) 0xf2 else 0xf3);
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x10, 0x85 | (@as(u8, xmm) << 3) });
@@ -4453,5 +4523,28 @@ test "probe every Windows stack page in large X64 frames" {
     try emitFrameAllocation(std.testing.allocator, &bytes, .linux, 8192);
     try std.testing.expectEqualSlices(u8, &.{
         0x48, 0x81, 0xec, 0x00, 0x20, 0x00, 0x00,
+    }, bytes.items);
+}
+
+test "scalar XMM high colors encode raw bits and preserve full Win64 registers" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try emitScalarBits(std.testing.allocator, &bytes, 15, .r9, false);
+    try emitScalarBits(std.testing.allocator, &bytes, 15, .r9, true);
+    try emitMoveFloat(std.testing.allocator, &bytes, 14, 15);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x66, 0x4d, 0x0f, 0x6e, 0xf9,
+        0x66, 0x4d, 0x0f, 0x7e, 0xf9,
+        0x45, 0x0f, 0x28, 0xf7,
+    }, bytes.items);
+    bytes.clearRetainingCapacity();
+    try emitPreservedFloats(std.testing.allocator, &bytes, (1 << 6) | (1 << 15), 48, false);
+    try emitPreservedFloats(std.testing.allocator, &bytes, (1 << 6) | (1 << 15), 48, true);
+    try std.testing.expectEqualSlices(u8, &.{
+        0xf3, 0x0f, 0x7f, 0xb5, 48,   0,    0,  0,
+        0xf3, 0x44, 0x0f, 0x7f, 0xbd, 64,   0,  0,
+        0,    0xf3, 0x0f, 0x6f, 0xb5, 48,   0,  0,
+        0,    0xf3, 0x44, 0x0f, 0x6f, 0xbd, 64, 0,
+        0,    0,
     }, bytes.items);
 }
