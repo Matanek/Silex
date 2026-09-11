@@ -1,0 +1,34 @@
+func main() {
+    var value0:float64 = 1.0
+    var value1:float64 = 2.0
+    var value2:float64 = 3.0
+    var value3:float64 = 4.0
+    var index = 0
+    while index < 4000000 {
+        let denominator = 2.0 + (index % 5) as float64 * 0.125
+        let before0 = copy value0
+        let first0 = before0 / denominator
+        var result0 = first0
+        let before1 = copy value1
+        let first1 = before1 / denominator
+        var result1 = first1
+        let before2 = copy value2
+        let first2 = before2 / denominator
+        var result2 = first2
+        let before3 = copy value3
+        let first3 = before3 / denominator
+        var result3 = first3
+        if index % 2 == 0 {
+            result0 += 0.125
+            result1 += 0.25
+            result2 += 0.375
+            result3 += 0.5
+        }
+        value0 = result0 + before0 / denominator
+        value1 = result1 + before1 / denominator
+        value2 = result2 + before2 / denominator
+        value3 = result3 + before3 / denominator
+        index++
+    }
+    print((value0 + value1 + value2 + value3) == 4.872464230251829)
+}

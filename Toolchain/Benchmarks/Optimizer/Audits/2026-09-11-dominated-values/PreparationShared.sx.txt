@@ -1,0 +1,143 @@
+// One-point preparation adapted from Box2D 3.1.1 contact_solver.c.
+// Revision 8c661469c9507d3ad6fbd2fea3f1aa71669c2fe3.
+// Copyright (c) 2023 Erin Catto. MIT: Oracle2D/Box2D-LICENSE.txt.
+// Complete preparation arithmetic; graph lookup and runtime timing excluded.
+
+struct Input {
+    var ma:float
+    var mb:float
+    var ia:float
+    var ib:float
+    var nx:float
+    var ny:float
+    var ax:float
+    var ay:float
+    var bx:float
+    var by:float
+    var separation:float
+    var vax:float
+    var vay:float
+    var wa:float
+    var vbx:float
+    var vby:float
+    var wb:float
+    var normal:float
+    var tangent:float
+    var rolling:float
+    var friction:float
+    var restitution:float
+    var tangent_speed:float
+    var rolling_resistance:float
+}
+
+struct Prepared {
+    var separation:float
+    var normal_mass:float
+    var tangent_mass:float
+    var relative_velocity:float
+    var rolling_mass:float
+    var normal:float
+    var tangent:float
+    var rolling:float
+    var friction:float
+    var restitution:float
+    var tangent_speed:float
+    var rolling_resistance:float
+    var bias_rate:float
+    var mass_scale:float
+    var impulse_scale:float
+    var nx:float
+    var ny:float
+    var ax:float
+    var ay:float
+    var bx:float
+    var by:float
+    var ma:float
+    var mb:float
+    var ia:float
+    var ib:float
+    var total:float
+}
+
+func prepare(input:@Input, warm:bool) Prepared {
+    let cached_ax = copy input.ax
+    let cached_ay = copy input.ay
+    let cached_bx = copy input.bx
+    let cached_by = copy input.by
+    let cached_ia = copy input.ia
+    let cached_ib = copy input.ib
+    let cached_ma = copy input.ma
+    let cached_mb = copy input.mb
+    let cached_nx = copy input.nx
+    let cached_ny = copy input.ny
+    var out = Prepared()
+    var warm_scale = 0.0
+    if warm { warm_scale = 1.0 }
+    out.separation = input.separation -
+        ((cached_bx - cached_ax) * cached_nx + (cached_by - cached_ay) * cached_ny)
+    let rn_a = cached_ax * cached_ny - cached_ay * cached_nx
+    let rn_b = cached_bx * cached_ny - cached_by * cached_nx
+    let kn = cached_ma + cached_mb + cached_ia * rn_a * rn_a + cached_ib * rn_b * rn_b
+    if kn > 0.0 { out.normal_mass = 1.0 / kn }
+    let tx = cached_ny
+    let ty = -cached_nx
+    let rt_a = cached_ax * ty - cached_ay * tx
+    let rt_b = cached_bx * ty - cached_by * tx
+    let kt = cached_ma + cached_mb + cached_ia * rt_a * rt_a + cached_ib * rt_b * rt_b
+    if kt > 0.0 { out.tangent_mass = 1.0 / kt }
+    let kr = cached_ia + cached_ib
+    if kr > 0.0 { out.rolling_mass = 1.0 / kr }
+    var vax = copy input.vax
+    var vay = copy input.vay
+    var wa = copy input.wa
+    var vbx = copy input.vbx
+    var vby = copy input.vby
+    var wb = copy input.wb
+    if cached_ma == 0.0 { vax = 0.0; vay = 0.0; wa = 0.0 }
+    if cached_mb == 0.0 { vbx = 0.0; vby = 0.0; wb = 0.0 }
+    out.relative_velocity = cached_nx * ((vbx - wb * cached_by) - (vax - wa * cached_ay)) +
+        cached_ny * ((vby + wb * cached_bx) - (vay + wa * cached_ax))
+    out.normal = warm_scale * input.normal
+    out.tangent = warm_scale * input.tangent
+    out.rolling = warm_scale * input.rolling
+    out.bias_rate = 12.0
+    out.mass_scale = 0.75
+    out.impulse_scale = 0.25
+    if cached_ma == 0.0 || cached_mb == 0.0 {
+        out.bias_rate = 24.0
+        out.mass_scale = 0.875
+        out.impulse_scale = 0.125
+    }
+    out.friction = input.friction
+    out.restitution = input.restitution
+    out.tangent_speed = input.tangent_speed
+    out.rolling_resistance = input.rolling_resistance
+    out.nx = cached_nx
+    out.ny = cached_ny
+    out.ax = cached_ax
+    out.ay = cached_ay
+    out.bx = cached_bx
+    out.by = cached_by
+    out.ma = cached_ma
+    out.mb = cached_mb
+    out.ia = cached_ia
+    out.ib = cached_ib
+    return out
+}
+
+func main() {
+    var input = Input(ma:1.0, mb:1.0, ia:1.0, ib:1.0, ny:1.0, ax:1.0, bx:-1.0,
+        separation:0.25, vax:1.0, vay:2.0, wa:0.5, vbx:3.0, vby:5.0, wb:-0.25,
+        normal:2.0, tangent:-1.0, rolling:0.5, friction:0.75, restitution:0.25,
+        tangent_speed:-0.5, rolling_resistance:0.125)
+    var total:float64 = 0.0
+    var index = 0
+    while index < 1000000 {
+        input.ma = (index % 3) as float
+        let out = prepare(input, index % 2 == 0)
+        let sum = out.separation + out.normal_mass + out.tangent_mass + out.relative_velocity + out.rolling_mass + out.normal + out.tangent + out.rolling + out.friction + out.restitution + out.tangent_speed + out.rolling_resistance + out.bias_rate + out.mass_scale + out.impulse_scale + out.nx + out.ny + out.ax + out.ay + out.bx + out.by + out.ma + out.mb + out.ia + out.ib + out.total
+        total += sum as float64
+        index++
+    }
+    print(total)
+}

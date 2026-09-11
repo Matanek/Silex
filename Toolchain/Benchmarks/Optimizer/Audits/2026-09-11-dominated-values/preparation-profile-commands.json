@@ -1,0 +1,26 @@
+[
+  {
+    "command": [
+      "zig",
+      "build",
+      "optimizer-oracle",
+      "--",
+      "hot-budget",
+      "/private/tmp/silex-part02-evidence/PreparationRepeated.sx",
+      "PreparationRepeated.prepare"
+    ],
+    "exit": 1
+  },
+  {
+    "command": [
+      "zig",
+      "build",
+      "optimizer-oracle",
+      "--",
+      "hot-budget",
+      "/private/tmp/silex-part02-evidence/PreparationShared.sx",
+      "PreparationShared.prepare"
+    ],
+    "exit": 1
+  }
+]

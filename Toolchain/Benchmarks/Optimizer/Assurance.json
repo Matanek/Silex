@@ -46,7 +46,9 @@
       "positive_cases": [
         "FloatArithmetic.sx",
         "Regressions/FloatSsaLoop.sx",
-        "Regressions/ScalarExpressionReuse.sx"
+        "Regressions/ScalarExpressionReuse.sx",
+        "Regressions/AggregatePreparation.sx",
+        "Regressions/ValueModules/Main.sx"
       ],
       "negative_cases": [
         "Regressions/FloatSsaDiamond.sx",
@@ -72,9 +74,9 @@
       "preconditions": "Strict floating operations; no fast-math; preserve signed zero, NaN and exact conversions.",
       "scope": "bounded-corpus",
       "open_questions": [
-        "Bounded local expression reuse covers immutable snapshots and exceptional floating values; inter-block availability, full-stage cost and physical X64 profitability remain open."
+        "Bounded dominance reuse covers stable scalar snapshots, signed zero, NaN and ordered scalar output; full-stage profitability and physical X64 remain unqualified."
       ],
-      "next_experiment": "Extend the sealed scalar-expression reduction to full-stage consumers and physical X64 while retaining call barriers and strict floating rules.",
+      "next_experiment": "Measure the unchanged full-stage consumers and target realization; the sealed preparation timing is inconclusive, not a speedup.",
       "owner": "optimizer",
       "targets": [
         "arm64",
@@ -191,9 +193,9 @@
       "preconditions": "Distinct roots can alias; calls, unknown effects and control boundaries invalidate local facts.",
       "scope": "bounded-corpus",
       "open_questions": [
-        "The bounded primitive readonly-view probe now loses its unobserved allocation and lifetime cost; general cross-block effects, observed storage and resource-bearing collections remain unqualified."
+        "Local primitive storage elimination and stable value dominance are covered; address formation, mutation, resources and unknown calls remain conservative barriers."
       ],
-      "next_experiment": "Separate late scalar helper calls and repeated pure calculations from alias-sensitive loads; qualify longer reductions and target pressure before extending the analysis.",
+      "next_experiment": "Qualify late scalar helper closure separately from alias-sensitive reads and the previously rejected reference expansion.",
       "owner": "optimizer",
       "targets": [
         "arm64",
@@ -206,7 +208,9 @@
         "AggregateScalarization.sx",
         "NestedAggregateWidths.sx",
         "Regressions/AggregateParameterResidence.sx",
-        "PreparationMasses.sx"
+        "PreparationMasses.sx",
+        "Regressions/AggregatePreparation.sx",
+        "Regressions/ValueModules/Main.sx"
       ],
       "negative_cases": [
         "Regressions/AggregateFieldStores.sx",
@@ -234,9 +238,9 @@
       "preconditions": "Snapshots, addressable homes and alias-visible writes must survive scalar replacement.",
       "scope": "bounded-corpus",
       "open_questions": [
-        "No timed aggregate/reference-return family; primitive aggregates do not cover classes, protocols or all owning fields."
+        "All 26 prepared fields are observed across dynamic/fixed bodies, warm starts and detached snapshots; stable parameter reads fall from 56 to 24, while aggregate copies/returns still require machine-cost attribution."
       ],
-      "next_experiment": "Reduce aggregate calls/returns from Integration into independent width and alias variants; inspect copies and residence.",
+      "next_experiment": "Use the sealed full preparation original/shared/direct controls to inspect ABI copies and residence; forcing the complete helper into its caller regresses.",
       "owner": "optimizer",
       "targets": [
         "arm64",
@@ -474,7 +478,9 @@
         "Regressions/BoidsKernel.sx",
         "Regressions/Boids2DSteering.sx",
         "DampedIntegration.sx",
-        "PreparationMasses.sx"
+        "PreparationMasses.sx",
+        "Regressions/AggregatePreparation.sx",
+        "Regressions/ValueModules/Main.sx"
       ],
       "negative_cases": [
         "Regressions/CheckedMemoryLanes.sx"

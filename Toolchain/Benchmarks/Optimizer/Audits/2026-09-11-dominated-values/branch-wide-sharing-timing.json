@@ -1,0 +1,189 @@
+{
+  "mode": "diagnostic",
+  "scope": "process wall time for 4000000 iterations of four independent floating recurrences with duplicate divisions across a branch; explicit-sharing control; same compiler; no LLVM comparator or physical X64 claim",
+  "warmup_pairs": 6,
+  "pairs": 21,
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "Apple M3 Pro",
+  "binary_sha256": {
+    "before": "e20d9f4470ca56f67db8c507a3bf5ed1a7643b0aafe75662a750390074c2b661",
+    "after": "f57b57c0e553a9ad47a403719ff5876e035b4b03d543edd5fa11b9dfe4e2e697"
+  },
+  "source_sha256": {
+    "before": "6ad01f694780df4eeaecef5245fd24fff4bb61471aea445576cbe86062f8b4bd",
+    "after": "53cf4f24896411c62a74215f375cadd607fe1d521c00dcab06315ae9f4cee7d5"
+  },
+  "observations": [
+    {
+      "index": 0,
+      "first": "before",
+      "before_ns": 66580709,
+      "after_ns": 64855041,
+      "after_before": 0.9740815616727662
+    },
+    {
+      "index": 1,
+      "first": "after",
+      "after_ns": 63469167,
+      "before_ns": 67363084,
+      "after_before": 0.9421950901179049
+    },
+    {
+      "index": 2,
+      "first": "before",
+      "before_ns": 66416083,
+      "after_ns": 65039625,
+      "after_before": 0.9792752306696557
+    },
+    {
+      "index": 3,
+      "first": "after",
+      "after_ns": 65805750,
+      "before_ns": 67581375,
+      "after_before": 0.9737261190675686
+    },
+    {
+      "index": 4,
+      "first": "before",
+      "before_ns": 67092792,
+      "after_ns": 66907958,
+      "after_before": 0.9972450989966255
+    },
+    {
+      "index": 5,
+      "first": "after",
+      "after_ns": 66725709,
+      "before_ns": 67364209,
+      "after_before": 0.9905216730148201
+    },
+    {
+      "index": 6,
+      "first": "before",
+      "before_ns": 66263750,
+      "after_ns": 65590000,
+      "after_before": 0.9898322989568202
+    },
+    {
+      "index": 7,
+      "first": "after",
+      "after_ns": 65312500,
+      "before_ns": 67178125,
+      "after_before": 0.9722286830720566
+    },
+    {
+      "index": 8,
+      "first": "before",
+      "before_ns": 66115375,
+      "after_ns": 66395000,
+      "after_before": 1.0042293490734946
+    },
+    {
+      "index": 9,
+      "first": "after",
+      "after_ns": 64431000,
+      "before_ns": 66464334,
+      "after_before": 0.9694071409787992
+    },
+    {
+      "index": 10,
+      "first": "before",
+      "before_ns": 68307958,
+      "after_ns": 65509959,
+      "after_before": 0.9590384622535488
+    },
+    {
+      "index": 11,
+      "first": "after",
+      "after_ns": 65254833,
+      "before_ns": 66237291,
+      "after_before": 0.9851675999249426
+    },
+    {
+      "index": 12,
+      "first": "before",
+      "before_ns": 66141667,
+      "after_ns": 64244750,
+      "after_before": 0.9713203932401643
+    },
+    {
+      "index": 13,
+      "first": "after",
+      "after_ns": 64708750,
+      "before_ns": 66091250,
+      "after_before": 0.9790819510903486
+    },
+    {
+      "index": 14,
+      "first": "before",
+      "before_ns": 66044875,
+      "after_ns": 63650584,
+      "after_before": 0.9637475125814077
+    },
+    {
+      "index": 15,
+      "first": "after",
+      "after_ns": 65205334,
+      "before_ns": 67456292,
+      "after_before": 0.9666308666951335
+    },
+    {
+      "index": 16,
+      "first": "before",
+      "before_ns": 65939666,
+      "after_ns": 67608375,
+      "after_before": 1.0253066037671468
+    },
+    {
+      "index": 17,
+      "first": "after",
+      "after_ns": 66578250,
+      "before_ns": 66232541,
+      "after_before": 1.0052196245951066
+    },
+    {
+      "index": 18,
+      "first": "before",
+      "before_ns": 68528459,
+      "after_ns": 65855542,
+      "after_before": 0.9609955186647346
+    },
+    {
+      "index": 19,
+      "first": "after",
+      "after_ns": 66713000,
+      "before_ns": 66384542,
+      "after_before": 1.0049478084822818
+    },
+    {
+      "index": 20,
+      "first": "before",
+      "before_ns": 67786709,
+      "after_ns": 65225041,
+      "after_before": 0.962209878045562
+    }
+  ],
+  "summary": {
+    "before_ns": {
+      "median": 66464334,
+      "minimum": 65939666,
+      "maximum": 68528459,
+      "mad": 419459,
+      "half_shift": -0.009004544588085528
+    },
+    "after_ns": {
+      "median": 65312500,
+      "minimum": 63469167,
+      "maximum": 67608375,
+      "mad": 603750,
+      "half_shift": -0.003228555604361971
+    },
+    "after_before": {
+      "median": 0.9740815616727662,
+      "minimum": 0.9421950901179049,
+      "maximum": 1.0253066037671468,
+      "mad": 0.011871683627204144,
+      "half_shift": -0.0015124978823586321
+    }
+  }
+}

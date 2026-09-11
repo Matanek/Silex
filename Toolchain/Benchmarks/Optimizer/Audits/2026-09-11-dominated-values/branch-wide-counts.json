@@ -1,0 +1,14 @@
+{
+  "before": {
+    "fdiv": 8,
+    "instructions": 2768
+  },
+  "shared": {
+    "fdiv": 4,
+    "instructions": 2772
+  },
+  "after": {
+    "fdiv": 4,
+    "instructions": 2768
+  }
+}

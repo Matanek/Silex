@@ -1,0 +1,16 @@
+{
+  "command": [
+    "Silex/Toolchain/zig-out/bin/silex",
+    "compile",
+    "/private/tmp/silex-part02-evidence/BranchValuesWide.sx",
+    "--release",
+    "--nocache",
+    "-o",
+    "/private/tmp/silex-part02-evidence/branch-wide-after"
+  ],
+  "compiler_sha256": "79add4e8f0f8e843a5d981ea7de971a5f845dd6afe98b675e5ce5386aab8fb0c",
+  "source_sha256": "6ad01f694780df4eeaecef5245fd24fff4bb61471aea445576cbe86062f8b4bd",
+  "binary_sha256": "c2a9b0f3afee7daffab66d3ac4affcf592a52acd66549f1e9bbf129e1084a953",
+  "exit": 0,
+  "stdout": "4.872464230251829\n"
+}

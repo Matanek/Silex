@@ -1,0 +1,2 @@
+evidence_mode	host_os	process_arch	hardware_arch	cpu_model	translated	oracle_target	oracle_cpu	oracle_revision	oracle_executable
+diagnostic	macos	aarch64	arm64	Apple M3 Pro	false	arm64-apple-darwin25.6.0	apple-m1	3623fe661ae35c6c80ac221f14d85be76aa870f1	clang

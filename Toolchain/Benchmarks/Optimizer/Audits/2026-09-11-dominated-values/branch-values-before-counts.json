@@ -1,0 +1,8 @@
+{
+  "before": {
+    "fdiv": 2
+  },
+  "shared": {
+    "fdiv": 1
+  }
+}

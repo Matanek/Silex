@@ -1,0 +1,165 @@
+struct @Values.Pair {
+    var .x:float64
+    var .y:float64
+}
+
+func @main() -> void {
+entry:
+    %0:float64 = const 2
+    %1:float64 = const 3
+    %2:@Values.Pair = struct.init @Values.Pair(.x=%0, .y=%1)
+    store $0:structure, %2
+    %4:bool = const true
+    %5:float64 = call @Values.measure(%2, %4)
+    %6:float64 = const 7
+    %7:bool = eq %5, %6
+    print %7
+    %8:@Values.Pair = load $0:structure
+    %9:bool = const false
+    %10:float64 = call @Values.measure(%8, %9)
+    %11:float64 = const 4
+    %12:bool = eq %10, %11
+    print %12
+    %13:@Values.Pair = load $0:structure
+    %64:float64 = field %13, .x
+    %65:float64 = const 0
+    %66:bool = lt %64, %65
+    branch %66, bb1, bb2
+bb1:
+    %68:float64 = const -1
+    %15:float64 = copy %68
+    jump bb3
+bb2:
+    %69:float64 = field %13, .x
+    %15:float64 = copy %69
+    jump bb3
+bb3:
+    %16:float64 = const 2
+    %17:bool = eq %15, %16
+    print %17
+    %20:internal address = address $0:structure
+    %56:internal address = reference.field %20, x
+    %57:float64 = reference.load %56
+    %58:float64 = const 9
+    %60:internal address = reference.field %20, x
+    reference.store %60, %58
+    %62:float64 = const 9
+    %63:float64 = add %57, %62
+    %22:float64 = copy %63
+    %23:float64 = const 11
+    %24:bool = eq %22, %23
+    print %24
+    %25:float = const 1
+    %27:float64 = const -0
+    %28:float64 = const 0
+    %29:@Values.Pair = struct.init @Values.Pair(.x=%27, .y=%28)
+    %30:bool = const false
+    %31:float64 = call @Values.measure(%29, %30)
+    %32:float64 = convert %25 to float64
+    %33:float64 = div %32, %31
+    %34:float64 = const 0
+    %35:bool = lt %33, %34
+    print %35
+    %36:float64 = const 0
+    %37:float64 = const 0
+    %38:float64 = div %36, %37
+    %39:float64 = const 0
+    %40:@Values.Pair = struct.init @Values.Pair(.x=%38, .y=%39)
+    %41:bool = const false
+    %42:float64 = call @Values.measure(%40, %41)
+    %43:bool = ne %42, %42
+    print %43
+    %70:int = const 12
+    %76:int = copy %70
+    jump bb4
+bb4:
+    %72:int = const 16
+    %76:int = copy %72
+    %74:int = const 12
+    %75:int = add %76, %74
+    %48:int = const 28
+    %49:bool = eq %75, %48
+    print %49
+    %55:bool = const true
+    print %55
+    return
+}
+
+func @Values.measure(%0:@Values.Pair, %1:bool) -> float64 {
+entry:
+    %2:float64 = field %0, .x
+    %3:float64 = deep_copy %2
+    %10:float64 = copy %3
+    branch %1, bb1, bb2
+bb1:
+    %4:float64 = copy %3
+    %5:float64 = field %0, .y
+    %6:float64 = add %4, %5
+    %10:float64 = copy %6
+    jump bb2
+bb2:
+    %7:float64 = copy %10
+    %8:float64 = copy %2
+    %9:float64 = add %7, %8
+    return %9
+}
+
+func @Values.partial(%0:@Values.Pair, %1:bool) -> float64 {
+entry:
+    branch %1, bb1, bb3
+bb1:
+    %2:float64 = field %0, .x
+    %3:float64 = const 0
+    %4:bool = lt %2, %3
+    branch %4, bb2, bb3
+bb2:
+    %6:float64 = const -1
+    return %6
+bb3:
+    %7:float64 = field %0, .x
+    return %7
+}
+
+func @Values.mutate(%0:internal address, %1:internal address) -> float64 {
+entry:
+    %20:internal address = reference.field %0, x
+    %18:float64 = reference.load %20
+    %8:float64 = const 9
+    %17:internal address = reference.field %1, x
+    reference.store %17, %8
+    %21:internal address = reference.field %0, x
+    %19:float64 = reference.load %21
+    %16:float64 = add %18, %19
+    return %16
+}
+
+func @Values.repeated<int>(%0:int, %1:int, %2:bool) -> int {
+entry:
+    %3:int = mul %0, %1
+    %9:int = copy %3
+    branch %2, bb1, bb2
+bb1:
+    %5:int = add %3, %0
+    %9:int = copy %5
+    jump bb2
+bb2:
+    %8:int = add %9, %3
+    return %8
+}
+
+func @Values.repeated<float64>(%0:float64, %1:float64, %2:bool) -> float64 {
+entry:
+    %3:float64 = mul %0, %1
+    %9:float64 = copy %3
+    branch %2, bb1, bb2
+bb1:
+    %4:float64 = copy %3
+    %5:float64 = add %4, %0
+    %9:float64 = copy %5
+    jump bb2
+bb2:
+    %6:float64 = copy %9
+    %7:float64 = copy %3
+    %8:float64 = add %6, %7
+    return %8
+}

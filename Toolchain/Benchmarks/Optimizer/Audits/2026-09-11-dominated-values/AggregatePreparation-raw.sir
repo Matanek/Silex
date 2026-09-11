@@ -1,0 +1,1957 @@
+struct @Input {
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .separation:float
+    var .vax:float
+    var .vay:float
+    var .wa:float
+    var .vbx:float
+    var .vby:float
+    var .wb:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+}
+
+struct @Prepared {
+    var .separation:float
+    var .normal_mass:float
+    var .tangent_mass:float
+    var .relative_velocity:float
+    var .rolling_mass:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+    var .bias_rate:float
+    var .mass_scale:float
+    var .impulse_scale:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .total:float
+}
+
+func @prepare(%0:@Input, %1:bool) -> @Prepared {
+entry:
+    %2:float = const 0
+    %3:float = const 0
+    %4:float = const 0
+    %5:float = const 0
+    %6:float = const 0
+    %7:float = const 0
+    %8:float = const 0
+    %9:float = const 0
+    %10:float = const 0
+    %11:float = const 0
+    %12:float = const 0
+    %13:float = const 0
+    %14:float = const 0
+    %15:float = const 0
+    %16:float = const 0
+    %17:float = const 0
+    %18:float = const 0
+    %19:float = const 0
+    %20:float = const 0
+    %21:float = const 0
+    %22:float = const 0
+    %23:float = const 0
+    %24:float = const 0
+    %25:float = const 0
+    %26:float = const 0
+    %27:float = const 0
+    %28:@Prepared = struct.init @Prepared(.separation=%2, .normal_mass=%3, .tangent_mass=%4, .relative_velocity=%5, .rolling_mass=%6, .normal=%7, .tangent=%8, .rolling=%9, .friction=%10, .restitution=%11, .tangent_speed=%12, .rolling_resistance=%13, .bias_rate=%14, .mass_scale=%15, .impulse_scale=%16, .nx=%17, .ny=%18, .ax=%19, .ay=%20, .bx=%21, .by=%22, .ma=%23, .mb=%24, .ia=%25, .ib=%26, .total=%27)
+    store $0:structure, %28
+    %29:float = const 0
+    store $1:float, %29
+    branch %1, bb1, bb2
+bb1:
+    %30:float = const 1
+    store $1:float, %30
+    jump bb3
+bb2:
+    jump bb3
+bb3:
+    %31:@Prepared = load $0:structure
+    %32:float = field %31, .separation
+    %33:float = field %0, .separation
+    %34:float = field %0, .bx
+    %35:float = field %0, .ax
+    %36:float = sub %34, %35
+    %37:float = field %0, .nx
+    %38:float = mul %36, %37
+    %39:float = field %0, .by
+    %40:float = field %0, .ay
+    %41:float = sub %39, %40
+    %42:float = field %0, .ny
+    %43:float = mul %41, %42
+    %44:float = add %38, %43
+    %45:float = sub %33, %44
+    %46:@Prepared = load $0:structure
+    %47:float = field %46, .separation
+    %48:float = field %46, .normal_mass
+    %49:float = field %46, .tangent_mass
+    %50:float = field %46, .relative_velocity
+    %51:float = field %46, .rolling_mass
+    %52:float = field %46, .normal
+    %53:float = field %46, .tangent
+    %54:float = field %46, .rolling
+    %55:float = field %46, .friction
+    %56:float = field %46, .restitution
+    %57:float = field %46, .tangent_speed
+    %58:float = field %46, .rolling_resistance
+    %59:float = field %46, .bias_rate
+    %60:float = field %46, .mass_scale
+    %61:float = field %46, .impulse_scale
+    %62:float = field %46, .nx
+    %63:float = field %46, .ny
+    %64:float = field %46, .ax
+    %65:float = field %46, .ay
+    %66:float = field %46, .bx
+    %67:float = field %46, .by
+    %68:float = field %46, .ma
+    %69:float = field %46, .mb
+    %70:float = field %46, .ia
+    %71:float = field %46, .ib
+    %72:float = field %46, .total
+    %73:@Prepared = struct.init @Prepared(.separation=%45, .normal_mass=%48, .tangent_mass=%49, .relative_velocity=%50, .rolling_mass=%51, .normal=%52, .tangent=%53, .rolling=%54, .friction=%55, .restitution=%56, .tangent_speed=%57, .rolling_resistance=%58, .bias_rate=%59, .mass_scale=%60, .impulse_scale=%61, .nx=%62, .ny=%63, .ax=%64, .ay=%65, .bx=%66, .by=%67, .ma=%68, .mb=%69, .ia=%70, .ib=%71, .total=%72)
+    store $0:structure, %73
+    %74:float = field %0, .ax
+    %75:float = field %0, .ny
+    %76:float = mul %74, %75
+    %77:float = field %0, .ay
+    %78:float = field %0, .nx
+    %79:float = mul %77, %78
+    %80:float = sub %76, %79
+    %81:float = field %0, .bx
+    %82:float = field %0, .ny
+    %83:float = mul %81, %82
+    %84:float = field %0, .by
+    %85:float = field %0, .nx
+    %86:float = mul %84, %85
+    %87:float = sub %83, %86
+    %88:float = field %0, .ma
+    %89:float = field %0, .mb
+    %90:float = add %88, %89
+    %91:float = field %0, .ia
+    %92:float = mul %91, %80
+    %93:float = mul %92, %80
+    %94:float = add %90, %93
+    %95:float = field %0, .ib
+    %96:float = mul %95, %87
+    %97:float = mul %96, %87
+    %98:float = add %94, %97
+    %99:float = const 0
+    %100:bool = gt %98, %99
+    branch %100, bb4, bb5
+bb4:
+    %101:@Prepared = load $0:structure
+    %102:float = field %101, .normal_mass
+    %103:float = const 1
+    %104:float = div %103, %98
+    %105:@Prepared = load $0:structure
+    %106:float = field %105, .normal_mass
+    %107:float = field %105, .separation
+    %108:float = field %105, .tangent_mass
+    %109:float = field %105, .relative_velocity
+    %110:float = field %105, .rolling_mass
+    %111:float = field %105, .normal
+    %112:float = field %105, .tangent
+    %113:float = field %105, .rolling
+    %114:float = field %105, .friction
+    %115:float = field %105, .restitution
+    %116:float = field %105, .tangent_speed
+    %117:float = field %105, .rolling_resistance
+    %118:float = field %105, .bias_rate
+    %119:float = field %105, .mass_scale
+    %120:float = field %105, .impulse_scale
+    %121:float = field %105, .nx
+    %122:float = field %105, .ny
+    %123:float = field %105, .ax
+    %124:float = field %105, .ay
+    %125:float = field %105, .bx
+    %126:float = field %105, .by
+    %127:float = field %105, .ma
+    %128:float = field %105, .mb
+    %129:float = field %105, .ia
+    %130:float = field %105, .ib
+    %131:float = field %105, .total
+    %132:@Prepared = struct.init @Prepared(.separation=%107, .normal_mass=%104, .tangent_mass=%108, .relative_velocity=%109, .rolling_mass=%110, .normal=%111, .tangent=%112, .rolling=%113, .friction=%114, .restitution=%115, .tangent_speed=%116, .rolling_resistance=%117, .bias_rate=%118, .mass_scale=%119, .impulse_scale=%120, .nx=%121, .ny=%122, .ax=%123, .ay=%124, .bx=%125, .by=%126, .ma=%127, .mb=%128, .ia=%129, .ib=%130, .total=%131)
+    store $0:structure, %132
+    jump bb6
+bb5:
+    jump bb6
+bb6:
+    %133:float = field %0, .ny
+    %134:float = field %0, .nx
+    %135:float = neg %134
+    %136:float = field %0, .ax
+    %137:float = mul %136, %135
+    %138:float = field %0, .ay
+    %139:float = mul %138, %133
+    %140:float = sub %137, %139
+    %141:float = field %0, .bx
+    %142:float = mul %141, %135
+    %143:float = field %0, .by
+    %144:float = mul %143, %133
+    %145:float = sub %142, %144
+    %146:float = field %0, .ma
+    %147:float = field %0, .mb
+    %148:float = add %146, %147
+    %149:float = field %0, .ia
+    %150:float = mul %149, %140
+    %151:float = mul %150, %140
+    %152:float = add %148, %151
+    %153:float = field %0, .ib
+    %154:float = mul %153, %145
+    %155:float = mul %154, %145
+    %156:float = add %152, %155
+    %157:float = const 0
+    %158:bool = gt %156, %157
+    branch %158, bb7, bb8
+bb7:
+    %159:@Prepared = load $0:structure
+    %160:float = field %159, .tangent_mass
+    %161:float = const 1
+    %162:float = div %161, %156
+    %163:@Prepared = load $0:structure
+    %164:float = field %163, .tangent_mass
+    %165:float = field %163, .separation
+    %166:float = field %163, .normal_mass
+    %167:float = field %163, .relative_velocity
+    %168:float = field %163, .rolling_mass
+    %169:float = field %163, .normal
+    %170:float = field %163, .tangent
+    %171:float = field %163, .rolling
+    %172:float = field %163, .friction
+    %173:float = field %163, .restitution
+    %174:float = field %163, .tangent_speed
+    %175:float = field %163, .rolling_resistance
+    %176:float = field %163, .bias_rate
+    %177:float = field %163, .mass_scale
+    %178:float = field %163, .impulse_scale
+    %179:float = field %163, .nx
+    %180:float = field %163, .ny
+    %181:float = field %163, .ax
+    %182:float = field %163, .ay
+    %183:float = field %163, .bx
+    %184:float = field %163, .by
+    %185:float = field %163, .ma
+    %186:float = field %163, .mb
+    %187:float = field %163, .ia
+    %188:float = field %163, .ib
+    %189:float = field %163, .total
+    %190:@Prepared = struct.init @Prepared(.separation=%165, .normal_mass=%166, .tangent_mass=%162, .relative_velocity=%167, .rolling_mass=%168, .normal=%169, .tangent=%170, .rolling=%171, .friction=%172, .restitution=%173, .tangent_speed=%174, .rolling_resistance=%175, .bias_rate=%176, .mass_scale=%177, .impulse_scale=%178, .nx=%179, .ny=%180, .ax=%181, .ay=%182, .bx=%183, .by=%184, .ma=%185, .mb=%186, .ia=%187, .ib=%188, .total=%189)
+    store $0:structure, %190
+    jump bb9
+bb8:
+    jump bb9
+bb9:
+    %191:float = field %0, .ia
+    %192:float = field %0, .ib
+    %193:float = add %191, %192
+    %194:float = const 0
+    %195:bool = gt %193, %194
+    branch %195, bb10, bb11
+bb10:
+    %196:@Prepared = load $0:structure
+    %197:float = field %196, .rolling_mass
+    %198:float = const 1
+    %199:float = div %198, %193
+    %200:@Prepared = load $0:structure
+    %201:float = field %200, .rolling_mass
+    %202:float = field %200, .separation
+    %203:float = field %200, .normal_mass
+    %204:float = field %200, .tangent_mass
+    %205:float = field %200, .relative_velocity
+    %206:float = field %200, .normal
+    %207:float = field %200, .tangent
+    %208:float = field %200, .rolling
+    %209:float = field %200, .friction
+    %210:float = field %200, .restitution
+    %211:float = field %200, .tangent_speed
+    %212:float = field %200, .rolling_resistance
+    %213:float = field %200, .bias_rate
+    %214:float = field %200, .mass_scale
+    %215:float = field %200, .impulse_scale
+    %216:float = field %200, .nx
+    %217:float = field %200, .ny
+    %218:float = field %200, .ax
+    %219:float = field %200, .ay
+    %220:float = field %200, .bx
+    %221:float = field %200, .by
+    %222:float = field %200, .ma
+    %223:float = field %200, .mb
+    %224:float = field %200, .ia
+    %225:float = field %200, .ib
+    %226:float = field %200, .total
+    %227:@Prepared = struct.init @Prepared(.separation=%202, .normal_mass=%203, .tangent_mass=%204, .relative_velocity=%205, .rolling_mass=%199, .normal=%206, .tangent=%207, .rolling=%208, .friction=%209, .restitution=%210, .tangent_speed=%211, .rolling_resistance=%212, .bias_rate=%213, .mass_scale=%214, .impulse_scale=%215, .nx=%216, .ny=%217, .ax=%218, .ay=%219, .bx=%220, .by=%221, .ma=%222, .mb=%223, .ia=%224, .ib=%225, .total=%226)
+    store $0:structure, %227
+    jump bb12
+bb11:
+    jump bb12
+bb12:
+    %228:float = field %0, .vax
+    %229:float = deep_copy %228
+    store $2:float, %229
+    %230:float = field %0, .vay
+    %231:float = deep_copy %230
+    store $3:float, %231
+    %232:float = field %0, .wa
+    %233:float = deep_copy %232
+    store $4:float, %233
+    %234:float = field %0, .vbx
+    %235:float = deep_copy %234
+    store $5:float, %235
+    %236:float = field %0, .vby
+    %237:float = deep_copy %236
+    store $6:float, %237
+    %238:float = field %0, .wb
+    %239:float = deep_copy %238
+    store $7:float, %239
+    %240:float = field %0, .ma
+    %241:float = const 0
+    %242:bool = eq %240, %241
+    branch %242, bb13, bb14
+bb13:
+    %243:float = const 0
+    store $2:float, %243
+    %244:float = const 0
+    store $3:float, %244
+    %245:float = const 0
+    store $4:float, %245
+    jump bb15
+bb14:
+    jump bb15
+bb15:
+    %246:float = field %0, .mb
+    %247:float = const 0
+    %248:bool = eq %246, %247
+    branch %248, bb16, bb17
+bb16:
+    %249:float = const 0
+    store $5:float, %249
+    %250:float = const 0
+    store $6:float, %250
+    %251:float = const 0
+    store $7:float, %251
+    jump bb18
+bb17:
+    jump bb18
+bb18:
+    %252:@Prepared = load $0:structure
+    %253:float = field %252, .relative_velocity
+    %254:float = field %0, .nx
+    %255:float = load $5:float
+    %256:float = load $7:float
+    %257:float = field %0, .by
+    %258:float = mul %256, %257
+    %259:float = sub %255, %258
+    %260:float = load $2:float
+    %261:float = load $4:float
+    %262:float = field %0, .ay
+    %263:float = mul %261, %262
+    %264:float = sub %260, %263
+    %265:float = sub %259, %264
+    %266:float = mul %254, %265
+    %267:float = field %0, .ny
+    %268:float = load $6:float
+    %269:float = load $7:float
+    %270:float = field %0, .bx
+    %271:float = mul %269, %270
+    %272:float = add %268, %271
+    %273:float = load $3:float
+    %274:float = load $4:float
+    %275:float = field %0, .ax
+    %276:float = mul %274, %275
+    %277:float = add %273, %276
+    %278:float = sub %272, %277
+    %279:float = mul %267, %278
+    %280:float = add %266, %279
+    %281:@Prepared = load $0:structure
+    %282:float = field %281, .relative_velocity
+    %283:float = field %281, .separation
+    %284:float = field %281, .normal_mass
+    %285:float = field %281, .tangent_mass
+    %286:float = field %281, .rolling_mass
+    %287:float = field %281, .normal
+    %288:float = field %281, .tangent
+    %289:float = field %281, .rolling
+    %290:float = field %281, .friction
+    %291:float = field %281, .restitution
+    %292:float = field %281, .tangent_speed
+    %293:float = field %281, .rolling_resistance
+    %294:float = field %281, .bias_rate
+    %295:float = field %281, .mass_scale
+    %296:float = field %281, .impulse_scale
+    %297:float = field %281, .nx
+    %298:float = field %281, .ny
+    %299:float = field %281, .ax
+    %300:float = field %281, .ay
+    %301:float = field %281, .bx
+    %302:float = field %281, .by
+    %303:float = field %281, .ma
+    %304:float = field %281, .mb
+    %305:float = field %281, .ia
+    %306:float = field %281, .ib
+    %307:float = field %281, .total
+    %308:@Prepared = struct.init @Prepared(.separation=%283, .normal_mass=%284, .tangent_mass=%285, .relative_velocity=%280, .rolling_mass=%286, .normal=%287, .tangent=%288, .rolling=%289, .friction=%290, .restitution=%291, .tangent_speed=%292, .rolling_resistance=%293, .bias_rate=%294, .mass_scale=%295, .impulse_scale=%296, .nx=%297, .ny=%298, .ax=%299, .ay=%300, .bx=%301, .by=%302, .ma=%303, .mb=%304, .ia=%305, .ib=%306, .total=%307)
+    store $0:structure, %308
+    %309:@Prepared = load $0:structure
+    %310:float = field %309, .normal
+    %311:float = load $1:float
+    %312:float = field %0, .normal
+    %313:float = mul %311, %312
+    %314:@Prepared = load $0:structure
+    %315:float = field %314, .normal
+    %316:float = field %314, .separation
+    %317:float = field %314, .normal_mass
+    %318:float = field %314, .tangent_mass
+    %319:float = field %314, .relative_velocity
+    %320:float = field %314, .rolling_mass
+    %321:float = field %314, .tangent
+    %322:float = field %314, .rolling
+    %323:float = field %314, .friction
+    %324:float = field %314, .restitution
+    %325:float = field %314, .tangent_speed
+    %326:float = field %314, .rolling_resistance
+    %327:float = field %314, .bias_rate
+    %328:float = field %314, .mass_scale
+    %329:float = field %314, .impulse_scale
+    %330:float = field %314, .nx
+    %331:float = field %314, .ny
+    %332:float = field %314, .ax
+    %333:float = field %314, .ay
+    %334:float = field %314, .bx
+    %335:float = field %314, .by
+    %336:float = field %314, .ma
+    %337:float = field %314, .mb
+    %338:float = field %314, .ia
+    %339:float = field %314, .ib
+    %340:float = field %314, .total
+    %341:@Prepared = struct.init @Prepared(.separation=%316, .normal_mass=%317, .tangent_mass=%318, .relative_velocity=%319, .rolling_mass=%320, .normal=%313, .tangent=%321, .rolling=%322, .friction=%323, .restitution=%324, .tangent_speed=%325, .rolling_resistance=%326, .bias_rate=%327, .mass_scale=%328, .impulse_scale=%329, .nx=%330, .ny=%331, .ax=%332, .ay=%333, .bx=%334, .by=%335, .ma=%336, .mb=%337, .ia=%338, .ib=%339, .total=%340)
+    store $0:structure, %341
+    %342:@Prepared = load $0:structure
+    %343:float = field %342, .tangent
+    %344:float = load $1:float
+    %345:float = field %0, .tangent
+    %346:float = mul %344, %345
+    %347:@Prepared = load $0:structure
+    %348:float = field %347, .tangent
+    %349:float = field %347, .separation
+    %350:float = field %347, .normal_mass
+    %351:float = field %347, .tangent_mass
+    %352:float = field %347, .relative_velocity
+    %353:float = field %347, .rolling_mass
+    %354:float = field %347, .normal
+    %355:float = field %347, .rolling
+    %356:float = field %347, .friction
+    %357:float = field %347, .restitution
+    %358:float = field %347, .tangent_speed
+    %359:float = field %347, .rolling_resistance
+    %360:float = field %347, .bias_rate
+    %361:float = field %347, .mass_scale
+    %362:float = field %347, .impulse_scale
+    %363:float = field %347, .nx
+    %364:float = field %347, .ny
+    %365:float = field %347, .ax
+    %366:float = field %347, .ay
+    %367:float = field %347, .bx
+    %368:float = field %347, .by
+    %369:float = field %347, .ma
+    %370:float = field %347, .mb
+    %371:float = field %347, .ia
+    %372:float = field %347, .ib
+    %373:float = field %347, .total
+    %374:@Prepared = struct.init @Prepared(.separation=%349, .normal_mass=%350, .tangent_mass=%351, .relative_velocity=%352, .rolling_mass=%353, .normal=%354, .tangent=%346, .rolling=%355, .friction=%356, .restitution=%357, .tangent_speed=%358, .rolling_resistance=%359, .bias_rate=%360, .mass_scale=%361, .impulse_scale=%362, .nx=%363, .ny=%364, .ax=%365, .ay=%366, .bx=%367, .by=%368, .ma=%369, .mb=%370, .ia=%371, .ib=%372, .total=%373)
+    store $0:structure, %374
+    %375:@Prepared = load $0:structure
+    %376:float = field %375, .rolling
+    %377:float = load $1:float
+    %378:float = field %0, .rolling
+    %379:float = mul %377, %378
+    %380:@Prepared = load $0:structure
+    %381:float = field %380, .rolling
+    %382:float = field %380, .separation
+    %383:float = field %380, .normal_mass
+    %384:float = field %380, .tangent_mass
+    %385:float = field %380, .relative_velocity
+    %386:float = field %380, .rolling_mass
+    %387:float = field %380, .normal
+    %388:float = field %380, .tangent
+    %389:float = field %380, .friction
+    %390:float = field %380, .restitution
+    %391:float = field %380, .tangent_speed
+    %392:float = field %380, .rolling_resistance
+    %393:float = field %380, .bias_rate
+    %394:float = field %380, .mass_scale
+    %395:float = field %380, .impulse_scale
+    %396:float = field %380, .nx
+    %397:float = field %380, .ny
+    %398:float = field %380, .ax
+    %399:float = field %380, .ay
+    %400:float = field %380, .bx
+    %401:float = field %380, .by
+    %402:float = field %380, .ma
+    %403:float = field %380, .mb
+    %404:float = field %380, .ia
+    %405:float = field %380, .ib
+    %406:float = field %380, .total
+    %407:@Prepared = struct.init @Prepared(.separation=%382, .normal_mass=%383, .tangent_mass=%384, .relative_velocity=%385, .rolling_mass=%386, .normal=%387, .tangent=%388, .rolling=%379, .friction=%389, .restitution=%390, .tangent_speed=%391, .rolling_resistance=%392, .bias_rate=%393, .mass_scale=%394, .impulse_scale=%395, .nx=%396, .ny=%397, .ax=%398, .ay=%399, .bx=%400, .by=%401, .ma=%402, .mb=%403, .ia=%404, .ib=%405, .total=%406)
+    store $0:structure, %407
+    %408:@Prepared = load $0:structure
+    %409:float = field %408, .bias_rate
+    %410:float = const 12
+    %411:@Prepared = load $0:structure
+    %412:float = field %411, .bias_rate
+    %413:float = field %411, .separation
+    %414:float = field %411, .normal_mass
+    %415:float = field %411, .tangent_mass
+    %416:float = field %411, .relative_velocity
+    %417:float = field %411, .rolling_mass
+    %418:float = field %411, .normal
+    %419:float = field %411, .tangent
+    %420:float = field %411, .rolling
+    %421:float = field %411, .friction
+    %422:float = field %411, .restitution
+    %423:float = field %411, .tangent_speed
+    %424:float = field %411, .rolling_resistance
+    %425:float = field %411, .mass_scale
+    %426:float = field %411, .impulse_scale
+    %427:float = field %411, .nx
+    %428:float = field %411, .ny
+    %429:float = field %411, .ax
+    %430:float = field %411, .ay
+    %431:float = field %411, .bx
+    %432:float = field %411, .by
+    %433:float = field %411, .ma
+    %434:float = field %411, .mb
+    %435:float = field %411, .ia
+    %436:float = field %411, .ib
+    %437:float = field %411, .total
+    %438:@Prepared = struct.init @Prepared(.separation=%413, .normal_mass=%414, .tangent_mass=%415, .relative_velocity=%416, .rolling_mass=%417, .normal=%418, .tangent=%419, .rolling=%420, .friction=%421, .restitution=%422, .tangent_speed=%423, .rolling_resistance=%424, .bias_rate=%410, .mass_scale=%425, .impulse_scale=%426, .nx=%427, .ny=%428, .ax=%429, .ay=%430, .bx=%431, .by=%432, .ma=%433, .mb=%434, .ia=%435, .ib=%436, .total=%437)
+    store $0:structure, %438
+    %439:@Prepared = load $0:structure
+    %440:float = field %439, .mass_scale
+    %441:float = const 0.75
+    %442:@Prepared = load $0:structure
+    %443:float = field %442, .mass_scale
+    %444:float = field %442, .separation
+    %445:float = field %442, .normal_mass
+    %446:float = field %442, .tangent_mass
+    %447:float = field %442, .relative_velocity
+    %448:float = field %442, .rolling_mass
+    %449:float = field %442, .normal
+    %450:float = field %442, .tangent
+    %451:float = field %442, .rolling
+    %452:float = field %442, .friction
+    %453:float = field %442, .restitution
+    %454:float = field %442, .tangent_speed
+    %455:float = field %442, .rolling_resistance
+    %456:float = field %442, .bias_rate
+    %457:float = field %442, .impulse_scale
+    %458:float = field %442, .nx
+    %459:float = field %442, .ny
+    %460:float = field %442, .ax
+    %461:float = field %442, .ay
+    %462:float = field %442, .bx
+    %463:float = field %442, .by
+    %464:float = field %442, .ma
+    %465:float = field %442, .mb
+    %466:float = field %442, .ia
+    %467:float = field %442, .ib
+    %468:float = field %442, .total
+    %469:@Prepared = struct.init @Prepared(.separation=%444, .normal_mass=%445, .tangent_mass=%446, .relative_velocity=%447, .rolling_mass=%448, .normal=%449, .tangent=%450, .rolling=%451, .friction=%452, .restitution=%453, .tangent_speed=%454, .rolling_resistance=%455, .bias_rate=%456, .mass_scale=%441, .impulse_scale=%457, .nx=%458, .ny=%459, .ax=%460, .ay=%461, .bx=%462, .by=%463, .ma=%464, .mb=%465, .ia=%466, .ib=%467, .total=%468)
+    store $0:structure, %469
+    %470:@Prepared = load $0:structure
+    %471:float = field %470, .impulse_scale
+    %472:float = const 0.25
+    %473:@Prepared = load $0:structure
+    %474:float = field %473, .impulse_scale
+    %475:float = field %473, .separation
+    %476:float = field %473, .normal_mass
+    %477:float = field %473, .tangent_mass
+    %478:float = field %473, .relative_velocity
+    %479:float = field %473, .rolling_mass
+    %480:float = field %473, .normal
+    %481:float = field %473, .tangent
+    %482:float = field %473, .rolling
+    %483:float = field %473, .friction
+    %484:float = field %473, .restitution
+    %485:float = field %473, .tangent_speed
+    %486:float = field %473, .rolling_resistance
+    %487:float = field %473, .bias_rate
+    %488:float = field %473, .mass_scale
+    %489:float = field %473, .nx
+    %490:float = field %473, .ny
+    %491:float = field %473, .ax
+    %492:float = field %473, .ay
+    %493:float = field %473, .bx
+    %494:float = field %473, .by
+    %495:float = field %473, .ma
+    %496:float = field %473, .mb
+    %497:float = field %473, .ia
+    %498:float = field %473, .ib
+    %499:float = field %473, .total
+    %500:@Prepared = struct.init @Prepared(.separation=%475, .normal_mass=%476, .tangent_mass=%477, .relative_velocity=%478, .rolling_mass=%479, .normal=%480, .tangent=%481, .rolling=%482, .friction=%483, .restitution=%484, .tangent_speed=%485, .rolling_resistance=%486, .bias_rate=%487, .mass_scale=%488, .impulse_scale=%472, .nx=%489, .ny=%490, .ax=%491, .ay=%492, .bx=%493, .by=%494, .ma=%495, .mb=%496, .ia=%497, .ib=%498, .total=%499)
+    store $0:structure, %500
+    %501:float = field %0, .ma
+    %502:float = const 0
+    %503:bool = eq %501, %502
+    branch %503, bb20, bb19
+bb19:
+    %505:float = field %0, .mb
+    %506:float = const 0
+    %507:bool = eq %505, %506
+    %504:bool = copy %507
+    jump bb21
+bb20:
+    %504:bool = const true
+    jump bb21
+bb21:
+    branch %504, bb22, bb23
+bb22:
+    %508:@Prepared = load $0:structure
+    %509:float = field %508, .bias_rate
+    %510:float = const 24
+    %511:@Prepared = load $0:structure
+    %512:float = field %511, .bias_rate
+    %513:float = field %511, .separation
+    %514:float = field %511, .normal_mass
+    %515:float = field %511, .tangent_mass
+    %516:float = field %511, .relative_velocity
+    %517:float = field %511, .rolling_mass
+    %518:float = field %511, .normal
+    %519:float = field %511, .tangent
+    %520:float = field %511, .rolling
+    %521:float = field %511, .friction
+    %522:float = field %511, .restitution
+    %523:float = field %511, .tangent_speed
+    %524:float = field %511, .rolling_resistance
+    %525:float = field %511, .mass_scale
+    %526:float = field %511, .impulse_scale
+    %527:float = field %511, .nx
+    %528:float = field %511, .ny
+    %529:float = field %511, .ax
+    %530:float = field %511, .ay
+    %531:float = field %511, .bx
+    %532:float = field %511, .by
+    %533:float = field %511, .ma
+    %534:float = field %511, .mb
+    %535:float = field %511, .ia
+    %536:float = field %511, .ib
+    %537:float = field %511, .total
+    %538:@Prepared = struct.init @Prepared(.separation=%513, .normal_mass=%514, .tangent_mass=%515, .relative_velocity=%516, .rolling_mass=%517, .normal=%518, .tangent=%519, .rolling=%520, .friction=%521, .restitution=%522, .tangent_speed=%523, .rolling_resistance=%524, .bias_rate=%510, .mass_scale=%525, .impulse_scale=%526, .nx=%527, .ny=%528, .ax=%529, .ay=%530, .bx=%531, .by=%532, .ma=%533, .mb=%534, .ia=%535, .ib=%536, .total=%537)
+    store $0:structure, %538
+    %539:@Prepared = load $0:structure
+    %540:float = field %539, .mass_scale
+    %541:float = const 0.875
+    %542:@Prepared = load $0:structure
+    %543:float = field %542, .mass_scale
+    %544:float = field %542, .separation
+    %545:float = field %542, .normal_mass
+    %546:float = field %542, .tangent_mass
+    %547:float = field %542, .relative_velocity
+    %548:float = field %542, .rolling_mass
+    %549:float = field %542, .normal
+    %550:float = field %542, .tangent
+    %551:float = field %542, .rolling
+    %552:float = field %542, .friction
+    %553:float = field %542, .restitution
+    %554:float = field %542, .tangent_speed
+    %555:float = field %542, .rolling_resistance
+    %556:float = field %542, .bias_rate
+    %557:float = field %542, .impulse_scale
+    %558:float = field %542, .nx
+    %559:float = field %542, .ny
+    %560:float = field %542, .ax
+    %561:float = field %542, .ay
+    %562:float = field %542, .bx
+    %563:float = field %542, .by
+    %564:float = field %542, .ma
+    %565:float = field %542, .mb
+    %566:float = field %542, .ia
+    %567:float = field %542, .ib
+    %568:float = field %542, .total
+    %569:@Prepared = struct.init @Prepared(.separation=%544, .normal_mass=%545, .tangent_mass=%546, .relative_velocity=%547, .rolling_mass=%548, .normal=%549, .tangent=%550, .rolling=%551, .friction=%552, .restitution=%553, .tangent_speed=%554, .rolling_resistance=%555, .bias_rate=%556, .mass_scale=%541, .impulse_scale=%557, .nx=%558, .ny=%559, .ax=%560, .ay=%561, .bx=%562, .by=%563, .ma=%564, .mb=%565, .ia=%566, .ib=%567, .total=%568)
+    store $0:structure, %569
+    %570:@Prepared = load $0:structure
+    %571:float = field %570, .impulse_scale
+    %572:float = const 0.125
+    %573:@Prepared = load $0:structure
+    %574:float = field %573, .impulse_scale
+    %575:float = field %573, .separation
+    %576:float = field %573, .normal_mass
+    %577:float = field %573, .tangent_mass
+    %578:float = field %573, .relative_velocity
+    %579:float = field %573, .rolling_mass
+    %580:float = field %573, .normal
+    %581:float = field %573, .tangent
+    %582:float = field %573, .rolling
+    %583:float = field %573, .friction
+    %584:float = field %573, .restitution
+    %585:float = field %573, .tangent_speed
+    %586:float = field %573, .rolling_resistance
+    %587:float = field %573, .bias_rate
+    %588:float = field %573, .mass_scale
+    %589:float = field %573, .nx
+    %590:float = field %573, .ny
+    %591:float = field %573, .ax
+    %592:float = field %573, .ay
+    %593:float = field %573, .bx
+    %594:float = field %573, .by
+    %595:float = field %573, .ma
+    %596:float = field %573, .mb
+    %597:float = field %573, .ia
+    %598:float = field %573, .ib
+    %599:float = field %573, .total
+    %600:@Prepared = struct.init @Prepared(.separation=%575, .normal_mass=%576, .tangent_mass=%577, .relative_velocity=%578, .rolling_mass=%579, .normal=%580, .tangent=%581, .rolling=%582, .friction=%583, .restitution=%584, .tangent_speed=%585, .rolling_resistance=%586, .bias_rate=%587, .mass_scale=%588, .impulse_scale=%572, .nx=%589, .ny=%590, .ax=%591, .ay=%592, .bx=%593, .by=%594, .ma=%595, .mb=%596, .ia=%597, .ib=%598, .total=%599)
+    store $0:structure, %600
+    jump bb24
+bb23:
+    jump bb24
+bb24:
+    %601:@Prepared = load $0:structure
+    %602:float = field %601, .friction
+    %603:float = field %0, .friction
+    %604:@Prepared = load $0:structure
+    %605:float = field %604, .friction
+    %606:float = field %604, .separation
+    %607:float = field %604, .normal_mass
+    %608:float = field %604, .tangent_mass
+    %609:float = field %604, .relative_velocity
+    %610:float = field %604, .rolling_mass
+    %611:float = field %604, .normal
+    %612:float = field %604, .tangent
+    %613:float = field %604, .rolling
+    %614:float = field %604, .restitution
+    %615:float = field %604, .tangent_speed
+    %616:float = field %604, .rolling_resistance
+    %617:float = field %604, .bias_rate
+    %618:float = field %604, .mass_scale
+    %619:float = field %604, .impulse_scale
+    %620:float = field %604, .nx
+    %621:float = field %604, .ny
+    %622:float = field %604, .ax
+    %623:float = field %604, .ay
+    %624:float = field %604, .bx
+    %625:float = field %604, .by
+    %626:float = field %604, .ma
+    %627:float = field %604, .mb
+    %628:float = field %604, .ia
+    %629:float = field %604, .ib
+    %630:float = field %604, .total
+    %631:@Prepared = struct.init @Prepared(.separation=%606, .normal_mass=%607, .tangent_mass=%608, .relative_velocity=%609, .rolling_mass=%610, .normal=%611, .tangent=%612, .rolling=%613, .friction=%603, .restitution=%614, .tangent_speed=%615, .rolling_resistance=%616, .bias_rate=%617, .mass_scale=%618, .impulse_scale=%619, .nx=%620, .ny=%621, .ax=%622, .ay=%623, .bx=%624, .by=%625, .ma=%626, .mb=%627, .ia=%628, .ib=%629, .total=%630)
+    store $0:structure, %631
+    %632:@Prepared = load $0:structure
+    %633:float = field %632, .restitution
+    %634:float = field %0, .restitution
+    %635:@Prepared = load $0:structure
+    %636:float = field %635, .restitution
+    %637:float = field %635, .separation
+    %638:float = field %635, .normal_mass
+    %639:float = field %635, .tangent_mass
+    %640:float = field %635, .relative_velocity
+    %641:float = field %635, .rolling_mass
+    %642:float = field %635, .normal
+    %643:float = field %635, .tangent
+    %644:float = field %635, .rolling
+    %645:float = field %635, .friction
+    %646:float = field %635, .tangent_speed
+    %647:float = field %635, .rolling_resistance
+    %648:float = field %635, .bias_rate
+    %649:float = field %635, .mass_scale
+    %650:float = field %635, .impulse_scale
+    %651:float = field %635, .nx
+    %652:float = field %635, .ny
+    %653:float = field %635, .ax
+    %654:float = field %635, .ay
+    %655:float = field %635, .bx
+    %656:float = field %635, .by
+    %657:float = field %635, .ma
+    %658:float = field %635, .mb
+    %659:float = field %635, .ia
+    %660:float = field %635, .ib
+    %661:float = field %635, .total
+    %662:@Prepared = struct.init @Prepared(.separation=%637, .normal_mass=%638, .tangent_mass=%639, .relative_velocity=%640, .rolling_mass=%641, .normal=%642, .tangent=%643, .rolling=%644, .friction=%645, .restitution=%634, .tangent_speed=%646, .rolling_resistance=%647, .bias_rate=%648, .mass_scale=%649, .impulse_scale=%650, .nx=%651, .ny=%652, .ax=%653, .ay=%654, .bx=%655, .by=%656, .ma=%657, .mb=%658, .ia=%659, .ib=%660, .total=%661)
+    store $0:structure, %662
+    %663:@Prepared = load $0:structure
+    %664:float = field %663, .tangent_speed
+    %665:float = field %0, .tangent_speed
+    %666:@Prepared = load $0:structure
+    %667:float = field %666, .tangent_speed
+    %668:float = field %666, .separation
+    %669:float = field %666, .normal_mass
+    %670:float = field %666, .tangent_mass
+    %671:float = field %666, .relative_velocity
+    %672:float = field %666, .rolling_mass
+    %673:float = field %666, .normal
+    %674:float = field %666, .tangent
+    %675:float = field %666, .rolling
+    %676:float = field %666, .friction
+    %677:float = field %666, .restitution
+    %678:float = field %666, .rolling_resistance
+    %679:float = field %666, .bias_rate
+    %680:float = field %666, .mass_scale
+    %681:float = field %666, .impulse_scale
+    %682:float = field %666, .nx
+    %683:float = field %666, .ny
+    %684:float = field %666, .ax
+    %685:float = field %666, .ay
+    %686:float = field %666, .bx
+    %687:float = field %666, .by
+    %688:float = field %666, .ma
+    %689:float = field %666, .mb
+    %690:float = field %666, .ia
+    %691:float = field %666, .ib
+    %692:float = field %666, .total
+    %693:@Prepared = struct.init @Prepared(.separation=%668, .normal_mass=%669, .tangent_mass=%670, .relative_velocity=%671, .rolling_mass=%672, .normal=%673, .tangent=%674, .rolling=%675, .friction=%676, .restitution=%677, .tangent_speed=%665, .rolling_resistance=%678, .bias_rate=%679, .mass_scale=%680, .impulse_scale=%681, .nx=%682, .ny=%683, .ax=%684, .ay=%685, .bx=%686, .by=%687, .ma=%688, .mb=%689, .ia=%690, .ib=%691, .total=%692)
+    store $0:structure, %693
+    %694:@Prepared = load $0:structure
+    %695:float = field %694, .rolling_resistance
+    %696:float = field %0, .rolling_resistance
+    %697:@Prepared = load $0:structure
+    %698:float = field %697, .rolling_resistance
+    %699:float = field %697, .separation
+    %700:float = field %697, .normal_mass
+    %701:float = field %697, .tangent_mass
+    %702:float = field %697, .relative_velocity
+    %703:float = field %697, .rolling_mass
+    %704:float = field %697, .normal
+    %705:float = field %697, .tangent
+    %706:float = field %697, .rolling
+    %707:float = field %697, .friction
+    %708:float = field %697, .restitution
+    %709:float = field %697, .tangent_speed
+    %710:float = field %697, .bias_rate
+    %711:float = field %697, .mass_scale
+    %712:float = field %697, .impulse_scale
+    %713:float = field %697, .nx
+    %714:float = field %697, .ny
+    %715:float = field %697, .ax
+    %716:float = field %697, .ay
+    %717:float = field %697, .bx
+    %718:float = field %697, .by
+    %719:float = field %697, .ma
+    %720:float = field %697, .mb
+    %721:float = field %697, .ia
+    %722:float = field %697, .ib
+    %723:float = field %697, .total
+    %724:@Prepared = struct.init @Prepared(.separation=%699, .normal_mass=%700, .tangent_mass=%701, .relative_velocity=%702, .rolling_mass=%703, .normal=%704, .tangent=%705, .rolling=%706, .friction=%707, .restitution=%708, .tangent_speed=%709, .rolling_resistance=%696, .bias_rate=%710, .mass_scale=%711, .impulse_scale=%712, .nx=%713, .ny=%714, .ax=%715, .ay=%716, .bx=%717, .by=%718, .ma=%719, .mb=%720, .ia=%721, .ib=%722, .total=%723)
+    store $0:structure, %724
+    %725:@Prepared = load $0:structure
+    %726:float = field %725, .nx
+    %727:float = field %0, .nx
+    %728:@Prepared = load $0:structure
+    %729:float = field %728, .nx
+    %730:float = field %728, .separation
+    %731:float = field %728, .normal_mass
+    %732:float = field %728, .tangent_mass
+    %733:float = field %728, .relative_velocity
+    %734:float = field %728, .rolling_mass
+    %735:float = field %728, .normal
+    %736:float = field %728, .tangent
+    %737:float = field %728, .rolling
+    %738:float = field %728, .friction
+    %739:float = field %728, .restitution
+    %740:float = field %728, .tangent_speed
+    %741:float = field %728, .rolling_resistance
+    %742:float = field %728, .bias_rate
+    %743:float = field %728, .mass_scale
+    %744:float = field %728, .impulse_scale
+    %745:float = field %728, .ny
+    %746:float = field %728, .ax
+    %747:float = field %728, .ay
+    %748:float = field %728, .bx
+    %749:float = field %728, .by
+    %750:float = field %728, .ma
+    %751:float = field %728, .mb
+    %752:float = field %728, .ia
+    %753:float = field %728, .ib
+    %754:float = field %728, .total
+    %755:@Prepared = struct.init @Prepared(.separation=%730, .normal_mass=%731, .tangent_mass=%732, .relative_velocity=%733, .rolling_mass=%734, .normal=%735, .tangent=%736, .rolling=%737, .friction=%738, .restitution=%739, .tangent_speed=%740, .rolling_resistance=%741, .bias_rate=%742, .mass_scale=%743, .impulse_scale=%744, .nx=%727, .ny=%745, .ax=%746, .ay=%747, .bx=%748, .by=%749, .ma=%750, .mb=%751, .ia=%752, .ib=%753, .total=%754)
+    store $0:structure, %755
+    %756:@Prepared = load $0:structure
+    %757:float = field %756, .ny
+    %758:float = field %0, .ny
+    %759:@Prepared = load $0:structure
+    %760:float = field %759, .ny
+    %761:float = field %759, .separation
+    %762:float = field %759, .normal_mass
+    %763:float = field %759, .tangent_mass
+    %764:float = field %759, .relative_velocity
+    %765:float = field %759, .rolling_mass
+    %766:float = field %759, .normal
+    %767:float = field %759, .tangent
+    %768:float = field %759, .rolling
+    %769:float = field %759, .friction
+    %770:float = field %759, .restitution
+    %771:float = field %759, .tangent_speed
+    %772:float = field %759, .rolling_resistance
+    %773:float = field %759, .bias_rate
+    %774:float = field %759, .mass_scale
+    %775:float = field %759, .impulse_scale
+    %776:float = field %759, .nx
+    %777:float = field %759, .ax
+    %778:float = field %759, .ay
+    %779:float = field %759, .bx
+    %780:float = field %759, .by
+    %781:float = field %759, .ma
+    %782:float = field %759, .mb
+    %783:float = field %759, .ia
+    %784:float = field %759, .ib
+    %785:float = field %759, .total
+    %786:@Prepared = struct.init @Prepared(.separation=%761, .normal_mass=%762, .tangent_mass=%763, .relative_velocity=%764, .rolling_mass=%765, .normal=%766, .tangent=%767, .rolling=%768, .friction=%769, .restitution=%770, .tangent_speed=%771, .rolling_resistance=%772, .bias_rate=%773, .mass_scale=%774, .impulse_scale=%775, .nx=%776, .ny=%758, .ax=%777, .ay=%778, .bx=%779, .by=%780, .ma=%781, .mb=%782, .ia=%783, .ib=%784, .total=%785)
+    store $0:structure, %786
+    %787:@Prepared = load $0:structure
+    %788:float = field %787, .ax
+    %789:float = field %0, .ax
+    %790:@Prepared = load $0:structure
+    %791:float = field %790, .ax
+    %792:float = field %790, .separation
+    %793:float = field %790, .normal_mass
+    %794:float = field %790, .tangent_mass
+    %795:float = field %790, .relative_velocity
+    %796:float = field %790, .rolling_mass
+    %797:float = field %790, .normal
+    %798:float = field %790, .tangent
+    %799:float = field %790, .rolling
+    %800:float = field %790, .friction
+    %801:float = field %790, .restitution
+    %802:float = field %790, .tangent_speed
+    %803:float = field %790, .rolling_resistance
+    %804:float = field %790, .bias_rate
+    %805:float = field %790, .mass_scale
+    %806:float = field %790, .impulse_scale
+    %807:float = field %790, .nx
+    %808:float = field %790, .ny
+    %809:float = field %790, .ay
+    %810:float = field %790, .bx
+    %811:float = field %790, .by
+    %812:float = field %790, .ma
+    %813:float = field %790, .mb
+    %814:float = field %790, .ia
+    %815:float = field %790, .ib
+    %816:float = field %790, .total
+    %817:@Prepared = struct.init @Prepared(.separation=%792, .normal_mass=%793, .tangent_mass=%794, .relative_velocity=%795, .rolling_mass=%796, .normal=%797, .tangent=%798, .rolling=%799, .friction=%800, .restitution=%801, .tangent_speed=%802, .rolling_resistance=%803, .bias_rate=%804, .mass_scale=%805, .impulse_scale=%806, .nx=%807, .ny=%808, .ax=%789, .ay=%809, .bx=%810, .by=%811, .ma=%812, .mb=%813, .ia=%814, .ib=%815, .total=%816)
+    store $0:structure, %817
+    %818:@Prepared = load $0:structure
+    %819:float = field %818, .ay
+    %820:float = field %0, .ay
+    %821:@Prepared = load $0:structure
+    %822:float = field %821, .ay
+    %823:float = field %821, .separation
+    %824:float = field %821, .normal_mass
+    %825:float = field %821, .tangent_mass
+    %826:float = field %821, .relative_velocity
+    %827:float = field %821, .rolling_mass
+    %828:float = field %821, .normal
+    %829:float = field %821, .tangent
+    %830:float = field %821, .rolling
+    %831:float = field %821, .friction
+    %832:float = field %821, .restitution
+    %833:float = field %821, .tangent_speed
+    %834:float = field %821, .rolling_resistance
+    %835:float = field %821, .bias_rate
+    %836:float = field %821, .mass_scale
+    %837:float = field %821, .impulse_scale
+    %838:float = field %821, .nx
+    %839:float = field %821, .ny
+    %840:float = field %821, .ax
+    %841:float = field %821, .bx
+    %842:float = field %821, .by
+    %843:float = field %821, .ma
+    %844:float = field %821, .mb
+    %845:float = field %821, .ia
+    %846:float = field %821, .ib
+    %847:float = field %821, .total
+    %848:@Prepared = struct.init @Prepared(.separation=%823, .normal_mass=%824, .tangent_mass=%825, .relative_velocity=%826, .rolling_mass=%827, .normal=%828, .tangent=%829, .rolling=%830, .friction=%831, .restitution=%832, .tangent_speed=%833, .rolling_resistance=%834, .bias_rate=%835, .mass_scale=%836, .impulse_scale=%837, .nx=%838, .ny=%839, .ax=%840, .ay=%820, .bx=%841, .by=%842, .ma=%843, .mb=%844, .ia=%845, .ib=%846, .total=%847)
+    store $0:structure, %848
+    %849:@Prepared = load $0:structure
+    %850:float = field %849, .bx
+    %851:float = field %0, .bx
+    %852:@Prepared = load $0:structure
+    %853:float = field %852, .bx
+    %854:float = field %852, .separation
+    %855:float = field %852, .normal_mass
+    %856:float = field %852, .tangent_mass
+    %857:float = field %852, .relative_velocity
+    %858:float = field %852, .rolling_mass
+    %859:float = field %852, .normal
+    %860:float = field %852, .tangent
+    %861:float = field %852, .rolling
+    %862:float = field %852, .friction
+    %863:float = field %852, .restitution
+    %864:float = field %852, .tangent_speed
+    %865:float = field %852, .rolling_resistance
+    %866:float = field %852, .bias_rate
+    %867:float = field %852, .mass_scale
+    %868:float = field %852, .impulse_scale
+    %869:float = field %852, .nx
+    %870:float = field %852, .ny
+    %871:float = field %852, .ax
+    %872:float = field %852, .ay
+    %873:float = field %852, .by
+    %874:float = field %852, .ma
+    %875:float = field %852, .mb
+    %876:float = field %852, .ia
+    %877:float = field %852, .ib
+    %878:float = field %852, .total
+    %879:@Prepared = struct.init @Prepared(.separation=%854, .normal_mass=%855, .tangent_mass=%856, .relative_velocity=%857, .rolling_mass=%858, .normal=%859, .tangent=%860, .rolling=%861, .friction=%862, .restitution=%863, .tangent_speed=%864, .rolling_resistance=%865, .bias_rate=%866, .mass_scale=%867, .impulse_scale=%868, .nx=%869, .ny=%870, .ax=%871, .ay=%872, .bx=%851, .by=%873, .ma=%874, .mb=%875, .ia=%876, .ib=%877, .total=%878)
+    store $0:structure, %879
+    %880:@Prepared = load $0:structure
+    %881:float = field %880, .by
+    %882:float = field %0, .by
+    %883:@Prepared = load $0:structure
+    %884:float = field %883, .by
+    %885:float = field %883, .separation
+    %886:float = field %883, .normal_mass
+    %887:float = field %883, .tangent_mass
+    %888:float = field %883, .relative_velocity
+    %889:float = field %883, .rolling_mass
+    %890:float = field %883, .normal
+    %891:float = field %883, .tangent
+    %892:float = field %883, .rolling
+    %893:float = field %883, .friction
+    %894:float = field %883, .restitution
+    %895:float = field %883, .tangent_speed
+    %896:float = field %883, .rolling_resistance
+    %897:float = field %883, .bias_rate
+    %898:float = field %883, .mass_scale
+    %899:float = field %883, .impulse_scale
+    %900:float = field %883, .nx
+    %901:float = field %883, .ny
+    %902:float = field %883, .ax
+    %903:float = field %883, .ay
+    %904:float = field %883, .bx
+    %905:float = field %883, .ma
+    %906:float = field %883, .mb
+    %907:float = field %883, .ia
+    %908:float = field %883, .ib
+    %909:float = field %883, .total
+    %910:@Prepared = struct.init @Prepared(.separation=%885, .normal_mass=%886, .tangent_mass=%887, .relative_velocity=%888, .rolling_mass=%889, .normal=%890, .tangent=%891, .rolling=%892, .friction=%893, .restitution=%894, .tangent_speed=%895, .rolling_resistance=%896, .bias_rate=%897, .mass_scale=%898, .impulse_scale=%899, .nx=%900, .ny=%901, .ax=%902, .ay=%903, .bx=%904, .by=%882, .ma=%905, .mb=%906, .ia=%907, .ib=%908, .total=%909)
+    store $0:structure, %910
+    %911:@Prepared = load $0:structure
+    %912:float = field %911, .ma
+    %913:float = field %0, .ma
+    %914:@Prepared = load $0:structure
+    %915:float = field %914, .ma
+    %916:float = field %914, .separation
+    %917:float = field %914, .normal_mass
+    %918:float = field %914, .tangent_mass
+    %919:float = field %914, .relative_velocity
+    %920:float = field %914, .rolling_mass
+    %921:float = field %914, .normal
+    %922:float = field %914, .tangent
+    %923:float = field %914, .rolling
+    %924:float = field %914, .friction
+    %925:float = field %914, .restitution
+    %926:float = field %914, .tangent_speed
+    %927:float = field %914, .rolling_resistance
+    %928:float = field %914, .bias_rate
+    %929:float = field %914, .mass_scale
+    %930:float = field %914, .impulse_scale
+    %931:float = field %914, .nx
+    %932:float = field %914, .ny
+    %933:float = field %914, .ax
+    %934:float = field %914, .ay
+    %935:float = field %914, .bx
+    %936:float = field %914, .by
+    %937:float = field %914, .mb
+    %938:float = field %914, .ia
+    %939:float = field %914, .ib
+    %940:float = field %914, .total
+    %941:@Prepared = struct.init @Prepared(.separation=%916, .normal_mass=%917, .tangent_mass=%918, .relative_velocity=%919, .rolling_mass=%920, .normal=%921, .tangent=%922, .rolling=%923, .friction=%924, .restitution=%925, .tangent_speed=%926, .rolling_resistance=%927, .bias_rate=%928, .mass_scale=%929, .impulse_scale=%930, .nx=%931, .ny=%932, .ax=%933, .ay=%934, .bx=%935, .by=%936, .ma=%913, .mb=%937, .ia=%938, .ib=%939, .total=%940)
+    store $0:structure, %941
+    %942:@Prepared = load $0:structure
+    %943:float = field %942, .mb
+    %944:float = field %0, .mb
+    %945:@Prepared = load $0:structure
+    %946:float = field %945, .mb
+    %947:float = field %945, .separation
+    %948:float = field %945, .normal_mass
+    %949:float = field %945, .tangent_mass
+    %950:float = field %945, .relative_velocity
+    %951:float = field %945, .rolling_mass
+    %952:float = field %945, .normal
+    %953:float = field %945, .tangent
+    %954:float = field %945, .rolling
+    %955:float = field %945, .friction
+    %956:float = field %945, .restitution
+    %957:float = field %945, .tangent_speed
+    %958:float = field %945, .rolling_resistance
+    %959:float = field %945, .bias_rate
+    %960:float = field %945, .mass_scale
+    %961:float = field %945, .impulse_scale
+    %962:float = field %945, .nx
+    %963:float = field %945, .ny
+    %964:float = field %945, .ax
+    %965:float = field %945, .ay
+    %966:float = field %945, .bx
+    %967:float = field %945, .by
+    %968:float = field %945, .ma
+    %969:float = field %945, .ia
+    %970:float = field %945, .ib
+    %971:float = field %945, .total
+    %972:@Prepared = struct.init @Prepared(.separation=%947, .normal_mass=%948, .tangent_mass=%949, .relative_velocity=%950, .rolling_mass=%951, .normal=%952, .tangent=%953, .rolling=%954, .friction=%955, .restitution=%956, .tangent_speed=%957, .rolling_resistance=%958, .bias_rate=%959, .mass_scale=%960, .impulse_scale=%961, .nx=%962, .ny=%963, .ax=%964, .ay=%965, .bx=%966, .by=%967, .ma=%968, .mb=%944, .ia=%969, .ib=%970, .total=%971)
+    store $0:structure, %972
+    %973:@Prepared = load $0:structure
+    %974:float = field %973, .ia
+    %975:float = field %0, .ia
+    %976:@Prepared = load $0:structure
+    %977:float = field %976, .ia
+    %978:float = field %976, .separation
+    %979:float = field %976, .normal_mass
+    %980:float = field %976, .tangent_mass
+    %981:float = field %976, .relative_velocity
+    %982:float = field %976, .rolling_mass
+    %983:float = field %976, .normal
+    %984:float = field %976, .tangent
+    %985:float = field %976, .rolling
+    %986:float = field %976, .friction
+    %987:float = field %976, .restitution
+    %988:float = field %976, .tangent_speed
+    %989:float = field %976, .rolling_resistance
+    %990:float = field %976, .bias_rate
+    %991:float = field %976, .mass_scale
+    %992:float = field %976, .impulse_scale
+    %993:float = field %976, .nx
+    %994:float = field %976, .ny
+    %995:float = field %976, .ax
+    %996:float = field %976, .ay
+    %997:float = field %976, .bx
+    %998:float = field %976, .by
+    %999:float = field %976, .ma
+    %1000:float = field %976, .mb
+    %1001:float = field %976, .ib
+    %1002:float = field %976, .total
+    %1003:@Prepared = struct.init @Prepared(.separation=%978, .normal_mass=%979, .tangent_mass=%980, .relative_velocity=%981, .rolling_mass=%982, .normal=%983, .tangent=%984, .rolling=%985, .friction=%986, .restitution=%987, .tangent_speed=%988, .rolling_resistance=%989, .bias_rate=%990, .mass_scale=%991, .impulse_scale=%992, .nx=%993, .ny=%994, .ax=%995, .ay=%996, .bx=%997, .by=%998, .ma=%999, .mb=%1000, .ia=%975, .ib=%1001, .total=%1002)
+    store $0:structure, %1003
+    %1004:@Prepared = load $0:structure
+    %1005:float = field %1004, .ib
+    %1006:float = field %0, .ib
+    %1007:@Prepared = load $0:structure
+    %1008:float = field %1007, .ib
+    %1009:float = field %1007, .separation
+    %1010:float = field %1007, .normal_mass
+    %1011:float = field %1007, .tangent_mass
+    %1012:float = field %1007, .relative_velocity
+    %1013:float = field %1007, .rolling_mass
+    %1014:float = field %1007, .normal
+    %1015:float = field %1007, .tangent
+    %1016:float = field %1007, .rolling
+    %1017:float = field %1007, .friction
+    %1018:float = field %1007, .restitution
+    %1019:float = field %1007, .tangent_speed
+    %1020:float = field %1007, .rolling_resistance
+    %1021:float = field %1007, .bias_rate
+    %1022:float = field %1007, .mass_scale
+    %1023:float = field %1007, .impulse_scale
+    %1024:float = field %1007, .nx
+    %1025:float = field %1007, .ny
+    %1026:float = field %1007, .ax
+    %1027:float = field %1007, .ay
+    %1028:float = field %1007, .bx
+    %1029:float = field %1007, .by
+    %1030:float = field %1007, .ma
+    %1031:float = field %1007, .mb
+    %1032:float = field %1007, .ia
+    %1033:float = field %1007, .total
+    %1034:@Prepared = struct.init @Prepared(.separation=%1009, .normal_mass=%1010, .tangent_mass=%1011, .relative_velocity=%1012, .rolling_mass=%1013, .normal=%1014, .tangent=%1015, .rolling=%1016, .friction=%1017, .restitution=%1018, .tangent_speed=%1019, .rolling_resistance=%1020, .bias_rate=%1021, .mass_scale=%1022, .impulse_scale=%1023, .nx=%1024, .ny=%1025, .ax=%1026, .ay=%1027, .bx=%1028, .by=%1029, .ma=%1030, .mb=%1031, .ia=%1032, .ib=%1006, .total=%1033)
+    store $0:structure, %1034
+    %1035:@Prepared = load $0:structure
+    return %1035
+}
+
+func @observe(%0:@Prepared, %1:@Prepared) -> void {
+entry:
+    store $0:structure, %0
+    store $1:structure, %1
+    %2:@Prepared = load $0:structure
+    %3:float = field %2, .separation
+    %4:@Prepared = load $1:structure
+    %5:float = field %4, .separation
+    %6:bool = eq %3, %5
+    print %6
+    %7:@Prepared = load $0:structure
+    %8:float = field %7, .normal_mass
+    %9:@Prepared = load $1:structure
+    %10:float = field %9, .normal_mass
+    %11:bool = eq %8, %10
+    print %11
+    %12:@Prepared = load $0:structure
+    %13:float = field %12, .tangent_mass
+    %14:@Prepared = load $1:structure
+    %15:float = field %14, .tangent_mass
+    %16:bool = eq %13, %15
+    print %16
+    %17:@Prepared = load $0:structure
+    %18:float = field %17, .relative_velocity
+    %19:@Prepared = load $1:structure
+    %20:float = field %19, .relative_velocity
+    %21:bool = eq %18, %20
+    print %21
+    %22:@Prepared = load $0:structure
+    %23:float = field %22, .rolling_mass
+    %24:@Prepared = load $1:structure
+    %25:float = field %24, .rolling_mass
+    %26:bool = eq %23, %25
+    print %26
+    %27:@Prepared = load $0:structure
+    %28:float = field %27, .normal
+    %29:@Prepared = load $1:structure
+    %30:float = field %29, .normal
+    %31:bool = eq %28, %30
+    print %31
+    %32:@Prepared = load $0:structure
+    %33:float = field %32, .tangent
+    %34:@Prepared = load $1:structure
+    %35:float = field %34, .tangent
+    %36:bool = eq %33, %35
+    print %36
+    %37:@Prepared = load $0:structure
+    %38:float = field %37, .rolling
+    %39:@Prepared = load $1:structure
+    %40:float = field %39, .rolling
+    %41:bool = eq %38, %40
+    print %41
+    %42:@Prepared = load $0:structure
+    %43:float = field %42, .friction
+    %44:@Prepared = load $1:structure
+    %45:float = field %44, .friction
+    %46:bool = eq %43, %45
+    print %46
+    %47:@Prepared = load $0:structure
+    %48:float = field %47, .restitution
+    %49:@Prepared = load $1:structure
+    %50:float = field %49, .restitution
+    %51:bool = eq %48, %50
+    print %51
+    %52:@Prepared = load $0:structure
+    %53:float = field %52, .tangent_speed
+    %54:@Prepared = load $1:structure
+    %55:float = field %54, .tangent_speed
+    %56:bool = eq %53, %55
+    print %56
+    %57:@Prepared = load $0:structure
+    %58:float = field %57, .rolling_resistance
+    %59:@Prepared = load $1:structure
+    %60:float = field %59, .rolling_resistance
+    %61:bool = eq %58, %60
+    print %61
+    %62:@Prepared = load $0:structure
+    %63:float = field %62, .bias_rate
+    %64:@Prepared = load $1:structure
+    %65:float = field %64, .bias_rate
+    %66:bool = eq %63, %65
+    print %66
+    %67:@Prepared = load $0:structure
+    %68:float = field %67, .mass_scale
+    %69:@Prepared = load $1:structure
+    %70:float = field %69, .mass_scale
+    %71:bool = eq %68, %70
+    print %71
+    %72:@Prepared = load $0:structure
+    %73:float = field %72, .impulse_scale
+    %74:@Prepared = load $1:structure
+    %75:float = field %74, .impulse_scale
+    %76:bool = eq %73, %75
+    print %76
+    %77:@Prepared = load $0:structure
+    %78:float = field %77, .nx
+    %79:@Prepared = load $1:structure
+    %80:float = field %79, .nx
+    %81:bool = eq %78, %80
+    print %81
+    %82:@Prepared = load $0:structure
+    %83:float = field %82, .ny
+    %84:@Prepared = load $1:structure
+    %85:float = field %84, .ny
+    %86:bool = eq %83, %85
+    print %86
+    %87:@Prepared = load $0:structure
+    %88:float = field %87, .ax
+    %89:@Prepared = load $1:structure
+    %90:float = field %89, .ax
+    %91:bool = eq %88, %90
+    print %91
+    %92:@Prepared = load $0:structure
+    %93:float = field %92, .ay
+    %94:@Prepared = load $1:structure
+    %95:float = field %94, .ay
+    %96:bool = eq %93, %95
+    print %96
+    %97:@Prepared = load $0:structure
+    %98:float = field %97, .bx
+    %99:@Prepared = load $1:structure
+    %100:float = field %99, .bx
+    %101:bool = eq %98, %100
+    print %101
+    %102:@Prepared = load $0:structure
+    %103:float = field %102, .by
+    %104:@Prepared = load $1:structure
+    %105:float = field %104, .by
+    %106:bool = eq %103, %105
+    print %106
+    %107:@Prepared = load $0:structure
+    %108:float = field %107, .ma
+    %109:@Prepared = load $1:structure
+    %110:float = field %109, .ma
+    %111:bool = eq %108, %110
+    print %111
+    %112:@Prepared = load $0:structure
+    %113:float = field %112, .mb
+    %114:@Prepared = load $1:structure
+    %115:float = field %114, .mb
+    %116:bool = eq %113, %115
+    print %116
+    %117:@Prepared = load $0:structure
+    %118:float = field %117, .ia
+    %119:@Prepared = load $1:structure
+    %120:float = field %119, .ia
+    %121:bool = eq %118, %120
+    print %121
+    %122:@Prepared = load $0:structure
+    %123:float = field %122, .ib
+    %124:@Prepared = load $1:structure
+    %125:float = field %124, .ib
+    %126:bool = eq %123, %125
+    print %126
+    %127:@Prepared = load $0:structure
+    %128:float = field %127, .total
+    %129:@Prepared = load $1:structure
+    %130:float = field %129, .total
+    %131:bool = eq %128, %130
+    print %131
+    return
+}
+
+func @main() -> void {
+entry:
+    %0:float = const 1
+    %1:float = const 1
+    %2:float = const 1
+    %3:float = const 1
+    %4:float = const 0
+    %5:float = const 1
+    %6:float = const 1
+    %7:float = const 0
+    %8:float = const 1
+    %9:float = neg %8
+    %10:float = const 0
+    %11:float = const 0.25
+    %12:float = const 1
+    %13:float = const 2
+    %14:float = const 0.5
+    %15:float = const 3
+    %16:float = const 5
+    %17:float = const 0.25
+    %18:float = neg %17
+    %19:float = const 2
+    %20:float = const 1
+    %21:float = neg %20
+    %22:float = const 0.5
+    %23:float = const 0.75
+    %24:float = const 0.25
+    %25:float = const 0.5
+    %26:float = neg %25
+    %27:float = const 0.125
+    %28:@Input = struct.init @Input(.ma=%0, .mb=%1, .ia=%2, .ib=%3, .nx=%4, .ny=%5, .ax=%6, .ay=%7, .bx=%9, .by=%10, .separation=%11, .vax=%12, .vay=%13, .wa=%14, .vbx=%15, .vby=%16, .wb=%18, .normal=%19, .tangent=%21, .rolling=%22, .friction=%23, .restitution=%24, .tangent_speed=%26, .rolling_resistance=%27)
+    store $0:structure, %28
+    %29:float = const 0.25
+    %30:float = const 0.25
+    %31:float = const 0.5
+    %32:float = const 2.75
+    %33:float = const 0.5
+    %34:float = const 2
+    %35:float = const 1
+    %36:float = neg %35
+    %37:float = const 0.5
+    %38:float = const 0.75
+    %39:float = const 0.25
+    %40:float = const 0.5
+    %41:float = neg %40
+    %42:float = const 0.125
+    %43:float = const 12
+    %44:float = const 0.75
+    %45:float = const 0.25
+    %46:float = const 0
+    %47:float = const 1
+    %48:float = const 1
+    %49:float = const 0
+    %50:float = const 1
+    %51:float = neg %50
+    %52:float = const 0
+    %53:float = const 1
+    %54:float = const 1
+    %55:float = const 1
+    %56:float = const 1
+    %57:float = const 0
+    %58:@Prepared = struct.init @Prepared(.separation=%29, .normal_mass=%30, .tangent_mass=%31, .relative_velocity=%32, .rolling_mass=%33, .normal=%34, .tangent=%36, .rolling=%37, .friction=%38, .restitution=%39, .tangent_speed=%41, .rolling_resistance=%42, .bias_rate=%43, .mass_scale=%44, .impulse_scale=%45, .nx=%46, .ny=%47, .ax=%48, .ay=%49, .bx=%51, .by=%52, .ma=%53, .mb=%54, .ia=%55, .ib=%56, .total=%57)
+    store $1:structure, %58
+    %59:@Input = load $0:structure
+    %60:bool = const true
+    %61:@Prepared = call @prepare(%59, %60)
+    %62:@Prepared = load $1:structure
+    call @observe(%61, %62)
+    %63:@Prepared = load $1:structure
+    %64:float = field %63, .normal
+    %65:float = const 0
+    %66:@Prepared = load $1:structure
+    %67:float = field %66, .normal
+    %68:float = field %66, .separation
+    %69:float = field %66, .normal_mass
+    %70:float = field %66, .tangent_mass
+    %71:float = field %66, .relative_velocity
+    %72:float = field %66, .rolling_mass
+    %73:float = field %66, .tangent
+    %74:float = field %66, .rolling
+    %75:float = field %66, .friction
+    %76:float = field %66, .restitution
+    %77:float = field %66, .tangent_speed
+    %78:float = field %66, .rolling_resistance
+    %79:float = field %66, .bias_rate
+    %80:float = field %66, .mass_scale
+    %81:float = field %66, .impulse_scale
+    %82:float = field %66, .nx
+    %83:float = field %66, .ny
+    %84:float = field %66, .ax
+    %85:float = field %66, .ay
+    %86:float = field %66, .bx
+    %87:float = field %66, .by
+    %88:float = field %66, .ma
+    %89:float = field %66, .mb
+    %90:float = field %66, .ia
+    %91:float = field %66, .ib
+    %92:float = field %66, .total
+    %93:@Prepared = struct.init @Prepared(.separation=%68, .normal_mass=%69, .tangent_mass=%70, .relative_velocity=%71, .rolling_mass=%72, .normal=%65, .tangent=%73, .rolling=%74, .friction=%75, .restitution=%76, .tangent_speed=%77, .rolling_resistance=%78, .bias_rate=%79, .mass_scale=%80, .impulse_scale=%81, .nx=%82, .ny=%83, .ax=%84, .ay=%85, .bx=%86, .by=%87, .ma=%88, .mb=%89, .ia=%90, .ib=%91, .total=%92)
+    store $1:structure, %93
+    %94:@Prepared = load $1:structure
+    %95:float = field %94, .tangent
+    %96:float = const 0
+    %97:@Prepared = load $1:structure
+    %98:float = field %97, .tangent
+    %99:float = field %97, .separation
+    %100:float = field %97, .normal_mass
+    %101:float = field %97, .tangent_mass
+    %102:float = field %97, .relative_velocity
+    %103:float = field %97, .rolling_mass
+    %104:float = field %97, .normal
+    %105:float = field %97, .rolling
+    %106:float = field %97, .friction
+    %107:float = field %97, .restitution
+    %108:float = field %97, .tangent_speed
+    %109:float = field %97, .rolling_resistance
+    %110:float = field %97, .bias_rate
+    %111:float = field %97, .mass_scale
+    %112:float = field %97, .impulse_scale
+    %113:float = field %97, .nx
+    %114:float = field %97, .ny
+    %115:float = field %97, .ax
+    %116:float = field %97, .ay
+    %117:float = field %97, .bx
+    %118:float = field %97, .by
+    %119:float = field %97, .ma
+    %120:float = field %97, .mb
+    %121:float = field %97, .ia
+    %122:float = field %97, .ib
+    %123:float = field %97, .total
+    %124:@Prepared = struct.init @Prepared(.separation=%99, .normal_mass=%100, .tangent_mass=%101, .relative_velocity=%102, .rolling_mass=%103, .normal=%104, .tangent=%96, .rolling=%105, .friction=%106, .restitution=%107, .tangent_speed=%108, .rolling_resistance=%109, .bias_rate=%110, .mass_scale=%111, .impulse_scale=%112, .nx=%113, .ny=%114, .ax=%115, .ay=%116, .bx=%117, .by=%118, .ma=%119, .mb=%120, .ia=%121, .ib=%122, .total=%123)
+    store $1:structure, %124
+    %125:@Prepared = load $1:structure
+    %126:float = field %125, .rolling
+    %127:float = const 0
+    %128:@Prepared = load $1:structure
+    %129:float = field %128, .rolling
+    %130:float = field %128, .separation
+    %131:float = field %128, .normal_mass
+    %132:float = field %128, .tangent_mass
+    %133:float = field %128, .relative_velocity
+    %134:float = field %128, .rolling_mass
+    %135:float = field %128, .normal
+    %136:float = field %128, .tangent
+    %137:float = field %128, .friction
+    %138:float = field %128, .restitution
+    %139:float = field %128, .tangent_speed
+    %140:float = field %128, .rolling_resistance
+    %141:float = field %128, .bias_rate
+    %142:float = field %128, .mass_scale
+    %143:float = field %128, .impulse_scale
+    %144:float = field %128, .nx
+    %145:float = field %128, .ny
+    %146:float = field %128, .ax
+    %147:float = field %128, .ay
+    %148:float = field %128, .bx
+    %149:float = field %128, .by
+    %150:float = field %128, .ma
+    %151:float = field %128, .mb
+    %152:float = field %128, .ia
+    %153:float = field %128, .ib
+    %154:float = field %128, .total
+    %155:@Prepared = struct.init @Prepared(.separation=%130, .normal_mass=%131, .tangent_mass=%132, .relative_velocity=%133, .rolling_mass=%134, .normal=%135, .tangent=%136, .rolling=%127, .friction=%137, .restitution=%138, .tangent_speed=%139, .rolling_resistance=%140, .bias_rate=%141, .mass_scale=%142, .impulse_scale=%143, .nx=%144, .ny=%145, .ax=%146, .ay=%147, .bx=%148, .by=%149, .ma=%150, .mb=%151, .ia=%152, .ib=%153, .total=%154)
+    store $1:structure, %155
+    %156:@Input = load $0:structure
+    %157:bool = const false
+    %158:@Prepared = call @prepare(%156, %157)
+    %159:@Prepared = load $1:structure
+    call @observe(%158, %159)
+    %160:@Input = load $0:structure
+    %161:float = field %160, .normal
+    %162:float = const 9
+    %163:@Input = load $0:structure
+    %164:float = field %163, .normal
+    %165:float = field %163, .ma
+    %166:float = field %163, .mb
+    %167:float = field %163, .ia
+    %168:float = field %163, .ib
+    %169:float = field %163, .nx
+    %170:float = field %163, .ny
+    %171:float = field %163, .ax
+    %172:float = field %163, .ay
+    %173:float = field %163, .bx
+    %174:float = field %163, .by
+    %175:float = field %163, .separation
+    %176:float = field %163, .vax
+    %177:float = field %163, .vay
+    %178:float = field %163, .wa
+    %179:float = field %163, .vbx
+    %180:float = field %163, .vby
+    %181:float = field %163, .wb
+    %182:float = field %163, .tangent
+    %183:float = field %163, .rolling
+    %184:float = field %163, .friction
+    %185:float = field %163, .restitution
+    %186:float = field %163, .tangent_speed
+    %187:float = field %163, .rolling_resistance
+    %188:@Input = struct.init @Input(.ma=%165, .mb=%166, .ia=%167, .ib=%168, .nx=%169, .ny=%170, .ax=%171, .ay=%172, .bx=%173, .by=%174, .separation=%175, .vax=%176, .vay=%177, .wa=%178, .vbx=%179, .vby=%180, .wb=%181, .normal=%162, .tangent=%182, .rolling=%183, .friction=%184, .restitution=%185, .tangent_speed=%186, .rolling_resistance=%187)
+    store $0:structure, %188
+    %189:float = field %61, .normal
+    %190:float = const 2
+    %191:bool = eq %189, %190
+    print %191
+    %192:float = const 0
+    %193:float = const 1
+    %194:float = const 0
+    %195:float = const 1
+    %196:float = const 0
+    %197:float = const 1
+    %198:float = const 1
+    %199:float = const 0
+    %200:float = const 1
+    %201:float = neg %200
+    %202:float = const 0
+    %203:float = const 0.25
+    %204:float = const 1
+    %205:float = const 2
+    %206:float = const 0.5
+    %207:float = const 3
+    %208:float = const 5
+    %209:float = const 0.25
+    %210:float = neg %209
+    %211:float = const 2
+    %212:float = const 1
+    %213:float = neg %212
+    %214:float = const 0.5
+    %215:float = const 0.75
+    %216:float = const 0.25
+    %217:float = const 0.5
+    %218:float = neg %217
+    %219:float = const 0.125
+    %220:@Input = struct.init @Input(.ma=%192, .mb=%193, .ia=%194, .ib=%195, .nx=%196, .ny=%197, .ax=%198, .ay=%199, .bx=%201, .by=%202, .separation=%203, .vax=%204, .vay=%205, .wa=%206, .vbx=%207, .vby=%208, .wb=%210, .normal=%211, .tangent=%213, .rolling=%214, .friction=%215, .restitution=%216, .tangent_speed=%218, .rolling_resistance=%219)
+    store $2:structure, %220
+    %221:float = const 0.25
+    %222:float = const 0.5
+    %223:float = const 1
+    %224:float = const 5.25
+    %225:float = const 1
+    %226:float = const 2
+    %227:float = const 1
+    %228:float = neg %227
+    %229:float = const 0.5
+    %230:float = const 0.75
+    %231:float = const 0.25
+    %232:float = const 0.5
+    %233:float = neg %232
+    %234:float = const 0.125
+    %235:float = const 24
+    %236:float = const 0.875
+    %237:float = const 0.125
+    %238:float = const 0
+    %239:float = const 1
+    %240:float = const 1
+    %241:float = const 0
+    %242:float = const 1
+    %243:float = neg %242
+    %244:float = const 0
+    %245:float = const 0
+    %246:float = const 1
+    %247:float = const 0
+    %248:float = const 1
+    %249:float = const 0
+    %250:@Prepared = struct.init @Prepared(.separation=%221, .normal_mass=%222, .tangent_mass=%223, .relative_velocity=%224, .rolling_mass=%225, .normal=%226, .tangent=%228, .rolling=%229, .friction=%230, .restitution=%231, .tangent_speed=%233, .rolling_resistance=%234, .bias_rate=%235, .mass_scale=%236, .impulse_scale=%237, .nx=%238, .ny=%239, .ax=%240, .ay=%241, .bx=%243, .by=%244, .ma=%245, .mb=%246, .ia=%247, .ib=%248, .total=%249)
+    store $3:structure, %250
+    %251:@Input = load $2:structure
+    %252:bool = const true
+    %253:@Prepared = call @prepare(%251, %252)
+    %254:@Prepared = load $3:structure
+    call @observe(%253, %254)
+    %255:@Prepared = load $3:structure
+    %256:float = field %255, .normal
+    %257:float = const 0
+    %258:@Prepared = load $3:structure
+    %259:float = field %258, .normal
+    %260:float = field %258, .separation
+    %261:float = field %258, .normal_mass
+    %262:float = field %258, .tangent_mass
+    %263:float = field %258, .relative_velocity
+    %264:float = field %258, .rolling_mass
+    %265:float = field %258, .tangent
+    %266:float = field %258, .rolling
+    %267:float = field %258, .friction
+    %268:float = field %258, .restitution
+    %269:float = field %258, .tangent_speed
+    %270:float = field %258, .rolling_resistance
+    %271:float = field %258, .bias_rate
+    %272:float = field %258, .mass_scale
+    %273:float = field %258, .impulse_scale
+    %274:float = field %258, .nx
+    %275:float = field %258, .ny
+    %276:float = field %258, .ax
+    %277:float = field %258, .ay
+    %278:float = field %258, .bx
+    %279:float = field %258, .by
+    %280:float = field %258, .ma
+    %281:float = field %258, .mb
+    %282:float = field %258, .ia
+    %283:float = field %258, .ib
+    %284:float = field %258, .total
+    %285:@Prepared = struct.init @Prepared(.separation=%260, .normal_mass=%261, .tangent_mass=%262, .relative_velocity=%263, .rolling_mass=%264, .normal=%257, .tangent=%265, .rolling=%266, .friction=%267, .restitution=%268, .tangent_speed=%269, .rolling_resistance=%270, .bias_rate=%271, .mass_scale=%272, .impulse_scale=%273, .nx=%274, .ny=%275, .ax=%276, .ay=%277, .bx=%278, .by=%279, .ma=%280, .mb=%281, .ia=%282, .ib=%283, .total=%284)
+    store $3:structure, %285
+    %286:@Prepared = load $3:structure
+    %287:float = field %286, .tangent
+    %288:float = const 0
+    %289:@Prepared = load $3:structure
+    %290:float = field %289, .tangent
+    %291:float = field %289, .separation
+    %292:float = field %289, .normal_mass
+    %293:float = field %289, .tangent_mass
+    %294:float = field %289, .relative_velocity
+    %295:float = field %289, .rolling_mass
+    %296:float = field %289, .normal
+    %297:float = field %289, .rolling
+    %298:float = field %289, .friction
+    %299:float = field %289, .restitution
+    %300:float = field %289, .tangent_speed
+    %301:float = field %289, .rolling_resistance
+    %302:float = field %289, .bias_rate
+    %303:float = field %289, .mass_scale
+    %304:float = field %289, .impulse_scale
+    %305:float = field %289, .nx
+    %306:float = field %289, .ny
+    %307:float = field %289, .ax
+    %308:float = field %289, .ay
+    %309:float = field %289, .bx
+    %310:float = field %289, .by
+    %311:float = field %289, .ma
+    %312:float = field %289, .mb
+    %313:float = field %289, .ia
+    %314:float = field %289, .ib
+    %315:float = field %289, .total
+    %316:@Prepared = struct.init @Prepared(.separation=%291, .normal_mass=%292, .tangent_mass=%293, .relative_velocity=%294, .rolling_mass=%295, .normal=%296, .tangent=%288, .rolling=%297, .friction=%298, .restitution=%299, .tangent_speed=%300, .rolling_resistance=%301, .bias_rate=%302, .mass_scale=%303, .impulse_scale=%304, .nx=%305, .ny=%306, .ax=%307, .ay=%308, .bx=%309, .by=%310, .ma=%311, .mb=%312, .ia=%313, .ib=%314, .total=%315)
+    store $3:structure, %316
+    %317:@Prepared = load $3:structure
+    %318:float = field %317, .rolling
+    %319:float = const 0
+    %320:@Prepared = load $3:structure
+    %321:float = field %320, .rolling
+    %322:float = field %320, .separation
+    %323:float = field %320, .normal_mass
+    %324:float = field %320, .tangent_mass
+    %325:float = field %320, .relative_velocity
+    %326:float = field %320, .rolling_mass
+    %327:float = field %320, .normal
+    %328:float = field %320, .tangent
+    %329:float = field %320, .friction
+    %330:float = field %320, .restitution
+    %331:float = field %320, .tangent_speed
+    %332:float = field %320, .rolling_resistance
+    %333:float = field %320, .bias_rate
+    %334:float = field %320, .mass_scale
+    %335:float = field %320, .impulse_scale
+    %336:float = field %320, .nx
+    %337:float = field %320, .ny
+    %338:float = field %320, .ax
+    %339:float = field %320, .ay
+    %340:float = field %320, .bx
+    %341:float = field %320, .by
+    %342:float = field %320, .ma
+    %343:float = field %320, .mb
+    %344:float = field %320, .ia
+    %345:float = field %320, .ib
+    %346:float = field %320, .total
+    %347:@Prepared = struct.init @Prepared(.separation=%322, .normal_mass=%323, .tangent_mass=%324, .relative_velocity=%325, .rolling_mass=%326, .normal=%327, .tangent=%328, .rolling=%319, .friction=%329, .restitution=%330, .tangent_speed=%331, .rolling_resistance=%332, .bias_rate=%333, .mass_scale=%334, .impulse_scale=%335, .nx=%336, .ny=%337, .ax=%338, .ay=%339, .bx=%340, .by=%341, .ma=%342, .mb=%343, .ia=%344, .ib=%345, .total=%346)
+    store $3:structure, %347
+    %348:@Input = load $2:structure
+    %349:bool = const false
+    %350:@Prepared = call @prepare(%348, %349)
+    %351:@Prepared = load $3:structure
+    call @observe(%350, %351)
+    %352:@Input = load $2:structure
+    %353:float = field %352, .normal
+    %354:float = const 9
+    %355:@Input = load $2:structure
+    %356:float = field %355, .normal
+    %357:float = field %355, .ma
+    %358:float = field %355, .mb
+    %359:float = field %355, .ia
+    %360:float = field %355, .ib
+    %361:float = field %355, .nx
+    %362:float = field %355, .ny
+    %363:float = field %355, .ax
+    %364:float = field %355, .ay
+    %365:float = field %355, .bx
+    %366:float = field %355, .by
+    %367:float = field %355, .separation
+    %368:float = field %355, .vax
+    %369:float = field %355, .vay
+    %370:float = field %355, .wa
+    %371:float = field %355, .vbx
+    %372:float = field %355, .vby
+    %373:float = field %355, .wb
+    %374:float = field %355, .tangent
+    %375:float = field %355, .rolling
+    %376:float = field %355, .friction
+    %377:float = field %355, .restitution
+    %378:float = field %355, .tangent_speed
+    %379:float = field %355, .rolling_resistance
+    %380:@Input = struct.init @Input(.ma=%357, .mb=%358, .ia=%359, .ib=%360, .nx=%361, .ny=%362, .ax=%363, .ay=%364, .bx=%365, .by=%366, .separation=%367, .vax=%368, .vay=%369, .wa=%370, .vbx=%371, .vby=%372, .wb=%373, .normal=%354, .tangent=%374, .rolling=%375, .friction=%376, .restitution=%377, .tangent_speed=%378, .rolling_resistance=%379)
+    store $2:structure, %380
+    %381:float = field %253, .normal
+    %382:float = const 2
+    %383:bool = eq %381, %382
+    print %383
+    %384:float = const 0
+    %385:float = const 0
+    %386:float = const 0
+    %387:float = const 0
+    %388:float = const 0
+    %389:float = const 1
+    %390:float = const 1
+    %391:float = const 0
+    %392:float = const 1
+    %393:float = neg %392
+    %394:float = const 0
+    %395:float = const 0.25
+    %396:float = const 1
+    %397:float = const 2
+    %398:float = const 0.5
+    %399:float = const 3
+    %400:float = const 5
+    %401:float = const 0.25
+    %402:float = neg %401
+    %403:float = const 2
+    %404:float = const 1
+    %405:float = neg %404
+    %406:float = const 0.5
+    %407:float = const 0.75
+    %408:float = const 0.25
+    %409:float = const 0.5
+    %410:float = neg %409
+    %411:float = const 0.125
+    %412:@Input = struct.init @Input(.ma=%384, .mb=%385, .ia=%386, .ib=%387, .nx=%388, .ny=%389, .ax=%390, .ay=%391, .bx=%393, .by=%394, .separation=%395, .vax=%396, .vay=%397, .wa=%398, .vbx=%399, .vby=%400, .wb=%402, .normal=%403, .tangent=%405, .rolling=%406, .friction=%407, .restitution=%408, .tangent_speed=%410, .rolling_resistance=%411)
+    store $4:structure, %412
+    %413:float = const 0.25
+    %414:float = const 0
+    %415:float = const 0
+    %416:float = const 0
+    %417:float = const 0
+    %418:float = const 2
+    %419:float = const 1
+    %420:float = neg %419
+    %421:float = const 0.5
+    %422:float = const 0.75
+    %423:float = const 0.25
+    %424:float = const 0.5
+    %425:float = neg %424
+    %426:float = const 0.125
+    %427:float = const 24
+    %428:float = const 0.875
+    %429:float = const 0.125
+    %430:float = const 0
+    %431:float = const 1
+    %432:float = const 1
+    %433:float = const 0
+    %434:float = const 1
+    %435:float = neg %434
+    %436:float = const 0
+    %437:float = const 0
+    %438:float = const 0
+    %439:float = const 0
+    %440:float = const 0
+    %441:float = const 0
+    %442:@Prepared = struct.init @Prepared(.separation=%413, .normal_mass=%414, .tangent_mass=%415, .relative_velocity=%416, .rolling_mass=%417, .normal=%418, .tangent=%420, .rolling=%421, .friction=%422, .restitution=%423, .tangent_speed=%425, .rolling_resistance=%426, .bias_rate=%427, .mass_scale=%428, .impulse_scale=%429, .nx=%430, .ny=%431, .ax=%432, .ay=%433, .bx=%435, .by=%436, .ma=%437, .mb=%438, .ia=%439, .ib=%440, .total=%441)
+    store $5:structure, %442
+    %443:@Input = load $4:structure
+    %444:bool = const true
+    %445:@Prepared = call @prepare(%443, %444)
+    %446:@Prepared = load $5:structure
+    call @observe(%445, %446)
+    %447:@Prepared = load $5:structure
+    %448:float = field %447, .normal
+    %449:float = const 0
+    %450:@Prepared = load $5:structure
+    %451:float = field %450, .normal
+    %452:float = field %450, .separation
+    %453:float = field %450, .normal_mass
+    %454:float = field %450, .tangent_mass
+    %455:float = field %450, .relative_velocity
+    %456:float = field %450, .rolling_mass
+    %457:float = field %450, .tangent
+    %458:float = field %450, .rolling
+    %459:float = field %450, .friction
+    %460:float = field %450, .restitution
+    %461:float = field %450, .tangent_speed
+    %462:float = field %450, .rolling_resistance
+    %463:float = field %450, .bias_rate
+    %464:float = field %450, .mass_scale
+    %465:float = field %450, .impulse_scale
+    %466:float = field %450, .nx
+    %467:float = field %450, .ny
+    %468:float = field %450, .ax
+    %469:float = field %450, .ay
+    %470:float = field %450, .bx
+    %471:float = field %450, .by
+    %472:float = field %450, .ma
+    %473:float = field %450, .mb
+    %474:float = field %450, .ia
+    %475:float = field %450, .ib
+    %476:float = field %450, .total
+    %477:@Prepared = struct.init @Prepared(.separation=%452, .normal_mass=%453, .tangent_mass=%454, .relative_velocity=%455, .rolling_mass=%456, .normal=%449, .tangent=%457, .rolling=%458, .friction=%459, .restitution=%460, .tangent_speed=%461, .rolling_resistance=%462, .bias_rate=%463, .mass_scale=%464, .impulse_scale=%465, .nx=%466, .ny=%467, .ax=%468, .ay=%469, .bx=%470, .by=%471, .ma=%472, .mb=%473, .ia=%474, .ib=%475, .total=%476)
+    store $5:structure, %477
+    %478:@Prepared = load $5:structure
+    %479:float = field %478, .tangent
+    %480:float = const 0
+    %481:@Prepared = load $5:structure
+    %482:float = field %481, .tangent
+    %483:float = field %481, .separation
+    %484:float = field %481, .normal_mass
+    %485:float = field %481, .tangent_mass
+    %486:float = field %481, .relative_velocity
+    %487:float = field %481, .rolling_mass
+    %488:float = field %481, .normal
+    %489:float = field %481, .rolling
+    %490:float = field %481, .friction
+    %491:float = field %481, .restitution
+    %492:float = field %481, .tangent_speed
+    %493:float = field %481, .rolling_resistance
+    %494:float = field %481, .bias_rate
+    %495:float = field %481, .mass_scale
+    %496:float = field %481, .impulse_scale
+    %497:float = field %481, .nx
+    %498:float = field %481, .ny
+    %499:float = field %481, .ax
+    %500:float = field %481, .ay
+    %501:float = field %481, .bx
+    %502:float = field %481, .by
+    %503:float = field %481, .ma
+    %504:float = field %481, .mb
+    %505:float = field %481, .ia
+    %506:float = field %481, .ib
+    %507:float = field %481, .total
+    %508:@Prepared = struct.init @Prepared(.separation=%483, .normal_mass=%484, .tangent_mass=%485, .relative_velocity=%486, .rolling_mass=%487, .normal=%488, .tangent=%480, .rolling=%489, .friction=%490, .restitution=%491, .tangent_speed=%492, .rolling_resistance=%493, .bias_rate=%494, .mass_scale=%495, .impulse_scale=%496, .nx=%497, .ny=%498, .ax=%499, .ay=%500, .bx=%501, .by=%502, .ma=%503, .mb=%504, .ia=%505, .ib=%506, .total=%507)
+    store $5:structure, %508
+    %509:@Prepared = load $5:structure
+    %510:float = field %509, .rolling
+    %511:float = const 0
+    %512:@Prepared = load $5:structure
+    %513:float = field %512, .rolling
+    %514:float = field %512, .separation
+    %515:float = field %512, .normal_mass
+    %516:float = field %512, .tangent_mass
+    %517:float = field %512, .relative_velocity
+    %518:float = field %512, .rolling_mass
+    %519:float = field %512, .normal
+    %520:float = field %512, .tangent
+    %521:float = field %512, .friction
+    %522:float = field %512, .restitution
+    %523:float = field %512, .tangent_speed
+    %524:float = field %512, .rolling_resistance
+    %525:float = field %512, .bias_rate
+    %526:float = field %512, .mass_scale
+    %527:float = field %512, .impulse_scale
+    %528:float = field %512, .nx
+    %529:float = field %512, .ny
+    %530:float = field %512, .ax
+    %531:float = field %512, .ay
+    %532:float = field %512, .bx
+    %533:float = field %512, .by
+    %534:float = field %512, .ma
+    %535:float = field %512, .mb
+    %536:float = field %512, .ia
+    %537:float = field %512, .ib
+    %538:float = field %512, .total
+    %539:@Prepared = struct.init @Prepared(.separation=%514, .normal_mass=%515, .tangent_mass=%516, .relative_velocity=%517, .rolling_mass=%518, .normal=%519, .tangent=%520, .rolling=%511, .friction=%521, .restitution=%522, .tangent_speed=%523, .rolling_resistance=%524, .bias_rate=%525, .mass_scale=%526, .impulse_scale=%527, .nx=%528, .ny=%529, .ax=%530, .ay=%531, .bx=%532, .by=%533, .ma=%534, .mb=%535, .ia=%536, .ib=%537, .total=%538)
+    store $5:structure, %539
+    %540:@Input = load $4:structure
+    %541:bool = const false
+    %542:@Prepared = call @prepare(%540, %541)
+    %543:@Prepared = load $5:structure
+    call @observe(%542, %543)
+    %544:@Input = load $4:structure
+    %545:float = field %544, .normal
+    %546:float = const 9
+    %547:@Input = load $4:structure
+    %548:float = field %547, .normal
+    %549:float = field %547, .ma
+    %550:float = field %547, .mb
+    %551:float = field %547, .ia
+    %552:float = field %547, .ib
+    %553:float = field %547, .nx
+    %554:float = field %547, .ny
+    %555:float = field %547, .ax
+    %556:float = field %547, .ay
+    %557:float = field %547, .bx
+    %558:float = field %547, .by
+    %559:float = field %547, .separation
+    %560:float = field %547, .vax
+    %561:float = field %547, .vay
+    %562:float = field %547, .wa
+    %563:float = field %547, .vbx
+    %564:float = field %547, .vby
+    %565:float = field %547, .wb
+    %566:float = field %547, .tangent
+    %567:float = field %547, .rolling
+    %568:float = field %547, .friction
+    %569:float = field %547, .restitution
+    %570:float = field %547, .tangent_speed
+    %571:float = field %547, .rolling_resistance
+    %572:@Input = struct.init @Input(.ma=%549, .mb=%550, .ia=%551, .ib=%552, .nx=%553, .ny=%554, .ax=%555, .ay=%556, .bx=%557, .by=%558, .separation=%559, .vax=%560, .vay=%561, .wa=%562, .vbx=%563, .vby=%564, .wb=%565, .normal=%546, .tangent=%566, .rolling=%567, .friction=%568, .restitution=%569, .tangent_speed=%570, .rolling_resistance=%571)
+    store $4:structure, %572
+    %573:float = field %445, .normal
+    %574:float = const 2
+    %575:bool = eq %573, %574
+    print %575
+    return
+}

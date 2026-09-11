@@ -1,0 +1,335 @@
+{
+  "mode": "diagnostic",
+  "scope": "process wall time including startup; 4000000 iterations of four scalar recurrences; original source before/after dominance and explicit input sharing control; no physical X64 claim",
+  "warmup_rotations": 6,
+  "rotations": 21,
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "Apple M3 Pro",
+  "binary_sha256": {
+    "before": "e20d9f4470ca56f67db8c507a3bf5ed1a7643b0aafe75662a750390074c2b661",
+    "shared": "f57b57c0e553a9ad47a403719ff5876e035b4b03d543edd5fa11b9dfe4e2e697",
+    "after": "c2a9b0f3afee7daffab66d3ac4affcf592a52acd66549f1e9bbf129e1084a953"
+  },
+  "binary_bytes": {
+    "before": 32952,
+    "shared": 32952,
+    "after": 32952
+  },
+  "source_sha256": {
+    "original": "6ad01f694780df4eeaecef5245fd24fff4bb61471aea445576cbe86062f8b4bd",
+    "shared": "53cf4f24896411c62a74215f375cadd607fe1d521c00dcab06315ae9f4cee7d5"
+  },
+  "observations": [
+    {
+      "index": 0,
+      "order": [
+        "before",
+        "shared",
+        "after"
+      ],
+      "before_ns": 67526292,
+      "shared_ns": 64219958,
+      "after_ns": 66883000,
+      "after_before": 0.9904734588417797,
+      "after_shared": 1.0414675138840794
+    },
+    {
+      "index": 1,
+      "order": [
+        "shared",
+        "after",
+        "before"
+      ],
+      "shared_ns": 63553334,
+      "after_ns": 66123750,
+      "before_ns": 67329416,
+      "after_before": 0.9820930275111847,
+      "after_shared": 1.0404450221289727
+    },
+    {
+      "index": 2,
+      "order": [
+        "after",
+        "before",
+        "shared"
+      ],
+      "after_ns": 66624041,
+      "before_ns": 66491167,
+      "shared_ns": 66589583,
+      "after_before": 1.0019983707008782,
+      "after_shared": 1.0005174683253386
+    },
+    {
+      "index": 3,
+      "order": [
+        "before",
+        "shared",
+        "after"
+      ],
+      "before_ns": 69326000,
+      "shared_ns": 67423667,
+      "after_ns": 65774167,
+      "after_before": 0.9487662204656262,
+      "after_shared": 0.9755352968268546
+    },
+    {
+      "index": 4,
+      "order": [
+        "shared",
+        "after",
+        "before"
+      ],
+      "shared_ns": 66054375,
+      "after_ns": 67379042,
+      "before_ns": 66444208,
+      "after_before": 1.0140694580933225,
+      "after_shared": 1.020054190203147
+    },
+    {
+      "index": 5,
+      "order": [
+        "after",
+        "before",
+        "shared"
+      ],
+      "after_ns": 65143083,
+      "before_ns": 66185875,
+      "shared_ns": 61189167,
+      "after_before": 0.9842444932547919,
+      "after_shared": 1.0646179085915648
+    },
+    {
+      "index": 6,
+      "order": [
+        "before",
+        "shared",
+        "after"
+      ],
+      "before_ns": 66651500,
+      "shared_ns": 67099083,
+      "after_ns": 65092709,
+      "after_before": 0.9766128144152795,
+      "after_shared": 0.9700983394959362
+    },
+    {
+      "index": 7,
+      "order": [
+        "shared",
+        "after",
+        "before"
+      ],
+      "shared_ns": 67656209,
+      "after_ns": 65786459,
+      "before_ns": 66368250,
+      "after_before": 0.9912338957257424,
+      "after_shared": 0.9723639555388035
+    },
+    {
+      "index": 8,
+      "order": [
+        "after",
+        "before",
+        "shared"
+      ],
+      "after_ns": 66680833,
+      "before_ns": 69198083,
+      "shared_ns": 67340833,
+      "after_before": 0.9636225471737417,
+      "after_shared": 0.990199111436593
+    },
+    {
+      "index": 9,
+      "order": [
+        "before",
+        "shared",
+        "after"
+      ],
+      "before_ns": 66182167,
+      "shared_ns": 64515542,
+      "after_ns": 67268833,
+      "after_before": 1.016419317306428,
+      "after_shared": 1.0426763988125527
+    },
+    {
+      "index": 10,
+      "order": [
+        "shared",
+        "after",
+        "before"
+      ],
+      "shared_ns": 67174334,
+      "after_ns": 66374875,
+      "before_ns": 67636958,
+      "after_before": 0.9813403346732418,
+      "after_shared": 0.9880987431896235
+    },
+    {
+      "index": 11,
+      "order": [
+        "after",
+        "before",
+        "shared"
+      ],
+      "after_ns": 67223084,
+      "before_ns": 67626583,
+      "shared_ns": 63814791,
+      "after_before": 0.9940334261750294,
+      "after_shared": 1.0534091383297017
+    },
+    {
+      "index": 12,
+      "order": [
+        "before",
+        "shared",
+        "after"
+      ],
+      "before_ns": 66071917,
+      "shared_ns": 64043500,
+      "after_ns": 67752458,
+      "after_before": 1.0254350271084158,
+      "after_shared": 1.0579131059358093
+    },
+    {
+      "index": 13,
+      "order": [
+        "shared",
+        "after",
+        "before"
+      ],
+      "shared_ns": 64603125,
+      "after_ns": 67048583,
+      "before_ns": 65835084,
+      "after_before": 1.0184324060405239,
+      "after_shared": 1.037853555845789
+    },
+    {
+      "index": 14,
+      "order": [
+        "after",
+        "before",
+        "shared"
+      ],
+      "after_ns": 67680333,
+      "before_ns": 67489000,
+      "shared_ns": 66842750,
+      "after_before": 1.0028350249670317,
+      "after_shared": 1.012530648424848
+    },
+    {
+      "index": 15,
+      "order": [
+        "before",
+        "shared",
+        "after"
+      ],
+      "before_ns": 66325209,
+      "shared_ns": 68983417,
+      "after_ns": 87866167,
+      "after_before": 1.3247778382424698,
+      "after_shared": 1.2737288296403178
+    },
+    {
+      "index": 16,
+      "order": [
+        "shared",
+        "after",
+        "before"
+      ],
+      "shared_ns": 146872000,
+      "after_ns": 104037041,
+      "before_ns": 94100792,
+      "after_before": 1.1055915554887148,
+      "after_shared": 0.7083517688871943
+    },
+    {
+      "index": 17,
+      "order": [
+        "after",
+        "before",
+        "shared"
+      ],
+      "after_ns": 78189167,
+      "before_ns": 76546125,
+      "shared_ns": 72162375,
+      "after_before": 1.0214647312323126,
+      "after_shared": 1.0835170959935838
+    },
+    {
+      "index": 18,
+      "order": [
+        "before",
+        "shared",
+        "after"
+      ],
+      "before_ns": 78203292,
+      "shared_ns": 71077833,
+      "after_ns": 76644625,
+      "after_before": 0.9800690359684603,
+      "after_shared": 1.0783196640223964
+    },
+    {
+      "index": 19,
+      "order": [
+        "shared",
+        "after",
+        "before"
+      ],
+      "shared_ns": 74575875,
+      "after_ns": 77719417,
+      "before_ns": 75326958,
+      "after_before": 1.0317609931891847,
+      "after_shared": 1.04215226438845
+    },
+    {
+      "index": 20,
+      "order": [
+        "after",
+        "before",
+        "shared"
+      ],
+      "after_ns": 75579125,
+      "before_ns": 75521958,
+      "shared_ns": 72346375,
+      "after_before": 1.0007569586583018,
+      "after_shared": 1.0446843397474994
+    }
+  ],
+  "summary": {
+    "before_ns": {
+      "median": 67489000,
+      "minimum": 65835084,
+      "maximum": 94100792,
+      "mad": 1303125,
+      "half_shift": 0.07368692712156655
+    },
+    "shared_ns": {
+      "median": 67099083,
+      "minimum": 61189167,
+      "maximum": 146872000,
+      "mad": 2583541,
+      "half_shift": 0.05591880785101422
+    },
+    "after_ns": {
+      "median": 67223084,
+      "minimum": 65092709,
+      "maximum": 104037041,
+      "mad": 1099334,
+      "half_shift": 0.14671399692067189
+    },
+    "after_before": {
+      "median": 1.0007569586583018,
+      "minimum": 0.9487662204656262,
+      "maximum": 1.3247778382424698,
+      "mad": 0.018663931147117174,
+      "half_shift": 0.0330068327515145
+    },
+    "after_shared": {
+      "median": 1.0404450221289727,
+      "minimum": 0.7083517688871943,
+      "maximum": 1.2737288296403178,
+      "mad": 0.02791437370412475,
+      "half_shift": 0.038366280760946836
+    }
+  }
+}

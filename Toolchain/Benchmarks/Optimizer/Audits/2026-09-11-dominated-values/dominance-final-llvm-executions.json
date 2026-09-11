@@ -1,0 +1,178 @@
+[
+  {
+    "case": "wide",
+    "mode": "raw",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-raw-O0"
+    ],
+    "source_sha256": "460c0a5e59ab702172c37ae7c182758692688cccc3cf4f55347c6f338e3db5ae",
+    "binary_sha256": "01cd8c12cab5213c5e30f94f6050a5bf98f3c556c28a18cf436008a9d3cc17ff",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "case": "wide",
+    "mode": "raw",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-raw-O3"
+    ],
+    "source_sha256": "460c0a5e59ab702172c37ae7c182758692688cccc3cf4f55347c6f338e3db5ae",
+    "binary_sha256": "dc45268dbd69136ddba91a7307e9c5c2d990f734d68b838105bc7507e3274ea7",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "case": "wide",
+    "mode": "silex",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-silex-O0"
+    ],
+    "source_sha256": "4a33177cbf50c8c67d862bc3f806aa99a87684783dff0613221714a0fd2bf1b7",
+    "binary_sha256": "1ae6489eaab7e3fa741cf16c0aef89f178f0cc112bb9704b86c78f8a0b922dfd",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "case": "wide",
+    "mode": "silex",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-wide-silex-O3"
+    ],
+    "source_sha256": "4a33177cbf50c8c67d862bc3f806aa99a87684783dff0613221714a0fd2bf1b7",
+    "binary_sha256": "297ee611c177b08947816bf8ccad516946fbdfd11c2e9385199adcca647e1939",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "case": "preparation",
+    "mode": "raw",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-raw-O0"
+    ],
+    "source_sha256": "0764a7746a4976f18e49c4a8e6661a04bceec241644f40dc46dada959a2f1759",
+    "binary_sha256": "9a4e83628dd09e6023b02e9a01a62a39e0e9a643a6eb772bcfacd84800ee7004",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "case": "preparation",
+    "mode": "raw",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-raw-O3"
+    ],
+    "source_sha256": "0764a7746a4976f18e49c4a8e6661a04bceec241644f40dc46dada959a2f1759",
+    "binary_sha256": "139842808a20327cb86a12e68dc4651390df7b5f7f9de8d94c4f204a106713c6",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "case": "preparation",
+    "mode": "silex",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-silex-O0"
+    ],
+    "source_sha256": "1218f3fa9f93cdc9d4aba37effa67e77c5fa3983b325375e8fa145ac4b428eb7",
+    "binary_sha256": "ecfd41fe1f0f3ae2f3c2d576a4b9ad26c48af2b75a97e98f3b1395c1a386816f",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "case": "preparation",
+    "mode": "silex",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/dominance-final-preparation-silex-O3"
+    ],
+    "source_sha256": "1218f3fa9f93cdc9d4aba37effa67e77c5fa3983b325375e8fa145ac4b428eb7",
+    "binary_sha256": "4db5b685201ecc10cd01dfa63899ce5403e23a1e9cd6d8c7ade403d88839b1a6",
+    "exit": 0,
+    "stdout": "true\n",
+    "stderr": "",
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  }
+]
