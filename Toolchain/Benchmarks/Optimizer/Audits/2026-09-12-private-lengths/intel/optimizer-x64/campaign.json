@@ -1,0 +1,2139 @@
+{
+  "schema_version": 3,
+  "references": {
+    "clang": {
+      "flags": [
+        "-std=c++23",
+        "-O2"
+      ],
+      "layout": "native C++ (historical)"
+    },
+    "clang-o3-slot8": {
+      "flags": [
+        "-std=c++23",
+        "-O3",
+        "-DSILEX_SLOT8"
+      ],
+      "layout": "8-byte fields, Flocking Sample=32 and Steering=16 bytes"
+    }
+  },
+  "benchmark_sources": {
+    "Arithmetic.cpp": "4bf4ca708871b6f762068a3e83d0a72d10104b0d79b8810658e6a35436974d0b",
+    "Arithmetic.sx": "c76b1e743e1df3fb4e395811385dafdd8295cffb28d8be0a2b650f2609948b6f",
+    "Flocking.cpp": "b6abce94c84c1bbc1b04094d7ea20718a367f3d1caea9fb1d5c125a211aad0dc",
+    "Flocking.sx": "4d7ee0ed9f135e1ed35bf621354070869b8ebfaf7455d854fdea38fa24c25c60",
+    "MathCallResidence.sx": "23f3dadbc0975b2ee4ad8c1ab3efbab902812121012aa73ee4d8abdc87ac63a9",
+    "Objects.cpp": "5aba9d29f66476be8f2d5e07571d4400f93a720225a08f7b9e0060b4e2c792fd",
+    "Objects.sx": "a3f039f72c94b7349aa64c27ad631c303102dc6b647f417682514286418522da",
+    "ScalarMathMinMax.sx": "4a85cd5061612e00870b8315b9f0b0e573060cb5179f351bff6e627825a88b73",
+    "campaign.py": "e1ca636a41384eaf75079084499470f056a7a05c749ee70af24576a8d462016c",
+    "run.sh": "cfd9123c49468fc33f5006079015e5e1d3e631555e1e56e7843be48b2c12140d"
+  },
+  "evidence_mode": "qualified",
+  "candidate_sha": "737fc8c9f9525cf1f7fe3f13af945eb88e63a58b",
+  "baseline_sha": "7bd153ce94975ccc2143679a85ef99fd1fa0db4f",
+  "host": {
+    "system": "Darwin",
+    "release": "24.6.0",
+    "machine": "x86_64",
+    "processor": "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+    "translated": false
+  },
+  "clang": "Apple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: x86_64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+  "contract": {
+    "minimum_samples": 21,
+    "maximum_spread_ppm": 200000,
+    "maximum_half_window_shift_ppm": 100000,
+    "parity_limit_ppm": 1000000,
+    "middle_observation_excluded_from_half_windows": true
+  },
+  "samples": 21,
+  "warmups": 6,
+  "workloads": [
+    {
+      "id": "arithmetic",
+      "output_sha256": "c57938e04137c1bbe1d8d371af5d8cb94c7501d94bb6e6d8829e202bfed11030",
+      "executables": {
+        "debug": {
+          "path": ".zig-cache/benchmark-native/arithmetic-debug",
+          "sha256": "b5c7a6542fbb1b02997f3454660808b4a4b5adfb59357aff3834e89fba2be246"
+        },
+        "release": {
+          "path": ".zig-cache/benchmark-native/arithmetic-release",
+          "sha256": "a0f3208932b8b1ba80afa53a3c8278d4f6d57d31f134a4f08364f3ffdb162da8"
+        },
+        "clang": {
+          "path": ".zig-cache/benchmark-native/arithmetic-clang",
+          "sha256": "5c96f3547b32c4de6d3369083416e4ff3fef67dc21695e5794d3f23bd753673d"
+        },
+        "clang-o3-slot8": {
+          "path": ".zig-cache/benchmark-native/arithmetic-clang-o3-slot8",
+          "sha256": "c1e26da1d46530f24c386fb409d916177d69c3704e3970e94df9d372fbce81f2"
+        },
+        "baseline": {
+          "path": ".zig-cache/benchmark-before/arithmetic-release",
+          "sha256": "a0f3208932b8b1ba80afa53a3c8278d4f6d57d31f134a4f08364f3ffdb162da8"
+        }
+      },
+      "observations": [
+        {
+          "index": 0,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 8457297,
+            "release": 6032081,
+            "clang": 5225820,
+            "clang-o3-slot8": 5489681,
+            "baseline": 6542068
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 6338631,
+            "clang": 5567944,
+            "clang-o3-slot8": 5006040,
+            "baseline": 6218776,
+            "debug": 8724128
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 5132816,
+            "clang-o3-slot8": 5265716,
+            "baseline": 6133803,
+            "debug": 8648002,
+            "release": 6392304
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 5042914,
+            "baseline": 6192310,
+            "debug": 8641801,
+            "release": 6755712,
+            "clang": 5380353
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 6134729,
+            "debug": 8586371,
+            "release": 6459549,
+            "clang": 5725565,
+            "clang-o3-slot8": 5335971
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 8676135,
+            "release": 6424705,
+            "clang": 5070945,
+            "clang-o3-slot8": 4951144,
+            "baseline": 6259856
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 6343584,
+            "clang": 5163483,
+            "clang-o3-slot8": 4954489,
+            "baseline": 6112010,
+            "debug": 8661906
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 5143597,
+            "clang-o3-slot8": 4955165,
+            "baseline": 6193286,
+            "debug": 8835941,
+            "release": 6303001
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 4948424,
+            "baseline": 6267999,
+            "debug": 8798631,
+            "release": 6248627,
+            "clang": 4898641
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 6529917,
+            "debug": 8674615,
+            "release": 6389238,
+            "clang": 4944703,
+            "clang-o3-slot8": 4914387
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 8586426,
+            "release": 6273559,
+            "clang": 4984836,
+            "clang-o3-slot8": 5121058,
+            "baseline": 6324471
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 6658003,
+            "clang": 5283854,
+            "clang-o3-slot8": 4995000,
+            "baseline": 6704064,
+            "debug": 8925512
+          }
+        },
+        {
+          "index": 12,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 5010557,
+            "clang-o3-slot8": 4995804,
+            "baseline": 6187438,
+            "debug": 8639120,
+            "release": 6214242
+          }
+        },
+        {
+          "index": 13,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 4942765,
+            "baseline": 6201206,
+            "debug": 8802259,
+            "release": 6502857,
+            "clang": 5116748
+          }
+        },
+        {
+          "index": 14,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 6169024,
+            "debug": 8684944,
+            "release": 6447364,
+            "clang": 4925603,
+            "clang-o3-slot8": 5142234
+          }
+        },
+        {
+          "index": 15,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 8630583,
+            "release": 6433840,
+            "clang": 5056006,
+            "clang-o3-slot8": 5284710,
+            "baseline": 6596252
+          }
+        },
+        {
+          "index": 16,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 6362919,
+            "clang": 5266364,
+            "clang-o3-slot8": 5277775,
+            "baseline": 6291354,
+            "debug": 8663809
+          }
+        },
+        {
+          "index": 17,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 5121872,
+            "clang-o3-slot8": 5273362,
+            "baseline": 6949118,
+            "debug": 8969456,
+            "release": 6402721
+          }
+        },
+        {
+          "index": 18,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 5099576,
+            "baseline": 6084201,
+            "debug": 8620647,
+            "release": 6236584,
+            "clang": 4852416
+          }
+        },
+        {
+          "index": 19,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 6329908,
+            "debug": 8619013,
+            "release": 6221474,
+            "clang": 4906154,
+            "clang-o3-slot8": 4884991
+          }
+        },
+        {
+          "index": 20,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 8645382,
+            "release": 6462809,
+            "clang": 5008878,
+            "clang-o3-slot8": 4938487,
+            "baseline": 6059199
+          }
+        }
+      ],
+      "configurations": {
+        "debug": {
+          "minimum_ns": 8457297,
+          "p10_ns": 8586426,
+          "median_ns": 8661906,
+          "p90_ns": 8835941,
+          "maximum_ns": 8969456,
+          "mad_ns": 41259,
+          "mad_ppm": 4763,
+          "spread_ppm": 28806,
+          "samples_ns": [
+            8457297,
+            8724128,
+            8648002,
+            8641801,
+            8586371,
+            8676135,
+            8661906,
+            8835941,
+            8798631,
+            8674615,
+            8586426,
+            8925512,
+            8639120,
+            8802259,
+            8684944,
+            8630583,
+            8663809,
+            8969456,
+            8620647,
+            8619013,
+            8645382
+          ]
+        },
+        "release": {
+          "minimum_ns": 6032081,
+          "p10_ns": 6221474,
+          "median_ns": 6389238,
+          "p90_ns": 6502857,
+          "maximum_ns": 6755712,
+          "mad_ns": 73571,
+          "mad_ppm": 11514,
+          "spread_ppm": 44040,
+          "samples_ns": [
+            6032081,
+            6338631,
+            6392304,
+            6755712,
+            6459549,
+            6424705,
+            6343584,
+            6303001,
+            6248627,
+            6389238,
+            6273559,
+            6658003,
+            6214242,
+            6502857,
+            6447364,
+            6433840,
+            6362919,
+            6402721,
+            6236584,
+            6221474,
+            6462809
+          ]
+        },
+        "clang": {
+          "minimum_ns": 4852416,
+          "p10_ns": 4906154,
+          "median_ns": 5116748,
+          "p90_ns": 5380353,
+          "maximum_ns": 5725565,
+          "mad_ns": 131912,
+          "mad_ppm": 25780,
+          "spread_ppm": 92675,
+          "samples_ns": [
+            5225820,
+            5567944,
+            5132816,
+            5380353,
+            5725565,
+            5070945,
+            5163483,
+            5143597,
+            4898641,
+            4944703,
+            4984836,
+            5283854,
+            5010557,
+            5116748,
+            4925603,
+            5056006,
+            5266364,
+            5121872,
+            4852416,
+            4906154,
+            5008878
+          ]
+        },
+        "clang-o3-slot8": {
+          "minimum_ns": 4884991,
+          "p10_ns": 4938487,
+          "median_ns": 5006040,
+          "p90_ns": 5284710,
+          "maximum_ns": 5489681,
+          "mad_ns": 91653,
+          "mad_ppm": 18308,
+          "spread_ppm": 69161,
+          "samples_ns": [
+            5489681,
+            5006040,
+            5265716,
+            5042914,
+            5335971,
+            4951144,
+            4954489,
+            4955165,
+            4948424,
+            4914387,
+            5121058,
+            4995000,
+            4995804,
+            4942765,
+            5142234,
+            5284710,
+            5277775,
+            5273362,
+            5099576,
+            4884991,
+            4938487
+          ]
+        },
+        "baseline": {
+          "minimum_ns": 6059199,
+          "p10_ns": 6112010,
+          "median_ns": 6218776,
+          "p90_ns": 6596252,
+          "maximum_ns": 6949118,
+          "mad_ns": 84973,
+          "mad_ppm": 13663,
+          "spread_ppm": 77867,
+          "samples_ns": [
+            6542068,
+            6218776,
+            6133803,
+            6192310,
+            6134729,
+            6259856,
+            6112010,
+            6193286,
+            6267999,
+            6529917,
+            6324471,
+            6704064,
+            6187438,
+            6201206,
+            6169024,
+            6596252,
+            6291354,
+            6949118,
+            6084201,
+            6329908,
+            6059199
+          ]
+        }
+      },
+      "release_vs_clang": {
+        "samples": 21,
+        "lower_bound_ppm": 1240229,
+        "median_ppm": 1258528,
+        "upper_bound_ppm": 1270896,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 6980,
+        "clang_half_shift_ppm": 20814,
+        "ratio_half_shift_ppm": 20489,
+        "ratios_ppm": [
+          1154284,
+          1138415,
+          1245379,
+          1255626,
+          1128194,
+          1266964,
+          1228547,
+          1225407,
+          1275583,
+          1292137,
+          1258528,
+          1260065,
+          1240229,
+          1270896,
+          1308949,
+          1272514,
+          1208218,
+          1250074,
+          1285253,
+          1268095,
+          1290270
+        ]
+      },
+      "release_vs_references": {
+        "clang": {
+          "samples": 21,
+          "lower_bound_ppm": 1240229,
+          "median_ppm": 1258528,
+          "upper_bound_ppm": 1270896,
+          "confidence_ppm": 960823,
+          "release_half_shift_ppm": 6980,
+          "clang_half_shift_ppm": 20814,
+          "ratio_half_shift_ppm": 20489,
+          "ratios_ppm": [
+            1154284,
+            1138415,
+            1245379,
+            1255626,
+            1128194,
+            1266964,
+            1228547,
+            1225407,
+            1275583,
+            1292137,
+            1258528,
+            1260065,
+            1240229,
+            1270896,
+            1308949,
+            1272514,
+            1208218,
+            1250074,
+            1285253,
+            1268095,
+            1290270
+          ]
+        },
+        "clang-o3-slot8": {
+          "samples": 21,
+          "lower_bound_ppm": 1222961,
+          "median_ppm": 1262750,
+          "upper_bound_ppm": 1280370,
+          "confidence_ppm": 960823,
+          "release_half_shift_ppm": 6980,
+          "clang_half_shift_ppm": 18684,
+          "ratio_half_shift_ppm": 14308,
+          "ratios_ppm": [
+            1098803,
+            1266196,
+            1213947,
+            1339644,
+            1210566,
+            1297620,
+            1280370,
+            1272006,
+            1262750,
+            1300108,
+            1225051,
+            1332933,
+            1243892,
+            1315631,
+            1253806,
+            1217444,
+            1205606,
+            1214162,
+            1222961,
+            1273589,
+            1308661
+          ]
+        }
+      },
+      "qualification_failures": [
+        "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+        "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+      ],
+      "release_vs_baseline": {
+        "samples": 21,
+        "lower_bound_ppm": 993129,
+        "median_ppm": 1017715,
+        "upper_bound_ppm": 1037888,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 6980,
+        "clang_half_shift_ppm": 11670,
+        "ratio_half_shift_ppm": 14575,
+        "ratios_ppm": [
+          922044,
+          1019273,
+          1042143,
+          1090984,
+          1052947,
+          1026334,
+          1037888,
+          1017715,
+          996909,
+          978456,
+          991949,
+          993129,
+          1004332,
+          1048643,
+          1045118,
+          975378,
+          1011375,
+          921371,
+          1025045,
+          982869,
+          1066611
+        ]
+      },
+      "qualified": false
+    },
+    {
+      "id": "objects",
+      "output_sha256": "1c7cd8ac9fb27ed65519b199e36de4575a0f257dc0c204e2b4f9bb3c1d75e210",
+      "executables": {
+        "debug": {
+          "path": ".zig-cache/benchmark-native/objects-debug",
+          "sha256": "864251c8f0a2a7804aeea56fd62efd9509ac044cd76932a314b274ce9adf56ee"
+        },
+        "release": {
+          "path": ".zig-cache/benchmark-native/objects-release",
+          "sha256": "cc913e70d3b379b28cb7b7ea218bdf9278db20776e812b8b24bbafdfa88898cf"
+        },
+        "clang": {
+          "path": ".zig-cache/benchmark-native/objects-clang",
+          "sha256": "5e414125170d15913f8bf8400b696485029d90cbf57756ee7ee99df1bbc813e0"
+        },
+        "clang-o3-slot8": {
+          "path": ".zig-cache/benchmark-native/objects-clang-o3-slot8",
+          "sha256": "3776804e7a48ce1909fbee1f424508c76efefce6916b1c4099775071fcf19a51"
+        },
+        "baseline": {
+          "path": ".zig-cache/benchmark-before/objects-release",
+          "sha256": "6b39787a8d412909065048353038bc3d7fdea32ed5b019791d2c0f192ddb1629"
+        }
+      },
+      "observations": [
+        {
+          "index": 0,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 31161955,
+            "release": 17764144,
+            "clang": 4675395,
+            "clang-o3-slot8": 4535559,
+            "baseline": 22575500
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 17342212,
+            "clang": 4790968,
+            "clang-o3-slot8": 4724001,
+            "baseline": 23264179,
+            "debug": 32327167
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 4963820,
+            "clang-o3-slot8": 4998214,
+            "baseline": 23683638,
+            "debug": 35152347,
+            "release": 17966856
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 4770542,
+            "baseline": 22470067,
+            "debug": 34005008,
+            "release": 17812260,
+            "clang": 4924782
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 23189380,
+            "debug": 32027424,
+            "release": 18226586,
+            "clang": 4943736,
+            "clang-o3-slot8": 4810864
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 32496015,
+            "release": 19186776,
+            "clang": 5172517,
+            "clang-o3-slot8": 4815489,
+            "baseline": 24163553
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 17681776,
+            "clang": 4839594,
+            "clang-o3-slot8": 4510816,
+            "baseline": 22981245,
+            "debug": 32058856
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 4944563,
+            "clang-o3-slot8": 5059064,
+            "baseline": 23064747,
+            "debug": 31642980,
+            "release": 17300250
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 5074953,
+            "baseline": 22972256,
+            "debug": 31862663,
+            "release": 18449227,
+            "clang": 4969369
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 22925309,
+            "debug": 33763273,
+            "release": 17676429,
+            "clang": 5332996,
+            "clang-o3-slot8": 4620248
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 30994809,
+            "release": 18468465,
+            "clang": 5390422,
+            "clang-o3-slot8": 5033554,
+            "baseline": 25130366
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 17599143,
+            "clang": 4737027,
+            "clang-o3-slot8": 4629670,
+            "baseline": 22543103,
+            "debug": 31120125
+          }
+        },
+        {
+          "index": 12,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 4849982,
+            "clang-o3-slot8": 4349780,
+            "baseline": 22663565,
+            "debug": 31269420,
+            "release": 17582029
+          }
+        },
+        {
+          "index": 13,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 4806159,
+            "baseline": 22680501,
+            "debug": 31328482,
+            "release": 17378207,
+            "clang": 4743796
+          }
+        },
+        {
+          "index": 14,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 22957113,
+            "debug": 32365801,
+            "release": 17538313,
+            "clang": 4690032,
+            "clang-o3-slot8": 4547662
+          }
+        },
+        {
+          "index": 15,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 31021748,
+            "release": 17864297,
+            "clang": 5005024,
+            "clang-o3-slot8": 4685682,
+            "baseline": 22254231
+          }
+        },
+        {
+          "index": 16,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 17289995,
+            "clang": 4739694,
+            "clang-o3-slot8": 4546625,
+            "baseline": 22843856,
+            "debug": 31392839
+          }
+        },
+        {
+          "index": 17,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 4878570,
+            "clang-o3-slot8": 4637386,
+            "baseline": 23118190,
+            "debug": 31298852,
+            "release": 17302008
+          }
+        },
+        {
+          "index": 18,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 4885394,
+            "baseline": 22919478,
+            "debug": 31198949,
+            "release": 17350060,
+            "clang": 4762775
+          }
+        },
+        {
+          "index": 19,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 22333286,
+            "debug": 32700168,
+            "release": 17598872,
+            "clang": 4776379,
+            "clang-o3-slot8": 4644583
+          }
+        },
+        {
+          "index": 20,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 31114316,
+            "release": 18029024,
+            "clang": 5017591,
+            "clang-o3-slot8": 4646183,
+            "baseline": 22455776
+          }
+        }
+      ],
+      "configurations": {
+        "debug": {
+          "minimum_ns": 30994809,
+          "p10_ns": 31114316,
+          "median_ns": 31642980,
+          "p90_ns": 33763273,
+          "maximum_ns": 35152347,
+          "mad_ns": 522855,
+          "mad_ppm": 16523,
+          "spread_ppm": 83713,
+          "samples_ns": [
+            31161955,
+            32327167,
+            35152347,
+            34005008,
+            32027424,
+            32496015,
+            32058856,
+            31642980,
+            31862663,
+            33763273,
+            30994809,
+            31120125,
+            31269420,
+            31328482,
+            32365801,
+            31021748,
+            31392839,
+            31298852,
+            31198949,
+            32700168,
+            31114316
+          ]
+        },
+        "release": {
+          "minimum_ns": 17289995,
+          "p10_ns": 17302008,
+          "median_ns": 17676429,
+          "p90_ns": 18449227,
+          "maximum_ns": 19186776,
+          "mad_ns": 298222,
+          "mad_ppm": 16871,
+          "spread_ppm": 64901,
+          "samples_ns": [
+            17764144,
+            17342212,
+            17966856,
+            17812260,
+            18226586,
+            19186776,
+            17681776,
+            17300250,
+            18449227,
+            17676429,
+            18468465,
+            17599143,
+            17582029,
+            17378207,
+            17538313,
+            17864297,
+            17289995,
+            17302008,
+            17350060,
+            17598872,
+            18029024
+          ]
+        },
+        "clang": {
+          "minimum_ns": 4675395,
+          "p10_ns": 4737027,
+          "median_ns": 4878570,
+          "p90_ns": 5172517,
+          "maximum_ns": 5390422,
+          "mad_ns": 115795,
+          "mad_ppm": 23735,
+          "spread_ppm": 89265,
+          "samples_ns": [
+            4675395,
+            4790968,
+            4963820,
+            4924782,
+            4943736,
+            5172517,
+            4839594,
+            4944563,
+            4969369,
+            5332996,
+            5390422,
+            4737027,
+            4849982,
+            4743796,
+            4690032,
+            5005024,
+            4739694,
+            4878570,
+            4762775,
+            4776379,
+            5017591
+          ]
+        },
+        "clang-o3-slot8": {
+          "minimum_ns": 4349780,
+          "p10_ns": 4535559,
+          "median_ns": 4685682,
+          "p90_ns": 5033554,
+          "maximum_ns": 5074953,
+          "mad_ns": 129807,
+          "mad_ppm": 27702,
+          "spread_ppm": 106280,
+          "samples_ns": [
+            4535559,
+            4724001,
+            4998214,
+            4770542,
+            4810864,
+            4815489,
+            4510816,
+            5059064,
+            5074953,
+            4620248,
+            5033554,
+            4629670,
+            4349780,
+            4806159,
+            4547662,
+            4685682,
+            4546625,
+            4637386,
+            4885394,
+            4644583,
+            4646183
+          ]
+        },
+        "baseline": {
+          "minimum_ns": 22254231,
+          "p10_ns": 22455776,
+          "median_ns": 22925309,
+          "p90_ns": 23683638,
+          "maximum_ns": 25130366,
+          "mad_ns": 264071,
+          "mad_ppm": 11518,
+          "spread_ppm": 53559,
+          "samples_ns": [
+            22575500,
+            23264179,
+            23683638,
+            22470067,
+            23189380,
+            24163553,
+            22981245,
+            23064747,
+            22972256,
+            22925309,
+            25130366,
+            22543103,
+            22663565,
+            22680501,
+            22957113,
+            22254231,
+            22843856,
+            23118190,
+            22919478,
+            22333286,
+            22455776
+          ]
+        }
+      },
+      "release_vs_clang": {
+        "samples": 21,
+        "lower_bound_ppm": 3616862,
+        "median_ppm": 3642846,
+        "upper_bound_ppm": 3684563,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12925,
+        "clang_half_shift_ppm": 34013,
+        "ratio_half_shift_ppm": 1546,
+        "ratios_ppm": [
+          3799495,
+          3619772,
+          3619562,
+          3616862,
+          3686804,
+          3709369,
+          3653565,
+          3498843,
+          3712589,
+          3314540,
+          3426163,
+          3715229,
+          3625174,
+          3663354,
+          3739486,
+          3569272,
+          3647913,
+          3546532,
+          3642846,
+          3684563,
+          3593163
+        ]
+      },
+      "release_vs_references": {
+        "clang": {
+          "samples": 21,
+          "lower_bound_ppm": 3616862,
+          "median_ppm": 3642846,
+          "upper_bound_ppm": 3684563,
+          "confidence_ppm": 960823,
+          "release_half_shift_ppm": 12925,
+          "clang_half_shift_ppm": 34013,
+          "ratio_half_shift_ppm": 1546,
+          "ratios_ppm": [
+            3799495,
+            3619772,
+            3619562,
+            3616862,
+            3686804,
+            3709369,
+            3653565,
+            3498843,
+            3712589,
+            3314540,
+            3426163,
+            3715229,
+            3625174,
+            3663354,
+            3739486,
+            3569272,
+            3647913,
+            3546532,
+            3642846,
+            3684563,
+            3593163
+          ]
+        },
+        "clang-o3-slot8": {
+          "samples": 21,
+          "lower_bound_ppm": 3671085,
+          "median_ppm": 3789117,
+          "upper_bound_ppm": 3825861,
+          "confidence_ppm": 960823,
+          "release_half_shift_ppm": 12925,
+          "clang_half_shift_ppm": 34563,
+          "ratio_half_shift_ppm": 3745,
+          "ratios_ppm": [
+            3916638,
+            3671085,
+            3594655,
+            3733802,
+            3788630,
+            3984387,
+            3919861,
+            3419654,
+            3635349,
+            3825861,
+            3669070,
+            3801381,
+            4042050,
+            3615820,
+            3856555,
+            3812528,
+            3802819,
+            3730982,
+            3551414,
+            3789117,
+            3880394
+          ]
+        }
+      },
+      "qualification_failures": [
+        "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+        "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+      ],
+      "release_vs_baseline": {
+        "samples": 21,
+        "lower_bound_ppm": 758618,
+        "median_ppm": 771044,
+        "upper_bound_ppm": 786877,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12925,
+        "clang_half_shift_ppm": 16659,
+        "ratio_half_shift_ppm": 12983,
+        "ratios_ppm": [
+          786877,
+          745446,
+          758618,
+          792710,
+          785988,
+          794037,
+          769400,
+          750073,
+          803109,
+          771044,
+          734906,
+          780688,
+          775783,
+          766217,
+          763959,
+          802737,
+          756877,
+          748415,
+          757000,
+          788010,
+          802868
+        ]
+      },
+      "qualified": false
+    },
+    {
+      "id": "flocking",
+      "output_sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+      "executables": {
+        "debug": {
+          "path": ".zig-cache/benchmark-native/flocking-debug",
+          "sha256": "18851ff18a80ad6f7de186ad757e8b12d8d0b74c806cb2c43dc90614fcef9827"
+        },
+        "release": {
+          "path": ".zig-cache/benchmark-native/flocking-release",
+          "sha256": "50eeab2df40e3934f49ccce785bebf90efe011e6b7f8e6bc43bbe2b70c1ab1a8"
+        },
+        "clang": {
+          "path": ".zig-cache/benchmark-native/flocking-clang",
+          "sha256": "34f2788a3d96ae9fe9e53c71b77a81a1986be584bc16673d04de8affad934c06"
+        },
+        "clang-o3-slot8": {
+          "path": ".zig-cache/benchmark-native/flocking-clang-o3-slot8",
+          "sha256": "3295f1d4da0a3ae7391a63596311054db9eb4f26d0525b8a641ed13ba75814c3"
+        },
+        "baseline": {
+          "path": ".zig-cache/benchmark-before/flocking-release",
+          "sha256": "4a4d5c459a1019d1d6107d30bace260b9b1818977f180ac7edc294b188f2f86f"
+        }
+      },
+      "observations": [
+        {
+          "index": 0,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 3606574101,
+            "release": 1488607736,
+            "clang": 389173090,
+            "clang-o3-slot8": 451698649,
+            "baseline": 1848940138
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 1435477060,
+            "clang": 287823029,
+            "clang-o3-slot8": 481099338,
+            "baseline": 1812240436,
+            "debug": 3605618195
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 288946302,
+            "clang-o3-slot8": 481297077,
+            "baseline": 1857902827,
+            "debug": 3494076376,
+            "release": 1445079711
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 502882476,
+            "baseline": 1782065657,
+            "debug": 3622323619,
+            "release": 1449763127,
+            "clang": 310964841
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 1782184747,
+            "debug": 3604679983,
+            "release": 1454516445,
+            "clang": 310576554,
+            "clang-o3-slot8": 442199010
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 3550426386,
+            "release": 1448843450,
+            "clang": 298695265,
+            "clang-o3-slot8": 460251591,
+            "baseline": 1777788461
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 1419168333,
+            "clang": 304456899,
+            "clang-o3-slot8": 448067325,
+            "baseline": 1743628758,
+            "debug": 3551419981
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 313136557,
+            "clang-o3-slot8": 480830603,
+            "baseline": 1803881389,
+            "debug": 3537504926,
+            "release": 1423093482
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 444103151,
+            "baseline": 1753125555,
+            "debug": 3610814861,
+            "release": 1442671974,
+            "clang": 293168356
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 1746456323,
+            "debug": 3579241627,
+            "release": 1463205869,
+            "clang": 289822252,
+            "clang-o3-slot8": 447994670
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 3571047247,
+            "release": 1385514912,
+            "clang": 288849539,
+            "clang-o3-slot8": 447737323,
+            "baseline": 1833377366
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 1457666275,
+            "clang": 292370303,
+            "clang-o3-slot8": 444516254,
+            "baseline": 1758716930,
+            "debug": 3591950007
+          }
+        },
+        {
+          "index": 12,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 288585886,
+            "clang-o3-slot8": 443505033,
+            "baseline": 1790499718,
+            "debug": 3598929236,
+            "release": 1430206340
+          }
+        },
+        {
+          "index": 13,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 500636794,
+            "baseline": 1788733569,
+            "debug": 3462125784,
+            "release": 1380870693,
+            "clang": 311891722
+          }
+        },
+        {
+          "index": 14,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 1799086920,
+            "debug": 3545899562,
+            "release": 1475448189,
+            "clang": 405137484,
+            "clang-o3-slot8": 446516476
+          }
+        },
+        {
+          "index": 15,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 3544728856,
+            "release": 1381451996,
+            "clang": 301031894,
+            "clang-o3-slot8": 444695215,
+            "baseline": 1856904528
+          }
+        },
+        {
+          "index": 16,
+          "order": [
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug"
+          ],
+          "timings_ns": {
+            "release": 1399032448,
+            "clang": 308408694,
+            "clang-o3-slot8": 480162365,
+            "baseline": 1746776681,
+            "debug": 3582432132
+          }
+        },
+        {
+          "index": 17,
+          "order": [
+            "clang",
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release"
+          ],
+          "timings_ns": {
+            "clang": 300430164,
+            "clang-o3-slot8": 442640119,
+            "baseline": 1817677966,
+            "debug": 3538683509,
+            "release": 1406271019
+          }
+        },
+        {
+          "index": 18,
+          "order": [
+            "clang-o3-slot8",
+            "baseline",
+            "debug",
+            "release",
+            "clang"
+          ],
+          "timings_ns": {
+            "clang-o3-slot8": 520162253,
+            "baseline": 1786776893,
+            "debug": 3566196386,
+            "release": 1414230602,
+            "clang": 319978835
+          }
+        },
+        {
+          "index": 19,
+          "order": [
+            "baseline",
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8"
+          ],
+          "timings_ns": {
+            "baseline": 1844898928,
+            "debug": 3607563916,
+            "release": 1442294995,
+            "clang": 286650444,
+            "clang-o3-slot8": 473805945
+          }
+        },
+        {
+          "index": 20,
+          "order": [
+            "debug",
+            "release",
+            "clang",
+            "clang-o3-slot8",
+            "baseline"
+          ],
+          "timings_ns": {
+            "debug": 3587121715,
+            "release": 1446525647,
+            "clang": 287143527,
+            "clang-o3-slot8": 443026132,
+            "baseline": 1865545136
+          }
+        }
+      ],
+      "configurations": {
+        "debug": {
+          "minimum_ns": 3462125784,
+          "p10_ns": 3537504926,
+          "median_ns": 3579241627,
+          "p90_ns": 3607563916,
+          "maximum_ns": 3622323619,
+          "mad_ns": 27821646,
+          "mad_ppm": 7773,
+          "spread_ppm": 19573,
+          "samples_ns": [
+            3606574101,
+            3605618195,
+            3494076376,
+            3622323619,
+            3604679983,
+            3550426386,
+            3551419981,
+            3537504926,
+            3610814861,
+            3579241627,
+            3571047247,
+            3591950007,
+            3598929236,
+            3462125784,
+            3545899562,
+            3544728856,
+            3582432132,
+            3538683509,
+            3566196386,
+            3607563916,
+            3587121715
+          ]
+        },
+        "release": {
+          "minimum_ns": 1380870693,
+          "p10_ns": 1385514912,
+          "median_ns": 1442294995,
+          "p90_ns": 1463205869,
+          "maximum_ns": 1488607736,
+          "mad_ns": 19201513,
+          "mad_ppm": 13313,
+          "spread_ppm": 53866,
+          "samples_ns": [
+            1488607736,
+            1435477060,
+            1445079711,
+            1449763127,
+            1454516445,
+            1448843450,
+            1419168333,
+            1423093482,
+            1442671974,
+            1463205869,
+            1385514912,
+            1457666275,
+            1430206340,
+            1380870693,
+            1475448189,
+            1381451996,
+            1399032448,
+            1406271019,
+            1414230602,
+            1442294995,
+            1446525647
+          ]
+        },
+        "clang": {
+          "minimum_ns": 286650444,
+          "p10_ns": 287823029,
+          "median_ns": 300430164,
+          "p90_ns": 319978835,
+          "maximum_ns": 405137484,
+          "mad_ns": 11461558,
+          "mad_ppm": 38150,
+          "spread_ppm": 107032,
+          "samples_ns": [
+            389173090,
+            287823029,
+            288946302,
+            310964841,
+            310576554,
+            298695265,
+            304456899,
+            313136557,
+            293168356,
+            289822252,
+            288849539,
+            292370303,
+            288585886,
+            311891722,
+            405137484,
+            301031894,
+            308408694,
+            300430164,
+            319978835,
+            286650444,
+            287143527
+          ]
+        },
+        "clang-o3-slot8": {
+          "minimum_ns": 442199010,
+          "p10_ns": 443026132,
+          "median_ns": 448067325,
+          "p90_ns": 500636794,
+          "maximum_ns": 520162253,
+          "mad_ns": 5427206,
+          "mad_ppm": 12112,
+          "spread_ppm": 128575,
+          "samples_ns": [
+            451698649,
+            481099338,
+            481297077,
+            502882476,
+            442199010,
+            460251591,
+            448067325,
+            480830603,
+            444103151,
+            447994670,
+            447737323,
+            444516254,
+            443505033,
+            500636794,
+            446516476,
+            444695215,
+            480162365,
+            442640119,
+            520162253,
+            473805945,
+            443026132
+          ]
+        },
+        "baseline": {
+          "minimum_ns": 1743628758,
+          "p10_ns": 1746776681,
+          "median_ns": 1790499718,
+          "p90_ns": 1856904528,
+          "maximum_ns": 1865545136,
+          "mad_ns": 31782788,
+          "mad_ppm": 17750,
+          "spread_ppm": 61506,
+          "samples_ns": [
+            1848940138,
+            1812240436,
+            1857902827,
+            1782065657,
+            1782184747,
+            1777788461,
+            1743628758,
+            1803881389,
+            1753125555,
+            1746456323,
+            1833377366,
+            1758716930,
+            1790499718,
+            1788733569,
+            1799086920,
+            1856904528,
+            1746776681,
+            1817677966,
+            1786776893,
+            1844898928,
+            1865545136
+          ]
+        }
+      },
+      "release_vs_clang": {
+        "samples": 21,
+        "lower_bound_ppm": 4589055,
+        "median_ppm": 4683278,
+        "upper_bound_ppm": 4955912,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12863,
+        "clang_half_shift_ppm": 11249,
+        "ratio_half_shift_ppm": 34988,
+        "ratios_ppm": [
+          3825053,
+          4987359,
+          5001205,
+          4662144,
+          4683278,
+          4850573,
+          4661311,
+          4544641,
+          4920967,
+          5048631,
+          4796666,
+          4985685,
+          4955912,
+          4427404,
+          3641845,
+          4589055,
+          4536293,
+          4680858,
+          4419762,
+          5031546,
+          5037639
+        ]
+      },
+      "release_vs_references": {
+        "clang": {
+          "samples": 21,
+          "lower_bound_ppm": 4589055,
+          "median_ppm": 4683278,
+          "upper_bound_ppm": 4955912,
+          "confidence_ppm": 960823,
+          "release_half_shift_ppm": 12863,
+          "clang_half_shift_ppm": 11249,
+          "ratio_half_shift_ppm": 34988,
+          "ratios_ppm": [
+            3825053,
+            4987359,
+            5001205,
+            4662144,
+            4683278,
+            4850573,
+            4661311,
+            4544641,
+            4920967,
+            5048631,
+            4796666,
+            4985685,
+            4955912,
+            4427404,
+            3641845,
+            4589055,
+            4536293,
+            4680858,
+            4419762,
+            5031546,
+            5037639
+          ]
+        },
+        "clang-o3-slot8": {
+          "samples": 21,
+          "lower_bound_ppm": 3002469,
+          "median_ppm": 3147937,
+          "upper_bound_ppm": 3248506,
+          "confidence_ppm": 960823,
+          "release_half_shift_ppm": 12863,
+          "clang_half_shift_ppm": 29842,
+          "ratio_half_shift_ppm": 3061,
+          "ratios_ppm": [
+            3295577,
+            2983743,
+            3002469,
+            2882906,
+            3289280,
+            3147937,
+            3167310,
+            2959656,
+            3248506,
+            3266123,
+            3094481,
+            3279219,
+            3224780,
+            2758228,
+            3304353,
+            3106514,
+            2913665,
+            3177007,
+            2718825,
+            3044062,
+            3265102
+          ]
+        }
+      },
+      "qualification_failures": [
+        "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+        "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+      ],
+      "release_vs_baseline": {
+        "samples": 21,
+        "lower_bound_ppm": 781774,
+        "median_ppm": 798774,
+        "upper_bound_ppm": 813916,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12863,
+        "clang_half_shift_ppm": 9483,
+        "ratio_half_shift_ppm": 27543,
+        "ratios_ppm": [
+          805114,
+          792100,
+          777801,
+          813529,
+          816142,
+          814969,
+          813916,
+          788906,
+          822914,
+          837814,
+          755717,
+          828823,
+          798774,
+          771982,
+          820109,
+          743954,
+          800922,
+          773663,
+          791498,
+          781774,
+          775390
+        ]
+      },
+      "qualified": false
+    }
+  ],
+  "qualification": {
+    "requested": true,
+    "passed": false,
+    "failures": [
+      "arithmetic: clang: Silex/Clang upper bound exceeds 1000000 ppm",
+      "arithmetic: clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm",
+      "objects: clang: Silex/Clang upper bound exceeds 1000000 ppm",
+      "objects: clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm",
+      "flocking: clang: Silex/Clang upper bound exceeds 1000000 ppm",
+      "flocking: clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+    ]
+  }
+}

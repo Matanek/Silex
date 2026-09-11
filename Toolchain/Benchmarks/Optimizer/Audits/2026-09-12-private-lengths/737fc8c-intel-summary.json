@@ -1,0 +1,352 @@
+{
+  "candidate": "737fc8c9f9525cf1f7fe3f13af945eb88e63a58b",
+  "baseline": "7bd153ce94975ccc2143679a85ef99fd1fa0db4f",
+  "host": {
+    "system": "Darwin",
+    "release": "24.6.0",
+    "machine": "x86_64",
+    "processor": "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+    "translated": false
+  },
+  "warmups": 6,
+  "samples": 21,
+  "archive_sha256": "93a7261098f5788af1e41b75327f42cebb9337a319170129be8ab3399e5fb177",
+  "archive_files": 48,
+  "checked_executables": [
+    {
+      "workload": "arithmetic",
+      "configuration": "debug",
+      "path": "benchmark-native/arithmetic-debug",
+      "sha256": "b5c7a6542fbb1b02997f3454660808b4a4b5adfb59357aff3834e89fba2be246"
+    },
+    {
+      "workload": "arithmetic",
+      "configuration": "release",
+      "path": "benchmark-native/arithmetic-release",
+      "sha256": "a0f3208932b8b1ba80afa53a3c8278d4f6d57d31f134a4f08364f3ffdb162da8"
+    },
+    {
+      "workload": "arithmetic",
+      "configuration": "clang",
+      "path": "benchmark-native/arithmetic-clang",
+      "sha256": "5c96f3547b32c4de6d3369083416e4ff3fef67dc21695e5794d3f23bd753673d"
+    },
+    {
+      "workload": "arithmetic",
+      "configuration": "clang-o3-slot8",
+      "path": "benchmark-native/arithmetic-clang-o3-slot8",
+      "sha256": "c1e26da1d46530f24c386fb409d916177d69c3704e3970e94df9d372fbce81f2"
+    },
+    {
+      "workload": "arithmetic",
+      "configuration": "baseline",
+      "path": "benchmark-before/arithmetic-release",
+      "sha256": "a0f3208932b8b1ba80afa53a3c8278d4f6d57d31f134a4f08364f3ffdb162da8"
+    },
+    {
+      "workload": "objects",
+      "configuration": "debug",
+      "path": "benchmark-native/objects-debug",
+      "sha256": "864251c8f0a2a7804aeea56fd62efd9509ac044cd76932a314b274ce9adf56ee"
+    },
+    {
+      "workload": "objects",
+      "configuration": "release",
+      "path": "benchmark-native/objects-release",
+      "sha256": "cc913e70d3b379b28cb7b7ea218bdf9278db20776e812b8b24bbafdfa88898cf"
+    },
+    {
+      "workload": "objects",
+      "configuration": "clang",
+      "path": "benchmark-native/objects-clang",
+      "sha256": "5e414125170d15913f8bf8400b696485029d90cbf57756ee7ee99df1bbc813e0"
+    },
+    {
+      "workload": "objects",
+      "configuration": "clang-o3-slot8",
+      "path": "benchmark-native/objects-clang-o3-slot8",
+      "sha256": "3776804e7a48ce1909fbee1f424508c76efefce6916b1c4099775071fcf19a51"
+    },
+    {
+      "workload": "objects",
+      "configuration": "baseline",
+      "path": "benchmark-before/objects-release",
+      "sha256": "6b39787a8d412909065048353038bc3d7fdea32ed5b019791d2c0f192ddb1629"
+    },
+    {
+      "workload": "flocking",
+      "configuration": "debug",
+      "path": "benchmark-native/flocking-debug",
+      "sha256": "18851ff18a80ad6f7de186ad757e8b12d8d0b74c806cb2c43dc90614fcef9827"
+    },
+    {
+      "workload": "flocking",
+      "configuration": "release",
+      "path": "benchmark-native/flocking-release",
+      "sha256": "50eeab2df40e3934f49ccce785bebf90efe011e6b7f8e6bc43bbe2b70c1ab1a8"
+    },
+    {
+      "workload": "flocking",
+      "configuration": "clang",
+      "path": "benchmark-native/flocking-clang",
+      "sha256": "34f2788a3d96ae9fe9e53c71b77a81a1986be584bc16673d04de8affad934c06"
+    },
+    {
+      "workload": "flocking",
+      "configuration": "clang-o3-slot8",
+      "path": "benchmark-native/flocking-clang-o3-slot8",
+      "sha256": "3295f1d4da0a3ae7391a63596311054db9eb4f26d0525b8a641ed13ba75814c3"
+    },
+    {
+      "workload": "flocking",
+      "configuration": "baseline",
+      "path": "benchmark-before/flocking-release",
+      "sha256": "4a4d5c459a1019d1d6107d30bace260b9b1818977f180ac7edc294b188f2f86f"
+    }
+  ],
+  "workloads": [
+    {
+      "id": "arithmetic",
+      "median_ms": {
+        "debug": 8.661906,
+        "release": 6.389238,
+        "clang": 5.116748,
+        "clang-o3-slot8": 5.00604,
+        "baseline": 6.218776
+      },
+      "baseline_comparison": {
+        "samples": 21,
+        "lower_bound_ppm": 993129,
+        "median_ppm": 1017715,
+        "upper_bound_ppm": 1037888,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 6980,
+        "clang_half_shift_ppm": 11670,
+        "ratio_half_shift_ppm": 14575,
+        "ratios_ppm": [
+          922044,
+          1019273,
+          1042143,
+          1090984,
+          1052947,
+          1026334,
+          1037888,
+          1017715,
+          996909,
+          978456,
+          991949,
+          993129,
+          1004332,
+          1048643,
+          1045118,
+          975378,
+          1011375,
+          921371,
+          1025045,
+          982869,
+          1066611
+        ]
+      },
+      "baseline_stability_failures": [],
+      "o3_comparison": {
+        "samples": 21,
+        "lower_bound_ppm": 1222961,
+        "median_ppm": 1262750,
+        "upper_bound_ppm": 1280370,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 6980,
+        "clang_half_shift_ppm": 18684,
+        "ratio_half_shift_ppm": 14308,
+        "ratios_ppm": [
+          1098803,
+          1266196,
+          1213947,
+          1339644,
+          1210566,
+          1297620,
+          1280370,
+          1272006,
+          1262750,
+          1300108,
+          1225051,
+          1332933,
+          1243892,
+          1315631,
+          1253806,
+          1217444,
+          1205606,
+          1214162,
+          1222961,
+          1273589,
+          1308661
+        ]
+      },
+      "parity_failures": [
+        "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+        "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+      ]
+    },
+    {
+      "id": "objects",
+      "median_ms": {
+        "debug": 31.64298,
+        "release": 17.676429,
+        "clang": 4.87857,
+        "clang-o3-slot8": 4.685682,
+        "baseline": 22.925309
+      },
+      "baseline_comparison": {
+        "samples": 21,
+        "lower_bound_ppm": 758618,
+        "median_ppm": 771044,
+        "upper_bound_ppm": 786877,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12925,
+        "clang_half_shift_ppm": 16659,
+        "ratio_half_shift_ppm": 12983,
+        "ratios_ppm": [
+          786877,
+          745446,
+          758618,
+          792710,
+          785988,
+          794037,
+          769400,
+          750073,
+          803109,
+          771044,
+          734906,
+          780688,
+          775783,
+          766217,
+          763959,
+          802737,
+          756877,
+          748415,
+          757000,
+          788010,
+          802868
+        ]
+      },
+      "baseline_stability_failures": [],
+      "o3_comparison": {
+        "samples": 21,
+        "lower_bound_ppm": 3671085,
+        "median_ppm": 3789117,
+        "upper_bound_ppm": 3825861,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12925,
+        "clang_half_shift_ppm": 34563,
+        "ratio_half_shift_ppm": 3745,
+        "ratios_ppm": [
+          3916638,
+          3671085,
+          3594655,
+          3733802,
+          3788630,
+          3984387,
+          3919861,
+          3419654,
+          3635349,
+          3825861,
+          3669070,
+          3801381,
+          4042050,
+          3615820,
+          3856555,
+          3812528,
+          3802819,
+          3730982,
+          3551414,
+          3789117,
+          3880394
+        ]
+      },
+      "parity_failures": [
+        "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+        "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+      ]
+    },
+    {
+      "id": "flocking",
+      "median_ms": {
+        "debug": 3579.241627,
+        "release": 1442.294995,
+        "clang": 300.430164,
+        "clang-o3-slot8": 448.067325,
+        "baseline": 1790.499718
+      },
+      "baseline_comparison": {
+        "samples": 21,
+        "lower_bound_ppm": 781774,
+        "median_ppm": 798774,
+        "upper_bound_ppm": 813916,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12863,
+        "clang_half_shift_ppm": 9483,
+        "ratio_half_shift_ppm": 27543,
+        "ratios_ppm": [
+          805114,
+          792100,
+          777801,
+          813529,
+          816142,
+          814969,
+          813916,
+          788906,
+          822914,
+          837814,
+          755717,
+          828823,
+          798774,
+          771982,
+          820109,
+          743954,
+          800922,
+          773663,
+          791498,
+          781774,
+          775390
+        ]
+      },
+      "baseline_stability_failures": [],
+      "o3_comparison": {
+        "samples": 21,
+        "lower_bound_ppm": 3002469,
+        "median_ppm": 3147937,
+        "upper_bound_ppm": 3248506,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 12863,
+        "clang_half_shift_ppm": 29842,
+        "ratio_half_shift_ppm": 3061,
+        "ratios_ppm": [
+          3295577,
+          2983743,
+          3002469,
+          2882906,
+          3289280,
+          3147937,
+          3167310,
+          2959656,
+          3248506,
+          3266123,
+          3094481,
+          3279219,
+          3224780,
+          2758228,
+          3304353,
+          3106514,
+          2913665,
+          3177007,
+          2718825,
+          3044062,
+          3265102
+        ]
+      },
+      "parity_failures": [
+        "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+        "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+      ]
+    }
+  ]
+}

@@ -42,5 +42,16 @@ Les preuves d’identité des exécutables distinguent ces contributions.
 La [matrice native](https://github.com/Matanek/Silex/actions/runs/34655625766)
 passe ses six jobs sur le SHA exact ; journaux et identifiants joints.
 La [mesure Intel](https://github.com/Matanek/Silex/actions/runs/34655627073)
-reste en cours.
+est terminée sur Intel i7-8700B physique, macOS 15.7.9, Clang 17.
+Six échauffements et 21 rotations sont stationnaires pour les trois cas.
+Arithmetic est neutre : ratio après/avant 1,017715, intervalle 0,993129..1,037888.
+Objects passe de 22,925 à 17,676 ms : ratio 0,771044, intervalle
+0,758618..0,786877, soit 22,90 % de gain. Flocking passe de 1790,500 à
+1442,295 ms : ratio 0,798774, intervalle 0,781774..0,813916, soit 20,12 %.
+Les ratios Silex/Clang -O3 restent 1,262750, 3,789117 et 3,147937 : la parité
+est rouge sur les trois cas. Les régressions 55/8/64/43 passent.
+
+Les 15 exécutables de l’artefact `10285447351` ont été vérifiés contre le
+rapport ; ses 48 fichiers extraits sont conservés. SHA-256 du ZIP :
+`93a7261098f5788af1e41b75327f42cebb9337a319170129be8ab3399e5fb177`.
 La Part 03 demeure active.
