@@ -1,0 +1,753 @@
+struct @Input {
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .separation:float
+    var .vax:float
+    var .vay:float
+    var .wa:float
+    var .vbx:float
+    var .vby:float
+    var .wb:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+}
+
+struct @Prepared {
+    var .separation:float
+    var .normal_mass:float
+    var .tangent_mass:float
+    var .relative_velocity:float
+    var .rolling_mass:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+    var .bias_rate:float
+    var .mass_scale:float
+    var .impulse_scale:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .total:float
+}
+
+func @prepare(%0:@Input, %1:bool) -> @Prepared {
+entry:
+    %3:float = const 0
+    %4:float = const 0
+    %6:float = const 0
+    %29:float = const 0
+    %1790:float = copy %29
+    branch %1, bb1, bb2
+bb1:
+    %30:float = const 1
+    %1790:float = copy %30
+    jump bb2
+bb2:
+    %33:float = field %0, .separation
+    %34:float = field %0, .bx
+    %35:float = field %0, .ax
+    %36:float = sub %34, %35
+    %37:float = field %0, .nx
+    %38:float = mul %36, %37
+    %39:float = field %0, .by
+    %40:float = field %0, .ay
+    %41:float = sub %39, %40
+    %42:float = field %0, .ny
+    %43:float = mul %41, %42
+    %44:float = add %38, %43
+    %45:float = sub %33, %44
+    %76:float = mul %35, %42
+    %79:float = mul %40, %37
+    %80:float = sub %76, %79
+    %83:float = mul %34, %42
+    %86:float = mul %39, %37
+    %87:float = sub %83, %86
+    %88:float = field %0, .ma
+    %89:float = field %0, .mb
+    %90:float = add %88, %89
+    %91:float = field %0, .ia
+    %92:float = mul %91, %80
+    %93:float = mul %92, %80
+    %94:float = add %90, %93
+    %95:float = field %0, .ib
+    %96:float = mul %95, %87
+    %97:float = mul %96, %87
+    %98:float = add %94, %97
+    %99:float = const 0
+    %100:bool = gt %98, %99
+    %1791:float = copy %3
+    branch %100, bb3, bb4
+bb3:
+    %103:float = const 1
+    %104:float = div %103, %98
+    %1791:float = copy %104
+    jump bb4
+bb4:
+    %133:float = copy %42
+    %134:float = copy %37
+    %135:float = neg %134
+    %136:float = copy %35
+    %137:float = mul %136, %135
+    %138:float = copy %40
+    %139:float = mul %138, %133
+    %140:float = sub %137, %139
+    %141:float = copy %34
+    %142:float = mul %141, %135
+    %143:float = copy %39
+    %144:float = mul %143, %133
+    %145:float = sub %142, %144
+    %148:float = copy %90
+    %149:float = copy %91
+    %150:float = mul %149, %140
+    %151:float = mul %150, %140
+    %152:float = add %148, %151
+    %153:float = copy %95
+    %154:float = mul %153, %145
+    %155:float = mul %154, %145
+    %156:float = add %152, %155
+    %157:float = const 0
+    %158:bool = gt %156, %157
+    %1792:float = copy %4
+    branch %158, bb5, bb6
+bb5:
+    %161:float = const 1
+    %162:float = div %161, %156
+    %1792:float = copy %162
+    jump bb6
+bb6:
+    %191:float = copy %91
+    %192:float = copy %95
+    %193:float = add %191, %192
+    %194:float = const 0
+    %195:bool = gt %193, %194
+    %1793:float = copy %6
+    branch %195, bb7, bb8
+bb7:
+    %198:float = const 1
+    %199:float = div %198, %193
+    %1793:float = copy %199
+    jump bb8
+bb8:
+    %228:float = field %0, .vax
+    %230:float = field %0, .vay
+    %232:float = field %0, .wa
+    %234:float = field %0, .vbx
+    %236:float = field %0, .vby
+    %238:float = field %0, .wb
+    %240:float = copy %88
+    %241:float = const 0
+    %242:bool = eq %240, %241
+    %1794:float = copy %228
+    %1796:float = copy %232
+    %1795:float = copy %230
+    branch %242, bb9, bb10
+bb9:
+    %243:float = const 0
+    %244:float = const 0
+    %245:float = const 0
+    %1794:float = copy %243
+    %1796:float = copy %245
+    %1795:float = copy %244
+    jump bb10
+bb10:
+    %246:float = copy %89
+    %247:float = const 0
+    %248:bool = eq %246, %247
+    %1797:float = copy %234
+    %1799:float = copy %238
+    %1798:float = copy %236
+    branch %248, bb11, bb12
+bb11:
+    %249:float = const 0
+    %250:float = const 0
+    %251:float = const 0
+    %1797:float = copy %249
+    %1799:float = copy %251
+    %1798:float = copy %250
+    jump bb12
+bb12:
+    %254:float = copy %37
+    %255:float = copy %1797
+    %256:float = copy %1799
+    %257:float = copy %39
+    %258:float = mul %256, %257
+    %259:float = sub %255, %258
+    %260:float = copy %1794
+    %261:float = copy %1796
+    %262:float = copy %40
+    %263:float = mul %261, %262
+    %264:float = sub %260, %263
+    %265:float = sub %259, %264
+    %266:float = mul %254, %265
+    %267:float = copy %42
+    %268:float = copy %1798
+    %270:float = copy %34
+    %271:float = mul %256, %270
+    %272:float = add %268, %271
+    %273:float = copy %1795
+    %275:float = copy %35
+    %276:float = mul %261, %275
+    %277:float = add %273, %276
+    %278:float = sub %272, %277
+    %279:float = mul %267, %278
+    %280:float = add %266, %279
+    %311:float = copy %1790
+    %312:float = field %0, .normal
+    %313:float = mul %311, %312
+    %345:float = field %0, .tangent
+    %346:float = mul %311, %345
+    %378:float = field %0, .rolling
+    %379:float = mul %311, %378
+    %410:float = const 12
+    %441:float = const 0.75
+    %472:float = const 0.25
+    %501:float = copy %88
+    %502:float = const 0
+    %503:bool = eq %501, %502
+    branch %503, bb14, bb13
+bb13:
+    %505:float = copy %89
+    %506:float = const 0
+    %507:bool = eq %505, %506
+    %504:bool = copy %507
+    jump bb15
+bb14:
+    %504:bool = const true
+    jump bb15
+bb15:
+    %1800:float = copy %410
+    %1802:float = copy %472
+    %1801:float = copy %441
+    branch %504, bb16, bb17
+bb16:
+    %510:float = const 24
+    %541:float = const 0.875
+    %572:float = const 0.125
+    %1800:float = copy %510
+    %1802:float = copy %572
+    %1801:float = copy %541
+    jump bb17
+bb17:
+    %603:float = field %0, .friction
+    %634:float = field %0, .restitution
+    %665:float = field %0, .tangent_speed
+    %696:float = field %0, .rolling_resistance
+    %727:float = copy %37
+    %758:float = copy %42
+    %789:float = copy %35
+    %820:float = copy %40
+    %851:float = copy %34
+    %882:float = copy %39
+    %913:float = copy %88
+    %944:float = copy %89
+    %975:float = copy %91
+    %1006:float = copy %95
+    %1764:float = copy %45
+    %1765:float = copy %1791
+    %1766:float = copy %1792
+    %1767:float = copy %280
+    %1768:float = copy %1793
+    %1769:float = copy %313
+    %1770:float = copy %346
+    %1771:float = copy %379
+    %1772:float = copy %603
+    %1773:float = copy %634
+    %1774:float = copy %665
+    %1775:float = copy %696
+    %1776:float = copy %1800
+    %1777:float = copy %1801
+    %1778:float = copy %1802
+    %1779:float = copy %727
+    %1780:float = copy %758
+    %1781:float = copy %789
+    %1782:float = copy %820
+    %1783:float = copy %851
+    %1784:float = copy %882
+    %1785:float = copy %913
+    %1786:float = copy %944
+    %1787:float = copy %975
+    %1788:float = copy %1006
+    %1789:float = const 0
+    %1035:@Prepared = struct.init @Prepared(.separation=%1764, .normal_mass=%1765, .tangent_mass=%1766, .relative_velocity=%1767, .rolling_mass=%1768, .normal=%1769, .tangent=%1770, .rolling=%1771, .friction=%1772, .restitution=%1773, .tangent_speed=%1774, .rolling_resistance=%1775, .bias_rate=%1776, .mass_scale=%1777, .impulse_scale=%1778, .nx=%1779, .ny=%1780, .ax=%1781, .ay=%1782, .bx=%1783, .by=%1784, .ma=%1785, .mb=%1786, .ia=%1787, .ib=%1788, .total=%1789)
+    return %1035
+}
+
+func @observe(%0:@Prepared, %1:@Prepared) -> void {
+entry:
+    %132:float = field %0, .separation
+    %133:float = field %0, .normal_mass
+    %134:float = field %0, .tangent_mass
+    %135:float = field %0, .relative_velocity
+    %136:float = field %0, .rolling_mass
+    %137:float = field %0, .normal
+    %138:float = field %0, .tangent
+    %139:float = field %0, .rolling
+    %140:float = field %0, .friction
+    %141:float = field %0, .restitution
+    %142:float = field %0, .tangent_speed
+    %143:float = field %0, .rolling_resistance
+    %144:float = field %0, .bias_rate
+    %145:float = field %0, .mass_scale
+    %146:float = field %0, .impulse_scale
+    %147:float = field %0, .nx
+    %148:float = field %0, .ny
+    %149:float = field %0, .ax
+    %150:float = field %0, .ay
+    %151:float = field %0, .bx
+    %152:float = field %0, .by
+    %153:float = field %0, .ma
+    %154:float = field %0, .mb
+    %155:float = field %0, .ia
+    %156:float = field %0, .ib
+    %157:float = field %0, .total
+    %158:float = field %1, .separation
+    %159:float = field %1, .normal_mass
+    %160:float = field %1, .tangent_mass
+    %161:float = field %1, .relative_velocity
+    %162:float = field %1, .rolling_mass
+    %163:float = field %1, .normal
+    %164:float = field %1, .tangent
+    %165:float = field %1, .rolling
+    %166:float = field %1, .friction
+    %167:float = field %1, .restitution
+    %168:float = field %1, .tangent_speed
+    %169:float = field %1, .rolling_resistance
+    %170:float = field %1, .bias_rate
+    %171:float = field %1, .mass_scale
+    %172:float = field %1, .impulse_scale
+    %173:float = field %1, .nx
+    %174:float = field %1, .ny
+    %175:float = field %1, .ax
+    %176:float = field %1, .ay
+    %177:float = field %1, .bx
+    %178:float = field %1, .by
+    %179:float = field %1, .ma
+    %180:float = field %1, .mb
+    %181:float = field %1, .ia
+    %182:float = field %1, .ib
+    %183:float = field %1, .total
+    %6:bool = eq %132, %158
+    print %6
+    %11:bool = eq %133, %159
+    print %11
+    %16:bool = eq %134, %160
+    print %16
+    %21:bool = eq %135, %161
+    print %21
+    %26:bool = eq %136, %162
+    print %26
+    %31:bool = eq %137, %163
+    print %31
+    %36:bool = eq %138, %164
+    print %36
+    %41:bool = eq %139, %165
+    print %41
+    %46:bool = eq %140, %166
+    print %46
+    %51:bool = eq %141, %167
+    print %51
+    %56:bool = eq %142, %168
+    print %56
+    %61:bool = eq %143, %169
+    print %61
+    %66:bool = eq %144, %170
+    print %66
+    %71:bool = eq %145, %171
+    print %71
+    %76:bool = eq %146, %172
+    print %76
+    %81:bool = eq %147, %173
+    print %81
+    %86:bool = eq %148, %174
+    print %86
+    %91:bool = eq %149, %175
+    print %91
+    %96:bool = eq %150, %176
+    print %96
+    %101:bool = eq %151, %177
+    print %101
+    %106:bool = eq %152, %178
+    print %106
+    %111:bool = eq %153, %179
+    print %111
+    %116:bool = eq %154, %180
+    print %116
+    %121:bool = eq %155, %181
+    print %121
+    %126:bool = eq %156, %182
+    print %126
+    %131:bool = eq %157, %183
+    print %131
+    return
+}
+
+func @main() -> void {
+entry:
+    %0:float = const 1
+    %1:float = const 1
+    %2:float = const 1
+    %3:float = const 1
+    %4:float = const 0
+    %5:float = const 1
+    %6:float = const 1
+    %7:float = const 0
+    %9:float = const -1
+    %10:float = const 0
+    %11:float = const 0.25
+    %12:float = const 1
+    %13:float = const 2
+    %14:float = const 0.5
+    %15:float = const 3
+    %16:float = const 5
+    %18:float = const -0.25
+    %19:float = const 2
+    %21:float = const -1
+    %22:float = const 0.5
+    %23:float = const 0.75
+    %24:float = const 0.25
+    %26:float = const -0.5
+    %27:float = const 0.125
+    %28:@Input = struct.init @Input(.ma=%0, .mb=%1, .ia=%2, .ib=%3, .nx=%4, .ny=%5, .ax=%6, .ay=%7, .bx=%9, .by=%10, .separation=%11, .vax=%12, .vay=%13, .wa=%14, .vbx=%15, .vby=%16, .wb=%18, .normal=%19, .tangent=%21, .rolling=%22, .friction=%23, .restitution=%24, .tangent_speed=%26, .rolling_resistance=%27)
+    %60:bool = const true
+    %61:@Prepared = call @prepare(%28, %60)
+    %576:float = const 0.25
+    %577:float = const 0.25
+    %578:float = const 0.5
+    %579:float = const 2.75
+    %580:float = const 0.5
+    %581:float = const 2
+    %582:float = const -1
+    %583:float = const 0.5
+    %584:float = const 0.75
+    %585:float = const 0.25
+    %586:float = const -0.5
+    %587:float = const 0.125
+    %588:float = const 12
+    %589:float = const 0.75
+    %590:float = const 0.25
+    %591:float = const 0
+    %592:float = const 1
+    %593:float = const 1
+    %594:float = const 0
+    %595:float = const -1
+    %596:float = const 0
+    %597:float = const 1
+    %598:float = const 1
+    %599:float = const 1
+    %600:float = const 1
+    %601:float = const 0
+    %62:@Prepared = struct.init @Prepared(.separation=%576, .normal_mass=%577, .tangent_mass=%578, .relative_velocity=%579, .rolling_mass=%580, .normal=%581, .tangent=%582, .rolling=%583, .friction=%584, .restitution=%585, .tangent_speed=%586, .rolling_resistance=%587, .bias_rate=%588, .mass_scale=%589, .impulse_scale=%590, .nx=%591, .ny=%592, .ax=%593, .ay=%594, .bx=%595, .by=%596, .ma=%597, .mb=%598, .ia=%599, .ib=%600, .total=%601)
+    call @observe(%61, %62)
+    %628:float = const 1
+    %629:float = const 1
+    %630:float = const 1
+    %631:float = const 1
+    %632:float = const 0
+    %633:float = const 1
+    %634:float = const 1
+    %635:float = const 0
+    %636:float = const -1
+    %637:float = const 0
+    %638:float = const 0.25
+    %639:float = const 1
+    %640:float = const 2
+    %641:float = const 0.5
+    %642:float = const 3
+    %643:float = const 5
+    %644:float = const -0.25
+    %645:float = const 2
+    %646:float = const -1
+    %647:float = const 0.5
+    %648:float = const 0.75
+    %649:float = const 0.25
+    %650:float = const -0.5
+    %651:float = const 0.125
+    %156:@Input = struct.init @Input(.ma=%628, .mb=%629, .ia=%630, .ib=%631, .nx=%632, .ny=%633, .ax=%634, .ay=%635, .bx=%636, .by=%637, .separation=%638, .vax=%639, .vay=%640, .wa=%641, .vbx=%642, .vby=%643, .wb=%644, .normal=%645, .tangent=%646, .rolling=%647, .friction=%648, .restitution=%649, .tangent_speed=%650, .rolling_resistance=%651)
+    %157:bool = const false
+    %158:@Prepared = call @prepare(%156, %157)
+    %652:float = const 0.25
+    %653:float = const 0.25
+    %654:float = const 0.5
+    %655:float = const 2.75
+    %656:float = const 0.5
+    %657:float = const 0
+    %658:float = const 0
+    %659:float = const 0
+    %660:float = const 0.75
+    %661:float = const 0.25
+    %662:float = const -0.5
+    %663:float = const 0.125
+    %664:float = const 12
+    %665:float = const 0.75
+    %666:float = const 0.25
+    %667:float = const 0
+    %668:float = const 1
+    %669:float = const 1
+    %670:float = const 0
+    %671:float = const -1
+    %672:float = const 0
+    %673:float = const 1
+    %674:float = const 1
+    %675:float = const 1
+    %676:float = const 1
+    %677:float = const 0
+    %159:@Prepared = struct.init @Prepared(.separation=%652, .normal_mass=%653, .tangent_mass=%654, .relative_velocity=%655, .rolling_mass=%656, .normal=%657, .tangent=%658, .rolling=%659, .friction=%660, .restitution=%661, .tangent_speed=%662, .rolling_resistance=%663, .bias_rate=%664, .mass_scale=%665, .impulse_scale=%666, .nx=%667, .ny=%668, .ax=%669, .ay=%670, .bx=%671, .by=%672, .ma=%673, .mb=%674, .ia=%675, .ib=%676, .total=%677)
+    call @observe(%158, %159)
+    %189:float = field %61, .normal
+    %190:float = const 2
+    %191:bool = eq %189, %190
+    print %191
+    %192:float = const 0
+    %193:float = const 1
+    %194:float = const 0
+    %195:float = const 1
+    %196:float = const 0
+    %197:float = const 1
+    %198:float = const 1
+    %199:float = const 0
+    %201:float = const -1
+    %202:float = const 0
+    %203:float = const 0.25
+    %204:float = const 1
+    %205:float = const 2
+    %206:float = const 0.5
+    %207:float = const 3
+    %208:float = const 5
+    %210:float = const -0.25
+    %211:float = const 2
+    %213:float = const -1
+    %214:float = const 0.5
+    %215:float = const 0.75
+    %216:float = const 0.25
+    %218:float = const -0.5
+    %219:float = const 0.125
+    %220:@Input = struct.init @Input(.ma=%192, .mb=%193, .ia=%194, .ib=%195, .nx=%196, .ny=%197, .ax=%198, .ay=%199, .bx=%201, .by=%202, .separation=%203, .vax=%204, .vay=%205, .wa=%206, .vbx=%207, .vby=%208, .wb=%210, .normal=%211, .tangent=%213, .rolling=%214, .friction=%215, .restitution=%216, .tangent_speed=%218, .rolling_resistance=%219)
+    %252:bool = const true
+    %253:@Prepared = call @prepare(%220, %252)
+    %702:float = const 0.25
+    %703:float = const 0.5
+    %704:float = const 1
+    %705:float = const 5.25
+    %706:float = const 1
+    %707:float = const 2
+    %708:float = const -1
+    %709:float = const 0.5
+    %710:float = const 0.75
+    %711:float = const 0.25
+    %712:float = const -0.5
+    %713:float = const 0.125
+    %714:float = const 24
+    %715:float = const 0.875
+    %716:float = const 0.125
+    %717:float = const 0
+    %718:float = const 1
+    %719:float = const 1
+    %720:float = const 0
+    %721:float = const -1
+    %722:float = const 0
+    %723:float = const 0
+    %724:float = const 1
+    %725:float = const 0
+    %726:float = const 1
+    %727:float = const 0
+    %254:@Prepared = struct.init @Prepared(.separation=%702, .normal_mass=%703, .tangent_mass=%704, .relative_velocity=%705, .rolling_mass=%706, .normal=%707, .tangent=%708, .rolling=%709, .friction=%710, .restitution=%711, .tangent_speed=%712, .rolling_resistance=%713, .bias_rate=%714, .mass_scale=%715, .impulse_scale=%716, .nx=%717, .ny=%718, .ax=%719, .ay=%720, .bx=%721, .by=%722, .ma=%723, .mb=%724, .ia=%725, .ib=%726, .total=%727)
+    call @observe(%253, %254)
+    %754:float = const 0
+    %755:float = const 1
+    %756:float = const 0
+    %757:float = const 1
+    %758:float = const 0
+    %759:float = const 1
+    %760:float = const 1
+    %761:float = const 0
+    %762:float = const -1
+    %763:float = const 0
+    %764:float = const 0.25
+    %765:float = const 1
+    %766:float = const 2
+    %767:float = const 0.5
+    %768:float = const 3
+    %769:float = const 5
+    %770:float = const -0.25
+    %771:float = const 2
+    %772:float = const -1
+    %773:float = const 0.5
+    %774:float = const 0.75
+    %775:float = const 0.25
+    %776:float = const -0.5
+    %777:float = const 0.125
+    %348:@Input = struct.init @Input(.ma=%754, .mb=%755, .ia=%756, .ib=%757, .nx=%758, .ny=%759, .ax=%760, .ay=%761, .bx=%762, .by=%763, .separation=%764, .vax=%765, .vay=%766, .wa=%767, .vbx=%768, .vby=%769, .wb=%770, .normal=%771, .tangent=%772, .rolling=%773, .friction=%774, .restitution=%775, .tangent_speed=%776, .rolling_resistance=%777)
+    %349:bool = const false
+    %350:@Prepared = call @prepare(%348, %349)
+    %778:float = const 0.25
+    %779:float = const 0.5
+    %780:float = const 1
+    %781:float = const 5.25
+    %782:float = const 1
+    %783:float = const 0
+    %784:float = const 0
+    %785:float = const 0
+    %786:float = const 0.75
+    %787:float = const 0.25
+    %788:float = const -0.5
+    %789:float = const 0.125
+    %790:float = const 24
+    %791:float = const 0.875
+    %792:float = const 0.125
+    %793:float = const 0
+    %794:float = const 1
+    %795:float = const 1
+    %796:float = const 0
+    %797:float = const -1
+    %798:float = const 0
+    %799:float = const 0
+    %800:float = const 1
+    %801:float = const 0
+    %802:float = const 1
+    %803:float = const 0
+    %351:@Prepared = struct.init @Prepared(.separation=%778, .normal_mass=%779, .tangent_mass=%780, .relative_velocity=%781, .rolling_mass=%782, .normal=%783, .tangent=%784, .rolling=%785, .friction=%786, .restitution=%787, .tangent_speed=%788, .rolling_resistance=%789, .bias_rate=%790, .mass_scale=%791, .impulse_scale=%792, .nx=%793, .ny=%794, .ax=%795, .ay=%796, .bx=%797, .by=%798, .ma=%799, .mb=%800, .ia=%801, .ib=%802, .total=%803)
+    call @observe(%350, %351)
+    %381:float = field %253, .normal
+    %382:float = const 2
+    %383:bool = eq %381, %382
+    print %383
+    %384:float = const 0
+    %385:float = const 0
+    %386:float = const 0
+    %387:float = const 0
+    %388:float = const 0
+    %389:float = const 1
+    %390:float = const 1
+    %391:float = const 0
+    %393:float = const -1
+    %394:float = const 0
+    %395:float = const 0.25
+    %396:float = const 1
+    %397:float = const 2
+    %398:float = const 0.5
+    %399:float = const 3
+    %400:float = const 5
+    %402:float = const -0.25
+    %403:float = const 2
+    %405:float = const -1
+    %406:float = const 0.5
+    %407:float = const 0.75
+    %408:float = const 0.25
+    %410:float = const -0.5
+    %411:float = const 0.125
+    %412:@Input = struct.init @Input(.ma=%384, .mb=%385, .ia=%386, .ib=%387, .nx=%388, .ny=%389, .ax=%390, .ay=%391, .bx=%393, .by=%394, .separation=%395, .vax=%396, .vay=%397, .wa=%398, .vbx=%399, .vby=%400, .wb=%402, .normal=%403, .tangent=%405, .rolling=%406, .friction=%407, .restitution=%408, .tangent_speed=%410, .rolling_resistance=%411)
+    %444:bool = const true
+    %445:@Prepared = call @prepare(%412, %444)
+    %828:float = const 0.25
+    %829:float = const 0
+    %830:float = const 0
+    %831:float = const 0
+    %832:float = const 0
+    %833:float = const 2
+    %834:float = const -1
+    %835:float = const 0.5
+    %836:float = const 0.75
+    %837:float = const 0.25
+    %838:float = const -0.5
+    %839:float = const 0.125
+    %840:float = const 24
+    %841:float = const 0.875
+    %842:float = const 0.125
+    %843:float = const 0
+    %844:float = const 1
+    %845:float = const 1
+    %846:float = const 0
+    %847:float = const -1
+    %848:float = const 0
+    %849:float = const 0
+    %850:float = const 0
+    %851:float = const 0
+    %852:float = const 0
+    %853:float = const 0
+    %446:@Prepared = struct.init @Prepared(.separation=%828, .normal_mass=%829, .tangent_mass=%830, .relative_velocity=%831, .rolling_mass=%832, .normal=%833, .tangent=%834, .rolling=%835, .friction=%836, .restitution=%837, .tangent_speed=%838, .rolling_resistance=%839, .bias_rate=%840, .mass_scale=%841, .impulse_scale=%842, .nx=%843, .ny=%844, .ax=%845, .ay=%846, .bx=%847, .by=%848, .ma=%849, .mb=%850, .ia=%851, .ib=%852, .total=%853)
+    call @observe(%445, %446)
+    %880:float = const 0
+    %881:float = const 0
+    %882:float = const 0
+    %883:float = const 0
+    %884:float = const 0
+    %885:float = const 1
+    %886:float = const 1
+    %887:float = const 0
+    %888:float = const -1
+    %889:float = const 0
+    %890:float = const 0.25
+    %891:float = const 1
+    %892:float = const 2
+    %893:float = const 0.5
+    %894:float = const 3
+    %895:float = const 5
+    %896:float = const -0.25
+    %897:float = const 2
+    %898:float = const -1
+    %899:float = const 0.5
+    %900:float = const 0.75
+    %901:float = const 0.25
+    %902:float = const -0.5
+    %903:float = const 0.125
+    %540:@Input = struct.init @Input(.ma=%880, .mb=%881, .ia=%882, .ib=%883, .nx=%884, .ny=%885, .ax=%886, .ay=%887, .bx=%888, .by=%889, .separation=%890, .vax=%891, .vay=%892, .wa=%893, .vbx=%894, .vby=%895, .wb=%896, .normal=%897, .tangent=%898, .rolling=%899, .friction=%900, .restitution=%901, .tangent_speed=%902, .rolling_resistance=%903)
+    %541:bool = const false
+    %542:@Prepared = call @prepare(%540, %541)
+    %904:float = const 0.25
+    %905:float = const 0
+    %906:float = const 0
+    %907:float = const 0
+    %908:float = const 0
+    %909:float = const 0
+    %910:float = const 0
+    %911:float = const 0
+    %912:float = const 0.75
+    %913:float = const 0.25
+    %914:float = const -0.5
+    %915:float = const 0.125
+    %916:float = const 24
+    %917:float = const 0.875
+    %918:float = const 0.125
+    %919:float = const 0
+    %920:float = const 1
+    %921:float = const 1
+    %922:float = const 0
+    %923:float = const -1
+    %924:float = const 0
+    %925:float = const 0
+    %926:float = const 0
+    %927:float = const 0
+    %928:float = const 0
+    %929:float = const 0
+    %543:@Prepared = struct.init @Prepared(.separation=%904, .normal_mass=%905, .tangent_mass=%906, .relative_velocity=%907, .rolling_mass=%908, .normal=%909, .tangent=%910, .rolling=%911, .friction=%912, .restitution=%913, .tangent_speed=%914, .rolling_resistance=%915, .bias_rate=%916, .mass_scale=%917, .impulse_scale=%918, .nx=%919, .ny=%920, .ax=%921, .ay=%922, .bx=%923, .by=%924, .ma=%925, .mb=%926, .ia=%927, .ib=%928, .total=%929)
+    call @observe(%542, %543)
+    %573:float = field %445, .normal
+    %574:float = const 2
+    %575:bool = eq %573, %574
+    print %575
+    return
+}

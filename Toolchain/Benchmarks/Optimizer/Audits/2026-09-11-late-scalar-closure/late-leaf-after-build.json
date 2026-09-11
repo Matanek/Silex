@@ -1,0 +1,16 @@
+{
+  "command": [
+    "Silex/Toolchain/zig-out/bin/silex",
+    "compile",
+    "/private/tmp/silex-part02-evidence/LateLeafLoop.sx",
+    "--release",
+    "--nocache",
+    "-o",
+    "/private/tmp/silex-part02-evidence/late-leaf-after"
+  ],
+  "compiler_sha256": "662d75fd5a82dfd15ba179c052084ca44b41aed04524db097a69313dc3c733e1",
+  "source_sha256": "39ea409406c58b6d5924573883fd44db2475e2cd5670d0b7505e5036a5d3f013",
+  "binary_sha256": "71db757a67758fc8f2c564f1a899f61373121ae79e8fa66e88ef09cdfab2bbff",
+  "exit": 0,
+  "stdout": "894\n"
+}

@@ -195,7 +195,7 @@
       "open_questions": [
         "Local primitive storage elimination and stable value dominance are covered; address formation, mutation, resources and unknown calls remain conservative barriers."
       ],
-      "next_experiment": "Qualify late scalar helper closure separately from alias-sensitive reads and the previously rejected reference expansion.",
+      "next_experiment": "Late scalar leaf closure is now covered with a causal disable test; qualify target realization without broadening alias-sensitive reference expansion.",
       "owner": "optimizer",
       "targets": [
         "arm64",
@@ -292,7 +292,8 @@
       "positive_cases": [
         "Regressions/PureMathReferenceInlining.sx",
         "Regressions/HotReferenceLeafClosure.sx",
-        "DampedIntegration.sx"
+        "DampedIntegration.sx",
+        "Regressions/LateScalarClosure.sx"
       ],
       "negative_cases": [
         "Regressions/CallEffectsInlining.sx",
@@ -324,7 +325,7 @@
       "open_questions": [
         "Indirect calls and captured functions have no raw LLVM bridge; instruction count alone failed on reference closure."
       ],
-      "next_experiment": "Reduce Preparation/Integration calls to standalone positive/negative closure probes and inspect target expansion.",
+      "next_experiment": "The sealed late scalar leaf improves its ARM64 loop from 150.146 to 61.366 ms; full preparation direct expansion regresses. Qualify unchanged consumers and physical X64 without overriding the existing cost rules.",
       "owner": "optimizer",
       "targets": [
         "arm64",
