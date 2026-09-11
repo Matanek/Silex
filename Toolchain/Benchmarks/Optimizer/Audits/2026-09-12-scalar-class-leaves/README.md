@@ -47,4 +47,17 @@ et l’oracle cumulatif reste vert.
 The native matrix run 34657769771 passed all six executed jobs on the exact
 6b3f302 candidate: Linux X64/ARM64, macOS X64, Windows X64/ARM64 and the
 Windows ARM64 bootstrap. Job logs are decoded connector text with LF line
-endings. The separate physical Intel timing campaign remains pending.
+endings. The separate physical Intel timing campaign is described below.
+
+Physical Intel run 34657771096, job 103453773111, completed on the exact
+6b3f302 candidate against 737fc8c. The 56 fixed cases, eight generated cases,
+64 integer failures and 43 numeric conversions passed. The archive digest
+was verified against GitHub, as were all 15 campaign executable hashes.
+The same physical Core i7-8700B, Darwin 24.6.0, Clang 17, six warmups and
+21 paired rotations were used. Objects decreased from 22.522685 to 19.027695 ms
+(paired ratio 0.860464, interval 0.824386..0.865611), but its baseline dispersion
+exceeds the unchanged threshold: this is not a qualified speedup. Arithmetic
+is likewise unstable and its executable is unchanged. Flocking is unchanged
+and stationary: paired ratio 0.971048 (0.953645..1.028383), a neutral result.
+The candidate/O3 slot-layout ratios remain 1.224633, 2.687758 and 3.058810;
+all parity gates remain red. The Spec Part remains active.
