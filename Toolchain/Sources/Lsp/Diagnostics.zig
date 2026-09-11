@@ -3,6 +3,13 @@ const Frontend = @import("../Frontend.zig");
 const Protocol = @import("Protocol.zig");
 const Types = @import("Types.zig");
 
+pub fn invalidSourcePath(allocator: std.mem.Allocator, path: []const u8) !Types.Diagnostic {
+    return .{
+        .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 0 } },
+        .message = try std.fmt.allocPrint(allocator, "source path '{s}' does not form a valid module name; use letters, digits and '_' in each segment, starting with a letter or '_'", .{path}),
+    };
+}
+
 pub fn analyze(
     allocator: std.mem.Allocator,
     source: []const u8,

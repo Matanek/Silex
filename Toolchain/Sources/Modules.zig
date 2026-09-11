@@ -118,6 +118,33 @@ pub fn discoverOwnedExcludingAs(
     excluded_roots: []const []const u8,
     origin: Origin,
 ) Error!Index {
+    return discoverSources(allocator, io, root_path, prefix, owner, excluded_roots, origin, false);
+}
+
+/// Keep usable modules available while an editor diagnoses invalid source paths.
+/// Compilation retains strict discovery through discoverOwnedExcludingAs.
+pub fn discoverForEditor(
+    allocator: Allocator,
+    io: Io,
+    root_path: []const u8,
+    prefix: ?[]const u8,
+    owner: usize,
+    excluded_roots: []const []const u8,
+    origin: Origin,
+) Error!Index {
+    return discoverSources(allocator, io, root_path, prefix, owner, excluded_roots, origin, true);
+}
+
+fn discoverSources(
+    allocator: Allocator,
+    io: Io,
+    root_path: []const u8,
+    prefix: ?[]const u8,
+    owner: usize,
+    excluded_roots: []const []const u8,
+    origin: Origin,
+    recover_invalid_paths: bool,
+) Error!Index {
     var root = try Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true });
     defer root.close(io);
 
@@ -139,17 +166,11 @@ pub fn discoverOwnedExcludingAs(
             try std.fs.path.join(allocator, &.{ root_path, relative_path });
         if (insideAny(full_path, excluded_roots)) continue;
 
-        const relative_name = try relativeModuleName(allocator, relative_path);
+        const module_name = sourceModuleName(allocator, relative_path, prefix) catch |err| switch (err) {
+            error.InvalidModulePath => if (recover_invalid_paths) continue else return err,
+            else => return err,
+        };
         const relative_directory = try moduleDirectoryName(allocator, relative_path);
-        const module_name = if (prefix) |name|
-            if (relative_name.len == 0)
-                try allocator.dupe(u8, name)
-            else
-                try std.fmt.allocPrint(allocator, "{s}.{s}", .{ name, relative_name })
-        else if (relative_name.len != 0)
-            relative_name
-        else
-            return error.InvalidModulePath;
         const local_prefix = if (prefix) |name|
             if (relative_directory.len == 0)
                 try allocator.dupe(u8, name)
@@ -256,6 +277,20 @@ pub fn moduleName(allocator: Allocator, relative_path: []const u8) Error![]const
     const name = try relativeModuleName(allocator, relative_path);
     if (name.len == 0) return error.InvalidModulePath;
     return name;
+}
+
+/// Resolve both the filename and its containing module, including root atoms.
+pub fn sourceModuleName(allocator: Allocator, relative_path: []const u8, prefix: ?[]const u8) Error![]const u8 {
+    const relative_name = try relativeModuleName(allocator, relative_path);
+    _ = try moduleDirectoryName(allocator, relative_path);
+    if (prefix) |name| {
+        return if (relative_name.len == 0)
+            allocator.dupe(u8, name)
+        else
+            std.fmt.allocPrint(allocator, "{s}.{s}", .{ name, relative_name });
+    }
+    if (relative_name.len == 0) return error.InvalidModulePath;
+    return relative_name;
 }
 
 pub fn moduleDirectoryName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
@@ -412,6 +447,29 @@ test "reject flat and atomized representations of the same module" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GPU/@module.sx", .data = "public func second() {}" });
     const root_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     try std.testing.expectError(error.DuplicateModule, discover(allocator, std.testing.io, root_path));
+    try std.testing.expectError(error.DuplicateModule, discoverForEditor(allocator, std.testing.io, root_path, null, 0, &.{}, .portable));
+}
+
+test "editor discovery isolates invalid source paths while compiler discovery stays strict" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    for ([_][]const u8{ "Test-01.sx", "Test_01.sx", "Test.Nested.sx", "Bad-Dir/Value.sx", "Math/@bad-name.sx", "Math/@Value.sx" }) |path| {
+        if (std.fs.path.dirname(path)) |directory| try temporary.dir.createDirPath(std.testing.io, directory);
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = path, .data = "" });
+    }
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    try std.testing.expectError(error.InvalidModulePath, discover(allocator, std.testing.io, root));
+    const recovered = try discoverForEditor(allocator, std.testing.io, root, null, 0, &.{}, .portable);
+    try std.testing.expectEqual(@as(usize, 3), recovered.providers.len);
+    try std.testing.expectEqualStrings("Math", recovered.providers[0].name);
+    try std.testing.expectEqualStrings("Test.Nested", recovered.providers[1].name);
+    try std.testing.expectEqualStrings("Test_01", recovered.providers[2].name);
+    try std.testing.expectEqualStrings("GFX", try sourceModuleName(allocator, "@Module.sx", "GFX"));
+    try std.testing.expectError(error.InvalidModulePath, sourceModuleName(allocator, "@Module.sx", null));
+    try std.testing.expectError(error.InvalidModulePath, sourceModuleName(allocator, "Bad-Dir/@Value.sx", "GFX"));
 }
 
 test "discover modules deterministically and skip infrastructure" {

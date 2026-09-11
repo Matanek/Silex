@@ -4,6 +4,7 @@ const Diagnostics = @import("Diagnostics.zig");
 const DocumentColors = @import("DocumentColors.zig");
 const Navigation = @import("Navigation.zig");
 const Protocol = @import("Protocol.zig");
+const ProjectIndex = @import("ProjectIndex.zig");
 const Types = @import("Types.zig");
 const Workspace = @import("Workspace.zig");
 const TargetModule = @import("../Target.zig");
@@ -209,6 +210,7 @@ pub const Server = struct {
                 (std.mem.eql(u8, trigger_character, " ") or std.mem.eql(u8, trigger_character, ")")) and
                 !completing_try_error and
                 !completing_try_alternative and
+                decision.kind != .use_path and
                 parameters.len == 0)
             {
                 return try self.reply(allocator, id, .{
@@ -341,12 +343,29 @@ pub const Server = struct {
             uri,
             source,
         ) catch false;
-        const diagnostics = try Diagnostics.analyze(
+        const source_diagnostics = try Diagnostics.analyze(
             allocator,
             source,
             self.position_encoding,
             has_project_context,
         );
+        const invalid_path = ProjectIndex.invalidSourcePath(
+            allocator,
+            self.io,
+            self.global_packages_root,
+            self.target,
+            self.workspace_root_uri,
+            uri,
+        ) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => null,
+        };
+        const diagnostics = if (invalid_path) |path| blk: {
+            const combined = try allocator.alloc(Types.Diagnostic, source_diagnostics.len + 1);
+            combined[0] = try Diagnostics.invalidSourcePath(allocator, path);
+            @memcpy(combined[1..], source_diagnostics);
+            break :blk combined;
+        } else source_diagnostics;
         return self.notification(allocator, "textDocument/publishDiagnostics", .{
             .uri = uri,
             .version = self.documentVersion(uri).?,
