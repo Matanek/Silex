@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Silex = @import("silex_optimizer_api");
 const Admission = @import("Admission.zig");
 const Advisor = @import("Advisor.zig");
@@ -64,6 +65,14 @@ const usage =
 
 const output_directory = ".zig-cache/optimizer-oracle";
 const generated_source_directory = output_directory ++ "/SilexOptimizerOracle";
+
+const TimingHostProfile = struct {
+    os: []const u8,
+    process_arch: []const u8,
+    hardware_arch: []const u8,
+    cpu_model: []const u8,
+    translated: bool,
+};
 
 pub fn main(init: std.process.Init) u8 {
     return run(init) catch |err| {
@@ -1046,8 +1055,19 @@ fn compareCorpus(
     enforce_parity: bool,
 ) !void {
     try std.Io.Dir.cwd().createDirPath(io, output_directory);
+    const host_profile = try timingHostProfile(allocator, io);
+    if (enforce_parity and host_profile.translated) return error.TranslatedTimingHost;
+    const evidence_mode = if (enforce_parity) "qualified" else "diagnostic";
     try Report.heading(io, allocator, "Silex Release versus LLVM -O3");
     try Report.line(io, allocator, "artifacts: {s}", .{output_directory});
+    try Report.line(io, allocator, "timing host: {s} {s} on {s}, CPU {s}, translated={any}, mode={s}", .{
+        host_profile.os,
+        host_profile.process_arch,
+        host_profile.hardware_arch,
+        host_profile.cpu_model,
+        host_profile.translated,
+        evidence_mode,
+    });
     var machine_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer machine_report.deinit();
     try machine_report.writer.writeAll(
@@ -1056,7 +1076,12 @@ fn compareCorpus(
     var parity_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer parity_report.deinit();
     try parity_report.writer.writeAll(
-        "workload\tsource_sha256\tsilex_binary_sha256\tllvm_binary_sha256\ttarget\tcpu\tsamples\tbatch\tlower_bound_ppm\tmedian_ppm\tupper_bound_ppm\tconfidence_ppm\n",
+        "workload\tsource_sha256\tsilex_binary_sha256\tllvm_binary_sha256\ttarget\tcpu\tevidence_mode\tsamples\tbatch\tlower_bound_ppm\tmedian_ppm\tupper_bound_ppm\tconfidence_ppm\tleft_half_shift_ppm\tright_half_shift_ppm\tratio_half_shift_ppm\n",
+    );
+    var observation_report: std.Io.Writer.Allocating = .init(allocator);
+    errdefer observation_report.deinit();
+    try observation_report.writer.writeAll(
+        "workload\tsource_sha256\tevidence_mode\tsample_index\tfirst_backend\tsilex_ns\tllvm_ns\tratio_ppm\n",
     );
     var opportunity_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer opportunity_report.deinit();
@@ -1211,6 +1236,7 @@ fn compareCorpus(
                 };
             }
         };
+        const stationarity = try Benchmark.stationarity(measurements);
         try Report.benchmark(io, allocator, "Silex Release", measurements.left);
         try Report.benchmark(io, allocator, "LLVM -O3", measurements.right);
         const relative_percent: u64 = if (measurements.right.median_ns == 0)
@@ -1228,20 +1254,42 @@ fn compareCorpus(
                 measurements.relative.confidence_ppm,
             },
         );
-        try parity_report.writer.print("{s}\t{s}\t{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{
+        try Report.line(
+            io,
+            allocator,
+            "  half-window shifts: Silex {d} ppm, LLVM {d} ppm, ratio {d} ppm (qualified maximum {d} ppm)",
+            .{
+                stationarity.left_half_shift_ppm,
+                stationarity.right_half_shift_ppm,
+                stationarity.ratio_half_shift_ppm,
+                Parity.maximum_half_window_shift_ppm,
+            },
+        );
+        try parity_report.writer.print("{s}\t{s}\t{s}\t{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{
             name,
             &source_hash,
             native_hash,
             llvm_hash,
             oracle.target_triple,
             oracle.cpu,
+            evidence_mode,
             measurements.relative.samples,
             measurements.left.batch,
             measurements.relative.lower_bound_ppm,
             measurements.relative.median_ppm,
             measurements.relative.upper_bound_ppm,
             measurements.relative.confidence_ppm,
+            stationarity.left_half_shift_ppm,
+            stationarity.right_half_shift_ppm,
+            stationarity.ratio_half_shift_ppm,
         });
+        try appendObservationRows(
+            &observation_report.writer,
+            name,
+            &source_hash,
+            evidence_mode,
+            measurements.observations,
+        );
         if (measurements.left.spreadPpm() > 200_000 or measurements.right.spreadPpm() > 200_000) {
             try Report.line(io, allocator, "  stability: noisy sample set; treat timing as diagnostic", .{});
         }
@@ -1280,6 +1328,12 @@ fn compareCorpus(
     const parity_path = output_directory ++ "/parity.tsv";
     try writeFile(io, parity_path, try parity_report.toOwnedSlice());
     try Report.line(io, allocator, "parity report: {s}", .{parity_path});
+    const observation_path = output_directory ++ "/timing-observations.tsv";
+    try writeFile(io, observation_path, try observation_report.toOwnedSlice());
+    try Report.line(io, allocator, "ordered timing observations: {s}", .{observation_path});
+    const profile_path = output_directory ++ "/timing-profile.tsv";
+    try writeTimingProfile(io, allocator, profile_path, evidence_mode, host_profile, oracle);
+    try Report.line(io, allocator, "timing profile: {s}", .{profile_path});
     const opportunities_path = output_directory ++ "/opportunities.tsv";
     try writeFile(io, opportunities_path, try opportunity_report.toOwnedSlice());
     try reportOpportunitySummary(io, allocator, opportunity_summary);
@@ -1344,6 +1398,115 @@ fn priority(finding_score: u8) []const u8 {
     if (finding_score >= 80) return "high";
     if (finding_score >= 70) return "medium";
     return "low";
+}
+
+fn appendObservationRows(
+    writer: *std.Io.Writer,
+    workload: []const u8,
+    source_hash: []const u8,
+    evidence_mode: []const u8,
+    observations: []const Benchmark.Observation,
+) !void {
+    for (observations) |observation| try writer.print(
+        "{s}\t{s}\t{s}\t{d}\t{s}\t{d}\t{d}\t{d}\n",
+        .{
+            workload,
+            source_hash,
+            evidence_mode,
+            observation.index,
+            @tagName(observation.first),
+            observation.left_ns,
+            observation.right_ns,
+            try observation.ratioPpm(),
+        },
+    );
+}
+
+fn writeTimingProfile(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    evidence_mode: []const u8,
+    profile: TimingHostProfile,
+    oracle: Registry.Oracle,
+) !void {
+    const contents = try std.fmt.allocPrint(
+        allocator,
+        "evidence_mode\thost_os\tprocess_arch\thardware_arch\tcpu_model\ttranslated\toracle_target\toracle_cpu\toracle_revision\toracle_executable\n{s}\t{s}\t{s}\t{s}\t{s}\t{any}\t{s}\t{s}\t{s}\t{s}\n",
+        .{
+            evidence_mode,
+            profile.os,
+            profile.process_arch,
+            profile.hardware_arch,
+            profile.cpu_model,
+            profile.translated,
+            oracle.target_triple,
+            oracle.cpu,
+            oracle.source_revision,
+            oracle.executable,
+        },
+    );
+    try writeFile(io, path, contents);
+}
+
+fn timingHostProfile(allocator: std.mem.Allocator, io: std.Io) !TimingHostProfile {
+    const uname_arch = try optionalCommandOutput(allocator, io, &.{ "uname", "-m" });
+    const cpu_model = switch (builtin.os.tag) {
+        .macos => try optionalCommandOutput(allocator, io, &.{ "sysctl", "-n", "machdep.cpu.brand_string" }),
+        .linux => try linuxCpuModel(allocator, io),
+        else => null,
+    };
+    const translated_output = if (builtin.os.tag == .macos)
+        try optionalCommandOutput(allocator, io, &.{ "sysctl", "-n", "sysctl.proc_translated" })
+    else
+        null;
+    return .{
+        .os = @tagName(builtin.os.tag),
+        .process_arch = @tagName(builtin.cpu.arch),
+        .hardware_arch = uname_arch orelse @tagName(builtin.cpu.arch),
+        .cpu_model = cpu_model orelse builtin.cpu.model.name,
+        .translated = if (translated_output) |value| std.mem.eql(u8, value, "1") else false,
+    };
+}
+
+fn optionalCommandOutput(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+) !?[]const u8 {
+    const result = std.process.run(allocator, io, .{
+        .argv = argv,
+        .stdout_limit = .limited(16 * 1024),
+        .stderr_limit = .limited(16 * 1024),
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    const success = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!success) return null;
+    const trimmed = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    return try allocator.dupe(u8, trimmed);
+}
+
+fn linuxCpuModel(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
+    const contents = std.Io.Dir.cwd().readFileAlloc(
+        io,
+        "/proc/cpuinfo",
+        allocator,
+        .limited(1024 * 1024),
+    ) catch return null;
+    var lines = std.mem.splitScalar(u8, contents, '\n');
+    while (lines.next()) |line| {
+        const separator = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const key = std.mem.trim(u8, line[0..separator], " \t");
+        if (!std.mem.eql(u8, key, "model name") and !std.mem.eql(u8, key, "Hardware")) continue;
+        const value = std.mem.trim(u8, line[separator + 1 ..], " \t\r");
+        if (value.len != 0) return try allocator.dupe(u8, value);
+    }
+    return null;
 }
 
 fn appendMachineRow(

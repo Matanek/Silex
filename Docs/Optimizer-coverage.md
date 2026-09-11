@@ -39,6 +39,8 @@ Reports are written under `Toolchain/.zig-cache/optimizer-oracle/`:
 | `llvm-operation-coverage.tsv` | Exhaustive IR operation classification shared with the actual emitter |
 | `proof-scope.tsv` | Historical outcome and whether its recorded source still matches; neither identity state means a fresh campaign |
 | `llvm-case-coverage.tsv` | Source hash, interpreter agreement, raw/Release emission result and unmodeled instruction tags per registered source |
+| `timing-observations.tsv` | Ordered paired timings, execution order, per-pair ratio and explicit diagnostic/qualified evidence mode |
+| `timing-profile.tsv` | Actual host OS, process/hardware architecture, CPU model, translation state and distinct LLVM target/CPU selection |
 
 The matrix owns every coverage family, registered pass, portable IR family and
 LLVM transposition technique. Each family names existing positive and negative
@@ -164,11 +166,19 @@ numerical contracts; comparing whole engines alone cannot attribute the gap.
 
 `compare 11` is diagnostic. Qualified timing requires at least 21 paired samples,
 a one-sided nonparametric median bound with at least 95% confidence, a maximum
-spread of 200,000 ppm, and a cost-ratio upper bound no greater than 1,000,000 ppm.
-The existing retry uses 63 samples. These policies are unchanged by this audit.
-The current runner does not archive ordered raw timing observations or test
-stationarity; this remains an explicit qualification gap. Do not use the three
-successful scalar timings to qualify unmeasured families.
+spread of 200,000 ppm, a maximum 100,000 ppm shift between the medians of the
+ordered half-windows for Silex, LLVM and their paired ratio, and a cost-ratio
+upper bound no greater than 1,000,000 ppm. The middle observation is excluded
+from the half-window comparison. The existing retry uses 63 samples.
+
+Every current comparison archives the observations in acquisition order and
+the backend executed first for each alternating pair. Reports label a run
+`diagnostic` unless the blocking parity gate requested qualification. The host
+profile is recorded independently of the LLVM target and CPU options; a
+translated process is rejected for qualification. Historical scalar proofs
+without these artifacts remain historical and cannot acquire the new
+qualification contract retroactively. Do not use them to qualify unmeasured
+families.
 
 The pinned LLVM source identity, actual Clang executable, target triple and CPU
 selection are distinct facts. In this audit Clang targets `apple-m1` on a physical
