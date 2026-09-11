@@ -1,0 +1,45 @@
+func combined(step:float, gravity:float, force:float, damping:float, velocity:float) float {
+    return step * force + (step * gravity) * -10.0 + damping * velocity
+}
+
+func combined64(step:float64, gravity:float64, force:float64, damping:float64, velocity:float64) float64 {
+    return step * force + (step * gravity) * -10.0 + damping * velocity
+}
+
+func negative_left(x:float, y:float, accumulator:float) float {
+    return (-x) * y - accumulator
+}
+
+func negative_right(x:float64, y:float64, accumulator:float64) float64 {
+    return accumulator - y * (-x)
+}
+
+test "negated products preserve their values when adjacent arithmetic can fuse" {
+    assert(combined(0.125, 1.0, -2.0, 0.5, 2.0) == -0.5)
+    assert(combined(0.125, 0.0, 0.0, 1.0, -2.0) == -2.0)
+    assert(combined64(0.125, 1.0, -2.0, 0.5, 2.0) == -0.5)
+    assert(combined64(0.125, 0.0, 0.0, 1.0, -2.0) == -2.0)
+    assert(negative_left(1.5, 2.0, 0.5) == -3.5)
+    assert(negative_right(1.5, 2.0, 0.5) == 3.5)
+}
+
+func cached_loop32(value:float, count:int) float {
+    var result = 0.5
+    var index = 0
+    while index < count { result = value * -10.0 + result; index++ }
+    return result
+}
+
+func cached_loop64(value:float64, count:int) float64 {
+    var result:float64 = 0.5
+    var index = 0
+    while index < count { result = result + -10.0 * value; index++ }
+    return result
+}
+
+test "fused arithmetic uses hoisted loop constants" {
+    assert(cached_loop32(1.5, 2) == -29.5)
+    assert(cached_loop32(0.0, 2) == 0.5)
+    assert(cached_loop64(1.5, 2) == -29.5)
+    assert(cached_loop64(0.0, 2) == 0.5)
+}

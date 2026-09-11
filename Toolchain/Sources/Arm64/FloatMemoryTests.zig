@@ -251,3 +251,121 @@ fn containsWord(code: []const u8, expected: u32) bool {
     }
     return false;
 }
+
+test "negated multiplication and FMA do not consume the same producer twice" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]bool{ false, true }) |double| {
+        for ([_]bool{ false, true }) |resident| {
+            for ([_]bool{ false, true }) |negated_left| {
+                for ([_]bool{ false, true }) |product_first| {
+                    for ([_]Machine.BinaryOperator{ .add, .subtract }) |operator| {
+                        const type_value = if (double) @import("../Ir.zig").Type.float64 else .float32;
+                        const function: Machine.Function = .{
+                            .name = "negated_product_then_arithmetic",
+                            .parameter_count = 3,
+                            .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 } },
+                            .return_type = type_value,
+                            .return_width = 1,
+                            .slot_count = 6,
+                            .frame_size = try Machine.frameSize(6),
+                            .float_register_slots = if (resident) &.{ 16, 17, 18, 19, 20, 21 } else &.{},
+                            .instructions = &.{
+                                .{ .unary = .{ .result = 3, .operand = 0, .operator = .negate, .type = type_value } },
+                                .{ .binary = .{ .result = 4, .left = if (negated_left) 3 else 1, .right = if (negated_left) 1 else 3, .operator = .multiply, .type = type_value } },
+                                .{ .binary = .{ .result = 5, .left = if (product_first) 4 else 2, .right = if (product_first) 2 else 4, .operator = operator, .type = type_value } },
+                                .{ .return_value = .{ .start = 5, .width = 1 } },
+                            },
+                        };
+                        inline for (.{ Encoder.encode, Encoder.encodeLinux, Encoder.encodeWindows }) |encodeTarget| {
+                            const image = try encodeTarget(allocator, .{ .functions = &.{ function, sentinel } }, .{ .test_function = 0 });
+                            const code = image.code[image.function_offsets[0]..image.function_offsets[1]];
+                            const entry = image.code[image.entry_offset.?..];
+                            for (8..16) |register| {
+                                try std.testing.expect(containsWord(entry, A64.storeFloat64Stack(@enumFromInt(register), @intCast(register - 8))));
+                                try std.testing.expect(containsWord(entry, A64.loadFloat64Stack(@enumFromInt(register), @intCast(register - 8))));
+                            }
+                            try std.testing.expect(containsWord(code, A64.floatNegatedMultiply(
+                                if (resident) .x20 else .x11,
+                                if (resident) .x16 else .x9,
+                                if (resident) .x17 else .x10,
+                                double,
+                            )));
+                        }
+                        if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) continue;
+                        const arguments = [_]i64{
+                            floatBits(1.5, double), floatBits(2.0, double), floatBits(0.5, double),
+                        };
+                        const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &arguments);
+                        const expected: f64 = if (operator == .add) -2.5 else if (product_first) -3.5 else 3.5;
+                        try std.testing.expectEqual(Machine.Status.success, result.status);
+                        try std.testing.expectEqual(floatBits(expected, double), result.value);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn floatBits(value: f64, double: bool) i64 {
+    return if (double) @bitCast(value) else @intCast(@as(u32, @bitCast(@as(f32, @floatCast(value)))));
+}
+
+test "FMA reads cached loop literals from their materialized register" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]bool{ false, true }) |double| {
+        for ([_]bool{ false, true }) |resident| {
+            for ([_]bool{ false, true }) |literal_left| {
+                for ([_]bool{ false, true }) |product_first| {
+                    for ([_]Machine.BinaryOperator{ .add, .subtract }) |operator| {
+                        const type_value = if (double) @import("../Ir.zig").Type.float64 else .float32;
+                        const literal: Machine.Instruction = if (double)
+                            .{ .constant_float64 = .{ .result = 2, .bits = @bitCast(@as(f64, -10.0)) } }
+                        else
+                            .{ .constant_float32 = .{ .result = 2, .bits = @bitCast(@as(f32, -10.0)) } };
+                        const function: Machine.Function = .{
+                            .name = "cached_literal_fma",
+                            .parameter_count = 3,
+                            .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 5, .width = 1 } },
+                            .return_type = type_value,
+                            .return_width = 1,
+                            .slot_count = 6,
+                            .frame_size = try Machine.frameSize(6),
+                            .float_register_slots = if (resident) &.{ 16, 17, 18, 19, 20, null } else &.{ null, null, null, null, null, null },
+                            .instructions = &.{
+                                literal,
+                                .{ .binary = .{ .result = 3, .left = if (literal_left) 2 else 0, .right = if (literal_left) 0 else 2, .operator = .multiply, .type = type_value } },
+                                .{ .binary = .{ .result = 4, .left = if (product_first) 3 else 1, .right = if (product_first) 1 else 3, .operator = operator, .type = type_value } },
+                                .{ .branch = .{ .condition = 5, .then_instruction = 0, .else_instruction = 4 } },
+                                .{ .return_value = .{ .start = 4, .width = 1 } },
+                            },
+                        };
+                        inline for (.{ Encoder.encode, Encoder.encodeLinux, Encoder.encodeWindows }) |encodeTarget| {
+                            const image = try encodeTarget(allocator, .{ .functions = &.{ function, sentinel } }, .{ .test_function = 0 });
+                            const code = image.code[image.function_offsets[0]..image.function_offsets[1]];
+                            const left: A64.Register = if (literal_left) .x5 else if (resident) .x16 else .x9;
+                            const right: A64.Register = if (!literal_left) .x5 else if (resident) .x16 else .x10;
+                            const destination: A64.Register = if (resident) .x20 else .x12;
+                            const accumulator: A64.Register = if (resident) .x17 else .x11;
+                            const expected_word = if (operator == .add)
+                                A64.floatMultiplyAdd(destination, left, right, accumulator, double)
+                            else if (product_first)
+                                A64.floatNegatedMultiplySubtract(destination, left, right, accumulator, double)
+                            else
+                                A64.floatMultiplySubtract(destination, left, right, accumulator, double);
+                            try std.testing.expect(containsWord(code, expected_word));
+                        }
+                        if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) continue;
+                        const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{ floatBits(1.5, double), floatBits(0.5, double), 0 });
+                        const expected: f64 = if (operator == .add) -14.5 else if (product_first) -15.5 else 15.5;
+                        try std.testing.expectEqual(Machine.Status.success, result.status);
+                        try std.testing.expectEqual(floatBits(expected, double), result.value);
+                    }
+                }
+            }
+        }
+    }
+}

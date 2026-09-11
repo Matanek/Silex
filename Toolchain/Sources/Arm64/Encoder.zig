@@ -200,6 +200,10 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             const offset: u32 = @intCast(words.items.len * 4);
             try words.append(allocator, saveFrame());
             try words.append(allocator, moveFramePointer());
+            // This entry is called through the platform C ABI. Silex scratch
+            // registers d9-d12 are volatile internally, but C preserves d8-d15.
+            try emitStackAdjustment(allocator, &words, 64, false);
+            for (8..16) |register| try words.append(allocator, A64.storeFloat64Stack(@enumFromInt(register), @intCast(register - 8)));
             if (platform == .windows) if (program.mutex_global) |global| {
                 try emitWindowsMutexCall(
                     allocator,
@@ -219,6 +223,8 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             // runner instead preserves the tested function result in X0 and
             // reads the Silex runtime status from X1.
             try words.append(allocator, moveRegister(if (platform == .linux) .x0 else .x1, .x8));
+            for (8..16) |register| try words.append(allocator, A64.loadFloat64Stack(@enumFromInt(register), @intCast(register - 8)));
+            try emitStackAdjustment(allocator, &words, 64, true);
             try words.append(allocator, restoreFrame());
             try words.append(allocator, returnInstruction());
             break :entry offset;
@@ -4637,8 +4643,10 @@ fn encodeFloatFusedArithmetic(
     multiply_value: Machine.Instruction.Binary,
 ) Error!void {
     const double = arithmetic.type == .float64;
-    const left = try prepareFloatOperand(allocator, words, function, .x9, multiply_value.left, double);
-    const right = try prepareFloatOperand(allocator, words, function, .x10, multiply_value.right, double);
+    const left = cachedFloatBinaryOperand(function, multiply_value, multiply_value.left) orelse
+        try prepareFloatOperand(allocator, words, function, .x9, multiply_value.left, double);
+    const right = cachedFloatBinaryOperand(function, multiply_value, multiply_value.right) orelse
+        try prepareFloatOperand(allocator, words, function, .x10, multiply_value.right, double);
     const accumulator_slot = if (arithmetic.left == multiply_value.result) arithmetic.right else arithmetic.left;
     const accumulator = try prepareFloatOperand(allocator, words, function, .x11, accumulator_slot, double);
     const destination = floatResultRegister(function, arithmetic.result) orelse .x12;
@@ -4661,6 +4669,10 @@ fn multiplyFeedsNextFusedArithmetic(
     binary: Machine.Instruction.Binary,
 ) bool {
     if (!binary.type.isFloat() or binary.operator != .multiply or index + 1 >= function.instructions.len) return false;
+    // The producer is already consumed by an earlier encoding rule. A later
+    // FMA cannot reread its inputs: negation or packed lanes may be elided.
+    if (negatedOperandForMultiply(function, index, binary) != null or
+        floatLaneResidence(function, binary.result) != null) return false;
     const arithmetic = switch (function.instructions[index + 1]) {
         .binary => |value| value,
         else => return false,
@@ -5863,14 +5875,14 @@ test "resolve calls and append a native test entry" {
     try std.testing.expect(image.entry_offset.? > 0);
     try std.testing.expectEqual(@as(usize, 0), image.code.len % 4);
     const entry_word = std.mem.readInt(u32, image.code[image.entry_offset.?..][0..4], .little);
-    const call_word = image.entry_offset.? / 4 + 9;
+    const call_word = image.entry_offset.? / 4 + 18;
     const delta: i32 = -@as(i32, @intCast(call_word));
     const expected = @as(u32, 0x94000000) | (@as(u32, @bitCast(delta)) & 0x03ffffff);
     const encoded_call = std.mem.readInt(u32, image.code[call_word * 4 ..][0..4], .little);
-    const status_word_offset = image.entry_offset.? + 13 * @sizeOf(u32);
+    const status_word_offset = image.entry_offset.? + 22 * @sizeOf(u32);
     const status_word = std.mem.readInt(u32, image.code[status_word_offset..][0..4], .little);
     const linux_image = try encodeLinux(arena.allocator(), .{ .functions = &functions }, .{ .test_function = 0 });
-    const linux_status_word_offset = linux_image.entry_offset.? + 13 * @sizeOf(u32);
+    const linux_status_word_offset = linux_image.entry_offset.? + 22 * @sizeOf(u32);
     const linux_status_word = std.mem.readInt(u32, linux_image.code[linux_status_word_offset..][0..4], .little);
     try std.testing.expectEqual(@as(u32, 0xa9bf7bfd), entry_word);
     try std.testing.expectEqual(expected, encoded_call);

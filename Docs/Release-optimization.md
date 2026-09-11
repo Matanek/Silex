@@ -405,6 +405,17 @@ removes the otherwise redundant move through the floating-point scratch
 register while retaining the same 64-bit payload transfer.
 Floating-point negation similarly reads its allocated operand and writes its
 allocated result directly; spilled endpoints retain the ordinary stack path.
+ARM64 encoding fusions have exclusive ownership of their producer. A multiply
+consumed by negated-multiply or packed-lane encoding cannot also feed the
+following arithmetic fusion: its original inputs may no longer have materialized
+homes. The following add/subtract reads the produced value normally. This
+invariant also applies in Debug; it is not a portable Release-pass assumption.
+A fused multiply also resolves cached loop literals through the same operand
+lookup as ordinary arithmetic, since their former homes are intentionally elided.
+The native test entry preserves the C ABI low halves of `v8` through `v15`
+across Silex calls, including internal scratch registers. Its callers can retain
+floating-point expectations across JIT execution without those values being
+corrupted by the test itself.
 X64 applies a corresponding regional policy to scalar integer and boolean
 loops containing at least four compatible arithmetic operations. Integer and
 boolean output, direct and indirect calls, function addresses, and pure
