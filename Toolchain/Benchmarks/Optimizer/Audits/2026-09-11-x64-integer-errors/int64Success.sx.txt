@@ -1,0 +1,2 @@
+func check(a:int64, zero:int64, one:int64) bool { return a+zero==a && a-zero==a && a*one==a && a/one==a && a%one==zero && a>=zero && a>zero && zero<a && zero<=a && a!=zero && -zero==zero }
+func main() { print(check(9223372036854775807,0,1)) }

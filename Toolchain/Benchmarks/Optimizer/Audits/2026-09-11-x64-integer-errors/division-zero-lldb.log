@@ -1,0 +1,34 @@
+(lldb) target create "/private/tmp/silex-part03-evidence/before-division_zero-macos-x64-debug"
+Current executable set to '/private/tmp/silex-part03-evidence/before-division_zero-macos-x64-debug' (x86_64).
+(lldb) run
+warning: libobjc.A.dylib is being read from process memory. This indicates that LLDB could not read from the host's in-memory shared cache. This will likely reduce debugging performance.
+
+true
+Process 61724 launched: '/private/tmp/silex-part03-evidence/before-division_zero-macos-x64-debug' (x86_64)
+Process 61724 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_ARITHMETIC (code=EXC_I386_DIV, subcode=0x0)
+    frame #0: 0x000000010000041c before-division_zero-macos-x64-debug`_mh_execute_header + 1052
+before-division_zero-macos-x64-debug`_mh_execute_header:
+->  0x10000041c <+1052>: idivq  %rcx
+    0x10000041f <+1055>: movq   %rax, 0x10(%rbp)
+    0x100000426 <+1062>: movq   0x10(%rbp), %rax
+    0x10000042d <+1069>: xorl   %edx, %edx
+Target 0: (before-division_zero-macos-x64-debug) stopped.
+(lldb) thread backtrace all
+* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_ARITHMETIC (code=EXC_I386_DIV, subcode=0x0)
+  * frame #0: 0x000000010000041c before-division_zero-macos-x64-debug`_mh_execute_header + 1052
+(lldb) register read rax rcx rdx rip
+     rax = 0x0000000000000007
+     rcx = 0x0000000000000000
+     rdx = 0x0000000000000000
+     rip = 0x000000010000041c  before-division_zero-macos-x64-debug.__TEXT.__text + 44
+(lldb) disassemble -p -c 8
+before-division_zero-macos-x64-debug`_mh_execute_header:
+->  0x10000041c <+1052>: idivq  %rcx
+    0x10000041f <+1055>: movq   %rax, 0x10(%rbp)
+    0x100000426 <+1062>: movq   0x10(%rbp), %rax
+    0x10000042d <+1069>: xorl   %edx, %edx
+    0x10000042f <+1071>: jmp    0x100000434               ; before-division_zero-macos-x64-debug.__TEXT.__text + 68
+    0x100000434 <+1076>: movq   %rbp, %rsp
+    0x100000437 <+1079>: addq   $0x30, %rsp
+    0x10000043e <+1086>: popq   %rbp

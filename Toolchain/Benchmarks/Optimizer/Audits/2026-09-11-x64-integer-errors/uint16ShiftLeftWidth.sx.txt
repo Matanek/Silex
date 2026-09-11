@@ -1,0 +1,2 @@
+func calculate(a:uint16, b:uint8) uint16 { return a<<b }
+func main() { print(true); print(calculate(1,16)); print(false) }

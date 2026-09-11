@@ -1,0 +1,869 @@
+{
+  "compiler_sha256": "5f1df97b896f2d63ea981fe5f9e7005746cddc8bb68b8fad54cf5571f690757f",
+  "records": [
+    {
+      "case": "int8Add",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-linux-arm64-debug"
+      ],
+      "sha256": "a1485e0714202e1734a19f2c3d624ace304218b1630ba3efd25cf5db67a309f4",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int8Add",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-linux-arm64-release"
+      ],
+      "sha256": "400663d4604b551aa77b13348929f856c3e4edf61f30173cd01c7df82d095ebf",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int8Add",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-linux-x64-debug"
+      ],
+      "sha256": "eadd37d822df0f75541a7615489919b04329a7db9ebf0739251fc689b3dff231",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int8Add",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-linux-x64-release"
+      ],
+      "sha256": "b9f7b2b06418d7d3736ff3b33d9831552a0da9887711fbdcaba766a5cfab0151",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int8Add",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-windows-arm64-debug"
+      ],
+      "sha256": "b626f0abfd2f3371951249231e1705fc2125b6ef8ef1f0221124ecb27f0c787d",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "int8Add",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-windows-arm64-release"
+      ],
+      "sha256": "9ec1448d680837300108808dc5ecee64a97d3d4a3265176060c211864d59f943",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "int8Add",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-windows-x64-debug"
+      ],
+      "sha256": "6a42843f84a6e4dc2780a65822a00c2f7dc8c67f89a6babbf636c9093b2a6131",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "int8Add",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int8Add.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int8Add-windows-x64-release"
+      ],
+      "sha256": "5ac6029ebf6a3fafaafe6865bc4c2e604980b3557de5aa51c274384f771fc14e",
+      "format": "/private/tmp/silex-part03-evidence/emission-int8Add-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-arm64-debug"
+      ],
+      "sha256": "efda1abb59419355bb7ba19b3b70ca5abf943d17c79092bc1d9b961e27687331",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-arm64-release"
+      ],
+      "sha256": "5265c5499f7d3c894f3716041795ea827e9187ae54d2d752faff90c06709a6ca",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-x64-debug"
+      ],
+      "sha256": "cbfe847f13eba5231164cd3f704b02750fcc7e4f382bf276a43a9ee033aa8cf6",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-x64-release"
+      ],
+      "sha256": "f0d2ea3f91632f455cdc9f400170d2a6da963e2fc67fbf20752b1bd853d58db0",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-arm64-debug"
+      ],
+      "sha256": "45f4d880f2bae0648337fcb0a712c7e2c0d65967d427e1cd04e3dc9cfc150f1b",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-arm64-release"
+      ],
+      "sha256": "f59bca5d001994f392176a2128d6aec4722dccd8573f364cfe59275752602af8",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-x64-debug"
+      ],
+      "sha256": "354b1f3fcf2d229c702396b4fb95071f00cc1152347c5544284bbd5a137dae3a",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "uint64Multiply",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Multiply.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-x64-release"
+      ],
+      "sha256": "691f832a2c4eb67afa0bd9da09b727337ae01bdd414ebc7e7b9c2e7d62a6e81a",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Multiply-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-arm64-debug"
+      ],
+      "sha256": "bba1615035d2e1fcf33e9fe037a977cef477277a0491eb477f52e357b83748e5",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-arm64-release"
+      ],
+      "sha256": "9cd9a282bf0134ba039273905c0703eb960a41f522164805864cd1c839ef2bc4",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-x64-debug"
+      ],
+      "sha256": "cea126106f5956a57bae791834628d393ead77122f29061faad7ec01748060ac",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-x64-release"
+      ],
+      "sha256": "671e5667535892daabfc6f8521986732a9a9f99419c489e8041b2cf5da46691c",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-arm64-debug"
+      ],
+      "sha256": "75c3f40d351cad47b7a7529bb43784c6a99a8bdd7f09ac89ab945849acdc295c",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-arm64-release"
+      ],
+      "sha256": "da59617e4922b90e200ec90a64e8bd330f8189e26209ae837f8626e1898a2079",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-x64-debug"
+      ],
+      "sha256": "a3005bca398d70ac4bd794db213d6d89ace666052eb91a5275b2e0c5583fa6f8",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "int64DivideZero",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideZero.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-x64-release"
+      ],
+      "sha256": "f6fcc71b023f033d150f738e955f60c4180df4d79e42e0b9a65486d9b9e9cf04",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideZero-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-arm64-debug"
+      ],
+      "sha256": "e07c64e54d215b28eb3db348977bd8515a954f79e721a0f8bdf88ed7c18a8db8",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-arm64-release"
+      ],
+      "sha256": "a98cb02eb880506561671b6e1465e0e7e85ee0d47e2bb4de1f2b4ed1cddcb8d4",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-x64-debug"
+      ],
+      "sha256": "3403079e0c0b3247ec4cae8cfb54e563743470944de56b5ed32bcda8f33fda92",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-x64-release"
+      ],
+      "sha256": "60c6594fd072eb56bb919985e6dee247fdf57dd5f7ac6dfc11b65ce272c677f3",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-arm64-debug"
+      ],
+      "sha256": "1c45936455f5cf245bd0dc5413170b416ec1037e6628d823af37cf9978a02881",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-arm64-release"
+      ],
+      "sha256": "8efe2a44513ebe476e8d478d2ed76c6bc248649ed54b7a232e4406628752d841",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-x64-debug"
+      ],
+      "sha256": "b6682859c3aaa6ccc13512331b027e23fef9b37b1ad691637855630151952358",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "int64DivideMinimum",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/int64DivideMinimum.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-x64-release"
+      ],
+      "sha256": "82c916500307a0d1f1a558c0b7034612895b4de66d04a54a777a5c9af02f71d1",
+      "format": "/private/tmp/silex-part03-evidence/emission-int64DivideMinimum-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-arm64-debug"
+      ],
+      "sha256": "24d69694a43a0ca735eb12890bc8115cb3ffb9abf53639797c611685b90ffb27",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-arm64-release"
+      ],
+      "sha256": "8f95a8cb420c3a5506ac2b83dc6a82766462de027648abecbc934992b7451fc7",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-x64-debug"
+      ],
+      "sha256": "8bbd0081afa25ffff900d3c9ae2ea083345a3e712d4962ad9fcda252c54f7394",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-x64-release"
+      ],
+      "sha256": "45b475252f6391d7d6b8d9ddddabcf093141ffe16ae7cbb92549865b34d2db7b",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-arm64-debug"
+      ],
+      "sha256": "3482d81e0bf150972f1a3c45cfe8327dfd01c893d54314ecd9571566565e5f0b",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-arm64-release"
+      ],
+      "sha256": "45103c9be5d6f780ce3d130939def811bc3dd4f713cb4dd8ee077b2222b46582",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-x64-debug"
+      ],
+      "sha256": "7d3711c1932f7983c4d2725923ac3b5459cbb210c64f01f7e4faac0f21649e01",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "uint8ShiftRightWidth",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint8ShiftRightWidth.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-x64-release"
+      ],
+      "sha256": "d0b7e8ca11791c246d3747ac58b7c39b73e74e7210264ac23619fb1ef2280776",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint8ShiftRightWidth-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "uint64Success",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-arm64-debug"
+      ],
+      "sha256": "93f82362a3ee514f9ed54319d142380dbf02718b3e22cb7bc147bdc01e713340",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Success",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-arm64-release"
+      ],
+      "sha256": "967e04f0af93d0c845107f576b757f306e1faae48ff020f5b7b27814275b3df9",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Success",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-x64-debug"
+      ],
+      "sha256": "5ba13d43c0709d6d94658f6af15c8b4cff909c43772356b255c63ce230173ebf",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Success",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-x64-release"
+      ],
+      "sha256": "de45db60cd3715661aa069fa6bb7cdbd5e3d1948cb18b9f548e9df59d1adba1d",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "uint64Success",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-arm64-debug"
+      ],
+      "sha256": "06ac01c7387cfed07033933de14c7e721cd229a1e404f5860b7aac87fe81c698",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "uint64Success",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-arm64-release"
+      ],
+      "sha256": "51cb750a84a10cac78c34979c412d5c17174b5e991bdf3ba6d1fb96e831413ab",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "uint64Success",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-x64-debug"
+      ],
+      "sha256": "59d151ecaf40af10e70d3c6391f35206c9808a78ccbef656df039fce63d2727e",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "uint64Success",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/uint64Success.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-x64-release"
+      ],
+      "sha256": "384a1e07fa9aff450a4b535936b7247ce0ede4bbd2f4746a0f9511de2fd0c88c",
+      "format": "/private/tmp/silex-part03-evidence/emission-uint64Success-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    }
+  ]
+}

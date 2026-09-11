@@ -1,0 +1,2 @@
+func calculate(a:uint64, b:uint64) uint64 { return -a }
+func main() { print(true); print(calculate(1,0)); print(false) }
