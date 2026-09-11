@@ -49,6 +49,7 @@ pub fn allocateFloatLanePairsFor(
 
 pub const ScalarFloatAccess = enum {
     resident,
+    collection_inputs,
     stack_operands,
     barrier,
 };
@@ -102,12 +103,25 @@ pub fn allocateFloatScalarsFor(
     }
     for (function.instructions, 0..) |instruction, index| {
         visitBarrier(instruction, index, first, last, weights, instruction_weights[index]);
-        MemoryResidence.pin(instruction, forced);
+        // Collection input homes are pinned by the target contract below.
+        // Its scalar result emitter can handle each leaf independently.
+        if (access(instruction) != .collection_inputs) MemoryResidence.pin(instruction, forced);
     }
     extendLoopCarriedIntervals(function.instructions, first, last);
+    const collection_live = if (for (function.instructions) |instruction| {
+        if (access(instruction) == .collection_inputs) break true;
+    } else false) try ResidenceLiveness.compute(allocator, function.instructions, function.slot_count) else null;
+    defer if (collection_live) |live| allocator.free(live);
     for (function.instructions, 0..) |instruction, index| {
         switch (access(instruction)) {
             .resident => {},
+            .collection_inputs => for (0..function.slot_count) |slot| {
+                if (instructionUses(instruction, @intCast(slot))) forced[slot] = true;
+                // A dead sibling must not share and overwrite a live result's
+                // color while the emitter transfers the complete element.
+                if (instructionDefines(instruction, @intCast(slot)) and
+                    !successorLive(function.instructions, collection_live.?, function.slot_count, index, slot)) forced[slot] = true;
+            },
             // These emitters preserve the FP bank but read and write stack
             // homes. Pin their complete spans, not unrelated live values.
             .stack_operands => for (0..function.slot_count) |slot| {
@@ -119,13 +133,39 @@ pub fn allocateFloatScalarsFor(
             },
         }
     }
+    // Preserve the established scalar allocation first. A short-lived loaded
+    // result may use a free color, but must not evict a loop recurrence merely
+    // because making the load resident adds another graph affinity component.
+    const baseline_forced = try allocator.dupe(bool, forced);
+    defer allocator.free(baseline_forced);
+    for (function.instructions) |instruction| if (access(instruction) == .collection_inputs) {
+        forceSpan(instruction.collection_load.result, baseline_forced);
+    };
     var intervals: std.ArrayList(Interval) = .empty;
     defer intervals.deinit(allocator);
+    var loaded: std.ArrayList(Interval) = .empty;
+    defer loaded.deinit(allocator);
     for (first, 0..) |start, slot| {
         if (start == std.math.maxInt(usize) or forced[slot] or !floats[slot]) continue;
-        try intervals.append(allocator, .{ .slot = @intCast(slot), .first = start, .last = last[slot], .weight = weights[slot] });
+        const interval: Interval = .{ .slot = @intCast(slot), .first = start, .last = last[slot], .weight = weights[slot] };
+        if (baseline_forced[slot]) try loaded.append(allocator, interval) else try intervals.append(allocator, interval);
     }
-    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.slot_count, forced, &.{}, &.{}, false);
+    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.slot_count, baseline_forced, &.{}, &.{}, false);
+    if (loaded.items.len != 0) {
+        // No component merging can alter the already assigned colors here.
+        const roots = try allocator.alloc(Machine.Slot, function.slot_count);
+        defer allocator.free(roots);
+        for (roots, 0..) |*root, slot| root.* = @intCast(slot);
+        std.mem.sort(Interval, loaded.items, {}, heavierThan);
+        for (loaded.items) |interval| {
+            for (registers) |register| {
+                if (!colorConflicts(interval.slot, register, residences, roots, collection_live.?, function.instructions, function.slot_count)) {
+                    residences[interval.slot] = register;
+                    break;
+                }
+            }
+        }
+    }
     return residences;
 }
 

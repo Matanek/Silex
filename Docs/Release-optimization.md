@@ -378,8 +378,13 @@ stack-resident lowering.
 
 X64 scalar FP allocation distinguishes instructions that consume registered
 values from stack-only emitters that preserve the FP bank. Aggregate copies,
-aggregate initialization, collection counts and fixed/dynamic/view loads keep
-all their input and output spans in stack homes. Independent floating values
+aggregate initialization and collection counts keep all their input and output
+spans in stack homes. Fixed, dynamic and view collection loads retain their
+input homes but transfer live scalar FP results directly to their allocated
+colors, preserving every payload bit. Dead result leaves stay pinned so their
+stores cannot overwrite a live sibling sharing the same graph color. Loaded
+results use only colors left available by the established scalar allocation;
+they cannot evict a recurrence or change its existing color. Independent floating values
 may remain in XMM6...XMM15 across these instructions. Bounds failures retain
 their epilogue exit, addressed spans remain pinned, and actual calls retain
 the full interval barrier. This does not change the packed SSE register bank

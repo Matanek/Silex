@@ -107,8 +107,8 @@ jobs:
             "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
-            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 13
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 13
           done
           float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
@@ -423,8 +423,8 @@ jobs:
             "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
-            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 13
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 13
           done
           float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
@@ -562,8 +562,8 @@ jobs:
             "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
-            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 13
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 13
           done
           float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
@@ -734,7 +734,7 @@ jobs:
             & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
             $floatMemoryOutput = @(& $floatMemoryBinary)
-            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 10 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 13 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "float memory residence $mode regression failed"
             }
           }
@@ -1090,7 +1090,7 @@ jobs:
             & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
             $floatMemoryOutput = @(& $floatMemoryBinary)
-            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 10 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 13 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "float memory residence $mode regression failed"
             }
           }

@@ -46,6 +46,17 @@ func select(values:@Pair[..], empty:bool) Pair {
     return Pair(x:x, y:y)
 }
 
+func loadedEdges(values:@Pair[..], index:int) {
+    let value = values[index]
+    print(1.0 / value.x < 0.0)
+    print(value.y != value.y)
+}
+
+func loadedNarrow(values:float32[3], index:int) {
+    let value = values[index]
+    print(1.0 / value < 0.0)
+}
+
 func main() {
     let values:Pair[] = [Pair(x:1.0, y:2.0), Pair(x:3.0, y:4.0)]
     let view = @values[0:values.count()]
@@ -59,6 +70,10 @@ func main() {
     let selected = select(view, false)
     print(selected.x == 5.0)
     print(selected.y == 8.0)
+    let special:Pair[] = [Pair(x:-0.0, y:0.0 / 0.0)]
+    loadedEdges(@special[0:special.count()], -1)
+    let narrowEdges:float32[3] = [0.0, 1.0, -0.0]
+    loadedNarrow(narrowEdges, -1)
     let empty = select(view, true)
     print(empty.x == 0.0 && empty.y == 0.0)
 }

@@ -646,7 +646,7 @@ fn encodeFunction(
             .list_init => |value| try emitListInit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .collection_load => |value| {
                 if (value.dynamic or value.view) {
-                    try emitDynamicCollectionLoad(allocator, bytes, &epilogue_fixups, value);
+                    try emitDynamicCollectionLoad(allocator, bytes, function, &epilogue_fixups, value);
                     continue;
                 }
                 if (!value.collection.aggregate or value.result.width == 0 or
@@ -671,7 +671,7 @@ fn encodeFunction(
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc1 });
                 for (0..value.result.width) |leaf| {
                     try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));
-                    try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
+                    try emitStoreScalar(allocator, bytes, function, .rax, @intCast(@as(usize, value.result.start) + leaf));
                 }
             },
             .collection_reference => |value| try emitCollectionReference(
@@ -2250,6 +2250,7 @@ fn emitCollectionCount(
 fn emitDynamicCollectionLoad(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
+    function: Machine.Function,
     epilogue: *std.ArrayList(EpilogueFixup),
     value: Machine.Instruction.CollectionLoad,
 ) Error!void {
@@ -2275,7 +2276,7 @@ fn emitDynamicCollectionLoad(
     try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc3 });
     for (0..value.result.width) |leaf| {
         try emitLoadMemory(allocator, bytes, .rax, .rbx, @intCast(leaf * Machine.slot_size));
-        try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
+        try emitStoreScalar(allocator, bytes, function, .rax, @intCast(@as(usize, value.result.start) + leaf));
     }
 }
 

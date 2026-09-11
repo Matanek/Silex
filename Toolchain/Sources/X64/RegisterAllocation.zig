@@ -53,7 +53,8 @@ fn scalarFloatInstruction(instruction: Machine.Instruction) FloatLaneAllocation.
         .reference_load => |value| if (value.result.width == 1) .resident else .barrier,
         // These stack emitters use only GPR scratch registers. Bounds errors
         // jump to the epilogue; no returning path calls or clobbers XMM6...15.
-        .copy_range, .aggregate_init, .collection_load, .collection_count => .stack_operands,
+        .collection_load => .collection_inputs,
+        .copy_range, .aggregate_init, .collection_count => .stack_operands,
         // A terminal return reads its stack operands and leaves the CFG.
         // Values belonging only to another successor cannot cross this exit.
         .return_value => .stack_operands,
@@ -866,7 +867,7 @@ test "X64 scalar floats retain temporaries but pin call and addressed values" {
     for ([_]usize{ 3, 4, 5, 6 }) |slot| try std.testing.expect(residences[slot] != null);
 }
 
-test "X64 scalar floats cross stack copies while every input and output leaf stays pinned" {
+test "X64 scalar collection results reside while memory inputs and stack copies stay pinned" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -897,7 +898,35 @@ test "X64 scalar floats cross stack copies while every input and output leaf sta
         };
         const residences = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{ 6, 7, 8, 9 }, scalarFloatInstruction);
         try std.testing.expect(residences[0] != null);
-        for ([_]usize{ 1, 2, 3, 4 }) |slot| try std.testing.expectEqual(@as(?u5, null), residences[slot]);
+        for ([_]usize{ 1, 2 }) |slot| try std.testing.expectEqual(@as(?u5, null), residences[slot]);
+        const baseline = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{ 6, 7, 8, 9 }, struct {
+            fn access(instruction: Machine.Instruction) FloatLaneAllocation.ScalarFloatAccess {
+                return if (instruction == .collection_load) .stack_operands else scalarFloatInstruction(instruction);
+            }
+        }.access);
+        for (baseline, residences) |previous, current| {
+            if (previous != null) try std.testing.expectEqual(previous, current);
+        }
+        for ([_]usize{ 3, 4 }) |slot| {
+            if (operation == .collection_load) {
+                try std.testing.expect(residences[slot] != null);
+            } else try std.testing.expectEqual(@as(?u5, null), residences[slot]);
+        }
+        if (operation == .collection_load) {
+            // The second loaded leaf is dead until redefined. It may not
+            // overwrite a live sibling sharing its graph color.
+            instructions[5] = .{ .copy = .{ .result = 6, .operand = 3 } };
+            instructions[6] = .{ .constant_float64 = .{ .result = 4, .bits = @bitCast(@as(f64, 4.0)) } };
+            const partial = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{6}, scalarFloatInstruction);
+            try std.testing.expect(partial[3] != null);
+            try std.testing.expectEqual(@as(?u5, null), partial[4]);
+            instructions[5] = .{ .local_address = .{ .result = 5, .local = 3, .width = 2 } };
+            const addressed = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{ 6, 7, 8, 9 }, scalarFloatInstruction);
+            try std.testing.expectEqual(@as(?u5, null), addressed[3]);
+            try std.testing.expectEqual(@as(?u5, null), addressed[4]);
+        }
+        instructions[5] = .{ .binary = .{ .result = 5, .left = 3, .right = 4, .operator = .add, .type = .float64 } };
+        instructions[6] = .{ .binary = .{ .result = 6, .left = 0, .right = 5, .operator = .add, .type = .float64 } };
         // The same live value must still spill when a real call intervenes.
         instructions[4] = .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } };
         const called = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{ 6, 7, 8, 9 }, scalarFloatInstruction);
