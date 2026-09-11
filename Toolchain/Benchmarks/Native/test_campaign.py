@@ -42,6 +42,30 @@ class CampaignTests(unittest.TestCase):
         self.assertTrue(any("half_shift" in failure for failure in failures))
         self.assertTrue(any("upper bound" in failure for failure in failures))
 
+    def test_equivalent_reference_failure_cannot_be_hidden_by_historical_parity(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for configuration in campaign.CONFIGURATIONS:
+                (root / f"arithmetic-{configuration}").touch()
+            def execute(path):
+                return b"same\n", 50 if path.name.endswith("clang-o3-slot8") else 100
+            with patch.object(campaign, "execute", side_effect=execute):
+                result = campaign.measure_workload(root, 21, 0, "arithmetic")
+        self.assertFalse(result["qualified"])
+        self.assertEqual(result["release_vs_clang"]["upper_bound_ppm"], 1_000_000)
+        self.assertTrue(any("clang-o3-slot8" in failure for failure in result["qualification_failures"]))
+
+    def test_equivalent_reference_output_is_checked(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for configuration in campaign.CONFIGURATIONS:
+                (root / f"arithmetic-{configuration}").touch()
+            def execute(path):
+                return (b"wrong\n" if path.name.endswith("clang-o3-slot8") else b"same\n"), 100
+            with patch.object(campaign, "execute", side_effect=execute):
+                with self.assertRaisesRegex(RuntimeError, "outputs differ"):
+                    campaign.measure_workload(root, 5, 1, "arithmetic")
+
     def test_native_x64_rejects_arm_and_translation(self) -> None:
         self.assertIsNotNone(
             campaign.native_x64_failure({"machine": "arm64", "translated": False})

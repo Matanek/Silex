@@ -11,7 +11,8 @@ from pathlib import Path
 
 
 WORKLOADS = ("arithmetic", "objects", "flocking")
-CONFIGURATIONS = ("debug", "release", "clang")
+REFERENCES = ("clang", "clang-o3-slot8")
+CONFIGURATIONS = ("debug", "release", *REFERENCES)
 MINIMUM_QUALIFIED_SAMPLES = 21
 MAXIMUM_SPREAD_PPM = 200_000
 MAXIMUM_HALF_WINDOW_SHIFT_PPM = 100_000
@@ -109,9 +110,9 @@ def half_window_shift_ppm(values: list[int]) -> int:
     return ratio_ppm(abs(second - first), first)
 
 
-def analyze_release_vs_clang(observations: list[dict[str, object]]) -> dict[str, object]:
+def analyze_release_vs_clang(observations: list[dict[str, object]], reference: str = "clang") -> dict[str, object]:
     release = [int(observation["timings_ns"]["release"]) for observation in observations]
-    clang = [int(observation["timings_ns"]["clang"]) for observation in observations]
+    clang = [int(observation["timings_ns"][reference]) for observation in observations]
     ratios = [ratio_ppm(left, right) for left, right in zip(release, clang)]
     ordered = sorted(ratios)
     bound_index, confidence_ppm = one_sided_median_bound(len(ratios))
@@ -174,13 +175,13 @@ def native_x64_failure(host: dict[str, object]) -> str | None:
     return None
 
 
-def qualification_failures(workload: dict[str, object]) -> list[str]:
+def qualification_failures(workload: dict[str, object], reference: str = "clang") -> list[str]:
     failures: list[str] = []
-    comparison = workload["release_vs_clang"]
+    comparison = workload["release_vs_clang"] if reference == "clang" else workload["release_vs_references"][reference]
     configurations = workload["configurations"]
     if comparison["samples"] < MINIMUM_QUALIFIED_SAMPLES:
         failures.append("insufficient paired samples")
-    for name in ("release", "clang"):
+    for name in ("release", reference):
         if configurations[name]["spread_ppm"] > MAXIMUM_SPREAD_PPM:
             failures.append(f"{name} spread exceeds {MAXIMUM_SPREAD_PPM} ppm")
     for name in (
@@ -248,8 +249,13 @@ def measure_workload(
             for configuration in CONFIGURATIONS
         },
         "release_vs_clang": analyze_release_vs_clang(observations),
+        "release_vs_references": {reference: analyze_release_vs_clang(observations, reference) for reference in REFERENCES},
     }
-    result["qualification_failures"] = qualification_failures(result)
+    result["qualification_failures"] = [
+        f"{reference}: {failure}"
+        for reference in REFERENCES
+        for failure in qualification_failures(result, reference)
+    ]
     result["qualified"] = not result["qualification_failures"]
     return result
 
@@ -276,7 +282,16 @@ def main() -> None:
             for failure in workload["qualification_failures"]
         )
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "references": {
+            "clang": {"flags": ["-std=c++23", "-O2"], "layout": "native C++ (historical)"},
+            "clang-o3-slot8": {"flags": ["-std=c++23", "-O3", "-DSILEX_SLOT8"], "layout": "8-byte fields, Flocking Sample=32 and Steering=16 bytes"},
+        },
+        "benchmark_sources": {
+            path.name: file_sha256(path)
+            for path in sorted(Path(__file__).parent.iterdir())
+            if path.suffix in {".cpp", ".sx"} or path.name in {"run.sh", "campaign.py"}
+        },
         "evidence_mode": "qualified" if arguments.require_parity else "diagnostic",
         "candidate_sha": arguments.candidate_sha,
         "host": host,

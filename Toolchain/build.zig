@@ -315,7 +315,7 @@ pub fn build(b: *std.Build) void {
     benchmark_command.addFileArg(b.path("Benchmarks/Native/run.sh"));
     benchmark_command.addArtifactArg(executable);
     benchmark_command.addDirectoryArg(b.path("Benchmarks/Native"));
-    const benchmark_step = b.step("benchmark-native", "Compare Debug and Release native code with clang++ -O2");
+    const benchmark_step = b.step("benchmark-native", "Compare native code with historical Clang -O2 and same-layout Clang -O3");
     benchmark_step.dependOn(&benchmark_command.step);
 
     const optimizer_oracle_module = b.createModule(.{
