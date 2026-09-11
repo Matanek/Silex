@@ -1,0 +1,768 @@
+{
+  "scope": "physical ARM64 complete preparation; 8192 elements, 2048 passes, all 26 output fields in signature; same slot8 layout; no X64 claim",
+  "host": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpu": "Apple M3 Pro",
+  "compiler_sha256": "522d8e107356e2604b5c76905c03b9775491cbd45aaef0f8aba10982900de1fe",
+  "binaries": {
+    "before": "a624612d1a1fd272657b855a519d5e91c160528bf098e5629808ebac3bc9b01d",
+    "after": "609921268e57515eb5bc43b9183f52537dbce5e22fb51ae6899e6ec0dc7ae855",
+    "clang": "8d7380b05b04989829c693b61d927ec6b34fb2e0b3146aae54e63e887934eb76"
+  },
+  "warmups": 6,
+  "samples": 21,
+  "observations": [
+    {
+      "index": 0,
+      "order": [
+        "before",
+        "after",
+        "clang"
+      ],
+      "runs": {
+        "before": {
+          "elapsed_ms": 452.983,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 452.983 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 454.209,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 454.209 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 258.786999853,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 258.786999853 4744923641\n"
+        }
+      },
+      "after_before": 1.0027065033345621,
+      "after_clang": 1.7551461250294895,
+      "before_clang": 1.7504086382133186
+    },
+    {
+      "index": 1,
+      "order": [
+        "after",
+        "clang",
+        "before"
+      ],
+      "runs": {
+        "after": {
+          "elapsed_ms": 454.056,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 454.056 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 256.083000218,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 256.083000218 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 448.531,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 448.531 4744923641.0\n"
+        }
+      },
+      "after_before": 1.0123179891690874,
+      "after_clang": 1.7730813822607054,
+      "before_clang": 1.7515063460603462
+    },
+    {
+      "index": 2,
+      "order": [
+        "clang",
+        "before",
+        "after"
+      ],
+      "runs": {
+        "clang": {
+          "elapsed_ms": 255.13299997,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 255.132999970 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 449.894,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 449.894 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 447.56,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 447.56 4744923641.0\n"
+        }
+      },
+      "after_before": 0.9948121112973278,
+      "after_clang": 1.7542223077870236,
+      "before_clang": 1.7633704775662151
+    },
+    {
+      "index": 3,
+      "order": [
+        "before",
+        "after",
+        "clang"
+      ],
+      "runs": {
+        "before": {
+          "elapsed_ms": 448.75198,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 448.75198 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 455.849,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 455.849 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 259.683999931,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 259.683999931 4744923641\n"
+        }
+      },
+      "after_before": 1.0158150165710689,
+      "after_clang": 1.7553988698615335,
+      "before_clang": 1.7280694232961475
+    },
+    {
+      "index": 4,
+      "order": [
+        "after",
+        "clang",
+        "before"
+      ],
+      "runs": {
+        "after": {
+          "elapsed_ms": 454.649,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 454.649 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 258.797999937,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 258.797999937 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 451.86902,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 451.86902 4744923641.0\n"
+        }
+      },
+      "after_before": 1.006152181001477,
+      "after_clang": 1.7567716910898719,
+      "before_clang": 1.7460297997279728
+    },
+    {
+      "index": 5,
+      "order": [
+        "clang",
+        "before",
+        "after"
+      ],
+      "runs": {
+        "clang": {
+          "elapsed_ms": 258.014000021,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 258.014000021 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 449.888,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 449.888 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 450.868,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 450.868 4744923641.0\n"
+        }
+      },
+      "after_before": 1.0021783199374066,
+      "after_clang": 1.7474555642845093,
+      "before_clang": 1.743657320778652
+    },
+    {
+      "index": 6,
+      "order": [
+        "before",
+        "after",
+        "clang"
+      ],
+      "runs": {
+        "before": {
+          "elapsed_ms": 449.328,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 449.328 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 446.902,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 446.902 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 257.254999829,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 257.254999829 4744923641\n"
+        }
+      },
+      "after_before": 0.9946008261225653,
+      "after_clang": 1.737194613504345,
+      "before_clang": 1.7466249452825906
+    },
+    {
+      "index": 7,
+      "order": [
+        "after",
+        "clang",
+        "before"
+      ],
+      "runs": {
+        "after": {
+          "elapsed_ms": 450.814,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 450.814 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 257.83700007,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 257.837000070 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 451.77002,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 451.77002 4744923641.0\n"
+        }
+      },
+      "after_before": 0.9978838347883289,
+      "after_clang": 1.748445722986262,
+      "before_clang": 1.7521535694153643
+    },
+    {
+      "index": 8,
+      "order": [
+        "clang",
+        "before",
+        "after"
+      ],
+      "runs": {
+        "clang": {
+          "elapsed_ms": 255.012999987,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 255.012999987 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 451.735,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 451.735 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 447.81802,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 447.81802 4744923641.0\n"
+        }
+      },
+      "after_before": 0.9913290314011532,
+      "after_clang": 1.7560595735230313,
+      "before_clang": 1.771419496351278
+    },
+    {
+      "index": 9,
+      "order": [
+        "before",
+        "after",
+        "clang"
+      ],
+      "runs": {
+        "before": {
+          "elapsed_ms": 443.642,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 443.642 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 436.797,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 436.797 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 252.059999853,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 252.059999853 4744923641\n"
+        }
+      },
+      "after_before": 0.9845708927468545,
+      "after_clang": 1.7329088322412824,
+      "before_clang": 1.760065064900141
+    },
+    {
+      "index": 10,
+      "order": [
+        "after",
+        "clang",
+        "before"
+      ],
+      "runs": {
+        "after": {
+          "elapsed_ms": 443.094,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 443.094 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 252.469999949,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 252.469999949 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 441.459,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 441.459 4744923641.0\n"
+        }
+      },
+      "after_before": 1.0037036281965028,
+      "after_clang": 1.755036242284259,
+      "before_clang": 1.7485602253304415
+    },
+    {
+      "index": 11,
+      "order": [
+        "clang",
+        "before",
+        "after"
+      ],
+      "runs": {
+        "clang": {
+          "elapsed_ms": 253.125999821,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 253.125999821 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 437.397,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 437.397 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 469.984,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 469.984 4744923641.0\n"
+        }
+      },
+      "after_before": 1.074502111354216,
+      "after_clang": 1.8567195797047826,
+      "before_clang": 1.7279813227772283
+    },
+    {
+      "index": 12,
+      "order": [
+        "before",
+        "after",
+        "clang"
+      ],
+      "runs": {
+        "before": {
+          "elapsed_ms": 431.57602,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 431.57602 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 440.474,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 440.474 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 252.06700014,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 252.067000140 4744923641\n"
+        }
+      },
+      "after_before": 1.0206174105780945,
+      "after_clang": 1.7474480981459581,
+      "before_clang": 1.7121480390542962
+    },
+    {
+      "index": 13,
+      "order": [
+        "after",
+        "clang",
+        "before"
+      ],
+      "runs": {
+        "after": {
+          "elapsed_ms": 437.44202,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 437.44202 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 251.335000154,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 251.335000154 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 440.42,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 440.42 4744923641.0\n"
+        }
+      },
+      "after_before": 0.9932383179692112,
+      "after_clang": 1.7404739480453062,
+      "before_clang": 1.7523225962565594
+    },
+    {
+      "index": 14,
+      "order": [
+        "clang",
+        "before",
+        "after"
+      ],
+      "runs": {
+        "clang": {
+          "elapsed_ms": 253.526000073,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 253.526000073 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 437.089,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 437.089 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 440.802,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 440.802 4744923641.0\n"
+        }
+      },
+      "after_before": 1.008494837435854,
+      "after_clang": 1.7386855780987984,
+      "before_clang": 1.7240401373987089
+    },
+    {
+      "index": 15,
+      "order": [
+        "before",
+        "after",
+        "clang"
+      ],
+      "runs": {
+        "before": {
+          "elapsed_ms": 435.11002,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 435.11002 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 437.935,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 437.935 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 253.535000142,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 253.535000142 4744923641\n"
+        }
+      },
+      "after_before": 1.0064925648000476,
+      "after_clang": 1.7273157542537367,
+      "before_clang": 1.7161733873283902
+    },
+    {
+      "index": 16,
+      "order": [
+        "after",
+        "clang",
+        "before"
+      ],
+      "runs": {
+        "after": {
+          "elapsed_ms": 440.867,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 440.867 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 255.239000078,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 255.239000078 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 436.784,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 436.784 4744923641.0\n"
+        }
+      },
+      "after_before": 1.0093478698853438,
+      "after_clang": 1.7272713020552222,
+      "before_clang": 1.7112745304068757
+    },
+    {
+      "index": 17,
+      "order": [
+        "clang",
+        "before",
+        "after"
+      ],
+      "runs": {
+        "clang": {
+          "elapsed_ms": 251.388000092,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 251.388000092 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 439.28702,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 439.28702 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 441.806,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 441.806 4744923641.0\n"
+        }
+      },
+      "after_before": 1.0057342463704027,
+      "after_clang": 1.7574665450948854,
+      "before_clang": 1.7474462577340006
+    },
+    {
+      "index": 18,
+      "order": [
+        "before",
+        "after",
+        "clang"
+      ],
+      "runs": {
+        "before": {
+          "elapsed_ms": 439.936,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 439.936 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 439.428,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 439.428 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 251.426000148,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 251.426000148 4744923641\n"
+        }
+      },
+      "after_before": 0.99884528658714,
+      "after_clang": 1.7477428736142404,
+      "before_clang": 1.7497633488224567
+    },
+    {
+      "index": 19,
+      "order": [
+        "after",
+        "clang",
+        "before"
+      ],
+      "runs": {
+        "after": {
+          "elapsed_ms": 439.256,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 439.256 4744923641.0\n"
+        },
+        "clang": {
+          "elapsed_ms": 253.025999991,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 253.025999991 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 436.794,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 436.794 4744923641.0\n"
+        }
+      },
+      "after_before": 1.0056365243112313,
+      "after_clang": 1.7360113190566349,
+      "before_clang": 1.7262810937039534
+    },
+    {
+      "index": 20,
+      "order": [
+        "clang",
+        "before",
+        "after"
+      ],
+      "runs": {
+        "clang": {
+          "elapsed_ms": 252.288999967,
+          "signature": 4744923641.0,
+          "engine": "clang",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation clang slots8 8192 2048 252.288999967 4744923641\n"
+        },
+        "before": {
+          "elapsed_ms": 439.71802,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 439.71802 4744923641.0\n"
+        },
+        "after": {
+          "elapsed_ms": 440.203,
+          "signature": 4744923641.0,
+          "engine": "silex",
+          "layout": "slots8",
+          "stdout": "KERNEL preparation silex slots8 8192 2048 440.203 4744923641.0\n"
+        }
+      },
+      "after_before": 1.001102934103087,
+      "after_clang": 1.7448362792574372,
+      "before_clang": 1.7429139600121932
+    }
+  ],
+  "summary": {
+    "after_before": {
+      "median": 1.0037036281965028,
+      "mad": 0.005644241688840923,
+      "lower_bound": 0.99884528658714,
+      "upper_bound": 1.0064925648000476,
+      "confidence_ppm": 960823,
+      "half_shift": 0.006082139205510151
+    },
+    "after_clang": {
+      "median": 1.7477428736142404,
+      "mad": 0.008316699908790914,
+      "lower_bound": 1.7404739480453062,
+      "upper_bound": 1.7551461250294895,
+      "confidence_ppm": 960823,
+      "half_shift": -0.006855423126508664
+    },
+    "before_clang": {
+      "median": 1.7466249452825906,
+      "mad": 0.005697650973968793,
+      "lower_bound": 1.7280694232961475,
+      "upper_bound": 1.7504086382133186,
+      "confidence_ppm": 960823,
+      "half_shift": -0.01360757414342717
+    },
+    "before": {
+      "median_ms": 441.459,
+      "mad_ms": 6.348979999999983
+    },
+    "after": {
+      "median_ms": 443.094,
+      "mad_ms": 4.724019999999996
+    },
+    "clang": {
+      "median_ms": 253.535000142,
+      "mad_ms": 1.7039999360000024
+    }
+  }
+}

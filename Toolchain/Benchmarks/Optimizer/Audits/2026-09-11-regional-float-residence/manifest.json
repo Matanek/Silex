@@ -1,0 +1,26 @@
+{
+  "candidate": "0ba0b85ab1dc7d69ea4d13a10ad5815aa74a7688",
+  "files": {
+    "FloatingRegions.sx.txt": "ae0e892be029d1063282d7e6b192de36116d1c11c56f58e76cf0700c657ce418",
+    "README.md": "07e606242ae952a5551d78cd07862f3cd0e707a12368d0c695a98016fdd041c7",
+    "binaries.json": "c901fc44e171d406e6d4d0f86116f6e1e464ee4f30565b34f21f4dec4a9b15be",
+    "floating-regions-after-loop.asm": "50b732d8b1eaddd58f29e68c478086c1c85837c2ffca12decff8ccdbcc0c8016",
+    "floating-regions-after.asm": "f2fa6018122c49a827217a2bbef042b184ea0eba84ba19356b8e30f37a7c2906",
+    "floating-regions-before-loop.asm": "2b2af67bb59095b20c71e95e4adc4a9b388f41af900655ac2d729ad525d86004",
+    "floating-regions-before.asm": "c41425488e0a222491a1b1116cd91dde7b5e03c04fc094d4e492a0bbc5c88b16",
+    "floating-regions-metrics.json": "efd317caded56d8007fbd62d9e6be7aa35e4f4ed41e9292a9e5ae36bd5cd36e0",
+    "floating-regions-timing.json": "5c809327a627c8a926d372529690b1edd92f9e0eb5ffd3666754bd71db04cee6",
+    "floating-regions-timing.log": "6398cda447d8be4308e36b4eb979494aca96079def4b810382088944cef6f0c0",
+    "measure_floating_regions.py": "048598a5dbec711ba62754382a9959e10dfe2387bb553f2f95b70767a8ec05ac",
+    "measure_preparation_regional.py": "edb8f515d1694c9fca5a042820afedb12aab219fbbbc024676d065615711a3ff",
+    "preparation-regional-all.asm": "111949aae924af10f4299bb22bdcf66f117e319cec26ee52af02c3e8d88c81a5",
+    "preparation-regional-correctness.json": "8949e75ee92017b41f2c891c5ef514a8fc7ef660c02edf40f0ec90ae2ee9df56",
+    "preparation-regional-metrics.json": "9b15382ae43b48a8aebf7294815a217c1c27c3177122fc92d0d5a134d46ff88c",
+    "preparation-regional-states.txt": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+    "preparation-regional-timing.json": "a7428c10dc4959ed9d70def9f50b486ceab56e91a27a712d6d49c1a02f91b9b1",
+    "preparation-regional-timing.log": "5ab255e82b0020f60e079c0b9459664d1c973cd038653de91b36c2db913c09d9",
+    "regional-optimizer-gate.log": "df71db715f1ebef05904e0a07759ecbe681ed9643286dbc06326dd7fd4229c46",
+    "regional-robustness.log": "22f9ca514c2bd70437bde45ccc497234fe28b9041e46622149615735af1d2863",
+    "regional-validated-check-test.log": "6b858b0d299d3d1033169f29da5ae568ef03bb010296635779bd4db9f5b5484a"
+  }
+}

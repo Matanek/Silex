@@ -1,0 +1,276 @@
+{
+  "scope": "physical ARM64 process wall time including startup; eight floating recurrences after a real call; 3000000 iterations; no X64 claim",
+  "host": "macOS-26.6.2-arm64-arm-64bit",
+  "cpu": "Apple M3 Pro",
+  "binaries": {
+    "before": "f9edaed7465ff6cf17c68828607d7532d263e732e0d39f522ab12303a176e787",
+    "after": "069ad96dd9834bc76a02c9136cf16725adc72415372ffb607176e5fff9840b29"
+  },
+  "source": "ae0e892be029d1063282d7e6b192de36116d1c11c56f58e76cf0700c657ce418",
+  "warmups": 6,
+  "samples": 21,
+  "rows": [
+    {
+      "index": 0,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 31608125,
+        "after": 9112917
+      },
+      "ratio": 0.2883093192019457
+    },
+    {
+      "index": 1,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 8837458,
+        "before": 30496875
+      },
+      "ratio": 0.2897824121323906
+    },
+    {
+      "index": 2,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 31331250,
+        "after": 9206250
+      },
+      "ratio": 0.293836026331538
+    },
+    {
+      "index": 3,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 8969667,
+        "before": 30291208
+      },
+      "ratio": 0.2961145359405937
+    },
+    {
+      "index": 4,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 31096208,
+        "after": 9000666
+      },
+      "ratio": 0.2894457742243041
+    },
+    {
+      "index": 5,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 8940042,
+        "before": 30363667
+      },
+      "ratio": 0.2944322238812591
+    },
+    {
+      "index": 6,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 30159625,
+        "after": 9859208
+      },
+      "ratio": 0.3269008815593695
+    },
+    {
+      "index": 7,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 9081666,
+        "before": 31525875
+      },
+      "ratio": 0.28807022802697785
+    },
+    {
+      "index": 8,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 30590542,
+        "after": 9004250
+      },
+      "ratio": 0.29434751433956285
+    },
+    {
+      "index": 9,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 8920958,
+        "before": 30361875
+      },
+      "ratio": 0.29382105024804955
+    },
+    {
+      "index": 10,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 30251917,
+        "after": 9408875
+      },
+      "ratio": 0.3110174803137269
+    },
+    {
+      "index": 11,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 9247958,
+        "before": 32316834
+      },
+      "ratio": 0.2861653465187834
+    },
+    {
+      "index": 12,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 30172458,
+        "after": 9216291
+      },
+      "ratio": 0.30545376846659295
+    },
+    {
+      "index": 13,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 9474750,
+        "before": 30559125
+      },
+      "ratio": 0.3100465082033599
+    },
+    {
+      "index": 14,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 30697958,
+        "after": 9335500
+      },
+      "ratio": 0.30410817553402086
+    },
+    {
+      "index": 15,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 9011000,
+        "before": 30407209
+      },
+      "ratio": 0.29634419916671734
+    },
+    {
+      "index": 16,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 30612291,
+        "after": 9351791
+      },
+      "ratio": 0.30549137926331615
+    },
+    {
+      "index": 17,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 9109417,
+        "before": 30681333
+      },
+      "ratio": 0.29690421208231077
+    },
+    {
+      "index": 18,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 32498708,
+        "after": 9047750
+      },
+      "ratio": 0.27840337529725795
+    },
+    {
+      "index": 19,
+      "order": [
+        "after",
+        "before"
+      ],
+      "runs": {
+        "after": 9373333,
+        "before": 31472791
+      },
+      "ratio": 0.29782338020164784
+    },
+    {
+      "index": 20,
+      "order": [
+        "before",
+        "after"
+      ],
+      "runs": {
+        "before": 32490000,
+        "after": 9289250
+      },
+      "ratio": 0.28591104955370883
+    }
+  ],
+  "summary": {
+    "paired_median": 0.2944322238812591,
+    "lower": 0.2897824121323906,
+    "upper": 0.29782338020164784,
+    "confidence_ppm": 960823,
+    "mad": 0.006122904679313423,
+    "half_shift": 0.012031703498789348,
+    "before_median_ms": 30.612291,
+    "after_median_ms": 9.112917
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "silex-before-regional": "1c24ff34b993fc426f48b8774ad4d8d38aadd2ce6e77d58dacfbbcd1b79f75a8",
+  "floating-regions-before": "f9edaed7465ff6cf17c68828607d7532d263e732e0d39f522ab12303a176e787",
+  "floating-regions-after": "069ad96dd9834bc76a02c9136cf16725adc72415372ffb607176e5fff9840b29",
+  "preparation-reference": "a624612d1a1fd272657b855a519d5e91c160528bf098e5629808ebac3bc9b01d",
+  "preparation-regional": "609921268e57515eb5bc43b9183f52537dbce5e22fb51ae6899e6ec0dc7ae855",
+  "preparation-full-clang": "8d7380b05b04989829c693b61d927ec6b34fb2e0b3146aae54e63e887934eb76"
+}
