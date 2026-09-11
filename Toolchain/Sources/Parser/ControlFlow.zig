@@ -65,6 +65,7 @@ pub fn parseIf(self: anytype) !Ast.Statement {
                 if (self.current.tag == .keyword_elif) continue;
                 if (self.current.tag == .keyword_else) {
                     try self.advance();
+                    if (self.current.tag == .keyword_if) continue;
                     else_statements = try self.parseBlock();
                 }
                 break;
