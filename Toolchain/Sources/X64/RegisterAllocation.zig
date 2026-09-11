@@ -95,7 +95,7 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Erro
         .last = last[slot],
         .weight = weights[slot],
     });
-    try allocateGraph(allocator, residences, intervals.items, function.instructions, function.slot_count);
+    try allocateGraph(allocator, residences, intervals.items, function.instructions, function.parameters, function.slot_count);
     return residences;
 }
 
@@ -318,6 +318,7 @@ fn allocateGraph(
     residences: []?u5,
     intervals: []Interval,
     instructions: []const Machine.Instruction,
+    parameters: []const Machine.Span,
     slot_count: usize,
 ) Allocator.Error!void {
     const live = try allocator.alloc(bool, instructions.len * slot_count);
@@ -344,13 +345,13 @@ fn allocateGraph(
     std.mem.sort(Interval, intervals, {}, heavierInterval);
     for (intervals) |interval| {
         if (copyResidence(interval.slot, residences, instructions, live, slot_count)) |preferred| {
-            if (!colorConflicts(interval.slot, preferred, residences, instructions, live, slot_count)) {
+            if (!colorConflicts(interval.slot, preferred, residences, instructions, parameters, live, slot_count)) {
                 residences[interval.slot] = preferred;
                 continue;
             }
         }
         for (registers) |register| {
-            if (!colorConflicts(interval.slot, register, residences, instructions, live, slot_count)) {
+            if (!colorConflicts(interval.slot, register, residences, instructions, parameters, live, slot_count)) {
                 residences[interval.slot] = register;
                 break;
             }
@@ -455,11 +456,19 @@ fn colorConflicts(
     register: u5,
     residences: []const ?u5,
     instructions: []const Machine.Instruction,
+    parameters: []const Machine.Span,
     live: []const bool,
     slot_count: usize,
 ) bool {
     for (residences, 0..) |residence, other| {
         if (other == slot or residence == null or residence.? != register) continue;
+        // The prologue writes every incoming parameter before instruction zero,
+        // including unused ones. Those implicit definitions must not clobber
+        // another value that is live at entry.
+        if (instructions.len != 0) for (parameters) |parameter| {
+            if ((spanContains(parameter, slot) and live[other]) or
+                (spanContains(parameter, other) and live[slot])) return true;
+        };
         for (instructions, 0..) |instruction, index| {
             if (instruction == .copy) {
                 const copy = instruction.copy;
@@ -532,6 +541,30 @@ test "keep operands used by the same X64 instruction in distinct residences" {
     try std.testing.expect(residences[0] != null);
     try std.testing.expect(residences[1] != null);
     try std.testing.expect(residences[0] != residences[1]);
+}
+
+test "unused X64 incoming parameters cannot clobber a live parameter" {
+    for (0..3) |used| {
+        const instructions = [_]Machine.Instruction{
+            .{ .constant_int = .{ .result = 3, .bits = 13 } },
+            .{ .binary = .{ .result = 4, .operator = .add, .left = @intCast(used), .right = 3 } },
+            .{ .return_value = .{ .start = 4, .width = 1 } },
+        };
+        const residences = try allocate(std.testing.allocator, .{
+            .name = "unused_inputs",
+            .parameter_count = 3,
+            .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 } },
+            .return_type = .int,
+            .slot_count = 5,
+            .frame_size = 48,
+            .instructions = &instructions,
+        });
+        defer std.testing.allocator.free(residences);
+        try std.testing.expect(residences[used] != null);
+        for (residences[0..3], 0..) |residence, index| {
+            if (index != used and residence != null) try std.testing.expect(residence != residences[used]);
+        }
+    }
 }
 
 test "allocate X64 scalar values globally across a loop" {

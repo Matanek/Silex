@@ -6,6 +6,7 @@ const DenseBlocks = @import("DenseBlocks.zig");
 const InlineControlFlow = @import("InlineControlFlow.zig");
 const InlineValues = @import("InlineValues.zig");
 const ReferenceMemory = @import("ReferenceMemory.zig");
+const KnownCollections = @import("KnownCollections.zig");
 const SsaPromotion = @import("SsaPromotion.zig");
 const ValueRanges = @import("ValueRanges.zig");
 const Workers = @import("../Workers.zig");
@@ -3063,11 +3064,21 @@ fn removeDeadConstants(allocator: Allocator, function: Ir.Function) ![]const Ir.
             for (block.instructions) |instruction| countUses(instruction, uses);
             countTerminatorUses(block.terminator, uses);
         }
+        const dead_storage = try KnownCollections.deadStorage(allocator, function, current, uses);
         var changed = false;
         const next = try allocator.alloc(Ir.Block, current.len);
         for (current, 0..) |block, block_index| {
             var instructions: std.ArrayList(Ir.Instruction) = .empty;
             for (block.instructions) |instruction| {
+                const storage: ?Ir.ValueId = switch (instruction) {
+                    .list_init => |list| list.result,
+                    .list_retain, .list_drop => |resource| resource.operand,
+                    else => null,
+                };
+                if (dead_storage) |dead| if (storage) |value| if (dead[value]) {
+                    changed = true;
+                    continue;
+                };
                 if (removableResult(instruction)) |result| if (uses[result] == 0) {
                     changed = true;
                     continue;
@@ -3105,6 +3116,7 @@ fn removableResult(instruction: Ir.Instruction) ?Ir.ValueId {
         .field_load => |value| value.result,
         .collection_load => |value| if (!value.checked) value.result else null,
         .collection_count => |value| value.result,
+        .collection_view => |value| value.result,
         .local_load => |value| value.result,
         .reference_load => |value| value.result,
         .reference_field => |value| value.result,

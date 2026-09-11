@@ -11,15 +11,7 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
             relevant = true;
     };
     if (!relevant) return function;
-    const definitions = try allocator.alloc(usize, function.value_types.len);
-    @memset(definitions, 0);
-    for (0..function.parameter_types.len + function.capture_types.len) |value| definitions[value] += 1;
-    for (function.blocks) |block| for (block.instructions) |instruction| {
-        if (resultOf(instruction)) |value| definitions[value] += 1;
-        if (instruction == .list_edit) {
-            if (instruction.list_edit.removed) |value| definitions[value] += 1;
-        }
-    };
+    const definitions = try definitionCounts(allocator, function, function.blocks);
     const integers = try allocator.alloc(?i64, function.value_types.len);
     const collections = try allocator.alloc(?[]const Ir.ValueId, function.value_types.len);
     const blocks = try allocator.dupe(Ir.Block, function.blocks);
@@ -128,6 +120,55 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
     var result = function;
     result.blocks = blocks;
     return result;
+}
+
+// Once every data use has disappeared, scalar list storage has no observable
+// identity or destructor. Initializer computations remain separate IR effects.
+// Do not generalize this to aggregates, references, escapes or mutable homes.
+pub fn deadStorage(
+    allocator: std.mem.Allocator,
+    function: Ir.Function,
+    blocks: []const Ir.Block,
+    uses: []const usize,
+) !?[]bool {
+    var present = false;
+    for (blocks) |block| for (block.instructions) |instruction| {
+        if (instruction == .list_init) present = true;
+    };
+    if (!present) return null;
+    const observed = try allocator.dupe(usize, uses);
+    for (blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .list_retain, .list_drop => |resource| observed[resource.operand] -= 1,
+        else => {},
+    };
+    const definitions = try definitionCounts(allocator, function, blocks);
+    const dead = try allocator.alloc(bool, uses.len);
+    @memset(dead, false);
+    for (blocks) |block| for (block.instructions) |instruction| {
+        if (instruction != .list_init) continue;
+        const list = instruction.list_init;
+        if (definitions[list.result] != 1 or observed[list.result] != 0 or list.values.len == 0) continue;
+        var scalar = true;
+        for (list.values) |value| {
+            const type_value = function.value_types[value];
+            if (!type_value.isInteger() and !type_value.isFloat() and type_value != .bool) scalar = false;
+        }
+        dead[list.result] = scalar;
+    };
+    return dead;
+}
+
+fn definitionCounts(allocator: std.mem.Allocator, function: Ir.Function, blocks: []const Ir.Block) ![]usize {
+    const definitions = try allocator.alloc(usize, function.value_types.len);
+    @memset(definitions, 0);
+    for (0..function.parameter_types.len + function.capture_types.len) |value| definitions[value] += 1;
+    for (blocks) |block| for (block.instructions) |instruction| {
+        if (resultOf(instruction)) |value| definitions[value] += 1;
+        if (instruction == .list_edit) {
+            if (instruction.list_edit.removed) |value| definitions[value] += 1;
+        }
+    };
+    return definitions;
 }
 
 fn scalarCollection(program: Ir.Program, type_value: Ir.Type) bool {

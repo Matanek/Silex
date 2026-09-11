@@ -110,6 +110,57 @@ test "release forwards known view elements after helper inlining" {
     try std.testing.expectEqual(@as(usize, 2), loads(without, "main"));
 }
 
+test "release removes only unobserved scalar collection storage" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func evaluate(value:int) int {
+        \\    let values:int[] = [value, 7]
+        \\    let view = @values[0:2]
+        \\    return view[0] + view[-1]
+        \\}
+        \\func escape(value:int) int[] { return [value, 7] }
+        \\class Owner { var value:int }
+        \\func owned(value:Owner) { var values:Owner[] = [value] }
+        \\func main() { print(evaluate(1)) }
+    );
+    const result = try Release.optimizeWithOptions(allocator, compilation.ir, .{ .verify_each_pass = true });
+    try std.testing.expectEqualStrings("8\n", (try Interpreter.runCapture(allocator, result)).stdout);
+    for (result.functions) |function| {
+        var storage: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction == .list_init or instruction == .list_drop or instruction == .list_retain or instruction == .collection_view) storage += 1;
+        };
+        if (std.mem.eql(u8, function.name, "evaluate")) try std.testing.expectEqual(@as(usize, 0), storage);
+        if (std.mem.eql(u8, function.name, "escape") or std.mem.eql(u8, function.name, "owned")) {
+            if (storage == 0) std.debug.print("unexpectedly removed storage in {s}:\n{s}\n", .{ function.name, try Ir.writeText(allocator, .{ .structures = result.structures, .functions = &.{function} }) });
+            try std.testing.expect(storage != 0);
+        }
+    }
+}
+
+test "dead scalar collection storage preserves initializer failures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func discard(value:int) { let unused:int[] = [value + 1] }
+        \\func main() { discard(9223372036854775807) }
+    );
+    const result = try Release.optimizeWithOptions(allocator, compilation.ir, .{ .verify_each_pass = true });
+    const before = Interpreter.runCapture(allocator, compilation.ir) catch |expected| {
+        try std.testing.expectError(expected, Interpreter.runCapture(allocator, result));
+        return;
+    };
+    const after = try Interpreter.runCapture(allocator, result);
+    try std.testing.expect(before.exit_code != 0);
+    try std.testing.expectEqual(before.exit_code, after.exit_code);
+    try std.testing.expectEqualStrings(before.stderr, after.stderr);
+}
+
 test "branching loop already proves nonnegative induction dividends" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

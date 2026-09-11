@@ -422,14 +422,19 @@ fn verifyOwningCollection(function_name: []const u8, differential: Differential.
 }
 
 fn verifyKnownViews(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const optimized_function = findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
     const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
         return error.ContractFunctionMissing} });
-    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
-        return error.ContractFunctionMissing} });
+    const optimized = IrStats.profile(.{ .functions = &.{optimized_function} });
     // Arithmetic on unknown inputs can still overflow. This contract removes
     // collection reads and their bounds checks, not unrelated numeric checks.
     if (raw.other_loads < 2 or optimized.other_loads != 0)
         return error.ExpectedKnownViewForwardingMissing;
+    for (optimized_function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .list_init, .collection_view, .list_retain, .list_drop => return error.ExpectedDeadScalarStorageRemovalMissing,
+        else => {},
+    };
     return .{ .view_memory = .{
         .function = function_name,
         .raw_loads = raw.other_loads,

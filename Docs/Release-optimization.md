@@ -175,9 +175,17 @@ views or references, resource releases, unknown effects and control boundaries
 discard available collection snapshots. Snapshot elements require single-definition
 value identities, and edge-transfer redefinitions invalidate local facts. Owning
 scalar replacement remains a copy-on-write value operation and preserves the
-input snapshot; it is never treated as a store through a view. Allocations,
-owning updates and lifetime operations remain explicit. This is a bounded local
-forwarding analysis, not general allocation removal or inter-block alias analysis.
+input snapshot; it is never treated as a store through a view. Owning updates
+remain explicit. This is a bounded local forwarding analysis, not inter-block
+alias analysis.
+
+Dead-value cleanup removes an unused view descriptor, whose construction clamps
+its bounds without failing. When all data uses of a single-definition list
+literal disappear, cleanup also removes its storage and retains/drops if every
+element is numeric or boolean. Initializer computations remain separate effects,
+including checked arithmetic. Escaping lists, lists with resources or aggregates,
+and multiply defined collection values retain their storage. This deliberately
+narrow rule does not infer the lifetime or alias behavior of an observed list.
 
 Unaddressed mutable locals of the same flat scalar form are represented as
 independent field locals before aggregate propagation. A load reconstructs the
@@ -451,6 +459,10 @@ straight from their residences instead of being reloaded from stale stack
 homes. Calls or aggregate operations inside the loop, strings, floating-point
 values, unsupported operations and short loops retain the whole-function
 spill path.
+The interference graph includes the prologue's implicit parameter definitions.
+An unused incoming argument therefore cannot overwrite a register holding a
+different value that is live at entry, even when the body never reads that
+unused parameter.
 When these X64 residences cover a contiguous prefix of virtual slots, Release
 omits that prefix from the physical value frame. A shifted frame base preserves
 the existing virtual offsets for every remaining stack home, the cycle context,
