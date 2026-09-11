@@ -1,0 +1,50 @@
+[
+  {
+    "target": "macos-arm64",
+    "label": "before",
+    "scope": "first encoded function Objects.calculate; complete function static count only",
+    "instructions": 415,
+    "calls": [
+      "1000043e8:\tfa 00 00 94\tbl\t0x1000047d0",
+      "100004414:\tef 00 00 94\tbl\t0x1000047d0",
+      "1000045ec:\t97 03 00 94\tbl\t0x100005448",
+      "100004618:\t9c 00 00 94\tbl\t0x100004888",
+      "100004650:\t7e 03 00 94\tbl\t0x100005448"
+    ]
+  },
+  {
+    "target": "macos-arm64",
+    "label": "after",
+    "scope": "first encoded function Objects.calculate; complete function static count only",
+    "instructions": 475,
+    "calls": [
+      "1000046ec:\t57 03 00 94\tbl\t0x100005448",
+      "100004718:\t98 00 00 94\tbl\t0x100004978",
+      "100004750:\t3e 03 00 94\tbl\t0x100005448"
+    ]
+  },
+  {
+    "target": "macos-x64",
+    "label": "before",
+    "scope": "first encoded function Objects.calculate; complete function static count only",
+    "instructions": 320,
+    "calls": [
+      "1000013ea:\te8 05 05 00 00\tcallq\t0x1000018f4",
+      "10000143f:\te8 b0 04 00 00\tcallq\t0x1000018f4",
+      "100001714:\te8 1f 0d 00 00\tcallq\t0x100002438",
+      "100001760:\te8 1a 02 00 00\tcallq\t0x10000197f",
+      "1000017d5:\te8 5e 0c 00 00\tcallq\t0x100002438"
+    ]
+  },
+  {
+    "target": "macos-x64",
+    "label": "after",
+    "scope": "first encoded function Objects.calculate; complete function static count only",
+    "instructions": 340,
+    "calls": [
+      "100001794:\te8 9f 0c 00 00\tcallq\t0x100002438",
+      "1000017e0:\te8 8f 01 00 00\tcallq\t0x100001974",
+      "100001855:\te8 de 0b 00 00\tcallq\t0x100002438"
+    ]
+  }
+]

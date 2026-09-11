@@ -1,0 +1,206 @@
+[
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-macos-arm64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "5d856120f28d4f8da6c9505bb572882f7821e215a0591149107b5aa350a8301f",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-macos-arm64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "ff17582a3b74925a3226f9f78c83b831cd389fa8a5a8a3d00d295e002fa1c3b0",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-macos-x64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "5bbf4fc6ff15fcfe7d099f0bcc31d4d6cf8d95fb470d1368b2597b1391aae48f",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-macos-x64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "4c902e5e1b9a076d2eec1d4fdecc69c11f2adda0959d5d633eba8d8b40cd6679",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-linux-arm64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "3037833c12bcb2c60b7958226938af441c7957e1d9b42fa4bec297977b1c6ffc"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-linux-arm64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "5d76acd3873ca2d908fb30d732ea6380281f2e2b59c8799d7db4b6cac83f2cfe"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-linux-x64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "2fffe4149a805f64ff699dbbb57ab5a11d88d9045ca478a62b0c088784a4d793"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-linux-x64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "d5e97f4bb32245fba62a140dac831679f577b6d948611a8d10bf23afc7fd42f3"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-windows-arm64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "9d1303f8770a05dbf12ab62a232cc4a5ca38ab6b94e7bed3a666904bac0dd93f"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-windows-arm64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "c2ab4ef9087f157ca280185ae208db4aa23586054c58282104c450771edef038"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-windows-x64-debug"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "90a8dbfca2006a1963f4314c73d3d51f8fff5038a515b23c449bf36afa7574c2"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/ClassLeafFixture/Main.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/class-leaf-windows-x64-release"
+    ],
+    "compile_exit": 0,
+    "compile_output": "",
+    "sha256": "5309bd4a0aed00a9eb6d61e3fdb6b45949e2bf0b3ad28482f9d1ec3c5c3b6aa5"
+  }
+]

@@ -1,0 +1,11 @@
+1/2 ClassLeafProbe.test_0...OK
+2/2 Optimize.InlineValues.test.inline scalar class leaves while preserving aliases and call effects...FAIL (TestUnexpectedResult)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:615:14: 0x1048e45df in expect (root)
+    if (!ok) return error.TestUnexpectedResult;
+             ^
+/private/tmp/silex-part03-evidence/ClassLeafMutationSources/Optimize/InlineValues.zig:775:17: 0x1048e508f in test.inline scalar class leaves while preserving aliases and call effects (root)
+                try std.testing.expect(std.mem.indexOf(u8, name, "Counter.add") == null);
+                ^
+1 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/55cf9524ee3ab6fac2ef7d46b2a0dd73/root --seed=0xd3bc982b

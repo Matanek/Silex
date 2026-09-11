@@ -1,0 +1,17 @@
+[
+  {
+    "original": ".zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv",
+    "preserved": ".zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587-prior-2e32fbb1ba263016.tsv",
+    "sha256": "2e32fbb1ba2630168275bd11ec382647a958ccec10fc449c88112405ce049c0e"
+  },
+  {
+    "original": ".zig-cache/optimizer-oracle/robustness/CacheStress/cache-stress.tsv",
+    "preserved": ".zig-cache/optimizer-oracle/robustness/CacheStress/cache-stress-prior-add679ea12aa50a4.tsv",
+    "sha256": "add679ea12aa50a48c9759294f6e3a3ea4cf018d22008c8cba798802ab877340"
+  },
+  {
+    "original": ".zig-cache/optimizer-oracle/robustness/ProjectStress/project-stress-v1.tsv",
+    "preserved": ".zig-cache/optimizer-oracle/robustness/ProjectStress/project-stress-v1-prior-9b459b849d058566.tsv",
+    "sha256": "9b459b849d058566610817f1eccbb0c9f7559d40014dbcc4aed38d4e738b87bb"
+  }
+]
