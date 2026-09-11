@@ -79,3 +79,32 @@ test "inherited call results use only the visible binding" {
         try Support.expectAbsent("is_down", items);
     }
 }
+
+test "namespace arguments recover unfinished conditions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Input.sx", .data = "public enum Key { w, a } public class State { func is_down(key:Key) bool { return false } }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "{s}/Main.sx", .{root_uri});
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    for ([_][]const u8{ "if input.is_down({s})", "while input.is_down({s})", "if (input.is_down({s}))", "if input.is_down({s}) {}", "input.is_down({s})", "if input.is_down({s}" }) |form| {
+        for ([_][]const u8{ "G<|>", "GF<|>" }) |prefix| {
+            const hole = std.mem.indexOf(u8, form, "{s}").?;
+            const expression = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ form[0..hole], prefix, form[hole + 3 ..] });
+            const source = try std.fmt.allocPrint(allocator, "use GFX.Input\nclass Root {{ func update(input:Input.State) {{\n {s}\n }} }}", .{expression});
+            const items = try Support.serverCompletion(&server, allocator, uri, source);
+            try Support.expectPresent("GFX", items);
+            try Support.expectAbsent("__completion", items);
+            try Support.expectNoDuplicates(items);
+            try Support.expectEqualItems(items, try Support.serverCompletion(&server, allocator, uri, source));
+        }
+    }
+}

@@ -4512,7 +4512,7 @@ fn parseForCompletionObserved(
         else
             "__completion()",
         .type_name => "int",
-        .aggregate_field => "__completion:true",
+        .aggregate_field => if (control_body_missing) "__completion:true {}" else "__completion:true",
         .statement => if (control_body_missing or (for_source and !for_body_follows))
             "true {}"
         else if (lineHasAssignmentBeforeCursor(before_prefix))
