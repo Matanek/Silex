@@ -39,8 +39,8 @@ aucune nouvelle mesure Physics n’est attribuée à cette analyse.
 La campagne Intel compare ce candidat à 7bd153c. La sélection SSE change
 Flocking ; les longueurs privées changent Objects ; Arithmetic est identique.
 Les preuves d’identité des exécutables distinguent ces contributions.
-Les workflows autorisés sont en cours sur le SHA exact :
-[matrice native](https://github.com/Matanek/Silex/actions/runs/34655625766) et
-[mesure Intel](https://github.com/Matanek/Silex/actions/runs/34655627073).
-Leurs résultats restent à collecter.
+La [matrice native](https://github.com/Matanek/Silex/actions/runs/34655625766)
+passe ses six jobs sur le SHA exact ; journaux et identifiants joints.
+La [mesure Intel](https://github.com/Matanek/Silex/actions/runs/34655627073)
+reste en cours.
 La Part 03 demeure active.
