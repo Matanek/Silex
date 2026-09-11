@@ -62,8 +62,8 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     if (!fully_compatible and !hasProfitableScalarRegion(function.instructions, externals)) return spilled(allocator, function);
     if (!fully_compatible and hasLoopAggregateCall(function.instructions)) return spilled(allocator, function);
     // Actual C calls preserve x19...x28 and only the low 64 bits of v8...v15.
-    // Keep the existing argument/result stack homes and use preserved colors
-    // for the whole function. Scratch v9...v12 remain excluded as before.
+    // Keep argument/result stack homes. Scalar regions may borrow volatile
+    // floating colors only when their live values do not meet a call.
     const has_calls = for (function.instructions) |instruction| {
         if (instruction == .call) break true;
         if (instruction == .external_call) {
@@ -95,8 +95,8 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         0,  1,  2,  3,  4,  5,  8,  13,
         14, 15,
     };
-    const float_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
-    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, float_registers);
+    const lane_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
+    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, lane_registers);
     var cursor_probe = function;
     cursor_probe.float_lane_slots = float_lane_residences;
     const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
@@ -214,6 +214,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         forced,
         reference_cursors,
         checked_reference_cursors,
+        false,
     );
     // Incoming arguments occupy x0 up to the last register parameter until
     // the prologue captures them. Lower volatile registers beyond that point
@@ -248,12 +249,13 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         allocator,
         float_residences,
         float_intervals.items,
-        float_registers,
+        &pair_registers,
         function.instructions,
         function.slot_count,
         forced,
         reference_cursors,
         checked_reference_cursors,
+        has_calls,
     );
     for (float_lane_residences, 0..) |lane, slot| if (lane != null) {
         float_residences[slot] = null;
@@ -425,6 +427,7 @@ fn allocateGraph(
     forced: []const bool,
     reference_cursors: []const LoopCursor.ReferenceCursor,
     checked_reference_cursors: []const LoopCursor.ReferenceCursor,
+    regional_float_colors: bool,
 ) Allocator.Error!void {
     const live = try allocator.alloc(bool, instructions.len * slot_count);
     defer allocator.free(live);
@@ -456,23 +459,45 @@ fn allocateGraph(
     try buildPureAliasRoots(allocator, alias_roots, instructions, live, slot_count, forced);
     coalesceCopyAffinityRoots(alias_roots, instructions, live, slot_count, forced);
 
+    // Constrain the whole coalesced component, including call operands and
+    // results. CFG liveness keeps a call on another path from extending an
+    // unrelated region; values genuinely crossing it use preserved colors.
+    const preserved = try allocator.alloc(bool, slot_count);
+    defer allocator.free(preserved);
+    @memset(preserved, false);
+    if (regional_float_colors) {
+        for (instructions, 0..) |instruction, index| {
+            if (instruction != .call and instruction != .external_call) continue;
+            for (0..slot_count) |slot| {
+                if (live[index * slot_count + slot] or successorLive(instructions, live, slot_count, index, slot))
+                    preserved[alias_roots[slot]] = true;
+            }
+        }
+    }
+
     std.mem.sort(Interval, intervals, {}, heavierThan);
     for (intervals) |interval| {
         const root = alias_roots[interval.slot];
         if (componentResidence(root, residences, alias_roots)) |precolored| {
-            if (!componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals)) {
+            if ((!preserved[root] or (precolored >= 8 and precolored < 16)) and
+                !componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals))
+            {
                 assignComponentResidence(root, precolored, residences, alias_roots, intervals);
             }
             continue;
         }
         if (preferredComponentResidence(root, residences, alias_roots, instructions)) |preferred| {
-            if (!componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals)) {
+            if ((!preserved[root] or (preferred >= 8 and preferred < 16)) and
+                !componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals))
+            {
                 assignComponentResidence(root, preferred, residences, alias_roots, intervals);
                 continue;
             }
         }
         for (registers) |register| {
-            if (!componentColorConflicts(root, register, residences, alias_roots, live, instructions, slot_count, intervals)) {
+            if ((!preserved[root] or (register >= 8 and register < 16)) and
+                !componentColorConflicts(root, register, residences, alias_roots, live, instructions, slot_count, intervals))
+            {
                 assignComponentResidence(root, register, residences, alias_roots, intervals);
                 break;
             }
@@ -2041,4 +2066,35 @@ test "hot scalar loops retain registers across a terminal print barrier" {
     try std.testing.expect(result.residences[8] != null);
     try std.testing.expect(result.residences[10] != null);
     try std.testing.expect(result.residences[11] != null);
+}
+
+test "floating regions borrow volatile colors without carrying them across calls" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0x3f800000 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0x40000000 } },
+        .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+        .{ .binary = .{ .result = 3, .operator = .multiply, .left = 2, .right = 1, .type = .float32 } },
+        .{ .call = .{ .function = 0, .arguments = &.{.{ .start = 3, .width = 1 }}, .result = null } },
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 0, .right = 1, .type = .float32 } },
+        .{ .return_value = .{ .start = 4, .width = 1 } },
+    };
+    const function: Machine.Function = .{
+        .name = "regions",
+        .parameter_count = 0,
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+    const temporary = result.float_residences[2] orelse return error.ExpectedVolatileResidence;
+    try std.testing.expect(temporary < 8 or temporary >= 16);
+    for ([_]usize{ 0, 1, 3 }) |slot| {
+        const register = result.float_residences[slot] orelse return error.ExpectedPreservedResidence;
+        try std.testing.expect(register >= 8 and register < 16);
+    }
 }

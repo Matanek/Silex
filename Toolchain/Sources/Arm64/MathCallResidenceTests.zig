@@ -44,7 +44,9 @@ test "scalar math calls retain live values in ABI-preserved registers" {
             for (allocation.residences) |resident| if (resident) |register| {
                 try std.testing.expect(register >= 19 and register <= (if (slots >= 4096) @as(u5, 27) else 28));
             };
-            for (allocation.float_residences) |resident| if (resident) |register| {
+            // Only the operand, live-through value and call result meet the
+            // ABI boundary. Earlier and later scalar regions may use volatiles.
+            for ([_]usize{ 2, 4, 5 }) |slot| if (allocation.float_residences[slot]) |register| {
                 try std.testing.expect(register == 8 or (register >= 13 and register <= 15));
             };
             for (allocation.float_lane_residences) |resident| if (resident) |lane| {

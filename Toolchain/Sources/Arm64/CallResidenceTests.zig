@@ -137,3 +137,51 @@ test "direct calls preserve resident view loop state and checked diagnostics" {
     try std.testing.expectEqual(@as(u64, 41), values[0]);
     try std.testing.expectEqual(@as(u64, 100), values[1]);
 }
+
+test "native floating regions survive a callee clobbering every allocatable FP register" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var caller: Machine.Function = .{
+        .name = "floating_caller",
+        .parameter_count = 0,
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 7,
+        .frame_size = try Machine.frameSize(7),
+        .instructions = &.{
+            .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 3)) } },
+            .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 4)) } },
+            .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+            .{ .binary = .{ .result = 3, .operator = .add, .left = 2, .right = 1, .type = .float32 } },
+            .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } },
+            .{ .binary = .{ .result = 4, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+            .{ .binary = .{ .result = 5, .operator = .add, .left = 4, .right = 3, .type = .float32 } },
+            .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 0, .type = .float32 } },
+            .{ .return_value = .{ .start = 6, .width = 1 } },
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, caller);
+    caller.register_slots = allocation.residences;
+    caller.float_register_slots = allocation.float_residences;
+    caller.float_lane_slots = allocation.float_lane_residences;
+    var clobbers: std.ArrayList(Machine.Instruction) = .empty;
+    const colors = [_]?u5{ 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 8, 13, 14, 15 };
+    for (colors, 0..) |_, slot| try clobbers.append(allocator, .{
+        .constant_float32 = .{ .result = @intCast(slot), .bits = @bitCast(@as(f32, 99)) },
+    });
+    try clobbers.append(allocator, .return_void);
+    const callee: Machine.Function = .{
+        .name = "clobber_all",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = colors.len,
+        .frame_size = try Machine.frameSize(colors.len),
+        .float_register_slots = &colors,
+        .instructions = clobbers.items,
+    };
+    const result = try Runner.invoke(allocator, .{ .functions = &.{ caller, callee } }, 0, &.{});
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(i64, @as(u32, @bitCast(@as(f32, 31)))), result.value);
+}
