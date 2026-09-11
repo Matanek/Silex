@@ -1,16 +1,24 @@
-// Reduced contact effective masses and warm impulses. This is not the complete
-// preparation stage: graph lookup, softness and relative velocity are excluded.
+// Reduced contact effective masses, relative velocity, softness and warm
+// impulses. Graph lookup and ownership are deliberately outside this witness.
 struct Input {
     var mass_a:float; var mass_b:float; var inertia_a:float; var inertia_b:float
     var nx:float; var ny:float; var ax:float; var ay:float; var bx:float; var by:float
+    var separation:float
+    var velocity_ax:float; var velocity_ay:float; var angular_a:float
+    var velocity_bx:float; var velocity_by:float; var angular_b:float
     var normal:float; var tangent:float; var rolling:float
 }
 struct Prepared {
+    var separation:float; var relative_velocity:float
     var normal_mass:float; var tangent_mass:float; var rolling_mass:float
     var normal:float; var tangent:float; var rolling:float
+    var bias_rate:float; var mass_scale:float; var impulse_scale:float
 }
 
 func prepare(input:@Input, warm:bool) Prepared {
+    var result = Prepared()
+    result.separation = input.separation -
+        ((input.bx - input.ax) * input.nx + (input.by - input.ay) * input.ny)
     let normal_a = input.ax * input.ny - input.ay * input.nx
     let normal_b = input.bx * input.ny - input.by * input.nx
     let normal_denominator = input.mass_a + input.mass_b +
@@ -20,10 +28,29 @@ func prepare(input:@Input, warm:bool) Prepared {
     let tangent_denominator = input.mass_a + input.mass_b +
         input.inertia_a * tangent_a * tangent_a + input.inertia_b * tangent_b * tangent_b
     let rolling_denominator = input.inertia_a + input.inertia_b
-    var result = Prepared()
     if normal_denominator > 0.0 { result.normal_mass = 1.0 / normal_denominator }
     if tangent_denominator > 0.0 { result.tangent_mass = 1.0 / tangent_denominator }
     if rolling_denominator > 0.0 { result.rolling_mass = 1.0 / rolling_denominator }
+    var velocity_ax = copy input.velocity_ax
+    var velocity_ay = copy input.velocity_ay
+    var angular_a = copy input.angular_a
+    var velocity_bx = copy input.velocity_bx
+    var velocity_by = copy input.velocity_by
+    var angular_b = copy input.angular_b
+    if input.mass_a == 0.0 { velocity_ax = 0.0; velocity_ay = 0.0; angular_a = 0.0 }
+    if input.mass_b == 0.0 { velocity_bx = 0.0; velocity_by = 0.0; angular_b = 0.0 }
+    result.relative_velocity = input.nx *
+        ((velocity_bx - angular_b * input.by) - (velocity_ax - angular_a * input.ay)) +
+        input.ny *
+        ((velocity_by + angular_b * input.bx) - (velocity_ay + angular_a * input.ax))
+    result.bias_rate = 12.0
+    result.mass_scale = 0.75
+    result.impulse_scale = 0.25
+    if input.mass_a == 0.0 || input.mass_b == 0.0 {
+        result.bias_rate = 24.0
+        result.mass_scale = 0.875
+        result.impulse_scale = 0.125
+    }
     if warm {
         result.normal = input.normal
         result.tangent = input.tangent
@@ -43,10 +70,19 @@ func batch(inputs:@Input[..], outputs:&Prepared[..], warm:bool) {
 func main() {
     let inputs:Input[] = [
         Input(mass_a:1.0, mass_b:1.0, inertia_a:1.0, inertia_b:1.0,
-            ny:1.0, ax:1.0, bx:-1.0, normal:2.0, tangent:-1.0, rolling:0.5),
+            ny:1.0, ax:1.0, bx:-1.0, separation:0.25,
+            velocity_ax:1.0, velocity_ay:2.0, angular_a:0.5,
+            velocity_bx:3.0, velocity_by:5.0, angular_b:-0.25,
+            normal:2.0, tangent:-1.0, rolling:0.5),
         Input(mass_b:1.0, inertia_b:1.0,
-            ny:1.0, ax:1.0, bx:-1.0, normal:4.0, tangent:-2.0, rolling:1.0),
-        Input(ny:1.0, ax:1.0, bx:-1.0, normal:8.0, tangent:-4.0, rolling:2.0)
+            ny:1.0, ax:1.0, bx:-1.0, separation:0.5,
+            velocity_ax:1.0, velocity_ay:2.0, angular_a:0.5,
+            velocity_bx:3.0, velocity_by:5.0, angular_b:-0.25,
+            normal:4.0, tangent:-2.0, rolling:1.0),
+        Input(ny:1.0, ax:1.0, bx:-1.0, separation:-0.5,
+            velocity_ax:1.0, velocity_ay:2.0, angular_a:0.5,
+            velocity_bx:3.0, velocity_by:5.0, angular_b:-0.25,
+            normal:8.0, tangent:-4.0, rolling:2.0)
     ]
     var outputs:Prepared[] = [Prepared(), Prepared(), Prepared()]
     let view = @inputs[0:3]
@@ -55,6 +91,11 @@ func main() {
     print(destination[0].normal_mass == 0.25 && destination[0].tangent_mass == 0.5 && destination[0].rolling_mass == 0.5)
     print(destination[1].normal_mass == 0.5 && destination[1].tangent_mass == 1.0 && destination[1].rolling_mass == 1.0)
     print(destination[2].normal_mass == 0.0 && destination[2].tangent_mass == 0.0 && destination[2].rolling_mass == 0.0)
+    print(destination[0].separation == 0.25 && destination[1].separation == 0.5 && destination[2].separation == -0.5)
+    print(destination[0].relative_velocity == 2.75 && destination[1].relative_velocity == 5.25 && destination[2].relative_velocity == 0.0)
+    print(destination[0].bias_rate == 12.0 && destination[0].mass_scale == 0.75 && destination[0].impulse_scale == 0.25)
+    print(destination[1].bias_rate == 24.0 && destination[1].mass_scale == 0.875 && destination[1].impulse_scale == 0.125)
+    print(destination[2].bias_rate == 24.0 && destination[2].mass_scale == 0.875 && destination[2].impulse_scale == 0.125)
     print(destination[0].normal == 2.0 && destination[0].tangent == -1.0 && destination[0].rolling == 0.5)
     print(destination[1].normal == 4.0 && destination[1].tangent == -2.0 && destination[1].rolling == 1.0)
     print(destination[2].normal == 8.0 && destination[2].tangent == -4.0 && destination[2].rolling == 2.0)
@@ -62,6 +103,9 @@ func main() {
     print(destination[0].normal_mass == 0.25 && destination[0].tangent_mass == 0.5 && destination[0].rolling_mass == 0.5)
     print(destination[1].normal_mass == 0.5 && destination[1].tangent_mass == 1.0 && destination[1].rolling_mass == 1.0)
     print(destination[2].normal_mass == 0.0 && destination[2].tangent_mass == 0.0 && destination[2].rolling_mass == 0.0)
+    print(destination[0].separation == 0.25 && destination[0].relative_velocity == 2.75 && destination[0].bias_rate == 12.0)
+    print(destination[1].separation == 0.5 && destination[1].relative_velocity == 5.25 && destination[1].bias_rate == 24.0)
+    print(destination[2].separation == -0.5 && destination[2].relative_velocity == 0.0 && destination[2].bias_rate == 24.0)
     print(destination[0].normal == 0.0 && destination[0].tangent == 0.0 && destination[0].rolling == 0.0)
     print(destination[1].normal == 0.0 && destination[1].tangent == 0.0 && destination[1].rolling == 0.0)
     print(destination[2].normal == 0.0 && destination[2].tangent == 0.0 && destination[2].rolling == 0.0)

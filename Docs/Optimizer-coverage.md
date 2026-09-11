@@ -127,8 +127,10 @@ need package composition opt into project compilation explicitly.
 Both probes print independent boolean observations rather than relying on the
 runtime assertion/text path. Their interpreter, native Silex, raw LLVM and
 Release LLVM outputs agree. `HotReferenceLeafClosure.sx` now observes position,
-rotation, activation of the linear speed cap and the capped squared speed. It
-does not yet cover the angular cap, relative velocity or softness.
+rotation, both speed-cap branches and their numeric bounds.
+`PreparationMasses.sx` also observes separation, dynamic/static relative
+velocity and the selected bias, mass and impulse softness scales. These reduced
+contracts exclude graph lookup, ownership and multi-point contact assembly.
 
 ## Experiments selected by the audit
 
@@ -136,7 +138,7 @@ does not yet cover the angular cap, relative velocity or softness.
 | --- | --- | --- |
 | Constant and memory propagation | `ReadonlyViewMemory.sx` | LLVM folds an observed result to a constant; separate call specialization, bounds information and load forwarding |
 | Range and signedness | `BranchingLoop.sx` | Advisor observes different signed/unsigned remainder operations; compare proven nonnegative variants with overflow and negative counterexamples |
-| Reference helpers and target pressure | `Regressions/PureMathReferenceInlining.sx`, `Regressions/HotReferenceLeafClosure.sx` | Both execute through LLVM; extend the numeric contract to the angular cap and physical X64 pressure before changing the current out-of-line policy |
+| Reference helpers and target pressure | `Regressions/PureMathReferenceInlining.sx`, `Regressions/HotReferenceLeafClosure.sx` | Both execute through LLVM and cover the linear/angular caps; obtain physical X64 pressure before changing the current out-of-line policy |
 | Aggregate preparation | No autonomous full preparation reduction yet | Extract fixed/dynamic body, zero denominator, warm-start and alias variants; observe every prepared field and separate output-reduction cost |
 | Register residence and barriers | `Regressions/X64RegionalBarriers.sx`, `Regressions/X64IndirectAggregate.sx` | Structural witnesses do not replace physical X64 execution or dynamic spill measurements |
 | Lifetime and effects | `OwningCollectionCopy.sx`, `Regressions/TextOutputIntegrity.sx` | Separate value semantics from destruction, runtime and text costs that the bridge does not model |

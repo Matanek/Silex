@@ -1336,7 +1336,7 @@ test "LLVM aggregate view probes preserve independent observations in both IR mo
     for ([_]struct { name: []const u8, lines: usize }{
         .{ .name = "AggregateViewAliasing.sx", .lines = 9 },
         .{ .name = "DampedIntegration.sx", .lines = 9 },
-        .{ .name = "PreparationMasses.sx", .lines = 13 },
+        .{ .name = "PreparationMasses.sx", .lines = 21 },
     }) |fixture| {
         const path = try std.fs.path.join(a, &.{ "Benchmarks/Optimizer", fixture.name });
         const source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, a, .limited(1024 * 1024));

@@ -83,13 +83,19 @@ func integrate(bodies:&Body[..], forces:&Forces[..]) {
 }
 
 func main() {
-    var bodies:Body[] = [Body(vx:3.0, vy:4.0, w:0.5, px:0.0, py:0.0, c:0.6, s:0.8)]
-    var forces:Forces[] = [Forces(
-        x:0.25, y:0.5, torque:0.125,
-        inverse_mass:0.5, inverse_inertia:0.25, gravity_scale:1.0,
-        linear_damping:0.25, angular_damping:0.125,
-        allow_fast_rotation:false, speed_capped:false
-    )]
+    var bodies:Body[] = [
+        Body(vx:3.0, vy:4.0, w:0.5, px:0.0, py:0.0, c:0.6, s:0.8),
+        Body(vx:0.0, vy:0.0, w:100.0, px:0.0, py:0.0, c:1.0, s:0.0)
+    ]
+    var forces:Forces[] = [
+        Forces(
+            x:0.25, y:0.5, torque:0.125,
+            inverse_mass:0.5, inverse_inertia:0.25, gravity_scale:1.0,
+            linear_damping:0.25, angular_damping:0.125,
+            allow_fast_rotation:false, speed_capped:false
+        ),
+        Forces(allow_fast_rotation:false, speed_capped:false)
+    ]
     var body_view = &bodies[0:bodies.count()]
     var force_view = &forces[0:forces.count()]
     integrate(body_view, force_view)
@@ -101,4 +107,8 @@ func main() {
     print(body_view[0].s > 0.0)
     print(force_view[0].speed_capped)
     print(body_view[0].vx * body_view[0].vx + body_view[0].vy * body_view[0].vy <= 16.0)
+    print(force_view[1].speed_capped)
+    print(body_view[1].w > 47.0 && body_view[1].w < 48.0)
+    print(body_view[1].c > 0.98 && body_view[1].c < 0.99)
+    print(body_view[1].s > 0.19 && body_view[1].s < 0.20)
 }

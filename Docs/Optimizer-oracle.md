@@ -240,13 +240,14 @@ indirect boundary calls and mismatched signatures remain unsupported.
 
 The autonomous `AggregateViewAliasing.sx`, `DampedIntegration.sx` and
 `PreparationMasses.sx` cases exercise mixed-width padded elements, escaping
-literals, aliasing, independent copies, reference helpers, damping/translation
-and effective masses with warm impulses. The `PureMathReferenceInlining.sx` and
+literals, aliasing, independent copies, reference helpers, damping/translation,
+effective masses, warm impulses, separation, relative velocity and dynamic or
+static softness selection. The `PureMathReferenceInlining.sx` and
 `HotReferenceLeafClosure.sx` corpus cases add scalar square root/copy-sign
-boundaries, rotation and the linear speed cap. They observe deterministic values
-and are not timed. They do not cover the angular cap or full preparation
-(relative velocity and softness). Their abstract lifetime model cannot qualify
-allocation, destruction or reference-count costs.
+boundaries, rotation and independent linear/angular speed caps. They observe
+deterministic values and are not timed. They do not cover graph lookup,
+multi-point contact assembly or ownership. Their abstract lifetime model cannot
+qualify allocation, destruction or reference-count costs.
 
 Generated qualification also combines a nested scalar aggregate, an owning
 copy-on-write snapshot, a temporary mutable view, a loop, and a branch in one
