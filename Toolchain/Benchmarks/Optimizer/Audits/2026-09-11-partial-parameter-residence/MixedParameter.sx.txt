@@ -1,0 +1,15 @@
+struct Input { var x:float; var tag:int; var y:float64; var active:bool; var passthrough:float }
+struct Snapshot { var x:float; var tag:int; var y:float64; var active:bool; var passthrough:float }
+func evaluate(input:@Input) Snapshot {
+    return Snapshot(x:input.x * 2.0, tag:input.tag, y:input.y + 1.0, active:input.active, passthrough:input.passthrough)
+}
+func main() {
+    var input = Input(x:0.0 / 0.0, tag:47, y:16777217.0, active:true, passthrough:-0.0)
+    let first = evaluate(input)
+    input.x = 10.0; input.tag = -3; input.y = 0.5; input.active = false; input.passthrough = 3.0
+    let second = evaluate(input)
+    print(first.x != first.x); print(first.tag == 47); print(first.y == 16777218.0)
+    print(first.active); print(1.0 / first.passthrough < 0.0)
+    print(second.x == 20.0); print(second.tag == -3); print(second.y == 1.5)
+    print(!second.active); print(second.passthrough == 3.0)
+}

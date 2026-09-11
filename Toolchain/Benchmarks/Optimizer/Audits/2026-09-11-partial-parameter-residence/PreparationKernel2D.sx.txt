@@ -1,0 +1,243 @@
+// One-point preparation adapted from Box2D 3.1.1 contact_solver.c.
+// Revision 8c661469c9507d3ad6fbd2fea3f1aa71669c2fe3.
+// Copyright (c) 2023 Erin Catto. MIT: Oracle2D/Box2D-LICENSE.txt.
+// Technical witness only; no production solver change.
+use STD.Process
+use STD.Time.Clock
+
+struct Input {
+    var ma:float
+    var mb:float
+    var ia:float
+    var ib:float
+    var nx:float
+    var ny:float
+    var ax:float
+    var ay:float
+    var bx:float
+    var by:float
+    var separation:float
+    var vax:float
+    var vay:float
+    var wa:float
+    var vbx:float
+    var vby:float
+    var wb:float
+    var normal:float
+    var tangent:float
+    var rolling:float
+    var friction:float
+    var restitution:float
+    var tangent_speed:float
+    var rolling_resistance:float
+}
+
+struct Prepared {
+    var separation:float
+    var normal_mass:float
+    var tangent_mass:float
+    var relative_velocity:float
+    var rolling_mass:float
+    var normal:float
+    var tangent:float
+    var rolling:float
+    var friction:float
+    var restitution:float
+    var tangent_speed:float
+    var rolling_resistance:float
+    var bias_rate:float
+    var mass_scale:float
+    var impulse_scale:float
+    var nx:float
+    var ny:float
+    var ax:float
+    var ay:float
+    var bx:float
+    var by:float
+    var ma:float
+    var mb:float
+    var ia:float
+    var ib:float
+    var total:float
+}
+
+func prepare(input:@Input, warm:bool) Prepared {
+    var out = Prepared()
+    var warm_scale = 0.0
+    if warm { warm_scale = 1.0 }
+    out.separation = input.separation -
+        ((input.bx - input.ax) * input.nx + (input.by - input.ay) * input.ny)
+    let rn_a = input.ax * input.ny - input.ay * input.nx
+    let rn_b = input.bx * input.ny - input.by * input.nx
+    let kn = input.ma + input.mb + input.ia * rn_a * rn_a + input.ib * rn_b * rn_b
+    if kn > 0.0 { out.normal_mass = 1.0 / kn }
+    let tx = input.ny
+    let ty = -input.nx
+    let rt_a = input.ax * ty - input.ay * tx
+    let rt_b = input.bx * ty - input.by * tx
+    let kt = input.ma + input.mb + input.ia * rt_a * rt_a + input.ib * rt_b * rt_b
+    if kt > 0.0 { out.tangent_mass = 1.0 / kt }
+    let kr = input.ia + input.ib
+    if kr > 0.0 { out.rolling_mass = 1.0 / kr }
+    var vax = copy input.vax
+    var vay = copy input.vay
+    var wa = copy input.wa
+    var vbx = copy input.vbx
+    var vby = copy input.vby
+    var wb = copy input.wb
+    if input.ma == 0.0 { vax = 0.0; vay = 0.0; wa = 0.0 }
+    if input.mb == 0.0 { vbx = 0.0; vby = 0.0; wb = 0.0 }
+    out.relative_velocity = input.nx * ((vbx - wb * input.by) - (vax - wa * input.ay)) +
+        input.ny * ((vby + wb * input.bx) - (vay + wa * input.ax))
+    out.normal = warm_scale * input.normal
+    out.tangent = warm_scale * input.tangent
+    out.rolling = warm_scale * input.rolling
+    out.bias_rate = 12.0
+    out.mass_scale = 0.75
+    out.impulse_scale = 0.25
+    if input.ma == 0.0 || input.mb == 0.0 {
+        out.bias_rate = 24.0
+        out.mass_scale = 0.875
+        out.impulse_scale = 0.125
+    }
+    out.friction = input.friction
+    out.restitution = input.restitution
+    out.tangent_speed = input.tangent_speed
+    out.rolling_resistance = input.rolling_resistance
+    out.nx = input.nx
+    out.ny = input.ny
+    out.ax = input.ax
+    out.ay = input.ay
+    out.bx = input.bx
+    out.by = input.by
+    out.ma = input.ma
+    out.mb = input.mb
+    out.ia = input.ia
+    out.ib = input.ib
+    return out
+}
+
+func make_input(index:int, frame:int) Input {
+    let k = (index % 16) as float
+    let phase = frame as float
+    var input = Input(ma:1.0, mb:0.5, ia:0.25, ib:0.5, nx:0.6, ny:0.8,
+        ax:0.125 + phase * 0.0078125, ay:-0.0625,
+        bx:-0.125, by:0.0625 + phase * 0.00390625,
+        separation:(k - 8.0) * 0.03125 + phase * 0.001953125,
+        vax:k * 0.125, vay:-0.5 - phase * 0.0625, wa:0.25,
+        vbx:-0.25, vby:k * 0.0625 - 1.0, wb:-0.5 + phase * 0.03125,
+        normal:0.125 + phase * 0.015625, tangent:0.03125, rolling:-0.015625,
+        friction:(index % 4) as float * 0.25, restitution:k * 0.0625,
+        tangent_speed:(k - 8.0) * 0.125, rolling_resistance:0.125)
+    if index % 4 == 0 { input.ma = 0.0; input.ia = 0.0 }
+    if index % 8 == 0 { input.mb = 0.0; input.ib = 0.0 }
+    if frame % 2 == 1 { input.nx = 0.8; input.ny = -0.6 }
+    return input
+}
+
+func main() {
+    var check = false
+    var full = false
+    match Process.arguments() {
+        failure(error) => { panic(error.detail) }
+        success(arguments) => {
+            for argument in arguments {
+                if argument == "--check" { check = true }
+                if argument == "--check-full" { check = true; full = true }
+            }
+        }
+    }
+    var count = 8192
+    var passes = 2048
+    if check { count = 16; if !full { passes = 8 } }
+    var inputs:Input[] = []
+    var outputs:Prepared[] = []
+    var frame = 0
+    while frame < 16 {
+        var i = 0
+        while i < count { inputs.append(make_input(i, frame)); i++ }
+        frame++
+    }
+    var i = 0
+    while i < count { outputs.append(Prepared()); i++ }
+    let input_view = @inputs[0:inputs.count()]
+    var output_view = &outputs[0:outputs.count()]
+    var signature:float64 = 0.0
+    var clock = Clock()
+    clock.tick()
+    var pass = 0
+    while pass < passes {
+        let base = (pass % 16) * count
+        i = 0
+        while i < count {
+            output_view[i] = prepare(input_view[base + i], pass % 2 == 0)
+            i++
+        }
+        i = 0
+        while i < count {
+            let value = copy output_view[i]
+            if check {
+                print("STATE ", pass, " ", i, " ",
+                    value.separation, " ",
+                    value.normal_mass, " ",
+                    value.tangent_mass, " ",
+                    value.relative_velocity, " ",
+                    value.rolling_mass, " ",
+                    value.normal, " ",
+                    value.tangent, " ",
+                    value.rolling, " ",
+                    value.friction, " ",
+                    value.restitution, " ",
+                    value.tangent_speed, " ",
+                    value.rolling_resistance, " ",
+                    value.bias_rate, " ",
+                    value.mass_scale, " ",
+                    value.impulse_scale, " ",
+                    value.nx, " ",
+                    value.ny, " ",
+                    value.ax, " ",
+                    value.ay, " ",
+                    value.bx, " ",
+                    value.by, " ",
+                    value.ma, " ",
+                    value.mb, " ",
+                    value.ia, " ",
+                    value.ib, " ",
+                    value.total)
+            } else {
+                signature += (value.separation * 1.0 +
+                    value.normal_mass * 2.0 +
+                    value.tangent_mass * 3.0 +
+                    value.relative_velocity * 4.0 +
+                    value.rolling_mass * 5.0 +
+                    value.normal * 6.0 +
+                    value.tangent * 7.0 +
+                    value.rolling * 8.0 +
+                    value.friction * 9.0 +
+                    value.restitution * 10.0 +
+                    value.tangent_speed * 11.0 +
+                    value.rolling_resistance * 12.0 +
+                    value.bias_rate * 13.0 +
+                    value.mass_scale * 14.0 +
+                    value.impulse_scale * 15.0 +
+                    value.nx * 16.0 +
+                    value.ny * 17.0 +
+                    value.ax * 18.0 +
+                    value.ay * 19.0 +
+                    value.bx * 20.0 +
+                    value.by * 21.0 +
+                    value.ma * 22.0 +
+                    value.mb * 23.0 +
+                    value.ia * 24.0 +
+                    value.ib * 25.0 +
+                    value.total * 26.0) as float64
+            }
+            i++
+        }
+        pass++
+    }
+    if !check {
+        let elapsed = clock.tick() * 1000.0
+        print("KERNEL preparation silex slots8 ", count, " ", passes, " ", elapsed, " ", signature)
+    }
+}
