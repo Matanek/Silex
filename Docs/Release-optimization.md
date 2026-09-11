@@ -374,6 +374,13 @@ or the integer allocation policy.
 Terminal returns likewise pin only their returned spans: their epilogue
 cannot invalidate values used exclusively by another CFG successor.
 
+Scalar X64 arithmetic and comparisons consume allocated FP colors directly.
+Stack operands still load into the existing scratch registers. Destructive
+SSE arithmetic uses the result color when safe; a result that aliases the
+right operand is computed in scratch before the final move. Operand order,
+precision, signed zero and unordered comparison behavior remain unchanged.
+Packed arithmetic and the minimum/maximum sequence retain their own lowering.
+
 ARM64 also admits a restricted set of memory operations. Checked dynamic
 loads, view replacement, and explicit address/reference accesses retain their
 bounds and failure behavior. Addressed local spans stay pinned. Scalar

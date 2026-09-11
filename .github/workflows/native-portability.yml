@@ -110,6 +110,15 @@ jobs:
             test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
             test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
           done
+          float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
+          for mode in debug release; do
+            "$silex" compile "$float_operands_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/scalar-float-operands-$mode"
+            float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")
+            test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$float_operands_output" | grep -c '^true$')" -eq 18
+          done
           run_distribution() {
             executable="$1"
             stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
@@ -399,6 +408,15 @@ jobs:
             test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
             test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
           done
+          float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
+          for mode in debug release; do
+            "$silex" compile "$float_operands_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/scalar-float-operands-$mode"
+            float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")
+            test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$float_operands_output" | grep -c '^true$')" -eq 18
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -510,6 +528,15 @@ jobs:
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
             test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
             test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
+          done
+          float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
+          for mode in debug release; do
+            "$silex" compile "$float_operands_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/scalar-float-operands-$mode"
+            float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")
+            test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$float_operands_output" | grep -c '^true$')" -eq 18
           done
 
   windows-x64:
@@ -655,6 +682,17 @@ jobs:
             $floatMemoryOutput = @(& $floatMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 10 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "float memory residence $mode regression failed"
+            }
+          }
+          $floatOperandsFixture = Join-Path $scalarRoot "ScalarFloatOperands.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx") $floatOperandsFixture
+          foreach ($mode in @("debug", "release")) {
+            $floatOperandsBinary = Join-Path $env:RUNNER_TEMP "scalar-float-operands-$mode.exe"
+            & $silex compile $floatOperandsFixture "--$mode" --nocache -o $floatOperandsBinary
+            if ($LASTEXITCODE -ne 0) { throw "scalar float operands compilation failed" }
+            $floatOperandsOutput = @(& $floatOperandsBinary)
+            if ($LASTEXITCODE -ne 0 -or $floatOperandsOutput.Count -ne 18 -or @($floatOperandsOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "scalar float operands $mode regression failed"
             }
           }
 
@@ -978,5 +1016,16 @@ jobs:
             $floatMemoryOutput = @(& $floatMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 10 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "float memory residence $mode regression failed"
+            }
+          }
+          $floatOperandsFixture = Join-Path $scalarRoot "ScalarFloatOperands.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx") $floatOperandsFixture
+          foreach ($mode in @("debug", "release")) {
+            $floatOperandsBinary = Join-Path $env:RUNNER_TEMP "scalar-float-operands-$mode.exe"
+            & $silex compile $floatOperandsFixture "--$mode" --nocache -o $floatOperandsBinary
+            if ($LASTEXITCODE -ne 0) { throw "scalar float operands compilation failed" }
+            $floatOperandsOutput = @(& $floatOperandsBinary)
+            if ($LASTEXITCODE -ne 0 -or $floatOperandsOutput.Count -ne 18 -or @($floatOperandsOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "scalar float operands $mode regression failed"
             }
           }

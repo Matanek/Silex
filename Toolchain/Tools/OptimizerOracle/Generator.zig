@@ -119,6 +119,7 @@ pub const corpus = [_]CorpusEntry{
 pub const regressions = [_]RegressionEntry{
     .{ .name = "Regressions/BranchComparisons.sx", .concern = "single-use and shared comparisons preserve signed and unsigned widths, unordered floats, infinities and signed zero" },
     .{ .name = "Regressions/BranchSnapshots.sx", .concern = "arm-local scalar snapshots preserve alias writes, joined values, negative indices, NaN and signed zero" },
+    .{ .name = "Regressions/ScalarFloatOperands.sx", .concern = "direct scalar SSE operands preserve subtraction/division order, widths, signed zero and unordered comparisons" },
     .{ .name = "Regressions/FloatMemoryResidence.sx", .concern = "FP recurrences across stack aggregate copies and fixed/view loads, widths, NaN and signed zero" },
     .{ .name = "Regressions/LoopExitResidence.sx", .concern = "loop-carried scalar state survives interleaved class exits and direct mutator calls" },
     // Native-only: the strict LLVM oracle does not lower float-to-integer conversions.

@@ -1,0 +1,32 @@
+func wide(left:float64, right:float64) {
+    print(left - right == 6.0)
+    print(right - left == -6.0)
+    print(left / right == 4.0)
+    print(right / left == 0.25)
+    print(left + right == 10.0)
+    print(left * right == 16.0)
+}
+
+func narrow(left:float32, right:float32) {
+    print(left - right == 6.0)
+    print(right - left == -6.0)
+    print(left / right == 4.0)
+    print(right / left == 0.25)
+    print(left + right == 10.0)
+    print(left * right == 16.0)
+}
+
+func edges(zero:float64, nan:float64) {
+    print(1.0 / zero < 0.0)
+    print(1.0 / -zero > 0.0)
+    print(!(nan < zero))
+    print(!(nan > zero))
+    print(!(nan == nan))
+    print(nan != nan)
+}
+
+func main() {
+    wide(8.0, 2.0)
+    narrow(8.0, 2.0)
+    edges(-0.0, 0.0 / 0.0)
+}

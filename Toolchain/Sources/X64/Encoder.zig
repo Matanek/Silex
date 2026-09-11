@@ -924,10 +924,8 @@ fn encodeFunction(
                 if (comparison) |binary| {
                     if (binary.type.isFloat()) {
                         const double = binary.type == .float64;
-                        try emitLoadFloatValue(allocator, bytes, function.float_register_slots, 0, binary.left, double);
-                        try emitLoadFloatValue(allocator, bytes, function.float_register_slots, 1, binary.right, double);
-                        if (double) try bytes.append(allocator, 0x66);
-                        try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc1 });
+                        const operands = try floatOperands(allocator, bytes, function.float_register_slots, binary);
+                        try emitScalarFloatOpcode(allocator, bytes, if (double) @as(?u8, 0x66) else null, 0x2e, operands.left, operands.right);
                     } else {
                         try emitLoadValue(allocator, bytes, function.register_slots, .rax, binary.left);
                         try emitLoadValue(allocator, bytes, function.register_slots, .rcx, binary.right);
@@ -1296,31 +1294,55 @@ fn emitAggregateEqual(
 
 fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, binary: Machine.Instruction.Binary) Error!void {
     const double = binary.type == .float64;
-    try emitLoadFloatValue(allocator, bytes, residences, 0, binary.left, double);
-    try emitLoadFloatValue(allocator, bytes, residences, 1, binary.right, double);
     switch (binary.operator) {
         .add, .subtract, .multiply, .divide => {
-            try bytes.append(allocator, if (double) 0xf2 else 0xf3);
-            try bytes.appendSlice(allocator, &.{ 0x0f, switch (binary.operator) {
+            const operands = try floatOperands(allocator, bytes, residences, binary);
+            const result = if (residences.len != 0) residences[binary.result] else null;
+            var destination: u5 = result orelse 0;
+            // SSE is destructive on the left operand. If allocation reuses
+            // the right color, compute in the existing scratch register and
+            // move only the final result; never commute floating operands.
+            if (destination == operands.right and destination != operands.left) destination = 0;
+            try emitMoveFloat(allocator, bytes, destination, operands.left);
+            try emitScalarFloatOpcode(allocator, bytes, if (double) 0xf2 else 0xf3, switch (binary.operator) {
                 .add => 0x58,
                 .subtract => 0x5c,
                 .multiply => 0x59,
                 .divide => 0x5e,
                 else => unreachable,
-            }, 0xc1 });
-            if (residences.len != 0 and residences[binary.result] != null) {
-                try emitMoveFloat(allocator, bytes, residences[binary.result].?, 0);
+            }, destination, operands.right);
+            if (result) |register| {
+                try emitMoveFloat(allocator, bytes, register, destination);
             } else try emitStoreFloatStack(allocator, bytes, 0, binary.result, double);
         },
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
-            if (double) try bytes.append(allocator, 0x66);
-            try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc1 });
+            const operands = try floatOperands(allocator, bytes, residences, binary);
+            try emitScalarFloatOpcode(allocator, bytes, if (double) @as(?u8, 0x66) else null, 0x2e, operands.left, operands.right);
             try emitFloatComparisonResult(allocator, bytes, binary.operator);
             try emitStoreStack(allocator, bytes, .rax, binary.result);
         },
-        .minimum, .maximum => try emitFloatMinimumMaximum(allocator, bytes, binary, double),
+        .minimum, .maximum => {
+            try emitLoadFloatValue(allocator, bytes, residences, 0, binary.left, double);
+            try emitLoadFloatValue(allocator, bytes, residences, 1, binary.right, double);
+            try emitFloatMinimumMaximum(allocator, bytes, binary, double);
+        },
         else => return error.UnsupportedInstruction,
     }
+}
+
+fn floatOperands(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, binary: Machine.Instruction.Binary) Allocator.Error!struct { left: u5, right: u5 } {
+    const left = if (residences.len != 0) residences[binary.left] else null;
+    const right = if (residences.len != 0) residences[binary.right] else null;
+    if (left == null) try emitLoadFloatStack(allocator, bytes, 0, binary.left, binary.type == .float64);
+    if (right == null) try emitLoadFloatStack(allocator, bytes, 1, binary.right, binary.type == .float64);
+    return .{ .left = left orelse 0, .right = right orelse 1 };
+}
+
+fn emitScalarFloatOpcode(allocator: Allocator, bytes: *std.ArrayList(u8), prefix: ?u8, opcode: u8, destination: u5, source: u5) Allocator.Error!void {
+    if (prefix) |value| try bytes.append(allocator, value);
+    const rex: u8 = 0x40 | (@as(u8, @intFromBool(destination >= 8)) << 2) | @intFromBool(source >= 8);
+    if (rex != 0x40) try bytes.append(allocator, rex);
+    try bytes.appendSlice(allocator, &.{ 0x0f, opcode, 0xc0 | ((@as(u8, destination) & 7) << 3) | (@as(u8, source) & 7) });
 }
 
 fn emitFloatComparisonResult(
@@ -4601,5 +4623,39 @@ test "scalar XMM high colors encode raw bits and preserve full Win64 registers" 
         0,    0xf3, 0x0f, 0x6f, 0xb5, 48,   0,  0,
         0,    0xf3, 0x44, 0x0f, 0x6f, 0xbd, 64, 0,
         0,    0,
+    }, bytes.items);
+}
+
+test "scalar SSE arithmetic uses allocated colors and preserves a reused right operand" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    const binary: Machine.Instruction.Binary = .{ .result = 2, .left = 0, .right = 1, .operator = .subtract, .type = .float64 };
+    // subSD xmm6,xmm15: the destination already contains the left operand.
+    try emitFloatBinary(allocator, &bytes, &.{ 6, 15, 6 }, binary);
+    try std.testing.expectEqualSlices(u8, &.{ 0xf2, 0x41, 0x0f, 0x5c, 0xf7 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    // If the result reuses the right operand, preserve its value until the
+    // subtraction has consumed it. The operand order cannot be reversed.
+    try emitFloatBinary(allocator, &bytes, &.{ 6, 15, 15 }, binary);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x0f, 0x28, 0xc6,
+        0xf2, 0x41, 0x0f,
+        0x5c, 0xc7, 0x44,
+        0x0f, 0x28, 0xf8,
+    }, bytes.items);
+    bytes.clearRetainingCapacity();
+    var single = binary;
+    single.operator = .divide;
+    single.type = .float32;
+    try emitFloatBinary(allocator, &bytes, &.{ 15, 6, 15 }, single);
+    try std.testing.expectEqualSlices(u8, &.{ 0xf3, 0x44, 0x0f, 0x5e, 0xfe }, bytes.items);
+    bytes.clearRetainingCapacity();
+    // Both high-register extension bits must be present after the prefix.
+    try emitScalarFloatOpcode(allocator, &bytes, 0x66, 0x2e, 14, 15);
+    try emitScalarFloatOpcode(allocator, &bytes, null, 0x2e, 15, 6);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x66, 0x45, 0x0f, 0x2e, 0xf7,
+        0x44, 0x0f, 0x2e, 0xfe,
     }, bytes.items);
 }
