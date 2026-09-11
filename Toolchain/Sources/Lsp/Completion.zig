@@ -2929,7 +2929,50 @@ const Local = struct {
     type_name: ?[]const u8,
     type_value: ?Ast.Type = null,
     depth: usize,
+    initializer: ?LocalInitializer = null,
 };
+
+pub const LocalInitializer = struct {
+    expression: []const u8,
+    cursor: usize,
+};
+
+fn declarationInitializer(source: []const u8, tokens: []const Token) ?LocalInitializer {
+    if (tokens.len == 0) return null;
+    var depth: usize = 0;
+    var end: usize = 0;
+    for (tokens, 0..) |token, index| {
+        if (depth == 0 and (token.tag == .semicolon or token.tag == .right_brace or
+            token.tag == .keyword_if or token.tag == .keyword_while or token.tag == .keyword_for or
+            token.tag == .keyword_match or token.tag == .keyword_mutex or
+            token.position.line > tokens[0].position.line)) break;
+        switch (token.tag) {
+            .left_parenthesis, .left_bracket, .left_brace => depth += 1,
+            .right_parenthesis, .right_bracket, .right_brace => {
+                if (depth == 0) break;
+                depth -= 1;
+            },
+            else => {},
+        }
+        end = index + 1;
+    }
+    if (end == 0 or depth != 0) return null;
+    return .{ .expression = source[tokens[0].start..tokens[end - 1].end], .cursor = tokens[0].start };
+}
+
+pub fn localInitializerAt(allocator: Allocator, source: []const u8, program: Ast.Program, cursor: usize, name: []const u8) !?LocalInitializer {
+    const callables = try containingCallables(allocator, source, program, cursor);
+    defer allocator.free(callables);
+    if (callables.len == 0) return null;
+    const locals = try visibleLocals(allocator, source, program, callables[0].position, cursor);
+    defer allocator.free(locals);
+    var index = locals.len;
+    while (index != 0) {
+        index -= 1;
+        if (std.mem.eql(u8, locals[index].name, name)) return locals[index].initializer;
+    }
+    return null;
+}
 
 fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program, start: usize, cursor: usize) ![]const Local {
     const tokens = try tokensUntil(allocator, source, cursor);
@@ -2993,6 +3036,10 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 const name = tokens[index + 1].lexeme;
                 try locals.append(allocator, .{
                     .name = name,
+                    .initializer = if (index + 3 < end and tokens[index + 2].tag == .equal)
+                        declarationInitializer(source, tokens[index + 3 ..])
+                    else
+                        null,
                     .type_name = inferDeclarationType(source, program, tokens[index..end]),
                     .type_value = inferDeclarationValueType(
                         source,
@@ -3477,7 +3524,7 @@ fn inferDeclarationValueType(
                 break;
             };
             if (end == index + 1) return null;
-            const spelling = std.mem.trim(u8, source[tokens[index + 1].start..tokens[end - 1].end], " \t\r\n");
+            const spelling = std.mem.trimStart(u8, std.mem.trim(u8, source[tokens[index + 1].start..tokens[end - 1].end], " \t\r\n"), "@& \t");
             return typeForSourceSpelling(program, spelling);
         }
         if (token.tag != .equal or index + 1 >= tokens.len or tokens[index + 1].tag != .identifier) continue;
@@ -3602,21 +3649,31 @@ pub fn resolveReceiverTypeForAccess(
         const static_access = findStructure(program, std.mem.trim(u8, access.base, " \t\r\n")) != null;
 
         if (directCall(access.member)) |call| {
-            var return_type: ?[]const u8 = null;
-            for (owner.methods) |method| {
-                if (method.is_static != static_access or !std.mem.eql(u8, method.name, call.name) or
-                    !acceptsArity(method.parameters, call.arity)) continue;
-                const candidate = specializedTypeName(
-                    allocator,
-                    program,
-                    owner,
-                    base_type,
-                    method.return_type,
-                ) catch return null;
-                if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
-                return_type = candidate;
+            var declaring = owner;
+            var declaring_type = base_type;
+            const access_structure = if (containingCallable(source, program, cursor)) |callable| callable.structure_name else null;
+            for (0..program.structures.len + 1) |_| {
+                var return_type: ?[]const u8 = null;
+                for (declaring.methods) |method| {
+                    if (method.is_static != static_access or !std.mem.eql(u8, method.name, call.name) or
+                        !localMemberVisible(program, access_structure, declaring, method) or
+                        !acceptsArity(method.parameters, call.arity)) continue;
+                    const candidate = specializedTypeName(
+                        allocator,
+                        program,
+                        declaring,
+                        declaring_type,
+                        method.return_type,
+                    ) catch return null;
+                    if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
+                    return_type = candidate;
+                }
+                if (return_type) |resolved| return typeAfterSafeAccess(resolved, safe_access);
+                if (static_access) return null;
+                declaring_type = specializedTypeName(allocator, program, declaring, declaring_type, declaring.base orelse return null) catch return null;
+                declaring = findStructure(program, nominalReceiverName(declaring_type)) orelse return null;
             }
-            return if (return_type) |resolved| typeAfterSafeAccess(resolved, safe_access) else null;
+            return null;
         }
 
         const fields = if (static_access) owner.static_fields else owner.fields;
@@ -3720,7 +3777,10 @@ pub fn resolveReceiverTypeForAccess(
             while (index != 0) {
                 index -= 1;
                 if (std.mem.eql(u8, locals[index].name, first)) {
-                    current_type = locals[index].type_name;
+                    current_type = if (locals[index].type_name) |name| std.mem.trimStart(u8, name, "@& \t") else null;
+                    if (locals[index].initializer) |initializer| {
+                        current_type = resolveReceiverType(allocator, source, program, initializer.cursor, initializer.expression) orelse current_type;
+                    }
                     break;
                 }
             }
@@ -4444,7 +4504,7 @@ fn parseForCompletionObserved(
         else if (callFollows(source, cursor))
             if (context.prefix.len == 0) "__completion" else ""
         else if (context.prefix.len != 0)
-            "()"
+            if (control_body_missing) "() {}" else "()"
         else if (memberFollowedByAssignment(source, cursor))
             "__completion"
         else if ((for_source and !for_body_follows) or control_body_missing)
@@ -4475,14 +4535,17 @@ fn parseForCompletionObserved(
         context.prefix_start;
     const block_suffix: []const u8 = if (std.mem.endsWith(u8, placeholder, " {}")) " {}" else "";
     const placeholder_expression = placeholder[0 .. placeholder.len - block_suffix.len];
-    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}", .{
+    // The condition's existing closing delimiters must precede its missing body.
+    const suffix_end = if (block_suffix.len != 0) completionClosersEnd(source, cursor) else cursor;
+    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}{s}", .{
         source[0..replacement_start],
         placeholder_expression,
         closers,
+        source[cursor..suffix_end],
         block_suffix,
-        source[cursor..],
+        source[suffix_end..],
     });
-    const recovered_cursor = replacement_start + placeholder.len + closers.len;
+    const recovered_cursor = replacement_start + placeholder.len + closers.len + suffix_end - cursor;
     parser = ParserModule.Parser.init(allocator, recovered);
     if (parser.parse()) |program| return .{
         .program = mergeExtensionsForCompletion(allocator, program),
@@ -4594,9 +4657,19 @@ fn isControlConditionKeyword(tag: TokenTag) bool {
 }
 
 fn blockFollowsCompletion(source: []const u8, cursor: usize) bool {
-    var index = cursor;
+    var index = completionClosersEnd(source, cursor);
     while (index < source.len and std.ascii.isWhitespace(source[index])) index += 1;
     return index < source.len and source[index] == '{';
+}
+
+fn completionClosersEnd(source: []const u8, cursor: usize) usize {
+    var end = cursor;
+    var lexer = LexerModule.Lexer.init(source[cursor..]);
+    while (true) {
+        const token = lexer.next() catch return end;
+        if (token.tag != .right_parenthesis and token.tag != .right_bracket) return end;
+        end = cursor + token.end;
+    }
 }
 
 pub fn aggregateContextAt(allocator: Allocator, source: []const u8, cursor: usize) !?AggregateContext {
@@ -5318,7 +5391,7 @@ pub fn qualifiedCall(receiver: []const u8) ?QualifiedCall {
     if (opening < 3 or tokens[opening - 2].tag != .dot or tokens[opening - 1].tag != .identifier) return null;
     for (tokens[0 .. opening - 2], 0..) |token, owner_index| {
         if (owner_index % 2 == 0) {
-            if (token.tag != .identifier) return null;
+            if (token.tag != .identifier and !(owner_index == 0 and token.tag == .keyword_self)) return null;
         } else if (token.tag != .dot) return null;
     }
 

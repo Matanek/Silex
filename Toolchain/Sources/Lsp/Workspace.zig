@@ -1743,17 +1743,7 @@ fn appendImportedMembersDepth(
 ) !void {
     if (depth > 128) return;
     const target = declarationTarget(project.index, query.type_path) orelse return;
-    var provider_index = target.provider;
-    const module_name = project.index.providers[target.provider].name;
-    for (project.index.providers, 0..) |candidate, candidate_index| {
-        if (!std.mem.eql(u8, candidate.name, module_name) or
-            !project.graph.canAccess(project.current_owner, candidate.owner, candidate.name)) continue;
-        const candidate_program = try loadProgram(allocator, io, documents, candidate) orelse continue;
-        if (programProvidesDeclaration(candidate_program.program, target.declaration)) {
-            provider_index = candidate_index;
-            break;
-        }
-    }
+    const provider_index = try declarationProviderIndex(allocator, io, documents, project, target.provider, target.declaration);
     const provider = project.index.providers[provider_index];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return;
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
@@ -2013,6 +2003,17 @@ fn inheritedMemberVisible(project: IndexedProject, provider: Modules.Provider, q
     return importedMemberVisible(project, provider, member);
 }
 
+fn declarationProviderIndex(allocator: Allocator, io: Io, documents: []const Types.Document, project: IndexedProject, initial: usize, declaration: []const u8) !usize {
+    const module_name = project.index.providers[initial].name;
+    for (project.index.providers, 0..) |candidate, index| {
+        if (!std.mem.eql(u8, candidate.name, module_name) or
+            !project.graph.canAccess(project.current_owner, candidate.owner, candidate.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, candidate) orelse continue;
+        if (programProvidesDeclaration(loaded.program, declaration)) return index;
+    }
+    return initial;
+}
+
 fn programProvidesDeclaration(program: Ast.Program, declaration: []const u8) bool {
     for (program.structures) |structure| if (std.mem.eql(u8, structure.name, declaration)) return true;
     for (program.enums) |enumeration| if (std.mem.eql(u8, enumeration.name, declaration)) return true;
@@ -2254,78 +2255,22 @@ fn declaredCallReturnTypePath(
     cursor: usize,
     receiver: []const u8,
 ) !?[]const u8 {
-    var tokens: std.ArrayList(LexerModule.Token) = .empty;
-    var lexer = LexerModule.Lexer.init(source[0..cursor]);
-    while (true) {
-        const token = lexer.next() catch break;
-        if (token.tag == .end) break;
-        try tokens.append(allocator, token);
+    const initializer = try Completion.localInitializerAt(allocator, source, current, cursor, receiver) orelse return null;
+    if (Completion.qualifiedCall(initializer.expression)) |call| {
+        if (try importedQualifiedCallReturnTypePath(allocator, io, documents, project, current, call)) |resolved| return resolved;
+        return importedInstanceCallReturnTypePath(allocator, io, documents, project, current, source, initializer.cursor, call);
     }
-    var index: usize = 0;
-    while (index + 4 < tokens.items.len) : (index += 1) {
-        if (tokens.items[index].tag != .keyword_let and tokens.items[index].tag != .keyword_var) continue;
-        if (tokens.items[index + 1].tag != .identifier or
-            !std.mem.eql(u8, tokens.items[index + 1].lexeme, receiver) or
-            tokens.items[index + 2].tag != .equal or
-            tokens.items[index + 3].tag != .identifier) continue;
-
-        if (tokens.items[index + 4].tag == .left_parenthesis) {
-            const arity = callArity(tokens.items, index + 4) orelse continue;
-            var result: ?[]const u8 = null;
-            for (current.functions) |function| {
-                if (function.operator != null or !std.mem.eql(u8, function.name, tokens.items[index + 3].lexeme) or
-                    !parametersAcceptArity(function.parameters, arity)) continue;
-                const local_type = returnTypeName(current, function.return_type) orelse continue;
-                const resolved = try importedTypePath(allocator, current, project, local_type) orelse continue;
-                if (result != null and !std.mem.eql(u8, result.?, resolved)) return null;
-                result = resolved;
-            }
-            return result;
-        }
-
-        if (index + 6 >= tokens.items.len or
-            tokens.items[index + 4].tag != .dot or
-            tokens.items[index + 5].tag != .identifier or
-            tokens.items[index + 6].tag != .left_parenthesis) continue;
-
-        const owner_alias = tokens.items[index + 3].lexeme;
-        const method_name = tokens.items[index + 5].lexeme;
-        const arguments = callArity(tokens.items, index + 6) orelse continue;
-
-        return importedQualifiedCallReturnTypePath(
-            allocator,
-            io,
-            documents,
-            project,
-            current,
-            .{ .owner = owner_alias, .name = method_name, .arity = arguments },
-        );
+    const call = Completion.directCall(initializer.expression) orelse return null;
+    var result: ?[]const u8 = null;
+    for (current.functions) |function| {
+        if (function.operator != null or !std.mem.eql(u8, function.name, call.name) or
+            !parametersAcceptArity(function.parameters, call.arity)) continue;
+        const local_type = returnTypeName(current, function.return_type) orelse continue;
+        const resolved = try importedTypePath(allocator, current, project, local_type) orelse continue;
+        if (result != null and !std.mem.eql(u8, result.?, resolved)) return null;
+        result = resolved;
     }
-    return null;
-}
-
-fn callArity(tokens: []const LexerModule.Token, opening: usize) ?usize {
-    var depth: usize = 1;
-    var arguments: usize = 0;
-    var has_argument = false;
-    var index = opening + 1;
-    while (index < tokens.len) : (index += 1) switch (tokens[index].tag) {
-        .left_parenthesis => {
-            if (depth == 1) has_argument = true;
-            depth += 1;
-        },
-        .right_parenthesis => {
-            depth -|= 1;
-            if (depth == 0) return arguments + @intFromBool(has_argument);
-        },
-        .comma => if (depth == 1) {
-            arguments += 1;
-        },
-        else => {
-            if (depth == 1) has_argument = true;
-        },
-    };
-    return null;
+    return result;
 }
 
 fn importedQualifiedCallReturnTypePath(
@@ -2395,41 +2340,53 @@ fn importedInstanceCallReturnTypePath(
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
     const local_type = Completion.resolveReceiverType(allocator, source, current, cursor, call.owner) orelse return null;
-    var owner_path = try importedTypePath(allocator, current, project, local_type) orelse return null;
+    const access = if (Completion.enclosingClass(source, current, cursor)) |child| localDerivesFrom(current, child.name, local_type) else false;
+    const inherited = try inheritedQuery(allocator, project, current, local_type, .{ .kind = .member, .prefix = "", .prefix_start = cursor, .cursor = cursor, .program = current }, access);
+    var query: ImportedMemberQuery = inherited orelse .{
+        .type_path = try importedTypePath(allocator, current, project, Completion.nominalReceiverName(local_type)) orelse return null,
+        .receiver_type = local_type,
+        .prefix = "",
+        .cursor = cursor,
+    };
     var depth: usize = 0;
-    while (depth <= project.index.providers.len) : (depth += 1) {
-        const target = declarationTarget(project.index, owner_path) orelse return null;
-        const provider = project.index.providers[target.provider];
+    while (depth <= 128) : (depth += 1) {
+        const target = declarationTarget(project.index, query.type_path) orelse return null;
+        const provider_index = try declarationProviderIndex(allocator, io, documents, project, target.provider, target.declaration);
+        const provider = project.index.providers[provider_index];
         if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
-        var matched_structure = false;
+        var parent: ?[]const u8 = null;
         for (loaded.program.structures) |structure| {
             if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
-            matched_structure = true;
             var return_name: ?[]const u8 = null;
             for (structure.methods) |method| {
-                if (method.is_static or !importedMemberVisible(project, provider, method) or
+                if (method.is_static or !inheritedMemberVisible(project, provider, query, method) or
                     !std.mem.eql(u8, method.name, call.name) or
                     !parametersAcceptArity(method.parameters, call.arity)) continue;
-                const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
-                if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
-                return_name = candidate;
+                const candidate = try Completion.specializedTypeName(allocator, loaded.program, structure, query.receiver_type orelse structure.name, method.return_type);
+                const resolved = try providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(candidate));
+                if (return_name != null and !std.mem.eql(u8, return_name.?, resolved)) return null;
+                return_name = resolved;
             }
-            const name = return_name orelse return null;
-            if (try importedTypePath(allocator, loaded.program, project, name)) |resolved| return resolved;
-            if (std.mem.indexOfScalar(u8, name, '.') != null and declarationTarget(project.index, name) != null) return name;
-            if (std.mem.eql(u8, name, target.declaration)) return owner_path;
-            return try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
+            if (return_name) |name| return name;
+            const base = structure.base orelse return null;
+            const base_type = try Completion.specializedTypeName(allocator, loaded.program, structure, query.receiver_type orelse structure.name, base);
+            query.receiver_type = base_type;
+            parent = try providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(base_type));
+            break;
         }
-        if (matched_structure) return null;
+        if (parent) |path| {
+            query.type_path = path;
+            continue;
+        }
         var reexport: ?[]const u8 = null;
         for (loaded.program.uses) |use| {
             if (!use.is_public or use.alias == null or
                 !std.mem.eql(u8, use.alias.?, target.declaration)) continue;
-            reexport = use.path;
+            reexport = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
             break;
         }
-        owner_path = reexport orelse return null;
+        query.type_path = reexport orelse return null;
     }
     return null;
 }
