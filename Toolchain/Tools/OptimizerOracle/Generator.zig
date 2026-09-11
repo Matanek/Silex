@@ -86,6 +86,7 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "Regressions/AggregatePreparation.sx", .timing = false },
     .{ .name = "Regressions/ScalarExpressionReuse.sx", .timing = false },
     .{ .name = "Regressions/KnownViewElements.sx", .timing = false },
     .{ .name = "DampedIntegration.sx", .timing = false },
@@ -112,6 +113,11 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{
+        .name = "Regressions/AggregatePreparation.sx",
+        .concern = "complete preparation observes all 26 fields across dynamic/fixed bodies, warm starts and detached results",
+        .contract = .none,
+    },
     .{
         .name = "Regressions/ScalarExpressionReuse.sx",
         .concern = "identical scalar snapshots share calculations across stores while changed memory and floating edge values retain their observations",
