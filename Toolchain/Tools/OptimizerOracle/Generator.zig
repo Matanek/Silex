@@ -20,6 +20,7 @@ pub const StructuralContract = union(enum) {
     },
     coalesces_view_memory: []const u8,
     forwards_owning_collection: []const u8,
+    forwards_known_views: []const u8,
     simplifies_ssa_values: []const u8,
     promotes_critical_edge: []const u8,
     coalesces_forwarded_phi: []const u8,
@@ -80,6 +81,7 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "Regressions/KnownViewElements.sx", .timing = false },
     .{ .name = "DampedIntegration.sx", .timing = false },
     .{ .name = "PreparationMasses.sx", .timing = false },
     .{ .name = "AggregateViewAliasing.sx", .timing = false },
@@ -104,6 +106,11 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{
+        .name = "Regressions/KnownViewElements.sx",
+        .concern = "known scalar elements propagate through clamped nested views; aliases and branches retain observations",
+        .contract = .{ .forwards_known_views = "constantViews" },
+    },
     .{
         .name = "IntegerArithmetic.sx",
         .concern = "a hot scalar loop retains target registers across a terminal output barrier",

@@ -372,6 +372,7 @@ fn qualifyNative(
             .elides_reference_memory => |requirement| requirement.overwritten,
             .coalesces_view_memory => |function_name| function_name,
             .forwards_owning_collection => |function_name| function_name,
+            .forwards_known_views => |function_name| function_name,
             else => null,
         };
         if (memory_function) |function_name| {

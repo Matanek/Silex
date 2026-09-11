@@ -194,6 +194,7 @@ pub fn verifyContract(
         .elides_reference_memory => |requirement| verifyReferenceMemory(requirement, differential),
         .coalesces_view_memory => |function_name| verifyViewMemory(function_name, differential),
         .forwards_owning_collection => |function_name| verifyOwningCollection(function_name, differential),
+        .forwards_known_views => |function_name| verifyKnownViews(function_name, differential),
         .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
         .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .coalesces_forwarded_phi => |function_name| verifyCriticalEdgePromotion(function_name, differential),
@@ -415,6 +416,25 @@ fn verifyOwningCollection(function_name: []const u8, differential: Differential.
         .function = function_name,
         .raw_loads = raw.other_loads,
         .optimized_loads = optimized.other_loads,
+        .optimized_stores = optimized.other_stores,
+        .optimized_guards = optimized.safety_guards,
+    } };
+}
+
+fn verifyKnownViews(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const optimized = IrStats.profile(.{ .functions = &.{findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    // Arithmetic on unknown inputs can still overflow. This contract removes
+    // collection reads and their bounds checks, not unrelated numeric checks.
+    if (raw.other_loads < 2 or optimized.other_loads != 0)
+        return error.ExpectedKnownViewForwardingMissing;
+    return .{ .view_memory = .{
+        .function = function_name,
+        .raw_loads = raw.other_loads,
+        .optimized_loads = optimized.other_loads,
+        .raw_stores = raw.other_stores,
         .optimized_stores = optimized.other_stores,
         .optimized_guards = optimized.safety_guards,
     } };

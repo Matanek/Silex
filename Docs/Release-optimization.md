@@ -163,6 +163,22 @@ later load may still resolve to a scalar list-literal element or to the exact
 replacement value when the collection lineage and both normalized constant
 indices are known. This forwards values across the functional update without
 treating the input and result storage as aliases or removing the update itself.
+The same block-local analysis follows known numeric and boolean elements through
+collection copies, slices and nested views. It normalizes negative indices and
+clamps both slice bounds, including reversed and empty slices. Known counts and
+in-range element reads become scalar values; out-of-range reads and unknown
+index arithmetic retain their original checks. Floating elements are forwarded
+without arithmetic, preserving their exact bits.
+
+Readonly access does not imply globally immutable storage. Calls, writes through
+views or references, resource releases, unknown effects and control boundaries
+discard available collection snapshots. Snapshot elements require single-definition
+value identities, and edge-transfer redefinitions invalidate local facts. Owning
+scalar replacement remains a copy-on-write value operation and preserves the
+input snapshot; it is never treated as a store through a view. Allocations,
+owning updates and lifetime operations remain explicit. This is a bounded local
+forwarding analysis, not general allocation removal or inter-block alias analysis.
+
 Unaddressed mutable locals of the same flat scalar form are represented as
 independent field locals before aggregate propagation. A load reconstructs the
 value at its original observation point, while a reconstruction stored in the

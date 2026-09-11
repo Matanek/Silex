@@ -466,7 +466,7 @@ const FunctionEmitter = struct {
         }
     }
 
-    fn emitCollectionView(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionSlice) Error!void {
+    fn emitCollectionView(self: *FunctionEmitter, _: usize, value: Ir.Instruction.CollectionSlice) Error!void {
         const source_type = try self.valueType(value.collection);
         const result_type = try self.valueType(value.result);
         const source = try self.collectionInfo(source_type);
@@ -487,22 +487,14 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, source_name, value.collection });
             try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, source_name, value.collection });
         }
-        try self.emitNormalizedIndex(serial, "start", value.start);
-        try self.emitNormalizedIndex(serial, "end", value.end);
-        try self.write("  %t{d}.start.low = icmp slt i64 %t{d}.start, 0\n", .{ serial, serial });
-        try self.write("  %t{d}.order.invalid = icmp sgt i64 %t{d}.start, %t{d}.end\n", .{ serial, serial, serial });
-        try self.write("  %t{d}.end.high = icmp sgt i64 %t{d}.end, %t{d}.count\n", .{ serial, serial, serial });
-        try self.write("  %t{d}.bounds.first = or i1 %t{d}.start.low, %t{d}.order.invalid\n", .{ serial, serial, serial });
-        try self.write("  %t{d}.bounds.invalid = or i1 %t{d}.bounds.first, %t{d}.end.high\n", .{ serial, serial, serial });
-        try self.write("  br i1 %t{d}.bounds.invalid, label %trap, label %b{d}.cont{d}\n", .{ serial, block_id, serial });
-        try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
-        try self.write("  %t{d}.view.data = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.start\n", .{
-            serial,
-            element_name,
-            serial,
-            serial,
+        try self.emitClampedSliceBound(serial, "start", value.start);
+        try self.emitClampedSliceBound(serial, "end", value.end);
+        try self.write("  %t{d}.view.data = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.start.clamped\n", .{
+            serial, element_name, serial, serial,
         });
-        try self.write("  %t{d}.view.count = sub i64 %t{d}.end, %t{d}.start\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.view.difference = sub i64 %t{d}.end.clamped, %t{d}.start.clamped\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.view.nonempty = icmp sgt i64 %t{d}.view.difference, 0\n", .{ serial, serial });
+        try self.write("  %t{d}.view.count = select i1 %t{d}.view.nonempty, i64 %t{d}.view.difference, i64 0\n", .{ serial, serial, serial });
         try self.write("  %t{d}.view = insertvalue {s} poison, ptr %t{d}.view.data, 0\n", .{
             serial,
             result_name,
@@ -514,6 +506,14 @@ const FunctionEmitter = struct {
             serial,
             serial,
         });
+    }
+
+    fn emitClampedSliceBound(self: *FunctionEmitter, serial: usize, comptime name: []const u8, value: Ir.ValueId) Error!void {
+        try self.emitNormalizedIndex(serial, name, value);
+        try self.write("  %t{d}.{s}.low = icmp slt i64 %t{d}.{s}, 0\n", .{ serial, name, serial, name });
+        try self.write("  %t{d}.{s}.nonnegative = select i1 %t{d}.{s}.low, i64 0, i64 %t{d}.{s}\n", .{ serial, name, serial, name, serial, name });
+        try self.write("  %t{d}.{s}.high = icmp sgt i64 %t{d}.{s}.nonnegative, %t{d}.count\n", .{ serial, name, serial, name, serial });
+        try self.write("  %t{d}.{s}.clamped = select i1 %t{d}.{s}.high, i64 %t{d}.count, i64 %t{d}.{s}.nonnegative\n", .{ serial, name, serial, name, serial, serial, name });
     }
 
     fn emitNormalizedIndex(self: *FunctionEmitter, serial: usize, comptime name: []const u8, value: Ir.ValueId) Error!void {
@@ -1293,7 +1293,9 @@ test "LLVM emitter supports read-only collection views and negative indices" {
     const text = try emit(allocator, compilation.ir);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "type { ptr, i64 }"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".index.negative = icmp slt i64"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".bounds.invalid = or i1"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".start.clamped = select i1"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".end.clamped = select i1"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, ".view.nonempty = icmp sgt i64"));
 }
 
 test "LLVM emitter supports mutable scalar collection views" {
@@ -1334,6 +1336,7 @@ test "LLVM aggregate view probes preserve independent observations in both IR mo
     defer arena.deinit();
     const a = arena.allocator();
     for ([_]struct { name: []const u8, lines: usize }{
+        .{ .name = "Regressions/KnownViewElements.sx", .lines = 7 },
         .{ .name = "AggregateViewAliasing.sx", .lines = 9 },
         .{ .name = "DampedIntegration.sx", .lines = 9 },
         .{ .name = "PreparationMasses.sx", .lines = 21 },

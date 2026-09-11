@@ -3729,6 +3729,7 @@ test "release preserves representation-changing copies" {
 }
 
 test {
+    _ = @import("KnownCollectionsTests.zig");
     _ = @import("ReleaseTests.zig");
     _ = @import("AggregateStoresTests.zig");
     _ = @import("UnusedLocals.zig");

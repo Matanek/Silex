@@ -205,6 +205,11 @@ as `{data, count}` values. List literals use heap storage because they can escap
 their creating function. Element strides and allocation sizes follow LLVM typed
 GEP layout, including padding. The bridge models view construction, signed
 negative-index normalization, checked loads and borrowed element references.
+View bounds normalize negative offsets, clamp each endpoint to `[0, count]`,
+and produce an empty view when the end precedes the start, matching the
+interpreter and native backends. Construction does not trap for these bounds;
+an invalid element access still does. `KnownViewElements.sx` compares clamped,
+nested and empty views against LLVM as well as both native Silex modes.
 Owning element references requiring copy-on-write detachment remain unsupported.
 For owning lists, retains and drops have no LLVM-side lifetime effect;
 instead, each functional owning replacement allocates and copies its input
