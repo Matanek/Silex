@@ -1,0 +1,2 @@
+12 emissions; 4 native runs; 13 true each
+[('Arithmetic', 'macos-arm64', True), ('Objects', 'macos-arm64', True), ('Flocking', 'macos-arm64', True), ('Arithmetic', 'macos-x64', True), ('Objects', 'macos-x64', True), ('Flocking', 'macos-x64', False)]

@@ -1,0 +1,28 @@
+[
+  {
+    "mode": "debug",
+    "first_difference_offsets": [
+      128,
+      129,
+      164868,
+      164869
+    ],
+    "different_bytes": 4,
+    "pe_header_offset": 120,
+    "before_sha256": "c2a88a56bf385e3b952af313bc517e5520ab5b2f0463fba3c0b204722abaa133",
+    "after_sha256": "7cc8e8b8b9d520acaf31fc7f9bcf3f6e752d4d940564bc9e810d5cde4c571c9a"
+  },
+  {
+    "mode": "release",
+    "first_difference_offsets": [
+      128,
+      129,
+      164868,
+      164869
+    ],
+    "different_bytes": 4,
+    "pe_header_offset": 120,
+    "before_sha256": "f07009efebad3bda71c2df2cff2a3088e94e8a6f326d781214c13c095f69cd34",
+    "after_sha256": "00f7afdaf412177ee6f88cf52add72d82c87fe46b4eedcbf45c55181f9e70866"
+  }
+]

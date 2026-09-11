@@ -1,0 +1,24 @@
+{
+  "prior_compiler_sha256": "2a33e6658976a602cfd4bd64b830f7b2afb8cf7b395a0cbb9fd341666fc81f28",
+  "final_compiler_sha256": "55e8610f220f5f88a8326c10b1f33c4ba8cae45c7402db82577d7073b7b8eb15",
+  "identical_fixture_executables": 10,
+  "windows_arm64_timestamp_only": [
+    {
+      "mode": "debug",
+      "only_timestamp_fields_differ": true,
+      "timestamp_offsets": [
+        128,
+        164868
+      ]
+    },
+    {
+      "mode": "release",
+      "only_timestamp_fields_differ": true,
+      "timestamp_offsets": [
+        128,
+        164868
+      ]
+    }
+  ],
+  "identical_benchmark_executables": 6
+}

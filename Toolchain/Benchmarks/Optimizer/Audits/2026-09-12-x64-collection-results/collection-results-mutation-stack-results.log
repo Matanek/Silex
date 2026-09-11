@@ -1,0 +1,13 @@
+1/4 X64LoadProbe.test_0...OK
+2/4 X64.RegisterAllocation.test.X64 scalar collection results reside while memory inputs and stack copies stay pinned...FAIL (TestUnexpectedResult)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:615:14: 0x10482d85b in expect (root)
+    if (!ok) return error.TestUnexpectedResult;
+             ^
+/private/tmp/silex-part03-evidence/CollectionResultsMutationSources/X64/RegisterAllocation.zig:912:17: 0x10482e5df in test.X64 scalar collection results reside while memory inputs and stack copies stay pinned (root)
+                try std.testing.expect(residences[slot] != null);
+                ^
+3/4 Arm64.RegisterAllocation.test_0...OK
+4/4 Arm64.MemoryResidence.test_0...OK
+3 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/72f041a5dabdcd368b0e9091cdbc48da/root --seed=0x71cb8700

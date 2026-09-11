@@ -1,0 +1,6 @@
+{
+  "yaml": "passed",
+  "bash_bodies": 15,
+  "fixture_jobs": 5,
+  "PowerShell": "reviewed; pending native CI"
+}

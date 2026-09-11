@@ -1,0 +1,17 @@
+1/4 X64LoadProbe.test_0...OK
+2/4 X64.RegisterAllocation.test.X64 scalar collection results reside while memory inputs and stack copies stay pinned...expected null, found 6
+FAIL (TestExpectedEqual)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:197:21: 0x1007d1b47 in expectEqualInner__anon_36692 (root)
+                    return error.TestExpectedEqual;
+                    ^
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:83:5: 0x1007d2acb in expectEqual (root)
+    return expectEqualInner(T, expected, actual);
+    ^
+/private/tmp/silex-part03-evidence/CollectionResultsMutationSources/X64/RegisterAllocation.zig:922:13: 0x1007d2bc7 in test.X64 scalar collection results reside while memory inputs and stack copies stay pinned (root)
+            try std.testing.expectEqual(@as(?u5, null), partial[4]);
+            ^
+3/4 Arm64.RegisterAllocation.test_0...OK
+4/4 Arm64.MemoryResidence.test_0...OK
+3 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/cfe3e66fd9c37ed98d2eca4de1b98ced/root --seed=0x9056e972
