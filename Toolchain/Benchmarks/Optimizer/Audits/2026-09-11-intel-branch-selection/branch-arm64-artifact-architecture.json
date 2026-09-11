@@ -1,0 +1,2636 @@
+{
+  "count": 526,
+  "all_arm64": true,
+  "artifacts": [
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-5-release",
+      "cpu_type": "0x100000c",
+      "sha256": "eb6579f8e8204abb2ecbf4a52a8756e77a6bb8abe335047cdb3fbe86ca4f9aef"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BranchingReferenceInlining-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f6c7929334a8ff5b9604c20b6ab0d01760a547784ce9a7060b87b992182d5ea5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-PureMathReferenceInlining-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "532c4d497be0c9759d297408b4375fb3246c516f64e4e745fc2fd8aa38ea9b89"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-HotReferenceLeafClosure-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c1b6875d2ca99977b4f6e9b82aecd8cd4e69c2a357ee8c7e4d095e47054453b0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-X64IndirectAggregate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6b30c75289f0a33627cd5aaa2da153748839e2f9294c3cf13c7f425d616a37a4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-Main-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0bde21daf85ea34b5d55954efdde2e02df21d37cd9c9992119d8de52d49af9e7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-MutableViewMemory-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c0f0419a179e617a4cba110eb55922b77e1e15a87a8146dc4a2eaeaf85d7f61e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-DominatedReferenceReads-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "4773975c66faec3ab20982eae39e3cbed49a389f5905cf63cb5a14a7e4de6d5e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-HotReferenceLeafClosure-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "591f4db4399b15f94462d9021dda704de848251886f811806553f78acce5c46d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BoidsKernel-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "823252278fe9e58c3d0a584c5cd9873f3004b823e093bafb628d0834d3fba6f6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-OwningCollectionCopy-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e25f2763ea41887ce083e5cc3d243832d76c06ecd34bbb90aae8434ea8ce986a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LoopForms-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "db5a2a3dca3c8788bf980318b007e7209b83f120ce1324a6f1e92077ab978cfb"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LoopForms-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f727c68aef333fbb4f7e4458135a1dc693b8ff7f87ff57c165524e3e1e5a996f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BranchComparisons-release",
+      "cpu_type": "0x100000c",
+      "sha256": "31a50345996f7a30738f1c246590bffb717bae158e794428ebc967321927e3e6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BoundedCollectionLoop-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d565bcbbaeee513a5432185c1262a1aed5c4938f1dfd5a1b36d0b77d7fdd2d27"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-X64RegionalBarriers-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ae736f763b93bb0a1fce80b0999442901d1103ea7c842d09ce79fcd5c1c82bc1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-CheckedMemoryLanes-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f63f980b023968fd86c6f4b898d815feb1f82b011361b0fa0087775ce33fff0d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-CheckedMemoryLanes-release",
+      "cpu_type": "0x100000c",
+      "sha256": "5fd204b90e645fee72f8167ad2346f8753f27258e28fb65a769df689287d74c4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ReversedFloatRecurrence-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a1bc4beb66c9fcc81e4252473619258ef055d06cadd58580606cd6a84d522814"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ScalarExpressionReuse-release",
+      "cpu_type": "0x100000c",
+      "sha256": "78262fb305fe34217e9f568ae298a4a7764ecb747cc1df3579b07bb138db98b8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LateScalarClosure-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ef9afa0a6190031e9b523528b08568ea4e1cd17364c02eec8f8f58cef65a745d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-4-release",
+      "cpu_type": "0x100000c",
+      "sha256": "732edb2f005400f7d1f2002b89e695aafec4edc1aefbdd8155b55192ee01beb1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ReversedFloatRecurrence-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4652d3c4bab5e691409aa22ca5e45b28f6b8ffa2bdd085ac3d394e2f001d97be"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-FloatSsaDiamond-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "4bf0c9f4932d6be8203f00bb51cfeafc39af2cb00fc708852fbb84939875ca69"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateParameterResidence-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6ea8661b5862eb879a69b2c9acb73c67eb94374818b1962eec5b200579db214f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaValueFacts-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c27e3a10b247fb3dfc237620a97eb225e79a050d839ef98d41a98fc7fdd36a95"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SequentialBoundedLoops-release",
+      "cpu_type": "0x100000c",
+      "sha256": "491e69104155495bb2b02b14587456c46a48fa389ca4aef7b7fbc53a6ae0245b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LoopExitFloatLaneXY-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "2f1c6ff17b6351b669fc152a31c28b6fbe21720cdf0b37873cbb3785322ce4ad"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateControlFlow-release",
+      "cpu_type": "0x100000c",
+      "sha256": "5a469dcbad55626352d55426dfb0f2c5023046e4742751aacd0e3f4f210688f1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-6-release",
+      "cpu_type": "0x100000c",
+      "sha256": "88245cee5b5cda658128886b7cfb6a07faadb7a527d6bcd96dad4a313dab1658"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ArrayStorageAccess-release",
+      "cpu_type": "0x100000c",
+      "sha256": "03e7faf925fda21d88aa03648a3750008331676cbb71833a6c3ff3ed4e15e6fd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-Main-release",
+      "cpu_type": "0x100000c",
+      "sha256": "02b12fa0f188da006ab9365a0039704c914947cf122566e8080a5621b5ff8d96"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateControlFlow-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "2cef1d543d610cef943f64b59b3485dba82210461e1459a4f0665993426b2991"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-DominatedReferenceReads-release",
+      "cpu_type": "0x100000c",
+      "sha256": "2b5706bb39a7c7292dc02615e9783e88748e5c32b236ac349cfe257eb9667f98"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-7-release",
+      "cpu_type": "0x100000c",
+      "sha256": "2185adafb05e7d19216418a9e5dfcb242deae1ee36ab9c12799a021c1a77374d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerArithmetic-release",
+      "cpu_type": "0x100000c",
+      "sha256": "9abf1f5b0548ed1a9c64aa813dd04a9da151c91cf4205182e782ca58a9eb6af9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-DynamicFieldClearAppend-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7b3e4badcdaf22d971b162122dd2b6a7965fab25a1136225d4864f8c1a0a992c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-X64IndirectAggregate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7ac15058e3e4f61fca01a75b98706cda0c31ba4722838e78d306242c1ad93880"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-Boids2DSteering-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "040e90fd7c2b43d1452c55bb90cc8f953754a93b5bf7d9754a8c285779c3d1ce"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-FloatLaneXYZ-release",
+      "cpu_type": "0x100000c",
+      "sha256": "8b5b4af234a2d5f6099bb48ce6e72b1cbaad3f0a1811faec48c6f7ed94655d09"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LoopExitFloatLaneXYZW-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c879efeeae0ee2d29fd7e4fb3414eda066da5d5624d1f41d1b8d97f645c8c638"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BranchingReferenceInlining-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "fb3dbc4acb5b00c0dcdbfcdf5f926f9422ffc64f28bf112b95f9b9b5b60be210"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerArithmetic-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "10f29423e9f8ebf64881c16efd4cb9f4367c06d8b0f5bbc8236752954bad858e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ConstantDivision-release",
+      "cpu_type": "0x100000c",
+      "sha256": "8cd81696d577fd8f77f30df4856779d8aebf04dac69ffd25b45a45b4bb9023e4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-Boids2DSteering-release",
+      "cpu_type": "0x100000c",
+      "sha256": "9a81ed13e7ae5982b018f6d4be6d6d2660d0b1836bfb901f85c40c4d90704e02"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BoidsKernel-release",
+      "cpu_type": "0x100000c",
+      "sha256": "76b59cab4ef90b050cf3f39c47510e651cf603ad8fa2c1e656e0c7d11494383f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BranchComparisons-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d5c521a3f6147e8f37ffceea721bd9ab03f937e7d473ed0ae9b40f406356997c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-DynamicFieldClearAppend-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f7110608f3f44efb0cfb60168dddee511d50465290ec1e9b12dc33f63067c07a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerRangeChecks-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "819290454d2a85b822e3ca9f2bdce3a4928aced636f4a9312108c8242b201f8d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LoopExitFloatLaneXYZW-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ebc86ec6f22d4d709b5c6f2f654df897b811f7f961d71e6fddc7e5ece6269da8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-MultipleReferenceCursors-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "89a157d0b38b821b7376be44657605b00e8277b03b7352f17c66654a0768362c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaCriticalEdge-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f2debb0a1e9e033c94e250894dfc70bd06a1b9c835f485247874a792406bccb3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-CollectionCursor-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7af450e0c6384df91ace238a68416678c4dcec21beb73cc7bd1c3afbc4389008"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaDistinctPhiLoop-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9c65b4a7f024a865e45c0d3f2d68ab5a20b9facf186703547081f807886bba68"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateScalarization-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7df4cc4998a98569b2728107e871f24ea328c26b3bb43e1175b19b7e490b9c10"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BoundedCollectionLoop-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "e9bdb5b4de762ff6ec07ecb1326938986ac7917f9ebf601717dc1d9dcc5f5fa6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-DenseScalarLoop-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "01a9db2c8c5aa70d01d9a1230642c5c8313f05bffa3f9ee13b611f52e5cf8f50"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-FloatSsaLoop-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d05f26624e98f8b6ce9d1f7fe6d6967adaeda988340b231969cf23ac3c6b16c3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-CollectionCursor-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "569439530c9d7abc1d6293684a9d06eefb525c3dbe6967d4894afabbe4ad0e16"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ScalarExpressionReuse-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "339568e7dae557500069c9d67df522c3402e9d22ebb349a88516b8b0654f3b43"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-FloatLaneXYZ-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b2b5dfffc0e873d48b3c5308af0984b8f2a8ba9fccebbfbde7028f5dc756dcb5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-2-release",
+      "cpu_type": "0x100000c",
+      "sha256": "5d26c93dc58d6a291fe58272c7bd89d7e7057e7ce98414647bf3b0148a66a7b1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerConversionConstants-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e1b8177049d716a22993f9e54b487cbb7fce40edeb315f642f6e694c0a8cd796"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerShiftConstants-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "be6356b9967035253bfb3cd3185eac64914d885035059f4e6ff3f7e65e46e9fc"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateScalarization-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "06f4d573c539cade22d25691a9d254204503b8755dcd04a419c900690cd8eac9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaDistinctPhiLoop-release",
+      "cpu_type": "0x100000c",
+      "sha256": "bfca78ff2740528b8604694c46aaf66c5731be7f2e684b999b1147ff777c6744"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-MutableViewMemory-release",
+      "cpu_type": "0x100000c",
+      "sha256": "54194d338546b96a388036330af3406cbb6a7f14b85b4ecdcd62278f2f93ebd9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaForwardedPhiLoop-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7b839c7ba249b69946324ef10f9cf080821920024bf22e8a62f3c1f66f19b191"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateFieldStores-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c7e57f2229713c19eb0046184d323c678c8ca671291c519e0deb61215d62ce52"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ConstantDivision-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "88a6638e9683ff7718c100f8d5a84e3875ce13e41627296c0dd47f6d9e1b3108"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-3-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e4e67555b3cb56c0f8e0d66df7fc1ad5fe7666f6097e9472df9a4ec9afcc92bf"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SequentialBoundedLoops-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6f46a96d30232f8e57bd1b23c19f2126201932ebe46edd4a5487e48f457a85f5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaForwardedPhiLoop-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "215cdbd7329c48f6435a547fa0b4ba9dc53236f05d562994bd0a2a227e4e31a6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-OwningCollectionCopy-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "def1966f7eff3cccdc14384aef3c8ccca24463e5519ac5794549b16d94a118ae"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-DenseScalarLoop-release",
+      "cpu_type": "0x100000c",
+      "sha256": "cc0c80ad880775576cb0f47225c23607672043f277c4699619238b2e40b2a3b4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-CallEffectsInlining-release",
+      "cpu_type": "0x100000c",
+      "sha256": "5af9b7531c7fce7d50eca02dcfc84f0d8d273538456ba03cab84f25cca89dd33"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ScalarFloatResidence-release",
+      "cpu_type": "0x100000c",
+      "sha256": "75f913f23c324c9d4da49f3e4aca30aef8182a7e2ec9117765ec8a8d3ed43b54"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-X64RegionalBarriers-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e05acaf59bb7a147d9b9e6737660919b9c6ca796a65fb462766ecdd2d82e04cc"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-MultipleReferenceCursors-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c3b158059f5bb6578a04b0e88f7351f576d3e1c7db5abc1029a2205e3946cc7b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-FloatSsaDiamond-release",
+      "cpu_type": "0x100000c",
+      "sha256": "9005db59d6850f2d29c68fcafae6bc56f2959572ea3e981ff08508eb8472bd4b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-1-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6c457513bf80d279d76c27f97fe7349c3a0ce25bda0369d324fb74e9d5df42d3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BooleanSharedChain-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0165cfc27ea448be3c38296492d7b586103dc63ef1bff1ebb076f93bf71d3c85"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaCriticalEdge-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6f2a3dbfcd9338d9e634a0974a3b36ff6b568f087a64eb789caaf2b3157b6bc0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LoopExitFloatLaneXY-release",
+      "cpu_type": "0x100000c",
+      "sha256": "0fdb4ffee9463ba3d055542feb7ba4e0c6beb130799e11f4f6d233a39595ccaf"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-LateScalarClosure-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b8d19159650b12478d7550dcfd65e2570a2802f830eafc9a8f8805d90303f064"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ReferenceCursorReuse-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "e3dab3b14da00489a6e4502c76a53b80b6888f61da305bd5667b77be39d6a3d7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregatePreparation-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e9aad9ec6543ac1c1d0e78bc0eee85f82ba4cac53b627523857408879ba5d81f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ScalarFloatResidence-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "49c207ae09d72d87acb5572cf190eed3fc12c25da9a0d7c86cfd2119a4998894"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerRangeChecks-release",
+      "cpu_type": "0x100000c",
+      "sha256": "772044430767bc0998342c54b22bcb7bac01803069731968f7bda39c4dad4119"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-TextOutputIntegrity-release",
+      "cpu_type": "0x100000c",
+      "sha256": "51cd5a67b27e329c1e4a827cc325fb31a95da2eb2e39f8d2a0a76bc5f26a6cab"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/native-scenario-8-release",
+      "cpu_type": "0x100000c",
+      "sha256": "361102688cde09f1ffbd2391f9abc06be7df7366549eb52a684833e12b64df3a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-PureMathReferenceInlining-release",
+      "cpu_type": "0x100000c",
+      "sha256": "940ba52755bd484b1e296a4f5e15c6ea2fa9f8992264b0f53ce153625c40b77a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregatePreparation-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a77ffaa74fa437e6df167000b8ddb81e646b1a89c53cda5afadd3bd69aa9d7f9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-FloatSsaLoop-release",
+      "cpu_type": "0x100000c",
+      "sha256": "11f88dd1ac614693f73dce35a08a935e8cb8dedf549703b50a6b697c05de8e21"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateParameterResidence-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0042038510163102b7e10a6484b33c818f59a1351c9451541f5f9a35e6ee617c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ReferenceDeadStores-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "45ffa5c3b4aa2084235973f573986598fe30314c19202f0649ecaadc50dfa73a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ReferenceCursorReuse-release",
+      "cpu_type": "0x100000c",
+      "sha256": "0b64ffcb7ddb83ba434e16b16a87924d0970ef7dc710bd6979459d53f72eb905"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-KnownViewElements-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "4b0340f0c8448f1dfff7cfb16e2de195200ef40efa3952ca921712a41d5740ec"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ReferenceDeadStores-release",
+      "cpu_type": "0x100000c",
+      "sha256": "da1a58144dac4069ab4bf7fad5a4cc23a09dc06656faa5b58a22042fabd2f0d6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerConversionConstants-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "bf3d8fcbbc8a01d9ed3e73d047e2191171e1108e38138da299bc687121b81f02"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-AggregateFieldStores-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3dc79ed5d2f7fb8c6b914fd9f13ea954865034ec034cede49edf6f4dce4d267b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-SsaValueFacts-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f9411ca8bff5b41e0d59436a0ddb69c3ca46316659877d5790439f8242fb2af6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-CallEffectsInlining-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "18678fa8223255ba96a788a775b1c6bc9ffb7b90575aabb11adbab381e9f5447"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-ArrayStorageAccess-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ada42dcc5d76bacceace4a077d7cfcfe9b2454018113ae5e030ac58dacc2704a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-KnownViewElements-release",
+      "cpu_type": "0x100000c",
+      "sha256": "ec271d65215cf68ed17dabe229b91cd0e010d0d403a273fd030bcc0cdbc80780"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-TextOutputIntegrity-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "991727243b98d63c8d7f7d12bee77e248a419384f98a2b35c2a461c2cc9849a7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-BooleanSharedChain-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f6a058c765b676d3bb2a1c00443daf89187ec313c4a5820659b8922f3f86ebc9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/regression-IntegerShiftConstants-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d6d91ec43c2147fe22692b430a38b6bbb82dac84501b9155d693c790a085d2bc"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1e892ae60bc804795f62754197bdb80cc4e8441a5310135ec6cb4c2874c77082"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "261a3b758fc61395975780800933c593619bd5de96e241951c8fc2cd4c9687ab"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32ShiftRightWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "ccc2cab00410f2795d8bd09f628cf4d187ed7bec6030020dd2aa70e97e6099ec"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c512763e31d10d00f87cdad63c883cd28ba7793c96dd4aa93f7bd4d1c221ffd0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "920f2f73f776b060dc1b40ca29ced004fca788d8555ec32ae94d83366a5a6f45"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9ec04f8cfa0db87b75cbf2736ec4f6ad3a120fd13cb1e56a1c29d439d7f2d414"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fd23cb8ae4d9208ace8424984b6264b9853695b84dfe56ca85d4b6487c9fee7d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16RemainderMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "2d3593b923e089eda5b2ec2f453c5d91865971b5afc00a7af4103cc96d96646d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fca54acb3d08d20cd31dbfbf122157d2dcac04b3460f45ff38eccf4cf64a4164"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "2e92e57e07b69ce00ea61a5f4a079bb46c01acf7c6abd2c52c81a1df0dd78cf0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "eb4113fc490f026bd31dd257a741fe5871e126db273eb82d305e71f103c392d2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a403fa8021cdadc4eaa31a56daf221f5036fd5b299f6482c6e5a405a677a5498"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fbd0c0858479c56afb49f9d0ae8d918d126053f4e7a44dc2c49d7a468aefb1df"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9c853ed03696fadd9ee6e10e26c388f63e0b96cdeda7848d5bb752b7d9a59312"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "625fcba78edb5e688541b8c335fe6077f93caabfc1f57b1c24eee17bbff1488d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f8c939f68541df1fdc6b9e9c8f4ef99a373821a19cf9fd9671ceb1ff27b6f892"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "822a21eb8f70c893646640207ac8a958b5340003f67da80a94f678d0f3638223"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b5f3de37fe1f7b1c81f1ba96250293f2d76f2b9e25d3141ca10215dc56ea7eb6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b1492abc89c69658cb8844e12a71253d21f4ba66a42bb38b48ccc8ed3eee60ce"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "8e6291081fc737c0c20887365db400bc2da3d43ed00d36294e3a4d47f963ecbe"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "2c9492b2cb4f3515f33abe3a0da8fe79c482c852c217bd35fd1c1d0fc9c96cc8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16DivideMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6919f0c32558f098fd3beb559065c2e4016e118cb660d7de2c86993b8888ab9f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fc6c42042ad31427ef5fc08fde51c31e883de6860870e0581cec8c3c94a252b2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a1e1b7370bf2af95e388bf0f3321f22791a0f7005616f16fe40072af7a598eb5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "2fafc531ac0713b1a330e3e949b65f3998e0b3e8f54994664d2ec2f314be2aca"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "df98c1608db7b54d79decb32d3f3738a0783e4700950e1212d7e858f003aa574"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8ShiftLeftWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9d2fb13839ac0f3c81299ace70fae4c883494423b34e44734825a2e05e8af250"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "869aeee8de7f80d034504099c1c7910becf2563bd5648b1fc8340f025ef383ed"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7f55c40b76670422fa79774e243980b939ca83a00efe10698f007cc16085e499"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16DivideMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "0d6d01bc33664df966a4d0a636614744a537f6e7d2f020916dfc363721b7a97b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "62729c07d726998af2891101fc95f70741488291e4d14279dd110460513ed749"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a15b3575fffa0ffe085b3e4adff174dd0c816a5f25a550346d99e20f2099cbca"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f714c69ec6c4611fe989244a57a398e1d49e7f3e66c9cebafa42a304382bf99b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "28e4ebe6557e762a57ed539914bd0ab83a413d2cfd8fdada525e6e03457666f5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d3ff76cc4e08c19f32a0fab42b0ee518334f49c97cbb7ca4d0d16888a6fee440"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "17b51718bb524377ea51f31767daebb5ba4ef61ae2c063711585512ccfe3e241"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4db682dd2b6310a21fde003e0f4e59e984a22dcf4a298aeda3fdcae2260a2e5e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "177079480d3d5b1c501a6e7298db1661d655cb210f6dbebbe7386620e9b76d65"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ebc6a2c6a264f4654205c18d1f06e298b32b44acd078c3e9116592c69861a99e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "328f0510ecc83130adae476b6d6059c0fe694423415ee55d44903119e683a20c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "52c5a6ed37bac93587587d23f64226193a708779c39e05a4e690ff643b02fd4e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "2c9492b2cb4f3515f33abe3a0da8fe79c482c852c217bd35fd1c1d0fc9c96cc8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a3740d2763a43d2bdeaf15a7e18a8bde9c59059d62714db6dd95aa7e166ce701"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "be6585d4837c1ca4352d0d9ceb0e89201d696646c078cf71ef07297ab8652213"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b53a0b349230c4bed87e18490b313d145f398d22fba9940c54ede19adc05901e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "5d918a8415227bf99cd6cbec8f2091bd76052b9b1a2025c2ccade895c7099dd3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9647bb7a9dbc02408f6efc6d3a6c0deaf7adc2eaa96bb614aff5cae9882da1d1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b852592efdc6b90611f1f339a6c775d3764a2b58178a3fbaca8ad7a79edfa363"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "eb4113fc490f026bd31dd257a741fe5871e126db273eb82d305e71f103c392d2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "17b51718bb524377ea51f31767daebb5ba4ef61ae2c063711585512ccfe3e241"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "59880ae19f6cb85b88efe8b03ae1d0bb7866cbb7a3252a2506eb676c02987a99"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8RemainderMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "60bf63f081d35587794147327be67e9a0a132fdc7b462bc3e2926e61c2939473"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64ShiftLeftWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "739a99b82e6bd77d86dba6d43f6adc691b9b75ff8bcd1cbcdfff18c36d66bc93"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7b4824f593c920cceec75b7d0a0b391020aeae2601e6172e5a1f716298f62d2a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "cab798b6cf02c312454234f809d22a8cac07ec4e80dfd0eee869c0bad2fd4e62"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d845e7ddb642593a95071920a41852f5a0e95e23e66a35d20966602d327acd16"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "2c9492b2cb4f3515f33abe3a0da8fe79c482c852c217bd35fd1c1d0fc9c96cc8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6b3d6eb99c7e27a919d278a3a7e3c3f58000527746f5912fd5d95ef2275fceba"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32DivideMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "ecb09c3ff642b997338185d6e3e0e679e7d5e3503b2226480eaa910aef768d4c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32ShiftLeftWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d750ba3d828bf95d28ddfaaa29e0face6aea219583ef207a8395db4ed161c6e2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "2c9492b2cb4f3515f33abe3a0da8fe79c482c852c217bd35fd1c1d0fc9c96cc8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8ShiftRightWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e26eac7f762db348b327554eb660badb9dd22fe032a8cb7a551b0e3df7850c35"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64RemainderMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "04d99f9d5674825ad507a2d67db4f1e303ff6a268708b837cab40bc2f1913ff1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "37a06e597e96f92784a7a265c5b9e59212b138cb28c5c489820036f875474794"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e62b3d59d277d1999ef956a7a7f466cadee4c1d846b7d4192cc9d339d45781b5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "090bc1fa65582a1e9cc53cb8ceac7f3b4450f7a5ed3768d631d9da4fe9fa2690"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "20a570e1d98140c1fb0851bbf184950d53dc08a44e70193d9fd89f9b2601b3d7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64DivideMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "da8a1c1381193fb8d491d791b5f3465764083e643c14ab1f03b64b39e3fc1cd6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "073ec55ebb3b5169d2d866a11c5099a0824c82098792c565adf447416c55eeb6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7d14af791a7599b64a2d3d37cf158b79149a48ac5136e5402d5c924db397edd7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "43f2142dc1fa410c74833e39347a830564db2f0ad47da12d72e19ef4a5b0d8d4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "644638d07cbdb221b37c1b398f8531fbe87783264d82bf1ba05d358debccb446"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "fa364bb07caedfcfcb15ae2aaab3bdf1647f96fda2b59e916abfcd3fb1d45de9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b75e73b34059953165bcfd68451867ddc0cd9080d66de9b2614fdb411bb327d5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6ba8b201e3def860b77f89735ca02eb53055dbfc6084ce37aae47802156c568c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "35120a433264955d463d74ec32a82a1de9b5a2d18cdf973480567dca5005ff63"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "eb4113fc490f026bd31dd257a741fe5871e126db273eb82d305e71f103c392d2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "221aff8302e9477e4972e1d9f4681a0d05380a219a53bfa579e3c0e37379fc88"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e8b2ee6c8a6b8bc06279530c7177de47b18481646c38274860f10682ad471fae"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e29ececabd000636fb43a65e42a2ee76eb182cfc38821e42377bd822233d2e84"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8RemainderZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b65bf211432131fb871e8d00bd7cf08ba0f655361df29dc2d725bd0f738ecbe4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64RemainderMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "025ef469676cb656a6c33eed05e5beeb96d6e3f0cf6c2df4257cf63f32d16bb5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64ShiftLeftWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "5d8c16398279ff27760f964c6b38ce573464f2af881b6bfb25fd657fda7a9cc9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "17b51718bb524377ea51f31767daebb5ba4ef61ae2c063711585512ccfe3e241"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "0b34ac2a5b7030afd6c337bc9f5d62128afc7cdb373da050458e022b1e739e23"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a6a5957c296b47d9693e48b9d9607e4ecc7198391585f9d63a7cb023de9120f7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fafa0b102dae9e8c36a2b490ac43c7e9a87575365017c924f52a83c00375d208"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "4945887e6d22be627ba9ef74d36d9984a806ef0bd9bc67c5c3e89d7d7f833367"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "00c155910a483c3a978370dd45785759c8d0e667c29911794e8b33ecf86ee9cc"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3a4b4293862a61d45aec010c945cc3272dcaec122dee4dc43f7e77b35075df41"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32DivideMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "465364de5deec1071079b652b69bd04f08b03b60abb1acc2fda6e4ff254d1e4e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32ShiftRightWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "53b20d6f995e521594b842dd11ec037035c131c4433fb0c3152b196a87bf09cd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "3fdf0e4c7f6fc7414410d25c37cdd29f2b365b59cc118af9dfab1b4217770595"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8DivideMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "95a6933e7b329abc862590bbec74d9d6b9af50a428bdec9544e52e0cb98537d0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "eb4113fc490f026bd31dd257a741fe5871e126db273eb82d305e71f103c392d2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4aa7c54945b10e07908c53c96677b081d8e111842cb8c874493daab491a86aa5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f9cdd9a7c4efa853b287a389d4c045818d737b2f70edb15a10ca7c0fe657461e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f71e0e6e337e2aaa76d243d6339813d0572e0f473382aa2802a7ea788bd9c86d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7cc68fd74d86b0bdbaea061daa2c418ebfd81bdc095b40e20d6f009b2bf4e3a4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f6553d889c95a2ae08e1b8148cc9c61ea418e7d737c0efa396c8f8c89d9dd30a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8DivideZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "733e87c01d2b61e12537633d749d4a36600d6015438afdf780af6e3c9fb8c1ab"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d69fd7e124a28a09e5cecac2c859bf405f0ab7f3b4b2c00453de5a4ca786c01d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32RemainderMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "bdbcefcf71ea33570c17c7d2e7533ec033a6c8060f7b9f598414e64f5f6b2468"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64ShiftRightWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "8e833ff74cf1b5c610868813828db1bc99a7245893021e356406bff9dfdb7633"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "617c66849983c0066612070aad5ffb4a25c397a025cae2df4ea711c4dc016243"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "cf3be37bd287c745e954396944c90a2c1aea319180540ca85ca4fc074dfdaad1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint32ShiftLeftWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fda3d21c605959b23fd9a66925f829214bbc923ce0fab92a4c1096782b3610ca"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "95df607a35bde385078957250b98778b71d5cea1ee51c5ad7c2975a03c8bc645"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Subtract-release",
+      "cpu_type": "0x100000c",
+      "sha256": "546efa21199298a9544b72ff124ed9a6b5a81e1fe179d936870919e21d0e628e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7c2703478858aeef984f7baa9df2a345448698fbe1086e15c6e1a87f904571d7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a59b0c6479325e9783c57bf864744fc499363947e7a2932bd4f3f5eb51ae1502"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "17b51718bb524377ea51f31767daebb5ba4ef61ae2c063711585512ccfe3e241"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7f64f25bd1ac202a7f698323210cf87a31cadf360e2752ae9ef4c135c8e5c183"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16RemainderMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1ab256211c314aab0c799f8a2315c1816b00647949f7925de895bfb819e3f63a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16ShiftLeftWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "98a240cb010ca7d0eed1ec200a84597b3e1e36828165083d3c83be05539212a5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3d73d5b55e78475931cf8910854a17604bb2f80fdc6e5c9e30338647f8e42eb2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d1f6879ad97d84f7fc3f773a8c5fee3289d0e008441a96ab262ce2f378116185"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64DivideMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d3e4f2a010ff7c36c52a23686d8fa6b9038ae79128374ea7dedac7ae72a70355"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Multiply-release",
+      "cpu_type": "0x100000c",
+      "sha256": "16d35bcd08f32b2a9fae010ecf8ffc3d576c5b474255d3a9e27ce474dbb717bf"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16DivideZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "45c8509b980fd0489dd4571e0342f0c6577846f9bff20f5f549ab80bc69bcf89"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "471b9681305c8602602cfa19f345fbedf86fc9f46b195885911323d8401b5dd5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a34714416d715ab537756bd512427b1d5af0cbd2327df7ba5995077d58dae9ca"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64RemainderZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "29afd9615d7a27a002232aee80cc9af29014ab044ab6ec98867df6e61dd968ad"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a67ed9104348ad4139648757b6188df6c3b4811e2ff78dafb1f2b03cc20d2b74"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8DivideMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "44b0403e326f03b3bb245bc663cd59d5bd0e9d02e53e2b06eb52b2025525d8e9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8ShiftLeftWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7fbf94fe84929bd4703c50aafe058af1ddb543b345343fc9db780398b60126e8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Negate-release",
+      "cpu_type": "0x100000c",
+      "sha256": "93c67525121772d60e8ef4ddc9d9cf3a7ff28cc40f718d90413d3476b7597cc0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Add-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "5814bdb81704d032d3611faf25a6612b6eca7656fac26d235fec2644dc56dc4e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d5f466e113d98ac03a92e7c8ad29fdf86366c5ff74538088b0ba6b30aa59f337"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f7caaa2fdb89d7bc00de3d6b990184ee4aca6886015a6fd9ba3f25c3a16d7000"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "44987a2311f37345d295fb1831946119b1fd9b8c153f0b2c86cdd1939af142b4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16ShiftLeftWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "67ced0c6fbc0d4afb59c21f5db4fddc0ddd8ce626afb53edc7ef161773ff932d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int64Add-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c67fa8ddfdf720126580202bc81d73545a701f7488ed010d3bca4150e53287f3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16ShiftRightWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c0f9a81c133c7224c02be404b3e71f4d7a48f547ada45816471922a29083297d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int32RemainderMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6a34a5bd0527e548c70e8a0ea364687e410ccca6abea6d83c2aac63d4b05bf27"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int8RemainderMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9dd6543031d68fbdd114ee94e278dfce49e59d3a332785dc421758929aad44db"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Negate-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1754f40f33b80a251496ebec22daf00cb1c4dd6092d06ba7599c2e1a225a0b38"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16ShiftRightWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "356e5b21906272371166c9e1bdefc376e4df0390358e66e9f2055d058bf8c69f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/int16Success-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f4cdd62cd0bfb76994979d592d51c9bba0388e169022cb16e2a80682a616e247"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8Multiply-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "62a8b2e5b65341c8ed3d603611eabc4f779c6d91a896b380b79e54fc3b348fde"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64Success-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d1ead0f0491c768403febef3803af7047d3a580e7dc34d7172abb309f0c10093"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint16Subtract-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b920162f3b8c978a8e89f4151be0cd503c033c8a6e7c0c452b3f2ce9d00fd51f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint64ShiftRightWidth-release",
+      "cpu_type": "0x100000c",
+      "sha256": "95b0dee2d65616b98ba63a99be657b2c9a044bb813018ad816fbec0db9b68f98"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/integer-failures/uint8ShiftRightWidth-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f00abfdf19450c31adb8ffbeeb08e807b7ebe0adecda9cbd928707f7f48950c4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/direct-or-helper-left-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1588bae8608c3beb8eb42c3da92e7cb21f4e618544196ac278cdfe3e1e6bcb38"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/scalar-or-aggregate-branch-right-release",
+      "cpu_type": "0x100000c",
+      "sha256": "03deb7b1f6269ae6478cda116c9d179be4928cf834e994ffd81434b9c3026184"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/direct-or-helper-left-release",
+      "cpu_type": "0x100000c",
+      "sha256": "3d0b9171503ef0dc730b0cadeccd4eafdada0487bbad31c971c18d718f457675"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/inline-or-nested-helper-left-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "2139897ff05d1efd6c0d1ac16d48368a8d0404a7a4174e0bd651150082b6c662"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/scalar-or-aggregate-branch-left-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "28f78ad93fe5c18213b276916cc3352454ba7598a10e60dd46e7f4bd53a78c3b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/direct-or-helper-right-release",
+      "cpu_type": "0x100000c",
+      "sha256": "70018c4c56bd9a190b94b5684e20c1ffcfbd0c400a354b5a282fd925c8e54392"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/declaration-order-left-release",
+      "cpu_type": "0x100000c",
+      "sha256": "637dbf7524cec679a436f16ae53aad1efbb86da8ee33de408415c254e40d53c9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/declaration-order-right-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "5eb1eb92d12d7f99bce56e872a7caea37519bd3092d1dd2c59cc5391e65f6512"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/declaration-order-right-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c3d3fc5c4349feffb79099dd7ee20b9be1fd3b4fc27ae3815fa936467f949428"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/while-or-for-collection-right-release",
+      "cpu_type": "0x100000c",
+      "sha256": "35ed51548366d4c8b0bd9ea6cd5bd75999d6b582ea3827e38550de72f7654cd2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/while-or-for-collection-left-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6a4324b357b40d9b018451ffc0e510988c613e9b2003575b76f2a00427e41d25"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/scalar-or-aggregate-branch-right-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c4a09f67993daee543d9f1a10b33dd32755d91fc70262595e9c786b13606c9c8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/declaration-order-left-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "985ac7942097a43d420b05ca7f542dad74eb294613b4e2e98420888bee052757"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/inline-or-nested-helper-right-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "655c743bed158f8e862a3da30701a5e56b6d4284b206b75c4627789a2f15f9d5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/inline-or-nested-helper-right-release",
+      "cpu_type": "0x100000c",
+      "sha256": "5ef9aeb9f8123ba18ffb91f1addf4fa076427997ff932ae6519b46eb23b2dc3c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/scalar-or-aggregate-branch-left-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4bfb55b80f41cdc9566139a2044f10f93639badb4c66e09347fc305d6a548521"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/while-or-for-collection-right-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "02d536d09b8077ea18e024d58cc30930d20da608b46eeb713570e045eb9b870d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/direct-or-helper-right-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6e4b1a758977f71cb774bb94eed020fcc3e7bdc315e1d4065e1ea97c5f8e9912"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/while-or-for-collection-left-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e68af034f3691eb7134e95a3500e98b3744d5e14ed102734f34f3cd705cfe377"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/SilexOptimizerMetamorphic/inline-or-nested-helper-left-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d85f24c3413484aea0ff63ef1f59581519d0fff64472f2cff55b2cf6aa6e874a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedWiden16-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "2e96075ea87c9a28539550009cabeb524096d2a9972cb0ed83d29adf6ab519b1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b7758da08bfe2dda00c18209b32ce531c2d7ee4bbae131abb60926df39de5c3d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUpper-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "75b443fb999e35bf87243ea5b6cf8309464dde0b4a54b44b65102da3b8d634a8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedWiden32-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1ede4d908cb8566ee5b9a07b6295eb0a6910eafcc94939013b4e0ab92b846d6f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow16-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "4d76898ea274f766002c62dcf6c4a601df67c8d75464002703e4511089bfa880"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatFraction-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "bd07ebdcf68d4b129adf6cd85065fd5e9e4d3907465427417e9bde12674d95ee"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "788f627ddbacb6e30a23f19376f1e88df16763fa5d438d84a66b6b67070d8084"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedWiden32-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4f35d7a3e730e1f6df344ad153ad2135a7e47a46e887fdea667735e0c30ffd4e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatHigh-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "35e57ad2cc3d4e232e8a05b26aa6f0bb7e09a472f122d6971153db497d6e8ebd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SingleFraction-release",
+      "cpu_type": "0x100000c",
+      "sha256": "9755a347e4a11bebd0b89957d12b36489e57d1ae11b8a5ed0c6cb3d220e187c6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow32-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c66d01cf1304953b33504bf70dd425ed5864ae5d85228f865e66861080c61ed5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned8-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "bbfb6f8920f8926a294d87ca6244310392e4681b0fa15bae437e7775a3ac6f5c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUpper-release",
+      "cpu_type": "0x100000c",
+      "sha256": "8be64d67acf5cf3f6753bf4eebfb772d14d35288697e37922f65573970f876a3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeZero-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "31f90008b8437a60a0ac9c68551a5cff090a4a5363b38b53bfeae709d093a0e6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SingleUpper-release",
+      "cpu_type": "0x100000c",
+      "sha256": "739e0f4f4963740990a51c14c03d7d89c8181637145dcf2556393234b4c0b599"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatLoss-release",
+      "cpu_type": "0x100000c",
+      "sha256": "59babf32d21f1687051acfda9ed56c65acffaa29cd279bfcb500de8bb107e292"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedWiden32-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d6bd58c9a91173de186831087aef4352694a2c27fa7e170a9b242f19fcdfc61d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned32-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c1216320aee0a61bbc145b1ec61a47e2bc017c38c470d4d5376335c9cb16c9aa"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatHigh-release",
+      "cpu_type": "0x100000c",
+      "sha256": "cf3c0c059a9ea6622871101fc54bf4a72b607d2dd193a23908ee4c917b6472d3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SingleExact-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c5dd418789b541ae7dec3210b3af39d5b6732147c68ce142f031144b92d06b84"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned8-release",
+      "cpu_type": "0x100000c",
+      "sha256": "aa7f3a7b2d4add92d134ffcbc5bd5f2b574d87b42fe1abf675968fbcacebea33"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeUnsigned-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6dc69ead46d6dcdd4e1610e78b8c62564e9b8ecbeaa13b05240a7bce0d41669b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned64-release",
+      "cpu_type": "0x100000c",
+      "sha256": "1329b73f27e29b7bdf441c14f6dfa993100ac86e0dec1348cab5d461a2910a1d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedWiden16-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c5fc847b1af40590b87379d63c7e0e8692470b5da75c2a6aeb657916e32a33cf"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned16-release",
+      "cpu_type": "0x100000c",
+      "sha256": "49a3c6281f7f49b4d0cedd136a7306d03b3330a94dad72800d8313057b5d3568"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned64-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1fee442ce3e62fb9d08514392a39ad93b2323fa5f21b4f338a02a098b0418cf0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow8-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a2f5fb903436bf5a54e4df96a488ca8b51b890f57d69f6cb2a8755749b65fec8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNNarrow-release",
+      "cpu_type": "0x100000c",
+      "sha256": "885d4e7797304a37b7141b5178586f43fcd676894155e1a2c3bdba4d08201e6d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedWiden8-release",
+      "cpu_type": "0x100000c",
+      "sha256": "71c1c4620e2308df379ff26f83bf2e662134510800f04cf7cacc24b1822f20cf"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatUpper-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "98f2a38a2eae7e1292fbccd1629cb2afd56ef4042f8b80ce9ec3ed016f9ba0e5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SingleExact-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "8f2f278444a164f74d6917fc831aa47d8c03947fe802366c5e953326e229f949"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned8-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d2d7a5e7df60046d2b277fa21e0263aaf04067194618dacbc754c6f70133d73c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedWiden16-release",
+      "cpu_type": "0x100000c",
+      "sha256": "3167395519181c1642ccd15f88d8b93cfc6fcafa1ddc70fd4f7ad6c1ba68e01d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedWiden16-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "aa1bfdc914f2242bac83155f894119841b6b4fd3490bcbf5933af4de45aa9818"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerFloatLoss-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "670df14330a61ec6c737b3bf7ab29128a365bb1eeeebf5aab3328d7db735824f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedWiden32-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "71b3dea5b0656aa5d9f48f6f89ad4d8daaddd11d7d885828e596e2d828c207b5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatLoss-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "84ae43ab6521d57ae430f2c2ed9eceb8bff851f3ea0df5ee87de73ee70d20595"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned64-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f67921d77b8dda1eba9afdf4aed2fe14531fbf85099646c89c0a2da220af5837"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatInfinityInteger-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c1ed0695003bc8a6923112de1afa2ab543f73fbb75f38db84ca14e1b36a73617"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerDoubleLoss-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f53871068b80616a3104626c75ca807a38590cf1e6303c52303b96dd69c5b968"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SingleFraction-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "87cf7801a0f26f09cdb9d59eceab5df190251310cd2685d3dc1479269f2f3676"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerFloatLoss-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d9cb10c8f6a4f29a6ce4e0175453be1def1a8690a45e4136ed05669893c3b057"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedHigh-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "168ade4509cde17db94b55aa571d753614f57408240c9a9a290f336484bf21c9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeZero-release",
+      "cpu_type": "0x100000c",
+      "sha256": "ca75ed9c63627cdbf00a103ca6bd6546e29c305471e1a20e1ec5ea7a7f8851ae"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow8-release",
+      "cpu_type": "0x100000c",
+      "sha256": "316a914782ee5146206e8d69f9b9c758cdfc4a44aec81fbe9ba038dffd551b57"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedHigh-release",
+      "cpu_type": "0x100000c",
+      "sha256": "cdd0572f6e2779f82c72b2159dc6b5a7b08e7758c554420863d433d3c21bb9c5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned32-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ab9135891afa8a448f9598bd3d8ca06ac3d52adc2c348b0fc65d1f9b8bf62ce9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatMinimum-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a06779cec64e95739dd0f7e04b42b1d223a216eeaae19bcc2e429db1c7235b4e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned8-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "69c8fcf7b13952fdd31c147fdd1268c1e40bc88313d720c93a498fef2b48f6fa"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow32-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c14615110548ed868b9af820a2ed4003b27a70abff96cc96e4647bcb0e875c37"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned16-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a43b254a71a48a3dce3f2774b6333da64e2cb0db10bac6049ddf19e54054c6cd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow16-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "918c8a6619d9a5281ebed1f107da0e3a6cca17bd541ab27e0388925ab4f3e76c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleHigh-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "8596807f789f608f540d059e9f49e08df20be016bc919ff1eac4e651716802a2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowExact-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d36f28d607d68dd9f39c3bd84d4f671dcb00caa244d15ec21800f747a07696e3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedUpper-release",
+      "cpu_type": "0x100000c",
+      "sha256": "198b777ff0ca03bd3b08ab93d8f86b135a5f4da38837467e79fafef87d63ae22"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeUnsigned-release",
+      "cpu_type": "0x100000c",
+      "sha256": "3e8d60e949f75cf1b3dad9e4ae239c78be682b6e0f3e5e7916d29231eb398862"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow32-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d221798f4304b5e629c589ae7e81cd9379903e1793c28a993f5bdec9eb753749"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow16-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6118746bb95a7630238934f1b47f99fa14cfbfe3695d5a639a871d50ac6347b3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow8-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a9231bd991183738da4766524fd7806465bff554c2e351f2e40e82bfdb29a6f2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "277dba884817dfcb6d1c0bb0f332cc6aa16fcbdc455a74e3b948b20fb1ab4362"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned32-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b661a3359b4913b0effb2b9ae33d7e9c5399d1772911fe1b4e58bbd63fda21ca"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SingleUpper-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "004cec7ad08481007e23016df161957974e296bfd27868123fed19892463b78f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatUpper-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a858d535bf497946fd6cc8217564ccf33350c5bd7919b7fa655576c0b8799398"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned64-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fcce77cde603ec7432808c440cd1ccb7f4c7fc7f6bef17cbf32602690dcdea39"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned16-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "843f567f7a1d86d814e15294daa4482b5f43036e3bddfa1a6af9875777c1a6fd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f69fe5b6df3574ae3eb08069c8a267ac847e2623502cd35c0a83de333d6dd6b9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned16-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c43caaa84eb9cbf910e71e4bd9c29d0fbbc03c58bf39aa0e8b73f1f19b3a9c91"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowLoss-release",
+      "cpu_type": "0x100000c",
+      "sha256": "36e9d2d25ef18ef913c197edd21ffb23013c35af52b075616601d8e7460c8ddb"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatFraction-release",
+      "cpu_type": "0x100000c",
+      "sha256": "fbf84ce2e947048960461176391dbb278dc1aa8fdbf75021cf75bf5f74fdda7a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNNarrow-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "5f2741786518b9ad547bdc660dae9d622dcc8de8aa7051cfd6ceab0c907445bb"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowExact-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "42b304fa29bb60c4b5ab20b621037baf59f688a5aca1e28f351cbb15f34870f4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowLoss-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1f2d521b53e460726481222f6042486a7223e7654a25dbdbf7c399fa61ba64da"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedUpper-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "28277c1af54a246afe32cc586fb210896d6e4bd760543fa693b1f423e5356b0e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/FloatInfinityInteger-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "87dabeb76d03e2dceb3fd8e62ac57d2d334db350f9828a2d7221ffe2789202f8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedWiden8-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "897edb96b6262bdc700e3b1d205bb68e4943dd7159ca684dba509b8416355f1e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned32-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4e78019cedcd475854407fa983bb3434c133c7c5bde87df0daae244ffb9f2a1e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedWiden8-release",
+      "cpu_type": "0x100000c",
+      "sha256": "725e823540cac5160b6fe458ff465069ab28789760e19404145ff7c701d13fb5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow32-release",
+      "cpu_type": "0x100000c",
+      "sha256": "ec6ac34c3551cf37b90a2f524ceab998702132e9139c67fed04d43abc4c1d8b6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleLoss-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "23699c09e0dc7452511a753a9ec6d0ee7725f39a9accfd542671b92e9a3c8a22"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerDoubleLoss-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "65c3f226bc6eea9d01f355f9c2f7cd300bf6dfa0f6296467ef16cc36cd640f2b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedWiden8-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6c7737d39f6a3c0680e99f7fdf8dce6bb1923396c6dc065923a43e481b9fb1f8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleHigh-release",
+      "cpu_type": "0x100000c",
+      "sha256": "f71894fa21aa67b68cd287ef2cdc32e6337b261d36328685fcf168ad3c5d1709"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow16-release",
+      "cpu_type": "0x100000c",
+      "sha256": "27e1251f6bd53822bf5abf03292e0eebd475edb3cfe4cd3c3a5297aeb6dd79f0"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleLoss-release",
+      "cpu_type": "0x100000c",
+      "sha256": "820a21de4c3241d10340b0d385b2d14e67aabb1febf5058057de54f051f74f93"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatMinimum-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c4a3f1eda08165ffdb5789aa51803890f3cc1a06a0471c2b9d6232ac1b9e1618"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow8-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d95d12e1be3f8ba828b8196feb5b6606c50e2c35fcf6156a94398b272b6f9571"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/ProjectStress/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "05988383eae8d64e3f6da48c0dd05343a15f4522d05f3c5a1817116bf30e0887"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/ProjectStress/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "eb625c6c9b3dbeaf3a3f2160e44824ee4e09e32dc9aa3c1faef8844a5a122bf2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/ProjectStress/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "328cfa40b5dfbdc403a7167b93bb9e5835cad4c33a6e6eda0dddab7fdb520b42"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/ProjectStress/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "05988383eae8d64e3f6da48c0dd05343a15f4522d05f3c5a1817116bf30e0887"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012932/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "1042e2f02426cd74f1f46c4aed3aedcf103c21e2fba9a4990d65f81550372c19"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012932/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "30417be5b0f8c60a4f47be72a18e1589570b00290c0b9541d31696c1b37df2d5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012932/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9ed364a21e39eb1e663fa00225ecb849c7c9fada429dfcee8a8d7525bd97e8a5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012932/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "1042e2f02426cd74f1f46c4aed3aedcf103c21e2fba9a4990d65f81550372c19"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012904/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c2cdfb501a6c7d7099f74ac02baf7d44d6e69f21602ab0afe580093b8de41ffd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012904/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "70ff2d75800e4a9c5611ab3b03b582ffebe21744612d222c19804eaf8f8e3774"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012904/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "efe1816d457c18fd3fff4fa49767b942493842509e26e0c6494cb3a56f32cc4f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012904/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c2cdfb501a6c7d7099f74ac02baf7d44d6e69f21602ab0afe580093b8de41ffd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012876/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "42b085ddad77c9c618307f8fb8f71a3e6d9dc3551f8fa1fb64429caeec494cc2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012876/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "abbc390c6c9d3c3f61b56911c727450241a454de36ebf2e048137ed503c363e1"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012876/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ab45b72f0d3e6abdd2988dde947bf51786bbd22f1e2a528c92aa652193eccf06"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012876/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "42b085ddad77c9c618307f8fb8f71a3e6d9dc3551f8fa1fb64429caeec494cc2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012840/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "38bebe3c82e6805ce3619511bbb3c352c91cf641c025735b88d32d0d1f8ce26a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012840/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a248fcd4f64876ab472f56eee6b0d4006af6b6072c80eba7b7e76252f2ed6509"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012840/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "11fc2841499119902af37950d1fc9c38cf74653c95f0b06f6b213de1b8a8b941"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012840/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "38bebe3c82e6805ce3619511bbb3c352c91cf641c025735b88d32d0d1f8ce26a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012848/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b0fbe00c7780d0f0557484865f5a2a4fc432c9b274ba39dd9dc112cc29c5ecaa"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012848/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "72fe873cd858a7a778589eff0675a640869d74735e2e41b4b37932e77bd2730c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012848/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "cd40619a1f2209317cbdf25ebb23e35bd80a787320e5050537f57d6a1ff715e2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012848/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b0fbe00c7780d0f0557484865f5a2a4fc432c9b274ba39dd9dc112cc29c5ecaa"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012884/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "1252b0cd14ea05ebe6b265061538f2378ce510844d8fe97d336de53bd1d77093"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012884/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "5343cd8e9f9fbb635625cad7e37d6dc66b922e343bf9526574ee0cef00925970"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012884/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c83dba15e58aefdd4839694430ecc10e1ff3ed59e66fb3d53f1644864115f0f7"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012884/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "1252b0cd14ea05ebe6b265061538f2378ce510844d8fe97d336de53bd1d77093"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012824/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "140b8197f4f2dc7d3932a4c384b70baf631d45514e5f6760228b3af674ae5a8c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012824/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7d72cb444e1a647625de47a1ba2530f840a7e669eb434db365488c994cae001d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012824/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "36e41c1b6fee5108a655a3eb762f85e6d6641c942707ed4a2d017e85fa344a13"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012824/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "140b8197f4f2dc7d3932a4c384b70baf631d45514e5f6760228b3af674ae5a8c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012812/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7ff4c4f963f01b7ef97b886b18cccf5c97dfa167a830bb8f5726032de459c995"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012812/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d1a7ce4040f6e264513f37d2962a795412be8234c06bee1ddf0f039d7f54fa32"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012812/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0bea5d4e5519587346a20489525d538e2a1e100fa80c3bf81129b82caa1410b3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012812/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7ff4c4f963f01b7ef97b886b18cccf5c97dfa167a830bb8f5726032de459c995"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012852/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a195ce6d6f0c4d2f048880446163d06b67f735e02379db8511814f4d24535b50"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012852/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3daef07c6257c151e599201b52e1dca5a488e1d89474f8dba2ab481b1f7fa5e6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012852/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c955809e32dc475ce1a80eb4f88668307527f6eab90a0933c484674e6d3458a4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012852/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a195ce6d6f0c4d2f048880446163d06b67f735e02379db8511814f4d24535b50"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012864/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c6f3f2bad50c796c833ca9296d101f5ce42aa33ee5f0a35edd3b3de76be551c2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012864/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3112f58be6d1a33475a85be9eb2db257f7a18784d39ac11dfaaeab8763732159"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012864/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "876bb784bb823ea06059dbba15314011956005d2d6fc0bbee5eebabea3a66a39"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012864/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c6f3f2bad50c796c833ca9296d101f5ce42aa33ee5f0a35edd3b3de76be551c2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012836/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "52203b59a3a6e59648cb58f3d040e4e9b963f6f30105a1e759f945871934f545"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012836/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b58c28ca5613a78463a6ce1c0f8d0d03e7f0b9a93fb5be4ac2577d6e91365dc9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012836/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "bb4be120bee964d08db4479e76e45424d6250d2a4bcc828fd6143875574273a4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012836/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "52203b59a3a6e59648cb58f3d040e4e9b963f6f30105a1e759f945871934f545"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012896/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a8536cbafb29ad5aea65303007fbb12a3ebdbadf01f824b0a4bb119b38f77685"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012896/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "9b99f0e4865abd312e3107e9c58dd50073a97e7c704de9fc96cac6197627c45e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012896/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a4547597e363aea10e8403d34c1b9a4e58d5938e794b10dbccfcac97209a6bdf"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012896/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a8536cbafb29ad5aea65303007fbb12a3ebdbadf01f824b0a4bb119b38f77685"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478591/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d0273fd32f8b49f8f2124536289d42234b19e4c73afe384d8b23b1b315b234a8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478591/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "cfd3f2dc1e3c32c358a098f8636a59622aad48063968b59fa89827464ac2280c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478591/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f9199a0a7f2098e1c8d0424a656f779265a0c304ad902490a482317fd4532a61"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478591/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d0273fd32f8b49f8f2124536289d42234b19e4c73afe384d8b23b1b315b234a8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012928/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "dde84f1b8ab9b8404248b328afa4c0c148ad38fed6f3b7956a278b005b8ef41e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012928/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "12e61e01774e3535b700c1b70db41a5342de9f70e5fbd1c53343fe0f40a725d9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012928/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "60e83a362f3dab25b0a328858f99e6c8a55deadcc4f8fdf2501091ec1c3f74bd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012928/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "dde84f1b8ab9b8404248b328afa4c0c148ad38fed6f3b7956a278b005b8ef41e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012944/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "baca0dfeaafa4bb89768609504d78f1c5d421ec05c5d637caafa3a28b951d440"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012944/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7ad1d85c4b8cdea3229e3e74fba9d1b314ac3b0545ae73d724f66fd8a65ac0ba"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012944/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "be67b89317747c575fa26168a66b3c35dbd0926f1c7aef6fd5fec4222b72fae8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012944/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "baca0dfeaafa4bb89768609504d78f1c5d421ec05c5d637caafa3a28b951d440"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012916/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7372c155e026aa3cf32e026c6c27f9bfa20359f9ce544ae4c8957d9ea52e5547"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012916/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6db8cdbda949e584a62a7a34c423bf183ab5ff011334c91dd08ffb361723d247"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012916/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "889964ef513dd0069f972a22c62cc8537a36b9875183242d4e4ac8dd2b927651"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012916/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "7372c155e026aa3cf32e026c6c27f9bfa20359f9ce544ae4c8957d9ea52e5547"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478590/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b365f660b36fd420579419d70aed14e9ba015a888eb99bff5768463dc0c08c91"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478590/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1ccbed5d069cdee8155cc35880d7e63fdfc476b46e1887a3f76d1167aadb222d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478590/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7d892ae36b30e9b8b41cd7f4ee203039490cabaa7e9055b7be518fdfb0bf7cb2"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478590/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b365f660b36fd420579419d70aed14e9ba015a888eb99bff5768463dc0c08c91"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012920/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "ea099c39510bd864209c60eca5f91991787750e15b29a8800688c09ffc7f6f7c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012920/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6c5cae5e1c670b2b367ff3d4cf405326138a5756c5d1f0f44f28b109945e16f4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012920/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "e0012cfe2e6d96f523ec89e6700e7eb3933a59c005dfb54d1c0e367d5d4430e9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012920/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "ea099c39510bd864209c60eca5f91991787750e15b29a8800688c09ffc7f6f7c"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478589/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "50df2fc062976165d437a042ab5fab44f4e5dc542dc5ecdb61b18b9da2d7d354"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478589/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "b36343c7596ee4f6998c5d8da8f79cc2d685280d1f92d87c5aec9d6e55a9af3f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478589/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "dbd7d1bf6ad5ad134a8e292828e02e9588750144e08d775461484ca14411394f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478589/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "50df2fc062976165d437a042ab5fab44f4e5dc542dc5ecdb61b18b9da2d7d354"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012908/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4824bc83e8de72df41bcef34dade0f55ccfd403704c8eb9bc0e505b869fb8d5e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012908/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3b48d5d37628346f0ebfbb913bfbdce5be1f1bb221ec3c6c651a78d526f80fa4"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012908/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "5d9e67a91dbd1dde3eecfa81c6f371dc30b48207b82460acf602ee5e61cb104e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012908/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "4824bc83e8de72df41bcef34dade0f55ccfd403704c8eb9bc0e505b869fb8d5e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478587/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6da108d832f08a474edf477b822a55f653bab6aa09b557afb3c22a8da477d4f6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478587/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "343c0c67ef8cb67c16a4765aeb2108ddde10876bb78db12edbec895f301fbfca"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478587/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "7205b39f1d206b3b9344b0cf592015fa6000a0a7a3950f383201347c16cd43e3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478587/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "6da108d832f08a474edf477b822a55f653bab6aa09b557afb3c22a8da477d4f6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012952/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "238cc74c7b061803768c816fab28c37dfbb4a46a641f52cbab837c04e6f61919"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012952/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0fb7424b8026b599d8f0c2a24484d8fab795ea149a23e29f3414e4bc9c369bcb"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012952/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "d9d7c4ae21a3deefbc28509440e48a9884b2f1ee51f1ee11d56390aa54a5999e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012952/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "238cc74c7b061803768c816fab28c37dfbb4a46a641f52cbab837c04e6f61919"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012936/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "dc0c10469d699ac4dcd38e0033ed01c522c30180f1e7a116460f468ba3ce7add"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012936/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0b5892bf20a074ed80981acd2890b590f6d718cfdeaf87568a4f50e5f6c03193"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012936/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "e7db68725445a1ffe03c545a43623f3c25118d3f1e120196897a8b9aa0b5ad97"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012936/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "dc0c10469d699ac4dcd38e0033ed01c522c30180f1e7a116460f468ba3ce7add"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478588/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "9e2fc849d53a8ab98f8e1041e0c9e725180807b65f6436e0fbf935afcaee4468"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478588/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "4affd3d34af419aa876d02eb71f0810dd40013c9175a42c016052f3a2fab8285"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478588/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "22e061bf9f6a0eb1a47b34d785628731185a7a3bf165f24a8e7e8fc94903232f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase13503953896175478588/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "9e2fc849d53a8ab98f8e1041e0c9e725180807b65f6436e0fbf935afcaee4468"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012900/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "84ed08158278502015b4cb4b3a7bb60fa7c85eadb4ee425477d4e12e6b99d5cd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012900/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "e2ab17bc331094aa1daf79074832594dbf6d874f127c5d572d1e56d60d4ddc19"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012900/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "79b095e40a0eebce148a0415826e468cf47fc98472ead21c5674dc89c8979b06"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012900/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "84ed08158278502015b4cb4b3a7bb60fa7c85eadb4ee425477d4e12e6b99d5cd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012828/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e73f0b9509dba9b6ea27fd6582c5ee6aa288a0944534f5f333cd3910dfc36472"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012828/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0444ab4b03f574340134fa6e0f1862e028b03edaa2d121b01e90fbfef49e7462"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012828/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "a0e6b16aa50c0522051f616330e3a26af1356aa0aceb62ec2e6c65314da75bf8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012828/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e73f0b9509dba9b6ea27fd6582c5ee6aa288a0944534f5f333cd3910dfc36472"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012872/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e759e639b47916b988d6c11a140ac7d1ee5012513fd813b145a90254681e382d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012872/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "ed32e5c6dca3cd772610e74f2ee018d340575bee7065dbf15aab6b3b09ac2357"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012872/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "42ff6731a9a4d93689d641f4f800f39b3f34cea81c4b04859e96584e9110114f"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012872/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "e759e639b47916b988d6c11a140ac7d1ee5012513fd813b145a90254681e382d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012844/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "da88b9b75081c02a04c3c5f65abfafce42015222d3d4960903f311a88682fcc8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012844/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3b4ac9f9db20108a67a40106cceb74220633601d0b2d793d4486913ceb8baea6"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012844/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "2b61fd571ca1a82c3ff27994c574c2e156035859751418d7dd09ee14711bc47d"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012844/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "da88b9b75081c02a04c3c5f65abfafce42015222d3d4960903f311a88682fcc8"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012888/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "531fb2f683b0615652d21e2258482546ab66035ec0404aee70c6b033a93d8330"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012888/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "4270330a966261e7ee6ff577f75596ac2369fd1e70bf383a3aa3817362f7b7d9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012888/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "fea3dcd34013099ac455e151c0436b6f95b33273940855c6cf4303028425a4e9"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012888/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "531fb2f683b0615652d21e2258482546ab66035ec0404aee70c6b033a93d8330"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012820/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c29dcb2ed7c2aa0883c61df1d26d8937f83e99fad9ccf7d5fba0a6378bc88c6e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012820/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c83240b210113fd01a6b96c5752e3b3b8e31a93a6261e898f1c4d71f2962c271"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012820/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6e60800a14c43e8308a1ff95d31f19762a3a06d3cb32db5acb72bb88cdd122ef"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012820/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "c29dcb2ed7c2aa0883c61df1d26d8937f83e99fad9ccf7d5fba0a6378bc88c6e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012816/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b25762934969db027759ff1d4fa94c588af1751dc585df52f8c69f576688cf4e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012816/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "6285ade49e90a59c515c3a6e99afaf4d44cb078622b6752b90a1a99fb3afc7a3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012816/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "902fb72a5182621d54b8bbb2b6aaa2638a2cb86a5bd371837ccdbabca2912288"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012816/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "b25762934969db027759ff1d4fa94c588af1751dc585df52f8c69f576688cf4e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012880/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "1e537cfb86c2eb3435712ea2c1423095833dc6d9943bcef3d64ac4c858cd6492"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012880/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "28fa326b77169c84694fac6b01ee10d72de5054eb58b593f04cc1f56edb7b932"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012880/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "dce3fd88663c11b45aedf70bf9fb818d00bbfbfa4505aef76863b81fd9854614"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012880/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "1e537cfb86c2eb3435712ea2c1423095833dc6d9943bcef3d64ac4c858cd6492"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012856/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "de2289d19cda3e2c3576db1b41389ae25effa7255e21dc8b82a169c69ba7b160"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012856/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "e965dd5ebb879155f1ba30a74f7f3677f7c6ea651dc1334405c5fd195ec4ecd3"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012856/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "987714149b7ff9f16a1fb59594add9d107d103d61a67e1975cbb8874203ac85b"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012856/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "de2289d19cda3e2c3576db1b41389ae25effa7255e21dc8b82a169c69ba7b160"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012860/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "17ca513c604f586d990f62db81150d55432bb01a116d358c3a5b2a3bac1c1101"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012860/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "0ed63ffd8554f6bd4f4732143183692d7caf6493ee316bc44326df58da006293"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012860/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "e8d578069db92bd3925c0d51b739a88a73d54f75f8bd4d378fc66b7ce5078396"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012860/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "17ca513c604f586d990f62db81150d55432bb01a116d358c3a5b2a3bac1c1101"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012892/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a176c250bc0633d65cb62fc7a2e0166094b9f9c629f06ccf136d32f4334c4c3e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012892/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "3a5afde42f7c1dcc840ff76f30b141a0a004c14ea4a593c77ffbf59e7ce21c80"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012892/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f1d0fdc30ab05454dba520f5109476ac8d9fa5ede87c38d071a0365fcf4e10ca"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012892/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "a176c250bc0633d65cb62fc7a2e0166094b9f9c629f06ccf136d32f4334c4c3e"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012868/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "0e3eea38e59761b919b41160f1e9277b77367d2d3b1eb79f9edba1defe61ed42"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012868/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "355afa91b8a8aa4f66f2868803a937c9c34549d37e4489a4b01e25b383a1e224"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012868/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "cffb63f00915b90213eb7fd6fedea09985d06128960bbcfa2e1cfe56d1cc8659"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012868/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "0e3eea38e59761b919b41160f1e9277b77367d2d3b1eb79f9edba1defe61ed42"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012832/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "27f6113ab17436722f97af6393eb8171961b1b394f2652519e3ca32969209441"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012832/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "f6e584b040208b52e8a38d0e15844dc0dcaa45de9fb6a3a1952b73e8b42bcacf"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012832/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "5b1c25dfb20c33f6f94f1780a55e58664c58c003d045964107aab46bd3bd59cb"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012832/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "27f6113ab17436722f97af6393eb8171961b1b394f2652519e3ca32969209441"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012940/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "73bc8f075c17c2ac1fa837dfea54603b242a17dcf5d5fb8e24370d48f55edc92"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012940/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "176ef4851096869f1bde74d9ad4af75e062a949f4ff8c48813bd23e344f653d5"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012940/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "621c6e95db994abfab0af38cff8920be7bc3cd0c4ff0510d8c53aa83520801fa"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012940/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "73bc8f075c17c2ac1fa837dfea54603b242a17dcf5d5fb8e24370d48f55edc92"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012948/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "003f00a1606151491d189d4bb236eac5a91c2476e3e888f35282956e873cc8ea"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012948/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "1bd794d6ee853eabf7561cf17db6c2c6e92a8b228e693c7b8fd876b338922683"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012948/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "27bd2f30c4d48b308946a49f217f507326df854ed2eb00a51e65e2d5b8713346"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012948/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "003f00a1606151491d189d4bb236eac5a91c2476e3e888f35282956e873cc8ea"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012912/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d7a74e9acce50f22d707f9a9200b0927a8f5f4a166148e45374b74ddb5193374"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012912/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "dc24a1d1364574727ef87068cfd435dc8b960f58568417278aacfd6d525c6d37"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012912/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "c50dae252d8de91e9e28e83a8707168eaff0de712821b552fbd7105a933d502a"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012912/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "d7a74e9acce50f22d707f9a9200b0927a8f5f4a166148e45374b74ddb5193374"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012924/native-release",
+      "cpu_type": "0x100000c",
+      "sha256": "3f43a201d89740f7ed098f4f5e955a3a6b85daee735f4008edb46e78a489e760"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012924/native-repeated-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "dc433be7040fb487d228f93467e0932dfaa5d97950c98d3d954dbd1e4dca67db"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012924/native-debug",
+      "cpu_type": "0x100000c",
+      "sha256": "40676014b23b746c649f1a46a59a5bc55be0f5a419045f2981bc6cff8a8823fd"
+    },
+    {
+      "path": ".zig-cache/optimizer-oracle/robustness/RobustnessCase7640891576956012924/native-repeated-release",
+      "cpu_type": "0x100000c",
+      "sha256": "3f43a201d89740f7ed098f4f5e955a3a6b85daee735f4008edb46e78a489e760"
+    }
+  ]
+}

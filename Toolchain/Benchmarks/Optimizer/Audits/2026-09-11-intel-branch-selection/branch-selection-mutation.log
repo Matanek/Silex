@@ -1,0 +1,10 @@
+1/1 BranchSelectionMutation.test.branch fusion rejects shared booleans, independent entries, and reused slots...FAIL (TestUnexpectedResult)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:615:14: 0x102a75847 in expect (test)
+    if (!ok) return error.TestUnexpectedResult;
+             ^
+/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Sources/BranchSelectionMutation.zig:69:5: 0x102a75ac3 in test.branch fusion rejects shared booleans, independent entries, and reused slots (test)
+    try std.testing.expect(comparison(function, 0) != null);
+    ^
+0 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/5ce7ab110e9552e66048526ac899bdf6/test --seed=0x85a5a851
