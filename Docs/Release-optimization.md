@@ -394,6 +394,12 @@ not at a later projection that could follow an aliasing write.
 Aggregate copies omit unused register destinations in both integer and
 floating-point registers: an unused leaf may share a register with a live
 sibling defined by the same transfer and must not overwrite it.
+Collection replacement through a mutable view is also a leaf operation. Its
+paired and trailing scalar transfers use only reserved scratch registers
+`x9`/`x11`, after the element address has consumed the index and stride. They
+must preserve volatile value residences such as `x5`/`x6`, which can hold an
+independent view used later in the same loop. The copy keeps its paired transfer
+shape and does not force those live values back to the stack.
 Reference transfers to resident floating-point registers use direct 64-bit
 loads and stores. Floating-point 64-bit stack transfers use the same direct
 instructions in both stack-address windows, in Debug and Release. These are
