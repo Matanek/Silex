@@ -1,0 +1,16 @@
+{
+  "compiler_before_sha256": "c5cfa8d5a9d449c7a6adffc58e58e0f8b28f64815d8705e20ff7b8e8e7dde5bc",
+  "source": "Toolchain/Benchmarks/Optimizer/Regressions/MultipleReferenceCursors.sx",
+  "source_sha256": "4d10954043c909c83a50c05107b2f53fe923aa91bc2a690d57e02359c07018b9",
+  "before": {
+    "debug_exit_code": 0,
+    "release_exit_code": 139,
+    "release_signal": "SIGSEGV",
+    "release_binary_sha256": "f87e640c4f75eaa46a0400b22e04d20ee8079965db0e87517b352bc70b1f265e",
+    "invalid_address": "0x3fc00008",
+    "cause": "Collection aggregate replacement copies overwrote live x5/x6 view descriptor residences. The value 0x3fc00000 is the first replacement float (1.5f)."
+  },
+  "fix": "Use reserved scratch x9/x11 after consuming index and stride, including the odd final leaf. Preserve paired transfers.",
+  "historical_copy_commit": "de15327b",
+  "native_execution_scope": "macOS ARM64; Linux/Windows ARM64 emission covered by the unit fixture, native execution remains to qualify"
+}

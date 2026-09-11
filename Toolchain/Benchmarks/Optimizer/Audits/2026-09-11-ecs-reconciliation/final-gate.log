@@ -1,0 +1,384 @@
+optimizer oracle: optimization coverage registry
+  schema: 2
+  LLVM executable: Apple clang version 21.0.0 (clang-2100.1.1.101)
+  LLVM sources: 3623fe661ae35c6c80ac221f14d85be76aa870f1 (llvmorg-21.1.0)
+  target: arm64-apple-darwin25.6.0, CPU apple-m1, -O3
+  coverage: 13 families, 7 baselines, 5 hot functions, 21 workspace repositories, 15 sealed qualification projects
+  interactions: 144 pairwise cases, 5 risk triplets, SHA-256 c5ca428fa03d03fd9b72f5a0f878333abd4c61be029d8aa44a85ba8dd86e9da3
+  plan: .zig-cache/optimizer-oracle/coverage-plan.tsv
+optimizer oracle: semantic verification
+  PASS DampedIntegration.sx (45 bytes output)
+  PASS PreparationMasses.sx (65 bytes output)
+  PASS AggregateViewAliasing.sx (45 bytes output)
+  PASS IntegerArithmetic.sx (7 bytes output)
+  PASS BranchingLoop.sx (7 bytes output)
+  PASS FloatArithmetic.sx (5 bytes output)
+  PASS IntegerControlFlow.sx (6 bytes output)
+  PASS IntegerWidths.sx (3 bytes output)
+  PASS UnsignedBitwise.sx (11 bytes output)
+  PASS AggregateScalarization.sx (6 bytes output)
+  PASS ReferenceAliasing.sx (6 bytes output)
+  PASS ReferenceDeadStores.sx (9 bytes output)
+  PASS ReadonlyViewMemory.sx (3 bytes output)
+  PASS MutableViewMemory.sx (3 bytes output)
+  PASS NestedAggregateWidths.sx (15 bytes output)
+  PASS OwningCollectionCopy.sx (10 bytes output)
+  PASS Regressions/LoopExitFloatLaneXY.sx (20 bytes output)
+  PASS Regressions/FloatLaneXYZ.sx (15 bytes output)
+  PASS Regressions/LoopExitFloatLaneXYZW.sx (40 bytes output)
+verified: 19 corpus programs
+optimizer oracle: cold and warm cache reproducibility
+  PASS IntegerArithmetic.sx: 9abf1f5b0548ed1a9c64aa813dd04a9da151c91cf4205182e782ca58a9eb6af9
+  PASS BranchingLoop.sx: 6c7067dd5dad67ec392f3471b674e5f1ef2e7cd4aabe7e4f97d5eb92abe7ea96
+  PASS Regressions/AggregateFieldStores.sx: 928a09ded17291f977d7191288b13cea6009efa3ca9b93b800147a57ef5e7137
+  PASS Regressions/DenseScalarLoop.sx: 1a0b52105c074562009dbd14087241c8e0458471fc66d490287559771ff242c0
+cache proof: .zig-cache/optimizer-oracle/cache-proof.tsv
+optimizer oracle: metamorphic qualification
+  PASS direct-or-helper: semantics and native modes agree, structure records a gap
+  PASS declaration-order: semantics and native modes agree, structure equivalent
+  PASS inline-or-nested-helper: semantics and native modes agree, structure records a gap
+  PASS scalar-or-aggregate-branch: semantics and native modes agree, structure equivalent
+  PASS while-or-for-collection: semantics and native modes agree, structure equivalent
+metamorphic report: .zig-cache/optimizer-oracle/metamorphic.tsv
+optimizer oracle: native optimizer regression qualification
+  PASS IntegerArithmetic.sx
+    protects: a hot scalar loop retains target registers across a terminal output barrier
+    contract: main scalar residences ARM64 13/13, X64 13/13
+    binaries: Debug 51568 bytes, Release 32952 bytes
+  PASS AggregateScalarization.sx
+    protects: value aggregate copies, field updates and returns reduce to scalar leaves
+    contract: update value-aggregate operations 14 -> 3
+    binaries: Debug 54104 bytes, Release 32952 bytes
+  PASS ReferenceDeadStores.sx
+    protects: exact reference stores are eliminated while a possibly aliasing observation remains
+    contract: overwrite reference stores 2 -> 1; observed retains 1 load(s) and 2 store(s)
+    counter: disabling reference_memory_elision retains 2 memory operation(s) versus 1 in overwrite; guards 0/0
+    binaries: Debug 52856 bytes, Release 32952 bytes
+  PASS MutableViewMemory.sx
+    protects: exact mutable-view stores and loads coalesce without removing the surviving bounds guard
+    contract: rewrite view loads 5 -> 0, stores 2 -> 1, 1 guard(s) retained
+    counter: disabling reference_memory_elision retains 3 memory operation(s) versus 1 in rewrite; guards 3/1
+    binaries: Debug 51376 bytes, Release 32952 bytes
+  PASS OwningCollectionCopy.sx
+    protects: known owning-list values forward while copy-on-write mutation remains explicit
+    contract: main owning loads 4 -> 0, 1 mutation(s) and 0 guard(s) retained
+    counter: disabling reference_memory_elision retains 3 memory operation(s) versus 1 in main; guards 3/0
+    binaries: Debug 50888 bytes, Release 32952 bytes
+  PASS Regressions/AggregateFieldStores.sx
+    protects: scalar field reads and writes preserve snapshots, alias mutations across calls and loops, and owning collection copies
+    binaries: Debug 105592 bytes, Release 49368 bytes
+  PASS Regressions/CheckedMemoryLanes.sx
+    protects: checked aggregate loads, independent arithmetic lanes, branches and borrowed writes
+    binaries: Debug 81680 bytes, Release 49368 bytes
+  PASS Regressions/AggregateControlFlow.sx
+    protects: immutable aggregate projections across branches and loops preserve snapshots and joined returns
+    binaries: Debug 64712 bytes, Release 32952 bytes
+  PASS Regressions/FloatSsaDiamond.sx
+    protects: float32 and float64 local values preserve both incoming edges of an SSA diamond
+    binaries: Debug 67984 bytes, Release 32952 bytes
+  PASS Regressions/FloatSsaLoop.sx
+    protects: float32 and float64 local recurrences preserve entry and back-edge values
+    binaries: Debug 54240 bytes, Release 32952 bytes
+  PASS Regressions/BooleanSharedChain.sx
+    protects: shared boolean-chain blocks and reused branch values
+    contract: hot_chain blocks 13 -> 8
+    binaries: Debug 57216 bytes, Release 32952 bytes
+  PASS Regressions/SsaValueFacts.sx
+    protects: unanimous SSA joins propagate exact constants while divergent joins retain their control
+    contract: unanimous branches 2 -> 1, arithmetic 1 -> 0
+    counter: disabling ssa_value_simplification retains 2 branches and 1 arithmetic operation(s), versus 1 and 0
+    binaries: Debug 56224 bytes, Release 32952 bytes
+  PASS Regressions/SsaCriticalEdge.sx
+    protects: float32 and float64 locals cross a critical edge without memory traffic or a synthetic block
+    contract: choose64 local operations 3 -> 0, blocks 4 -> 3
+    counter: disabling ssa_promotion_post retains 3 local operation(s) versus 0, with blocks 3 versus 3
+    binaries: Debug 53744 bytes, Release 32952 bytes
+  PASS Regressions/SsaForwardedPhiLoop.sx
+    protects: a loop-carried float value crosses an inner forwarding join without falling back to local storage
+    contract: accumulate local operations 9 -> 0, blocks 7 -> 6
+    counter: disabling ssa_promotion_post retains 4 local operation(s) versus 0, with blocks 6 versus 6
+    binaries: Debug 52968 bytes, Release 32952 bytes
+  PASS Regressions/SsaDistinctPhiLoop.sx
+    protects: a float recurrence keeps distinct loop and branch joins without falling back to local storage
+    contract: accumulate local operations 13 -> 0, blocks 7 -> 7
+    counter: disabling ssa_promotion_post retains 8 local operation(s) versus 0, with blocks 7 versus 7
+    binaries: Debug 53664 bytes, Release 32952 bytes
+  PASS Regressions/IntegerConversionConstants.sx
+    protects: unanimous integer facts cross representable conversions and expose dependent constant arithmetic
+    contract: joined conversions 5 -> 0, arithmetic 4 -> 0
+    counter: disabling ssa_value_simplification retains 1 conversions and 1 arithmetic operation(s), versus 0 and 0
+    binaries: Debug 52424 bytes, Release 32952 bytes
+  PASS Regressions/IntegerShiftConstants.sx
+    protects: unanimous integer and count facts fold valid shifts while invalid counts preserve their failure
+    contract: shifted branches 2 -> 1, arithmetic 3 -> 0
+    counter: disabling ssa_value_simplification retains 2 branches and 3 arithmetic operation(s), versus 1 and 0
+    binaries: Debug 54296 bytes, Release 32952 bytes
+  PASS Regressions/IntegerRangeChecks.sx
+    protects: dominating and loop-carried bounds remove only proven overflow and conversion checks
+    contract: increment, decrement, widen_unsigned, shift_bounded, accumulate proven checks 12 -> 0; 1 unproven check(s) retained
+    counter: disabling value_range_analysis retains 10 proven check(s) versus 0; unproven checks remain 1/1
+    binaries: Debug 58656 bytes, Release 32952 bytes
+  PASS Regressions/ConstantDivision.sx
+    protects: signed and unsigned constant division, including powers of two, preserves all Silex integer widths on native backends
+    binaries: Debug 77056 bytes, Release 32952 bytes
+  PASS Regressions/X64RegionalBarriers.sx
+    protects: a hot X64 scalar loop retains volatile registers while aggregate construction and a direct call remain stack barriers
+    contract: integrate X64 regional residence 13/15, 2 spilled values, 4 frame slots/32 bytes, loop stack 0 load/0 store, barriers 1 direct/0 indirect call and 2 aggregate leaf slots
+    binaries: Debug 52792 bytes, Release 32952 bytes
+  PASS Regressions/X64IndirectAggregate.sx
+    protects: a hot X64 scalar loop retains registers before a wide aggregate and indirect call barrier
+    contract: integrate X64 regional residence 14/20, 6 spilled values, 8 frame slots/64 bytes, loop stack 0 load/0 store, barriers 0 direct/1 indirect call and 4 aggregate leaf slots
+    binaries: Debug 53080 bytes, Release 32952 bytes
+  PASS Regressions/ArrayStorageAccess.sx
+    protects: fixed, dynamic, nested, and aggregate collection storage
+    binaries: Debug 69856 bytes, Release 49368 bytes
+  PASS Regressions/BoundedCollectionLoop.sx
+    protects: proven zero-origin collection traversal without weakening other bounds checks
+    contract: sum checked collection loads 1 -> 0
+    binaries: Debug 53976 bytes, Release 32952 bytes
+  PASS Regressions/SequentialBoundedLoops.sx
+    protects: zero-origin recovery after a sequential loop resets its reused induction variable
+    contract: sum_sequential checked collection loads 2 -> 1
+    binaries: Debug 54008 bytes, Release 32952 bytes
+  PASS Regressions/DenseScalarLoop.sx
+    protects: class count accessor inlining and redundant scalar loads inside a dense loop
+    contract: integrate collection loads 4 -> 2, calls 1 -> 0
+    binaries: Debug 56432 bytes, Release 32952 bytes
+  PASS Regressions/LoopExitFloatLaneXY.sx
+    protects: XY loop recurrences become stable vectorizable snapshots after loop exit
+    contract: finish SLP width 2 (required >= 2), ARM64 pairs 15 (required=yes), X64 pairs 0 (required=no)
+    binaries: Debug 53624 bytes, Release 32952 bytes
+  PASS Regressions/FloatLaneXYZ.sx
+    protects: portable XYZ lane grouping through loads and arithmetic
+    contract: transform SLP width 3 (required >= 3), ARM64 pairs 3 (required=no), X64 pairs 0 (required=no)
+    binaries: Debug 51408 bytes, Release 32952 bytes
+  PASS Regressions/LoopExitFloatLaneXYZW.sx
+    protects: XYZW loop recurrences become two stable vectorizable pairs after loop exit
+    contract: finish SLP width 4 (required >= 4), ARM64 pairs 30 (required=yes), X64 pairs 0 (required=no)
+    binaries: Debug 55496 bytes, Release 32952 bytes
+  PASS Regressions/TextOutputIntegrity.sx
+    protects: complete text output through branches and collection iteration
+    binaries: Debug 54312 bytes, Release 32952 bytes
+  PASS Regressions/BoidsKernel.sx
+    protects: boids-like arrays, shared boolean chains, and native XY/Z realization
+    contract: steer SLP width 3 (required >= 3), ARM64 pairs 15 (required=yes), X64 pairs 6 (required=yes)
+    binaries: Debug 58144 bytes, Release 32952 bytes
+  PASS Regressions/Boids2DSteering.sx
+    protects: aggregate vector parameters keep pointer-terminated collection cursors disjoint from cached float literals
+    binaries: Debug 60208 bytes, Release 32952 bytes
+  PASS Regressions/ReversedFloatRecurrence.sx
+    protects: reversed float recurrence copies preserve lane order and exact unaligned compact-field loads
+    binaries: Debug 53544 bytes, Release 32952 bytes
+  PASS Regressions/CollectionCursor.sx
+    protects: a generic unit-stride float collection loop retains a post-indexed pointer-terminated cursor
+    contract: accumulate ARM64 cursor post-indexed=yes, pointer-terminated=yes
+    binaries: Debug 54992 bytes, Release 32952 bytes
+  PASS Regressions/ReferenceCursorReuse.sx
+    protects: ascending mutable view references preserve checked bounds and reuse stable element addresses across field writes
+    binaries: Debug 55592 bytes, Release 32952 bytes
+  PASS Regressions/MultipleReferenceCursors.sx
+    protects: independent mutable views carry every checked ascending element address in one loop
+    contract: shift ARM64 reference cursors unchecked=0, checked=2
+    binaries: Debug 53400 bytes, Release 32952 bytes
+  PASS Regressions/AggregateParameterResidence.sx
+    protects: read-only aggregate parameters keep scalar leaves in ARM64 registers unless storage is required
+    contract: evaluate ARM64 aggregate parameter residence 12/12
+    binaries: Debug 51120 bytes, Release 32952 bytes
+  PASS Regressions/LoopForms.sx
+    protects: signed and unsigned inductions, nested control, break, continue, dynamic bounds, strided access and contiguous recurrence
+    binaries: Debug 59352 bytes, Release 32952 bytes
+  PASS Regressions/CallEffectsInlining.sx
+    protects: small reference and checked-view callees inline into the final caller without losing their memory effects
+    contract: main calls 2 -> 0, reference stores 1 -> 0 after scalar replacement
+    counter: disabling value_inlining retains 2 call(s) versus 0 in main
+    binaries: Debug 52568 bytes, Release 32952 bytes
+  PASS Regressions/BranchingReferenceInlining.sx
+    protects: branching reference callees inline at hot loop sites while preserving their writes
+    contract: main calls 1 -> 0, reference stores 2 -> 2 after scalar replacement
+    counter: disabling value_inlining retains 1 call(s) versus 0 in main
+    binaries: Debug 53528 bytes, Release 32952 bytes
+  PASS Regressions/PureMathReferenceInlining.sx
+    protects: proven pure scalar-math effects remain exact while a native call barrier stays outside a branching reference caller
+    contract: main calls 1 -> 1, reference stores 4 -> 4 after scalar replacement
+    binaries: Debug 57592 bytes, Release 51072 bytes
+  PASS Regressions/HotReferenceLeafClosure.sx
+    protects: a pressure-heavy hot set of reference leaf callees stays out of line until expanded caller residences are proven profitable
+    contract: integrate calls 2 -> 2, reference stores 9 -> 9 after scalar replacement
+    binaries: Debug 84888 bytes, Release 51224 bytes
+  PASS Regressions/DynamicFieldClearAppend.sx
+    protects: a loop-local class call bound stays defined before clearing and rebuilding a dynamic field
+    binaries: Debug 75752 bytes, Release 49368 bytes
+qualified: 42 fixed regressions and 8 generated native scenarios
+optimizer oracle: deterministic numeric fuzzing
+verified: 128 generated programs (seed 1..128)
+optimizer oracle: LLVM differential fuzzing
+verified: 32 LLVM programs (seed 1..32)
+optimizer oracle: Silex Release versus LLVM -O3
+artifacts: .zig-cache/optimizer-oracle
+  PASS DampedIntegration.sx
+  IR: 386 -> 433 instructions, 55 -> 46 blocks, 351 -> 554 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 87 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 96] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 21.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 16 block(s) with 4 added PHI node(s); Silex retains 42 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 78] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 2.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 49368 bytes, LLVM 33576 bytes
+  timing: skipped correctness probe
+  PASS PreparationMasses.sx
+  IR: 555 -> 530 instructions, 96 -> 66 blocks, 504 -> 674 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 184 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 98] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 38.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 40 block(s) with 16 added PHI node(s); Silex retains 66 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 2 internal call(s); Silex retains 3.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 49368 bytes, LLVM 33640 bytes
+  timing: skipped correctness probe
+  PASS AggregateViewAliasing.sx
+  IR: 304 -> 407 instructions, 46 -> 32 blocks, 264 -> 457 values
+  LLVM guidance:
+    [critical 98] proven safety-check elimination
+      evidence: LLVM retains 6 safety guard(s); Silex retains 47.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 95] alias-aware reference-memory elimination
+      evidence: LLVM retains at most 24 comparable reference-memory operation(s); Silex retains 34.
+      action: Remove dead reference reads and stores without forwarding values across writes that may alias.
+    [high 84] control-flow graph simplification
+      evidence: LLVM retains 18 block(s); Silex retains 30.
+      action: Merge equivalent blocks and branches after propagation while preserving reused values.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 1.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+    [medium 70] redundant conversion elimination
+      evidence: LLVM retains 1 conversion(s); Silex retains 3.
+      action: Compose consecutive conversions and remove those whose source range already fits the target.
+  size: Silex 65784 bytes, LLVM 33608 bytes
+  timing: skipped correctness probe
+  PASS IntegerArithmetic.sx
+  IR: 22 -> 29 instructions, 5 -> 8 blocks, 19 -> 37 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  Silex Release: median 15339534 ns, MAD 1693 ppm, p10..p90 15313562..17138777 ns
+  LLVM -O3: median 17995472 ns, MAD 8399 ppm, p10..p90 17801569..18261791 ns
+  relative median: Silex 85% of LLVM time
+  paired median interval: 850923..938504 ppm at 968750 ppm one-sided confidence (1000000 = parity)
+  PASS BranchingLoop.sx
+  IR: 35 -> 48 instructions, 8 -> 14 blocks, 29 -> 61 values
+  LLVM guidance:
+    [medium 70] range and signedness analysis
+      evidence: LLVM retains 2 signed and 6 unsigned remainder operation(s); Silex retains 4 signed and 0 unsigned.
+      action: Propagate ranges, signedness, and non-negativity to select simpler operations and prove checks.
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  Silex Release: median 15397464 ns, MAD 1824 ppm, p10..p90 15369375..15595851 ns
+  LLVM -O3: median 16911994 ns, MAD 2696 ppm, p10..p90 16865506..17051684 ns
+  relative median: Silex 91% of LLVM time
+  paired median interval: 902987..922176 ppm at 968750 ppm one-sided confidence (1000000 = parity)
+  PASS FloatArithmetic.sx
+  IR: 22 -> 34 instructions, 5 -> 8 blocks, 19 -> 35 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  Silex Release: median 10365566 ns, MAD 1699 ppm, p10..p90 10347950..10438358 ns
+  LLVM -O3: median 10449441 ns, MAD 4836 ppm, p10..p90 10368908..10534466 ns
+  relative median: Silex 99% of LLVM time
+  paired median interval: 982294..999677 ppm at 968750 ppm one-sided confidence (1000000 = parity)
+  PASS IntegerControlFlow.sx
+  IR: 20 -> 12 instructions, 5 -> 5 blocks, 17 -> 38 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS IntegerWidths.sx
+  IR: 9 -> 7 instructions, 2 -> 2 blocks, 10 -> 15 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  timing: skipped correctness probe
+  PASS UnsignedBitwise.sx
+  IR: 10 -> 9 instructions, 2 -> 2 blocks, 10 -> 17 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS AggregateScalarization.sx
+  IR: 72 -> 24 instructions, 6 -> 9 blocks, 67 -> 262 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33544 bytes
+  timing: skipped correctness probe
+  PASS ReferenceAliasing.sx
+  IR: 58 -> 29 instructions, 4 -> 4 blocks, 57 -> 159 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33576 bytes
+  timing: skipped correctness probe
+  PASS ReferenceDeadStores.sx
+  IR: 63 -> 15 instructions, 3 -> 3 blocks, 60 -> 93 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33544 bytes
+  timing: skipped correctness probe
+  PASS ReadonlyViewMemory.sx
+  IR: 16 -> 23 instructions, 2 -> 2 blocks, 16 -> 25 values
+  LLVM guidance:
+    [high 81] constant propagation and dead-code elimination
+      evidence: LLVM produces 1 constant print operation(s); Silex produces 0.
+      action: Propagate constants across calls and branches, then remove unreachable computations and blocks.
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS MutableViewMemory.sx
+  IR: 34 -> 15 instructions, 2 -> 2 blocks, 32 -> 35 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS NestedAggregateWidths.sx
+  IR: 72 -> 17 instructions, 2 -> 2 blocks, 67 -> 81 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS OwningCollectionCopy.sx
+  IR: 28 -> 14 instructions, 1 -> 1 blocks, 21 -> 21 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33480 bytes
+  timing: skipped correctness probe
+  PASS Regressions/LoopExitFloatLaneXY.sx
+  LLVM oracle: float vector width 2 (required >= 2)
+  Silex ARM64: finish has 15 native XY pair(s)
+  IR: 67 -> 90 instructions, 5 -> 8 blocks, 58 -> 122 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS Regressions/FloatLaneXYZ.sx
+  IR: 35 -> 19 instructions, 2 -> 2 blocks, 33 -> 52 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  timing: skipped correctness probe
+  PASS Regressions/LoopExitFloatLaneXYZW.sx
+  LLVM oracle: float vector width 4 (required >= 4)
+  Silex ARM64: finish has 30 native XY pair(s)
+  IR: 118 -> 160 instructions, 5 -> 8 blocks, 101 -> 249 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+machine report: .zig-cache/optimizer-oracle/report.tsv
+parity report: .zig-cache/optimizer-oracle/parity.tsv
+optimizer oracle: ranked Silex optimization priorities
+  1. proven safety-check elimination (3 workloads, score 292)
+  2. interprocedural specialization and inlining (3 workloads, score 232)
+  3. loop and lane vectorization (2 workloads, score 200)
+  4. loop induction variables and PHI nodes (2 workloads, score 188)
+  5. alias-aware reference-memory elimination (1 workloads, score 95)
+  6. control-flow graph simplification (1 workloads, score 84)
+  7. constant propagation and dead-code elimination (1 workloads, score 81)
+  8. range and signedness analysis (1 workloads, score 70)
+  9. redundant conversion elimination (1 workloads, score 70)
+optimization guidance: .zig-cache/optimizer-oracle/opportunities.tsv
+optimizer oracle: optimizer qualification gate passed

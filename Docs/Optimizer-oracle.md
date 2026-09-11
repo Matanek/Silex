@@ -30,8 +30,10 @@ Schema version 2 replaces free-form evidence strings with `proof_ids`. Every
 identifier resolves through the top-level proof catalog to a repository and
 ancestor revision, a source and SHA-256, the exact command and configuration,
 the expected observation, and the result with its own SHA-256. The audit
-rejects unknown identifiers, stale source or result hashes, and duplicate
-references. A closed coverage or LLVM-transposition entry may reference only
+rejects unknown identifiers, source hashes inconsistent with the recorded Git
+revision, stale result hashes, and duplicate references. Historical proof sources
+are read from that revision, not from the current working tree: extending the
+oracle does not rewrite an older proof or turn it into a current execution. A closed coverage or LLVM-transposition entry may reference only
 passed proofs; `diagnostic-red` results remain usable to explain an open gap
 but cannot close it.
 
@@ -93,6 +95,23 @@ compiler-owned revision and source hash locally while retaining the sealed
 external records in the registry. This makes source exports independently
 auditable without allowing a partially populated workspace to pass as a full
 qualification environment.
+An external workspace anchor may carry an explicit `reconciliation` when its
+historical branch was never merged into the current package line. This record
+keeps the original revision and adds a candidate ancestor of HEAD, their exact
+common ancestor, both tree identities, a SHA-256 of their deterministic Git diff,
+and a reason for the replacement. It applies only to that repository and that
+original revision. Compiler anchors cannot use this mechanism. Missing history,
+wrong ancestry, a different tree or an unreviewed delta fail qualification;
+other revisions retain the ordinary ancestry check. This is a reviewed closure
+change, not a claim that the two package trees are equivalent.
+
+Sealed corpus and hot-function sources must match their hashes both at the
+original revision and in the current working tree. Historical proofs instead
+bind their recorded source revision; their status never substitutes for running
+the current gate. The GFX.ECS reconciliation and fresh package/consumer evidence
+are recorded in
+`Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-ecs-reconciliation/`.
+
 LLVM commands additionally refuse a different Clang version or host triple.
 `cache-proof` builds each selected case without cache, after priming, and from
 a warm hit, then compares executable hashes and outputs. `metamorphic` executes

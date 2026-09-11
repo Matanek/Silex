@@ -1,0 +1,128 @@
+[
+  {
+    "repository": "Silex",
+    "historical_anchor": "94fd92f3a0c81256c82af182fb12bb4b241d22d5",
+    "head": "16a7820fefe4619aef7d9ca62c591df5ae1588a3",
+    "clean": false
+  },
+  {
+    "repository": "Silex-Benchmarks",
+    "historical_anchor": "9b6038ba357afb825afa745832582437c2f40949",
+    "head": "5d18296d098292ac94aad6d780df1bd3473573fc",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX",
+    "historical_anchor": "f0c9123df8f2cf2224eaa27f8619991e4acea900",
+    "head": "062cb475252961e58013c2116437670bb48a85d1",
+    "clean": true
+  },
+  {
+    "repository": "Packages/STD",
+    "historical_anchor": "997ce443190e7b093e257f7c2df62fac33a0859f",
+    "head": "1f3847430b7a7a814ad0b4e3dd2e4f3711cfd4e9",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Assets",
+    "historical_anchor": "50bc47c68b33a9a8fb7e17f110820e9cb3b73f37",
+    "head": "907960397db0f0d300e6fc895fa8d5635a0aad01",
+    "clean": true
+  },
+  {
+    "repository": "Packages/JSON",
+    "historical_anchor": "046f6411f8146eeae1c51dac5f590918997b8541",
+    "head": "e5eae6c2ca9a7244df3c09e531ca1c818010e32a",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Canvas",
+    "historical_anchor": "a09608ec0267f5678bd7dab6a852f14623f34040",
+    "head": "c64f73da05b82bcdaf9bb493fa7fd984213bd741",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Font",
+    "historical_anchor": "5689a4fc62ceadb51555176302ef8c757c4e00ab",
+    "head": "e520dd899ac5a2598bdb646ee270baa49c1f301c",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.ECS",
+    "historical_anchor": "0fb019cf2f5bf0fc56078ba0a01618fca868fd87",
+    "head": "9ddd3347bf630365ee9147ad024618f72af11f4c",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.GPU",
+    "historical_anchor": "8d2fa380e88a551fb3503fe7e830f9c4fef83eda",
+    "head": "fb17a0c5ae08545f8e4aa07f42988c49607e0743",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Physics",
+    "historical_anchor": "f1a10061a377c8fc489e47d39245c86d7907aaf9",
+    "head": "ab63f10d70e7afae2d3bfa5cff51e405c1197536",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Application",
+    "historical_anchor": "e7cfa74773af23361542a1f92ad9b5da3ceee29d",
+    "head": "a752087d537f59c96d4d724dc1fda1977bf28cd5",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Scene2D",
+    "historical_anchor": "4e85614a3239cd3941e1f1810fbe545eca7ec2fa",
+    "head": "516607f47bc1ac7ccc6c09577aa99cbc2cc8b9e3",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Rendering",
+    "historical_anchor": "913d77ba7680bc8d2fc3940f4adae0515b7864a1",
+    "head": "542b366ca071a8a0bd9451ea6a500e60b4e290f8",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Scene3D",
+    "historical_anchor": "b3ec2f8b165b6c8823fed48dedbcfe27efbfd27d",
+    "head": "97d4f2617c7ea7290629306353293b9f0d85c0de",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Stats",
+    "historical_anchor": "2ce7377b97aa838301378c0f19c2628908927815",
+    "head": "b13785e8630db2b73cd7a43cac2b8bbe4b7281e2",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.UI",
+    "historical_anchor": "1cccec6dab86063e530ae121b5cb32f7f7cc7e3b",
+    "head": "80f758aa9f615d6ff86ce6b49891781801325eb2",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.UI.Terminal",
+    "historical_anchor": "14989cd9f316d86ae369b844376ca0508c368e98",
+    "head": "1086d5040237455c9777250233850eaa360f2a66",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.Viewer",
+    "historical_anchor": "16b2d2edc1bf03cae5a2009b6612a76a53576ebe",
+    "head": "f9bec08fc6b7d896c8ffe72e337a8b37c9027bb7",
+    "clean": true
+  },
+  {
+    "repository": "Packages/GFX.WebView",
+    "historical_anchor": "78329e6b31307238762752559a404adada1eb7b0",
+    "head": "197dd6863f5ca9360600d28ddd3f8ea1dc7551f4",
+    "clean": true
+  },
+  {
+    "repository": "Packages/Sync",
+    "historical_anchor": "123b73ec70464b90ec9b4848d9bbf19dffb88db6",
+    "head": "e27120158e8a18b72bd36318369110b9ab431592",
+    "clean": true
+  }
+]

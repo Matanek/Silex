@@ -110,7 +110,7 @@
     {"repository": "Packages/JSON", "revision": "046f6411f8146eeae1c51dac5f590918997b8541", "role": "boids-closure"},
     {"repository": "Packages/GFX.Canvas", "revision": "a09608ec0267f5678bd7dab6a852f14623f34040", "role": "boids-closure"},
     {"repository": "Packages/GFX.Font", "revision": "5689a4fc62ceadb51555176302ef8c757c4e00ab", "role": "boids-closure"},
-    {"repository": "Packages/GFX.ECS", "revision": "0fb019cf2f5bf0fc56078ba0a01618fca868fd87", "role": "boids-closure"},
+    {"repository": "Packages/GFX.ECS", "revision": "0fb019cf2f5bf0fc56078ba0a01618fca868fd87", "role": "boids-closure", "reconciliation": {"candidate_revision": "9ddd3347bf630365ee9147ad024618f72af11f4c", "common_ancestor": "8e2511419d548a21dfb396e790f3d303dab915af", "historical_tree": "31c512611da7c33ba9f0ae669feca916c43e301a", "candidate_tree": "c8b1f1500755fa30ef99d8787bd0511f6badb643", "delta_sha256": "3d351b0c24796774f56483eeaa933555a5bfe68af303add3c5de632ccdd8304a", "reason": "The historical anchor belongs to an unmerged ECS branch exposing Commands construction and flush. Canonical main keeps those methods module-private and adds mutable-query regressions. This explicitly reviewed closure replacement is not package or performance equivalence; the original ECS.sx seal is unchanged."}},
     {"repository": "Packages/GFX.GPU", "revision": "8d2fa380e88a551fb3503fe7e830f9c4fef83eda", "role": "boids-closure"},
     {"repository": "Packages/GFX.Physics", "revision": "f1a10061a377c8fc489e47d39245c86d7907aaf9", "role": "boids-closure"},
     {"repository": "Packages/GFX.Application", "revision": "e7cfa74773af23361542a1f92ad9b5da3ceee29d", "role": "boids-closure"},
