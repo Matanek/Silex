@@ -7,6 +7,7 @@ const InlineControlFlow = @import("InlineControlFlow.zig");
 const InlineValues = @import("InlineValues.zig");
 const ReferenceMemory = @import("ReferenceMemory.zig");
 const KnownCollections = @import("KnownCollections.zig");
+const ScalarExpressions = @import("ScalarExpressions.zig");
 const SsaPromotion = @import("SsaPromotion.zig");
 const ValueRanges = @import("ValueRanges.zig");
 const Workers = @import("../Workers.zig");
@@ -1257,7 +1258,8 @@ fn simplifySsaFunction(allocator: Allocator, original: Ir.Function) !Ir.Function
     while (iteration <= original.blocks.len) : (iteration += 1) {
         const previous_blocks = current.blocks.len;
         const previous_instructions = instructionCount(current.blocks);
-        const next = try simplifySsaFunctionOnce(allocator, current);
+        const expressions = try ScalarExpressions.optimize(allocator, current);
+        const next = try simplifySsaFunctionOnce(allocator, expressions);
         const changed = next.blocks.len != previous_blocks or
             instructionCount(next.blocks) != previous_instructions or
             !terminatorsEqual(current.blocks, next.blocks);
@@ -3741,6 +3743,7 @@ test "release preserves representation-changing copies" {
 }
 
 test {
+    _ = @import("ScalarExpressionsTests.zig");
     _ = @import("KnownCollectionsTests.zig");
     _ = @import("ReleaseTests.zig");
     _ = @import("AggregateStoresTests.zig");

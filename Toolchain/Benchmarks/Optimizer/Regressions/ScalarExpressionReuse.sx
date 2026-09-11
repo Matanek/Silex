@@ -1,0 +1,46 @@
+struct Pair { var x:float64; var y:float64 }
+
+func product(first:float64, second:float64) float64 { return first * second }
+
+func repeated(first:float64, second:float64) float64 {
+    return first * second + first * second
+}
+
+func fromHelper(first:float64, second:float64) float64 {
+    return product(first, second) + product(first, second)
+}
+
+func repeatedGeneric<T>(first:T, second:T) T {
+    return first * second + first * second
+}
+
+func storeBetween(pair:&Pair, first:float64, second:float64) {
+    pair.x = first * second
+    pair.y = first * second
+}
+
+func reloadBetween(pair:&Pair, factor:float64) {
+    pair.x = pair.x * factor
+    pair.y = pair.x * factor
+}
+
+func checked(first:int, second:int) int {
+    return first / second + first / second
+}
+
+func main() {
+    let first:float64 = 1.5
+    let second:float64 = 2.0
+    print(repeated(first, second) == 6.0)
+    print(fromHelper(first, second) == repeated(first, second))
+    print(repeatedGeneric(first, second) == repeated(first, second))
+    var pair = Pair()
+    storeBetween(pair, 2.0, 3.0)
+    print(pair.x == 6.0 && pair.y == 6.0)
+    reloadBetween(pair, 2.0)
+    print(pair.x == 12.0 && pair.y == 24.0)
+    print(checked(12, 3) == 8)
+    print(1.0 / repeated(-0.0, 2.0) < 0.0)
+    let nan = repeated(0.0, 1.0 / 0.0)
+    print(nan != nan)
+}

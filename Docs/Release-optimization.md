@@ -103,6 +103,14 @@ inputs remain unknown. The resulting facts fold safe arithmetic, replace
 constant branches, prune unreachable blocks, and remove newly dead copies to a
 fixed point. Representable constant integer conversions contribute a constant
 of the target width, exposing dependent arithmetic to the same fixed point.
+Within a block, identical numeric and boolean binary expressions can also share
+the result of an earlier evaluation. The operands and result must have stable,
+single-definition identities; operand order, type and arithmetic flags must
+match exactly. Copies can identify the same scalar snapshot without removing
+floating lane provenance. Stores do not change those snapshots, while calls
+and resource-release barriers end expression availability. This rule neither
+reorders floating arithmetic nor forwards a fresh memory read, and the first
+checked evaluation remains observable on every path reaching the duplicate.
 Constant shifts fold only when their signed or unsigned count is inside the
 left operand width. Range analysis also marks dynamic shifts unchecked when
 the complete count interval proves that condition; ARM64 then omits the width

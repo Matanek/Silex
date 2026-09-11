@@ -21,6 +21,11 @@ pub const StructuralContract = union(enum) {
     coalesces_view_memory: []const u8,
     forwards_owning_collection: []const u8,
     forwards_known_views: []const u8,
+    reuses_scalar_expressions: struct {
+        repeated: []const u8,
+        stored: []const u8,
+        reloaded: []const u8,
+    },
     simplifies_ssa_values: []const u8,
     promotes_critical_edge: []const u8,
     coalesces_forwarded_phi: []const u8,
@@ -81,6 +86,7 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "Regressions/ScalarExpressionReuse.sx", .timing = false },
     .{ .name = "Regressions/KnownViewElements.sx", .timing = false },
     .{ .name = "DampedIntegration.sx", .timing = false },
     .{ .name = "PreparationMasses.sx", .timing = false },
@@ -106,6 +112,11 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{
+        .name = "Regressions/ScalarExpressionReuse.sx",
+        .concern = "identical scalar snapshots share calculations across stores while changed memory and floating edge values retain their observations",
+        .contract = .{ .reuses_scalar_expressions = .{ .repeated = "repeated", .stored = "storeBetween", .reloaded = "reloadBetween" } },
+    },
     .{
         .name = "Regressions/KnownViewElements.sx",
         .concern = "known scalar elements propagate through clamped nested views; aliases and branches retain observations",

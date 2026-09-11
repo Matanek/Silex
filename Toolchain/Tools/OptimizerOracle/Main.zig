@@ -314,6 +314,14 @@ fn qualifyNative(
             return err;
         };
         var ssa_counter: ?Qualification.SsaValueCounter = null;
+        var expression_counter: ?Qualification.ScalarExpressionCounter = null;
+        if (entry.contract == .reuses_scalar_expressions) {
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
+                .verify_each_pass = true,
+                .disabled = .ssa_value_simplification,
+            });
+            expression_counter = try Qualification.verifyScalarExpressionCounter(entry.contract.reuses_scalar_expressions, differential, without);
+        }
         if (entry.contract == .simplifies_ssa_values) {
             const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
@@ -426,6 +434,9 @@ fn qualifyNative(
         try Report.line(io, allocator, "  PASS {s}", .{entry.name});
         try Report.line(io, allocator, "    protects: {s}", .{entry.concern});
         try reportEvidence(io, allocator, evidence);
+        if (expression_counter) |counter| {
+            try Report.line(io, allocator, "    counter: disabling ssa_value_simplification retains {d} scalar products versus {d}", .{ counter.disabled, counter.enabled });
+        }
         if (ssa_counter) |counter| {
             try Report.line(
                 io,
@@ -628,6 +639,12 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 memory.optimized_stores,
                 memory.optimized_guards,
             },
+        ),
+        .scalar_expressions => |expressions| try Report.line(
+            io,
+            allocator,
+            "    contract: scalar products {d} -> {d}; changed-memory path retains {d}",
+            .{ expressions.raw_products, expressions.optimized_products, expressions.reloaded_products },
         ),
         .ssa_values => |ssa| try Report.line(
             io,
