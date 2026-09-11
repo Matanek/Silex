@@ -185,3 +185,45 @@ test "native floating regions survive a callee clobbering every allocatable FP r
     try std.testing.expectEqual(Machine.Status.success, result.status);
     try std.testing.expectEqual(@as(i64, @as(u32, @bitCast(@as(f32, 31)))), result.value);
 }
+
+test "resident float64 call arguments and results preserve every bit in registers and stack" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]u64{ 0x8000000000000000, 0x7ff8000000000123, 0x3ff4000000000000 }) |bits| {
+        for ([_]u12{ 1, 9 }) |count| {
+            const arguments = try allocator.alloc(Machine.Span, count);
+            @memset(arguments, .{ .start = 0, .width = 1 });
+            const parameters = try allocator.alloc(Machine.Span, count);
+            for (parameters, 0..) |*parameter, index| parameter.* = .{ .start = @intCast(index), .width = 1 };
+            const caller: Machine.Function = .{
+                .name = "caller",
+                .parameter_count = 0,
+                .return_type = .float64,
+                .return_width = 1,
+                .slot_count = 2,
+                .frame_size = try Machine.frameSize(2),
+                .float_register_slots = &.{ 8, 13 },
+                .instructions = &.{
+                    .{ .constant_float64 = .{ .result = 0, .bits = bits } },
+                    .{ .call = .{ .function = 1, .arguments = arguments, .result = .{ .start = 1, .width = 1 } } },
+                    .{ .return_value = .{ .start = 1, .width = 1 } },
+                },
+            };
+            const callee: Machine.Function = .{
+                .name = "callee",
+                .parameter_count = count,
+                .parameters = parameters,
+                .return_type = .float64,
+                .return_width = 1,
+                .slot_count = count,
+                .frame_size = try Machine.frameSize(@intCast(count)),
+                .instructions = &.{.{ .return_value = .{ .start = @intCast(count - 1), .width = 1 } }},
+            };
+            const result = try Runner.invoke(allocator, .{ .functions = &.{ caller, callee } }, 0, &.{});
+            try std.testing.expectEqual(Machine.Status.success, result.status);
+            try std.testing.expectEqual(@as(i64, @bitCast(bits)), result.value);
+        }
+    }
+}

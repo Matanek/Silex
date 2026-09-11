@@ -1832,8 +1832,10 @@ fn encodeFunction(
                 }
                 if (call.result) |result| if (!result.aggregate) {
                     if (floatResidence(function, result.start) != null) {
-                        try words.append(allocator, moveGeneralToFloat(.x9, .x0, false));
-                        try storeFloatValue(allocator, words, function, .x9, result.start, false);
+                        // The internal scalar ABI transfers a complete machine
+                        // slot, including float64 payloads and signed zero.
+                        try words.append(allocator, moveGeneralToFloat(.x9, .x0, true));
+                        try storeFloatValue(allocator, words, function, .x9, result.start, true);
                     } else try storeValue(allocator, words, function, .x0, result.start);
                 };
             },
@@ -2626,8 +2628,8 @@ fn emitCallArguments(
                     try words.append(allocator, moveWideZero64(outgoing, 0, 0));
                 } else try emitStackAddress(allocator, words, outgoing, argument.start);
             } else if (use_residences and floatResidence(function, argument.start) != null) {
-                try loadFloatValue(allocator, words, function, .x9, argument.start, false);
-                try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
+                try loadFloatValue(allocator, words, function, .x9, argument.start, true);
+                try words.append(allocator, moveFloatToGeneral(outgoing, .x9, true));
             } else if (use_residences) {
                 try loadValue(allocator, words, function, outgoing, argument.start);
             } else try words.append(allocator, loadStack(outgoing, argument.start));
@@ -2643,8 +2645,8 @@ fn emitCallArguments(
                 try words.append(allocator, moveWideZero64(outgoing, 0, 0));
             } else try emitStackAddress(allocator, words, outgoing, argument.start);
         } else if (use_residences and floatResidence(function, argument.start) != null) {
-            try loadFloatValue(allocator, words, function, .x9, argument.start, false);
-            try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
+            try loadFloatValue(allocator, words, function, .x9, argument.start, true);
+            try words.append(allocator, moveFloatToGeneral(outgoing, .x9, true));
         } else if (use_residences) {
             try loadValue(allocator, words, function, outgoing, argument.start);
         } else try words.append(allocator, loadStack(outgoing, argument.start));
@@ -2672,7 +2674,7 @@ fn emitCallArguments(
                 try words.append(allocator, moveFloatToGeneral(.x9, .x9, false));
             }
         } else if (floatResidence(function, argument.start)) |number| {
-            try words.append(allocator, moveFloatToGeneral(.x9, @enumFromInt(number), false));
+            try words.append(allocator, moveFloatToGeneral(.x9, @enumFromInt(number), true));
         } else if (valueResultRegister(function, argument.start)) |source| {
             if (source != .x9) try words.append(allocator, moveRegister(.x9, source));
         } else try emitLoadAtOffset(
