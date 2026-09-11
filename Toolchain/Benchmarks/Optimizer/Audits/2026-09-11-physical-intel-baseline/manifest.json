@@ -1,0 +1,69 @@
+{
+  "artifacts": [
+    {
+      "path": "README.md",
+      "sha256": "2c9063a9ad0fcad0e71a84b7fb0bdb76bc15026d4e9fd17617f367f7e19cda40",
+      "bytes": 1538
+    },
+    {
+      "path": "artifact/benchmark-native/report.txt",
+      "sha256": "e3135134f6024f200581b28649b87a37e87ecd9c5dbf6d8d7c83278c1a70d583",
+      "bytes": 1813
+    },
+    {
+      "path": "artifact/optimizer-x64/benchmark-build.log",
+      "sha256": "e3135134f6024f200581b28649b87a37e87ecd9c5dbf6d8d7c83278c1a70d583",
+      "bytes": 1813
+    },
+    {
+      "path": "artifact/optimizer-x64/campaign.json",
+      "sha256": "8869c16a5aa54bfc6a4317e7900d7eb29400a68d731bb741151e852c8184b745",
+      "bytes": 30799
+    },
+    {
+      "path": "artifact/optimizer-x64/environment.txt",
+      "sha256": "3444536bae57eb116041354424bd60134e0c21bd135ae0bb0488eefacfd59040",
+      "bytes": 184
+    },
+    {
+      "path": "artifact/optimizer-x64/qualification.log",
+      "sha256": "c7fa3a3c9965d9717f3ba9ea5f2d7bf1ec36826f40c66e58256286f7bcd5aa99",
+      "bytes": 13779
+    },
+    {
+      "path": "authorized-x64-artifacts.json",
+      "sha256": "b3500e6da5c44e62d4354afbc2603a6bca223d55bbf0291ff9867b47721acced",
+      "bytes": 879
+    },
+    {
+      "path": "authorized-x64-dispatch.json",
+      "sha256": "2948e42d28371e52dddab1357b7b1a58490e0d9ac71ccde80bffdce2c209a1db",
+      "bytes": 237
+    },
+    {
+      "path": "authorized-x64-job.log",
+      "sha256": "2c3c6291c266e59292dce828c540d56c91d210a49548f8f12b44cbd13b7f2386",
+      "bytes": 60798
+    },
+    {
+      "path": "authorized-x64-pre-push.log",
+      "sha256": "e14f4e02ea03509b56a9114dd7b8db7dac0cdf0ceebda142a1dcd380bbf6810a",
+      "bytes": 213
+    },
+    {
+      "path": "authorized-x64-runs.json",
+      "sha256": "3910e33120be6dd2f8077f8949df6b66d92151170b62649f480cf4503b5e4642",
+      "bytes": 222
+    },
+    {
+      "path": "authorized-x64-upstream-audit.log",
+      "sha256": "86216ed5684d92a856f7af71eb72282f65827c45ec8896557fa02cae39475181",
+      "bytes": 237
+    },
+    {
+      "path": "authorized-x64.zip",
+      "sha256": "b4a8e1b36539c635a0af28d1c22a08ad1d0683e082f2b1468de1df4ca02ec9b6",
+      "bytes": 10086
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "artifacts": [
+    {
+      "id": 10267641304,
+      "name": "optimizer-x64-270a53c9afd6504ea91d070d2d0079049d7ba1d9",
+      "size_in_bytes": 10086,
+      "url": "https://api.github.com/repos/Matanek/Silex/actions/artifacts/10267641304",
+      "archive_download_url": "https://api.github.com/repos/Matanek/Silex/actions/artifacts/10267641304/zip",
+      "expired": false,
+      "created_at": "2026-09-11T14:12:56Z",
+      "expires_at": "2026-09-25T14:12:55Z",
+      "updated_at": "2026-09-11T14:12:56Z",
+      "digest": "sha256:b4a8e1b36539c635a0af28d1c22a08ad1d0683e082f2b1468de1df4ca02ec9b6",
+      "workflow_run": {
+        "id": 34606627827,
+        "repository_id": 1312214609,
+        "head_repository_id": 1312214609,
+        "head_branch": "spec-silex-optimization-parity-completion",
+        "head_sha": "270a53c9afd6504ea91d070d2d0079049d7ba1d9"
+      }
+    }
+  ]
+}

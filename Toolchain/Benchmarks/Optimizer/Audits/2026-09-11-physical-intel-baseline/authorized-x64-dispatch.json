@@ -1,0 +1,12 @@
+{
+  "candidate": "270a53c9afd6504ea91d070d2d0079049d7ba1d9",
+  "payload": {
+    "ref": "spec-silex-optimization-parity-completion",
+    "inputs": {
+      "target": "optimizer-x64"
+    }
+  },
+  "stdout": "",
+  "stderr": "",
+  "exit": 0
+}
