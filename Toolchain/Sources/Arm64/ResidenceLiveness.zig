@@ -8,6 +8,30 @@ pub const Interval = struct {
     weight: u64,
 };
 
+pub fn compute(allocator: std.mem.Allocator, instructions: []const Machine.Instruction, slot_count: usize) std.mem.Allocator.Error![]bool {
+    const live = try allocator.alloc(bool, instructions.len * slot_count);
+    @memset(live, false);
+    var changed = true;
+    while (changed) {
+        changed = false;
+        var reverse = instructions.len;
+        while (reverse != 0) {
+            reverse -= 1;
+            for (0..slot_count) |slot| {
+                const out = successorLive(instructions, live, slot_count, reverse, slot);
+                const value = instructionUses(instructions[reverse], slot) or
+                    (out and !instructionDefines(instructions[reverse], slot));
+                const at = reverse * slot_count + slot;
+                if (live[at] != value) {
+                    live[at] = value;
+                    changed = true;
+                }
+            }
+        }
+    }
+    return live;
+}
+
 pub fn successorLive(
     instructions: []const Machine.Instruction,
     live: []const bool,

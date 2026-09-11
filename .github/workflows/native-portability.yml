@@ -92,6 +92,15 @@ jobs:
             test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
             test "$(printf '%s\n' "$snapshot_output" | grep -c '^true$')" -eq 8
           done
+          loop_exit_fixture="$scalar_root/LoopExitResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx" "$loop_exit_fixture"
+          for mode in debug release; do
+            "$silex" compile "$loop_exit_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/loop-exit-residence-$mode"
+            loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")
+            test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
+            test "$(printf '%s\n' "$loop_exit_output" | grep -c '^true$')" -eq 5
+          done
           run_distribution() {
             executable="$1"
             stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
@@ -363,6 +372,15 @@ jobs:
             test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
             test "$(printf '%s\n' "$snapshot_output" | grep -c '^true$')" -eq 8
           done
+          loop_exit_fixture="$scalar_root/LoopExitResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx" "$loop_exit_fixture"
+          for mode in debug release; do
+            "$silex" compile "$loop_exit_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/loop-exit-residence-$mode"
+            loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")
+            test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
+            test "$(printf '%s\n' "$loop_exit_output" | grep -c '^true$')" -eq 5
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -456,6 +474,15 @@ jobs:
             snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")
             test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
             test "$(printf '%s\n' "$snapshot_output" | grep -c '^true$')" -eq 8
+          done
+          loop_exit_fixture="$scalar_root/LoopExitResidence.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx" "$loop_exit_fixture"
+          for mode in debug release; do
+            "$silex" compile "$loop_exit_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/loop-exit-residence-$mode"
+            loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")
+            test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
+            test "$(printf '%s\n' "$loop_exit_output" | grep -c '^true$')" -eq 5
           done
 
   windows-x64:
@@ -579,6 +606,17 @@ jobs:
             $snapshotOutput = @(& $snapshotBinary)
             if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "branch snapshot $mode regression failed"
+            }
+          }
+          $loopExitFixture = Join-Path $scalarRoot "LoopExitResidence.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx") $loopExitFixture
+          foreach ($mode in @("debug", "release")) {
+            $loopExitBinary = Join-Path $env:RUNNER_TEMP "loop-exit-residence-$mode.exe"
+            & $silex compile $loopExitFixture "--$mode" --nocache -o $loopExitBinary
+            if ($LASTEXITCODE -ne 0) { throw "loop exit residence compilation failed" }
+            $loopExitOutput = @(& $loopExitBinary)
+            if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "loop exit residence $mode regression failed"
             }
           }
 
@@ -880,5 +918,16 @@ jobs:
             $snapshotOutput = @(& $snapshotBinary)
             if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "branch snapshot $mode regression failed"
+            }
+          }
+          $loopExitFixture = Join-Path $scalarRoot "LoopExitResidence.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx") $loopExitFixture
+          foreach ($mode in @("debug", "release")) {
+            $loopExitBinary = Join-Path $env:RUNNER_TEMP "loop-exit-residence-$mode.exe"
+            & $silex compile $loopExitFixture "--$mode" --nocache -o $loopExitBinary
+            if ($LASTEXITCODE -ne 0) { throw "loop exit residence compilation failed" }
+            $loopExitOutput = @(& $loopExitBinary)
+            if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "loop exit residence $mode regression failed"
             }
           }

@@ -395,9 +395,12 @@ and every interval live across it, remain stack-resident. Mixed aggregate
 loads and aggregate calls inside loops retain the whole-function spill path.
 On ARM64, the same barrier model admits a repeated scalar loop with at least
 four compatible arithmetic operations even when an output or another stack
-effect follows the loop. Values confined to the loop can then remain in
-registers; values live across the effect retain their deterministic stack
-homes.
+effect follows the loop. Admission follows paths reaching the back-edge latch,
+so an exit block laid out between the header and body does not count as part
+of the repeated region. Unsupported emitters pin their inputs, outputs and
+values live on their actual CFG paths; numeric interval overlap alone does
+not pin values confined to another path. Values live across the effect retain
+their deterministic stack homes, and addressed spans remain pinned.
 The regional path does not use paired SIMD residences or memory scheduling.
 Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.

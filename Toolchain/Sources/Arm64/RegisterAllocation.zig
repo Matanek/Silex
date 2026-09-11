@@ -13,6 +13,7 @@ const spanContains = ResidenceLiveness.spanContains;
 
 test {
     _ = @import("MemoryResidence.zig");
+    _ = @import("LoopExitResidenceTests.zig");
 }
 
 const Allocator = std.mem.Allocator;
@@ -128,7 +129,7 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Err
 pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, externals: []const Machine.ExternalFunction) (Allocator.Error || Machine.Error)!Result {
     if (!isCompatibleFunction(function, true, externals)) return spilled(allocator, function);
     const fully_compatible = isFullyResidenceCompatible(function, externals);
-    if (!fully_compatible and !hasProfitableScalarRegion(function.instructions, externals)) return spilled(allocator, function);
+    if (!fully_compatible and !(try hasProfitableScalarRegion(allocator, function.instructions, externals))) return spilled(allocator, function);
     if (!fully_compatible and hasLoopAggregateCall(function.instructions)) return spilled(allocator, function);
     // Actual C calls preserve x19...x28 and only the low 64 bits of v8...v15.
     // Keep argument/result stack homes. Scalar regions may borrow volatile
@@ -226,9 +227,13 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         touch(cursor.result, cursor.initialize, first, last, weights, instruction_weights[cursor.initialize]);
         touch(cursor.result, cursor.increment, first, last, weights, instruction_weights[cursor.increment]);
     }
-    for (function.instructions, 0..) |instruction, index| {
-        if (!isResidenceCompatibleInstruction(instruction, externals)) {
-            pinIntervalsAt(instruction, index, first, last, forced);
+    if (!fully_compatible) {
+        const live = try ResidenceLiveness.compute(allocator, function.instructions, function.slot_count);
+        defer allocator.free(live);
+        for (function.instructions, 0..) |instruction, index| {
+            if (!isResidenceCompatibleInstruction(instruction, externals)) {
+                pinLiveAt(function.instructions, index, live, function.slot_count, forced);
+            }
         }
     }
 
@@ -498,28 +503,8 @@ fn allocateGraph(
     checked_reference_cursors: []const LoopCursor.ReferenceCursor,
     regional_float_colors: bool,
 ) Allocator.Error!void {
-    const live = try allocator.alloc(bool, instructions.len * slot_count);
+    const live = try ResidenceLiveness.compute(allocator, instructions, slot_count);
     defer allocator.free(live);
-    @memset(live, false);
-
-    var changed = true;
-    while (changed) {
-        changed = false;
-        var reverse = instructions.len;
-        while (reverse != 0) {
-            reverse -= 1;
-            for (0..slot_count) |slot| {
-                const out = successorLive(instructions, live, slot_count, reverse, slot);
-                const value = instructionUses(instructions[reverse], slot) or
-                    (out and !instructionDefines(instructions[reverse], slot));
-                const at = reverse * slot_count + slot;
-                if (live[at] != value) {
-                    live[at] = value;
-                    changed = true;
-                }
-            }
-        }
-    }
     for (reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
     for (checked_reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
 
@@ -1129,8 +1114,8 @@ fn isFullyResidenceCompatible(function: Machine.Function, externals: []const Mac
     return true;
 }
 
-fn hasProfitableScalarRegion(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
-    if (hasProfitableLoopRegion(instructions, externals)) return true;
+fn hasProfitableScalarRegion(allocator: Allocator, instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) Allocator.Error!bool {
+    if (try hasProfitableLoopRegion(allocator, instructions, externals)) return true;
 
     const has_wide_float_candidate = for (instructions) |instruction| {
         if (instruction == .collection_load and instruction.collection_load.result.width >= 16) break true;
@@ -1154,23 +1139,51 @@ fn hasProfitableScalarRegion(instructions: []const Machine.Instruction, external
     return false;
 }
 
-fn hasProfitableLoopRegion(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+fn hasProfitableLoopRegion(allocator: Allocator, instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) Allocator.Error!bool {
+    const reaches_latch = try allocator.alloc(bool, instructions.len);
+    defer allocator.free(reaches_latch);
     for (instructions, 0..) |instruction, source| switch (instruction) {
-        .jump => |target| if (target <= source and profitableLoopRange(instructions[target .. source + 1], externals)) return true,
+        .jump => |target| if (target <= source and profitableLoopRange(instructions, target, source, reaches_latch, externals)) return true,
         .branch => |branch| {
             if (branch.then_instruction <= source and
-                profitableLoopRange(instructions[branch.then_instruction .. source + 1], externals)) return true;
+                profitableLoopRange(instructions, branch.then_instruction, source, reaches_latch, externals)) return true;
             if (branch.else_instruction <= source and
-                profitableLoopRange(instructions[branch.else_instruction .. source + 1], externals)) return true;
+                profitableLoopRange(instructions, branch.else_instruction, source, reaches_latch, externals)) return true;
         },
         else => {},
     };
     return false;
 }
 
-fn profitableLoopRange(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+// The linear span of a back edge can contain an exit block laid out before
+// the loop body. Only paths that can reach its latch contribute to this cost
+// estimate. Actual safety still comes from CFG liveness and pinned operands.
+fn profitableLoopRange(instructions: []const Machine.Instruction, header: usize, latch: usize, reaches_latch: []bool, externals: []const Machine.ExternalFunction) bool {
+    @memset(reaches_latch, false);
+    reaches_latch[latch] = true;
+    var changed = true;
+    while (changed) {
+        changed = false;
+        var index = latch;
+        while (index > header) {
+            index -= 1;
+            if (reaches_latch[index]) continue;
+            const reaches = switch (instructions[index]) {
+                .jump => |target| reaches_latch[target],
+                .branch => |value| reaches_latch[value.then_instruction] or reaches_latch[value.else_instruction],
+                .return_value, .return_void, .panic => false,
+                else => reaches_latch[index + 1],
+            };
+            if (reaches) {
+                reaches_latch[index] = true;
+                changed = true;
+            }
+        }
+    }
+    if (!reaches_latch[header]) return false;
     var arithmetic: usize = 0;
-    for (instructions) |instruction| {
+    for (instructions[header .. latch + 1], header..) |instruction, index| {
+        if (!reaches_latch[index]) continue;
         if (!isResidenceCompatibleInstruction(instruction, externals)) return false;
         arithmetic += switch (instruction) {
             .binary => |value| @intFromBool(value.type != .str),
@@ -1207,13 +1220,14 @@ fn isResidenceCompatibleInstruction(instruction: Machine.Instruction, externals:
     };
 }
 
-fn pinIntervalsAt(
-    instruction: Machine.Instruction,
+fn pinLiveAt(
+    instructions: []const Machine.Instruction,
     index: usize,
-    first: []const usize,
-    last: []const usize,
+    live: []const bool,
+    slot_count: usize,
     forced: []bool,
 ) void {
+    const instruction = instructions[index];
     const terminal_operand: ?Machine.Slot = switch (instruction) {
         .print => |value| switch (value.kind) {
             .signed_integer, .unsigned_integer, .boolean => value.value,
@@ -1221,9 +1235,13 @@ fn pinIntervalsAt(
         },
         else => null,
     };
-    for (first, last, forced, 0..) |start, end, *pinned, slot| {
-        if (terminal_operand != null and terminal_operand.? == slot and end == index) continue;
-        if (start != std.math.maxInt(usize) and start <= index and end >= index) pinned.* = true;
+    for (forced, 0..) |*pinned, slot| {
+        const live_out = successorLive(instructions, live, slot_count, index, slot);
+        if (terminal_operand != null and terminal_operand.? == slot and !live_out) continue;
+        // Unsupported emitters still read and write stack homes. A value on
+        // another CFG path need not be spilled merely because its numeric
+        // interval surrounds this instruction in the emitted layout.
+        if (live[index * slot_count + slot] or live_out or instructionDefines(instruction, slot)) pinned.* = true;
     }
 }
 
