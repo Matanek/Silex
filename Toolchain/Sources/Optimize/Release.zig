@@ -189,6 +189,25 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
         current = try simplifySsaValues(allocator, current);
         try verifyAfterPass(allocator, current, options);
     }
+    if (options.stop_after == .ssa_value_simplification) return current;
+
+    // Revisit only scalar leaves exposed by memory/SSA cleanup, once. Recompute
+    // facts after cloning; keep the existing inline cost and disable controls.
+    if (options.disabled != .value_inlining) {
+        const expanded = try InlineValues.optimizeScalarLeaves(allocator, current);
+        if (expanded.functions.ptr != current.functions.ptr) {
+            current = expanded;
+            try verifyAfterPass(allocator, current, options);
+            if (options.disabled != .value_range_analysis) {
+                current = try ValueRanges.optimize(allocator, current);
+                try verifyAfterPass(allocator, current, options);
+            }
+            if (options.disabled != .ssa_value_simplification) {
+                current = try simplifySsaValues(allocator, current);
+                try verifyAfterPass(allocator, current, options);
+            }
+        }
+    }
     const validated = try Ir.writeText(allocator, current);
     allocator.free(validated);
     return current;
@@ -3747,6 +3766,7 @@ test "release preserves representation-changing copies" {
 test {
     _ = @import("ScalarExpressionsTests.zig");
     _ = @import("DominatedValuesTests.zig");
+    _ = @import("LateScalarClosureTests.zig");
     _ = @import("KnownCollectionsTests.zig");
     _ = @import("ReleaseTests.zig");
     _ = @import("AggregateStoresTests.zig");

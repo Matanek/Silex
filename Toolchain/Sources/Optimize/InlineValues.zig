@@ -12,9 +12,32 @@ const Info = struct {
 };
 
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithMode(allocator, program, false);
+}
+
+// Memory and SSA cleanup can expose scalar leaves after the first inline pass.
+// Revisit only these leaves: no aggregate, reference or call expansion.
+pub fn optimizeScalarLeaves(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithMode(allocator, program, true);
+}
+
+fn optimizeWithMode(allocator: Allocator, program: Ir.Program, scalar_leaves_only: bool) !Ir.Program {
     const information = try allocator.alloc(Info, program.functions.len);
     @memset(information, .{});
     for (program.functions, 0..) |_, index| resolve(program, information, index);
+    if (scalar_leaves_only) {
+        for (program.functions, information) |function, *info| {
+            if (!scalarLeaf(function)) info.state = .rejected;
+        }
+        const has_call = found: {
+            for (program.functions) |function| for (function.blocks) |block| for (block.instructions) |instruction| {
+                if (instruction == .call and information[instruction.call.function].state == .eligible)
+                    break :found true;
+            };
+            break :found false;
+        };
+        if (!has_call) return program;
+    }
     const summaries = try CallSummary.analyze(allocator, program);
 
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
@@ -24,6 +47,35 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     var result = program;
     result.functions = functions;
     return result;
+}
+
+fn scalarLeaf(function: Ir.Function) bool {
+    if (!function.return_type.isNumeric() and function.return_type != .bool) return false;
+    for (function.parameter_types) |value_type| {
+        if (!value_type.isNumeric() and value_type != .bool) return false;
+    }
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        switch (instruction) {
+            .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .local_load, .local_store, .unary, .binary, .convert => {},
+            else => return false,
+        }
+        // SSA cleanup can leave unused descriptor types in the value table.
+        // Only operands/results still used by this leaf constrain its domain.
+        switch (instruction) {
+            inline .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .local_load, .local_store, .unary, .binary, .convert => |value| {
+                if (@TypeOf(value) != void) {
+                    inline for (.{ "result", "operand", "left", "right" }) |field| {
+                        if (@hasField(@TypeOf(value), field)) {
+                            const value_type = function.value_types[@field(value, field)];
+                            if (!value_type.isNumeric() and value_type != .bool) return false;
+                        }
+                    }
+                }
+            },
+            else => unreachable,
+        }
+    };
+    return true;
 }
 
 fn resolve(program: Ir.Program, information: []Info, function_index: usize) void {

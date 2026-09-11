@@ -111,6 +111,11 @@ floating lane provenance. Stores do not change those snapshots, while calls
 and resource-release barriers end expression availability. This rule neither
 reorders floating arithmetic nor forwards a fresh memory read, and the first
 checked evaluation remains observable on every path reaching the duplicate.
+A final bounded revisit applies the existing value-inlining cost rules to
+single-block scalar leaves exposed by memory and SSA cleanup. It excludes
+aggregate/reference values, calls and effects, and runs only once; range and
+SSA facts are recomputed after cloning. Disabling value inlining disables this
+revisit too. Unused initializers that can fail remain observable after inlining.
 For a function with only scalar operations, local values and value aggregates,
 a dominance analysis also reuses identical binary evaluations and numeric
 fields of stable aggregate parameters across blocks. It rejects functions

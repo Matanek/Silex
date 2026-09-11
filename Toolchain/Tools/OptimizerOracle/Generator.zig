@@ -87,6 +87,7 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "Regressions/LateScalarClosure.sx", .timing = false },
     .{ .name = "Regressions/ValueModules/Main.sx", .timing = false, .project = true },
     .{ .name = "Regressions/AggregatePreparation.sx", .timing = false },
     .{ .name = "Regressions/ScalarExpressionReuse.sx", .timing = false },
@@ -115,6 +116,11 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{
+        .name = "Regressions/LateScalarClosure.sx",
+        .concern = "helpers exposed as scalar leaves after collection cleanup preserve loop results and checked initialization",
+        .contract = .none,
+    },
     .{
         .name = "Regressions/ValueModules/Main.sx",
         .concern = "module and generic boundaries preserve dominated values, partial paths, mutable aliases and strict floating observations",
