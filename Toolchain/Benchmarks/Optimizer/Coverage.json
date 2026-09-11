@@ -179,7 +179,8 @@
     {"id": "reference_memory_elision", "families": ["references", "alias", "loads", "stores", "dead-code"]},
     {"id": "ssa_promotion_post", "families": ["locals", "ssa", "phi", "control"]},
     {"id": "value_range_analysis", "families": ["ssa", "ranges", "integers", "control", "overflow", "conversions"]},
-    {"id": "ssa_value_simplification", "families": ["ssa", "constants", "copies", "control", "dead-code"]}
+    {"id": "ssa_value_simplification", "families": ["ssa", "constants", "copies", "control", "dead-code"]},
+    {"id": "branch_snapshot_sinking", "families": ["references", "copies", "alias", "control"]}
   ],
   "coverage": [
     {"id": "scalar-integers", "state": "equivalent", "owner_part": "silex-llvm-opt-07", "semantic": true, "cost_model": true, "debug": true, "release": true, "llvm": true, "structure": true, "targets": ["arm64", "x64"], "proof_ids": ["semantic-regression-corpus", "structural-regression-contracts", "native-regression-corpus", "differential-and-llvm-corpus", "integer-timing-qualified", "adversarial-robustness-campaign"]},

@@ -118,6 +118,7 @@ pub const corpus = [_]CorpusEntry{
 
 pub const regressions = [_]RegressionEntry{
     .{ .name = "Regressions/BranchComparisons.sx", .concern = "single-use and shared comparisons preserve signed and unsigned widths, unordered floats, infinities and signed zero" },
+    .{ .name = "Regressions/BranchSnapshots.sx", .concern = "arm-local scalar snapshots preserve alias writes, joined values, negative indices, NaN and signed zero" },
     // Native-only: the strict LLVM oracle does not lower float-to-integer conversions.
     .{ .name = "Regressions/ScalarFloatResidence.sx", .concern = "scalar FP pressure, loop recurrence, call barriers, addressed aliases, exact conversion, NaN and signed zero" },
     .{ .name = "Regressions/DominatedReferenceReads.sx", .concern = "dominated borrowed fields preserve branches, mutable aliases, signed zero, NaN and mixed scalar widths" },

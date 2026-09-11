@@ -227,6 +227,17 @@ apply to loads already proven bounded; their generated element reference
 remains bounded and therefore does not reintroduce a runtime check. Small
 bounded aggregates retain their compact native copy so it can seed SIMD lanes.
 
+The final `branch_snapshot_sinking` pass can place an immediately preceding
+scalar snapshot at the entry of both exclusive branch arms. Every read keeps
+its original order and occurs before the first original arm instruction; the
+checked element address stays before the branch. Each arm receives fresh value
+identifiers, so calls in a cold output arm do not force the other arm's values
+to remain on the stack. This is limited to numeric or boolean reference reads
+and field addresses, with a maximum of 128 copied instructions. The condition
+must be independent of those values. Shared arm entries, multiple definitions,
+uses beyond the two immediate arms, and intervening effects prevent the move.
+No read is deferred past an alias write, and floating-point bits are unchanged.
+
 A direct call may borrow a collection element for a flat scalar aggregate
 parameter when the callee only projects fields from that parameter. Every
 call site must provide a single-use element load in the same block, and no

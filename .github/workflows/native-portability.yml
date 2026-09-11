@@ -80,6 +80,18 @@ jobs:
             --release -o "$RUNNER_TEMP/macos-x64-boundary"
           test "$("$RUNNER_TEMP/macos-x64-boundary")" = "macos x64 boundary ready"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
+          scalar_root="$RUNNER_TEMP/scalar-float-fixture"
+          mkdir -p "$scalar_root"
+          printf '%s\n' '{"sources":"."}' > "$scalar_root/Package.json"
+          snapshot_fixture="$scalar_root/BranchSnapshots.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx" "$snapshot_fixture"
+          for mode in debug release; do
+            "$silex" compile "$snapshot_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/branch-snapshots-$mode"
+            snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")
+            test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
+            test "$(printf '%s\n' "$snapshot_output" | grep -c '^true$')" -eq 8
+          done
           run_distribution() {
             executable="$1"
             stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
@@ -342,6 +354,15 @@ jobs:
               -o "$RUNNER_TEMP/branch-comparisons-$mode"
             test "$("$RUNNER_TEMP/branch-comparisons-$mode")" = "true"
           done
+          snapshot_fixture="$scalar_root/BranchSnapshots.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx" "$snapshot_fixture"
+          for mode in debug release; do
+            "$silex" compile "$snapshot_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/branch-snapshots-$mode"
+            snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")
+            test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
+            test "$(printf '%s\n' "$snapshot_output" | grep -c '^true$')" -eq 8
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -426,6 +447,15 @@ jobs:
             "$silex" compile "$branch_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/branch-comparisons-$mode"
             test "$("$RUNNER_TEMP/branch-comparisons-$mode")" = "true"
+          done
+          snapshot_fixture="$scalar_root/BranchSnapshots.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx" "$snapshot_fixture"
+          for mode in debug release; do
+            "$silex" compile "$snapshot_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/branch-snapshots-$mode"
+            snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")
+            test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
+            test "$(printf '%s\n' "$snapshot_output" | grep -c '^true$')" -eq 8
           done
 
   windows-x64:
@@ -538,6 +568,17 @@ jobs:
             $branchOutput = @(& $branchBinary)
             if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {
               throw "branch comparison $mode regression failed"
+            }
+          }
+          $snapshotFixture = Join-Path $scalarRoot "BranchSnapshots.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx") $snapshotFixture
+          foreach ($mode in @("debug", "release")) {
+            $snapshotBinary = Join-Path $env:RUNNER_TEMP "branch-snapshots-$mode.exe"
+            & $silex compile $snapshotFixture "--$mode" --nocache -o $snapshotBinary
+            if ($LASTEXITCODE -ne 0) { throw "branch snapshot compilation failed" }
+            $snapshotOutput = @(& $snapshotBinary)
+            if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "branch snapshot $mode regression failed"
             }
           }
 
@@ -828,5 +869,16 @@ jobs:
             $branchOutput = @(& $branchBinary)
             if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {
               throw "branch comparison $mode regression failed"
+            }
+          }
+          $snapshotFixture = Join-Path $scalarRoot "BranchSnapshots.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx") $snapshotFixture
+          foreach ($mode in @("debug", "release")) {
+            $snapshotBinary = Join-Path $env:RUNNER_TEMP "branch-snapshots-$mode.exe"
+            & $silex compile $snapshotFixture "--$mode" --nocache -o $snapshotBinary
+            if ($LASTEXITCODE -ne 0) { throw "branch snapshot compilation failed" }
+            $snapshotOutput = @(& $snapshotBinary)
+            if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "branch snapshot $mode regression failed"
             }
           }

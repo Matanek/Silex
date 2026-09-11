@@ -165,15 +165,18 @@
         "ReadonlyViewMemory.sx",
         "MutableViewMemory.sx",
         "AggregateViewAliasing.sx",
-        "Regressions/KnownViewElements.sx"
+        "Regressions/KnownViewElements.sx",
+        "Regressions/BranchSnapshots.sx"
       ],
       "negative_cases": [
         "ReferenceAliasing.sx",
         "Regressions/MultipleReferenceCursors.sx",
-        "Regressions/KnownViewElements.sx"
+        "Regressions/KnownViewElements.sx",
+        "Regressions/BranchSnapshots.sx"
       ],
       "passes": [
-        "reference_memory_elision"
+        "reference_memory_elision",
+        "branch_snapshot_sinking"
       ],
       "ir_families": [
         "collections-and-references"
