@@ -1,0 +1,2 @@
+func convert(value:uint16) uint64 { return value as uint64 }
+func main() { print(true); print(convert(65535) == 65535); print(false) }

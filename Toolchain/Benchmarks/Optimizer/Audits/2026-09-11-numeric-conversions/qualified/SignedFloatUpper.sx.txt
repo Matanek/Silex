@@ -1,0 +1,2 @@
+func convert(value:int64) float64 { return value as float64 }
+func main() { print(true); print(convert(9223372036854775807)); print(false) }

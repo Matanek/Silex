@@ -1,0 +1,2 @@
+func convert(value:int32) uint32 { return value as uint32 }
+func main() { print(true); print(convert(-1)); print(false) }

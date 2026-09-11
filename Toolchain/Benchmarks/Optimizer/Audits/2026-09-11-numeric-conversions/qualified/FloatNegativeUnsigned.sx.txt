@@ -1,0 +1,2 @@
+func convert(value:float64) uint64 { return value as uint64 }
+func main() { print(true); print(convert(-1.0)); print(false) }

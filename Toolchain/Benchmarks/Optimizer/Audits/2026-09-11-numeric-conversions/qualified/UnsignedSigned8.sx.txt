@@ -1,0 +1,2 @@
+func convert(value:uint8) int8 { return value as int8 }
+func main() { print(true); print(convert(255)); print(false) }

@@ -1,0 +1,2 @@
+func convert(value:float64) float32 { return value as float32 }
+func main() { print(true); print(convert(1.5)); print(false) }

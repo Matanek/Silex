@@ -1,0 +1,70 @@
+[
+  {
+    "case": "StaticPrecisionLoss",
+    "compiler": "before",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-before",
+      "compile",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionLoss.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionLoss-before"
+    ],
+    "compiler_sha256": "ce8fbf904639497e89d1a64d21a9c3ca834e38b650deefcfd06c84f84a0a95ed",
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "case": "StaticPrecisionLoss",
+    "compiler": "after",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionLoss.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionLoss-after"
+    ],
+    "compiler_sha256": "ecbde18f772c2f0ccf7100053a8b76c585c9467b62c79245cbd6c7d56ef04cdc",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "/private/tmp/silex-part03-evidence/StaticPrecisionLoss.sx:1:107: error: static initializer numeric conversion loses information\n"
+  },
+  {
+    "case": "StaticPrecisionExact",
+    "compiler": "before",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-before",
+      "compile",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionExact.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionExact-before"
+    ],
+    "compiler_sha256": "ce8fbf904639497e89d1a64d21a9c3ca834e38b650deefcfd06c84f84a0a95ed",
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "case": "StaticPrecisionExact",
+    "compiler": "after",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionExact.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/StaticPrecisionExact-after"
+    ],
+    "compiler_sha256": "ecbde18f772c2f0ccf7100053a8b76c585c9467b62c79245cbd6c7d56ef04cdc",
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]
