@@ -62,6 +62,13 @@ pub fn analyze(
             @memcpy(fields[0..assignment_target.fields.len], assignment_target.fields);
             fields[fields.len - 1] = .{ .name_position = field.name_position, .name = field.name };
             assignment_target.fields = fields;
+            // Property setters need the receiver expression just like an
+            // ordinary field assignment, including synthetic cascade locals.
+            assignment_target.source = try expression(self, field.name_position, .{ .field_access = .{
+                .base = target,
+                .name_position = field.name_position,
+                .name = field.name,
+            } });
             try Mutation.analyzeAssignment(self, builder, .{
                 .position = field.name_position,
                 .target = assignment_target,

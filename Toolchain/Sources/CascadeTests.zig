@@ -7,6 +7,30 @@ const Runner = @import("Arm64/Runner.zig");
 const Parser = @import("Parser.zig").Parser;
 const Project = @import("Project.zig");
 
+test "cascade assignments invoke inherited property setters on temporary and stable receivers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Mode { pausable; always }
+        \\class Node {
+        \\    private var current:Mode = Mode.always
+        \\    var process_mode:Mode { get { return self.current } set(value) { self.current = value } }
+        \\    func add_child(child:Node) { print(child.process_mode == Mode.pausable) }
+        \\}
+        \\class Player:Node {}
+        \\func main() {
+        \\    Node().add_child(Player()..process_mode = Mode.pausable)
+        \\    var player = Player()
+        \\    Node().add_child(player..process_mode = Mode.pausable)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("true\ntrue\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
 test "parse method and field cascade operations before terminal access" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
