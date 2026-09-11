@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "parent": "d2a29047f50bcd963418c92d9535d818bdbd71ed",
+  "sources": {
+    "Toolchain/Tools/OptimizerOracle/Main.zig": "a2cef0cf5287e0f71a2f84a893ae91b024eca301e6376174f61db4d49f92ddf8",
+    "Docs/Optimizer-coverage.md": "80c49174b00d6c1753023c25f28d271a37e1ed01ce71c99ca50376ed8da0a9ff"
+  },
+  "validation": {
+    "command": "zig build check test-optimizer-oracle optimizer-gate optimizer-robustness-qualified --summary all",
+    "cwd": "Toolchain",
+    "exit": 0
+  },
+  "files": {
+    "README.md": "0112c83fbaccac5a203b62e5d076b9efd0caa64f6deff8b0104fcce0f0c0b923",
+    "metamorphic-admission.log": "f26f1eb7a96ecd378e8ae7c09137e9f3102130e39eecc953bd66aa8ce14dbfd3",
+    "metamorphic-after.tsv": "7877f72a471cf4e1bdd219fb88aa2f0c5224cb60db404c4c1b24ead4daec1189",
+    "metamorphic-before.tsv": "20fefc62c979d701de33ebe34aefba0bfbb5c7dec55f9e29061d115806db1627",
+    "metamorphic-reachable-before.log": "36427c5116719731b750f5212b6a7bdc5733703885f418c10ea98cce3f22037a",
+    "metamorphic-validation.log": "b7d6df179f60614fe4b5933ffea64160275c53338a96cda82ea0ff83b969a5a3",
+    "profile_metamorphic.py": "38355898c7baeb8e8396fcbed3024b9a026696ba772c5caacaa2ffd11618f95f"
+  }
+}

@@ -210,6 +210,18 @@ removed, with unchanged value-frame size and call count. This is a bounded
 known-view helper now retains two checked additions because an identical third
 evaluation shares the first result; no initial failure is removed.
 
+## Metamorphic execution surface
+
+Metamorphic quality comparisons use the closure reachable from `main`, as native
+emission and LLVM do. The earlier report counted unused helper definitions left
+in portable IR after inlining. Its direct/helper counts of 2/5 and nested-helper
+counts of 19/23 therefore did not describe extra executed work. Reachable counts
+are 2/2 and 15/15, respectively, with identical blocks and no remaining calls.
+The original raw report remains archived. Library-shaped inputs without `main`
+retain all functions, and reachable references, finalizers and dynamic targets
+remain part of the existing reachability contract. This reporting correction
+changes no compiler transformation or performance threshold.
+
 ## Timing and qualification
 
 `compare 11` is diagnostic. Qualified timing requires at least 21 paired samples,

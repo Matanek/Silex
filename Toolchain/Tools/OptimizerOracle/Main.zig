@@ -907,8 +907,8 @@ fn qualifyMetamorphic(
             "{s}/{s}-right",
             .{ directory, pair.id },
         ), true);
-        const left_profile = IrStats.profile(left.optimized_ir);
-        const right_profile = IrStats.profile(right.optimized_ir);
+        const left_profile = try IrStats.profileReachable(allocator, left.optimized_ir);
+        const right_profile = try IrStats.profileReachable(allocator, right.optimized_ir);
         const structural_equivalent = structurallyEquivalent(pair.axis, left_profile, right_profile);
         const left_hash = sourceSha256(pair.left);
         const right_hash = sourceSha256(pair.right);
@@ -1662,4 +1662,18 @@ test {
     _ = Qualification;
     _ = Registry;
     _ = Reducer;
+}
+
+test "metamorphic helper decomposition preserves the executable quality class" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for (Metamorphic.pairs) |pair| {
+        const left = try Differential.verify(allocator, pair.left);
+        const right = try Differential.verify(allocator, pair.right);
+        const left_profile = try IrStats.profileReachable(allocator, left.optimized_ir);
+        const right_profile = try IrStats.profileReachable(allocator, right.optimized_ir);
+        try std.testing.expect(executionEqual(left.execution, right.execution));
+        try std.testing.expect(structurallyEquivalent(pair.axis, left_profile, right_profile));
+    }
 }
