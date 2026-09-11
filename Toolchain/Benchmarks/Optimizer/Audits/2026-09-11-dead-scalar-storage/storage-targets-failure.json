@@ -1,0 +1,106 @@
+{
+  "compiler_sha256": "6ca0c5b7547b84917f56725e16cdbd7ea4b877494f37ff95bb465abceb58da9a",
+  "source_sha256": "b3a3370e7deab8cfab6db6842534de06b8057b5d8152c88f0a710c14f1f50a57",
+  "records": [
+    {
+      "target": "macos-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "Silex/Toolchain/Benchmarks/Optimizer/Regressions/KnownViewElements.sx",
+        "--nocache",
+        "--debug",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/storage-views-macos-arm64-debug"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "c5086a0201dd3b2a7cb86a661242ea769961b43fdf5272c1a8d78f2fa222ace5",
+      "format": "/private/tmp/silex-part02-evidence/storage-views-macos-arm64-debug: Mach-O 64-bit executable arm64",
+      "run_exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": "",
+      "execution": "physical-arm64",
+      "passed": true
+    },
+    {
+      "target": "macos-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "Silex/Toolchain/Benchmarks/Optimizer/Regressions/KnownViewElements.sx",
+        "--nocache",
+        "--release",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/storage-views-macos-arm64-release"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "61b56decd1c7bd25e2add1797f7af3d9d249684a66ef1f7a4faef4293730e402",
+      "format": "/private/tmp/silex-part02-evidence/storage-views-macos-arm64-release: Mach-O 64-bit executable arm64",
+      "run_exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": "",
+      "execution": "physical-arm64",
+      "passed": true
+    },
+    {
+      "target": "macos-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "Silex/Toolchain/Benchmarks/Optimizer/Regressions/KnownViewElements.sx",
+        "--nocache",
+        "--debug",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/storage-views-macos-x64-debug"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "30bf6f464994087f5d20ad11cd70a340c2f73e44c7acbe6d9fb718af1a88c532",
+      "format": "/private/tmp/silex-part02-evidence/storage-views-macos-x64-debug: Mach-O 64-bit executable x86_64",
+      "run_exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": "",
+      "execution": "Rosetta-X64",
+      "passed": true
+    },
+    {
+      "target": "macos-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "Silex/Toolchain/Benchmarks/Optimizer/Regressions/KnownViewElements.sx",
+        "--nocache",
+        "--release",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/storage-views-macos-x64-release"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "5b958f759ccb69f34306b6d46974973949ff1045d123f59a3237051129387203",
+      "format": "/private/tmp/silex-part02-evidence/storage-views-macos-x64-release: Mach-O 64-bit executable x86_64",
+      "run_exit": 0,
+      "stdout": "false\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": "",
+      "execution": "Rosetta-X64",
+      "passed": false
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "implementation": "92961b870ae47c1168f4cee4ef65a9e0e6cd06e6",
+  "parent": "d990d12e44f966b3456f13fc114c2dc1ca37e468",
+  "compiler_sha256": "27c0eba21a90e3baa9814b2b80feba610321c4e181380110d31f2a9b75466bd2",
+  "sources": {
+    "Toolchain/Sources/Optimize/KnownCollections.zig": "1c7f4c8f8c962a9bf4523f6d07c44180bac66b35fc5432b24453a52a1eae22c4",
+    "Toolchain/Sources/Optimize/KnownCollectionsTests.zig": "2eb8fad76ab4e007bf5eb35a573ada50f2683c89c34556c11f954334d75a4ec9",
+    "Toolchain/Sources/Optimize/Release.zig": "b1baff4659ab2a400a6081adeefc3ad490e04a60cb845e87358defcfe49e6252",
+    "Toolchain/Sources/X64/RegisterAllocation.zig": "4e46cc446eb0d17d206f2188b639172aa9771417e201f74d2a3a4414dbe0e9ad",
+    "Toolchain/Tools/OptimizerOracle/Qualification.zig": "d6f70ef8e509056a17df9f9891b341b59413ab0a70108d2028f11179c7d17d97",
+    "Toolchain/Benchmarks/Optimizer/Regressions/KnownViewElements.sx": "b3a3370e7deab8cfab6db6842534de06b8057b5d8152c88f0a710c14f1f50a57"
+  },
+  "llvm_references": [
+    {
+      "url": "https://github.com/llvm/llvm-project/blob/3623fe661ae35c6c80ac221f14d85be76aa870f1/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp",
+      "sha256": "924c53a17f1f4316329de719cd24bd19aed75bb027d97af76f4598e15ff9d57d"
+    },
+    {
+      "url": "https://github.com/llvm/llvm-project/blob/3623fe661ae35c6c80ac221f14d85be76aa870f1/llvm/test/Transforms/InstCombine/malloc-free.ll",
+      "sha256": "d28518ffb889ed90c574f8f4eb3981671cc6f76ac869116d77fbd2d5a8d23abe"
+    },
+    {
+      "url": "https://github.com/llvm/llvm-project/blob/3623fe661ae35c6c80ac221f14d85be76aa870f1/llvm/lib/Transforms/Scalar/EarlyCSE.cpp",
+      "sha256": "57b77366a1f8b3e599b762382fa1b200490bfa22d674d1e12ec1b370cea2c3cb"
+    }
+  ],
+  "files": {
+    "DampedIntegration-llvm.ll": "07b1569d86d39f0c5863f8ded29e746e773bbc5237b8905a45bd98afd9ebc833",
+    "DampedIntegration-raw.ll": "1d084471fc5c1644d10d7519f25f8d071426588a29442915113db981b5229488",
+    "DampedIntegration-raw.sir": "aede44c0d4920a7710895539b68f9c61b9e72cff886800d7b1e6b7f86c9fdb44",
+    "DampedIntegration-silex.ll": "0ed6b6dbcb2d426de5ae5b33e312b0a02e719e59d741366cfa4c7486dad3e229",
+    "DampedIntegration-silex.sir": "3f398bceb5ff2ba605a7640d913847fc2f65c354b6b9a563224b4c7d9d7618f0",
+    "IntegrationRepeated.sx.txt": "059bc63c0effcf73bb4dc95144682aa083e548a790af955b2f831478c8121964",
+    "IntegrationShared.sx.txt": "d1d5ef227944245fab7fdd9df1ab88a9f34d9985b9c209045442192ed5ed70d2",
+    "KnownViewElements-llvm.ll": "36f095514ccdfb531231c56dd1157df2d8583c75a454a83d0e3f01b6aa07a7e2",
+    "KnownViewElements-raw.ll": "b2df14755d376a64f8f4ad6ee0cdb5e53e4f41a70fbcac2f72b757fafb825576",
+    "KnownViewElements-raw.sir": "eef2bc4ecd311c5cae43b96e110c12c8972e86c9d1a2cb0d798f944d604e66cb",
+    "KnownViewElements-silex.ll": "3df34b0fb824a26877d250f962cb797dc0eef39444aaf4feef6fe2bba09a66a7",
+    "KnownViewElements-silex.sir": "9ed1492d883f9a540afda2a74d06ee1e49c72bbb1ff38b578fc1ac842fd1e39c",
+    "KnownViewLoop.sx.txt": "7fdb0c8f16c97951f93ffdb633504f6ae8dc09ed57fdac1b1ea784b1e496e453",
+    "Package.json.txt": "7cd7cc2a8d08ece25d26b816d5b37f26aa5c314f331f9a43c719607788f1da95",
+    "README.md": "820c28469bf7bac6dd1dd8d883d165a03003dcc6644d022f2e9583dbec542b1d",
+    "ReadonlyViewMemory-llvm.ll": "19043aa57d60a11b0832286ad77ee13d38917b6733b7f02c1d1ed2c2b811bca5",
+    "ReadonlyViewMemory-raw.ll": "ebf30afbc6df2dc3e6b79c518ec41488f901800089cc9912daeba593d21b037b",
+    "ReadonlyViewMemory-raw.sir": "815a3603b43d1d457a35e402169a871e83fcc9bd5f7f78f62e0371bceec159c5",
+    "ReadonlyViewMemory-silex.ll": "68f95640adc3beb18f09c79986fd61ea6bbb4b418b767a2cce46ee8fb32bc4cc",
+    "ReadonlyViewMemory-silex.sir": "127273d07e22e403b6fa2716cb7fa0d60da2a9f0a44ab0d97157ea19732ad824",
+    "ScalarOverflow.sx.txt": "2c8e328355d82a140f389729d2a4e51036da022be9962bd007b3922463baf159",
+    "UnusedInitializerFailure.sx.txt": "ece352552ea6f143c5bd6b57cb0052f0ed84ca415679f39bc700b996418290d8",
+    "integration-sharing-summary.log": "08d61ed07a96c51ce4a488d4947f83caf0242eda9f92a02c4726b24cefab5f06",
+    "integration-sharing-timing.json": "ec54f299a3e4e49da768459b7c7293e23168278217c65354ff03f644c609712e",
+    "measure_integration.py": "2bbd6c3a4bcab43b60397ec51ea3b858beb082168bcae1583f52f258cf65420d",
+    "measure_storage.py": "4841085278102aae75097d4d19977444002118025e4560b16304cf5160cfe9d4",
+    "opportunities.tsv": "a74d2dd0971594aa90f59a41101d37336ff74ab15501bd2c4edf1c31c64c0967",
+    "report.tsv": "a6b202224b7f02ecda2974b0be66f006e44e4accc86a37baf294b2ff20690096",
+    "storage-admission-impact.log": "5b6d38c923e13341a14d2da87bdf51147b8a690ef75290b00be5828bc1e1dbf4",
+    "storage-compare-11.log": "a32fb21efb241e43468db31c169c3293a478ab891bc60a839f771637acd0a936",
+    "storage-evidence-admission.log": "627061e1bed91a4898b80836b9910202a1340778141b5a06131a94c74b7070a7",
+    "storage-evidence-check.log": "1998945d64b306d6983a75d9a88952c48a281b48a52d5a59977b711f4d8b900e",
+    "storage-failure-attribution.json": "32cf0a1b77a8a30163d1b42de37066a9b0a1f22a8c1ac28a6d978937b4a7096d",
+    "storage-fixed-validation.log": "cf1291778b1e986b36d737d72e998a5a86cf7201c7ae5bea932697b4a409fb7d",
+    "storage-full-validation.log": "35cea6545ab9e806fe44acb056f1038473f2d7f0f6237ab58448a6700ed8f5d8",
+    "storage-initializer-failures.json": "f5f2cd8dc2e18639185099ac88064bd48eedb30f05671841d3e1e2a39b2c57f1",
+    "storage-llvm-executions.json": "237c3c6e1fc90a6c1f149452129af6d4fdf604afed82dc341a1cd83495f2c961",
+    "storage-loop-builds.json": "5cdede079620a96839c8f92df048f3ad325be52588c11ba5318cb2fd1cae989d",
+    "storage-targeted.log": "c25e3b16d4701f11d936838ca03b2bb9c7a16f2b36b42cabd3e542508575aa69",
+    "storage-targets-failure.json": "89738da15f0287d75aebd6fd46f8e437a2c73160d23912f2422f8b9d87810c56",
+    "storage-targets.json": "feda19c8e80ccebacfc59bf3b4a744b8b3014770ed86b4ea4d33ee9807562287",
+    "storage-timing-summary.log": "5ab2c3a0872ae229a752b60ca9ed853bc19089de36a96d8af3ad749c4eed4532",
+    "storage-timing.json": "519e50218b77cd3b10222b43289c60947218228d5649530106452e13c507fdee",
+    "storage-x64-failure.asm": "7bbb4722914f2342b7e5c1295259de68c384dc56b53db20034bd81ce2367bfe4",
+    "storage-x64-fixed-entry.asm": "2b455000db1c9d76b49befbe9f59ffc883f59a33ad6df1af26abab2c4eac4ad5",
+    "timing-observations.tsv": "84448fcedc4def06e8f960fea1b632f8ed1b7d7a2682c9e96b10fe29ed09e1a4",
+    "timing-profile.tsv": "4379de4cadd5253b05a761c1b75cd7fcadeec97cd5182400b6cae5a15f278bf7",
+    "verify_storage_failures.py": "288e511ebc06b817b39e6189c786cae9853fe99f7cf22d724bba42a53caddaf0",
+    "verify_storage_targets.py": "144894e5fb045b9c7704d571256c7b84850042908c7ae672b17a7c4105d6a35b"
+  }
+}

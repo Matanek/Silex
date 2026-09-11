@@ -1,0 +1,95 @@
+{
+  "compiler_sha256": "27c0eba21a90e3baa9814b2b80feba610321c4e181380110d31f2a9b75466bd2",
+  "source_sha256": "ece352552ea6f143c5bd6b57cb0052f0ed84ca415679f39bc700b996418290d8",
+  "records": [
+    {
+      "target": "macos-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/StorageChecks/UnusedInitializerFailure.sx",
+        "--nocache",
+        "--debug",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/initializer-macos-arm64-debug"
+      ],
+      "build_exit": 0,
+      "build_stderr": "",
+      "binary_sha256": "9f017ec6034451f214a6bec0619be978e8a8f0fa78ae19ecf0f2aff27b353ff3",
+      "exit": 1,
+      "stdout": "",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "target": "macos-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/StorageChecks/UnusedInitializerFailure.sx",
+        "--nocache",
+        "--release",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/initializer-macos-arm64-release"
+      ],
+      "build_exit": 0,
+      "build_stderr": "",
+      "binary_sha256": "987bcaf6ad0cf6d4a6d3715f80a6e384c4a14928041dd0eda4b6bc1a03cd1a31",
+      "exit": 1,
+      "stdout": "",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "target": "macos-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/StorageChecks/UnusedInitializerFailure.sx",
+        "--nocache",
+        "--debug",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/initializer-macos-x64-debug"
+      ],
+      "build_exit": 0,
+      "build_stderr": "",
+      "binary_sha256": "bd349cb4a88b2a5781664fe63e6fa9985a54d5b5111b32b95e8c7e704d5913af",
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "passed": false
+    },
+    {
+      "target": "macos-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/StorageChecks/UnusedInitializerFailure.sx",
+        "--nocache",
+        "--release",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part02-evidence/initializer-macos-x64-release"
+      ],
+      "build_exit": 0,
+      "build_stderr": "",
+      "binary_sha256": "88ce3278fb82ccf3bc559da2118ea468527ddd4b335f5900cf3a3cc276444c37",
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "passed": false
+    }
+  ],
+  "passed": false
+}

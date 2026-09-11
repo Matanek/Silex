@@ -1,0 +1,71 @@
+{
+  "compiler_sha256": "27c0eba21a90e3baa9814b2b80feba610321c4e181380110d31f2a9b75466bd2",
+  "records": [
+    {
+      "name": "view-loop-after",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/KnownViewLoop.sx",
+        "--release",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part02-evidence/view-loop-after"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "source_sha256": "7fdb0c8f16c97951f93ffdb633504f6ae8dc09ed57fdac1b1ea784b1e496e453",
+      "binary_sha256": "c335ae35d59cc70ca85020852301abb34bdc641253c7a0b280cba500d3b9dddc",
+      "binary_bytes": 32952,
+      "run_exit": 0,
+      "stdout": "266\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "integration-repeated",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/IntegrationRepeated.sx",
+        "--release",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part02-evidence/integration-repeated"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "source_sha256": "059bc63c0effcf73bb4dc95144682aa083e548a790af955b2f831478c8121964",
+      "binary_sha256": "c7f073ce07d3951a24265f4734423717f9939d85ae0ea94f36972293013b2c8c",
+      "binary_bytes": 32952,
+      "run_exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "integration-shared",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part02-evidence/IntegrationShared.sx",
+        "--release",
+        "--nocache",
+        "-o",
+        "/private/tmp/silex-part02-evidence/integration-shared"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "source_sha256": "d1d5ef227944245fab7fdd9df1ab88a9f34d9985b9c209045442192ed5ed70d2",
+      "binary_sha256": "778f6c39f55da08a76ba429fbc6f774a1a50b3fbf2ef69d01df8f2b675b2f7c7",
+      "binary_bytes": 32952,
+      "run_exit": 0,
+      "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+      "stderr": "",
+      "passed": true
+    }
+  ]
+}

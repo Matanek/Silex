@@ -144,7 +144,7 @@ contracts exclude graph lookup, ownership and multi-point contact assembly.
 
 | General mechanism | Existing discriminant | Next proof and present limitation |
 | --- | --- | --- |
-| Constant and memory propagation | `ReadonlyViewMemory.sx`, `Regressions/KnownViewElements.sx` | Numeric view reads now fold; allocation/lifetime cost and general inter-block propagation remain open |
+| Constant and memory propagation | `ReadonlyViewMemory.sx`, `Regressions/KnownViewElements.sx` | Numeric view reads and their unobserved primitive storage now disappear; observed storage, resources and general inter-block propagation remain open |
 | Range and signedness | `BranchingLoop.sx` | Three induction dividends already carry a nonnegative proof; advisor/LLVM signed counts omit it, so inspect target consumption before attributing a portable gap |
 | Reference helpers and target pressure | `Regressions/PureMathReferenceInlining.sx`, `Regressions/HotReferenceLeafClosure.sx` | Both execute through LLVM and cover the linear/angular caps; obtain physical X64 pressure before changing the current out-of-line policy |
 | Aggregate preparation | No autonomous full preparation reduction yet | Extract fixed/dynamic body, zero denominator, warm-start and alias variants; observe every prepared field and separate output-reduction cost |
@@ -177,6 +177,21 @@ Debug/Release executions agree with interpretation and LLVM. The separate
 and does not show a significant speedup. These proofs close a bounded numeric
 gap and preserve the wider cost questions; they do not establish general
 optimizer parity.
+
+The [dead-storage audit](../Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-dead-scalar-storage/README.md)
+then removes unused primitive list storage and view descriptors, while retaining
+initializer effects. Its 21-rotation ARM64 loop falls from a median 345.599 ms
+to 3.616 ms. The result isolates allocation/lifetime cost in this reduction;
+startup remains included and no full-consumer or physical X64 gain is claimed.
+
+The wider target check exposed and corrected an X64 prologue interference bug:
+an unused incoming argument could overwrite a live argument's register. The
+corrected candidate passes 2,126 tests, all twelve target emissions and the four
+macOS Debug/Release executions. A separate negative probe identifies an existing
+X64 gap: checked integer addition can still succeed on overflow in both Debug
+and Release, including on the original compiler. The portable failure remains
+present; machine-quality work owns the reduced case. Its red X64 observation
+is preserved and is not counted as interpreter/native error parity.
 
 ## Timing and qualification
 
