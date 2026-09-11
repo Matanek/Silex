@@ -1,0 +1,25 @@
+func barrier(value:int) int { print(value); return value }
+func main() {
+    let limit = barrier(3000000)
+    var a = 0.125
+    var b = 0.25
+    var c = 0.375
+    var d = 0.5
+    var e = 0.625
+    var f = 0.75
+    var g = 0.875
+    var h = 1.0
+    var index = 0
+    while index < limit {
+        a = a * 0.999 + 0.001
+        b = b * 0.999 + 0.002
+        c = c * 0.999 + 0.003
+        d = d * 0.999 + 0.004
+        e = e * 0.999 + 0.005
+        f = f * 0.999 + 0.006
+        g = g * 0.999 + 0.007
+        h = h * 0.999 + 0.008
+        index++
+    }
+    print(a + b + c + d + e + f + g + h)
+}

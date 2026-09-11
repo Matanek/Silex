@@ -1,0 +1,57 @@
+{
+  "workflow_sha256": "af9cdf3d9768132958a0af67faaa614334b98523ebc4ab5f4b653da21ac5af0f",
+  "checks": [
+    {
+      "job": "linux-arm64",
+      "shell": "bash",
+      "source": "ScalarFloatResidence.sx",
+      "modes": [
+        "debug",
+        "release"
+      ],
+      "expected_lines": 9,
+      "expected_value": "true",
+      "execution": "pending hosted runner",
+      "syntax": "passed bash -n"
+    },
+    {
+      "job": "linux-x64",
+      "shell": "bash",
+      "source": "ScalarFloatResidence.sx",
+      "modes": [
+        "debug",
+        "release"
+      ],
+      "expected_lines": 9,
+      "expected_value": "true",
+      "execution": "pending hosted runner",
+      "syntax": "passed bash -n"
+    },
+    {
+      "job": "windows-x64",
+      "shell": "pwsh",
+      "source": "ScalarFloatResidence.sx",
+      "modes": [
+        "debug",
+        "release"
+      ],
+      "expected_lines": 9,
+      "expected_value": "true",
+      "execution": "pending hosted runner",
+      "syntax": "YAML parsed; PowerShell checked on runner"
+    },
+    {
+      "job": "windows-arm64",
+      "shell": "pwsh",
+      "source": "ScalarFloatResidence.sx",
+      "modes": [
+        "debug",
+        "release"
+      ],
+      "expected_lines": 9,
+      "expected_value": "true",
+      "execution": "pending hosted runner",
+      "syntax": "YAML parsed; PowerShell checked on runner"
+    }
+  ]
+}

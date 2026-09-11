@@ -1,0 +1,54 @@
+{
+  "floating-regions-x64-before": {
+    "loops": [
+      {
+        "start": "0x100001227",
+        "end": "0x100001642",
+        "instructions": 147,
+        "float_arithmetic": 16,
+        "stack_accesses": 106,
+        "float_stack_accesses": 48
+      }
+    ],
+    "scalar_color_mentions": 0
+  },
+  "floating-regions-x64-after": {
+    "loops": [
+      {
+        "start": "0x1000011a7",
+        "end": "0x1000013fa",
+        "instructions": 115,
+        "float_arithmetic": 16,
+        "stack_accesses": 10,
+        "float_stack_accesses": 0
+      }
+    ],
+    "scalar_color_mentions": 92
+  },
+  "flocking-x64-baseline": {
+    "loops": [
+      {
+        "start": "0x100001e00",
+        "end": "0x10000282f",
+        "instructions": 399,
+        "float_arithmetic": 30,
+        "stack_accesses": 257,
+        "float_stack_accesses": 110
+      }
+    ],
+    "scalar_color_mentions": 0
+  },
+  "flocking-x64-floats": {
+    "loops": [
+      {
+        "start": "0x100001db4",
+        "end": "0x1000025c8",
+        "instructions": 392,
+        "float_arithmetic": 30,
+        "stack_accesses": 120,
+        "float_stack_accesses": 13
+      }
+    ],
+    "scalar_color_mentions": 306
+  }
+}

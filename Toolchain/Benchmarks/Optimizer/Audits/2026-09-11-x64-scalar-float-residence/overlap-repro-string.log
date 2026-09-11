@@ -1,0 +1,5 @@
+ok - string iteration yields Unicode scalars
+ok - string iteration covers two three four and combining scalars
+ok - empty string skips its body
+ok - string source is evaluated once and obeys loop control
+4 passed; 0 failed

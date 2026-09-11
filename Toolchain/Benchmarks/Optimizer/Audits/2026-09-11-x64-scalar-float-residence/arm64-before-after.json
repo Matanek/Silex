@@ -1,0 +1,20 @@
+[
+  {
+    "artifact": "scalar-float-residence-before-regional",
+    "returncode": 0,
+    "stdout": "true\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\n",
+    "sha256": "56016ef61086e5a8db2d17f4bf7d136155009896cf8df1b5a80c0683ba1c7d28"
+  },
+  {
+    "artifact": "scalar-float-residence-arm64",
+    "returncode": 0,
+    "stdout": "true\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\n",
+    "sha256": "4474df989cb0aed0a29cc60ce741415861ed152a5e8f3adcccd0e75b0b6e3fef"
+  },
+  {
+    "artifact": "scalar-float-residence-arm64-fixed",
+    "returncode": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "sha256": "0d5610235a4388e992c25914b94007b2d442ea5d54acaf272c88f8947c98d1dc"
+  }
+]
