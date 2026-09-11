@@ -1440,12 +1440,15 @@ test "parse conditional alternatives and logical precedence" {
         \\    if !false && true || false { print("first") }
         \\    elif false { print("second") }
         \\    else if true { print("third") }
+        \\    else if false { print("fourth") }
+        \\    elif false { print("fifth") }
+        \\    else if false { print("sixth") }
         \\    else { print("last") }
         \\}
     );
     const program = try parser.parse();
     const conditional = program.functions[0].statements[0].if_statement;
-    try std.testing.expectEqual(@as(usize, 3), conditional.branches.len);
+    try std.testing.expectEqual(@as(usize, 6), conditional.branches.len);
     try std.testing.expect(conditional.else_statements != null);
     const logical_or = conditional.branches[0].condition.expression.value.binary;
     try std.testing.expectEqual(Ast.BinaryOperator.logical_or, logical_or.operator);
