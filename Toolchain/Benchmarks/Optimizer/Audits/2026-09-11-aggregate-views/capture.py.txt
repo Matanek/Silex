@@ -1,0 +1,38 @@
+from pathlib import Path
+import subprocess, json, hashlib, platform, shutil
+root = Path.cwd()
+tc = root / 'Silex/Toolchain'
+audit = tc / 'Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views'
+cache = tc / '.zig-cache/optimizer-oracle'
+compiler = tc / 'zig-out/bin/silex'
+oracle = json.loads((tc / 'Benchmarks/Optimizer/Coverage.json').read_text())['oracle']
+records = []
+def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def run(args):
+    result = subprocess.run([str(a) for a in args], cwd=root, capture_output=True, text=True)
+    record = dict(argv=[str(a) for a in args], cwd=str(root), exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)
+    records.append(record)
+    (audit / 'execution.json').write_text(json.dumps(records, indent=2) + '\n')
+    if result.returncode: raise RuntimeError(record)
+    return record
+for name, count in [('AggregateViewAliasing',9),('DampedIntegration',9),('PreparationMasses',13)]:
+    expected = 'true\n' * count
+    source = Path('Silex/Toolchain/Benchmarks/Optimizer') / (name + '.sx')
+    result = run([compiler, 'interpret', source])
+    assert result['stdout'] == expected and not result['stderr'], result
+    for mode, flag in [('debug','-d'),('release','-r')]:
+        binary = cache / (name + '-proof-' + mode)
+        run([compiler, 'compile', source, flag, '-n', '-o', binary])
+        result = run([binary]); result['binary_sha256'] = sha(binary)
+        assert result['stdout'] == expected and not result['stderr'], result
+    for ir in ['raw','silex']:
+        llvm = cache / f'{name}-{ir}.ll'
+        shutil.copyfile(llvm, audit / llvm.name)
+        for opt in ['-O0','-O3']:
+            binary = cache / f'{name}-proof-{ir}{opt}'
+            run([oracle['executable'], opt, '-target', oracle['target_triple'], '-mcpu=' + oracle['cpu'], llvm, '-o', binary])
+            result = run([binary]); result['binary_sha256'] = sha(binary)
+            assert result['stdout'] == expected and not result['stderr'], result
+(audit / 'execution.json').write_text(json.dumps(records, indent=2) + '\n')
+(audit / 'host.json').write_text(json.dumps(dict(platform=platform.platform(), machine=platform.machine(), compiler_sha256=sha(compiler), oracle=oracle, clang=run(['clang','--version'])['stdout'], zig=run(['zig','version'])['stdout']), indent=2) + '\n')
+print('Three probes: interpreter, native Debug/Release, raw/Release LLVM at -O0/-O3 matched all 31 observations.')

@@ -181,10 +181,13 @@ forward an exact post-store load. A different reference root is never assumed
 disjoint: a read through it invalidates dead-store evidence, and calls, unknown
 memory effects, and block boundaries invalidate both transformations.
 
-Scalar read-only collection views are emitted to LLVM as `{data, count}`
-values. The oracle models list literals with non-owning stack storage, view
-construction, signed negative-index normalization, and checked element loads.
-For owning scalar lists, retains and drops have no LLVM-side lifetime effect;
+Collections of scalar values and plain nested aggregates are emitted to LLVM
+as `{data, count}` values. List literals use heap storage because they can escape
+their creating function. Element strides and allocation sizes follow LLVM typed
+GEP layout, including padding. The bridge models view construction, signed
+negative-index normalization, checked loads and borrowed element references.
+Owning element references requiring copy-on-write detachment remain unsupported.
+For owning lists, retains and drops have no LLVM-side lifetime effect;
 instead, each functional owning replacement allocates and copies its input
 storage before the checked write. This deliberately models Silex copy-on-write
 value semantics rather than its reference-count implementation. A source list
@@ -193,7 +196,7 @@ the allocation and copy when their observable scalar values make that legal.
 Resource-bearing elements and ownership edges remain unsupported rather than
 being approximated with different lifetime semantics.
 
-Mutable scalar views use the same `{data, count}` representation, but
+Mutable views of plain values use the same `{data, count}` representation, but
 `collection_replace` becomes a checked store through `data`. On an exact
 same-view, same-index chain with no intervening observable or possibly aliasing
 instruction, Release may discard an overwritten store and forward a following
@@ -201,6 +204,20 @@ exact load from the surviving store.
 Any access through another view is treated as possibly aliasing and ends the
 proof. The oracle counts checks attached to collection replacement and element
 references as safety guards, not only checks attached to collection loads.
+Before LLVM emission, multiply-defined portable virtual registers receive local
+homes and explicit edge stores/loads. This preserves short-circuit effects and
+loop edge copies without treating portable IR as SSA or applying Silex Release
+optimization to the raw oracle input. LLVM performs its own promotion. Exact
+`float32` to `float64` widening uses `fpext`; narrowing remains unsupported.
+
+The autonomous `AggregateViewAliasing.sx`, `DampedIntegration.sx` and
+`PreparationMasses.sx` cases exercise mixed-width padded elements, escaping
+literals, aliasing, independent copies, reference helpers, damping/translation
+and effective masses with warm impulses. They observe deterministic values and
+are not timed. They do not cover full integration (rotation and speed caps) or
+full preparation (relative velocity and softness). Their abstract lifetime model
+cannot qualify allocation, destruction or reference-count costs.
+
 Generated qualification also combines a nested scalar aggregate, an owning
 copy-on-write snapshot, a temporary mutable view, a loop, and a branch in one
 program. This interaction case is compiled and executed through the same

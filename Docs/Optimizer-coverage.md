@@ -84,6 +84,22 @@ hash protects a descriptive result string, not the raw observations of an
 entire campaign. New qualifications must seal the actual commands, inputs,
 closure, target, binaries and observations; old evidence remains historical.
 
+## Extension to aggregate views
+
+The follow-up audit in
+[`Audits/2026-09-11-aggregate-views`](../Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/README.md)
+adds three autonomous, untimed sources. The fixed corpus now has 19 cases;
+the corpus/regression union has 53. All 53 agree in raw/Release interpretation,
+and 26 emit LLVM in both modes. The bridge now models 25 instruction tags
+conditionally, abstracts two lifetime tags and rejects 42 others.
+
+The three new sources separate aliasing/copy semantics, damping/translation and
+effective-mass preparation. They enabled a direct LLVM comparison that exposed
+an ARM64 overlapping-fusion correctness defect and a native-test C ABI defect.
+The compiler regressions are independent of Physics. Remaining full-stage
+observations, resource lifetimes, numerical edge policies and timing contracts
+remain open; the initial audit above is preserved as historical evidence.
+
 ## Experiments selected by the audit
 
 | General mechanism | Existing discriminant | Next proof and present limitation |

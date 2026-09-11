@@ -84,7 +84,7 @@ pub fn emit(allocator: Allocator, program: Ir.Program) Error![]u8 {
             .allocator = allocator,
             .output = &output,
             .program = program,
-            .function = function,
+            .function = try @import("LlvmValues.zig").lower(allocator, function),
             .function_id = function_id,
         };
         try emitter.emit();
@@ -166,6 +166,7 @@ const FunctionEmitter = struct {
             .list_retain, .list_drop => {},
             .field_load => |value| try self.emitFieldLoad(value),
             .collection_load => |value| try self.emitCollectionLoad(block_id, value),
+            .collection_reference => |value| try self.emitCollectionReference(block_id, value),
             .collection_replace => |value| try self.emitCollectionReplace(block_id, value),
             .collection_count => |value| try self.emitCollectionCount(value),
             .collection_view => |value| try self.emitCollectionView(block_id, value),
@@ -205,15 +206,14 @@ const FunctionEmitter = struct {
         const type_value = try self.valueType(result);
         if (type_value != try self.valueType(operand)) return error.InvalidProgram;
         const collection = self.collectionInfo(type_value) catch return self.copyValue(result, operand);
-        if (collection.view or (!collection.element.isNumeric() and collection.element != .bool))
+        if (collection.view or !plainValue(self.program, collection.element, 0))
             return error.UnsupportedType;
 
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, type_value);
-        const element_bytes = scalarByteWidth(collection.element) orelse return error.UnsupportedType;
         try self.write("  %t{d}.source = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, operand });
         try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, operand });
-        try self.write("  %t{d}.bytes = mul i64 %t{d}.count, {d}\n", .{ serial, serial, element_bytes });
+        try self.emitCollectionBytes(serial, collection.element);
         try self.write("  %t{d}.storage = call ptr @malloc(i64 %t{d}.bytes)\n", .{ serial, serial });
         try self.write(
             "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.source, i64 %t{d}.bytes, i1 false)\n",
@@ -285,20 +285,19 @@ const FunctionEmitter = struct {
     fn emitListInit(self: *FunctionEmitter, value: Ir.Instruction.ListInit) Error!void {
         const type_value = try self.valueType(value.result);
         const collection = try self.collectionInfo(type_value);
-        if (!collection.element.isNumeric() and collection.element != .bool) return error.UnsupportedType;
+        if (!plainValue(self.program, collection.element, 0)) return error.UnsupportedType;
         const element_name = try llvmType(self.allocator, self.program, collection.element);
         const type_name = try llvmType(self.allocator, self.program, type_value);
         const serial = self.nextTemporary();
-        try self.write("  %t{d}.storage = alloca [{d} x {s}]\n", .{ serial, value.values.len, element_name });
+        try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, value.values.len });
+        try self.emitCollectionBytes(serial, collection.element);
+        // A literal can escape its creating function. Stack storage would give
+        // the caller a dangling collection; lifetime cost is still abstracted.
+        try self.write("  %t{d}.storage = call ptr @malloc(i64 %t{d}.bytes)\n", .{ serial, serial });
         for (value.values, 0..) |item, index| {
             if (try self.valueType(item) != collection.element) return error.InvalidProgram;
-            try self.write("  %t{d}.item{d} = getelementptr [{d} x {s}], ptr %t{d}.storage, i32 0, i64 {d}\n", .{
-                serial,
-                index,
-                value.values.len,
-                element_name,
-                serial,
-                index,
+            try self.write("  %t{d}.item{d} = getelementptr {s}, ptr %t{d}.storage, i64 {d}\n", .{
+                serial, index, element_name, serial, index,
             });
             try self.write("  store {s} %v{d}, ptr %t{d}.item{d}\n", .{ element_name, item, serial, index });
         }
@@ -353,6 +352,48 @@ const FunctionEmitter = struct {
         try self.write("  %v{d} = load {s}, ptr %t{d}.element\n", .{ value.result, element_name, serial });
     }
 
+    fn emitCollectionReference(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionReference) Error!void {
+        const collection_type = try self.valueType(value.collection);
+        const collection = try self.collectionInfo(collection_type);
+        // Owning references can require detaching shared storage. Only borrowed
+        // views are modeled here; never silently turn copy-on-write into aliasing.
+        if (!collection.view or value.ownership != .root or !plainValue(self.program, collection.element, 0))
+            return error.UnsupportedInstruction;
+        if (try self.valueType(value.index) != .int or try self.valueType(value.result) != .address)
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, collection_type);
+        if (value.reference) |reference| {
+            if (try self.valueType(reference) != .address) return error.InvalidProgram;
+            try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });
+            try self.write("  %t{d}.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, type_name, serial });
+            try self.write("  %t{d}.count = extractvalue {s} %t{d}.source, 1\n", .{ serial, type_name, serial });
+        } else {
+            try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
+            try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
+        }
+        try self.emitNormalizedIndex(serial, "index", value.index);
+        if (value.checked) {
+            try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
+            try self.write("  %t{d}.index.high = icmp sge i64 %t{d}.index, %t{d}.count\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
+            try self.write("  br i1 %t{d}.index.invalid, label %trap, label %b{d}.cont{d}\n", .{ serial, block_id, serial });
+            try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
+        }
+        try self.write("  %v{d} = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.index\n", .{
+            value.result, try llvmType(self.allocator, self.program, collection.element), serial, serial,
+        });
+    }
+
+    fn emitCollectionBytes(self: *FunctionEmitter, serial: usize, element: Ir.Type) Error!void {
+        // Let LLVM compute its own aggregate padding; Silex's storage slots
+        // are not the oracle's layout and cannot be used as a byte stride.
+        try self.write("  %t{d}.end = getelementptr {s}, ptr null, i64 %t{d}.count\n", .{
+            serial, try llvmType(self.allocator, self.program, element), serial,
+        });
+        try self.write("  %t{d}.bytes = ptrtoint ptr %t{d}.end to i64\n", .{ serial, serial });
+    }
+
     fn emitCollectionReplace(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionReplace) Error!void {
         const collection_type = try self.valueType(value.collection);
         const collection = try self.collectionInfo(collection_type);
@@ -360,14 +401,13 @@ const FunctionEmitter = struct {
             try self.valueType(value.result) != collection_type or
             try self.valueType(value.index) != .int or
             try self.valueType(value.replacement) != collection.element or
-            (!collection.element.isNumeric() and collection.element != .bool))
+            !plainValue(self.program, collection.element, 0))
         {
             return error.UnsupportedInstruction;
         }
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, collection_type);
         const element_name = try llvmType(self.allocator, self.program, collection.element);
-        const element_bytes = scalarByteWidth(collection.element) orelse return error.UnsupportedType;
         try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
         try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
         try self.emitNormalizedIndex(serial, "index", value.index);
@@ -379,7 +419,7 @@ const FunctionEmitter = struct {
             try self.write("b{d}.cont{d}:\n", .{ block_id, serial });
         }
         if (!collection.view) {
-            try self.write("  %t{d}.bytes = mul i64 %t{d}.count, {d}\n", .{ serial, serial, element_bytes });
+            try self.emitCollectionBytes(serial, collection.element);
             try self.write("  %t{d}.copy = call ptr @malloc(i64 %t{d}.bytes)\n", .{ serial, serial });
             try self.write(
                 "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.copy, ptr %t{d}.data, i64 %t{d}.bytes, i1 false)\n",
@@ -806,6 +846,8 @@ const FunctionEmitter = struct {
 
     fn emitConvert(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Convert) Error!void {
         if (value.source == value.target) return self.copyValue(value.result, value.operand);
+        if (value.source == .float32 and value.target == .float64)
+            return self.write("  %v{d} = fpext float %v{d} to double\n", .{ value.result, value.operand });
         if (value.source.isInteger() and value.target.isFloat())
             return self.emitIntegerToFloat(block_id, value);
         if (!value.source.isInteger() or !value.target.isInteger()) return error.UnsupportedInstruction;
@@ -977,10 +1019,15 @@ const CollectionInfo = struct {
     view: bool,
 };
 
-fn scalarByteWidth(type_value: Ir.Type) ?usize {
-    if (type_value == .bool) return 1;
-    if (!type_value.isNumeric()) return null;
-    return std.math.divCeil(usize, type_value.bitWidth(), 8) catch unreachable;
+fn plainValue(program: Ir.Program, type_value: Ir.Type, depth: usize) bool {
+    if (type_value.isNumeric() or type_value == .bool) return true;
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= program.structures.len or depth >= program.structures.len) return false;
+    const structure = program.structures[index];
+    if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null)
+        return false;
+    for (structure.fields) |field| if (!plainValue(program, field.type, depth + 1)) return false;
+    return true;
 }
 
 fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
@@ -1151,4 +1198,67 @@ test "LLVM emitter preserves owning scalar collection copies" {
     const text = try emit(allocator, compilation.ir);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "call void @llvm.memcpy.p0.p0.i64"));
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "store i64 %v"));
+}
+
+test "LLVM aggregate view probes preserve independent observations in both IR modes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]struct { name: []const u8, lines: usize }{
+        .{ .name = "AggregateViewAliasing.sx", .lines = 9 },
+        .{ .name = "DampedIntegration.sx", .lines = 9 },
+        .{ .name = "PreparationMasses.sx", .lines = 13 },
+    }) |fixture| {
+        const path = try std.fs.path.join(a, &.{ "Benchmarks/Optimizer", fixture.name });
+        const source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, a, .limited(1024 * 1024));
+        const result = try @import("Differential.zig").verify(a, source);
+        const expected = try a.alloc(u8, fixture.lines * 5);
+        for (0..fixture.lines) |index| @memcpy(expected[index * 5 ..][0..5], "true\n");
+        try std.testing.expectEqualStrings(expected, result.execution.completed.stdout);
+        _ = emit(a, result.raw_ir) catch |err| {
+            std.debug.print("raw LLVM probe {s}: {t}\n", .{ fixture.name, err });
+            return err;
+        };
+        _ = emit(a, result.optimized_ir) catch |err| {
+            std.debug.print("Release LLVM probe {s}: {t}\n", .{ fixture.name, err });
+            return err;
+        };
+    }
+}
+
+test "LLVM collection references reject owning storage rather than erase copy-on-write" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var frontend = Silex.Frontend.init(a);
+    const compilation = try frontend.compile(
+        \\struct Pair { var x:int }
+        \\func touch(value:&Pair) { value.x += 1 }
+        \\func update(values:&Pair[..]) { touch(values[0]) }
+        \\func main() { var values:Pair[] = [Pair(x:3)]; update(&values[0:1]); print(values[0].x) }
+    );
+    var program = compilation.ir;
+    const structures = try a.dupe(Ir.Structure, program.structures);
+    var changed = false;
+    for (structures) |*structure| if (structure.collection) |*collection| {
+        if (collection.view) {
+            collection.view = false;
+            changed = true;
+        }
+    };
+    try std.testing.expect(changed);
+    program.structures = structures;
+    try std.testing.expectError(error.UnsupportedInstruction, emit(a, program));
+}
+
+test "LLVM plain collection elements reject resource-bearing and nested owning shapes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var frontend = Silex.Frontend.init(a);
+    const compilation = try frontend.compile(
+        \\struct Owner { var values:int[] }
+        \\func main() { let values:Owner[] = [Owner(values:[1, 2])]; print(values.count()) }
+    );
+    try std.testing.expectError(error.UnsupportedType, emit(a, compilation.ir));
 }

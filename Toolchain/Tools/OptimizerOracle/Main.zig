@@ -1115,6 +1115,14 @@ fn compareCorpus(
             !std.mem.eql(u8, expected.stderr, llvm_result.stderr) or
             !std.mem.eql(u8, expected.stderr, native_result.stderr))
         {
+            std.debug.print("oracle semantic mismatch for {s}: LLVM stdout={} stderr={}, native stdout={} stderr={} (artifacts: {s})\n", .{
+                name,
+                std.mem.eql(u8, expected.stdout, llvm_result.stdout),
+                std.mem.eql(u8, expected.stderr, llvm_result.stderr),
+                std.mem.eql(u8, expected.stdout, native_result.stdout),
+                std.mem.eql(u8, expected.stderr, native_result.stderr),
+                output_directory,
+            });
             return error.SemanticMismatch;
         }
 

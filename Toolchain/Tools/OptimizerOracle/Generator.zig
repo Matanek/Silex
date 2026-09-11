@@ -79,6 +79,9 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "DampedIntegration.sx", .timing = false },
+    .{ .name = "PreparationMasses.sx", .timing = false },
+    .{ .name = "AggregateViewAliasing.sx", .timing = false },
     .{ .name = "IntegerArithmetic.sx", .timing = true },
     .{ .name = "BranchingLoop.sx", .timing = true },
     .{ .name = "FloatArithmetic.sx", .timing = true },

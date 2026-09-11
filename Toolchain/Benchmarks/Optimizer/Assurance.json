@@ -115,7 +115,8 @@
       "positive_cases": [
         "ReferenceDeadStores.sx",
         "ReadonlyViewMemory.sx",
-        "MutableViewMemory.sx"
+        "MutableViewMemory.sx",
+        "AggregateViewAliasing.sx"
       ],
       "negative_cases": [
         "ReferenceAliasing.sx",
@@ -144,7 +145,8 @@
       "positive_cases": [
         "AggregateScalarization.sx",
         "NestedAggregateWidths.sx",
-        "Regressions/AggregateParameterResidence.sx"
+        "Regressions/AggregateParameterResidence.sx",
+        "PreparationMasses.sx"
       ],
       "negative_cases": [
         "Regressions/AggregateFieldStores.sx",
@@ -175,7 +177,8 @@
       "positive_cases": [
         "OwningCollectionCopy.sx",
         "MutableViewMemory.sx",
-        "Regressions/CollectionCursor.sx"
+        "Regressions/CollectionCursor.sx",
+        "AggregateViewAliasing.sx"
       ],
       "negative_cases": [
         "Regressions/CheckedMemoryLanes.sx",
@@ -201,7 +204,8 @@
       "id": "calls-closure-and-inlining",
       "positive_cases": [
         "Regressions/PureMathReferenceInlining.sx",
-        "Regressions/HotReferenceLeafClosure.sx"
+        "Regressions/HotReferenceLeafClosure.sx",
+        "DampedIntegration.sx"
       ],
       "negative_cases": [
         "Regressions/CallEffectsInlining.sx",
@@ -326,7 +330,9 @@
       "id": "packages-and-real-consumers",
       "positive_cases": [
         "Regressions/BoidsKernel.sx",
-        "Regressions/Boids2DSteering.sx"
+        "Regressions/Boids2DSteering.sx",
+        "DampedIntegration.sx",
+        "PreparationMasses.sx"
       ],
       "negative_cases": [
         "Regressions/CheckedMemoryLanes.sx"
@@ -336,9 +342,9 @@
       "preconditions": "Compare identical source/closure or explicitly equivalent kernels; application architecture is a separate cause.",
       "scope": "bounded-corpus",
       "open_questions": [
-        "Preparation/Integration still need autonomous same-workload probes; inherited external closure audit fails on GFX.ECS ancestry."
+        "Autonomous damping/translation and effective-mass probes cover subsets only; full Preparation/Integration and inherited GFX.ECS closure remain open."
       ],
-      "next_experiment": "Extract stage kernels into compiler fixtures and qualify them before full external sentries; reconcile external proof ownership separately.",
+      "next_experiment": "Extend independent reductions to rotation/speed caps, relative velocity and softness; preserve full-stage observation and qualification contracts.",
       "owner": "qualification",
       "targets": [
         "arm64",

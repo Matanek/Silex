@@ -1,0 +1,41 @@
+// Mixed widths exercise LLVM's own aggregate stride, including padding.
+struct Pair { var x:float; var tag:int8; var y:float64 }
+
+func update(values:&Pair[..], index:int, delta:float) {
+    values[index].x += delta
+    values[index].tag += 1
+    values[index].y += delta as float64
+}
+
+func observe(left:&Pair[..], right:&Pair[..], index:int) float {
+    let before = copy left[index].x
+    update(right, -1, 2.0)
+    return before + left[index].x
+}
+
+func make() Pair[] { return [Pair(x:21.0, tag:9, y:34.0)] }
+
+func main() {
+    let escaped = make()
+    print(escaped[0].x == 21.0 && escaped[0].tag == 9 && escaped[0].y == 34.0)
+    var values:Pair[] = [Pair(x:3.0, tag:1, y:5.0), Pair(x:7.0, tag:2, y:11.0)]
+    var other:Pair[] = [Pair(x:13.0, tag:3, y:17.0)]
+    var left = &values[0:2]
+    var distinct = &other[0:1]
+    print(observe(left, left, -1) == 16.0)
+    print(observe(left, distinct, -1) == 18.0)
+    print(left[0].x == 3.0 && left[0].tag == 1 && left[0].y == 5.0)
+    print(left[1].x == 9.0 && left[1].tag == 3 && left[1].y == 13.0)
+    print(distinct[0].x == 15.0 && distinct[0].tag == 4 && distinct[0].y == 19.0)
+
+    // Functional replacement and explicit copying must preserve old elements.
+    let original:Pair[] = [Pair(x:1.0, tag:5, y:2.0), Pair(x:4.0, tag:6, y:8.0)]
+    var replaced = original
+    replaced[-1] = Pair(x:16.0, tag:7, y:32.0)
+    var detached = copy replaced
+    var changed = &detached[0:2]
+    update(changed, -1, 1.0)
+    print(original[1].x == 4.0 && original[1].tag == 6 && original[1].y == 8.0)
+    print(replaced[1].x == 16.0 && replaced[1].tag == 7 && replaced[1].y == 32.0)
+    print(changed[1].x == 17.0 && changed[1].tag == 8 && changed[1].y == 33.0)
+}

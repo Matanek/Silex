@@ -1,0 +1,238 @@
+{
+  "schema": 1,
+  "captured_at": "2026-09-11T01:14:29.443045+00:00",
+  "base_revision": "8d81d346639188a95dbb9dfc2ea0e4426c84a129",
+  "compiler_correction_revision": "382aeffcdd29da928f0a4e426d55b0dd7996a99f",
+  "candidate_identity": "Compiler correction commit plus the enclosing oracle commit; source hashes seal the precommit executions.",
+  "package_closure": {
+    "STD": {
+      "revision": "1f3847430b7a7a814ad0b4e3dd2e4f3711cfd4e9",
+      "clean": true,
+      "used_by": "coverage scan only; the three new probes are package-independent"
+    }
+  },
+  "validation": [
+    {
+      "command": [
+        "zig",
+        "build",
+        "check",
+        "--summary",
+        "all"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain",
+      "exit_code": 0,
+      "log": "check.log"
+    },
+    {
+      "command": [
+        "zig",
+        "build",
+        "test",
+        "--summary",
+        "all"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain",
+      "exit_code": 0,
+      "log": "test.log"
+    },
+    {
+      "command": [
+        "zig",
+        "build",
+        "optimizer-oracle",
+        "--summary",
+        "all",
+        "--",
+        "compare",
+        "5"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain",
+      "exit_code": 0,
+      "log": "compare.log",
+      "performance_qualified": false
+    },
+    {
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61d1f8b00b9d7603bfa04681e65720c3/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "coverage-scan"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "coverage-scan.log"
+    },
+    {
+      "command": [
+        "python3",
+        "/private/tmp/parity02-capture.py"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "script": "capture.py.txt",
+      "observations": "execution.json"
+    },
+    {
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61d1f8b00b9d7603bfa04681e65720c3/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "robustness-qualified"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "robustness.log"
+    },
+    {
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61d1f8b00b9d7603bfa04681e65720c3/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "gate"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 1,
+      "log": "qualified-gate.log",
+      "status": "blocked-inherited-GFX.ECS-ancestry"
+    },
+    {
+      "command": [
+        "zig",
+        "build",
+        "optimizer-admission",
+        "--",
+        "admission-impact",
+        "Toolchain/Sources/Arm64/Encoder.zig",
+        "Toolchain/Sources/Arm64/FloatMemoryTests.zig",
+        "Tests/Native/FusedFloatArithmetic.sx",
+        "Docs/Release-optimization.md"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain",
+      "exit_code": 0,
+      "log": "admission-compiler.log"
+    },
+    {
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61d1f8b00b9d7603bfa04681e65720c3/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "admission-impact",
+        "Docs/Optimizer-coverage.md",
+        "Docs/Optimizer-oracle.md",
+        "Toolchain/Benchmarks/Optimizer/AggregateViewAliasing.sx",
+        "Toolchain/Benchmarks/Optimizer/Assurance.json",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/.gitattributes",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/AggregateViewAliasing-raw.ll",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/AggregateViewAliasing-silex.ll",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/DampedIntegration-raw.ll",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/DampedIntegration-silex.ll",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/Manifest.json",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/OriginalReproducer.sx.txt",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/PreparationMasses-raw.ll",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/PreparationMasses-silex.ll",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/README.md",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/admission-compiler.log",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/admission-oracle.log",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/assurance.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/cache-stress.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/cached-literal-before.asm",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/capture.py.txt",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/check.log",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/compare.log",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/coverage-scan.log",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/execution.json",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/host.json",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/llvm-case-coverage.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/llvm-operation-coverage.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/opportunities.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/original-arm64.asm",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/parity.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/project-stress-v1.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/proof-scope.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/qualified-gate.log",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/robustness.log",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/run-qualified-1789088971975782000.tsv",
+        "Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-aggregate-views/test.log",
+        "Toolchain/Benchmarks/Optimizer/DampedIntegration.sx",
+        "Toolchain/Benchmarks/Optimizer/PreparationMasses.sx",
+        "Toolchain/Tools/OptimizerOracle/Generator.zig",
+        "Toolchain/Tools/OptimizerOracle/Llvm.zig",
+        "Toolchain/Tools/OptimizerOracle/LlvmCoverage.zig",
+        "Toolchain/Tools/OptimizerOracle/LlvmValues.zig",
+        "Toolchain/Tools/OptimizerOracle/Main.zig"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "admission-oracle.log"
+    }
+  ],
+  "source_sha256": {
+    "Docs/Optimizer-coverage.md": "ba212d923e26b12a585cf20806f574c9c94eb1698a689e84b7b24b524b392b49",
+    "Docs/Optimizer-oracle.md": "a890f665652c18767285ca5b13da3a998ecdddb4f9f0040db0728ff02428c9dc",
+    "Docs/Release-optimization.md": "5d10e2fb1d15e7c1d7995788b9ef18798ec8944320c15ea6179a99844d0877eb",
+    "Tests/Native/FusedFloatArithmetic.sx": "5386054d3448a518d7a57aef33136b0ede7c0c2092751bb43285f7a5cd17fd75",
+    "Toolchain/Benchmarks/Optimizer/AggregateViewAliasing.sx": "af41e6aff004ebd6f850aa5a743e1687a0673234f420c1e36505bd87576b600d",
+    "Toolchain/Benchmarks/Optimizer/Assurance.json": "69b3a75dad2ca31b3522658dfb6fa40e68840a15616e57533b4392b13b72578a",
+    "Toolchain/Benchmarks/Optimizer/DampedIntegration.sx": "d166c87c03bf64fae032eefa01fe632d862194a28f979d9f6a6c3d1e87d6232f",
+    "Toolchain/Benchmarks/Optimizer/PreparationMasses.sx": "0d80e012d9e3673acd4a5634169f93c35687bfcd28ac97509d0134ad8caad864",
+    "Toolchain/Sources/Arm64/Encoder.zig": "e52dc6bba11afebd1166df7e8a84e09de1d602965c5d7d7a155aecddc928239c",
+    "Toolchain/Sources/Arm64/FloatMemoryTests.zig": "f12401f05993678902b58afe4f876cfbb016b90396a57e9f1122690051dc8de0",
+    "Toolchain/Tools/OptimizerOracle/Generator.zig": "7e2c2c87799ebf3755197590fea78e92679f5cf3bb1e2af9b908c53a040b9f03",
+    "Toolchain/Tools/OptimizerOracle/Llvm.zig": "78690741f141b6cf7130d2e96a1c3d6750a1ea915d9f566aa8e3ecece1a70b3a",
+    "Toolchain/Tools/OptimizerOracle/LlvmCoverage.zig": "8dd8c4816dffa72523ba48e0a08b012ab079e91e15dbee7fe49af3141434556b",
+    "Toolchain/Tools/OptimizerOracle/LlvmValues.zig": "7659fca5a935145a86323290aa218e15b391c5304ff953c0b1fee0a10ae7800f",
+    "Toolchain/Tools/OptimizerOracle/Main.zig": "21fce16dcf964a5582a6f6b54c28e8a6735861342d28e06a4ab1bc6adc79cc0b"
+  },
+  "artifact_sha256": {
+    ".gitattributes": "539b5d3589eeddc188b0e7f51e8d8dfe9593d29d9c75f07da71c18e26be814e8",
+    "AggregateViewAliasing-raw.ll": "7fbfdf3f59b42d4ee704e1c592ae86a71f43d248327542ffeecd5bd38f262261",
+    "AggregateViewAliasing-silex.ll": "0f6813686a97f4f1f44e220c8b72573e75b2f6544363e3cb2edcdeca87038eb7",
+    "DampedIntegration-raw.ll": "b9c997c0338f03cc104ec2a9492e8611d6b75367cfbc2f972ee556e5be0cd464",
+    "DampedIntegration-silex.ll": "4511d9c38b771e081f2fbe1b9a61263aeb3c7b281ada50d52c408d56282e2678",
+    "OriginalReproducer.sx.txt": "5e079f35b6a18cee395969620c2af276cf3f3a792950627568da4f8a9350e7de",
+    "PreparationMasses-raw.ll": "9ff3802746c728c8f9fd9188924c9c754f8c8ce65e7913a28c8d2dd6a42fdb0b",
+    "PreparationMasses-silex.ll": "df30312006939e8c83c98f60f041fdc81ea8cbb0adc8f69d013980a68261cd16",
+    "README.md": "ca63c299d2a14c90a808e2bd0bc3ebc2b542c35078d29faa249d182305712f98",
+    "admission-compiler.log": "a369494f1985881a5ac4d130cd437ab8a34d283d3c568e2cfce750d4919ec71c",
+    "admission-oracle.log": "627061e1bed91a4898b80836b9910202a1340778141b5a06131a94c74b7070a7",
+    "assurance.tsv": "670ddbb7ca6001341e78cfb0595be45461678c24c7aaae6379cfbee3161dbebd",
+    "cache-stress.tsv": "3a98a2416f3caf0f934bb4cf938bc1dacbf4e2dff8fb0033e5e96c248a28e0cd",
+    "cached-literal-before.asm": "c3105114416b2d7131a4b98f2ccbfd26e00a41562f988d781e69a0eaa2d6c308",
+    "capture.py.txt": "790edbd37689ee8b1682e4c2a5a0a354ad62e12ef1b675367bc2eec0ce059afa",
+    "check.log": "94c747854efcb19dbd1362df3b1f00d39ef5a7d8629f94676b2cad39627ca9e0",
+    "compare.log": "63ffa7dd94f122a86ee27e2bbd554fd7da684b10e8189e2025efd81ecfc71ab7",
+    "coverage-scan.log": "3b2b565bd39c5814f3a2ff187c20888c1d303f7e572e0c40e01b4e84033f26e2",
+    "execution.json": "a87dd2b339cc97d42c1997e55a673b96abe016a017b5e0a68b0afe2782a25e4d",
+    "host.json": "9c625516b0a59f1fd0e789417cbe205a0062520ea4234e28a2884f4bea4caafd",
+    "interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv": "f668eafdd03ae36169d1a10cff99f64f1a2e4fd894ebbb4c93d0461f3cd5909c",
+    "llvm-case-coverage.tsv": "fc81d18782f63e5d810b94de03ccd67c263945efc364f8d6cdf446566114919c",
+    "llvm-operation-coverage.tsv": "c93106558dc23a5415a080e45dc790c50804932905b34dfa881171ed437c8bd7",
+    "opportunities.tsv": "3df19a107470f52dc246affd1e27b8fc363d465748756681ea03176ff1a34c3b",
+    "original-arm64.asm": "5b952e2bec4c072c3f667ab7276ccea230d47c6b73fc1812c2e7cd1fa6420ed4",
+    "parity.tsv": "50caaaabc637fd78c4f9266ae355111c43d59dc4b9ab001add18085d5c60d089",
+    "project-stress-v1.tsv": "9b459b849d058566610817f1eccbb0c9f7559d40014dbcc4aed38d4e738b87bb",
+    "proof-scope.tsv": "9fe52dcdef7365a8ab50b6352f82ed53c6b890b8b0cf131977d75673120b986d",
+    "qualified-gate.log": "176990efe95cd541f01b2147d89f13a761f8e80164863b589925a8f584b70fa8",
+    "robustness.log": "d367716941d0c554866280113732368ecc0511567b37f5931550c19ba2203181",
+    "run-qualified-1789088971975782000.tsv": "3a452a1a8c55d4654aaec60e40085d644dcd28f95423aa9d619f18ecb9521e71",
+    "test.log": "2b54c2b3d821d9b2dc7b6269ded26663d72b52697371ab0b80c0c77b7b09d20f"
+  },
+  "scope": {
+    "corpus_cases": 19,
+    "scan_sources": 53,
+    "interpreter_matches": 53,
+    "llvm_emitted_both": 26,
+    "new_probes_executed": 3,
+    "execution_configurations_per_probe": 7,
+    "host": "macos-arm64",
+    "performance_qualified": false,
+    "unexecuted_targets": [
+      "linux-arm64",
+      "windows-arm64",
+      "physical-x64"
+    ],
+    "general_parity": false
+  }
+}

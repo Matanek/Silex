@@ -1,0 +1,69 @@
+// Reduced contact effective masses and warm impulses. This is not the complete
+// preparation stage: graph lookup, softness and relative velocity are excluded.
+struct Input {
+    var mass_a:float; var mass_b:float; var inertia_a:float; var inertia_b:float
+    var nx:float; var ny:float; var ax:float; var ay:float; var bx:float; var by:float
+    var normal:float; var tangent:float; var rolling:float
+}
+struct Prepared {
+    var normal_mass:float; var tangent_mass:float; var rolling_mass:float
+    var normal:float; var tangent:float; var rolling:float
+}
+
+func prepare(input:@Input, warm:bool) Prepared {
+    let normal_a = input.ax * input.ny - input.ay * input.nx
+    let normal_b = input.bx * input.ny - input.by * input.nx
+    let normal_denominator = input.mass_a + input.mass_b +
+        input.inertia_a * normal_a * normal_a + input.inertia_b * normal_b * normal_b
+    let tangent_a = -input.ax * input.nx - input.ay * input.ny
+    let tangent_b = -input.bx * input.nx - input.by * input.ny
+    let tangent_denominator = input.mass_a + input.mass_b +
+        input.inertia_a * tangent_a * tangent_a + input.inertia_b * tangent_b * tangent_b
+    let rolling_denominator = input.inertia_a + input.inertia_b
+    var result = Prepared()
+    if normal_denominator > 0.0 { result.normal_mass = 1.0 / normal_denominator }
+    if tangent_denominator > 0.0 { result.tangent_mass = 1.0 / tangent_denominator }
+    if rolling_denominator > 0.0 { result.rolling_mass = 1.0 / rolling_denominator }
+    if warm {
+        result.normal = input.normal
+        result.tangent = input.tangent
+        result.rolling = input.rolling
+    }
+    return result
+}
+
+func batch(inputs:@Input[..], outputs:&Prepared[..], warm:bool) {
+    var index = 0
+    while index < inputs.count() {
+        outputs[index] = prepare(inputs[index], warm)
+        index++
+    }
+}
+
+func main() {
+    let inputs:Input[] = [
+        Input(mass_a:1.0, mass_b:1.0, inertia_a:1.0, inertia_b:1.0,
+            ny:1.0, ax:1.0, bx:-1.0, normal:2.0, tangent:-1.0, rolling:0.5),
+        Input(mass_b:1.0, inertia_b:1.0,
+            ny:1.0, ax:1.0, bx:-1.0, normal:4.0, tangent:-2.0, rolling:1.0),
+        Input(ny:1.0, ax:1.0, bx:-1.0, normal:8.0, tangent:-4.0, rolling:2.0)
+    ]
+    var outputs:Prepared[] = [Prepared(), Prepared(), Prepared()]
+    let view = @inputs[0:3]
+    var destination = &outputs[0:3]
+    batch(view, destination, true)
+    print(destination[0].normal_mass == 0.25 && destination[0].tangent_mass == 0.5 && destination[0].rolling_mass == 0.5)
+    print(destination[1].normal_mass == 0.5 && destination[1].tangent_mass == 1.0 && destination[1].rolling_mass == 1.0)
+    print(destination[2].normal_mass == 0.0 && destination[2].tangent_mass == 0.0 && destination[2].rolling_mass == 0.0)
+    print(destination[0].normal == 2.0 && destination[0].tangent == -1.0 && destination[0].rolling == 0.5)
+    print(destination[1].normal == 4.0 && destination[1].tangent == -2.0 && destination[1].rolling == 1.0)
+    print(destination[2].normal == 8.0 && destination[2].tangent == -4.0 && destination[2].rolling == 2.0)
+    batch(view, destination, false)
+    print(destination[0].normal_mass == 0.25 && destination[0].tangent_mass == 0.5 && destination[0].rolling_mass == 0.5)
+    print(destination[1].normal_mass == 0.5 && destination[1].tangent_mass == 1.0 && destination[1].rolling_mass == 1.0)
+    print(destination[2].normal_mass == 0.0 && destination[2].tangent_mass == 0.0 && destination[2].rolling_mass == 0.0)
+    print(destination[0].normal == 0.0 && destination[0].tangent == 0.0 && destination[0].rolling == 0.0)
+    print(destination[1].normal == 0.0 && destination[1].tangent == 0.0 && destination[1].rolling == 0.0)
+    print(destination[2].normal == 0.0 && destination[2].tangent == 0.0 && destination[2].rolling == 0.0)
+    print(inputs[0].normal == 2.0 && inputs[1].normal == 4.0 && inputs[2].normal == 8.0)
+}
