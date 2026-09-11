@@ -1034,3 +1034,29 @@ test "diagnose incomplete and invalid generic class arguments" {
         "generic methods in generic structures are not supported",
     );
 }
+
+test "generic calls infer inherited method results and forced optional layers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Base { func value() int? { return 42 } func nested() int?? { return 7 } }
+        \\class Middle:Base {}
+        \\class Leaf:Middle {}
+        \\class Override:Base { override func value() int? { return 99 } }
+        \\struct Store { func identity<T>(value:T) T { return value } }
+        \\func identity<T>(value:T) T { return value }
+        \\func main() {
+        \\    var leaf = Leaf(); var store = Store(); var changed = Override()
+        \\    print(store.identity<int>(leaf.value()!))
+        \\    print(store.identity(leaf.value()!))
+        \\    print(identity<int>(leaf.value()!))
+        \\    print(store.identity<int?>(leaf.nested()!)!)
+        \\    print(store.identity<int>(leaf.nested()!!))
+        \\    print(store.identity<int>(changed.value()!))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n42\n42\n7\n7\n99\n", result.stdout);
+}

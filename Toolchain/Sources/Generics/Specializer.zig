@@ -1817,13 +1817,20 @@ pub const Specializer = struct {
                             if (std.mem.eql(u8, call.name, "count")) break :call_type .int;
                             if (std.mem.eql(u8, call.name, "is_empty")) break :call_type .bool;
                         }
-                        for (structure.methods) |method| {
-                            if (std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
-                                break :call_type if (call.safe and method.return_type.optionalChild() == null)
-                                    .optional(method.return_type)
-                                else
-                                    method.return_type;
+                        var owner: ?Ast.Structure = structure;
+                        var remaining = self.structures.items.len;
+                        while (owner) |current| {
+                            if (remaining == 0) break;
+                            remaining -= 1;
+                            for (current.methods) |method| {
+                                if (std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
+                                    break :call_type if (call.safe and method.return_type.optionalChild() == null)
+                                        .optional(method.return_type)
+                                    else
+                                        method.return_type;
+                                }
                             }
+                            owner = if (current.base) |base| self.structureForType(base) else null;
                         }
                     }
                 }
@@ -1841,6 +1848,8 @@ pub const Specializer = struct {
             },
             .unary => |unary| if (unary.operator == .logical_not)
                 .bool
+            else if (unary.operator == .force_optional)
+                if (self.inferExpressionType(unary.operand, locals)) |operand_type| operand_type.optionalChild() else null
             else if (unary.operator == .propagate)
                 self.inferPropagatedType(unary.operand, locals)
             else

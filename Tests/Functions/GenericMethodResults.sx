@@ -1,0 +1,28 @@
+class Base {
+    func value() int? { return 42 }
+    func nested() int?? { return 7 }
+}
+
+class Middle:Base {}
+class Leaf:Middle {}
+class Override:Base {
+    override func value() int? { return 99 }
+}
+
+struct Store {
+    func identity<T>(value:T) T { return value }
+}
+
+func identity<T>(value:T) T { return value }
+
+test "infer inherited results and unwrap exactly one optional layer in generic calls" {
+    var leaf = Leaf()
+    var changed = Override()
+    var store = Store()
+    assert(store.identity<int>(leaf.value()!) == 42)
+    assert(store.identity(leaf.value()!) == 42)
+    assert(identity<int>(leaf.value()!) == 42)
+    assert(store.identity<int?>(leaf.nested()!)! == 7)
+    assert(store.identity<int>(leaf.nested()!!) == 7)
+    assert(store.identity<int>(changed.value()!) == 99)
+}
