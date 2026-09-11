@@ -14,6 +14,7 @@ const Llvm = @import("Llvm.zig");
 const LlvmStats = @import("LlvmStats.zig");
 const Metamorphic = @import("Metamorphic.zig");
 const Native = @import("Native.zig");
+const NumericConversions = @import("NumericConversions.zig");
 const NativeGenerator = @import("NativeGenerator.zig");
 const Parity = @import("Parity.zig");
 const ProjectStress = @import("ProjectStress.zig");
@@ -530,6 +531,8 @@ fn qualifyNative(
     }
     const failure_count = try IntegerFailures.qualify(allocator, io, silex_binary, output_directory ++ "/integer-failures");
     try Report.line(io, allocator, "qualified: {d} integer failures with ordered output in Debug/Release", .{failure_count});
+    const conversion_count = try NumericConversions.qualify(allocator, io, silex_binary, output_directory ++ "/numeric-conversions");
+    try Report.line(io, allocator, "qualified: {d} numeric conversions with exact values and diagnostics in Debug/Release", .{conversion_count});
     try qualifyGeneratedNative(io, allocator, silex_binary, generated_count, initial_seed);
     try Report.line(io, allocator, "qualified: {d} fixed regressions and {d} generated native scenarios", .{
         Generator.regressions.len,
@@ -1675,6 +1678,7 @@ test {
     _ = Metamorphic;
     _ = Native;
     _ = NativeGenerator;
+    _ = NumericConversions;
     _ = Qualification;
     _ = Registry;
     _ = Reducer;

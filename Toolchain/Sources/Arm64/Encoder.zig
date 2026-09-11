@@ -4753,6 +4753,17 @@ fn encodeConversion(
         const result = floatResultRegister(function, conversion.result) orelse .x10;
         try words.append(allocator, integerToFloat(result, operand, conversion.source.isSignedInteger(), double));
         if (conversion.checked) {
+            if (conversion.source.bitWidth() == 64) {
+                // FCVTZS/FCVTZU saturate at the positive integer endpoint.
+                // Reject a rounded power-of-two upper bound before comparing
+                // the reconverted value with the original integer.
+                const upper: f64 = @floatFromInt(@as(u128, Numeric.integerMax(conversion.source)) + 1);
+                const bits: u64 = if (double) @bitCast(upper) else @as(u32, @bitCast(@as(f32, @floatCast(upper))));
+                try emitImmediate64(allocator, words, .x11, bits);
+                try words.append(allocator, moveGeneralToFloat(.x11, .x11, double));
+                try words.append(allocator, floatCompare(result, .x11, double));
+                try emitConversionGuard(allocator, words, fixups, data_fixups, external_call_sites, platform, program, conversion.header, .minus);
+            }
             try words.append(allocator, floatToInteger(.x11, result, conversion.source.isSignedInteger(), double));
             try words.append(allocator, compareRegisters(operand, .x11));
             try emitConversionGuard(allocator, words, fixups, data_fixups, external_call_sites, platform, program, conversion.header, .equal);

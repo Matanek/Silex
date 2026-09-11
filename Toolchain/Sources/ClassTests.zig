@@ -527,6 +527,18 @@ test "static let evaluates deterministic intrinsic expressions and functions" {
     try std.testing.expectEqualStrings("472.0 true 42\n", output);
 }
 
+test "static integer to float conversion preserves the original integer precision" {
+    try expectCompileError(
+        "struct Values { static let maximum:uint64 = 18446744073709551615; static let rounded:float32 = Values.maximum as float32 } func main() {}",
+        "static initializer numeric conversion loses information",
+    );
+    const output = try run(
+        "struct Values { static let high:uint64 = 9223372036854775808; static let exact:float32 = Values.high as float32 } func main() { print(Values.exact == 9223372036854775808.0) }",
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("true\n", output);
+}
+
 test "immutable intrinsic static members lower directly to constants" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

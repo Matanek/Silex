@@ -1,6 +1,7 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const ResidenceLiveness = @import("../Arm64/ResidenceLiveness.zig");
+const NumericConversion = @import("NumericConversion.zig");
 const Numeric = @import("../Numeric.zig");
 const IntegerArithmetic = @import("IntegerArithmetic.zig");
 const ConstantDivision = @import("../ConstantDivision.zig");
@@ -733,31 +734,19 @@ fn encodeFunction(
                 try emitStoreStack(allocator, bytes, .rax, value.result);
             },
             .convert => |conversion| {
-                if (!conversion.source.isFloat() and conversion.target.isFloat()) {
-                    try emitLoadStack(allocator, bytes, .rax, conversion.operand);
-                    try bytes.appendSlice(allocator, if (conversion.target == .float32)
-                        &.{ 0xf3, 0x48, 0x0f, 0x2a, 0xc0 }
-                    else
-                        &.{ 0xf2, 0x48, 0x0f, 0x2a, 0xc0 });
-                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, conversion.target == .float64);
-                } else if (conversion.source.isFloat() and !conversion.target.isFloat()) {
-                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, conversion.source == .float64);
-                    try bytes.appendSlice(allocator, if (conversion.source == .float32)
-                        &.{ 0xf3, 0x48, 0x0f, 0x2c, 0xc0 }
-                    else
-                        &.{ 0xf2, 0x48, 0x0f, 0x2c, 0xc0 });
-                    try emitStoreStack(allocator, bytes, .rax, conversion.result);
-                } else if (conversion.source == .float32 and conversion.target == .float64) {
-                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, false);
-                    try bytes.appendSlice(allocator, &.{ 0xf3, 0x0f, 0x5a, 0xc0 });
-                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, true);
-                } else if (conversion.source == .float64 and conversion.target == .float32) {
-                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, true);
-                    try bytes.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x5a, 0xc0 });
-                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, false);
-                } else {
-                    try emitLoadStack(allocator, bytes, .rax, conversion.operand);
-                    try emitStoreStack(allocator, bytes, .rax, conversion.result);
+                var failures: std.ArrayList(usize) = .empty;
+                defer failures.deinit(allocator);
+                try emitLoadStack(allocator, bytes, .rax, conversion.operand);
+                try NumericConversion.emit(allocator, bytes, conversion, &failures);
+                try emitStoreStack(allocator, bytes, .rax, conversion.result);
+                if (failures.items.len != 0) {
+                    try bytes.append(allocator, 0xe9);
+                    const completed = bytes.items.len;
+                    try bytes.appendNTimes(allocator, 0, 4);
+                    for (failures.items) |site| try patchRelative(bytes.items, site, bytes.items.len);
+                    try emitWriteStatic(allocator, bytes, data_fixups, windows_import_sites, platform, conversion.header);
+                    try emitRuntimeFailure(allocator, bytes, &epilogue_fixups);
+                    try patchRelative(bytes.items, completed, bytes.items.len);
                 }
             },
             .format_value => |format| try TextRuntime.emit(
@@ -4044,7 +4033,7 @@ test "encode float32 to float64 widening on X64" {
 
     const image = try encodeLinux(std.testing.allocator, program);
     defer image.deinit(std.testing.allocator);
-    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf3, 0x0f, 0x5a, 0xc0 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf3, 0x0f, 0x5a, 0xdb }) != null);
 }
 
 test "encode float64 to float32 narrowing on X64" {
@@ -4073,7 +4062,7 @@ test "encode float64 to float32 narrowing on X64" {
 
     const image = try encodeLinux(std.testing.allocator, program);
     defer image.deinit(std.testing.allocator);
-    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf2, 0x0f, 0x5a, 0xc0 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf2, 0x0f, 0x5a, 0xe3 }) != null);
 }
 
 test "encode indirect C ABI calls on Linux and Windows X64" {

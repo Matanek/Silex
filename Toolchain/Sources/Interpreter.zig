@@ -1263,8 +1263,9 @@ fn convert(value: Value, target: Ir.Type, checked: bool) Error!Value {
         const number = try numericInteger(value);
         if (target == .float32) {
             const result: f32 = if (source.isSignedInteger()) @floatFromInt(number.signed()) else @floatFromInt(number.bits);
-            const exact: f64 = if (source.isSignedInteger()) @floatFromInt(number.signed()) else @floatFromInt(number.bits);
-            if (checked and @as(f64, result) != exact) return error.InvalidConversion;
+            if (source.isSignedInteger()) {
+                if (checked and @as(i128, @intFromFloat(result)) != number.signed()) return error.InvalidConversion;
+            } else if (checked and @as(u128, @intFromFloat(result)) != number.bits) return error.InvalidConversion;
             return .{ .float32 = result };
         }
         const result: f64 = if (source.isSignedInteger()) @floatFromInt(number.signed()) else @floatFromInt(number.bits);
