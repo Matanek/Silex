@@ -2,6 +2,53 @@ const std = @import("std");
 const Machine = @import("Machine.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
 
+test "view replacement preserves live volatile registers across paired and trailing copies" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]u12{ 1, 2, 3 }) |width| {
+        const function: Machine.Function = .{
+            .name = "replace_with_live_siblings",
+            .parameter_count = 7,
+            .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 }, .{ .start = 4, .width = 1 }, .{ .start = 5, .width = 1 }, .{ .start = 6, .width = 1 } },
+            .return_type = .int,
+            .return_width = 1,
+            .slot_count = 13,
+            .frame_size = try Machine.frameSize(13),
+            .register_slots = &.{ null, null, null, null, null, 5, 6, null, null, null, null, null, 0 },
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 7, .bits = 11 } },
+                .{ .constant_int = .{ .result = 8, .bits = 13 } },
+                .{ .constant_int = .{ .result = 9, .bits = 17 } },
+                .{ .collection_replace = .{
+                    .result = .{ .start = 10, .width = 2, .aggregate = true },
+                    .collection = .{ .start = 0, .width = 2, .aggregate = true },
+                    .index = 2,
+                    .replacement = .{ .start = 7, .width = width, .aggregate = true },
+                    .count = 0,
+                    .dynamic = true,
+                    .view = true,
+                    .checked = false,
+                    .element_stride = width * Machine.slot_size,
+                    .header = 0,
+                    .tail = 0,
+                } },
+                .{ .binary = .{ .result = 12, .operator = .add, .left = 5, .right = 6, .type = .int } },
+                .{ .return_value = .{ .start = 12, .width = 1 } },
+            },
+        };
+        var values = [_]i64{ 0, 0, 0 };
+        const result = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{function}, .strings = &.{""} }, 0, &.{ @intCast(@intFromPtr(&values)), 1, 0, 0, 0, 101, 103 });
+        try std.testing.expectEqual(Machine.Status.success, result.status);
+        try std.testing.expectEqual(@as(i64, 204), result.value);
+        const expected = [_]i64{ 11, 13, 17 };
+        try std.testing.expectEqualSlices(i64, expected[0..width], values[0..width]);
+        for (values[width..]) |value| try std.testing.expectEqual(@as(i64, 0), value);
+    }
+}
+
 test "pure aggregate construction and copies retain arithmetic residences" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

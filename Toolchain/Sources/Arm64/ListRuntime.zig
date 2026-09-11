@@ -1510,16 +1510,18 @@ fn copyReplacementToAddress(
         return;
     }
     try stackAddress(allocator, words, .x12, replacement.start);
+    // View replacement is compatible with register residence: x0...x8 may
+    // still hold live values. Use only reserved scratch registers for copies.
     var leaf: usize = 0;
     while (leaf + 1 < replacement.width) : (leaf += 2) {
         const byte_offset: u9 = @intCast(leaf * Machine.slot_size);
-        try words.append(allocator, A64.load64Pair(.x5, .x6, .x12, byte_offset));
-        try words.append(allocator, A64.store64Pair(.x5, .x6, destination, byte_offset));
+        try words.append(allocator, A64.load64Pair(.x9, .x11, .x12, byte_offset));
+        try words.append(allocator, A64.store64Pair(.x9, .x11, destination, byte_offset));
     }
     if (leaf < replacement.width) {
         const byte_offset: u12 = @intCast(leaf * Machine.slot_size);
-        try words.append(allocator, A64.load64(.x5, .x12, byte_offset));
-        try words.append(allocator, A64.store64(.x5, destination, byte_offset));
+        try words.append(allocator, A64.load64(.x9, .x12, byte_offset));
+        try words.append(allocator, A64.store64(.x9, destination, byte_offset));
     }
 }
 
@@ -1735,9 +1737,9 @@ test "copy slot aggregates to collection storage with paired transfers" {
 
     try std.testing.expectEqualSlices(u32, &.{
         A64.addSubtractImmediate(.x12, .zero_or_sp, 242 * Machine.slot_size, true),
-        A64.load64Pair(.x5, .x6, .x12, 0),
-        A64.store64Pair(.x5, .x6, .x10, 0),
-        A64.load64Pair(.x5, .x6, .x12, 2 * Machine.slot_size),
-        A64.store64Pair(.x5, .x6, .x10, 2 * Machine.slot_size),
+        A64.load64Pair(.x9, .x11, .x12, 0),
+        A64.store64Pair(.x9, .x11, .x10, 0),
+        A64.load64Pair(.x9, .x11, .x12, 2 * Machine.slot_size),
+        A64.store64Pair(.x9, .x11, .x10, 2 * Machine.slot_size),
     }, words.items);
 }
