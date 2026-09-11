@@ -371,6 +371,8 @@ may remain in XMM6...XMM15 across these instructions. Bounds failures retain
 their epilogue exit, addressed spans remain pinned, and actual calls retain
 the full interval barrier. This does not change the packed SSE register bank
 or the integer allocation policy.
+Terminal returns likewise pin only their returned spans: their epilogue
+cannot invalidate values used exclusively by another CFG successor.
 
 ARM64 also admits a restricted set of memory operations. Checked dynamic
 loads, view replacement, and explicit address/reference accesses retain their

@@ -35,6 +35,17 @@ func edges(values:@Pair[..], zero:float64, nan:float64) {
     print(unordered != unordered)
 }
 
+func select(values:@Pair[..], empty:bool) Pair {
+    var x:float64 = 1.0
+    var y:float64 = 2.0
+    for value in values {
+        x += value.x
+        y += value.y
+    }
+    if empty { return Pair(x:0.0, y:0.0) }
+    return Pair(x:x, y:y)
+}
+
 func main() {
     let values:Pair[] = [Pair(x:1.0, y:2.0), Pair(x:3.0, y:4.0)]
     let view = @values[0:values.count()]
@@ -45,4 +56,9 @@ func main() {
     print(fixed(narrow, 0) == 0.5)
     print(fixed(narrow, 9) == 9.5)
     edges(view, -0.0, 0.0 / 0.0)
+    let selected = select(view, false)
+    print(selected.x == 5.0)
+    print(selected.y == 8.0)
+    let empty = select(view, true)
+    print(empty.x == 0.0 && empty.y == 0.0)
 }

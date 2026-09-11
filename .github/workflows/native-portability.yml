@@ -107,8 +107,8 @@ jobs:
             "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
-            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 7
-            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 7
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
           done
           run_distribution() {
             executable="$1"
@@ -396,8 +396,8 @@ jobs:
             "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
-            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 7
-            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 7
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
           done
 
   linux-x64:
@@ -508,8 +508,8 @@ jobs:
             "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
-            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 7
-            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 7
+            test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 10
           done
 
   windows-x64:
@@ -653,7 +653,7 @@ jobs:
             & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
             $floatMemoryOutput = @(& $floatMemoryBinary)
-            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 7 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 10 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "float memory residence $mode regression failed"
             }
           }
@@ -976,7 +976,7 @@ jobs:
             & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
             $floatMemoryOutput = @(& $floatMemoryBinary)
-            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 7 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 10 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "float memory residence $mode regression failed"
             }
           }

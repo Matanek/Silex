@@ -54,6 +54,9 @@ fn scalarFloatInstruction(instruction: Machine.Instruction) FloatLaneAllocation.
         // These stack emitters use only GPR scratch registers. Bounds errors
         // jump to the epilogue; no returning path calls or clobbers XMM6...15.
         .copy_range, .aggregate_init, .collection_load, .collection_count => .stack_operands,
+        // A terminal return reads its stack operands and leaves the CFG.
+        // Values belonging only to another successor cannot cross this exit.
+        .return_value => .stack_operands,
         else => .barrier,
     };
 }
@@ -900,4 +903,30 @@ test "X64 scalar floats cross stack copies while every input and output leaf sta
         const called = try FloatLaneAllocation.allocateFloatScalarsFor(allocator, function, &.{ 6, 7, 8, 9 }, scalarFloatInstruction);
         try std.testing.expectEqual(@as(?u5, null), called[0]);
     }
+}
+
+test "X64 scalar floats survive an interleaved return on another branch" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const function: Machine.Function = .{
+        .name = "exclusive_return",
+        .parameter_count = 0,
+        .return_type = .float64,
+        .return_width = 1,
+        .slot_count = 4,
+        .frame_size = try Machine.frameSize(4),
+        .instructions = &.{
+            .{ .constant_float64 = .{ .result = 0, .bits = @bitCast(@as(f64, 1.0)) } },
+            .{ .constant_float64 = .{ .result = 1, .bits = @bitCast(@as(f64, 2.0)) } },
+            .{ .constant_bool = .{ .result = 2, .value = false } },
+            .{ .branch = .{ .condition = 2, .then_instruction = 4, .else_instruction = 5 } },
+            .{ .return_value = .{ .start = 1, .width = 1 } },
+            .{ .binary = .{ .result = 3, .left = 0, .right = 1, .operator = .add, .type = .float64 } },
+            .{ .return_value = .{ .start = 3, .width = 1 } },
+        },
+    };
+    const residences = try FloatLaneAllocation.allocateFloatScalarsFor(arena.allocator(), function, &.{ 6, 7, 8, 9 }, scalarFloatInstruction);
+    try std.testing.expect(residences[0] != null);
+    try std.testing.expectEqual(@as(?u5, null), residences[1]);
+    try std.testing.expectEqual(@as(?u5, null), residences[3]);
 }
