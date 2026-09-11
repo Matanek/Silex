@@ -99,6 +99,10 @@ pub const corpus = [_]CorpusEntry{
 
 pub const regressions = [_]RegressionEntry{
     .{
+        .name = "Regressions/LastElementNormalization.sx",
+        .concern = "repeated last-element normalization extends the value domain before use counting while preserving the first bounds check",
+    },
+    .{
         .name = "IntegerArithmetic.sx",
         .concern = "a hot scalar loop retains target registers across a terminal output barrier",
         .contract = .{ .native_loop_residence = .{
