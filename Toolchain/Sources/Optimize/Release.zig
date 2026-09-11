@@ -8,6 +8,7 @@ const InlineValues = @import("InlineValues.zig");
 const ReferenceMemory = @import("ReferenceMemory.zig");
 const KnownCollections = @import("KnownCollections.zig");
 const ScalarExpressions = @import("ScalarExpressions.zig");
+const DominatedValues = @import("DominatedValues.zig");
 const SsaPromotion = @import("SsaPromotion.zig");
 const ValueRanges = @import("ValueRanges.zig");
 const Workers = @import("../Workers.zig");
@@ -1245,20 +1246,21 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
 fn simplifySsaValues(allocator: Allocator, program: Ir.Program) !Ir.Program {
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
-        functions[index] = try simplifySsaFunction(allocator, function);
+        functions[index] = try simplifySsaFunction(allocator, program, function);
     }
     var result = program;
     result.functions = functions;
     return result;
 }
 
-fn simplifySsaFunction(allocator: Allocator, original: Ir.Function) !Ir.Function {
+fn simplifySsaFunction(allocator: Allocator, program: Ir.Program, original: Ir.Function) !Ir.Function {
     var current = original;
     var iteration: usize = 0;
     while (iteration <= original.blocks.len) : (iteration += 1) {
         const previous_blocks = current.blocks.len;
         const previous_instructions = instructionCount(current.blocks);
-        const expressions = try ScalarExpressions.optimize(allocator, current);
+        const dominated = try DominatedValues.optimize(allocator, program, current);
+        const expressions = try ScalarExpressions.optimize(allocator, dominated);
         const next = try simplifySsaFunctionOnce(allocator, expressions);
         const changed = next.blocks.len != previous_blocks or
             instructionCount(next.blocks) != previous_instructions or
@@ -3744,6 +3746,7 @@ test "release preserves representation-changing copies" {
 
 test {
     _ = @import("ScalarExpressionsTests.zig");
+    _ = @import("DominatedValuesTests.zig");
     _ = @import("KnownCollectionsTests.zig");
     _ = @import("ReleaseTests.zig");
     _ = @import("AggregateStoresTests.zig");

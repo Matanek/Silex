@@ -6,6 +6,7 @@ const IrStats = @import("IrStats.zig");
 
 pub const Evidence = union(enum) {
     none,
+    dominated_fields: struct { raw: usize, optimized: usize },
     scalar_expressions: struct {
         raw_products: usize,
         optimized_products: usize,
@@ -200,6 +201,7 @@ pub fn verifyContract(
         .coalesces_view_memory => |function_name| verifyViewMemory(function_name, differential),
         .forwards_owning_collection => |function_name| verifyOwningCollection(function_name, differential),
         .forwards_known_views => |function_name| verifyKnownViews(function_name, differential),
+        .reuses_dominated_fields => |name| verifyDominatedFields(name, differential),
         .reuses_scalar_expressions => |requirement| verifyScalarExpressions(requirement, differential),
         .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
         .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
@@ -1190,4 +1192,27 @@ fn findFunction(program: Silex.Ir.Program, name: []const u8) ?Silex.Ir.Function 
 fn qualifiedNameMatches(candidate: []const u8, leaf: []const u8) bool {
     if (candidate.len <= leaf.len or candidate[candidate.len - leaf.len - 1] != '.') return false;
     return std.mem.endsWith(u8, candidate, leaf);
+}
+
+fn fieldLoadCount(program: Silex.Ir.Program, name: []const u8) !usize {
+    const function = findFunction(program, name) orelse return error.ContractFunctionMissing;
+    var count: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        if (instruction == .field_load) count += 1;
+    };
+    return count;
+}
+
+fn verifyDominatedFields(name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = try fieldLoadCount(differential.raw_ir, name);
+    const optimized = try fieldLoadCount(differential.optimized_ir, name);
+    if (raw <= optimized or optimized != 24) return error.ExpectedDominatedFieldReuseMissing;
+    return .{ .dominated_fields = .{ .raw = raw, .optimized = optimized } };
+}
+
+pub fn verifyDominatedFieldCounter(name: []const u8, enabled: Differential.Result, disabled: Differential.Result) !ScalarExpressionCounter {
+    const with_count = try fieldLoadCount(enabled.optimized_ir, name);
+    const without_count = try fieldLoadCount(disabled.optimized_ir, name);
+    if (with_count != 24 or without_count <= with_count) return error.ExpectedDominatedFieldCounterMissing;
+    return .{ .enabled = with_count, .disabled = without_count };
 }

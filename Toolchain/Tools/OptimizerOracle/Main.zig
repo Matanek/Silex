@@ -315,6 +315,14 @@ fn qualifyNative(
         };
         var ssa_counter: ?Qualification.SsaValueCounter = null;
         var expression_counter: ?Qualification.ScalarExpressionCounter = null;
+        var field_counter: ?Qualification.ScalarExpressionCounter = null;
+        if (entry.contract == .reuses_dominated_fields) {
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
+                .verify_each_pass = true,
+                .disabled = .ssa_value_simplification,
+            });
+            field_counter = try Qualification.verifyDominatedFieldCounter(entry.contract.reuses_dominated_fields, differential, without);
+        }
         if (entry.contract == .reuses_scalar_expressions) {
             const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
@@ -434,6 +442,9 @@ fn qualifyNative(
         try Report.line(io, allocator, "  PASS {s}", .{entry.name});
         try Report.line(io, allocator, "    protects: {s}", .{entry.concern});
         try reportEvidence(io, allocator, evidence);
+        if (field_counter) |counter| {
+            try Report.line(io, allocator, "    counter: disabling ssa_value_simplification retains {d} field reads versus {d}", .{ counter.disabled, counter.enabled });
+        }
         if (expression_counter) |counter| {
             try Report.line(io, allocator, "    counter: disabling ssa_value_simplification retains {d} scalar products versus {d}", .{ counter.disabled, counter.enabled });
         }
@@ -640,6 +651,7 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 memory.optimized_guards,
             },
         ),
+        .dominated_fields => |fields| try Report.line(io, allocator, "    contract: dominated aggregate field reads {d} -> {d}", .{ fields.raw, fields.optimized }),
         .scalar_expressions => |expressions| try Report.line(
             io,
             allocator,

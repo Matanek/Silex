@@ -111,6 +111,15 @@ floating lane provenance. Stores do not change those snapshots, while calls
 and resource-release barriers end expression availability. This rule neither
 reorders floating arithmetic nor forwards a fresh memory read, and the first
 checked evaluation remains observable on every path reaching the duplicate.
+For a function with only scalar operations, local values and value aggregates,
+a dominance analysis also reuses identical binary evaluations and numeric
+fields of stable aggregate parameters across blocks. It rejects functions
+containing calls, writes to addressable values, address formation or resource
+operations; ordered scalar output does not mutate the analyzed values.
+Classes, collections and local aggregate homes are not field candidates.
+Every replacement has an already executed dominating definition, including
+under shuffled block order and loop backedges. A value available on only one
+incoming branch is retained, and no potentially failing computation is hoisted.
 Constant shifts fold only when their signed or unsigned count is inside the
 left operand width. Range analysis also marks dynamic shifts unchecked when
 the complete count interval proves that condition; ARM64 then omits the width
