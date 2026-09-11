@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "families": [
     {
       "id": "scalar-integers",
@@ -20,6 +20,15 @@
       "ir_families": [
         "constants-and-optionals"
       ],
+      "interaction_axes": ["type", "control", "error"],
+      "risk_triplets": ["collection+bounds+ownership"],
+      "proof_ids": [
+        "semantic-regression-corpus",
+        "structural-regression-contracts",
+        "integer-timing-qualified"
+      ],
+      "budget_ids": [],
+      "budget_gap": "No registered hot-function budget isolates integer widths and overflow cost.",
       "preconditions": "Integer widths and signedness; checked overflow remains observable.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -45,6 +54,18 @@
         "scalar_math_intrinsics"
       ],
       "ir_families": [],
+      "interaction_axes": ["type", "control", "call"],
+      "risk_triplets": ["float+simd+spill"],
+      "proof_ids": [
+        "native-regression-corpus",
+        "differential-and-llvm-corpus",
+        "float-timing-qualified"
+      ],
+      "budget_ids": [
+        "physics-preparation-kernel-macos-arm64",
+        "physics-contact-kernel-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Strict floating operations; no fast-math; preserve signed zero, NaN and exact conversions.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -73,6 +94,17 @@
         "local_simplification_post"
       ],
       "ir_families": [],
+      "interaction_axes": ["control", "error"],
+      "risk_triplets": ["aggregate+branch+return"],
+      "proof_ids": [
+        "structural-regression-contracts",
+        "metamorphic-quality-corpus"
+      ],
+      "budget_ids": [
+        "physics-contact-kernel-macos-arm64",
+        "font-direct-glyph-result-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Preserve predecessor identity, short-circuit effects and error ordering.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -98,6 +130,17 @@
       ],
       "passes": [],
       "ir_families": [],
+      "interaction_axes": ["loop", "control", "error"],
+      "risk_triplets": ["alias+call+loop"],
+      "proof_ids": [
+        "adversarial-robustness-campaign",
+        "branching-loop-qualified-timing"
+      ],
+      "budget_ids": [
+        "boids-steering-macos-arm64",
+        "physics-preparation-kernel-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Induction ranges must prove overflow, exit and index safety; retain negative and dynamic bounds.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -128,6 +171,18 @@
       "ir_families": [
         "collections-and-references"
       ],
+      "interaction_axes": ["memory", "alias", "call"],
+      "risk_triplets": ["alias+call+loop"],
+      "proof_ids": [
+        "adversarial-robustness-campaign",
+        "structural-regression-contracts"
+      ],
+      "budget_ids": [
+        "boids-steering-macos-arm64",
+        "physics-preparation-kernel-macos-arm64",
+        "physics-contact-kernel-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Distinct roots can alias; calls, unknown effects and control boundaries invalidate local facts.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -160,6 +215,17 @@
       "ir_families": [
         "globals-and-aggregates"
       ],
+      "interaction_axes": ["type", "memory", "alias", "call"],
+      "risk_triplets": ["aggregate+branch+return"],
+      "proof_ids": [
+        "structural-regression-contracts",
+        "metamorphic-quality-corpus"
+      ],
+      "budget_ids": [
+        "physics-preparation-kernel-macos-arm64",
+        "physics-contact-kernel-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Snapshots, addressable homes and alias-visible writes must survive scalar replacement.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -188,6 +254,18 @@
       "ir_families": [
         "ownership-and-copies"
       ],
+      "interaction_axes": ["memory", "alias", "error"],
+      "risk_triplets": ["collection+bounds+ownership"],
+      "proof_ids": [
+        "native-regression-corpus",
+        "cache-reproducibility"
+      ],
+      "budget_ids": [
+        "boids-steering-macos-arm64",
+        "font-raster-image-signature-macos-arm64",
+        "font-direct-glyph-result-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Functional owning replacement preserves the original; mutable views alias; bounds errors remain observable.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -217,6 +295,21 @@
         "control_flow_inlining"
       ],
       "ir_families": [],
+      "interaction_axes": ["call", "loop", "target"],
+      "risk_triplets": ["alias+call+loop", "float+simd+spill"],
+      "proof_ids": [
+        "structural-regression-contracts",
+        "native-regression-corpus",
+        "arm64-x64-portability-contracts"
+      ],
+      "budget_ids": [
+        "boids-steering-macos-arm64",
+        "physics-preparation-kernel-macos-arm64",
+        "physics-contact-kernel-macos-arm64",
+        "font-raster-image-signature-macos-arm64",
+        "font-direct-glyph-result-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Inlining must preserve errors/effects; profitability includes post-expansion lifetimes, spills and frames.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -241,6 +334,14 @@
       ],
       "passes": [],
       "ir_families": [],
+      "interaction_axes": ["error", "control"],
+      "risk_triplets": ["collection+bounds+ownership"],
+      "proof_ids": [
+        "semantic-regression-corpus",
+        "adversarial-robustness-campaign"
+      ],
+      "budget_ids": [],
+      "budget_gap": "Registered budgets measure successful hot paths; failing-path order and diagnostic cost remain unbudgeted.",
       "preconditions": "Match failure kind and ordering; LLVM trap does not reproduce Silex diagnostic text.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -265,6 +366,17 @@
       ],
       "passes": [],
       "ir_families": [],
+      "interaction_axes": ["type", "loop", "target"],
+      "risk_triplets": ["float+simd+spill"],
+      "proof_ids": [
+        "native-regression-corpus",
+        "arm64-x64-portability-contracts"
+      ],
+      "budget_ids": [
+        "boids-steering-macos-arm64",
+        "physics-preparation-kernel-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Lanes must be independent and profitable after packing, extraction, calls and spills on each target.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -290,6 +402,17 @@
       "ir_families": [
         "scalar-text-and-effects"
       ],
+      "interaction_axes": ["memory", "call", "error", "package"],
+      "risk_triplets": ["package+runtime+target"],
+      "proof_ids": [
+        "native-regression-corpus",
+        "cache-reproducibility"
+      ],
+      "budget_ids": [
+        "font-raster-image-signature-macos-arm64",
+        "font-direct-glyph-result-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Text, resource effects and boundary operations retain order and lifetime.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -314,6 +437,20 @@
       ],
       "passes": [],
       "ir_families": [],
+      "interaction_axes": ["call", "loop", "target"],
+      "risk_triplets": ["float+simd+spill"],
+      "proof_ids": [
+        "real-consumer-hot-budgets",
+        "arm64-x64-portability-contracts"
+      ],
+      "budget_ids": [
+        "boids-steering-macos-arm64",
+        "physics-preparation-kernel-macos-arm64",
+        "physics-contact-kernel-macos-arm64",
+        "font-raster-image-signature-macos-arm64",
+        "font-direct-glyph-result-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "ABI barriers and addressable values retain storage; costs must count dynamic hot-region traffic.",
       "scope": "bounded-corpus",
       "open_questions": [
@@ -339,12 +476,29 @@
       ],
       "passes": [],
       "ir_families": [],
+      "interaction_axes": ["package", "target", "memory"],
+      "risk_triplets": ["package+runtime+target"],
+      "proof_ids": [
+        "registry-completeness",
+        "differential-and-llvm-corpus",
+        "cache-reproducibility",
+        "real-consumer-hot-budgets",
+        "arm64-x64-portability-contracts"
+      ],
+      "budget_ids": [
+        "boids-steering-macos-arm64",
+        "physics-preparation-kernel-macos-arm64",
+        "physics-contact-kernel-macos-arm64",
+        "font-raster-image-signature-macos-arm64",
+        "font-direct-glyph-result-macos-arm64"
+      ],
+      "budget_gap": null,
       "preconditions": "Compare identical source/closure or explicitly equivalent kernels; application architecture is a separate cause.",
       "scope": "bounded-corpus",
       "open_questions": [
-        "Autonomous damping/translation and effective-mass probes cover subsets only; full Preparation/Integration and inherited GFX.ECS closure remain open."
+        "Autonomous reductions close the selected numeric subsets; full-stage cost, physical X64 behavior and exact-SHA external qualification remain open."
       ],
-      "next_experiment": "Extend independent reductions to rotation/speed caps, relative velocity and softness; preserve full-stage observation and qualification contracts.",
+      "next_experiment": "Run the sealed full-stage consumers on the exact compiler SHA and compare their hot budgets on physical ARM64 and X64 profiles.",
       "owner": "qualification",
       "targets": [
         "arm64",

@@ -35,22 +35,28 @@ Reports are written under `Toolchain/.zig-cache/optimizer-oracle/`:
 
 | Report | Meaning |
 | --- | --- |
-| `assurance.tsv` | Legacy state, historical timing proof count, currently timed corpus cases, bounded scope and owner per family |
+| `assurance.tsv` | Legacy state, timing evidence, interaction/proof/budget link counts, explicit budget-gap state, bounded scope and owner per family |
 | `llvm-operation-coverage.tsv` | Exhaustive IR operation classification shared with the actual emitter |
 | `proof-scope.tsv` | Historical outcome and whether its recorded source still matches; neither identity state means a fresh campaign |
 | `llvm-case-coverage.tsv` | Source hash, interpreter agreement, raw/Release emission result and unmodeled instruction tags per registered source |
 
 The matrix owns every coverage family, registered pass, portable IR family and
 LLVM transposition technique. Each family names existing positive and negative
-regressions, preconditions, target scope, unresolved questions and a next
-experiment. These associations identify relevant witnesses, not newly proved
-exhaustiveness. Target names identify required scope, not executed hosts.
+regressions, preconditions, interaction axes, risk triplets, historical proofs,
+target scope, unresolved questions and a next experiment. It also names every
+applicable registered hot-function budget. A family without such a budget must
+carry an explicit gap instead of an empty unexplained list. These associations
+identify relevant witnesses, not newly proved exhaustiveness. Target names
+identify required scope, not executed hosts.
+
 Tests reject missing families, techniques, negative cases, open questions,
-unregistered sources and unowned passes. The matrix is checked by every oracle
-command, including the mandatory quick gate. Admission prevents changing
-`Assurance.json` in the same commit as compiler implementation, as it already
-does for performance baselines. This separation does not replace review of a
-contract-only change.
+unregistered sources, stale proof identifiers, unknown interactions or budgets,
+unowned passes and any registered proof, interaction or hot budget left without
+a family. They also reject a missing or contradictory budget decision. The
+matrix is checked by every oracle command, including the mandatory quick gate.
+Admission prevents changing `Assurance.json` in the same commit as compiler
+implementation, as it already does for performance baselines. This separation
+does not replace review of a contract-only change.
 
 ## Current measured boundary
 

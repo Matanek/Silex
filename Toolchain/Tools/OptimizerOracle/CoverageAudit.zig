@@ -15,6 +15,11 @@ pub const Family = struct {
     negative_cases: []const []const u8,
     passes: []const []const u8,
     ir_families: []const []const u8,
+    interaction_axes: []const []const u8,
+    risk_triplets: []const []const u8,
+    proof_ids: []const []const u8,
+    budget_ids: []const []const u8,
+    budget_gap: ?[]const u8,
     preconditions: []const u8,
     scope: enum { @"bounded-corpus" },
     open_questions: []const []const u8,
@@ -32,7 +37,7 @@ pub fn load(allocator: Allocator, io: std.Io, directory: []const u8) !Manifest {
 }
 
 pub fn audit(manifest: Manifest, registry: Registry.Manifest) !void {
-    if (manifest.schema_version != 1) return error.UnsupportedAssuranceSchema;
+    if (manifest.schema_version != 2) return error.UnsupportedAssuranceSchema;
     if (manifest.families.len != registry.coverage.len) return error.IncompleteAssuranceCoverage;
     for (registry.coverage) |coverage| {
         var found: usize = 0;
@@ -44,7 +49,9 @@ pub fn audit(manifest: Manifest, registry: Registry.Manifest) !void {
     for (manifest.families) |family| {
         if (family.preconditions.len == 0 or family.next_experiment.len == 0 or
             family.open_questions.len == 0 or family.targets.len == 0 or
-            family.positive_cases.len == 0 or family.negative_cases.len == 0)
+            family.positive_cases.len == 0 or family.negative_cases.len == 0 or
+            family.interaction_axes.len == 0 or family.risk_triplets.len == 0 or
+            family.proof_ids.len == 0)
             return error.IncompleteAssuranceScope;
         // This schema describes bounded evidence. It cannot promote an entry to
         // general parity by deleting its questions or changing a status boolean.
@@ -72,6 +79,32 @@ pub fn audit(manifest: Manifest, registry: Registry.Manifest) !void {
             };
             if (!found) return error.UnknownAssuranceIrFamily;
         }
+        try unique(family.interaction_axes);
+        for (family.interaction_axes) |axis| if (!contains(registry.interactions.axes, axis))
+            return error.UnknownAssuranceInteraction;
+        try unique(family.risk_triplets);
+        for (family.risk_triplets) |triplet| if (!contains(registry.interactions.risk_triplets, triplet))
+            return error.UnknownAssuranceRiskTriplet;
+        try unique(family.proof_ids);
+        for (family.proof_ids) |proof_id| {
+            var found = false;
+            for (registry.proofs) |proof| if (same(proof.id, proof_id)) {
+                found = true;
+            };
+            if (!found) return error.UnknownAssuranceProof;
+        }
+        try unique(family.budget_ids);
+        for (family.budget_ids) |budget_id| {
+            var found = false;
+            for (registry.hot_functions) |hot_function| if (same(hot_function.id, budget_id)) {
+                found = true;
+            };
+            if (!found) return error.UnknownAssuranceBudget;
+        }
+        if (family.budget_ids.len == 0) {
+            if (family.budget_gap == null or family.budget_gap.?.len == 0)
+                return error.MissingAssuranceBudgetDecision;
+        } else if (family.budget_gap != null) return error.ConflictingAssuranceBudgetDecision;
     }
     for (registry.passes) |pass| {
         var found = false;
@@ -87,6 +120,14 @@ pub fn audit(manifest: Manifest, registry: Registry.Manifest) !void {
         };
         if (!found) return error.UnownedAssuranceIrFamily;
     }
+    for (registry.interactions.axes) |axis| if (!familyContains(manifest.families, "interaction_axes", axis))
+        return error.UnownedAssuranceInteraction;
+    for (registry.interactions.risk_triplets) |triplet| if (!familyContains(manifest.families, "risk_triplets", triplet))
+        return error.UnownedAssuranceRiskTriplet;
+    for (registry.proofs) |proof| if (!familyContains(manifest.families, "proof_ids", proof.id))
+        return error.UnownedAssuranceProof;
+    for (registry.hot_functions) |hot_function| if (!familyContains(manifest.families, "budget_ids", hot_function.id))
+        return error.UnownedAssuranceBudget;
     if (manifest.techniques.len != registry.transposition.len) return error.IncompleteAssuranceTechniques;
     for (registry.transposition) |entry| {
         var occurrences: usize = 0;
@@ -114,6 +155,11 @@ pub fn audit(manifest: Manifest, registry: Registry.Manifest) !void {
         };
         if (!found) return error.UnownedTimingCase;
     }
+}
+
+fn familyContains(families: []const Family, comptime field_name: []const u8, value: []const u8) bool {
+    for (families) |family| if (contains(@field(family, field_name), value)) return true;
+    return false;
 }
 
 fn auditCases(cases: []const []const u8) !void {
@@ -149,7 +195,7 @@ pub fn report(allocator: Allocator, io: std.Io, manifest: Manifest, registry: Re
     try std.Io.Dir.cwd().createDirPath(io, output);
     var table: std.Io.Writer.Allocating = .init(allocator);
     defer table.deinit();
-    try table.writer.writeAll("family\tlegacy_state\tlegacy_timing_proofs\tcurrent_timing_cases\tscope\towner\topen_questions\n");
+    try table.writer.writeAll("family\tlegacy_state\tlegacy_timing_proofs\tcurrent_timing_cases\tinteraction_axes\trisk_triplets\tproofs\tbudgets\tbudget_gap\tscope\towner\topen_questions\n");
     for (manifest.families) |family| {
         var state: []const u8 = "unknown";
         var timing_proofs: usize = 0;
@@ -164,7 +210,20 @@ pub fn report(allocator: Allocator, io: std.Io, manifest: Manifest, registry: Re
         for (Generator.corpus) |entry| if (entry.timing and contains(family.positive_cases, entry.name)) {
             timing_cases += 1;
         };
-        try table.writer.print("{s}\t{s}\t{d}\t{d}\t{s}\t{s}\t{d}\n", .{ family.id, state, timing_proofs, timing_cases, @tagName(family.scope), @tagName(family.owner), family.open_questions.len });
+        try table.writer.print("{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{any}\t{s}\t{s}\t{d}\n", .{
+            family.id,
+            state,
+            timing_proofs,
+            timing_cases,
+            family.interaction_axes.len,
+            family.risk_triplets.len,
+            family.proof_ids.len,
+            family.budget_ids.len,
+            family.budget_gap != null,
+            @tagName(family.scope),
+            @tagName(family.owner),
+            family.open_questions.len,
+        });
     }
     try write(io, output ++ "/assurance.tsv", table.written());
     table.clearRetainingCapacity();
@@ -330,4 +389,18 @@ test "assurance rejects removed coverage, techniques, negative cases and fabrica
     families[0] = original.families[0];
     families[0].targets = &.{"arm64"};
     try std.testing.expectError(error.IncompleteAssuranceTargets, audit(manifest, registry));
+    families[0] = original.families[0];
+    families[0].interaction_axes = &.{"missing-axis"};
+    try std.testing.expectError(error.UnknownAssuranceInteraction, audit(manifest, registry));
+    families[0] = original.families[0];
+    families[0].proof_ids = &.{"stale-proof"};
+    try std.testing.expectError(error.UnknownAssuranceProof, audit(manifest, registry));
+    families[0] = original.families[0];
+    families[0].budget_ids = &.{"missing-budget"};
+    families[0].budget_gap = null;
+    try std.testing.expectError(error.UnknownAssuranceBudget, audit(manifest, registry));
+    families[0] = original.families[0];
+    families[0].budget_ids = &.{};
+    families[0].budget_gap = null;
+    try std.testing.expectError(error.MissingAssuranceBudgetDecision, audit(manifest, registry));
 }
