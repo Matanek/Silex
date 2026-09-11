@@ -1,0 +1,3 @@
+workload	rank	score	priority	kind	evidence	action
+BranchingLoop.sx	1	70	medium	range_analysis	LLVM retains 2 signed and 6 unsigned remainder operation(s); Silex retains 4 signed and 0 unsigned.	Propagate ranges, signedness, and non-negativity to select simpler operations and prove checks.
+ReadonlyViewMemory.sx	1	81	high	constant_propagation	LLVM produces 1 constant print operation(s); Silex produces 0.	Propagate constants across calls and branches, then remove unreachable computations and blocks.

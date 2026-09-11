@@ -228,3 +228,8 @@ Timing remains separate from correctness. The comparison runner builds each
 candidate once, alternates execution order, and reports median, MAD, p10-p90,
 and limitations. A noisy or too-short workload is diagnostic evidence, not a
 performance verdict.
+
+For the distinction between a closed registry and general compiler parity, see
+[scope of optimizer evidence](Optimizer-coverage.md). The coverage audit records
+unsupported cases and historical proof identity without promoting either to
+current LLVM execution evidence.

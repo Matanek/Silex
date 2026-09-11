@@ -1,0 +1,445 @@
+{
+  "schema_version": 1,
+  "families": [
+    {
+      "id": "scalar-integers",
+      "positive_cases": [
+        "IntegerArithmetic.sx",
+        "IntegerWidths.sx",
+        "UnsignedBitwise.sx"
+      ],
+      "negative_cases": [
+        "Regressions/IntegerRangeChecks.sx",
+        "Regressions/IntegerConversionConstants.sx"
+      ],
+      "passes": [
+        "local_simplification_pre",
+        "value_range_analysis",
+        "ssa_value_simplification"
+      ],
+      "ir_families": [
+        "constants-and-optionals"
+      ],
+      "preconditions": "Integer widths and signedness; checked overflow remains observable.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "Arithmetic timing does not qualify all widths, conversions or range-driven operations."
+      ],
+      "next_experiment": "Compare signed/unsigned range variants and conversion boundaries with identical overflow checks.",
+      "owner": "optimizer",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "scalar-floating-point",
+      "positive_cases": [
+        "FloatArithmetic.sx",
+        "Regressions/FloatSsaLoop.sx"
+      ],
+      "negative_cases": [
+        "Regressions/FloatSsaDiamond.sx"
+      ],
+      "passes": [
+        "scalar_math_intrinsics"
+      ],
+      "ir_families": [],
+      "preconditions": "Strict floating operations; no fast-math; preserve signed zero, NaN and exact conversions.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "One recurrence timing does not qualify math calls, branch selection or exceptional operands."
+      ],
+      "next_experiment": "Add NaN/signed-zero and math-helper equivalent probes; inspect native selection and call expansion.",
+      "owner": "optimizer",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "branches-diamonds-and-phi",
+      "positive_cases": [
+        "Regressions/BooleanSharedChain.sx",
+        "Regressions/SsaValueFacts.sx"
+      ],
+      "negative_cases": [
+        "Regressions/SsaCriticalEdge.sx",
+        "Regressions/SsaDistinctPhiLoop.sx"
+      ],
+      "passes": [
+        "ssa_promotion_pre",
+        "ssa_promotion_post",
+        "local_simplification_post"
+      ],
+      "ir_families": [],
+      "preconditions": "Preserve predecessor identity, short-circuit effects and error ordering.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "No dedicated timed branch/phi workload; block reduction is not a dynamic branch-cost proof."
+      ],
+      "next_experiment": "Measure equivalent branch/select/phi kernels with shared conditions and observable fallible paths.",
+      "owner": "optimizer",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "loops-inductions-and-ranges",
+      "positive_cases": [
+        "BranchingLoop.sx",
+        "Regressions/LoopForms.sx",
+        "Regressions/DenseScalarLoop.sx"
+      ],
+      "negative_cases": [
+        "Regressions/SequentialBoundedLoops.sx",
+        "Regressions/ReversedFloatRecurrence.sx"
+      ],
+      "passes": [],
+      "ir_families": [],
+      "preconditions": "Induction ranges must prove overflow, exit and index safety; retain negative and dynamic bounds.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "One timed loop does not qualify nested/strided/dynamic-bound or multi-exit loops."
+      ],
+      "next_experiment": "Compare induction, LICM, rotation and cursor variants independently, then in interaction.",
+      "owner": "optimizer",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "references-and-alias",
+      "positive_cases": [
+        "ReferenceDeadStores.sx",
+        "ReadonlyViewMemory.sx",
+        "MutableViewMemory.sx"
+      ],
+      "negative_cases": [
+        "ReferenceAliasing.sx",
+        "Regressions/MultipleReferenceCursors.sx"
+      ],
+      "passes": [
+        "reference_memory_elision"
+      ],
+      "ir_families": [
+        "collections-and-references"
+      ],
+      "preconditions": "Distinct roots can alias; calls, unknown effects and control boundaries invalidate local facts.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "LLVM still folds the readonly-view probe to a constant where Silex does not; cross-block effects are not generally covered."
+      ],
+      "next_experiment": "Use ReadonlyViewMemory.sx to distinguish call specialization, range information and memory forwarding.",
+      "owner": "optimizer",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "aggregates-copies-and-returns",
+      "positive_cases": [
+        "AggregateScalarization.sx",
+        "NestedAggregateWidths.sx",
+        "Regressions/AggregateParameterResidence.sx"
+      ],
+      "negative_cases": [
+        "Regressions/AggregateFieldStores.sx",
+        "Regressions/AggregateControlFlow.sx"
+      ],
+      "passes": [
+        "aggregate_argument_borrow",
+        "aggregate_scalarization_pre",
+        "aggregate_scalarization_post"
+      ],
+      "ir_families": [
+        "globals-and-aggregates"
+      ],
+      "preconditions": "Snapshots, addressable homes and alias-visible writes must survive scalar replacement.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "No timed aggregate/reference-return family; primitive aggregates do not cover classes, protocols or all owning fields."
+      ],
+      "next_experiment": "Reduce aggregate calls/returns from Integration into independent width and alias variants; inspect copies and residence.",
+      "owner": "optimizer",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "collections-ownership-and-bounds",
+      "positive_cases": [
+        "OwningCollectionCopy.sx",
+        "MutableViewMemory.sx",
+        "Regressions/CollectionCursor.sx"
+      ],
+      "negative_cases": [
+        "Regressions/CheckedMemoryLanes.sx",
+        "Regressions/ArrayStorageAccess.sx"
+      ],
+      "passes": [],
+      "ir_families": [
+        "ownership-and-copies"
+      ],
+      "preconditions": "Functional owning replacement preserves the original; mutable views alias; bounds errors remain observable.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "LLVM models scalar collection values, not reference-count cost, resource destruction or resource-bearing elements."
+      ],
+      "next_experiment": "Separate value-semantic comparisons from lifetime/runtime cost; add observable destruction and allocation witnesses.",
+      "owner": "llvm-bridge",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "calls-closure-and-inlining",
+      "positive_cases": [
+        "Regressions/PureMathReferenceInlining.sx",
+        "Regressions/HotReferenceLeafClosure.sx"
+      ],
+      "negative_cases": [
+        "Regressions/CallEffectsInlining.sx",
+        "Regressions/BranchingReferenceInlining.sx",
+        "Regressions/X64IndirectAggregate.sx"
+      ],
+      "passes": [
+        "value_inlining",
+        "control_flow_inlining"
+      ],
+      "ir_families": [],
+      "preconditions": "Inlining must preserve errors/effects; profitability includes post-expansion lifetimes, spills and frames.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "Indirect calls and captured functions have no raw LLVM bridge; instruction count alone failed on reference closure."
+      ],
+      "next_experiment": "Reduce Preparation/Integration calls to standalone positive/negative closure probes and inspect target expansion.",
+      "owner": "optimizer",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "errors-and-overflow",
+      "positive_cases": [
+        "IntegerWidths.sx",
+        "Regressions/IntegerRangeChecks.sx"
+      ],
+      "negative_cases": [
+        "Regressions/IntegerShiftConstants.sx",
+        "Regressions/CheckedMemoryLanes.sx"
+      ],
+      "passes": [],
+      "ir_families": [],
+      "preconditions": "Match failure kind and ordering; LLVM trap does not reproduce Silex diagnostic text.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "Fixed successful probes do not qualify emitted failing executions or all diagnostics against LLVM."
+      ],
+      "next_experiment": "Add paired failure-path contracts distinct from successful-value timing; keep Silex interpreter/native diagnostics authoritative.",
+      "owner": "llvm-bridge",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "simd-and-vectorization",
+      "positive_cases": [
+        "Regressions/LoopExitFloatLaneXY.sx",
+        "Regressions/LoopExitFloatLaneXYZW.sx"
+      ],
+      "negative_cases": [
+        "Regressions/FloatLaneXYZ.sx",
+        "Regressions/ReversedFloatRecurrence.sx"
+      ],
+      "passes": [],
+      "ir_families": [],
+      "preconditions": "Lanes must be independent and profitable after packing, extraction, calls and spills on each target.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "Width/pair contracts are structural; no timed vector family or physical X64 vector claim is established."
+      ],
+      "next_experiment": "Compare widths 2/3/4, reductions and loop exits with target realization and packing costs visible.",
+      "owner": "machine",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "runtime-effects-and-text",
+      "positive_cases": [
+        "Regressions/TextOutputIntegrity.sx"
+      ],
+      "negative_cases": [
+        "Regressions/CallEffectsInlining.sx",
+        "Regressions/AggregateFieldStores.sx"
+      ],
+      "passes": [],
+      "ir_families": [
+        "scalar-text-and-effects"
+      ],
+      "preconditions": "Text, resource effects and boundary operations retain order and lifetime.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "String operations, globals, dynamic/boundary calls and synchronization lack equivalent LLVM lowering."
+      ],
+      "next_experiment": "Audit unsupported operations and add isolated semantic/runtime-cost witnesses without claiming LLVM equivalence prematurely.",
+      "owner": "llvm-bridge",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "registers-spills-and-stack",
+      "positive_cases": [
+        "IntegerArithmetic.sx",
+        "Regressions/AggregateParameterResidence.sx"
+      ],
+      "negative_cases": [
+        "Regressions/X64RegionalBarriers.sx",
+        "Regressions/X64IndirectAggregate.sx"
+      ],
+      "passes": [],
+      "ir_families": [],
+      "preconditions": "ABI barriers and addressable values retain storage; costs must count dynamic hot-region traffic.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "Structural X64 contracts and ARM64 timings do not close the physical X64 Arithmetic/Objects/Flocking residuals."
+      ],
+      "next_experiment": "Run fixed reduced residence/barrier probes physically on both architectures; distinguish frame bytes from dynamic spill traffic.",
+      "owner": "machine",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    },
+    {
+      "id": "packages-and-real-consumers",
+      "positive_cases": [
+        "Regressions/BoidsKernel.sx",
+        "Regressions/Boids2DSteering.sx"
+      ],
+      "negative_cases": [
+        "Regressions/CheckedMemoryLanes.sx"
+      ],
+      "passes": [],
+      "ir_families": [],
+      "preconditions": "Compare identical source/closure or explicitly equivalent kernels; application architecture is a separate cause.",
+      "scope": "bounded-corpus",
+      "open_questions": [
+        "Preparation/Integration still need autonomous same-workload probes; inherited external closure audit fails on GFX.ECS ancestry."
+      ],
+      "next_experiment": "Extract stage kernels into compiler fixtures and qualify them before full external sentries; reconcile external proof ownership separately.",
+      "owner": "qualification",
+      "targets": [
+        "arm64",
+        "x64"
+      ]
+    }
+  ],
+  "techniques": [
+    {
+      "family": "new-pass-manager-and-analysis-invalidation",
+      "coverage_ids": [
+        "branches-diamonds-and-phi"
+      ]
+    },
+    {
+      "family": "instcombine-and-simplifycfg",
+      "coverage_ids": [
+        "scalar-integers",
+        "branches-diamonds-and-phi"
+      ]
+    },
+    {
+      "family": "mem2reg-sroa-and-early-cse",
+      "coverage_ids": [
+        "aggregates-copies-and-returns"
+      ]
+    },
+    {
+      "family": "lazy-value-info-and-correlated-propagation",
+      "coverage_ids": [
+        "scalar-integers",
+        "loops-inductions-and-ranges"
+      ]
+    },
+    {
+      "family": "basic-aa-memoryssa-and-dse",
+      "coverage_ids": [
+        "references-and-alias"
+      ]
+    },
+    {
+      "family": "global-value-numbering",
+      "coverage_ids": [
+        "references-and-alias"
+      ]
+    },
+    {
+      "family": "ipsccp-attributor-and-function-attrs",
+      "coverage_ids": [
+        "calls-closure-and-inlining"
+      ]
+    },
+    {
+      "family": "inline-cost-and-cgscc",
+      "coverage_ids": [
+        "calls-closure-and-inlining"
+      ]
+    },
+    {
+      "family": "loop-simplify-indvars-licm-and-rotate",
+      "coverage_ids": [
+        "loops-inductions-and-ranges"
+      ]
+    },
+    {
+      "family": "loop-vectorize-and-slp-vectorizer",
+      "coverage_ids": [
+        "simd-and-vectorization"
+      ]
+    },
+    {
+      "family": "target-transform-info",
+      "coverage_ids": [
+        "simd-and-vectorization",
+        "registers-spills-and-stack"
+      ]
+    },
+    {
+      "family": "selectiondag-globalisel-and-combiner",
+      "coverage_ids": [
+        "registers-spills-and-stack"
+      ]
+    },
+    {
+      "family": "machine-scheduler",
+      "coverage_ids": [
+        "registers-spills-and-stack"
+      ]
+    },
+    {
+      "family": "greedy-register-allocation-and-spill-placement",
+      "coverage_ids": [
+        "registers-spills-and-stack"
+      ]
+    },
+    {
+      "family": "lit-filecheck-and-differential-testing",
+      "coverage_ids": [
+        "errors-and-overflow",
+        "packages-and-real-consumers"
+      ]
+    }
+  ]
+}

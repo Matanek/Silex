@@ -276,3 +276,14 @@ test "every rule must retain the quick gate" {
     invalid.rules = &invalid_rules;
     try std.testing.expectError(error.AdmissionRuleWithoutQuickGate, audit(invalid));
 }
+
+test "the live coverage contract cannot change alongside compiler implementation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const manifest = try load(arena.allocator(), std.testing.io, "Benchmarks/Optimizer");
+    try audit(manifest);
+    try std.testing.expectError(error.BaselineSelfValidation, select(arena.allocator(), manifest, &.{
+        "Toolchain/Sources/Optimize/Release.zig",
+        "Toolchain/Benchmarks/Optimizer/Assurance.json",
+    }));
+}

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "relevant_roots": ["Toolchain/", "Docs/", ".github/workflows/"],
-  "protected_contracts": ["Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json"],
+  "protected_contracts": ["Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json", "Toolchain/Benchmarks/Optimizer/Assurance.json"],
   "checks": [
     {"id": "optimizer-admission-quick", "kind": "local", "command": "cd Toolchain && zig build check", "status_context": "optimizer admission / quick"},
     {"id": "optimizer-qualified-internal", "kind": "qualified", "command": "cd Toolchain && zig build optimizer-gate", "status_context": "optimizer admission / qualified internal"},

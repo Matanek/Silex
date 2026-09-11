@@ -17,6 +17,7 @@ const Parity = @import("Parity.zig");
 const ProjectStress = @import("ProjectStress.zig");
 const Qualification = @import("Qualification.zig");
 const Registry = @import("Registry.zig");
+const CoverageAudit = @import("CoverageAudit.zig");
 const Reducer = @import("Reducer.zig");
 const Report = @import("Report.zig");
 const Robustness = @import("Robustness.zig");
@@ -26,6 +27,8 @@ const usage =
     \\
     \\Commands:
     \\  audit               Validate coverage, baselines, passes and LLVM pins
+    \\  coverage-audit      Audit bounded evidence and LLVM bridge coverage without packages
+    \\  coverage-scan       Probe raw/Release LLVM emission for every registered case
     \\  verify              Compare raw and Release IR through the interpreter
     \\  passes              List the stable Release pass registry
     \\  verify-prefix PASS  Verify the corpus through one Release pass
@@ -81,6 +84,14 @@ fn run(init: std.process.Init) !u8 {
     const command = arguments[3];
     const registry = try Registry.load(allocator, init.io, corpus_directory);
     try Registry.audit(registry);
+    const assurance = try CoverageAudit.load(allocator, init.io, corpus_directory);
+    try CoverageAudit.audit(assurance, registry);
+    if (std.mem.eql(u8, command, "coverage-audit") or std.mem.eql(u8, command, "coverage-scan")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try CoverageAudit.report(allocator, init.io, assurance, registry, corpus_directory);
+        if (std.mem.eql(u8, command, "coverage-scan")) try CoverageAudit.scan(allocator, init.io, corpus_directory);
+        return 0;
+    }
     if (std.mem.eql(u8, command, "admission-audit")) {
         if (arguments.len != 4) return error.InvalidArguments;
         const admission = try Admission.load(allocator, init.io, corpus_directory);
@@ -123,7 +134,7 @@ fn run(init: std.process.Init) !u8 {
         try Registry.auditParity(registry);
         try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
         try reportRegistry(init.io, allocator, registry);
-        try Report.heading(init.io, allocator, "optimizer parity registry closed");
+        try Report.heading(init.io, allocator, "registered fixed-corpus parity registry closed; general parity requires coverage-audit review");
         return 0;
     }
     if (std.mem.eql(u8, command, "verify")) {
@@ -1441,6 +1452,7 @@ fn isHelp(argument: []const u8) bool {
 }
 
 test {
+    _ = CoverageAudit;
     _ = Advisor;
     _ = Benchmark;
     _ = Differential;

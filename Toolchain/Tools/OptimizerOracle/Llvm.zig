@@ -1,5 +1,6 @@
 const std = @import("std");
 const Silex = @import("silex_optimizer_api");
+const Coverage = @import("LlvmCoverage.zig");
 
 const Allocator = std.mem.Allocator;
 const Ir = Silex.Ir;
@@ -138,6 +139,8 @@ const FunctionEmitter = struct {
     }
 
     fn emitInstruction(self: *FunctionEmitter, block_id: usize, instruction: Ir.Instruction) Error!void {
+        if (Coverage.classify(std.meta.activeTag(instruction)) == .unsupported)
+            return error.UnsupportedInstruction;
         switch (instruction) {
             .constant_int => |value| {
                 const type_value = try self.valueType(value.result);
