@@ -82,10 +82,20 @@ entièrement vérifiée et rejouée. Les tolérances n'ont pas changé.
 ## Limites
 
 La [campagne Intel appariée](https://github.com/Matanek/Silex/actions/runs/34646656058)
-sur ce candidat est distincte de la matrice de correction. Ses résultats
-doivent être scellés après son achèvement. Rosetta ne constitue jamais une
-mesure de performance Intel physique. Aucun résultat présent n'autorise la
-clôture de la Part 03.
+sur ce candidat est terminée. Les 51 cas fixes et huit générés, les 64 erreurs
+entières et les 43 conversions passent. Sur Intel i7-8700B physique, macOS
+15.7.9 et Clang 17, les 21 rotations après six échauffements sont stables.
+Les intervalles après/avant contiennent 1 pour les trois charges : aucun gain
+ni ralentissement établi. Les ratios appariés après/Clang -O3 sont 1,270308
+(Arithmetic), 4,892208 (Objects) et 3,911734 (Flocking). Les deux références
+Clang restent bloquantes. La campagne échoue uniquement sur la parité.
+
+L'artefact `10283013412` est vérifié par le SHA-256 du ZIP
+`ddc2d64fbd2d413648ce422ccfd9d66808b2821ab5b308fccfe22deae99f6a56`.
+Ses fichiers, les 15 exécutables mesurés, le journal et les métadonnées des
+jobs sont joints sous `intel/` et dans les fichiers `5ff94ab-intel-*`.
+Rosetta ne constitue jamais une mesure de performance Intel physique.
+Aucun résultat présent n'autorise la clôture de la Part 03.
 
 `manifest.json` donne les empreintes des fichiers de cette preuve, hors
 manifest lui-même. Les journaux bruts conservent leurs espaces d'origine.
