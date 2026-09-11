@@ -1,0 +1,23 @@
+1/2 DirectSseProbe.test_0...OK
+2/2 X64.Encoder.test.scalar SSE arithmetic uses allocated colors and preserves a reused right operand...slices differ. first difference occurs at index 0 (0x0)
+
+============ expected this output: =============  len: 5 (0x5)
+
+F2 41 0F 5C F7                                    .A.\.
+
+============= instead found this: ==============  len: 14 (0xE)
+
+0F 28 C6 41 0F 28 CF F2  0F 5C C1 0F 28 F0        .(.A.(...\..(.
+
+================================================
+
+FAIL (TestExpectedEqual)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:379:5: 0x10296baab in expectEqualSlices__anon_36402 (root)
+    return error.TestExpectedEqual;
+    ^
+/private/tmp/silex-part03-evidence/DirectSseMutationSources/X64/Encoder.zig:4627:5: 0x10296bca7 in test.scalar SSE arithmetic uses allocated colors and preserves a reused right operand (root)
+    try std.testing.expectEqualSlices(u8, &.{ 0xf2, 0x41, 0x0f, 0x5c, 0xf7 }, bytes.items);
+    ^
+1 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/150879eaa16c8999673d7c6b20695b6b/root --seed=0xe00b18e0

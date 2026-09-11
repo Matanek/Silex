@@ -1,0 +1,12 @@
+{
+  "subsd": 2,
+  "divsd": 5,
+  "addsd": 1,
+  "mulsd": 1,
+  "subss": 2,
+  "divss": 2,
+  "addss": 1,
+  "mulss": 1,
+  "ucomisd": 12,
+  "ucomiss": 6
+}
