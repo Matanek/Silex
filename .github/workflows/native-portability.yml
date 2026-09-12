@@ -137,6 +137,15 @@ jobs:
             test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 10
             test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 10
           done
+          integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
+          for mode in debug release; do
+            "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/integer-memory-regions-$mode"
+            integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
+            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 10
+          done
           run_distribution() {
             executable="$1"
             stderr="$RUNNER_TEMP/$(basename "$executable").stderr"
@@ -453,6 +462,15 @@ jobs:
             test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 10
             test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 10
           done
+          integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
+          for mode in debug release; do
+            "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/integer-memory-regions-$mode"
+            integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
+            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 10
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -591,6 +609,15 @@ jobs:
             class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")
             test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 10
             test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 10
+          done
+          integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
+          cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
+          for mode in debug release; do
+            "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/integer-memory-regions-$mode"
+            integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
+            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 10
+            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 10
           done
 
   windows-x64:
@@ -769,6 +796,17 @@ jobs:
             $classLeafOutput = @(& $classLeafBinary)
             if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 10 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar class leaves $mode regression failed"
+            }
+          }
+          $integerMemoryFixture = Join-Path $scalarRoot "IntegerMemoryRegions.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx") $integerMemoryFixture
+          foreach ($mode in @("debug", "release")) {
+            $integerMemoryBinary = Join-Path $env:RUNNER_TEMP "integer-memory-regions-$mode.exe"
+            & $silex compile $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
+            if ($LASTEXITCODE -ne 0) { throw "integer memory regions compilation failed" }
+            $integerMemoryOutput = @(& $integerMemoryBinary)
+            if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 10 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "integer memory regions $mode regression failed"
             }
           }
 
@@ -1125,5 +1163,16 @@ jobs:
             $classLeafOutput = @(& $classLeafBinary)
             if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 10 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar class leaves $mode regression failed"
+            }
+          }
+          $integerMemoryFixture = Join-Path $scalarRoot "IntegerMemoryRegions.sx"
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx") $integerMemoryFixture
+          foreach ($mode in @("debug", "release")) {
+            $integerMemoryBinary = Join-Path $env:RUNNER_TEMP "integer-memory-regions-$mode.exe"
+            & $silex compile $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
+            if ($LASTEXITCODE -ne 0) { throw "integer memory regions compilation failed" }
+            $integerMemoryOutput = @(& $integerMemoryBinary)
+            if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 10 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+              throw "integer memory regions $mode regression failed"
             }
           }

@@ -500,18 +500,7 @@ fn encodeFunction(
                 program,
                 value,
             ),
-            .copy => |copy| {
-                if (function.float_register_slots.len != 0) {
-                    const source = function.float_register_slots[copy.operand];
-                    const destination = function.float_register_slots[copy.result];
-                    if (source != null and destination != null) {
-                        try emitMoveFloat(allocator, bytes, destination.?, source.?);
-                        continue;
-                    }
-                }
-                try emitLoadScalar(allocator, bytes, function, .rax, copy.operand);
-                try emitStoreScalar(allocator, bytes, function, .rax, copy.result);
-            },
+            .copy => |copy| try emitScalarCopy(allocator, bytes, function, copy),
             .copy_range => |copy| try emitCopyRange(allocator, bytes, copy.result, copy.operand),
             .deep_copy => |copy| {
                 if (copy.operand.width != copy.result.width) return error.InvalidMachineProgram;
@@ -3502,6 +3491,24 @@ fn emitLoadFloatValue(allocator: Allocator, bytes: *std.ArrayList(u8), residence
     try emitLoadFloatStack(allocator, bytes, destination, slot, double);
 }
 
+fn emitScalarCopy(allocator: Allocator, bytes: *std.ArrayList(u8), function: Machine.Function, copy: Machine.Instruction.Copy) Error!void {
+    const source_float = if (function.float_register_slots.len != 0) function.float_register_slots[copy.operand] else null;
+    const destination_float = if (function.float_register_slots.len != 0) function.float_register_slots[copy.result] else null;
+    if (source_float != null and destination_float != null) {
+        return emitMoveFloat(allocator, bytes, destination_float.?, source_float.?);
+    }
+    if (source_float == null and destination_float == null and function.register_slots.len != 0) {
+        const source = function.register_slots[copy.operand];
+        const destination = function.register_slots[copy.result];
+        if (source != null and destination != null) {
+            if (source.? != destination.?) try emitMoveRegister(allocator, bytes, @enumFromInt(destination.?), @enumFromInt(source.?));
+            return;
+        }
+    }
+    try emitLoadScalar(allocator, bytes, function, .rax, copy.operand);
+    try emitStoreScalar(allocator, bytes, function, .rax, copy.result);
+}
+
 fn emitScalarBits(allocator: Allocator, bytes: *std.ArrayList(u8), xmm: u5, general: Register, load: bool) Allocator.Error!void {
     const register: u8 = @intFromEnum(general);
     const rex: u8 = 0x48 | (@as(u8, @intFromBool(xmm >= 8)) << 2) | @intFromBool(register >= 8);
@@ -4659,4 +4666,35 @@ test "scalar SSE arithmetic uses allocated colors and preserves a reused right o
         0x66, 0x45, 0x0f, 0x2e, 0xf7,
         0x44, 0x0f, 0x2e, 0xfe,
     }, bytes.items);
+}
+
+test "X64 scalar copies honor coalesced integer colors and FP transfers" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    var function: Machine.Function = .{
+        .name = "copy_colors",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 2,
+        .frame_size = 16,
+        .register_slots = &.{ 8, 8 },
+        .instructions = &.{},
+    };
+    const copy: Machine.Instruction.Copy = .{ .result = 1, .operand = 0 };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqual(@as(usize, 0), bytes.items.len);
+    function.register_slots = &.{ 8, 9 };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x89, 0xc1 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    function.float_register_slots = &.{ 6, 7 };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqualSlices(u8, &.{ 0x0f, 0x28, 0xfe }, bytes.items);
+    bytes.clearRetainingCapacity();
+    // A mixed-bank transfer must keep the full payload through the scalar
+    // bridge; the integer-color shortcut cannot read a stale GPR home.
+    function.float_register_slots = &.{ 6, null };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqualSlices(u8, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xf0, 0x49, 0x89, 0xc1 }, bytes.items);
 }

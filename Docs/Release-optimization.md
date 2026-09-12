@@ -376,6 +376,19 @@ rejects pointer termination. Fully
 resident leaf functions allocate no value frame. Debug retains the direct
 stack-resident lowering.
 
+X64 integer regions recognize only paths that reach a loop's back edge when
+estimating repeated arithmetic. A cold call block laid out between the header
+and body does not reject that region. Fixed stack memory transfers, class
+field accesses and collection reads preserve r8...r11; their actual stack
+inputs and outputs stay pinned while independent integer state can remain
+resident. Address-taken spans remain pinned. Allocation, ownership operations
+and actual calls remain volatile barriers, with values live across them kept
+in memory according to CFG liveness. Floating arithmetic, aggregate parameters
+and other unsupported shapes retain their existing fallback. Copies between
+integer residences use a direct register move and emit nothing when both
+values already share their color. Mixed integer/FP transfers retain the full
+scalar-bit bridge.
+
 X64 scalar FP allocation distinguishes instructions that consume registered
 values from stack-only emitters that preserve the FP bank. Aggregate copies,
 aggregate initialization and collection counts keep all their input and output

@@ -2,6 +2,8 @@ const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const FloatLaneAllocation = @import("../Arm64/RegisterAllocation.zig");
 const MemorySchedule = @import("../Arm64/MemorySchedule.zig");
+const ResidenceLiveness = @import("../Arm64/ResidenceLiveness.zig");
+const MemoryResidence = @import("../Arm64/MemoryResidence.zig");
 const AggregateCallForwarding = @import("../Arm64/AggregateCallForwarding.zig");
 
 const Allocator = std.mem.Allocator;
@@ -75,7 +77,7 @@ fn residentStackPrefix(function: Machine.Function, residences: []const ?u5) Mach
 
 pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Error![]const ?u5 {
     const fully_compatible = compatible(function);
-    if (!fully_compatible and !regionallyCompatible(function)) return &.{};
+    if (!fully_compatible and !(try regionallyCompatible(allocator, function))) return &.{};
     const residences = try allocator.alloc(?u5, function.slot_count);
     @memset(residences, null);
     const forced = try allocator.alloc(bool, function.slot_count);
@@ -98,14 +100,22 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Erro
     for (function.parameters) |parameter| touch(parameter.start, 0, first, last, weights, 1);
     for (function.instructions, 0..) |instruction, index| {
         visit(instruction, index, first, last, weights, instruction_weights[index]);
+        MemoryResidence.pin(instruction, forced);
     }
     if (!fully_compatible) {
         extendLoopCarriedIntervals(function.instructions, first, last);
+        const live = try ResidenceLiveness.compute(allocator, function.instructions, function.slot_count);
+        defer allocator.free(live);
         for (function.instructions, 0..) |instruction, index| {
-            // X64 output owns every volatile scratch register. Keep complete
-            // intervals crossing that barrier in their deterministic homes;
-            // registers are then used only by regions that end before it.
-            if (!compatibleInstruction(instruction)) pinBarrier(instruction, index, first, last, forced);
+            if (compatibleInstruction(instruction)) continue;
+            if (stackMemoryInstruction(instruction)) {
+                // These encoders preserve r8...r11. Pin only the stack homes
+                // they actually access, leaving independent loop state live.
+                for (0..function.slot_count) |slot| {
+                    const reads_stack = instruction != .aggregate_init and instructionUses(instruction, slot);
+                    if (reads_stack or instructionDefines(instruction, slot)) forced[slot] = true;
+                }
+            } else pinBarrier(instruction, index, function.instructions, live, forced);
         }
     }
 
@@ -127,22 +137,57 @@ fn compatible(function: Machine.Function) bool {
     return true;
 }
 
-fn regionallyCompatible(function: Machine.Function) bool {
+fn regionallyCompatible(allocator: Allocator, function: Machine.Function) Allocator.Error!bool {
     // Four arithmetic operations amortize the extra allocation machinery and
     // match the target-independent scalar-loop threshold used by ARM64.
-    if (!compatibleShape(function) or !hasProfitableLoopRegion(function.instructions)) return false;
+    if (function.return_type.isFloat() or !compatibleShape(function) or
+        !(try hasProfitableLoopRegion(allocator, function.instructions))) return false;
     for (function.instructions) |instruction| {
-        if (compatibleInstruction(instruction)) continue;
+        if (compatibleInstruction(instruction) or stackMemoryInstruction(instruction)) continue;
         switch (instruction) {
             .print => |value| switch (value.kind) {
                 .signed_integer, .unsigned_integer, .boolean => {},
                 .string, .float32, .float64 => return false,
             },
-            .copy_range, .aggregate_init, .function_address, .call, .indirect_call => {},
+            .function_address,
+            .call,
+            .indirect_call,
+            .class_init,
+            .class_retain,
+            .class_drop,
+            .list_init,
+            .list_retain,
+            .list_drop,
+            => {},
             else => return false,
         }
     }
     return true;
+}
+
+// All admitted memory paths use only rax/rbx/rcx/rdx (and FP scratch).
+// Allocation, ownership and actual calls remain full volatile barriers.
+fn stackMemoryInstruction(instruction: Machine.Instruction) bool {
+    return switch (instruction) {
+        .copy_range,
+        .aggregate_init,
+        .local_address,
+        .storage_init,
+        .reference_load,
+        .reference_store,
+        .reference_offset,
+        .reference_indirect_offset,
+        .class_load,
+        .class_store,
+        .class_test,
+        .collection_load,
+        .collection_count,
+        .protocol_init,
+        .protocol_test,
+        .protocol_extract,
+        => true,
+        else => false,
+    };
 }
 
 fn compatibleShape(function: Machine.Function) bool {
@@ -208,7 +253,10 @@ fn visit(instruction: Machine.Instruction, index: usize, first: []usize, last: [
             for (value.arguments) |argument| touchSpan(argument, index, first, last, weights, weight);
             if (value.result) |result| touchSpan(result, index, first, last, weights, weight);
         },
-        else => {},
+        else => for (0..first.len) |slot| {
+            if (instructionUses(instruction, slot) or instructionDefines(instruction, slot))
+                touch(@intCast(slot), index, first, last, weights, weight);
+        },
     }
 }
 
@@ -229,26 +277,56 @@ fn heavierInterval(_: void, left: Interval, right: Interval) bool {
     return left.slot < right.slot;
 }
 
-fn hasProfitableLoopRegion(instructions: []const Machine.Instruction) bool {
+fn hasProfitableLoopRegion(allocator: Allocator, instructions: []const Machine.Instruction) Allocator.Error!bool {
+    const reaches_latch = try allocator.alloc(bool, instructions.len);
+    defer allocator.free(reaches_latch);
     for (instructions, 0..) |instruction, source| switch (instruction) {
-        .jump => |target| if (target <= source and profitableLoopRange(instructions[target .. source + 1])) return true,
+        .jump => |target| if (target <= source and profitableLoopRange(instructions, target, source, reaches_latch)) return true,
         .branch => |branch| {
             if (branch.then_instruction <= source and
-                profitableLoopRange(instructions[branch.then_instruction .. source + 1])) return true;
+                profitableLoopRange(instructions, branch.then_instruction, source, reaches_latch)) return true;
             if (branch.else_instruction <= source and
-                profitableLoopRange(instructions[branch.else_instruction .. source + 1])) return true;
+                profitableLoopRange(instructions, branch.else_instruction, source, reaches_latch)) return true;
         },
         else => {},
     };
     return false;
 }
 
-fn profitableLoopRange(instructions: []const Machine.Instruction) bool {
+// The linear span of a back edge can contain an exit block laid out before
+// the loop body. Only paths that can reach its latch contribute to this cost
+// estimate. Actual safety still comes from CFG liveness and pinned operands.
+fn profitableLoopRange(instructions: []const Machine.Instruction, header: usize, latch: usize, reaches_latch: []bool) bool {
+    @memset(reaches_latch, false);
+    reaches_latch[latch] = true;
+    var changed = true;
+    while (changed) {
+        changed = false;
+        var index = latch;
+        while (index > header) {
+            index -= 1;
+            if (reaches_latch[index]) continue;
+            const reaches = switch (instructions[index]) {
+                .jump => |target| reaches_latch[target],
+                .branch => |value| reaches_latch[value.then_instruction] or reaches_latch[value.else_instruction],
+                .return_value, .return_void, .panic => false,
+                else => reaches_latch[index + 1],
+            };
+            if (reaches) {
+                reaches_latch[index] = true;
+                changed = true;
+            }
+        }
+    }
+    if (!reaches_latch[header]) return false;
     var arithmetic: usize = 0;
-    for (instructions) |instruction| {
-        if (!compatibleInstruction(instruction)) return false;
+    for (instructions[header .. latch + 1], header..) |instruction, index| {
+        if (!reaches_latch[index]) continue;
+        if (!compatibleInstruction(instruction) and !stackMemoryInstruction(instruction)) return false;
         arithmetic += switch (instruction) {
-            .binary, .unary => 1,
+            .binary => |value| @intFromBool(value.type != .str),
+            .unary => 1,
+            .convert => 1,
             else => 0,
         };
     }
@@ -290,12 +368,13 @@ fn extendBackEdge(target: usize, source: usize, first: []const usize, last: []us
 fn pinBarrier(
     instruction: Machine.Instruction,
     index: usize,
-    first: []const usize,
-    last: []const usize,
+    instructions: []const Machine.Instruction,
+    live: []const bool,
     forced: []bool,
 ) void {
-    for (first, last, forced) |start, end, *pinned| {
-        if (start != std.math.maxInt(usize) and start < index and end > index) pinned.* = true;
+    for (forced, 0..) |*pinned, slot| {
+        if (live[index * forced.len + slot] and
+            successorLive(instructions, live, forced.len, index, slot)) pinned.* = true;
     }
     switch (instruction) {
         // Integer and boolean output copy their terminal operand from its
@@ -323,7 +402,9 @@ fn pinBarrier(
             for (value.arguments) |argument| forceSpan(argument, forced);
             if (value.result) |result| forceSpan(result, forced);
         },
-        else => {},
+        else => for (0..forced.len) |slot| {
+            if (instructionUses(instruction, slot) or instructionDefines(instruction, slot)) forced[slot] = true;
+        },
     }
 }
 
@@ -418,7 +499,7 @@ fn instructionUses(instruction: Machine.Instruction, slot: usize) bool {
         .indirect_call => |value| value.callee == slot or value.callee + 1 == slot or for (value.arguments) |argument| {
             if (spanContains(argument, slot)) break true;
         } else false,
-        else => false,
+        else => ResidenceLiveness.instructionUses(instruction, slot),
     };
 }
 
@@ -435,7 +516,7 @@ fn instructionDefines(instruction: Machine.Instruction, slot: usize) bool {
             if (value.environment) |environment| spanContains(environment, slot) else false,
         .call => |value| if (value.result) |result| spanContains(result, slot) else false,
         .indirect_call => |value| if (value.result) |result| spanContains(result, slot) else false,
-        else => false,
+        else => ResidenceLiveness.instructionDefines(instruction, slot),
     };
 }
 
@@ -958,4 +1039,51 @@ test "X64 scalar floats survive an interleaved return on another branch" {
     try std.testing.expect(residences[0] != null);
     try std.testing.expectEqual(@as(?u5, null), residences[1]);
     try std.testing.expectEqual(@as(?u5, null), residences[3]);
+}
+
+test "X64 memory regions retain loop indices across interleaved cold calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 1, .bits = 1 } },
+        .{ .constant_int = .{ .result = 2, .bits = 0 } },
+        .{ .constant_int = .{ .result = 3, .bits = 0 } },
+        .{ .binary = .{ .result = 4, .operator = .less, .left = 2, .right = 0, .type = .int } },
+        .{ .branch = .{ .condition = 4, .then_instruction = 7, .else_instruction = 5 } },
+        .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } },
+        .{ .return_value = .{ .start = 3, .width = 1 } },
+        .{ .storage_init = .{ .start = 8, .width = 2 } },
+        .{ .binary = .{ .result = 5, .operator = .add, .left = 3, .right = 2, .type = .int } },
+        .{ .binary = .{ .result = 3, .operator = .add, .left = 5, .right = 1, .type = .int } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 2, .right = 1, .type = .int } },
+        .{ .copy = .{ .result = 2, .operand = 6 } },
+        .{ .jump = 3 },
+    };
+    const function: Machine.Function = .{
+        .name = "memory_region",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 10,
+        .frame_size = 80,
+        .instructions = &instructions,
+    };
+    const residences = try allocate(allocator, function);
+    try std.testing.expectEqual(@as(usize, 10), residences.len);
+    try std.testing.expect(residences[2] != null);
+    try std.testing.expectEqual(@as(?u5, null), residences[3]);
+    try std.testing.expectEqual(@as(?u5, null), residences[8]);
+    try std.testing.expectEqual(@as(?u5, null), residences[9]);
+    // A repeated actual call destroys volatile loop state and refuses the
+    // region; a local address pins its complete span even on an exit path.
+    instructions[7] = instructions[5];
+    const repeated = try allocate(allocator, function);
+    try std.testing.expect(repeated.len == 0 or repeated[2] == null);
+    instructions[7] = .{ .storage_init = .{ .start = 8, .width = 2 } };
+    instructions[5] = .{ .local_address = .{ .result = 8, .local = 2, .width = 1 } };
+    const addressed = try allocate(allocator, function);
+    try std.testing.expectEqual(@as(?u5, null), addressed[2]);
+    try std.testing.expectEqual(@as(?u5, null), addressed[8]);
 }
