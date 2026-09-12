@@ -1,0 +1,23 @@
+1/2 X64DirectProbe.test_0...OK
+2/2 X64.Encoder.test.X64 integer operands use colors without destroying a reused right input...slices differ. first difference occurs at index 0 (0x0)
+
+============ expected this output: =============  len: 3 (0x3)
+
+4D 29 D8                                          M).
+
+============= instead found this: ==============  len: 12 (0xC)
+
+4C 89 C0 4C 89 D9 48 29  C8 49 89 C0              L..L..H).I..
+
+================================================
+
+FAIL (TestExpectedEqual)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:379:5: 0x104d33aab in expectEqualSlices__anon_36407 (root)
+    return error.TestExpectedEqual;
+    ^
+/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Sources/X64/Encoder.zig:4710:5: 0x104d33ef3 in test.X64 integer operands use colors without destroying a reused right input (root)
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x29, 0xd8 }, bytes.items);
+    ^
+1 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/89b79bd2c0883ba72b057489cc9260d5/root --seed=0x6177759a

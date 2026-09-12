@@ -1,0 +1,34 @@
+# Opérandes entiers X64 directs
+
+Candidat `b8d01d73233a88a080170b53096f2a72bbd8d98e`, baseline
+`901c6f5594841a277da00c53c29051bb7ab23076`. Compilateur local figé :
+`d19794be31e2f5bedc555a190e9160579f64bf84aaa3b91d69d76d00232eb94a`.
+
+Les opérations entières 64 bits utilisent leurs couleurs directement. Un
+résultat réutilisant l'opérande droit passe temporairement par scratch ; les
+branches de dépassement conservent leur statut et leur épilogue. Les opérations
+étroites et la multiplication non signée contrôlée gardent leur chemin normalisé.
+Les comparaisons fusionnées 64 bits lisent les registres alloués ; les comparaisons
+étroites normalisent uniquement des copies pour préserver leurs entrées vivantes.
+
+Le test réduit échoue avant. Les 61 tests X64 passent, et retirer la protection
+du résultat réutilisant l'opérande droit produit bien TestExpectedEqual.
+Le portail complet passe 49 étapes, 2169 tests internes et 184 tests de langage.
+L'oracle passe 31 étapes et 74 tests, avec 57 régressions fixes, huit scénarios,
+64 erreurs entières et 43 conversions, également qualifiés sur X64 Rosetta.
+La robustesse passe 144 paires, cinq triplets, 41 natifs, quatre négatifs et
+les stress cache/graphe. Les 28 émissions et 12 exécutions macOS Debug/Release
+ont des sorties exactes : 18 contrôles entiers, 22 contrôles mixtes et le
+corpus de portabilité. Le témoin signé utilise les opérateurs arithmétiques
+admis ; les opérateurs bit à bit restent testés sur uint.
+
+Les trois binaires généraux ARM64 sont inchangés. Arithmetic X64 passe de 90
+à 80 instructions dans sa première fonction. Les textes complets Objects et
+Flocking passent de 1436 à 1428 et de 1862 à 1853 instructions. Les périmètres
+incluent les chemins froids et, sauf Arithmetic, le runtime ; ces comptes
+ne démontrent aucun gain physique.
+
+Les jobs natifs macOS/Linux/Windows X64 sont dispatchés sur le SHA exact.
+La mesure Intel contre `901c6f5` attend la fin de la campagne précédente pour
+ne pas l'annuler. Aucun gain ni parité physique n'est revendiqué avant les
+résultats. Le fichier de dispatch Intel préparé n'est pas une preuve d'exécution.

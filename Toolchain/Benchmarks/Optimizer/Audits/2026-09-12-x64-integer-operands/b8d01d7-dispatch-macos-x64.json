@@ -1,0 +1,6 @@
+{
+  "ref": "spec-silex-optimization-parity-completion",
+  "inputs": {
+    "target": "macos-x64"
+  }
+}

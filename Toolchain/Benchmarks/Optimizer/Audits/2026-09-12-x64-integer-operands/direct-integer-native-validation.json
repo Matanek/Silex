@@ -1,0 +1,542 @@
+[
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-macos-arm64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "92c8c1eeca9aed08a802673566529f8d591cb9ee651e22af6e95dd453e6ef264",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-macos-arm64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "06a98f4081cc039fd6d26b14c10818c2431ee0af41f90b6cbddef7ac97b27d25",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-macos-x64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "c80bf98175d1027c68a5f22113e3fc00de313f48de12495602dc9878e60e871b",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-macos-x64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "a4e85532f6494ccc8f7df3cab525b1520c381c185d64709c85a6508624b9b91b",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-linux-arm64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-arm64",
+    "mode": "debug",
+    "sha256": "8b9acc01e82386f443b329adafb6ab618b62aca79c7194b3b168a55294627337",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-linux-arm64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-arm64",
+    "mode": "release",
+    "sha256": "074bcc40a6b98974c9040105cbf0ebc6dd5d67ad86b22831a7f421e2a10a101f",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-linux-x64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-x64",
+    "mode": "debug",
+    "sha256": "fdcfadc5e9c8665c581838f65de95ede5ff5f38784d1873d153554b1467bd4ab",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-linux-x64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-x64",
+    "mode": "release",
+    "sha256": "2f7296e5b75926d9c3a8ddaad56f91b7711fca6d8aa5fce9e01b5f81ca4d2afe",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-windows-arm64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-arm64",
+    "mode": "debug",
+    "sha256": "ba67b4bd55998bbad2f203669b67dd92cc850cb6ff4935a4ea9ac67b39971580",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-windows-arm64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-arm64",
+    "mode": "release",
+    "sha256": "03b1f434f70b39a9062a93f98ad15da07a416c5f57dfaffb4755368a2206786f",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-windows-x64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-x64",
+    "mode": "debug",
+    "sha256": "5bab80e8d9ab38b898a71c2236a050549ff2ecdea5c8230b41d93984ac80f6c8",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-float-windows-x64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-x64",
+    "mode": "release",
+    "sha256": "73c04e403541765fc1b4dd3ee1a8a063ae3f0fc3a6006bd6a31f69ebedf5191a",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-macos-arm64-debug"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "4d5f240bc48acc8d1641f2ed9b7a07f61fef098681f216d5a2cce7e6167dbbfd",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-macos-arm64-release"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "23dc53a42f546860b11b830f4028ecdc8696666b571986a9d07d39841c6b9563",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-macos-x64-debug"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "95307b7eec67fe2c1578734bcbc777d6827206dad3ec00b37fd12e2445046854",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-macos-x64-release"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "9be2c61f6e8776e3a7765970f63d11a17e2e0c2509ff8d0a9aa7901edae4c46b",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-linux-arm64-debug"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "linux-arm64",
+    "mode": "debug",
+    "sha256": "cdeea87aa496195a24503db35b56e0d22f4adf6cea56d8e9a37e58235fb13783",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-linux-arm64-release"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "linux-arm64",
+    "mode": "release",
+    "sha256": "b7d4383ea29e6cba5d9a8f25895681a0b7d360260e8d7a68148e36c6572bacef",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-linux-x64-debug"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "linux-x64",
+    "mode": "debug",
+    "sha256": "7f465d7fba0b0b112d6a6f8226abbd78e6919a60d70ca3ac183993f2871e106c",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-linux-x64-release"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "linux-x64",
+    "mode": "release",
+    "sha256": "cdfe2443eec9e894cb27c0c7e7ca57646cb650db70b1f6276875483339d33caa",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-windows-arm64-debug"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "windows-arm64",
+    "mode": "debug",
+    "sha256": "b746b5eed663d6f9da86bd57ea2be693e1c5ac837dd1d70b65e3437a7294719e",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-windows-arm64-release"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "windows-arm64",
+    "mode": "release",
+    "sha256": "120480a6a168e63d643ebbf510bd4201a3f85e2014ad7145f337d2822a5f756e",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-windows-x64-debug"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "windows-x64",
+    "mode": "debug",
+    "sha256": "a02b31acccc4614febfe93f3b8b67006bd948013e0a216fda7612bcac263ea4d",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-integer-windows-x64-release"
+    ],
+    "fixture_sha256": "c8ddd7cf1fbc0424bb443bc107699316097125cfbdad1a05a7eeb130adb1a9da",
+    "target": "windows-x64",
+    "mode": "release",
+    "sha256": "3deb0b5148ad9ed71e44c0f514b1da1009eb7f1084c9b59ddc29c7dd9da1c514",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-protocol/NativePortability.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-protocol-macos-arm64-debug"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "008d84c0c79c42d307a6f48d7ede1c1806e2416a22763a51d235b623d2c7bfa0",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-protocol/NativePortability.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-protocol-macos-arm64-release"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "6d920575e6682ba88526824ccf73e81663a12c810abfcdc1d38979cffde6daa0",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-protocol/NativePortability.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-protocol-macos-x64-debug"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "9b458b6bddd283c85d452f7d59aa470b953bdd79f33e1af4a3131693565bb8bd",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/DirectInteger-protocol/NativePortability.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/direct-integer-protocol-macos-x64-release"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "9b2e486ae7dadb6f28e499f57585d1cb4433a2cf7baa6114c0dd33952ebdf450",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  }
+]

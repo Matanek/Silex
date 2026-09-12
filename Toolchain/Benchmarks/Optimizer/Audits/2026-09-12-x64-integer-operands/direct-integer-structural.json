@@ -1,0 +1,41 @@
+{
+  "scope": "Whole text including runtime, except arithmetic first function; not timing evidence",
+  "workloads": {
+    "arithmetic": {
+      "before": {
+        "instructions": 90,
+        "stack_references": 3,
+        "binary_sha256": "6067de218535a3ee296eed15c44992252b5e8d2d254f2e2d7ebf8efde20a6399"
+      },
+      "after": {
+        "instructions": 80,
+        "stack_references": 3,
+        "binary_sha256": "e59bd04a9b359925eeaf41545c1a5d2ceee84bb35bee4e2e2400d6441f1b6c6f"
+      }
+    },
+    "objects": {
+      "before": {
+        "instructions": 1436,
+        "stack_references": 180,
+        "binary_sha256": "71222a84fcad08522aa0503c04f39d67cebec10a401458ed7de44416c6d43a42"
+      },
+      "after": {
+        "instructions": 1428,
+        "stack_references": 179,
+        "binary_sha256": "25ce60ce307df14eba38a3cec44e0b61c91a60c3e7fc81ead5db1882de6665f9"
+      }
+    },
+    "flocking": {
+      "before": {
+        "instructions": 1862,
+        "stack_references": 583,
+        "binary_sha256": "aba561293d459406ace1498d16415c2c83f41417787d6157609dc022820d30ed"
+      },
+      "after": {
+        "instructions": 1853,
+        "stack_references": 583,
+        "binary_sha256": "439db8699d8223032dd7d542bf80c9dd5db32bd888df5f89aa2d9f324022950b"
+      }
+    }
+  }
+}
