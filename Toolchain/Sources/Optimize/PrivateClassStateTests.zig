@@ -15,28 +15,30 @@ fn count(function: Ir.Function, tag: std.meta.Tag(Ir.Instruction)) usize {
     return total;
 }
 
+const counter_source =
+    \\class Counter {
+    \\    var value:int
+    \\    func add(amount:int) { self.value += amount }
+    \\}
+    \\func calculate(rounds:int) int {
+    \\    var counter = Counter(value:2)
+    \\    var observer = counter
+    \\    var index = 0
+    \\    while index < rounds {
+    \\        if index % 2 == 0 { counter.add(3) } else { observer.add(-1) }
+    \\        index++
+    \\    }
+    \\    return observer.value + counter.value
+    \\}
+    \\func main() { print(calculate(0)); print(calculate(4)); print(calculate(5)) }
+;
+
 test "private class state keeps stores and ownership while forwarding a shared loop recurrence" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     var frontend = Frontend.Frontend.init(a);
-    const compilation = try frontend.compile(
-        \\class Counter {
-        \\    var value:int
-        \\    func add(amount:int) { self.value += amount }
-        \\}
-        \\func calculate(rounds:int) int {
-        \\    var counter = Counter(value:2)
-        \\    var observer = counter
-        \\    var index = 0
-        \\    while index < rounds {
-        \\        if index % 2 == 0 { counter.add(3) } else { observer.add(-1) }
-        \\        index++
-        \\    }
-        \\    return observer.value + counter.value
-        \\}
-        \\func main() { print(calculate(0)); print(calculate(4)); print(calculate(5)) }
-    );
+    const compilation = try frontend.compile(counter_source);
     const before = try Release.optimizeWithOptions(a, compilation.ir, .{
         .disabled = .reference_memory_elision,
         .stop_after = .reference_memory_elision,
@@ -150,5 +152,32 @@ test "private class state rejects addresses escapes mixed homes and reused ident
         const after = try State.optimize(a, program, function);
         try std.testing.expectEqual(count(function, .field_load), count(after, .field_load));
         try std.testing.expectEqual(function.local_types.len, after.local_types.len);
+    }
+}
+
+test "private class state cost policy follows the requested target architecture" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const Target = @import("../Target.zig").Target;
+    var frontend = Frontend.Frontend.init(a);
+    const compilation = try frontend.compile(counter_source);
+    for ([_]Target{ .macos_arm64, .linux_arm64, .windows_arm64, .macos_x64, .linux_x64, .windows_x64 }) |target| {
+        var options = Release.Options.forTarget(target, 2);
+        try std.testing.expectEqual(@as(u16, 2), options.worker_count);
+        options.stop_after = .reference_memory_elision;
+        options.verify_each_pass = true;
+        const result = try Release.optimizeWithOptions(a, compilation.ir, options);
+        var checked = false;
+        for (result.functions) |function| {
+            if (!std.mem.eql(u8, function.name, "calculate")) continue;
+            checked = true;
+            if (target.architecture == .arm64) {
+                try std.testing.expectEqual(@as(usize, 0), count(function, .field_load));
+            } else {
+                try std.testing.expect(count(function, .field_load) > 0);
+            }
+        }
+        try std.testing.expect(checked);
     }
 }

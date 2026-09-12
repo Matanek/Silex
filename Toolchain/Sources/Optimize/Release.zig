@@ -6,6 +6,8 @@ const DenseBlocks = @import("DenseBlocks.zig");
 const InlineControlFlow = @import("InlineControlFlow.zig");
 const InlineValues = @import("InlineValues.zig");
 const ReferenceMemory = @import("ReferenceMemory.zig");
+const PrivateClassState = @import("PrivateClassState.zig");
+const Target = @import("../Target.zig").Target;
 const KnownCollections = @import("KnownCollections.zig");
 const ScalarExpressions = @import("ScalarExpressions.zig");
 const DominatedValues = @import("DominatedValues.zig");
@@ -79,6 +81,13 @@ pub const Options = struct {
     verify_each_pass: bool = false,
     stop_after: ?PassId = null,
     disabled: ?PassId = null,
+    private_class_state: bool = true,
+
+    pub fn forTarget(target: Target, worker_count: u16) Options {
+        // Semantically portable, but current X64 lowering makes this cache
+        // slower on physical Intel. Keep its proven ARM64 profitability.
+        return .{ .worker_count = worker_count, .private_class_state = target.architecture == .arm64 };
+    }
 };
 
 const Constant = union(enum) {
@@ -114,7 +123,7 @@ pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_cou
     return optimizeWithOptions(allocator, program, .{ .worker_count = worker_count });
 }
 
-/// Oracle-only controls make pass attribution and prefix bisection
+/// Internal target cost policy and oracle controls keep pass attribution
 /// reproducible without exposing optimizer switches through the Silex CLI.
 pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: Options) !Ir.Program {
     var current = program;
@@ -178,6 +187,11 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
 
     if (options.disabled != .reference_memory_elision) {
         current = try ReferenceMemory.optimize(allocator, current);
+        if (options.private_class_state) {
+            const functions = try allocator.dupe(Ir.Function, current.functions);
+            for (functions) |*function| function.* = try PrivateClassState.optimize(allocator, current, function.*);
+            current.functions = functions;
+        }
         try verifyAfterPass(allocator, current, options);
     }
     if (options.stop_after == .reference_memory_elision) return current;

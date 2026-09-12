@@ -187,6 +187,12 @@ destruction remain explicit and ordered. The existing SSA pass transports
 the scalar state across branches and loops. This is a write-through cache of
 private state, not allocation elimination or a change to shared class identity.
 
+Native compilation currently enables this cache for ARM64 targets. X64 keeps
+the previous field-read representation: paired measurements on physical Intel
+showed a slowdown with the current X64 lowering. The requested target selects
+this cost policy, including cross-compilation; the portable oracle can still
+exercise the transformation independently of native profitability.
+
 For flat numeric or boolean value structures, a reconstructed reference or
 mutable-view store writes only the changed fields when the other fields come
 from a still-current snapshot of that exact destination. Calls, unknown
