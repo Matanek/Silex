@@ -67,6 +67,11 @@ typed without exposing their declarations or members. `public` is checked
 during composition and semantic resolution; none of these visibilities is
 related to Mach-O symbol export or native layout.
 
+Synthesized collection layouts are not independent public declarations. A
+fixed array may contain a module-visible element type inside that module;
+when an authored signature exposes the array, visibility checking follows its
+element type and rejects any narrower type that would leak through the API.
+
 ## Collect catalog contributions
 
 Umbrella catalog contributions are discovered only in an active named

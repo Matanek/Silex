@@ -2,6 +2,46 @@ const std = @import("std");
 const Project = @import("Project.zig");
 const Interpreter = @import("Interpreter.zig");
 
+test "fixed arrays keep module element types private unless an authored API exposes them" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\struct Hidden { var value:int }
+        \\func main() {
+        \\    var values:Hidden[2] = [Hidden(value:4), Hidden(value:9)]
+        \\    values.swap(0, -1)
+        \\    print(values[0].value)
+        \\}
+        ,
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("9\n", result.stdout);
+
+    for ([_]struct { source: []const u8, message: []const u8 }{
+        .{
+            .source = "struct Hidden {} public func expose(values:Hidden[2]) {} func main() {}",
+            .message = "public function 'expose' exposes module structure 'Hidden'",
+        },
+        .{
+            .source = "struct Hidden {} public struct Api { var values:Hidden[2] } func main() {}",
+            .message = "public structure 'Api' exposes module structure 'Hidden'",
+        },
+    }) |case| {
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = case.source });
+        compiler = Project.Compiler.init(allocator, std.testing.io);
+        try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+        try std.testing.expectEqualStrings(case.message, compiler.diagnostic.?.message);
+    }
+}
+
 test "activate an imported element used only by a package view signature" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

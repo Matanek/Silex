@@ -1415,7 +1415,9 @@ pub const Compiler = struct {
         const program = self.units[module].program.?;
         for (program.structures) |structure| {
             if (structure.is_test and (!self.include_tests or module != self.entry_module)) continue;
-            if (!structure.is_public) continue;
+            // Collection layouts are synthesized, not authored public APIs.
+            // Their element visibility is checked at each exposing signature.
+            if (!structure.is_public or structure.collection != null) continue;
             for (structure.type_parameters) |parameter| if (parameter.constraint) |constraint| {
                 try self.requirePublicType(module, constraint, parameter.position, "public structure", structure.name);
             };
