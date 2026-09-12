@@ -21,6 +21,33 @@ func calculate(iterations:int) int {
     var result:Value = Snapshot(value:observer.get())
     return result.get()
 }
+func signedSteps(count:int) int {
+    var value = 7
+    var index = 0
+    while index < count {
+        value = (value * 3 + index) % 1023 - 17
+        index++
+    }
+    return value
+}
+func unsignedSteps(count:int) uint {
+    var value:uint = 7
+    var index = 0
+    while index < count {
+        value = ((value * 3 + index as uint) & 1023) ^ 17
+        index++
+    }
+    return value
+}
+func narrowSteps(count:int) int8 {
+    var value:int8 = 7
+    var index = 0
+    while index < count {
+        value = (value + (index % 7) as int8) % 97
+        index++
+    }
+    return value
+}
 func main() {
     print(calculate(-1) == 0)
     print(calculate(0) == 0)
@@ -32,4 +59,12 @@ func main() {
     print(calculate(20) == 60)
     print(calculate(100) == 300)
     print(calculate(10000) == 30000)
+    print(signedSteps(0) == 7)
+    print(signedSteps(1) == 4)
+    print(signedSteps(2) == -4)
+    print(signedSteps(1000) == 376)
+    print(unsignedSteps(0) == 7)
+    print(unsignedSteps(1000) == 635)
+    print(narrowSteps(0) == 7)
+    print(narrowSteps(1000) == 94)
 }

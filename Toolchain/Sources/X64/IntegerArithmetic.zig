@@ -122,7 +122,7 @@ fn immediateRdx(allocator: Allocator, bytes: *std.ArrayList(u8), bits: u64) Allo
     try bytes.appendSlice(allocator, &encoded);
 }
 
-fn guard(allocator: Allocator, bytes: *std.ArrayList(u8), epilogue: anytype, failure_condition: u4, status: Machine.Status) Allocator.Error!void {
+pub fn guard(allocator: Allocator, bytes: *std.ArrayList(u8), epilogue: anytype, failure_condition: u4, status: Machine.Status) Allocator.Error!void {
     // Invert the condition to skip mov edx,status + jmp epilogue on success.
     try bytes.appendSlice(allocator, &.{ 0x70 | @as(u8, failure_condition ^ 1), 10, 0xba });
     var encoded: [4]u8 = undefined;

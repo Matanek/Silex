@@ -394,6 +394,13 @@ slots and unsupported instructions retain their fallback. Copies between
 integer residences use a direct register move and emit nothing when both
 values already share their color. Mixed integer/FP transfers retain the full
 scalar-bit bridge.
+For 64-bit integer addition, subtraction, multiplication and bit operations,
+allocated operands feed the two-address instruction directly. A result that
+reuses the right input goes through scratch until both inputs are consumed.
+Signed and unsigned overflow branches keep the existing status and epilogue
+protocol. Checked unsigned multiplication and narrower integer arithmetic retain
+their normalization path. Fused 64-bit comparisons read colors without copying;
+narrow comparisons normalize scratch copies so live inputs remain unchanged.
 
 X64 scalar FP allocation distinguishes instructions that consume registered
 values from stack-only emitters that preserve the FP bank. Aggregate copies,

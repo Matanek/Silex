@@ -143,8 +143,8 @@ jobs:
             "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/integer-memory-regions-$mode"
             integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
-            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 18
           done
           run_distribution() {
             executable="$1"
@@ -468,8 +468,8 @@ jobs:
             "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/integer-memory-regions-$mode"
             integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
-            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 18
           done
 
   linux-x64:
@@ -616,8 +616,8 @@ jobs:
             "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/integer-memory-regions-$mode"
             integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
-            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 18
           done
 
   windows-x64:
@@ -805,7 +805,7 @@ jobs:
             & $silex compile $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "integer memory regions compilation failed" }
             $integerMemoryOutput = @(& $integerMemoryBinary)
-            if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 10 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 18 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "integer memory regions $mode regression failed"
             }
           }
@@ -1172,7 +1172,7 @@ jobs:
             & $silex compile $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "integer memory regions compilation failed" }
             $integerMemoryOutput = @(& $integerMemoryBinary)
-            if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 10 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 18 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "integer memory regions $mode regression failed"
             }
           }

@@ -916,12 +916,7 @@ fn encodeFunction(
                         const operands = try floatOperands(allocator, bytes, function.float_register_slots, binary);
                         try emitScalarFloatOpcode(allocator, bytes, if (double) @as(?u8, 0x66) else null, 0x2e, operands.left, operands.right);
                     } else {
-                        try emitLoadValue(allocator, bytes, function.register_slots, .rax, binary.left);
-                        try emitLoadValue(allocator, bytes, function.register_slots, .rcx, binary.right);
-                        const width = if (binary.type.isInteger()) binary.type.bitWidth() else 64;
-                        try IntegerArithmetic.normalize(allocator, bytes, 0, width, binary.type.isSignedInteger());
-                        try IntegerArithmetic.normalize(allocator, bytes, 1, width, binary.type.isSignedInteger());
-                        try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8 });
+                        try emitIntegerComparison(allocator, bytes, function.register_slots, binary);
                     }
                     condition = BranchSelection.condition(binary).?;
                     if (BranchSelection.unorderedResult(binary)) |unordered| {
@@ -1190,10 +1185,71 @@ fn emitBinary(
 ) Error!void {
     if (binary.type.isFloat()) return emitFloatBinary(allocator, bytes, &.{}, binary);
     if (binary.type == .str) return emitStringBinary(allocator, bytes, binary);
+    if (try emitResidentIntegerBinary(allocator, bytes, residences, binary, epilogue)) return;
     try emitLoadValue(allocator, bytes, residences, .rax, binary.left);
     try emitLoadValue(allocator, bytes, residences, .rcx, binary.right);
     try IntegerArithmetic.binary(allocator, bytes, binary, epilogue);
     try emitStoreValue(allocator, bytes, residences, .rax, binary.result);
+}
+
+fn integerOperand(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, slot: Machine.Slot, scratch: Register) Allocator.Error!Register {
+    if (residences.len != 0) if (residences[slot]) |color| return @enumFromInt(color);
+    try emitLoadStack(allocator, bytes, scratch, slot);
+    return scratch;
+}
+
+fn emitIntegerComparison(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, binary: Machine.Instruction.Binary) Allocator.Error!void {
+    const width = if (binary.type.isInteger()) binary.type.bitWidth() else 64;
+    if (width == 64) {
+        const left = try integerOperand(allocator, bytes, residences, binary.left, .rax);
+        const right = try integerOperand(allocator, bytes, residences, binary.right, .rcx);
+        return emitRegisterBinary(allocator, bytes, 0x39, left, right);
+    }
+    // Narrow normalization must not change a resident input still used later.
+    try emitLoadValue(allocator, bytes, residences, .rax, binary.left);
+    try emitLoadValue(allocator, bytes, residences, .rcx, binary.right);
+    try IntegerArithmetic.normalize(allocator, bytes, 0, width, binary.type.isSignedInteger());
+    try IntegerArithmetic.normalize(allocator, bytes, 1, width, binary.type.isSignedInteger());
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+}
+
+fn emitResidentIntegerBinary(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    residences: []const ?u5,
+    binary: Machine.Instruction.Binary,
+    epilogue: *std.ArrayList(EpilogueFixup),
+) Allocator.Error!bool {
+    if (!binary.type.isInteger() or binary.type.bitWidth() != 64 or residences.len == 0) return false;
+    switch (binary.operator) {
+        .add, .subtract, .bit_and, .bit_xor => {},
+        .multiply => if (binary.checked and !binary.type.isSignedInteger()) return false,
+        else => return false,
+    }
+    // Integer residences are r8...r11, leaving both scratch inputs disjoint.
+    const left = try integerOperand(allocator, bytes, residences, binary.left, .rax);
+    const right = try integerOperand(allocator, bytes, residences, binary.right, .rcx);
+    var destination: Register = if (residences[binary.result]) |color| @enumFromInt(color) else .rax;
+    // Two-address instructions overwrite their left operand. If the result
+    // reuses the right input, compute in scratch until both inputs are read.
+    if (destination == right and destination != left) destination = .rax;
+    if (destination != left) try emitMoveRegister(allocator, bytes, destination, left);
+    switch (binary.operator) {
+        .add => try emitRegisterBinary(allocator, bytes, 0x01, destination, right),
+        .subtract => try emitRegisterBinary(allocator, bytes, 0x29, destination, right),
+        .multiply => try emitSignedMultiplyRegister(allocator, bytes, destination, right),
+        .bit_and => try emitRegisterBinary(allocator, bytes, 0x21, destination, right),
+        .bit_xor => try emitRegisterBinary(allocator, bytes, 0x31, destination, right),
+        else => unreachable,
+    }
+    if (binary.checked and (binary.operator == .add or binary.operator == .subtract or binary.operator == .multiply)) {
+        try IntegerArithmetic.guard(allocator, bytes, epilogue, if (binary.type.isSignedInteger()) 0 else 2, .integer_overflow);
+    }
+    if (residences[binary.result]) |color| {
+        const result: Register = @enumFromInt(color);
+        if (result != destination) try emitMoveRegister(allocator, bytes, result, destination);
+    } else try emitStoreStack(allocator, bytes, destination, binary.result);
+    return true;
 }
 
 fn emitStringBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.Instruction.Binary) Error!void {
@@ -4697,4 +4753,49 @@ test "X64 scalar copies honor coalesced integer colors and FP transfers" {
     function.float_register_slots = &.{ 6, null };
     try emitScalarCopy(allocator, &bytes, function, copy);
     try std.testing.expectEqualSlices(u8, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xf0, 0x49, 0x89, 0xc1 }, bytes.items);
+}
+
+test "X64 integer operands use colors without destroying a reused right input" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    var epilogue: std.ArrayList(EpilogueFixup) = .empty;
+    defer epilogue.deinit(allocator);
+    var binary: Machine.Instruction.Binary = .{ .result = 2, .left = 0, .right = 1, .operator = .subtract, .type = .int, .checked = false };
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x29, 0xd8 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 11 }, binary, &epilogue);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4c, 0x89, 0xc0, 0x4c, 0x29, 0xd8, 0x49, 0x89, 0xc3 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    binary.operator = .multiply;
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x0f, 0xaf, 0xc3 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    binary.operator = .add;
+    binary.checked = true;
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    // The overflow guard must read the arithmetic flags before any other
+    // operation and retain the exact status/epilogue protocol.
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x01, 0xd8, 0x71, 10, 0xba, 1, 0, 0, 0, 0xe9, 0, 0, 0, 0 }, bytes.items);
+    try std.testing.expectEqual(@as(usize, 1), epilogue.items.len);
+    try std.testing.expectEqual(@as(usize, 11), epilogue.items[0].displacement_at);
+    bytes.clearRetainingCapacity();
+    epilogue.clearRetainingCapacity();
+    binary.type = .uint;
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    try std.testing.expectEqual(@as(u8, 0x73), bytes.items[3]);
+}
+
+test "X64 integer comparisons keep narrow normalization away from live colors" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    var binary: Machine.Instruction.Binary = .{ .result = 2, .left = 0, .right = 1, .operator = .less, .type = .int };
+    try emitIntegerComparison(allocator, &bytes, &.{ 8, 11, null }, binary);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x39, 0xd8 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    binary.type = .int8;
+    try emitIntegerComparison(allocator, &bytes, &.{ 8, 11, null }, binary);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4c, 0x89, 0xc0, 0x4c, 0x89, 0xd9, 0x48, 0x0f, 0xbe, 0xc0, 0x48, 0x0f, 0xbe, 0xc9, 0x48, 0x39, 0xc8 }, bytes.items);
 }
