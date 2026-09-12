@@ -30,6 +30,7 @@ python3 Silex/Toolchain/Tools/LlvmEvaluation/compile.py \
   --source Silex/Toolchain/Benchmarks/Optimizer/LlvmEvaluation/SteeringWorkload.sx \
   --adapter Tools/Adapter/bin/silex-llvm-evaluation \
   --shadercross Tools/Shadercross/install/bin/shadercross \
+  --silex-prefix none \
   --llvm-dir Tools/LLVM-21.1.8 \
   --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk \
   --opt O3 --output Evaluations/SteeringWorkload-O3
@@ -42,6 +43,11 @@ reading a user-global toolchain installation, and its digest participates in the
 cache key. The tool never falls back to the native backend. Unsupported IR is
 rejected before creating LLVM output, and a failed stage does not replace an
 existing executable.
+
+`--silex-prefix` defaults to `none`. A named internal `ReleaseOptimizer` pass
+selects the cumulative prefix ending at that pass. This is an attribution control
+for determining which Silex canonicalizations remain necessary before LLVM; it is
+not a public optimizer switch or permission to enable the full Release pipeline.
 
 `verify.py` accepts `--native`, `--adapter`, `--shadercross`, `--llvm-dir`, `--sdk`,
 `--output-dir`, and `--report`. It compares exact stdout, stderr, and exit status in native Debug,

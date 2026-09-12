@@ -68,10 +68,12 @@ def compile_source(args):
         raw = staging / "raw.ll"
         run("compose_translate_serialize", [
             adapter, "--backend", "llvm", "--shadercross", args.shadercross,
+            "--silex-prefix", args.silex_prefix,
             source, raw,
         ])
         inputs = dict(backend="llvm-evaluation-v1", driver_sha256=sha(__file__), raw_ir_sha256=sha(raw),
                       source=str(source), source_sha256=sha(source), opt=args.opt,
+                      silex_prefix=args.silex_prefix,
                       cpu=args.cpu, triple="arm64-apple-macosx26.0.0", sdk=str(sdk),
                       shadercross=str(Path(args.shadercross).resolve(strict=True)),
                       shadercross_sha256=sha(args.shadercross),
@@ -120,6 +122,7 @@ def main():
     parser.add_argument("--source", required=True)
     parser.add_argument("--adapter", required=True)
     parser.add_argument("--shadercross", required=True)
+    parser.add_argument("--silex-prefix", default="none")
     parser.add_argument("--llvm-dir", required=True)
     parser.add_argument("--sdk", required=True)
     parser.add_argument("--opt", choices=["O0", "O3"], required=True)

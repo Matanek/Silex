@@ -36,9 +36,10 @@ def main():
         report.write_text(json.dumps(records, indent=2)+"\n")
         return record
 
-    def llvm_command(path, mode, binary):
+    def llvm_command(path, mode, binary, silex_prefix="none"):
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--shadercross", args.shadercross,
+                "--silex-prefix", silex_prefix,
                 "--llvm-dir", args.llvm_dir, "--sdk", args.sdk,
                 "--opt", mode, "--output", binary]
 
@@ -77,6 +78,42 @@ def main():
     for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
+
+    dominance = (corpus/"LlvmEvaluation/CommandsDominance.sx").resolve()
+    native_observable = None
+    for mode in ["debug", "release"]:
+        binary = output/("CommandsDominance-"+mode)
+        built = call("CommandsDominance-compile-"+mode,
+                     [args.native, "compile", dominance, "--"+mode, "--nocache", "--output", binary])
+        assert built["returncode"] == 0, built
+        run = call("CommandsDominance-run-"+mode, [binary])
+        observable = {key: run[key] for key in ["returncode", "stdout", "stderr"]}
+        assert observable == {"returncode": 0, "stdout": "7\n", "stderr": ""}, run
+        if native_observable is None:
+            native_observable = observable
+        else:
+            assert observable == native_observable, (native_observable, observable)
+    for prefix in ["none", "local_simplification_pre"]:
+        target = output/("CommandsDominance-"+prefix+".ll")
+        target.write_bytes(b"existing output must survive verifier refusal")
+        rejected = call("CommandsDominance-"+prefix, [
+            args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
+            "--silex-prefix", prefix, dominance, target,
+        ])
+        assert rejected["returncode"] != 0, rejected
+        assert "DefinitionDoesNotDominateUse" in rejected["stderr"], rejected
+        assert target.read_bytes() == b"existing output must survive verifier refusal"
+    target = output/"CommandsDominance-ssa_promotion_pre.ll"
+    target.write_bytes(b"existing output must survive later refusal")
+    canonicalized = call("CommandsDominance-ssa_promotion_pre", [
+        args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
+        "--silex-prefix", "ssa_promotion_pre", dominance, target,
+    ])
+    assert canonicalized["returncode"] != 0, canonicalized
+    assert "DefinitionDoesNotDominateUse" not in canonicalized["stderr"], canonicalized
+    assert "UnsupportedType" in canonicalized["stderr"], canonicalized
+    assert target.read_bytes() == b"existing output must survive later refusal"
+    print("COMMANDS DOMINANCE PREFIX ATTRIBUTION PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseString", "RefuseCallback"]:

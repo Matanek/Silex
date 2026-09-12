@@ -1,0 +1,94 @@
+use Interop.C
+
+struct Entity {
+    let index:int
+}
+
+struct EntityRecipe {
+    let value:int
+}
+
+class World {
+    func spawn(recipe:EntityRecipe) { print(recipe.value) }
+    func destroy(entity:Entity) { print(entity.index) }
+    func enable(entity:Entity, state:bool) { if state { print(entity.index) } }
+    func is_alive(entity:Entity) bool { return entity.index >= 0 }
+}
+
+protocol StructuralCommand {
+    func apply(world:&World)
+}
+
+struct EmptyStructuralCommand:StructuralCommand {
+    func apply(world:&World) {}
+}
+
+enum Command {
+    spawn(EntityRecipe)
+    destroy(Entity)
+    enable(Entity, bool)
+    structural(StructuralCommand)
+}
+
+struct CommandEntry {
+    let system_order:int
+    let interval_order:int
+    let sequence:int
+    var command:Command
+}
+
+class Commands {
+    private var pending:CommandEntry[]
+    private var parent_address:uint
+
+    init() {
+        self.pending = [
+            CommandEntry(system_order:0, interval_order:0, sequence:0, command:Command.spawn(EntityRecipe(value:7))),
+            CommandEntry(system_order:0, interval_order:0, sequence:1, command:Command.destroy(Entity(index:-1)))
+        ]
+        self.parent_address = 0
+    }
+
+    func flush(world:&World) {
+        if self.parent_address != 0 {
+            var root = C.object_from_address<Commands>(self.parent_address)
+            root.flush(world)
+            return
+        }
+        var commands = self.pending
+        self.pending = []
+        sort_commands(commands)
+        for var entry in commands {
+            match entry.command {
+                spawn(recipe) => { world.spawn(recipe) }
+                destroy(entity) => { if world.is_alive(entity) { world.destroy(entity) } }
+                enable(entity, state) => { if world.is_alive(entity) { world.enable(entity, state) } }
+                structural(var change) => { change.apply(world) }
+            }
+        }
+    }
+}
+
+func sort_commands(commands:&CommandEntry[]) {
+    var right = 1
+    while right < commands.count() {
+        var left = right
+        while left > 0 && command_after(commands[left - 1], commands[left]) {
+            commands.swap(left - 1, left)
+            left--
+        }
+        right++
+    }
+}
+
+func command_after(left:@CommandEntry, right:@CommandEntry) bool {
+    if left.system_order != right.system_order { return left.system_order > right.system_order }
+    if left.interval_order != right.interval_order { return left.interval_order > right.interval_order }
+    return left.sequence > right.sequence
+}
+
+func main() {
+    var world = World()
+    var commands = Commands()
+    commands.flush(world)
+}
