@@ -51,3 +51,19 @@ Les six journaux et le statut des jobs sont conservés. Ils portent exactement
 `40dc12052f4d03b646ba2210ec5b15013f338f77` ; les modifications suivantes
 ne réutilisent pas ces résultats comme preuve de leur propre code.
 La campagne Intel appariée `34662127944` reste en cours.
+
+## Campagne Intel conservée, sans gain qualifié
+
+Le run [34662127944](https://github.com/Matanek/Silex/actions/runs/34662127944)
+a terminé ses régressions avec succès, puis échoué au portail de mesure.
+Les 21 paires et six échauffements dépassent le seuil de dispersion pour
+les trois workloads, côté candidat et baseline `3e58401`. Arithmetic dépasse
+aussi le seuil de dérive du candidat. Aucune baisse brute ne constitue donc
+un gain qualifié ; les seuils de stabilité et de parité sont inchangés.
+Les ratios appariés centraux sont 1.003256 / 0.859019 / 1.023559 pour
+Arithmetic / Objects / Flocking. La parité demeure rouge.
+
+L'artefact 10287862942 est contrôlé : ZIP SHA-256
+`99636a0febbc10549d5141e15d7dcf799c94922fcc406e12152fd7cdc9619574`,
+quinze empreintes de binaires correspondent au rapport. Les métadonnées,
+journaux, échantillons bruts et exécutables sont conservés dans cet audit.
