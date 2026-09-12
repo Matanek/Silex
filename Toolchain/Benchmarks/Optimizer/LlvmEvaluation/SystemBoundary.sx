@@ -1,0 +1,12 @@
+use Interop.C
+use Interop.MacOS
+
+let release = C.function<func(C.Pointer<uint8>) void>(library:MacOS.lib_system, name:"freeaddrinfo")
+let random = C.function<func() uint32>(library:MacOS.lib_system, name:"arc4random")
+let error_pointer = C.function<func() C.Pointer<uint8> >(library:MacOS.lib_system, name:"__error")
+
+func main() {
+    let value = random()
+    if value != value { release(error_pointer()) }
+    print(value == value)
+}

@@ -53,6 +53,12 @@ after `--silex-prefix`. Once the closed program verifies, it records only direct
 package boundaries reachable from `main`, their typed signatures and call-site
 counts. Producing this report does not imply that the emitter supports them.
 
+Direct boundary calls are emitted only when every parameter and result already
+has an explicit scalar or address LLVM representation. Void calls carry no
+synthetic result. Duplicate declarations must keep the same provider and exact
+signature; indirect calls and conflicts remain explicit refusals. Archive and
+framework linking is a separate stage and is not inferred by the emitter.
+
 `verify.py` accepts `--native`, `--adapter`, `--shadercross`, `--llvm-dir`, `--sdk`,
 `--output-dir`, and `--report`. It compares exact stdout, stderr, and exit status in native Debug,
 native Release, LLVM O0, and LLVM O3; it also checks the interpreter on bounded

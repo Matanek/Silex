@@ -55,6 +55,7 @@ def main():
         "LlvmEvaluation/DivisionByZero.sx": "7\n",
         "LlvmEvaluation/Conversion.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
+        "LlvmEvaluation/SystemBoundary.sx": "true\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -74,6 +75,17 @@ def main():
             else:
                 assert observable == expected, (source, mode, expected, observable)
             print(source.stem, mode, "PASS", flush=True)
+
+    system_metadata = json.loads(Path(str(output/"SystemBoundary-O0")+".json").read_text())
+    system_llvm = (Path(system_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "declare void @freeaddrinfo(ptr)",
+        "declare i32 @arc4random()",
+        "declare ptr @__error()",
+        "call void @freeaddrinfo(ptr",
+    ]:
+        assert fragment in system_llvm, fragment
+    print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
     for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])

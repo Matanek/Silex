@@ -94,7 +94,13 @@ pub fn emitWithBoundaries(
         }
     }
     try output.append(allocator, '\n');
-    try emitBoundaryDeclarations(&output, allocator, program, boundaries);
+    try emitBoundaryDeclarations(
+        &output,
+        allocator,
+        program,
+        boundaries,
+        boundary_use.direct_sites_by_function,
+    );
     for (program.structures, 0..) |structure, structure_index| {
         if (structure.collection != null) {
             try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
@@ -181,7 +187,7 @@ pub fn boundaryReport(
             .parameters = boundary.parameters,
             .return_type = boundary.return_type,
             .direct_sites = sites,
-            .supported_by_prototype = Silex.Boundary.isPureScalarMath(boundary),
+            .supported_by_prototype = supportsDirectBoundary(boundary),
         };
         entry_index += 1;
     }
@@ -238,7 +244,7 @@ fn inspectBoundaryUse(
         };
     }
     for (result.direct_sites_by_function, 0..) |sites, index| {
-        if (sites == 0 or Silex.Boundary.isPureScalarMath(boundaries[index])) continue;
+        if (sites == 0 or supportsDirectBoundary(boundaries[index])) continue;
         result.unsupported += 1;
         if (result.first_unsupported == null) result.first_unsupported = index;
     }
@@ -1127,12 +1133,17 @@ const FunctionEmitter = struct {
     fn emitBoundaryCall(self: *FunctionEmitter, value: Ir.Instruction.BoundaryCall) Error!void {
         if (value.function >= self.boundaries.len) return error.InvalidProgram;
         const boundary = self.boundaries[value.function];
-        if (!Silex.Boundary.isPureScalarMath(boundary)) return error.UnsupportedInstruction;
+        if (!supportsDirectBoundary(boundary)) return error.UnsupportedType;
         if (boundary.parameters.len != value.arguments.len) return error.InvalidProgram;
-        const result = value.result orelse return error.InvalidProgram;
-        if (try self.valueType(result) != boundary.return_type) return error.InvalidProgram;
-        try self.write("  %v{d} = call {s} @{s}(", .{
-            result,
+        try self.output.appendSlice(self.allocator, "  ");
+        if (boundary.return_type == .void) {
+            if (value.result != null) return error.InvalidProgram;
+        } else {
+            const result = value.result orelse return error.InvalidProgram;
+            if (try self.valueType(result) != boundary.return_type) return error.InvalidProgram;
+            try self.write("%v{d} = ", .{result});
+        }
+        try self.write("call {s} @{s}(", .{
             try llvmType(self.allocator, self.program, boundary.return_type),
             boundary.source_name,
         });
@@ -1223,13 +1234,26 @@ fn emitBoundaryDeclarations(
     allocator: Allocator,
     program: Ir.Program,
     boundaries: []const Silex.Boundary.Function,
+    direct_sites_by_function: []const usize,
 ) Error!void {
+    if (direct_sites_by_function.len != boundaries.len) return error.InvalidProgram;
+    var emitted = false;
     boundary: for (boundaries, 0..) |function, index| {
-        if (!Silex.Boundary.isPureScalarMath(function)) continue;
-        for (boundaries[0..index]) |previous| {
-            if (Silex.Boundary.isPureScalarMath(previous) and
-                std.mem.eql(u8, previous.source_name, function.source_name))
-                continue :boundary;
+        if (direct_sites_by_function[index] == 0) continue;
+        if (!supportsDirectBoundary(function)) return error.UnsupportedType;
+        for (boundaries[0..index], direct_sites_by_function[0..index]) |previous, previous_sites| {
+            if (previous_sites == 0 or !std.mem.eql(u8, previous.source_name, function.source_name)) continue;
+            if (!std.mem.eql(u8, previous.provider, function.provider) or
+                previous.return_type != function.return_type or
+                !std.mem.eql(Ir.Type, previous.parameters, function.parameters))
+            {
+                std.debug.print(
+                    "silex LLVM evaluation: boundary symbol '{s}' has conflicting providers or signatures\n",
+                    .{function.source_name},
+                );
+                return error.InvalidProgram;
+            }
+            continue :boundary;
         }
         try appendFmt(output, allocator, "declare {s} @{s}(", .{
             try llvmType(allocator, program, function.return_type),
@@ -1240,8 +1264,35 @@ fn emitBoundaryDeclarations(
             try output.appendSlice(allocator, try llvmType(allocator, program, parameter));
         }
         try output.appendSlice(allocator, ")\n");
+        emitted = true;
     }
-    if (boundaries.len != 0) try output.append(allocator, '\n');
+    if (emitted) try output.append(allocator, '\n');
+}
+
+fn supportsDirectBoundary(function: Silex.Boundary.Function) bool {
+    if (!supportsBoundaryType(function.return_type)) return false;
+    for (function.parameters) |parameter| if (!supportsBoundaryType(parameter)) return false;
+    return true;
+}
+
+fn supportsBoundaryType(type_value: Ir.Type) bool {
+    return switch (type_value) {
+        .void,
+        .bool,
+        .int8,
+        .uint8,
+        .int16,
+        .uint16,
+        .int32,
+        .uint32,
+        .int,
+        .uint,
+        .float32,
+        .float64,
+        .address,
+        => true,
+        else => false,
+    };
 }
 
 const CollectionInfo = struct {
