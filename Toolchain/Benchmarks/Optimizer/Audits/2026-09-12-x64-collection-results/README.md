@@ -42,3 +42,9 @@ dispersée) et Flocking mesure les résultats chargés, son code étant identiqu
 entre 737fc8c et 6b3f302. Les seuils et vingt-et-une rotations après six
 échauffements restent inchangés. Les campagnes distantes sont en cours ;
 aucune parité physique ni aucun gain de ce candidat n’est encore acquis.
+
+Les exécutions distantes X64 sont vertes sur le SHA exact 3e58401 : macOS
+34659581895 (job 103459098981), Linux 34659583268 (103459103243), Windows
+34659584418 (103459106064). Elles comprennent la fixture à treize assertions
+en Debug/Release. Les journaux sont le texte décodé du connecteur, avec
+fins de ligne LF. Le run de mesure Intel 34659585652 reste en cours.
