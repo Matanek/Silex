@@ -206,6 +206,42 @@ func dynamic_class_total() int {
     return value.total(1, 2, 3, 4, 5, 6, 7, 8)
 }
 
+protocol MutableTotal {
+    func add(amount:int)
+    func increment() int
+}
+
+struct MutableOffset:MutableTotal {
+    var value:int
+    func add(amount:int) { self.value += amount }
+    func increment() int { self.value += 1; return self.value }
+}
+
+class MutableClassOffset:MutableTotal {
+    var value:int
+    func add(amount:int) { self.value += amount }
+    func increment() int { self.value += 1; return self.value }
+}
+
+func mutate_dynamic_total(value:MutableTotal) int {
+    var receiver = value
+    receiver.add(4)
+    return receiver.increment()
+}
+
+func verify_dynamic_mutation() {
+    let snapshot = MutableOffset(value:3)
+    assert(mutate_dynamic_total(snapshot) == 8)
+    assert(snapshot.value == 3)
+    var shared = MutableClassOffset(value:10)
+    assert(mutate_dynamic_total(shared) == 15)
+    assert(shared.value == 15)
+}
+
+test "dynamic protocol dispatch returns updated structures and shared classes" {
+    verify_dynamic_mutation()
+}
+
 func verify_embedded_bytes() {
     let source = embed_bytes("NativePortability.sx")
     assert(source.count() > 300)
@@ -552,6 +588,7 @@ func main() {
     assert(callback_total() == 55)
     assert(dynamic_total() == 42)
     assert(dynamic_class_total() == 42)
+    verify_dynamic_mutation()
     assert(paired_float_checksum(
         NativeFloatPair(x:1.0, y:2.0),
         NativeFloatPair(x:3.0, y:4.0)

@@ -994,14 +994,20 @@ fn analyzeProtocolCall(
     const updated = try self.newValue(builder, receiver.type);
     const result = if (requirement.return_type == .void) null else try self.newValue(builder, requirement.return_type);
     const merge_block = try self.newBlock(builder);
-    for (conformers) |structure_index| {
+    for (conformers, 0..) |structure_index, conformer_index| {
         const witness_file = ProtocolValues.witnessFile(self, structure_index, protocol_index) orelse return error.InvalidSource;
         const implementation = ProtocolValues.implementationAt(self, structure_index, requirement, witness_file) orelse return error.InvalidSource;
-        const action_block = try self.newBlock(builder);
-        const next_block = try self.newBlock(builder);
-        const matches = try ProtocolValues.emitTest(self, builder, receiver.value, structure_index);
-        self.terminate(builder, .{ .branch = .{ .condition = matches, .then_block = action_block, .else_block = next_block } });
-        builder.current_block = action_block;
+        // Typed protocol values contain one of this program's conformers.
+        // The final witness is exhaustive: an unmatched fallthrough would
+        // reach the merge without defining its result or updated receiver.
+        const next_block: ?Ir.BlockId = if (conformer_index + 1 < conformers.len) next: {
+            const action = try self.newBlock(builder);
+            const next = try self.newBlock(builder);
+            const matches = try ProtocolValues.emitTest(self, builder, receiver.value, structure_index);
+            self.terminate(builder, .{ .branch = .{ .condition = matches, .then_block = action, .else_block = next } });
+            builder.current_block = action;
+            break :next next;
+        } else null;
         const concrete = try ProtocolValues.emitExtract(self, builder, receiver.value, structure_index);
         const method_receiver = if (structure_index != implementation.owner)
             (try self.coerce(builder, .{ .type = Ast.Type.structure(structure_index), .value = concrete }, Ast.Type.structure(implementation.owner), call.name_position)).value
@@ -1040,9 +1046,8 @@ fn analyzeProtocolCall(
             try self.emit(builder, .{ .copy = .{ .result = target, .operand = source } });
         }
         self.terminate(builder, .{ .jump = merge_block });
-        builder.current_block = next_block;
+        if (next_block) |next| builder.current_block = next;
     }
-    self.terminate(builder, .{ .jump = merge_block });
     builder.current_block = merge_block;
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
     try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
