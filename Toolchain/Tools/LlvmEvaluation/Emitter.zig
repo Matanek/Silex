@@ -25,7 +25,7 @@ pub fn emitWithBoundaries(
     const reachable = try IrStats.reachableFunctions(allocator, program);
     defer allocator.free(reachable);
     const boundary_use = try inspectBoundaryUse(allocator, program, boundaries, reachable);
-    defer allocator.free(boundary_use.direct);
+    defer allocator.free(boundary_use.direct_sites_by_function);
     if (boundary_use.unsupported != 0 or boundary_use.indirect_sites != 0) {
         const first = boundary_use.first_unsupported;
         std.debug.print(
@@ -149,8 +149,66 @@ pub fn emitWithBoundaries(
     return output.toOwnedSlice(allocator);
 }
 
+pub fn boundaryReport(
+    allocator: Allocator,
+    program: Ir.Program,
+    boundaries: []const Silex.Boundary.Function,
+) Error![]u8 {
+    const reachable = try IrStats.reachableFunctions(allocator, program);
+    defer allocator.free(reachable);
+    const boundary_use = try inspectBoundaryUse(allocator, program, boundaries, reachable);
+    defer allocator.free(boundary_use.direct_sites_by_function);
+
+    var reachable_function_count: usize = 0;
+    for (reachable) |is_reachable| if (is_reachable) {
+        reachable_function_count += 1;
+    };
+    var direct_function_count: usize = 0;
+    for (boundary_use.direct_sites_by_function) |sites| if (sites != 0) {
+        direct_function_count += 1;
+    };
+    const entries = try allocator.alloc(BoundaryInventoryEntry, direct_function_count);
+    var entry_index: usize = 0;
+    for (boundaries, 0..) |boundary, index| {
+        const sites = boundary_use.direct_sites_by_function[index];
+        if (sites == 0) continue;
+        entries[entry_index] = .{
+            .index = index,
+            .owner = boundary.owner,
+            .name = boundary.name,
+            .provider = boundary.provider,
+            .source_name = boundary.source_name,
+            .parameters = boundary.parameters,
+            .return_type = boundary.return_type,
+            .direct_sites = sites,
+            .supported_by_prototype = Silex.Boundary.isPureScalarMath(boundary),
+        };
+        entry_index += 1;
+    }
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .boundary_table_size = boundaries.len,
+        .reachable_functions = reachable_function_count,
+        .reachable_direct_boundary_functions = direct_function_count,
+        .direct_call_sites = boundary_use.direct_sites,
+        .indirect_call_sites = boundary_use.indirect_sites,
+        .functions = entries,
+    }, .{ .whitespace = .indent_2 });
+}
+
+const BoundaryInventoryEntry = struct {
+    index: usize,
+    owner: usize,
+    name: []const u8,
+    provider: []const u8,
+    source_name: []const u8,
+    parameters: []const Ir.Type,
+    return_type: Ir.Type,
+    direct_sites: usize,
+    supported_by_prototype: bool,
+};
+
 const BoundaryUse = struct {
-    direct: []bool,
+    direct_sites_by_function: []usize,
     direct_sites: usize = 0,
     indirect_sites: usize = 0,
     unsupported: usize = 0,
@@ -164,23 +222,23 @@ fn inspectBoundaryUse(
     reachable: []const bool,
 ) Error!BoundaryUse {
     if (reachable.len != program.functions.len) return error.InvalidProgram;
-    var result: BoundaryUse = .{ .direct = try allocator.alloc(bool, boundaries.len) };
-    @memset(result.direct, false);
-    errdefer allocator.free(result.direct);
+    var result: BoundaryUse = .{ .direct_sites_by_function = try allocator.alloc(usize, boundaries.len) };
+    @memset(result.direct_sites_by_function, 0);
+    errdefer allocator.free(result.direct_sites_by_function);
     for (program.functions, 0..) |function, function_index| {
         if (!reachable[function_index]) continue;
         for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
             .boundary_call => |call| {
                 if (call.function >= boundaries.len) return error.InvalidProgram;
                 result.direct_sites += 1;
-                result.direct[call.function] = true;
+                result.direct_sites_by_function[call.function] += 1;
             },
             .boundary_indirect_call => result.indirect_sites += 1,
             else => {},
         };
     }
-    for (result.direct, 0..) |used, index| {
-        if (!used or Silex.Boundary.isPureScalarMath(boundaries[index])) continue;
+    for (result.direct_sites_by_function, 0..) |sites, index| {
+        if (sites == 0 or Silex.Boundary.isPureScalarMath(boundaries[index])) continue;
         result.unsupported += 1;
         if (result.first_unsupported == null) result.first_unsupported = index;
     }

@@ -104,16 +104,38 @@ def main():
         assert "DefinitionDoesNotDominateUse" in rejected["stderr"], rejected
         assert target.read_bytes() == b"existing output must survive verifier refusal"
     target = output/"CommandsDominance-ssa_promotion_pre.ll"
+    boundary_report = output/"CommandsDominance-boundaries.json"
     target.write_bytes(b"existing output must survive later refusal")
     canonicalized = call("CommandsDominance-ssa_promotion_pre", [
         args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
-        "--silex-prefix", "ssa_promotion_pre", dominance, target,
+        "--silex-prefix", "ssa_promotion_pre", "--boundary-report", boundary_report,
+        dominance, target,
     ])
     assert canonicalized["returncode"] != 0, canonicalized
     assert "DefinitionDoesNotDominateUse" not in canonicalized["stderr"], canonicalized
     assert "UnsupportedType" in canonicalized["stderr"], canonicalized
     assert target.read_bytes() == b"existing output must survive later refusal"
+    inventory = json.loads(boundary_report.read_text())
+    assert inventory["reachable_direct_boundary_functions"] == 0, inventory
+    assert inventory["direct_call_sites"] == 0 and inventory["indirect_call_sites"] == 0, inventory
     print("COMMANDS DOMINANCE PREFIX ATTRIBUTION PASS", flush=True)
+
+    pure_math = (corpus/"Regressions/PureMathReferenceInlining.sx").resolve()
+    boundary_report = output/"PureMathReferenceInlining-boundaries.json"
+    raw_llvm = output/"PureMathReferenceInlining-raw.ll"
+    reported = call("PureMathReferenceInlining-boundary-report", [
+        args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
+        "--silex-prefix", "none", "--boundary-report", boundary_report,
+        pure_math, raw_llvm,
+    ])
+    assert reported["returncode"] == 0, reported
+    inventory = json.loads(boundary_report.read_text())
+    assert inventory["boundary_table_size"] > inventory["reachable_direct_boundary_functions"], inventory
+    assert inventory["reachable_direct_boundary_functions"] == 1, inventory
+    assert inventory["direct_call_sites"] == 1 and inventory["indirect_call_sites"] == 0, inventory
+    function = inventory["functions"][0]
+    assert function["source_name"] == "sqrtf" and function["supported_by_prototype"], inventory
+    print("REACHABLE BOUNDARY INVENTORY PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseString", "RefuseCallback"]:

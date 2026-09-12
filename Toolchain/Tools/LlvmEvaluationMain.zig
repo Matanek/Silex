@@ -12,24 +12,27 @@ pub fn main(init: std.process.Init) u8 {
 fn run(init: std.process.Init) !u8 {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
-    if (args.len != 9 or
+    if ((args.len != 9 and args.len != 11) or
         !std.mem.eql(u8, args[1], "--backend") or
         !std.mem.eql(u8, args[2], "llvm") or
         !std.mem.eql(u8, args[3], "--shadercross") or
-        !std.mem.eql(u8, args[5], "--silex-prefix"))
+        !std.mem.eql(u8, args[5], "--silex-prefix") or
+        (args.len == 11 and !std.mem.eql(u8, args[7], "--boundary-report")))
     {
         std.debug.print(
-            "usage: silex-llvm-evaluation --backend llvm --shadercross PATH --silex-prefix none|PASS SOURCE OUTPUT.ll\n",
+            "usage: silex-llvm-evaluation --backend llvm --shadercross PATH --silex-prefix none|PASS [--boundary-report REPORT.json] SOURCE OUTPUT.ll\n",
             .{},
         );
         return 1;
     }
+    const source_index: usize = if (args.len == 11) 9 else 7;
+    const output_index = source_index + 1;
     const started = std.Io.Clock.awake.now(init.io);
     var compiler = Silex.Project.Compiler.init(allocator, init.io);
     compiler.shadercross_path = args[4];
-    const compiled = compiler.compile(args[7]) catch |err| {
+    const compiled = compiler.compile(args[source_index]) catch |err| {
         if (compiler.diagnostic) |diagnostic| std.debug.print("{s}:{d}:{d}: {s}\n", .{
-            compiler.diagnosticPath(args[7]), diagnostic.position.line, diagnostic.position.column, diagnostic.message,
+            compiler.diagnosticPath(args[source_index]), diagnostic.position.line, diagnostic.position.column, diagnostic.message,
         });
         return err;
     };
@@ -62,11 +65,18 @@ fn run(init: std.process.Init) !u8 {
         return err;
     };
     const verified_at = std.Io.Clock.awake.now(init.io);
+    if (args.len == 11) {
+        const report = try Emitter.boundaryReport(allocator, program, compiled.boundaries);
+        const report_file = try std.Io.Dir.cwd().createFile(init.io, args[8], .{});
+        defer report_file.close(init.io);
+        try report_file.writeStreamingAll(init.io, report);
+        try report_file.writeStreamingAll(init.io, "\n");
+    }
     // Only the explicitly selected cumulative prefix may run before LLVM. No
     // native lowering or native implementation of a Silex function is mixed in.
     const llvm = try Emitter.emitWithBoundaries(allocator, program, compiled.boundaries);
     const emitted_at = std.Io.Clock.awake.now(init.io);
-    const file = try std.Io.Dir.cwd().createFile(init.io, args[8], .{});
+    const file = try std.Io.Dir.cwd().createFile(init.io, args[output_index], .{});
     defer file.close(init.io);
     try file.writeStreamingAll(init.io, llvm);
     const written_at = std.Io.Clock.awake.now(init.io);
