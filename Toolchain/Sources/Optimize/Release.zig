@@ -3322,6 +3322,7 @@ test "release preserves representation-changing copies" {
 }
 
 test {
+    _ = @import("PrivateClassStateTests.zig");
     _ = @import("ScalarExpressionsTests.zig");
     _ = @import("DominatedValuesTests.zig");
     _ = @import("LateScalarClosureTests.zig");

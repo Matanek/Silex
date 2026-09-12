@@ -192,8 +192,8 @@ jobs:
             "$silex" compile "$class_leaf_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-class-leaves-$mode"
             class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")
-            test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 18
           done
           integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
@@ -517,8 +517,8 @@ jobs:
             "$silex" compile "$class_leaf_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-class-leaves-$mode"
             class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")
-            test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 18
           done
           integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
@@ -665,8 +665,8 @@ jobs:
             "$silex" compile "$class_leaf_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-class-leaves-$mode"
             class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")
-            test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 10
-            test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 10
+            test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 18
+            test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 18
           done
           integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
@@ -852,7 +852,7 @@ jobs:
             & $silex compile $classLeafFixture "--$mode" --nocache -o $classLeafBinary
             if ($LASTEXITCODE -ne 0) { throw "scalar class leaves compilation failed" }
             $classLeafOutput = @(& $classLeafBinary)
-            if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 10 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 18 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar class leaves $mode regression failed"
             }
           }
@@ -1219,7 +1219,7 @@ jobs:
             & $silex compile $classLeafFixture "--$mode" --nocache -o $classLeafBinary
             if ($LASTEXITCODE -ne 0) { throw "scalar class leaves compilation failed" }
             $classLeafOutput = @(& $classLeafBinary)
-            if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 10 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
+            if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 18 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar class leaves $mode regression failed"
             }
           }

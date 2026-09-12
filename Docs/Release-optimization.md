@@ -171,6 +171,22 @@ calls, unknown memory effects, and block boundaries invalidate both proofs.
 The pass never removes the final observable mutation or an unproved bounds
 failure.
 
+The same pass can cache scalar fields of a private class instance created in
+the entry block. It follows copies, local homes and class-store results to
+prove that every alias still identifies that instance. Each tracked home must
+be initialized in entry, every value identity must have one definition, and
+address-taking, calls receiving the object, mixed-instance homes, inherited
+classes and resource fields reject the proof. Drops remain on returning paths;
+no cached read may follow a drop. Unrelated effects cannot reach a proven
+private instance.
+
+Eligible field reads become scalar local reads. Initialization seeds those
+locals and every field store updates both the original object and its cached
+value. Allocation, allocation failures, field writes, reference counts and
+destruction remain explicit and ordered. The existing SSA pass transports
+the scalar state across branches and loops. This is a write-through cache of
+private state, not allocation elimination or a change to shared class identity.
+
 For flat numeric or boolean value structures, a reconstructed reference or
 mutable-view store writes only the changed fields when the other fields come
 from a still-current snapshot of that exact destination. Calls, unknown

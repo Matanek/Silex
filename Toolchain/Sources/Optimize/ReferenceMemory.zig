@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
 const KnownCollections = @import("KnownCollections.zig");
+const PrivateClassState = @import("PrivateClassState.zig");
 
 const Definition = struct {
     instruction: ?Ir.Instruction = null,
@@ -20,7 +21,8 @@ fn optimizeFunction(allocator: std.mem.Allocator, program: Ir.Program, function:
     const pruned = try removeOverwrittenStores(allocator, function, definitions);
     const forwarded = try forwardStoredValues(allocator, pruned, definitions);
     const views = try simplifyExactViewStores(allocator, program, forwarded);
-    return KnownCollections.optimize(allocator, program, views);
+    const collections = try KnownCollections.optimize(allocator, program, views);
+    return PrivateClassState.optimize(allocator, program, collections);
 }
 
 const ViewStore = struct {

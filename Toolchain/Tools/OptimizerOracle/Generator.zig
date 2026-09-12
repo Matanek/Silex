@@ -117,7 +117,7 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
-    .{ .name = "Regressions/ScalarClassLeaves.sx", .concern = "scalar class mutator leaves preserve shared identity, signed and floating updates, boolean fields, and resource replacement barriers" },
+    .{ .name = "Regressions/ScalarClassLeaves.sx", .concern = "scalar class state and mutator leaves preserve shared identity, reassignment barriers, signed updates, NaN, signed zero, boolean fields, and resource replacement barriers" },
     .{ .name = "Regressions/IntegerMemoryRegions.sx", .concern = "integer loop regions and direct signed/unsigned operands preserve aliases, narrow normalization, cold exits and empty iterations" },
     .{ .name = "Regressions/BranchComparisons.sx", .concern = "single-use and shared comparisons preserve signed and unsigned widths, unordered floats, infinities and signed zero" },
     .{ .name = "Regressions/BranchSnapshots.sx", .concern = "arm-local scalar snapshots preserve alias writes, joined values, negative indices, NaN and signed zero" },
