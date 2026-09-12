@@ -265,6 +265,14 @@ func replace_pair_through_view(values:&NativeIntegerPair[..]) {
 }
 
 func verify_collections() {
+    var singleton:int[1] = [7]
+    singleton.swap(0, -1)
+    assert(singleton[0] == 7)
+    var pairs:NativeIntegerPair[2] = [NativeIntegerPair(x:4, y:5), NativeIntegerPair(x:8, y:9)]
+    pairs.swap(0, -1)
+    assert(pairs[0].x == 8 && pairs[0].y == 9)
+    assert(pairs[1].x == 4 && pairs[1].y == 5)
+
     var fixed:int[3] = [1, 2, 3]
     let old_fixed = fixed.replace(1, 8)
     fixed.swap(0, -1)

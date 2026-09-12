@@ -3,6 +3,7 @@ const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
 const Lower = @import("Arm64/Lower.zig");
+const Release = @import("Optimize/Release.zig");
 const X64Encoder = @import("X64/Encoder.zig");
 
 test "mutate fixed arrays and dynamic lists with value semantics" {
@@ -45,6 +46,16 @@ test "mutate fixed arrays and dynamic lists with value semantics" {
     try std.testing.expect(linux_x64.code.len != 0);
     try std.testing.expect(windows_x64.code.len != 0);
     try std.testing.expect(windows_x64.windows_import_sites.len != 0);
+    const optimized = try Release.optimize(allocator, compilation.ir);
+    const release_result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings(result.stdout, release_result.stdout);
+    const release_machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    var release_linux_x64 = try X64Encoder.encodeLinux(allocator, release_machine);
+    defer release_linux_x64.deinit(allocator);
+    var release_windows_x64 = try X64Encoder.encodeWindows(allocator, release_machine);
+    defer release_windows_x64.deinit(allocator);
+    try std.testing.expect(release_linux_x64.code.len != 0);
+    try std.testing.expect(release_windows_x64.code.len != 0);
 }
 
 test "reject collection mutation through let" {

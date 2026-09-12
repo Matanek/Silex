@@ -39,6 +39,33 @@ fn exitCode(result: std.process.RunResult) u8 {
     };
 }
 
+test "release fixed array swaps preserve lengths across scalar and aggregate layouts" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { let x:int; let y:int }
+        \\func main() {
+        \\    var singleton:int[1] = [7]
+        \\    singleton.swap(0, -1)
+        \\    var triple:int[3] = [1, 2, 3]
+        \\    triple.swap(0, -1)
+        \\    var pairs:Pair[2] = [Pair(x:4, y:5), Pair(x:8, y:9)]
+        \\    pairs.swap(0, -1)
+        \\    print(singleton[0], " ", triple[0], triple[1], triple[2], " ", pairs[0].x, pairs[0].y, pairs[1].x, pairs[1].y)
+        \\}
+    );
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("7 321 8945\n", reference.stdout);
+    const optimized = try @import("Optimize/Release.zig").optimize(allocator, compilation.ir);
+    const native = try runMachine(allocator, try Lower.lowerWithMode(allocator, optimized, .release));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualStrings(reference.stdout, native.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, native.stderr);
+}
+
 test "native recursive copy preserves detached graph topology" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -721,11 +721,21 @@ fn lowerInstruction(
                 .tail = try strings.lookup(if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
         },
-        .collection_count => |count| .{ .collection_count = .{
-            .result = layout.values[count.result].start,
-            .collection = layout.values[count.collection],
-            .view = collectionForType(program, function.value_types[count.collection]).?.view,
-        } },
+        .collection_count => |count| collection_count: {
+            const collection = collectionForType(program, function.value_types[count.collection]) orelse return error.InvalidMachineProgram;
+            // Optimizations can introduce counts for fixed arrays, even though
+            // source-level count() calls already fold their static length.
+            if (collection.length) |length| break :collection_count .{ .constant_int = .{
+                .result = layout.values[count.result].start,
+                .bits = length,
+                .type = function.value_types[count.result],
+            } };
+            break :collection_count .{ .collection_count = .{
+                .result = layout.values[count.result].start,
+                .collection = layout.values[count.collection],
+                .view = collection.view,
+            } };
+        },
         .list_edit => |edit| edit_value: {
             const collection = collectionForType(program, function.value_types[edit.collection]) orelse return error.InvalidMachineProgram;
             const argument_collection = if (edit.argument) |argument| collectionForType(program, function.value_types[argument]) else null;

@@ -24,6 +24,12 @@ closed portable program; a backend cannot independently discard a different
 semantic slice. The complete typed IR remains available to diagnostics, the
 reference interpreter, and `--emit-ir`.
 
+The shared lowering resolves a fixed array's `collection_count` to its static
+element count. Optimizations may introduce this IR operation while normalizing
+negative indices, even when source-level `count()` calls already folded to
+constants. Dynamic lists and views retain their runtime count access; a fixed
+array's inline elements must never be interpreted as a list header.
+
 ## Recognize targets
 
 Package composition recognizes `macos-arm64`, `macos-x64`, `linux-arm64`,
