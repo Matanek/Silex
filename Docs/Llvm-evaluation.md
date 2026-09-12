@@ -92,13 +92,20 @@ diagnostics and output emitted before failure.
 
 Plain owning collections use heap storage with a reference-count header. Retains
 and drops are emitted from composed IR, and `collection_replace` consumes the old
-owning root when it creates replacement storage. Nested resources, edge ownership,
-class allocation/ownership, callbacks, other non-integer globals, package providers,
-and mutable views requiring owning storage detachment are currently rejected. A returned literal
-remains allocated until its final owning root is dropped. A live-allocation
-counter checked after normal return makes leaks fail validation, including the
-copy/replace regression. This counter is part of the prototype cost; it is not a
-production GC design.
+owning root when it creates replacement storage. The same private allocation
+foundation now covers exact, non-inherited classes whose fields are only numeric
+or boolean: class values stay opaque pointers while a separate private storage
+type drives allocation and field loads. Their root count starts at zero, matching
+the native IR contract, and explicit root retains/drops control reclamation.
+
+This class subset accepts a drop only when its exact static plan contains solely
+provably empty finalizers. Effective finalizers, resource fields, inheritance,
+edge ownership and cycles remain explicit refusals; this is not a substitute for
+the native object graph collector. Callbacks, other non-integer globals, package
+providers, and mutable views requiring owning storage detachment are also still
+rejected. A live-allocation counter checked after normal return makes leaks fail
+validation, including both collection replacement and the optional-class witness.
+This counter is part of the prototype cost; it is not a production GC design.
 
 The cache lives under the group's single `.silex/llvm-evaluation/v1` root. Keys
 include emitted IR, source identity, adapter and driver hashes, LLVM and linker

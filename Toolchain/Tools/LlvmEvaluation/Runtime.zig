@@ -26,6 +26,27 @@ pub const text =
     \\  unreachable
     \\}
     \\
+    \\define internal fastcc ptr @sx_class_alloc(i64 %bytes) {
+    \\entry:
+    \\  %size = add i64 %bytes, 8
+    \\  %wrapped = icmp ult i64 %size, %bytes
+    \\  br i1 %wrapped, label %fail, label %allocate
+    \\allocate:
+    \\  %header = call ptr @malloc(i64 %size)
+    \\  %null = icmp eq ptr %header, null
+    \\  br i1 %null, label %fail, label %ready
+    \\ready:
+    \\  store i64 0, ptr %header
+    \\  %old = load i64, ptr @sx.live
+    \\  %next = add i64 %old, 1
+    \\  store i64 %next, ptr @sx.live
+    \\  %data = getelementptr i8, ptr %header, i64 8
+    \\  ret ptr %data
+    \\fail:
+    \\  call void @exit(i32 1)
+    \\  unreachable
+    \\}
+    \\
     \\define internal fastcc void @sx_retain(ptr %data) {
     \\entry:
     \\  %header = getelementptr i8, ptr %data, i64 -8

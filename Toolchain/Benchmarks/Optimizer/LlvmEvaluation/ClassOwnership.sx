@@ -1,0 +1,15 @@
+class Box {
+    var value:int
+}
+
+func read(box:Box?) int {
+    if let present = box { return present.value }
+    return -1
+}
+
+func main() {
+    var box:Box? = Box(value:7)
+    print(read(box))
+    box = null
+    print(read(box))
+}

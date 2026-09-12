@@ -1,8 +1,0 @@
-class Box {
-    var value:int
-}
-
-func main() {
-    var box = Box(value:7)
-    print(box.value)
-}

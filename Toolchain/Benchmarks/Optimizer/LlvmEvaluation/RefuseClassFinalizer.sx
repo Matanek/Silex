@@ -1,0 +1,7 @@
+class Noisy {
+    drop { print(99) }
+}
+
+func main() {
+    var value = Noisy()
+}
