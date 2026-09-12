@@ -1,0 +1,50 @@
+{
+  "host": {
+    "system": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "processor": "Apple M3 Pro",
+    "translated": false
+  },
+  "median_ms": {
+    "debug": 9.031333,
+    "release": 3.734042,
+    "clang": 2.090583,
+    "clang-o3-slot8": 2.072292,
+    "baseline": 8.402833
+  },
+  "after_before": {
+    "samples": 21,
+    "lower_bound_ppm": 443264,
+    "median_ppm": 444372,
+    "upper_bound_ppm": 447871,
+    "confidence_ppm": 960823,
+    "release_half_shift_ppm": 3723,
+    "clang_half_shift_ppm": 11775,
+    "ratio_half_shift_ppm": 5174,
+    "ratios_ppm": [
+      458833,
+      438461,
+      447871,
+      442472,
+      505051,
+      443264,
+      413780,
+      447463,
+      444286,
+      438929,
+      434166,
+      454741,
+      444372,
+      410022,
+      445125,
+      443522,
+      463800,
+      467312,
+      446585,
+      443922,
+      452906
+    ]
+  },
+  "failures": []
+}
