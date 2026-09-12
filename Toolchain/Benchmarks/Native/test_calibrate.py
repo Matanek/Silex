@@ -3,12 +3,37 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import calibrate
 import campaign
 
 
 class CalibrationTests(unittest.TestCase):
+    def test_balanced_batches_preserve_every_launch_and_output_check(self):
+        calls = []
+        def execute(path):
+            calls.append(path.parent.name)
+            return b"expected", 10 if path.parent.name == "after" else 20
+        with patch.object(campaign, "execute", side_effect=execute), patch.object(campaign, "file_sha256", return_value="sha"):
+            result = calibrate.measure_balanced_pair(Path("after"), Path("before"), samples=21, warmups=1, batches=2)
+        self.assertEqual(len(calls), 22 * 16)
+        self.assertEqual(len(result["observations"]), 21)
+        self.assertEqual(result["release_vs_baseline"]["median_ppm"], 500_000)
+        self.assertEqual(result["stability_failures"], [])
+        for row in result["observations"]:
+            launches = row["launches"]
+            self.assertEqual(len(launches), 16)
+            for start in (0, 8):
+                block = launches[start:start + 8]
+                positions = {name: [i for i, launch in enumerate(block) if launch["configuration"] == name] for name in ("release", "baseline")}
+                self.assertEqual([len(value) for value in positions.values()], [4, 4])
+                self.assertEqual(sum(positions["release"]), sum(positions["baseline"]))
+            self.assertEqual(row["timings_ns"], {"release": 80, "baseline": 160})
+        with patch.object(campaign, "execute", side_effect=[(b"expected", 10), (b"wrong", 10)]):
+            with self.assertRaisesRegex(RuntimeError, "outputs differ"):
+                calibrate.measure_balanced_pair(Path("after"), Path("before"))
+
     def artifact(self, directory):
         report = {"candidate_sha": "candidate", "baseline_sha": "baseline", "workloads": []}
         for workload in campaign.WORKLOADS:

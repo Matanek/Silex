@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 Toolchain/Benchmarks/Native/calibrate.py calibration-input calibration-output \
-            --expected-candidate "$EXPECTED_CANDIDATE" --source-run-id "$SOURCE_RUN"
+            --expected-candidate "$EXPECTED_CANDIDATE" --source-run-id "$SOURCE_RUN" --balanced-batches
       - name: Preserve the calibration evidence
         if: always()
         uses: actions/upload-artifact@v7
