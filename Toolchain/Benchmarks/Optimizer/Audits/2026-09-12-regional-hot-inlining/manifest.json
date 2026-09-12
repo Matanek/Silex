@@ -1,0 +1,59 @@
+{
+  "artifacts": [
+    {
+      "path": "README.md",
+      "sha256": "b7400b0886141b63ea4be53cc8e98909b1499d4b85de8781a8db20ef02489a0b",
+      "bytes": 6132
+    },
+    {
+      "path": "arm64-integration-silex-ab.json",
+      "sha256": "85ee8dfaa9a82bf98611c5923745ac45eafa95842ce8c9428c131461538d2121",
+      "bytes": 19633
+    },
+    {
+      "path": "arm64-preparation-control.json",
+      "sha256": "835deab259cc0e974ac80344bbc61469f6cbda56123027f52d73880a54ce97ff",
+      "bytes": 19483
+    },
+    {
+      "path": "evidence.json",
+      "sha256": "36405ec293c135dfbe3e5876f0024e8973d9a96a9c6bfc2e64eff25ea9881c57",
+      "bytes": 6040
+    },
+    {
+      "path": "github-arm64-physics-report.json",
+      "sha256": "8b7dfbf5cd113458c3465d2c9b39b55076d98527f8b054c7e71739f801422b99",
+      "bytes": 6048932
+    },
+    {
+      "path": "github-intel-physics-report.json",
+      "sha256": "5e1a6c6467a19a4ddf71f46fc9169d9e6609314cb169ad91e25096e980888fce",
+      "bytes": 6046921
+    },
+    {
+      "path": "intel-environment.txt",
+      "sha256": "59dacaf2bf27fb8365b21bbc155985e49463888a5ca83742fe8828b777216710",
+      "bytes": 232
+    },
+    {
+      "path": "intel-native-qualification.log",
+      "sha256": "5b55a6b89691a8634cd316a16a8756691ae6508fc8bd4bfd67d2659e34c68e2c",
+      "bytes": 16200
+    },
+    {
+      "path": "intel-optimizer-campaign.json",
+      "sha256": "82c0ede3a2ebab0ca043326d578a570a33fbaefcc35c22081e820143fa2942ac",
+      "bytes": 54531
+    },
+    {
+      "path": "measure-integration.py",
+      "sha256": "71d89c52991aa0c143548b62e354838333828c93f23b58de815ced90b0701f4a",
+      "bytes": 3061
+    },
+    {
+      "path": "measure-preparation.py",
+      "sha256": "c96375d7ca22a2c81d8e4fa925687a8c600e37ef6104f671ac35b21911af2f8a",
+      "bytes": 2849
+    }
+  ]
+}

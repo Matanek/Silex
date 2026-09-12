@@ -1,0 +1,767 @@
+{
+  "scope": "diagnostic physical ARM64 canonical Preparation; Silex candidate versus frozen Silex baseline and identical-file control",
+  "host": {
+    "system": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "processor": "arm",
+    "translated": false
+  },
+  "warmups": 6,
+  "samples": 21,
+  "binaries": {
+    "baseline": {
+      "path": "/private/tmp/silex-part03-evidence/preparation-before-inline",
+      "sha256": "0431f3cbd6f973126d47b1d8e11aaad15df0a392569c3ce07766ab42dbb8fa35",
+      "bytes": 83560
+    },
+    "release": {
+      "path": "/private/tmp/silex-part03-evidence/preparation-physics-inline-regional",
+      "sha256": "49b6c03da594d52e14ead6f6c78eadb62e68d044b69693882e991c660f9483fa",
+      "bytes": 83568
+    },
+    "control": {
+      "path": "/private/tmp/silex-part03-evidence/preparation-before-inline-control",
+      "sha256": "0431f3cbd6f973126d47b1d8e11aaad15df0a392569c3ce07766ab42dbb8fa35",
+      "bytes": 83560
+    }
+  },
+  "observations": [
+    {
+      "index": 0,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 269.63202,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 269.63202 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 275.411,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 275.411 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 265.753,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 265.753 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 269632020,
+        "release": 275411000,
+        "control": 265753000
+      }
+    },
+    {
+      "index": 1,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 278.65698,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 278.65698 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 274.885,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 274.885 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 268.692,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 268.692 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 268692000,
+        "release": 278656980,
+        "control": 274885000
+      }
+    },
+    {
+      "index": 2,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 289.674,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 289.674 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 287.674,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 287.674 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 295.98502,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 295.98502 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 287674000,
+        "release": 295985020,
+        "control": 289674000
+      }
+    },
+    {
+      "index": 3,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 287.982,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 287.982 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 281.028,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 281.028 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 286.62802,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 286.62802 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 287982000,
+        "release": 281028000,
+        "control": 286628020
+      }
+    },
+    {
+      "index": 4,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 280.678,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 280.678 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 287.172,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 287.172 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 274.597,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 274.597 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 274597000,
+        "release": 280678000,
+        "control": 287172000
+      }
+    },
+    {
+      "index": 5,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 287.49298,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 287.49298 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 291.927,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 291.927 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 271.494,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 271.494 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 291927000,
+        "release": 271494000,
+        "control": 287492980
+      }
+    },
+    {
+      "index": 6,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 280.197,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 280.197 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 274.403,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 274.403 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 276.135,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 276.135 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 280197000,
+        "release": 274403000,
+        "control": 276135000
+      }
+    },
+    {
+      "index": 7,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 275.135,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 275.135 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 279.091,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 279.091 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 279.577,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 279.577 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 279577000,
+        "release": 275135000,
+        "control": 279091000
+      }
+    },
+    {
+      "index": 8,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 279.4,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 279.4 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 287.302,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 287.302 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 277.489,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 277.489 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 287302000,
+        "release": 277489000,
+        "control": 279400000
+      }
+    },
+    {
+      "index": 9,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 267.276,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 267.276 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 276.551,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 276.551 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 278.731,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 278.731 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 267276000,
+        "release": 276551000,
+        "control": 278731000
+      }
+    },
+    {
+      "index": 10,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 290.432,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 290.432 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 290.535,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 290.535 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 281.281,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 281.281 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 281281000,
+        "release": 290432000,
+        "control": 290535000
+      }
+    },
+    {
+      "index": 11,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 279.614,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 279.614 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 277.35498,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 277.35498 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 282.621,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 282.621 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 277354980,
+        "release": 282621000,
+        "control": 279614000
+      }
+    },
+    {
+      "index": 12,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 291.753,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 291.753 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 277.219,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 277.219 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 294.00302,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 294.00302 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 291753000,
+        "release": 277219000,
+        "control": 294003020
+      }
+    },
+    {
+      "index": 13,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 289.55902,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 289.55902 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 276.621,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 276.621 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 290.443,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 290.443 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 290443000,
+        "release": 289559020,
+        "control": 276621000
+      }
+    },
+    {
+      "index": 14,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 271.181,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 271.181 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 278.64502,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 278.64502 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 290.68402,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 290.68402 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 278645020,
+        "release": 290684020,
+        "control": 271181000
+      }
+    },
+    {
+      "index": 15,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 282.728,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 282.728 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 279.87997,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 279.87997 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 280.401,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 280.401 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 282728000,
+        "release": 279879970,
+        "control": 280401000
+      }
+    },
+    {
+      "index": 16,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 280.65198,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 280.65198 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 291.776,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 291.776 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 275.711,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 275.711 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 275711000,
+        "release": 280651980,
+        "control": 291776000
+      }
+    },
+    {
+      "index": 17,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 282.037,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 282.037 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 283.074,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 283.074 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 277.456,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 277.456 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 283074000,
+        "release": 277456000,
+        "control": 282037000
+      }
+    },
+    {
+      "index": 18,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 287.12903,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 287.12903 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 284.3,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 284.3 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 270.827,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 270.827 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 287129030,
+        "release": 284300000,
+        "control": 270827000
+      }
+    },
+    {
+      "index": 19,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 291.45102,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 291.45102 4744923641.0\n"
+        },
+        "control": {
+          "elapsed_ms": 279.338,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 279.338 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 284.006,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 284.006 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 284006000,
+        "release": 291451020,
+        "control": 279338000
+      }
+    },
+    {
+      "index": 20,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 280.74,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 280.74 4744923641.0\n"
+        },
+        "baseline": {
+          "elapsed_ms": 276.54,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 276.54 4744923641.0\n"
+        },
+        "release": {
+          "elapsed_ms": 285.15402,
+          "stdout": "KERNEL preparation silex slots8 8192 2048 285.15402 4744923641.0\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 276540000,
+        "release": 285154020,
+        "control": 280740000
+      }
+    }
+  ],
+  "configurations": {
+    "baseline": {
+      "minimum_ns": 267276000,
+      "p10_ns": 269632020,
+      "median_ns": 281281000,
+      "p90_ns": 290443000,
+      "maximum_ns": 291927000,
+      "mad_ns": 5848030,
+      "mad_ppm": 20790,
+      "spread_ppm": 73986,
+      "samples_ns": [
+        269632020,
+        268692000,
+        287674000,
+        287982000,
+        274597000,
+        291927000,
+        280197000,
+        279577000,
+        287302000,
+        267276000,
+        281281000,
+        277354980,
+        291753000,
+        290443000,
+        278645020,
+        282728000,
+        275711000,
+        283074000,
+        287129030,
+        284006000,
+        276540000
+      ]
+    },
+    "release": {
+      "minimum_ns": 271494000,
+      "p10_ns": 275135000,
+      "median_ns": 280651980,
+      "p90_ns": 290684020,
+      "maximum_ns": 295985020,
+      "mad_ns": 4100980,
+      "mad_ppm": 14612,
+      "spread_ppm": 55403,
+      "samples_ns": [
+        275411000,
+        278656980,
+        295985020,
+        281028000,
+        280678000,
+        271494000,
+        274403000,
+        275135000,
+        277489000,
+        276551000,
+        290432000,
+        282621000,
+        277219000,
+        289559020,
+        290684020,
+        279879970,
+        280651980,
+        277456000,
+        284300000,
+        291451020,
+        285154020
+      ]
+    },
+    "control": {
+      "minimum_ns": 265753000,
+      "p10_ns": 271181000,
+      "median_ns": 279614000,
+      "p90_ns": 290535000,
+      "maximum_ns": 294003020,
+      "mad_ns": 4729000,
+      "mad_ppm": 16912,
+      "spread_ppm": 69216,
+      "samples_ns": [
+        265753000,
+        274885000,
+        289674000,
+        286628020,
+        287172000,
+        287492980,
+        276135000,
+        279091000,
+        279400000,
+        278731000,
+        290535000,
+        279614000,
+        294003020,
+        276621000,
+        271181000,
+        280401000,
+        291776000,
+        282037000,
+        270827000,
+        279338000,
+        280740000
+      ]
+    }
+  },
+  "comparisons": {
+    "candidate_vs_baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 984111,
+      "median_ppm": 1017920,
+      "upper_bound_ppm": 1026214,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 24545,
+      "clang_half_shift_ppm": 10267,
+      "ratio_half_shift_ppm": 3438,
+      "ratios_ppm": [
+        1021432,
+        1037086,
+        1028890,
+        975852,
+        1022145,
+        930006,
+        979321,
+        984111,
+        965844,
+        1034701,
+        1032533,
+        1018986,
+        950183,
+        996956,
+        1043205,
+        989926,
+        1017920,
+        980153,
+        990147,
+        1026214,
+        1031149
+      ]
+    },
+    "control_vs_baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 985503,
+      "median_ppm": 996336,
+      "upper_bound_ppm": 1008144,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 3582,
+      "clang_half_shift_ppm": 10267,
+      "ratio_half_shift_ppm": 1928,
+      "ratios_ppm": [
+        985613,
+        1023048,
+        1006952,
+        995298,
+        1045794,
+        984811,
+        985503,
+        998261,
+        972495,
+        1042858,
+        1032899,
+        1008144,
+        1007712,
+        952410,
+        973213,
+        991769,
+        1058267,
+        996336,
+        943224,
+        983563,
+        1015187
+      ]
+    }
+  }
+}
