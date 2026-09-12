@@ -375,13 +375,13 @@ pub const regressions = [_]RegressionEntry{
     },
     .{
         .name = "Regressions/PureMathReferenceInlining.sx",
-        .concern = "proven pure scalar-math effects remain exact while a native call barrier stays outside a branching reference caller",
-        .contract = .{ .preserves_branching_reference_calls = "main" },
+        .concern = "a bounded branching reference callee crosses only a proven pure scalar-math boundary and closes in its hot caller",
+        .contract = .{ .specializes_branching_reference_calls = "main" },
     },
     .{
         .name = "Regressions/HotReferenceLeafClosure.sx",
-        .concern = "a pressure-heavy hot set of reference leaf callees stays out of line until expanded caller residences are proven profitable",
-        .contract = .{ .preserves_branching_reference_calls = "integrate" },
+        .concern = "regional pressure admits a bounded hot reference leaf set without accumulating values from mutually exclusive paths",
+        .contract = .{ .specializes_branching_reference_calls = "integrate" },
     },
     .{
         .name = "Regressions/DynamicFieldClearAppend.sx",

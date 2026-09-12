@@ -23,9 +23,10 @@ struct Forces {
     var speed_capped:bool
 }
 
-// The first leaf deliberately exceeds the ordinary per-callee budget while
-// the complete pair remains bounded and removes every internal call from the
-// two hot loops.
+// The first leaf has many scalar values spread over mutually exclusive paths.
+// Regional pressure accounting admits the bounded expansion and removes every
+// internal call from the two hot loops without treating all paths as live at
+// once.
 func integrate_velocity(body:&Body, forces:&Forces) {
     let step:float = 1.0 / 240.0
     let maximum_angular:float = (0.25 * 3.14159265359) * 60.0

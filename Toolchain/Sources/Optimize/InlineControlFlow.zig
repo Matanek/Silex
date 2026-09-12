@@ -3,7 +3,7 @@ const Ir = @import("../Ir.zig");
 const CallSummary = @import("CallSummary.zig");
 
 const Allocator = std.mem.Allocator;
-const maximum_cost = 128;
+const maximum_cost = 256;
 
 const Info = struct {
     state: enum { unresolved, visiting, rejected, eligible } = .unresolved,
@@ -120,7 +120,8 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                         info.state = .rejected;
                         return;
                     }
-                    native_barrier = true;
+                    if (call.function >= program.boundary_effects.len or
+                        program.boundary_effects[call.function] != .pure) native_barrier = true;
                     cost += 4;
                 },
                 .call => |call| {
@@ -496,7 +497,7 @@ test "inline branching reference updates without losing their addresses" {
     try std.testing.expect(optimized.functions[1].blocks[3].instructions[0] == .reference_load);
 }
 
-test "keep newly supported branching references with native barriers out of callers" {
+test "inline branching references across pure scalar boundaries only" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -521,7 +522,7 @@ test "keep newly supported branching references with native barriers out of call
         .instructions = &.{.{ .call = .{ .result = null, .function = 0, .arguments = &.{ 0, 1, 2 } } }},
         .terminator = .return_void,
     }};
-    const program: Ir.Program = .{
+    var program: Ir.Program = .{
         .functions = &.{
             .{
                 .name = "update_with_boundary",
@@ -540,6 +541,12 @@ test "keep newly supported branching references with native barriers out of call
         },
         .boundary_effects = &.{.pure},
     };
-    const optimized = try optimize(allocator, program);
-    try std.testing.expect(optimized.functions[1].blocks[0].instructions[0] == .call);
+    const pure = try optimize(allocator, program);
+    const pure_text = try Ir.writeText(allocator, pure);
+    const pure_caller = std.mem.indexOf(u8, pure_text, "func @caller") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!std.mem.containsAtLeast(u8, pure_text[pure_caller..], 1, "call @update_with_boundary"));
+
+    program.boundary_effects = &.{.unknown};
+    const unknown = try optimize(allocator, program);
+    try std.testing.expect(unknown.functions[1].blocks[0].instructions[0] == .call);
 }
