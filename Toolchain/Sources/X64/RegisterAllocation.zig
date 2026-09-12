@@ -97,10 +97,25 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Erro
     @memset(instruction_weights, 1);
     if (!fully_compatible) weightLoops(function.instructions, instruction_weights);
 
-    for (function.parameters) |parameter| touch(parameter.start, 0, first, last, weights, 1);
+    // Newly admitted aggregate/FP signatures copy their full incoming ABI
+    // payload before any volatile residence is initialized. In particular a
+    // later scalar argument must not overwrite an earlier aggregate pointer
+    // arriving in r8...r11 during the backwards prologue copy.
+    const stack_parameters = !fully_compatible and
+        (!compatibleShape(function) or function.return_type.isFloat());
+    for (function.parameters) |parameter| {
+        touchSpan(parameter, 0, first, last, weights, 1);
+        if (stack_parameters or parameter.aggregate or parameter.width != 1) forceSpan(parameter, forced);
+    }
+    if (function.hidden_return_slot) |slot| forceSlot(slot, forced);
     for (function.instructions, 0..) |instruction, index| {
         visit(instruction, index, first, last, weights, instruction_weights[index]);
         MemoryResidence.pin(instruction, forced);
+        // Aggregate returns read every leaf from its ABI stack home. Scalar
+        // floating returns likewise bypass the FP bank in the return emitter.
+        if (instruction == .return_value and
+            (instruction.return_value.aggregate or function.return_type.isFloat()))
+            forceSpan(instruction.return_value, forced);
     }
     if (!fully_compatible) {
         extendLoopCarriedIntervals(function.instructions, first, last);
@@ -140,7 +155,8 @@ fn compatible(function: Machine.Function) bool {
 fn regionallyCompatible(allocator: Allocator, function: Machine.Function) Allocator.Error!bool {
     // Four arithmetic operations amortize the extra allocation machinery and
     // match the target-independent scalar-loop threshold used by ARM64.
-    if (function.return_type.isFloat() or !compatibleShape(function) or
+    if (function.reuses_slots or function.capture_parameters.len != 0 or
+        function.float_register_slots.len != 0 or function.float_lane_slots.len != 0 or
         !(try hasProfitableLoopRegion(allocator, function.instructions))) return false;
     for (function.instructions) |instruction| {
         if (compatibleInstruction(instruction) or stackMemoryInstruction(instruction)) continue;
@@ -169,6 +185,13 @@ fn regionallyCompatible(allocator: Allocator, function: Machine.Function) Alloca
 // Allocation, ownership and actual calls remain full volatile barriers.
 fn stackMemoryInstruction(instruction: Machine.Instruction) bool {
     return switch (instruction) {
+        // Floating operations preserve the integer bank. Their values remain
+        // excluded from GPR allocation; the independent FP allocator may place
+        // them in XMM registers. Numeric conversion uses only rax/rcx/rdx.
+        .constant_float32, .constant_float64, .convert => true,
+        .unary => |value| value.type.isFloat(),
+        .binary => |value| value.type.isFloat(),
+        .return_value => |value| value.aggregate,
         .copy_range,
         .aggregate_init,
         .local_address,
@@ -1086,4 +1109,54 @@ test "X64 memory regions retain loop indices across interleaved cold calls" {
     const addressed = try allocate(allocator, function);
     try std.testing.expectEqual(@as(?u5, null), addressed[2]);
     try std.testing.expectEqual(@as(?u5, null), addressed[8]);
+}
+
+test "X64 mixed loops retain integer indices with aggregate inputs and returns" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 4, .bits = 0 } },
+        .{ .constant_int = .{ .result = 5, .bits = 1 } },
+        .{ .constant_float32 = .{ .result = 6, .bits = @bitCast(@as(f32, 1.0)) } },
+        .{ .copy = .{ .result = 7, .operand = 6 } },
+        .{ .binary = .{ .result = 8, .operator = .less, .left = 4, .right = 3 } },
+        .{ .branch = .{ .condition = 8, .then_instruction = 6, .else_instruction = 12 } },
+        .{ .binary = .{ .result = 7, .operator = .add, .left = 7, .right = 6, .type = .float32 } },
+        .{ .binary = .{ .result = 9, .operator = .multiply, .left = 7, .right = 6, .type = .float32 } },
+        .{ .binary = .{ .result = 10, .operator = .add, .left = 4, .right = 5 } },
+        .{ .copy = .{ .result = 4, .operand = 10 } },
+        .{ .binary = .{ .result = 11, .operator = .add, .left = 4, .right = 5 } },
+        .{ .jump = 4 },
+        .{ .aggregate_init = .{ .result = .{ .start = 12, .width = 2, .aggregate = true }, .fields = &.{ .{ .start = 7, .width = 1 }, .{ .start = 6, .width = 1 } } } },
+        .{ .return_value = .{ .start = 12, .width = 2, .aggregate = true } },
+    };
+    var function: Machine.Function = .{
+        .name = "mixed_region",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 1, .width = 2, .aggregate = true }, .{ .start = 3, .width = 1 } },
+        .return_type = .structure(0),
+        .return_width = 2,
+        .hidden_return_slot = 0,
+        .slot_count = 14,
+        .frame_size = 112,
+        .instructions = &instructions,
+    };
+    const aggregate = try allocate(allocator, function);
+    try std.testing.expectEqual(@as(usize, 14), aggregate.len);
+    try std.testing.expect(aggregate[4] != null);
+    for ([_]usize{ 0, 1, 2, 3, 6, 7, 9, 12, 13 }) |slot|
+        try std.testing.expectEqual(@as(?u5, null), aggregate[slot]);
+
+    function.hidden_return_slot = null;
+    function.return_type = .float32;
+    function.return_width = 1;
+    instructions[12] = .{ .copy = .{ .result = 12, .operand = 7 } };
+    instructions[13] = .{ .return_value = .{ .start = 12, .width = 1 } };
+    const scalar = try allocate(allocator, function);
+    try std.testing.expect(scalar[4] != null);
+    try std.testing.expectEqual(@as(?u5, null), scalar[12]);
+    instructions[10] = .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } };
+    const interrupted = try allocate(allocator, function);
+    try std.testing.expect(interrupted.len == 0 or interrupted[4] == null);
 }

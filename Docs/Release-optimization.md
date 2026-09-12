@@ -383,8 +383,14 @@ field accesses and collection reads preserve r8...r11; their actual stack
 inputs and outputs stay pinned while independent integer state can remain
 resident. Address-taken spans remain pinned. Allocation, ownership operations
 and actual calls remain volatile barriers, with values live across them kept
-in memory according to CFG liveness. Floating arithmetic, aggregate parameters
-and other unsupported shapes retain their existing fallback. Copies between
+in memory according to CFG liveness. Floating arithmetic and numeric conversions
+preserve independent integer residences in mixed loops. Their operands and
+results remain excluded from the integer bank; FP allocation keeps its own
+policy. Aggregate parameters, hidden result pointers and aggregate or floating
+return values retain their complete stack homes. Newly admitted aggregate/FP
+signatures keep incoming parameters in stack homes so a resident scalar cannot
+overwrite an aggregate argument pointer during the prologue. Captures, reused
+slots and unsupported instructions retain their fallback. Copies between
 integer residences use a direct register move and emit nothing when both
 values already share their color. Mixed integer/FP transfers retain the full
 scalar-bit bridge.

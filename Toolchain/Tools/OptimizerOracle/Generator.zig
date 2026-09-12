@@ -123,7 +123,7 @@ pub const regressions = [_]RegressionEntry{
     .{ .name = "Regressions/BranchSnapshots.sx", .concern = "arm-local scalar snapshots preserve alias writes, joined values, negative indices, NaN and signed zero" },
     .{ .name = "Regressions/PrivateCollectionLengths.sx", .concern = "private literal lengths cross branches and unrelated calls while mutation, copies, view escapes and terminal lifetimes stay exact" },
     .{ .name = "Regressions/ScalarFloatOperands.sx", .concern = "direct scalar SSE operands preserve subtraction/division order, widths, signed zero and unordered comparisons" },
-    .{ .name = "Regressions/FloatMemoryResidence.sx", .concern = "FP recurrences across stack aggregate copies and fixed/view loads, widths, NaN and signed zero" },
+    .{ .name = "Regressions/FloatMemoryResidence.sx", .concern = "mixed integer and FP recurrences across aggregate inputs and returns, stack copies and fixed/view loads, widths, NaN and signed zero" },
     .{ .name = "Regressions/LoopExitResidence.sx", .concern = "loop-carried scalar state survives interleaved class exits and direct mutator calls" },
     // Native-only: the strict LLVM oracle does not lower float-to-integer conversions.
     .{ .name = "Regressions/ScalarFloatResidence.sx", .concern = "scalar FP pressure, loop recurrence, call barriers, addressed aliases, exact conversion, NaN and signed zero" },
