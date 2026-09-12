@@ -11,7 +11,9 @@ import time
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ["native", "adapter", "llvm-dir", "sdk", "output-dir", "report"]:
+    for name in [
+        "native", "adapter", "shadercross", "llvm-dir", "sdk", "output-dir", "report",
+    ]:
         parser.add_argument("--"+name, required=True)
     args = parser.parse_args()
     root = Path.cwd()
@@ -36,7 +38,8 @@ def main():
 
     def llvm_command(path, mode, binary):
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
-                "--adapter", args.adapter, "--llvm-dir", args.llvm_dir, "--sdk", args.sdk,
+                "--adapter", args.adapter, "--shadercross", args.shadercross,
+                "--llvm-dir", args.llvm_dir, "--sdk", args.sdk,
                 "--opt", mode, "--output", binary]
 
     cases = {

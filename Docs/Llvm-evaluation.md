@@ -29,18 +29,22 @@ python3 Silex/Toolchain/Tools/LlvmEvaluation/compile.py \
   --backend llvm \
   --source Silex/Toolchain/Benchmarks/Optimizer/LlvmEvaluation/SteeringWorkload.sx \
   --adapter Tools/Adapter/bin/silex-llvm-evaluation \
+  --shadercross Tools/Shadercross/install/bin/shadercross \
   --llvm-dir Tools/LLVM-21.1.8 \
   --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk \
   --opt O3 --output Evaluations/SteeringWorkload-O3
 ```
 
-The tool requires macOS ARM64; the current target is macOS 26 with the 26.5 SDK
-and an explicit CPU selection (default `apple-m3`). It never falls back to the
-native backend. Unsupported IR is rejected before creating LLVM output, and a
-failed stage does not replace an existing executable.
+The tool requires macOS ARM64; the current target is macOS 26 with the 26.5 SDK,
+an explicit Shadercross executable and an explicit CPU selection (default
+`apple-m3`). The Shadercross path lets package composition compile HLSL without
+reading a user-global toolchain installation, and its digest participates in the
+cache key. The tool never falls back to the native backend. Unsupported IR is
+rejected before creating LLVM output, and a failed stage does not replace an
+existing executable.
 
-`verify.py` accepts `--native`, `--adapter`, `--llvm-dir`, `--sdk`, `--output-dir`,
-and `--report`. It compares exact stdout, stderr, and exit status in native Debug,
+`verify.py` accepts `--native`, `--adapter`, `--shadercross`, `--llvm-dir`, `--sdk`,
+`--output-dir`, and `--report`. It compares exact stdout, stderr, and exit status in native Debug,
 native Release, LLVM O0, and LLVM O3; it also checks the interpreter on bounded
 cases, unsupported source forms, cache reuse/repair, and native/LLVM/native runs.
 

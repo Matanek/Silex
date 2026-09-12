@@ -66,10 +66,15 @@ def compile_source(args):
             return process
 
         raw = staging / "raw.ll"
-        run("compose_translate_serialize", [adapter, "--backend", "llvm", source, raw])
+        run("compose_translate_serialize", [
+            adapter, "--backend", "llvm", "--shadercross", args.shadercross,
+            source, raw,
+        ])
         inputs = dict(backend="llvm-evaluation-v1", driver_sha256=sha(__file__), raw_ir_sha256=sha(raw),
                       source=str(source), source_sha256=sha(source), opt=args.opt,
                       cpu=args.cpu, triple="arm64-apple-macosx26.0.0", sdk=str(sdk),
+                      shadercross=str(Path(args.shadercross).resolve(strict=True)),
+                      shadercross_sha256=sha(args.shadercross),
                       sdk_settings_sha256=sha(sdk/"SDKSettings.json"),
                       system_stub_sha256=sha(sdk/"usr/lib/libSystem.tbd"),
                       tools={str(p): sha(p) for p in [adapter, llvm/"bin/opt", llvm/"bin/llc",
@@ -114,6 +119,7 @@ def main():
     parser.add_argument("--backend", choices=["llvm"], required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--adapter", required=True)
+    parser.add_argument("--shadercross", required=True)
     parser.add_argument("--llvm-dir", required=True)
     parser.add_argument("--sdk", required=True)
     parser.add_argument("--opt", choices=["O0", "O3"], required=True)
