@@ -13,6 +13,7 @@ on:
         options:
           - all
           - optimizer-x64
+          - optimizer-x64-calibration
           - macos-x64
           - linux-arm64
           - linux-x64
@@ -25,6 +26,15 @@ on:
         type: string
         default: ''
 
+      calibration_run_id:
+        description: Completed optimizer-x64 run whose executables should be calibrated
+        required: false
+        type: string
+      calibration_candidate:
+        description: Exact candidate SHA expected in the calibration artifact
+        required: false
+        type: string
+
 permissions:
   contents: read
 
@@ -33,6 +43,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  optimizer-x64-calibration:
+    if: inputs.target == 'optimizer-x64-calibration'
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the calibration tools
+        uses: actions/checkout@v6
+      - name: Verify calibration request
+        shell: bash
+        env:
+          SOURCE_RUN: ${{ inputs.calibration_run_id }}
+          EXPECTED_CANDIDATE: ${{ inputs.calibration_candidate }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_CANDIDATE" =~ ^[0-9a-f]{40}$ ]]
+          source_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq '.head_sha')
+          test "$source_sha" = "$EXPECTED_CANDIDATE"
+      - name: Download the sealed native executables
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.calibration_run_id }}
+          name: optimizer-x64-${{ inputs.calibration_candidate }}
+          path: calibration-input
+      - name: Calibrate original, reversed and identical Objects pairs
+        shell: bash
+        env:
+          SOURCE_RUN: ${{ inputs.calibration_run_id }}
+          EXPECTED_CANDIDATE: ${{ inputs.calibration_candidate }}
+        run: |
+          set -euo pipefail
+          python3 Toolchain/Benchmarks/Native/calibrate.py calibration-input calibration-output \
+            --expected-candidate "$EXPECTED_CANDIDATE" --source-run-id "$SOURCE_RUN"
+      - name: Preserve the calibration evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: optimizer-x64-calibration-${{ github.sha }}
+          path: calibration-output
+          if-no-files-found: error
+          retention-days: 14
+
   macos-x64:
     if: inputs.target == 'all' || inputs.target == 'macos-x64'
     runs-on: macos-15-intel
