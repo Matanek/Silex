@@ -2,15 +2,21 @@
   "candidate": "b8d01d73233a88a080170b53096f2a72bbd8d98e",
   "compiler_sha256": "d19794be31e2f5bedc555a190e9160579f64bf84aaa3b91d69d76d00232eb94a",
   "files": {
-    "README.md": "4e5fe6e03b97b65fb5404b64c4acb62dc17952417d0b48d549662b82a8f0cbb9",
+    "README.md": "7dd2d1766bb6e3ec5041a74ff302d74d22410ab5c595fd7e08a1f118e8afdd1b",
     "b8d01d7-dispatch-linux-x64.json": "0bec5a7652a5d1e29b4de175ca0c62f59696c2716b30d7e7d293a3aae7079c6b",
     "b8d01d7-dispatch-macos-x64.json": "e51f586368abd36c03eb0e53b2887259da2783b1d28c75a5330fbd318318dce0",
     "b8d01d7-dispatch-optimizer-x64.json": "8a1af4a648d5b807bbea3a8997ff7ea73067b0a7a9348b60353a1de1ae73af0b",
     "b8d01d7-dispatch-windows-x64.json": "37264ba9bb00440356d5509499420a194049c90c48039a1ef371eb58d243bfb3",
+    "b8d01d7-native-job-103474213127.log": "8b07cc5c3494ce203dae1c72c8635ce27755344e4f57387212fbd492e6506df7",
+    "b8d01d7-native-job-103474215712.log": "1c5b76ed73c6dbbd172ec981a03db80371147642e7946f1bdc8c30772ac4fabc",
+    "b8d01d7-native-job-103474218530.log": "770cfc2e5fc31b46e8fea4fc00e960dd98e520ee1560f8a8a03b6346883a3a1b",
+    "b8d01d7-native-jobs.json": "19a765483bed6dab3cd1d85ddf7b9d7294ec371c606db0887268736182bd9278",
+    "b8d01d7-runs.json": "e866653c3c1100332ce8a7ab8a09a9c819ff91e76011e397ba0773d427c88dc2",
     "direct-integer-alias-mutation.json": "ce29731d9213f8aeeefc7d87765a700efb526aea12e9a17fd33a4331ad286e07",
     "direct-integer-alias-mutation.log": "0057ef94477ed45469d256a6d82f200184d9db56f7c51084fb7bd2c7c9b85508",
     "direct-integer-arithmetic-after.asm": "254e0d008ce569420cfaaa1dfd95213eb061fb389e48cb2cade0ed8a18c27246",
     "direct-integer-arithmetic-before.asm": "9fe4130407eee7b9e6dc1b0e14b96a27f443a7a2469a76810e39dcb5bcb10bd6",
+    "direct-integer-arithmetic-loop.json": "3150b0d40091d8e5dd1908a309f9fa4ff58bf084ef69ca1c14fe81f66d8fc896",
     "direct-integer-arithmetic-macos-arm64": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
     "direct-integer-arithmetic-macos-x64": "e59bd04a9b359925eeaf41545c1a5d2ceee84bb35bee4e2e2400d6441f1b6c6f",
     "direct-integer-before.log": "5c639834d1da19e66d2908f4df2f03557a7ce9ef874ba1239c991e97da195b50",
@@ -53,6 +59,8 @@
     "direct-integer-objects-macos-arm64": "9960f656e75a02c8773945dec6e628120682b6cabf79f842114f60e7b4dfe891",
     "direct-integer-objects-macos-x64": "25ce60ce307df14eba38a3cec44e0b61c91a60c3e7fc81ead5db1882de6665f9",
     "direct-integer-optimizer-gate.log": "47bde9c8d3a0b3e8aafced71d1724939ef4fa67ee714398017eb745db403d820",
+    "direct-integer-physics-code-comparison.json": "8b2bbb34fd195609644a27f3e2ef71c8d07ef9a55038bb742a977a4b42988156",
+    "direct-integer-physics-code-comparison.log": "386f387aae996daa8ea0344e9486cc746ef656a25068de57d3261741093eae31",
     "direct-integer-pre-push.log": "8d80fab6f252b0f6ec95856aa127d25b17f545888b7cf24f5fcfacbf39a326b6",
     "direct-integer-protocol-macos-arm64-debug": "008d84c0c79c42d307a6f48d7ede1c1806e2416a22763a51d235b623d2c7bfa0",
     "direct-integer-protocol-macos-arm64-release": "6d920575e6682ba88526824ccf73e81663a12c810abfcdc1d38979cffde6daa0",
@@ -65,6 +73,9 @@
     "direct-integer-workflow-validation.json": "17b9b53089966483aee6eb909614dd76fdc2f194a39560fd4f74b610ba5fb462",
     "direct-integer-x64-qualified-command.json": "fd6f1f844d4e5c5b47cbd1e154a677fcfc106d9fbfa667051a0179233e44f35d",
     "direct-integer-x64-qualified.log": "cf26c9b11bf97f1d3ad9f8bb0d3a98aadcbc99a78cb16c4c5f2bcdaaf70250d2",
-    "validate_direct_integer.py": "ac9c37d9695fca94589f64f0fc2af1184279d1105fffdd943e8e5b9776820a1f"
+    "integration-direct-integer": "6535d1c21613f00626af4a4ca269399698e096bc0d574ed3be0c16853a3711c7",
+    "preparation-direct-integer": "b18b3f075351a364d48a3c7ac6c7482238b8666404260ef89e4cd35210bc0994",
+    "validate_direct_integer.py": "ac9c37d9695fca94589f64f0fc2af1184279d1105fffdd943e8e5b9776820a1f",
+    "verify_final_physics_text.py": "3c29cee67dd074072db9180038db93bc96657c5a7483bf1816b6f371d28cb553"
   }
 }

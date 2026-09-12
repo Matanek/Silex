@@ -1,0 +1,482 @@
+﻿2026-09-12T01:24:25.6151177Z Current runner version: '2.337.0'
+2026-09-12T01:24:25.6225199Z ##[group]Runner Image Provisioner
+2026-09-12T01:24:25.6226732Z Hosted Compute Agent
+2026-09-12T01:24:25.6227851Z Version: 20260828.587
+2026-09-12T01:24:25.6229449Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-12T01:24:25.6230884Z Build Date: 2026-08-28T16:44:25Z
+2026-09-12T01:24:25.6232070Z Worker ID: {f0907714-10d5-41a3-9b0e-515845bd81ee}
+2026-09-12T01:24:25.6233480Z Azure Region: eastus
+2026-09-12T01:24:25.6234620Z ##[endgroup]
+2026-09-12T01:24:25.6236977Z ##[group]Operating System
+2026-09-12T01:24:25.6238225Z Ubuntu
+2026-09-12T01:24:25.6239354Z 24.04.5
+2026-09-12T01:24:25.6240012Z LTS
+2026-09-12T01:24:25.6240608Z ##[endgroup]
+2026-09-12T01:24:25.6241203Z ##[group]Runner Image
+2026-09-12T01:24:25.6241931Z Image: ubuntu-24.04
+2026-09-12T01:24:25.6242527Z Version: 20260907.300.1
+2026-09-12T01:24:25.6243909Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-12T01:24:25.6245511Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-12T01:24:25.6246587Z ##[endgroup]
+2026-09-12T01:24:25.6247713Z ##[group]GITHUB_TOKEN Permissions
+2026-09-12T01:24:25.6250293Z Contents: read
+2026-09-12T01:24:25.6250941Z Metadata: read
+2026-09-12T01:24:25.6251596Z ##[endgroup]
+2026-09-12T01:24:25.6253672Z Secret source: Actions
+2026-09-12T01:24:25.6255127Z Cache mode: write
+2026-09-12T01:24:25.6256189Z Prepare workflow directory
+2026-09-12T01:24:25.6595759Z Prepare all required actions
+2026-09-12T01:24:25.6643776Z Getting action download info
+2026-09-12T01:24:25.8739967Z Download action repository 'actions/checkout@v6' (SHA:d23441a48e516b6c34aea4fa41551a30e30af803)
+2026-09-12T01:24:26.0981430Z Complete job name: linux-x64
+2026-09-12T01:24:26.1759906Z ##[group]Run actions/checkout@v6
+2026-09-12T01:24:26.1760798Z with:
+2026-09-12T01:24:26.1761268Z   repository: Matanek/Silex
+2026-09-12T01:24:26.1764944Z   token: ***
+2026-09-12T01:24:26.1765429Z   ssh-strict: true
+2026-09-12T01:24:26.1765884Z   ssh-user: git
+2026-09-12T01:24:26.1766348Z   persist-credentials: true
+2026-09-12T01:24:26.1766857Z   clean: true
+2026-09-12T01:24:26.1767329Z   sparse-checkout-cone-mode: true
+2026-09-12T01:24:26.1767880Z   fetch-depth: 1
+2026-09-12T01:24:26.1768516Z   fetch-tags: false
+2026-09-12T01:24:26.1768989Z   show-progress: true
+2026-09-12T01:24:26.1769450Z   lfs: false
+2026-09-12T01:24:26.1769870Z   submodules: false
+2026-09-12T01:24:26.1770330Z   set-safe-directory: true
+2026-09-12T01:24:26.1770853Z   allow-unsafe-pr-checkout: false
+2026-09-12T01:24:26.1771631Z ##[endgroup]
+2026-09-12T01:24:26.2767382Z Syncing repository: Matanek/Silex
+2026-09-12T01:24:26.2770350Z ##[group]Getting Git version info
+2026-09-12T01:24:26.2771558Z Working directory is '/home/runner/work/Silex/Silex'
+2026-09-12T01:24:26.2773115Z [command]/usr/bin/git version
+2026-09-12T01:24:26.2880948Z git version 2.55.0
+2026-09-12T01:24:26.2893759Z ##[endgroup]
+2026-09-12T01:24:26.2911234Z Temporarily overriding HOME='/home/runner/work/_temp/59d93668-f877-4223-bbc5-07fa5dbeef04' before making global git config changes
+2026-09-12T01:24:26.2913884Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T01:24:26.2916903Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Silex/Silex
+2026-09-12T01:24:26.2969691Z Deleting the contents of '/home/runner/work/Silex/Silex'
+2026-09-12T01:24:26.2975371Z ##[group]Determining repository object format
+2026-09-12T01:24:26.2978210Z ##[endgroup]
+2026-09-12T01:24:26.2979843Z ##[group]Initializing the repository
+2026-09-12T01:24:26.2984032Z [command]/usr/bin/git init /home/runner/work/Silex/Silex
+2026-09-12T01:24:26.3081785Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-12T01:24:26.3083772Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-12T01:24:26.3085062Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-12T01:24:26.3086126Z hint: call:
+2026-09-12T01:24:26.3086541Z hint:
+2026-09-12T01:24:26.3087088Z hint: 	git config --global init.defaultBranch <name>
+2026-09-12T01:24:26.3087709Z hint:
+2026-09-12T01:24:26.3088307Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-12T01:24:26.3089956Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-12T01:24:26.3090705Z hint:
+2026-09-12T01:24:26.3091131Z hint: 	git branch -m <name>
+2026-09-12T01:24:26.3091611Z hint:
+2026-09-12T01:24:26.3092259Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-12T01:24:26.3097875Z Initialized empty Git repository in /home/runner/work/Silex/Silex/.git/
+2026-09-12T01:24:26.3110464Z [command]/usr/bin/git remote add origin https://github.com/Matanek/Silex
+2026-09-12T01:24:26.3156146Z ##[endgroup]
+2026-09-12T01:24:26.3157772Z ##[group]Disabling automatic garbage collection
+2026-09-12T01:24:26.3161072Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-12T01:24:26.3193695Z ##[endgroup]
+2026-09-12T01:24:26.3195120Z ##[group]Setting up auth
+2026-09-12T01:24:26.3196090Z Removing SSH command configuration
+2026-09-12T01:24:26.3213800Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T01:24:26.3251929Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T01:24:26.3626382Z Removing HTTP extra header
+2026-09-12T01:24:26.3633972Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T01:24:26.3674079Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T01:24:26.3890949Z Removing includeIf entries pointing to credentials config files
+2026-09-12T01:24:26.3897744Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T01:24:26.3934715Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T01:24:26.4160574Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-12T01:24:26.4201339Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Silex/Silex/.git.path /home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:24:26.4234313Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:24:26.4271417Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:24:26.4305009Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:24:26.4339714Z ##[endgroup]
+2026-09-12T01:24:26.4340511Z ##[group]Fetching the repository
+2026-09-12T01:24:26.4348161Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +b8d01d73233a88a080170b53096f2a72bbd8d98e:refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T01:24:27.9912098Z From https://github.com/Matanek/Silex
+2026-09-12T01:24:27.9914597Z  * [new ref]         b8d01d73233a88a080170b53096f2a72bbd8d98e -> origin/spec-silex-optimization-parity-completion
+2026-09-12T01:24:27.9925919Z [command]/usr/bin/git branch --list --remote origin/spec-silex-optimization-parity-completion
+2026-09-12T01:24:27.9955831Z   origin/spec-silex-optimization-parity-completion
+2026-09-12T01:24:27.9966850Z [command]/usr/bin/git rev-parse refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T01:24:27.9994905Z b8d01d73233a88a080170b53096f2a72bbd8d98e
+2026-09-12T01:24:28.0005100Z ##[endgroup]
+2026-09-12T01:24:28.0005894Z ##[group]Determining the checkout info
+2026-09-12T01:24:28.0006821Z ##[endgroup]
+2026-09-12T01:24:28.0009352Z [command]/usr/bin/git sparse-checkout disable
+2026-09-12T01:24:28.0064909Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-12T01:24:28.0100251Z ##[group]Checking out the ref
+2026-09-12T01:24:28.0105426Z [command]/usr/bin/git checkout --progress --force -B spec-silex-optimization-parity-completion refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T01:24:28.2881452Z Switched to a new branch 'spec-silex-optimization-parity-completion'
+2026-09-12T01:24:28.2905140Z branch 'spec-silex-optimization-parity-completion' set up to track 'origin/spec-silex-optimization-parity-completion'.
+2026-09-12T01:24:28.2909083Z ##[endgroup]
+2026-09-12T01:24:28.2958614Z [command]/usr/bin/git log -1 --format=%H
+2026-09-12T01:24:28.2986067Z b8d01d73233a88a080170b53096f2a72bbd8d98e
+2026-09-12T01:24:28.3329262Z ##[group]Run actions/checkout@v6
+2026-09-12T01:24:28.3329899Z with:
+2026-09-12T01:24:28.3330334Z   repository: Matanek/Silex-Lib-STD
+2026-09-12T01:24:28.3331021Z   ref: 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-12T01:24:28.3331733Z   path: Dependencies/STD
+2026-09-12T01:24:28.3339064Z   token: ***
+2026-09-12T01:24:28.3339493Z   ssh-strict: true
+2026-09-12T01:24:28.3339941Z   ssh-user: git
+2026-09-12T01:24:28.3340396Z   persist-credentials: true
+2026-09-12T01:24:28.3340927Z   clean: true
+2026-09-12T01:24:28.3341398Z   sparse-checkout-cone-mode: true
+2026-09-12T01:24:28.3342018Z   fetch-depth: 1
+2026-09-12T01:24:28.3342491Z   fetch-tags: false
+2026-09-12T01:24:28.3342966Z   show-progress: true
+2026-09-12T01:24:28.3343441Z   lfs: false
+2026-09-12T01:24:28.3343844Z   submodules: false
+2026-09-12T01:24:28.3344345Z   set-safe-directory: true
+2026-09-12T01:24:28.3344917Z   allow-unsafe-pr-checkout: false
+2026-09-12T01:24:28.3345502Z ##[endgroup]
+2026-09-12T01:24:28.4183027Z Syncing repository: Matanek/Silex-Lib-STD
+2026-09-12T01:24:28.4198014Z ##[group]Getting Git version info
+2026-09-12T01:24:28.4199903Z Working directory is '/home/runner/work/Silex/Silex/Dependencies/STD'
+2026-09-12T01:24:28.4232814Z [command]/usr/bin/git version
+2026-09-12T01:24:28.4277963Z git version 2.55.0
+2026-09-12T01:24:28.4303847Z ##[endgroup]
+2026-09-12T01:24:28.4320643Z Temporarily overriding HOME='/home/runner/work/_temp/d8130ac6-4f99-4a09-8652-15c4149afae6' before making global git config changes
+2026-09-12T01:24:28.4330115Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T01:24:28.4350479Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Silex/Silex/Dependencies/STD
+2026-09-12T01:24:28.4390783Z ##[group]Determining repository object format
+2026-09-12T01:24:28.4392659Z ##[endgroup]
+2026-09-12T01:24:28.4394095Z ##[group]Initializing the repository
+2026-09-12T01:24:28.4395827Z [command]/usr/bin/git init /home/runner/work/Silex/Silex/Dependencies/STD
+2026-09-12T01:24:28.4409743Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-12T01:24:28.4422235Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-12T01:24:28.4439914Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-12T01:24:28.4441277Z hint: call:
+2026-09-12T01:24:28.4441697Z hint:
+2026-09-12T01:24:28.4442247Z hint: 	git config --global init.defaultBranch <name>
+2026-09-12T01:24:28.4443000Z hint:
+2026-09-12T01:24:28.4443706Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-12T01:24:28.4445083Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-12T01:24:28.4446059Z hint:
+2026-09-12T01:24:28.4446464Z hint: 	git branch -m <name>
+2026-09-12T01:24:28.4447233Z hint:
+2026-09-12T01:24:28.4448020Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-12T01:24:28.4450818Z Initialized empty Git repository in /home/runner/work/Silex/Silex/Dependencies/STD/.git/
+2026-09-12T01:24:28.4455390Z [command]/usr/bin/git remote add origin https://github.com/Matanek/Silex-Lib-STD
+2026-09-12T01:24:28.4478945Z ##[endgroup]
+2026-09-12T01:24:28.4480430Z ##[group]Disabling automatic garbage collection
+2026-09-12T01:24:28.4482598Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-12T01:24:28.4516478Z ##[endgroup]
+2026-09-12T01:24:28.4517958Z ##[group]Setting up auth
+2026-09-12T01:24:28.4519458Z Removing SSH command configuration
+2026-09-12T01:24:28.4525054Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T01:24:28.4641146Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T01:24:28.4814187Z Removing HTTP extra header
+2026-09-12T01:24:28.4834362Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T01:24:28.4870719Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T01:24:28.5113236Z Removing includeIf entries pointing to credentials config files
+2026-09-12T01:24:28.5121604Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T01:24:28.5164737Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T01:24:28.5403339Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-12T01:24:28.5445083Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git.path /home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:24:28.5480448Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:24:28.5516409Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/Dependencies/STD/.git.path /github/runner_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:24:28.5559243Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path /github/runner_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:24:28.5589074Z ##[endgroup]
+2026-09-12T01:24:28.5589853Z ##[group]Fetching the repository
+2026-09-12T01:24:28.5597663Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-12T01:24:28.8243239Z From https://github.com/Matanek/Silex-Lib-STD
+2026-09-12T01:24:28.8244404Z  * branch            5a018305fb470dfe00e94466150b3c04f207e252 -> FETCH_HEAD
+2026-09-12T01:24:28.8255220Z [command]/usr/bin/git rev-parse --verify --quiet 5a018305fb470dfe00e94466150b3c04f207e252^{object}
+2026-09-12T01:24:28.8283440Z 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-12T01:24:28.8288729Z ##[endgroup]
+2026-09-12T01:24:28.8289646Z ##[group]Determining the checkout info
+2026-09-12T01:24:28.8290604Z ##[endgroup]
+2026-09-12T01:24:28.8295602Z [command]/usr/bin/git sparse-checkout disable
+2026-09-12T01:24:28.8339124Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-12T01:24:28.8370634Z ##[group]Checking out the ref
+2026-09-12T01:24:28.8374440Z [command]/usr/bin/git checkout --progress --force 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-12T01:24:28.8643319Z Note: switching to '5a018305fb470dfe00e94466150b3c04f207e252'.
+2026-09-12T01:24:28.8644087Z 
+2026-09-12T01:24:28.8644541Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-12T01:24:28.8645509Z changes and commit them, and you can discard any commits you make in this
+2026-09-12T01:24:28.8646404Z state without impacting any branches by switching back to a branch.
+2026-09-12T01:24:28.8646914Z 
+2026-09-12T01:24:28.8647249Z If you want to create a new branch to retain commits you create, you may
+2026-09-12T01:24:28.8648051Z do so (now or later) by using -c with the switch command. Example:
+2026-09-12T01:24:28.8648809Z 
+2026-09-12T01:24:28.8649011Z   git switch -c <new-branch-name>
+2026-09-12T01:24:28.8649377Z 
+2026-09-12T01:24:28.8649529Z Or undo this operation with:
+2026-09-12T01:24:28.8649704Z 
+2026-09-12T01:24:28.8649797Z   git switch -
+2026-09-12T01:24:28.8649930Z 
+2026-09-12T01:24:28.8650163Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-12T01:24:28.8650515Z 
+2026-09-12T01:24:28.8650627Z HEAD is now at 5a01830 Prepare STD 0.21.0
+2026-09-12T01:24:28.8652594Z ##[endgroup]
+2026-09-12T01:24:28.8693603Z [command]/usr/bin/git log -1 --format=%H
+2026-09-12T01:24:28.8723513Z 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-12T01:24:28.8864061Z ##[group]Run set -euo pipefail
+2026-09-12T01:24:28.8864464Z [36;1mset -euo pipefail[0m
+2026-09-12T01:24:28.8864773Z [36;1marchive="$RUNNER_TEMP/zig.tar.xz"[0m
+2026-09-12T01:24:28.8865321Z [36;1mcurl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"[0m
+2026-09-12T01:24:28.8866058Z [36;1mecho "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -[0m
+2026-09-12T01:24:28.8866630Z [36;1mtar -xJf "$archive" -C "$RUNNER_TEMP"[0m
+2026-09-12T01:24:28.8867026Z [36;1mecho "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"[0m
+2026-09-12T01:24:28.8908247Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-12T01:24:28.8909013Z ##[endgroup]
+2026-09-12T01:24:28.9060515Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-09-12T01:24:28.9061392Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-09-12T01:24:28.9061869Z 
+2026-09-12T01:24:29.5685355Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-09-12T01:24:30.5099011Z   0 52.9M    0 32506    0     0  49063      0  0:18:50 --:--:--  0:18:50 49028
+2026-09-12T01:24:31.5078569Z   3 52.9M    3 2063k    0     0  1286k      0  0:00:42  0:00:01  0:00:41 1286k
+2026-09-12T01:24:32.5081834Z  40 52.9M   40 21.6M    0     0  8510k      0  0:00:06  0:00:02  0:00:04 8510k
+2026-09-12T01:24:32.5092475Z  99 52.9M   99 52.7M    0     0  14.6M      0  0:00:03  0:00:03 --:--:-- 14.6M
+2026-09-12T01:24:32.5093393Z 100 52.9M  100 52.9M    0     0  14.6M      0  0:00:03  0:00:03 --:--:-- 14.6M
+2026-09-12T01:24:32.5536919Z /home/runner/work/_temp/zig.tar.xz: OK
+2026-09-12T01:24:36.2696241Z ##[group]Run set -euo pipefail
+2026-09-12T01:24:36.2696668Z [36;1mset -euo pipefail[0m
+2026-09-12T01:24:36.2696927Z [36;1mtest "$(uname -m)" = "x86_64"[0m
+2026-09-12T01:24:36.2697210Z [36;1mexport HOME="$RUNNER_TEMP/home"[0m
+2026-09-12T01:24:36.2697482Z [36;1mmkdir -p "$HOME"[0m
+2026-09-12T01:24:36.2697780Z [36;1mzig build -Doptimize=ReleaseFast -Dcpu=baseline \[0m
+2026-09-12T01:24:36.2698147Z [36;1m  --prefix "$RUNNER_TEMP/silex-prefix" \[0m
+2026-09-12T01:24:36.2698837Z [36;1m  --build-file Toolchain/build.zig[0m
+2026-09-12T01:24:36.2699170Z [36;1msilex="$RUNNER_TEMP/silex-prefix/bin/silex"[0m
+2026-09-12T01:24:36.2699479Z [36;1m"$silex" setup[0m
+2026-09-12T01:24:36.2699868Z [36;1m"$silex" link "$GITHUB_WORKSPACE/Dependencies/STD" --workspace "$GITHUB_WORKSPACE"[0m
+2026-09-12T01:24:36.2700412Z [36;1m"$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"[0m
+2026-09-12T01:24:36.2700891Z [36;1m"$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"[0m
+2026-09-12T01:24:36.2701605Z [36;1m"$silex" test "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"[0m
+2026-09-12T01:24:36.2702121Z [36;1m"$silex" compile "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \[0m
+2026-09-12T01:24:36.2702582Z [36;1m  --release -o "$RUNNER_TEMP/native-portability"[0m
+2026-09-12T01:24:36.2702993Z [36;1mportability_output=$("$RUNNER_TEMP/native-portability")[0m
+2026-09-12T01:24:36.2703366Z [36;1mprintf '%s\n' "$portability_output"[0m
+2026-09-12T01:24:36.2703804Z [36;1mcycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')[0m
+2026-09-12T01:24:36.2704241Z [36;1mtest "$cycle_drops" -eq 6[0m
+2026-09-12T01:24:36.2704624Z [36;1m"$silex" compile "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" \[0m
+2026-09-12T01:24:36.2705069Z [36;1m  --release -o "$RUNNER_TEMP/distribution-smoke"[0m
+2026-09-12T01:24:36.2705525Z [36;1mtest "$("$RUNNER_TEMP/distribution-smoke")" = "silex distribution ready"[0m
+2026-09-12T01:24:36.2706226Z [36;1maggregate_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/AggregateFieldStores.sx"[0m
+2026-09-12T01:24:36.2707003Z [36;1mtest "$("$silex" interpret "$aggregate_fixture" --nocache)" = "aggregate field stores preserved"[0m
+2026-09-12T01:24:36.2707499Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2707847Z [36;1m  "$silex" compile "$aggregate_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2708241Z [36;1m    -o "$RUNNER_TEMP/aggregate-fields-$mode"[0m
+2026-09-12T01:24:36.2708959Z [36;1m  test "$("$RUNNER_TEMP/aggregate-fields-$mode")" = "aggregate field stores preserved"[0m
+2026-09-12T01:24:36.2709396Z [36;1mdone[0m
+2026-09-12T01:24:36.2709772Z [36;1mminmax_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Native/ScalarMathMinMax.sx"[0m
+2026-09-12T01:24:36.2710231Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2710567Z [36;1m  "$silex" compile "$minmax_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2710963Z [36;1m    -o "$RUNNER_TEMP/scalar-math-minmax-$mode"[0m
+2026-09-12T01:24:36.2711457Z [36;1m  test "$("$RUNNER_TEMP/scalar-math-minmax-$mode")" = "scalar-math-minmax: pass"[0m
+2026-09-12T01:24:36.2711868Z [36;1mdone[0m
+2026-09-12T01:24:36.2712228Z [36;1m# Compile the exact standalone witness without the optimizer package's STD graph.[0m
+2026-09-12T01:24:36.2712710Z [36;1mscalar_root="$RUNNER_TEMP/scalar-float-fixture"[0m
+2026-09-12T01:24:36.2713032Z [36;1mmkdir -p "$scalar_root"[0m
+2026-09-12T01:24:36.2713363Z [36;1mprintf '%s\n' '{"sources":"."}' > "$scalar_root/Package.json"[0m
+2026-09-12T01:24:36.2713784Z [36;1mscalar_fixture="$scalar_root/ScalarFloatResidence.sx"[0m
+2026-09-12T01:24:36.2714407Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx" "$scalar_fixture"[0m
+2026-09-12T01:24:36.2714971Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2715303Z [36;1m  "$silex" compile "$scalar_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2715885Z [36;1m    -o "$RUNNER_TEMP/scalar-float-residence-$mode"[0m
+2026-09-12T01:24:36.2716314Z [36;1m  scalar_output=$("$RUNNER_TEMP/scalar-float-residence-$mode")[0m
+2026-09-12T01:24:36.2716754Z [36;1m  test "$(printf '%s\n' "$scalar_output" | wc -l)" -eq 9[0m
+2026-09-12T01:24:36.2717169Z [36;1m  test "$(printf '%s\n' "$scalar_output" | grep -c '^true$')" -eq 9[0m
+2026-09-12T01:24:36.2717515Z [36;1mdone[0m
+2026-09-12T01:24:36.2717786Z [36;1mbranch_fixture="$scalar_root/BranchComparisons.sx"[0m
+2026-09-12T01:24:36.2718593Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx" "$branch_fixture"[0m
+2026-09-12T01:24:36.2719155Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2719499Z [36;1m  "$silex" compile "$branch_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2719891Z [36;1m    -o "$RUNNER_TEMP/branch-comparisons-$mode"[0m
+2026-09-12T01:24:36.2720284Z [36;1m  test "$("$RUNNER_TEMP/branch-comparisons-$mode")" = "true"[0m
+2026-09-12T01:24:36.2720768Z [36;1mdone[0m
+2026-09-12T01:24:36.2721032Z [36;1msnapshot_fixture="$scalar_root/BranchSnapshots.sx"[0m
+2026-09-12T01:24:36.2721619Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx" "$snapshot_fixture"[0m
+2026-09-12T01:24:36.2722158Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2722495Z [36;1m  "$silex" compile "$snapshot_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2722878Z [36;1m    -o "$RUNNER_TEMP/branch-snapshots-$mode"[0m
+2026-09-12T01:24:36.2723266Z [36;1m  snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")[0m
+2026-09-12T01:24:36.2723676Z [36;1m  test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8[0m
+2026-09-12T01:24:36.2724094Z [36;1m  test "$(printf '%s\n' "$snapshot_output" | grep -c '^true$')" -eq 8[0m
+2026-09-12T01:24:36.2724447Z [36;1mdone[0m
+2026-09-12T01:24:36.2724738Z [36;1mloop_exit_fixture="$scalar_root/LoopExitResidence.sx"[0m
+2026-09-12T01:24:36.2725394Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx" "$loop_exit_fixture"[0m
+2026-09-12T01:24:36.2725954Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2726290Z [36;1m  "$silex" compile "$loop_exit_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2726679Z [36;1m    -o "$RUNNER_TEMP/loop-exit-residence-$mode"[0m
+2026-09-12T01:24:36.2727072Z [36;1m  loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")[0m
+2026-09-12T01:24:36.2727495Z [36;1m  test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5[0m
+2026-09-12T01:24:36.2727913Z [36;1m  test "$(printf '%s\n' "$loop_exit_output" | grep -c '^true$')" -eq 5[0m
+2026-09-12T01:24:36.2728262Z [36;1mdone[0m
+2026-09-12T01:24:36.2728765Z [36;1mfloat_memory_fixture="$scalar_root/FloatMemoryResidence.sx"[0m
+2026-09-12T01:24:36.2729431Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx" "$float_memory_fixture"[0m
+2026-09-12T01:24:36.2730022Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2730382Z [36;1m  "$silex" compile "$float_memory_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2730799Z [36;1m    -o "$RUNNER_TEMP/float-memory-residence-$mode"[0m
+2026-09-12T01:24:36.2731229Z [36;1m  float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")[0m
+2026-09-12T01:24:36.2731703Z [36;1m  test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 22[0m
+2026-09-12T01:24:36.2732154Z [36;1m  test "$(printf '%s\n' "$float_memory_output" | grep -c '^true$')" -eq 22[0m
+2026-09-12T01:24:36.2732534Z [36;1mdone[0m
+2026-09-12T01:24:36.2732842Z [36;1mfloat_operands_fixture="$scalar_root/ScalarFloatOperands.sx"[0m
+2026-09-12T01:24:36.2733516Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"[0m
+2026-09-12T01:24:36.2734099Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2734463Z [36;1m  "$silex" compile "$float_operands_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2735032Z [36;1m    -o "$RUNNER_TEMP/scalar-float-operands-$mode"[0m
+2026-09-12T01:24:36.2735478Z [36;1m  float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")[0m
+2026-09-12T01:24:36.2735958Z [36;1m  test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18[0m
+2026-09-12T01:24:36.2736419Z [36;1m  test "$(printf '%s\n' "$float_operands_output" | grep -c '^true$')" -eq 18[0m
+2026-09-12T01:24:36.2736795Z [36;1mdone[0m
+2026-09-12T01:24:36.2737108Z [36;1mprivate_length_fixture="$scalar_root/PrivateCollectionLengths.sx"[0m
+2026-09-12T01:24:36.2737820Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx" "$private_length_fixture"[0m
+2026-09-12T01:24:36.2738721Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2739088Z [36;1m  "$silex" compile "$private_length_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2739522Z [36;1m    -o "$RUNNER_TEMP/private-collection-lengths-$mode"[0m
+2026-09-12T01:24:36.2740149Z [36;1m  private_length_output=$("$RUNNER_TEMP/private-collection-lengths-$mode")[0m
+2026-09-12T01:24:36.2740636Z [36;1m  test "$(printf '%s\n' "$private_length_output" | wc -l)" -eq 10[0m
+2026-09-12T01:24:36.2741092Z [36;1m  test "$(printf '%s\n' "$private_length_output" | grep -c '^true$')" -eq 10[0m
+2026-09-12T01:24:36.2741466Z [36;1mdone[0m
+2026-09-12T01:24:36.2741736Z [36;1mclass_leaf_fixture="$scalar_root/ScalarClassLeaves.sx"[0m
+2026-09-12T01:24:36.2742348Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarClassLeaves.sx" "$class_leaf_fixture"[0m
+2026-09-12T01:24:36.2742911Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2743254Z [36;1m  "$silex" compile "$class_leaf_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2743665Z [36;1m    -o "$RUNNER_TEMP/scalar-class-leaves-$mode"[0m
+2026-09-12T01:24:36.2744067Z [36;1m  class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")[0m
+2026-09-12T01:24:36.2744497Z [36;1m  test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 10[0m
+2026-09-12T01:24:36.2744938Z [36;1m  test "$(printf '%s\n' "$class_leaf_output" | grep -c '^true$')" -eq 10[0m
+2026-09-12T01:24:36.2745297Z [36;1mdone[0m
+2026-09-12T01:24:36.2745598Z [36;1minteger_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"[0m
+2026-09-12T01:24:36.2746270Z [36;1mcp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"[0m
+2026-09-12T01:24:36.2746854Z [36;1mfor mode in debug release; do[0m
+2026-09-12T01:24:36.2747208Z [36;1m  "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \[0m
+2026-09-12T01:24:36.2747627Z [36;1m    -o "$RUNNER_TEMP/integer-memory-regions-$mode"[0m
+2026-09-12T01:24:36.2748063Z [36;1m  integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")[0m
+2026-09-12T01:24:36.2748860Z [36;1m  test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18[0m
+2026-09-12T01:24:36.2749338Z [36;1m  test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 18[0m
+2026-09-12T01:24:36.2749711Z [36;1mdone[0m
+2026-09-12T01:24:36.2790260Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-12T01:24:36.2790612Z ##[endgroup]
+2026-09-12T01:28:16.4601895Z silex: installed Shadercross for linux-x64
+2026-09-12T01:28:24.9871847Z silex: installed Native linker for linux-x64
+2026-09-12T01:28:24.9887943Z silex: linked STD@0.21.0 to /home/runner/work/Silex/Silex/Dependencies/STD for this workspace
+2026-09-12T01:28:38.2743848Z ok - str concatenation operand positions
+2026-09-12T01:28:38.2967144Z ok - str compound concatenation
+2026-09-12T01:28:38.3189122Z ok - str equality and interpolation
+2026-09-12T01:28:38.3399501Z ok - str unicode scalar count
+2026-09-12T01:28:38.3401793Z 4 passed; 0 failed
+2026-09-12T01:28:38.3942528Z ok - str return positions
+2026-09-12T01:28:38.3943597Z 1 passed; 0 failed
+2026-09-12T01:28:38.4542038Z ok - dynamic protocol dispatch returns updated structures and shared classes
+2026-09-12T01:28:38.4755884Z ok - execute direct indirect and dynamic calls beyond native registers
+2026-09-12T01:28:38.4965786Z ok - preserve paired float32 arithmetic on native
+2026-09-12T01:28:38.5187633Z ok - mutate a class-owned native list without changing its snapshot
+2026-09-12T01:28:38.5434459Z ok - replace class elements in a class-owned native list
+2026-09-12T01:28:38.5668894Z ok - preserve embedded byte contents on native
+2026-09-12T01:28:38.5882730Z ok - format native floats through the standalone runtime
+2026-09-12T01:28:38.6094190Z ok - convert native float precision in both directions
+2026-09-12T01:28:38.6309352Z ok - replace and preserve an aliased native list
+2026-09-12T01:28:38.6525304Z ok - swap and reverse a native list
+2026-09-12T01:28:38.6742546Z ok - grow a native list at every position
+2026-09-12T01:28:38.6965212Z ok - remove native list elements from every position
+2026-09-12T01:28:38.7184289Z ok - slice view mutate and clear native lists
+2026-09-12T01:28:38.7427838Z ok - mutable aggregate view detaches shared native list
+2026-09-12T01:28:38.7656309Z copy state drop
+2026-09-12T01:28:38.7656803Z copy state drop
+2026-09-12T01:28:38.7657304Z ok - deep-copy repeated native class roots without collections
+2026-09-12T01:28:38.7881588Z native cycle drop
+2026-09-12T01:28:38.7882081Z native cycle drop
+2026-09-12T01:28:38.7882731Z ok - finalize a direct native class cycle
+2026-09-12T01:28:38.8104044Z native cycle drop
+2026-09-12T01:28:38.8104495Z native cycle drop
+2026-09-12T01:28:38.8105106Z ok - finalize a native class cycle through lists
+2026-09-12T01:28:38.8320844Z native cycle drop
+2026-09-12T01:28:38.8321326Z native cycle drop
+2026-09-12T01:28:38.8321830Z ok - finalize a native class cycle through protocols
+2026-09-12T01:28:38.8553119Z ok - execute the complete native collection mutation slice
+2026-09-12T01:28:38.8767658Z copy state drop
+2026-09-12T01:28:38.8768125Z copy state drop
+2026-09-12T01:28:38.8768954Z ok - execute native ownership and deep-copy runtime
+2026-09-12T01:28:38.8984485Z ok - preserve resource aggregates across native list growth
+2026-09-12T01:28:38.9197214Z ok - serialize native mutations with mutex
+2026-09-12T01:28:38.9421094Z native cycle drop
+2026-09-12T01:28:38.9421558Z native cycle drop
+2026-09-12T01:28:38.9421959Z native cycle drop
+2026-09-12T01:28:38.9422356Z native cycle drop
+2026-09-12T01:28:38.9422819Z native cycle drop
+2026-09-12T01:28:38.9423208Z native cycle drop
+2026-09-12T01:28:38.9423810Z ok - finalize native cycles across direct collection and protocol edges
+2026-09-12T01:28:38.9448980Z 23 passed; 0 failed
+2026-09-12T01:28:39.0254476Z copy state drop
+2026-09-12T01:28:39.0254951Z copy state drop
+2026-09-12T01:28:39.0255308Z native cycle drop
+2026-09-12T01:28:39.0255659Z native cycle drop
+2026-09-12T01:28:39.0256178Z native cycle drop
+2026-09-12T01:28:39.0256890Z native cycle drop
+2026-09-12T01:28:39.0257504Z native cycle drop
+2026-09-12T01:28:39.0258128Z native cycle drop
+2026-09-12T01:28:40.0993156Z Post job cleanup.
+2026-09-12T01:28:40.1849382Z [command]/usr/bin/git version
+2026-09-12T01:28:40.1896760Z git version 2.55.0
+2026-09-12T01:28:40.1955435Z Temporarily overriding HOME='/home/runner/work/_temp/4e9088a2-f378-49e3-8b3d-14b28cb1365d' before making global git config changes
+2026-09-12T01:28:40.1956841Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T01:28:40.1958039Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Silex/Silex/Dependencies/STD
+2026-09-12T01:28:40.1994015Z Removing SSH command configuration
+2026-09-12T01:28:40.2001903Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T01:28:40.2041180Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T01:28:40.2300560Z Removing HTTP extra header
+2026-09-12T01:28:40.2307495Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T01:28:40.2348165Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T01:28:40.2605564Z Removing includeIf entries pointing to credentials config files
+2026-09-12T01:28:40.2615810Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T01:28:40.2646451Z includeif.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git.path
+2026-09-12T01:28:40.2647809Z includeif.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git/worktrees/*.path
+2026-09-12T01:28:40.2649721Z includeif.gitdir:/github/workspace/Dependencies/STD/.git.path
+2026-09-12T01:28:40.2650825Z includeif.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path
+2026-09-12T01:28:40.2657374Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git.path
+2026-09-12T01:28:40.2683595Z /home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2698148Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git.path /home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2739311Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git/worktrees/*.path
+2026-09-12T01:28:40.2765655Z /home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2777951Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Silex/Silex/Dependencies/STD/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2821139Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/Dependencies/STD/.git.path
+2026-09-12T01:28:40.2847901Z /github/runner_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2858089Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/Dependencies/STD/.git.path /github/runner_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2904899Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path
+2026-09-12T01:28:40.2938542Z /github/runner_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2950760Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path /github/runner_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config
+2026-09-12T01:28:40.2991321Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T01:28:40.3216577Z Removing credentials config '/home/runner/work/_temp/git-credentials-a0a108e0-8a24-45fe-b547-d412bf4668cd.config'
+2026-09-12T01:28:40.3405046Z Post job cleanup.
+2026-09-12T01:28:40.4327419Z [command]/usr/bin/git version
+2026-09-12T01:28:40.4368375Z git version 2.55.0
+2026-09-12T01:28:40.4442186Z Temporarily overriding HOME='/home/runner/work/_temp/0727950b-3d93-4139-9aa1-c4c3669849e3' before making global git config changes
+2026-09-12T01:28:40.4443474Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T01:28:40.4448891Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Silex/Silex
+2026-09-12T01:28:40.4485048Z Removing SSH command configuration
+2026-09-12T01:28:40.4493078Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T01:28:40.4532681Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T01:28:40.4806865Z Removing HTTP extra header
+2026-09-12T01:28:40.4814664Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T01:28:40.4861390Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T01:28:40.5211341Z Removing includeIf entries pointing to credentials config files
+2026-09-12T01:28:40.5222451Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T01:28:40.5269617Z includeif.gitdir:/home/runner/work/Silex/Silex/.git.path
+2026-09-12T01:28:40.5270554Z includeif.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path
+2026-09-12T01:28:40.5271517Z includeif.gitdir:/github/workspace/.git.path
+2026-09-12T01:28:40.5272288Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-12T01:28:40.5280306Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Silex/Silex/.git.path
+2026-09-12T01:28:40.5319699Z /home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5338298Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Silex/Silex/.git.path /home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5397064Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path
+2026-09-12T01:28:40.5436260Z /home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5451605Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5500203Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-12T01:28:40.5528014Z /github/runner_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5542214Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5583471Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-12T01:28:40.5610882Z /github/runner_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5624032Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config
+2026-09-12T01:28:40.5673140Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T01:28:40.5928943Z Removing credentials config '/home/runner/work/_temp/git-credentials-e2c8e9f8-aab2-469f-98a5-a64bf240fd81.config'
+2026-09-12T01:28:40.6099770Z Cleaning up orphan processes
+

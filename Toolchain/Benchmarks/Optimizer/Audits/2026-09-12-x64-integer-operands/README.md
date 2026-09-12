@@ -28,7 +28,14 @@ Flocking passent de 1436 à 1428 et de 1862 à 1853 instructions. Les périmètr
 incluent les chemins froids et, sauf Arithmetic, le runtime ; ces comptes
 ne démontrent aucun gain physique.
 
-Les jobs natifs macOS/Linux/Windows X64 sont dispatchés sur le SHA exact.
-La mesure Intel contre `901c6f5` attend la fin de la campagne précédente pour
-ne pas l'annuler. Aucun gain ni parité physique n'est revendiqué avant les
-résultats. Le fichier de dispatch Intel préparé n'est pas une preuve d'exécution.
+Les trois jobs natifs du SHA exact sont verts : macOS X64 `34664716155`
+(job `103474213127`), Linux X64 `34664717182` (job `103474215712`) et Windows
+X64 `34664718405` (job `103474218530`). Journaux et métadonnées sont scellés.
+La campagne Intel `34664959587` est lancée contre `901c6f5` après la fin de
+la campagne précédente. Aucun gain ni parité n'est revendiqué avant son résultat.
+
+Le corps répété d'Arithmetic contient 38 → 28 instructions, dont 17 → 7
+copies de registres ; le chemin de dépassement est conservé. Les dix suppressions
+sont dans cette zone chaude. Les sections machine des noyaux Preparation et
+Integration ARM64 recompilés sont identiques à `40dc120` : 42756 et 49860 octets.
+Les déficits de parité Physics mesurés auparavant ne sont donc pas résolus.
