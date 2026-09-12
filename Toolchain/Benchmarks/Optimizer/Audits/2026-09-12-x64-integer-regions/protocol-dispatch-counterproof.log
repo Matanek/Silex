@@ -1,0 +1,30 @@
+1/8 Main.test_0...OK
+2/8 Main.test_1...OK
+3/8 Arm64.Lower.test_0...OK
+4/8 Optimize.Release.test_0...OK
+5/8 Arm64.RegisterAllocation.test_0...OK
+6/8 LspTests.test_0...OK
+7/8 Arm64.MemoryResidence.test_0...OK
+8/8 Optimize.ReleaseTests.test.protocol dispatch defines results and updated receivers on every returning path...DOMINANCE function=exercise value=5 defs=1 first=.{ .block = 5, .instruction = 2 } use=.{ .block = 4, .instruction = 0 }
+FAIL (DefinitionDoesNotDominateUse)
+/private/tmp/silex-part03-evidence/DominanceProbeSources/Optimize/Verifier.zig:474:9: 0x10098bd93 in verifyUse (root)
+        return error.DefinitionDoesNotDominateUse;
+        ^
+/private/tmp/silex-part03-evidence/DominanceProbeSources/Optimize/Verifier.zig:503:13: 0x100b74afb in one (root)
+            try verifyUse(
+            ^
+/private/tmp/silex-part03-evidence/DominanceProbeSources/Optimize/Verifier.zig:534:33: 0x100b716df in verifyInstructionUses (root)
+        .local_store => |value| try context.one(value.operand),
+                                ^
+/private/tmp/silex-part03-evidence/DominanceProbeSources/Optimize/Verifier.zig:95:13: 0x10093950f in verifyFunction (root)
+            try verifyInstructionUses(
+            ^
+/private/tmp/silex-part03-evidence/DominanceProbeSources/Optimize/Verifier.zig:25:40: 0x100935133 in verify (root)
+    for (program.functions) |function| try verifyFunction(allocator, program, function);
+                                       ^
+/private/tmp/silex-part03-evidence/DominanceProbeSources/Optimize/ReleaseTests.zig:1410:9: 0x100884b97 in test.protocol dispatch defines results and updated receivers on every returning path (root)
+        try Verifier.verify(allocator, compilation.ir);
+        ^
+7 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/8165cf00a93d92ef41fa9b38899420a1/root --seed=0xf04559c5
