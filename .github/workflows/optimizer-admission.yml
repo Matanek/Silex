@@ -26,6 +26,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check out the pinned STD test dependency
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-STD
+          # Shared with the optimizer X64 qualification fixture.
+          ref: 80aabd9a2de919af52dc0b8bf2d0f9de50aa75c5
+          path: Dependencies/STD
+
+      - name: Register the pinned STD package for hermetic checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          links_root="$HOME/.silex/links"
+          mkdir -p "$links_root"
+          printf '{"path":"%s"}\n' "$GITHUB_WORKSPACE/Dependencies/STD" \
+            > "$links_root/STD.json"
+
       - name: Install Zig 0.16.0
         shell: bash
         run: |
