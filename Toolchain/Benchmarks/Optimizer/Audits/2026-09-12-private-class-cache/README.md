@@ -108,4 +108,11 @@ Les portails finaux passent : 45/45 étapes check/test, 1995 tests internes et
 régressions fixes, huit scénarios, 64 erreurs entières et 43 conversions,
 qualification X64 et robustesse complète. Les identités comparent chaque
 paire dans le même contexte local isolé. La preuve native distante finale
-reste à obtenir. Aucun gain Intel n'est revendiqué par cette correction.
+est fournie par le
+[run 34681686660](https://github.com/Matanek/Silex/actions/runs/34681686660)
+sur le SHA exact `1507a041b2b6704f253acdede2599d1360e52712` : macOS X64,
+Linux ARM64/X64, Windows ARM64/X64 et la construction intermédiaire Windows
+ARM64 sont verts. Les cinq exécutions natives contrôlent les dix-huit résultats
+de ScalarClassLeaves. Avec l'exécution macOS ARM64 locale, les six cibles
+affectées disposent d'une preuve native. Aucun gain Intel n'est revendiqué par
+cette correction ; X64 reprend les binaires de référence.
