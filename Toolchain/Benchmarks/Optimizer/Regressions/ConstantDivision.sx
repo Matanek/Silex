@@ -53,6 +53,18 @@ func parity(value:int) int {
     return 0
 }
 
+func boundedParity(count:int) int {
+    var index = 0
+    var evens = 0
+    while index < count {
+        if index % 2 == 0 {
+            evens++
+        }
+        index++
+    }
+    return evens
+}
+
 func main() {
     let signed8:func(int8) int8 = signed8Quotient
     let signed16:func(int16) int16 = signed16Remainder
@@ -83,5 +95,8 @@ func main() {
     assert(parity(-6) == 1)
     assert(parity(7) == 0)
     assert(parity(8) == 1)
+    assert(boundedParity(-1) == 0)
+    assert(boundedParity(0) == 0)
+    assert(boundedParity(5) == 3)
     print("constant division preserved")
 }

@@ -1063,7 +1063,7 @@ fn parityComparison(
         .binary => |value| value,
         else => return null,
     };
-    if (remainder.operator != .remainder or remainder.type != comparison.type or
+    if (remainder.operator != .remainder or !remainder.left_non_negative or remainder.type != comparison.type or
         !slotUsedOnlyAt(function.instructions, remainder.result, index) or
         !slotUsedOnlyAt(function.instructions, zero.result, index)) return null;
     const compares_remainder_to_zero =
@@ -4661,6 +4661,7 @@ test "fuse X64 parity branches without materializing a signed remainder" {
             .right = 1,
             .type = .int,
             .checked = false,
+            .left_non_negative = true,
         } },
         .{ .constant_int = .{ .result = 3, .bits = 0, .type = .int } },
         .{ .binary = .{
@@ -4702,6 +4703,10 @@ test "fuse X64 parity branches without materializing a signed remainder" {
 
     instructions[0].constant_int.bits = 2;
     instructions[6] = .{ .jump = 1 };
+    try std.testing.expect(parityComparison(function, 3, instructions[3].binary) == null);
+
+    instructions[6] = .return_void;
+    instructions[1].binary.left_non_negative = false;
     try std.testing.expect(parityComparison(function, 3, instructions[3].binary) == null);
 }
 
