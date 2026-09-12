@@ -1,0 +1,110 @@
+[
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-arithmetic-macos-arm64"
+    ],
+    "workload": "Arithmetic",
+    "target": "macos-arm64",
+    "sha256": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
+    "identical_40dc120": true,
+    "stdout": "143997165\n"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-objects-macos-arm64"
+    ],
+    "workload": "Objects",
+    "target": "macos-arm64",
+    "sha256": "9960f656e75a02c8773945dec6e628120682b6cabf79f842114f60e7b4dfe891",
+    "identical_40dc120": true,
+    "stdout": "6000000\n"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-flocking-macos-arm64"
+    ],
+    "workload": "Flocking",
+    "target": "macos-arm64",
+    "sha256": "cda996604e707451cd4c2cfc855e741d9df9a42bebbc9c773e34d1def4b528e7",
+    "identical_40dc120": true,
+    "stdout": "true\n"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-arithmetic-macos-x64"
+    ],
+    "workload": "Arithmetic",
+    "target": "macos-x64",
+    "sha256": "6067de218535a3ee296eed15c44992252b5e8d2d254f2e2d7ebf8efde20a6399",
+    "identical_40dc120": true,
+    "stdout": "143997165\n"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-objects-macos-x64"
+    ],
+    "workload": "Objects",
+    "target": "macos-x64",
+    "sha256": "71222a84fcad08522aa0503c04f39d67cebec10a401458ed7de44416c6d43a42",
+    "identical_40dc120": true,
+    "stdout": "6000000\n"
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-flocking-macos-x64"
+    ],
+    "workload": "Flocking",
+    "target": "macos-x64",
+    "sha256": "aba561293d459406ace1498d16415c2c83f41417787d6157609dc022820d30ed",
+    "identical_40dc120": false,
+    "stdout": "true\n"
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "scope": "Complete X64 text, including main, cold paths and runtime; not timing evidence",
+  "before": {
+    "instructions": 1862,
+    "stack_references": 651,
+    "binary_sha256": "14c6fdfa2dcd1312dd25fcd378ffdf905726c652ba2b93b40d483569f4b95df0"
+  },
+  "after": {
+    "instructions": 1862,
+    "stack_references": 583,
+    "binary_sha256": "aba561293d459406ace1498d16415c2c83f41417787d6157609dc022820d30ed"
+  }
+}

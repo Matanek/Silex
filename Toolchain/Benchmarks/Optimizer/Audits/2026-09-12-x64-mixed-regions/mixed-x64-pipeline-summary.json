@@ -1,0 +1,44 @@
+[
+  {
+    "function": "Objects.calculate",
+    "command": [
+      "/private/tmp/silex-part03-evidence/mixed-hot-budget-probe",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+      "hot-budget",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "Objects.calculate"
+    ],
+    "lower_mode": "debug then X64RegisterAllocation, as Main.lowerModeForTarget",
+    "gp": 13,
+    "fp": 0
+  },
+  {
+    "function": "Flocking.calculate",
+    "command": [
+      "/private/tmp/silex-part03-evidence/mixed-hot-budget-probe",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+      "hot-budget",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "Flocking.calculate"
+    ],
+    "lower_mode": "debug then X64RegisterAllocation, as Main.lowerModeForTarget",
+    "gp": 23,
+    "fp": 73
+  },
+  {
+    "function": "Flocking.steer",
+    "command": [
+      "/private/tmp/silex-part03-evidence/mixed-hot-budget-probe",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+      "hot-budget",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "Flocking.steer"
+    ],
+    "lower_mode": "debug then X64RegisterAllocation, as Main.lowerModeForTarget",
+    "gp": 12,
+    "fp": 55
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "function": "Objects.calculate",
+    "gp_before": 13,
+    "fp_before": 0,
+    "gp_after": 13,
+    "fp_after": 0
+  },
+  {
+    "function": "Flocking.calculate",
+    "gp_before": 0,
+    "fp_before": 73,
+    "gp_after": 23,
+    "fp_after": 73
+  },
+  {
+    "function": "Flocking.steer",
+    "gp_before": 0,
+    "fp_before": 55,
+    "gp_after": 12,
+    "fp_after": 55
+  }
+]

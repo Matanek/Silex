@@ -1,0 +1,16 @@
+1/3 X64MixedProbe.test_0...OK
+2/3 X64.RegisterAllocation.test.X64 mixed loops retain integer indices with aggregate inputs and returns...expected 14, found 0
+FAIL (TestExpectedEqual)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:118:17: 0x104e058b7 in expectEqualInner__anon_36667 (root)
+                return error.TestExpectedEqual;
+                ^
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:83:5: 0x104e05f17 in expectEqual (root)
+    return expectEqualInner(T, expected, actual);
+    ^
+/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Sources/X64/RegisterAllocation.zig:1123:5: 0x104e05fa3 in test.X64 mixed loops retain integer indices with aggregate inputs and returns (root)
+    try std.testing.expectEqual(@as(usize, 14), aggregate.len);
+    ^
+3/3 Arm64.MemoryResidence.test_0...OK
+2 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/53ecc0d818d13de2ba8127a752e7d8c0/root --seed=0x45f53152
