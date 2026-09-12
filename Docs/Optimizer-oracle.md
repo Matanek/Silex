@@ -5,6 +5,51 @@ raw and Release portable IR, reference interpretation, native Debug and
 Release execution, and a pinned Clang/LLVM `-O3` configuration. LLVM output is
 never consumed by the Silex compiler.
 
+## Choose the reference for the question
+
+Use a frozen Silex version to measure progress, and retain the accepted
+long-term baseline to detect cumulative regressions. Compare the same source,
+work, dependency closure, modes and physical target. Record three distinct
+conclusions:
+
+- Correctness: expected observables, raw/optimized interpretation, native
+  Debug/Release, negative and metamorphic cases, plus independent witnesses
+  and LLVM where its bridge preserves the relevant semantics. Two Silex
+  execution paths can share a defect.
+- Progress: candidate versus Silex baseline, with raw paired observations and
+  the decision rule fixed before measuring. Distinguish improvement,
+  regression, no detected difference and inconclusive evidence. A confidence
+  interval containing equality does not itself establish non-regression;
+  that guarantee needs its own bound declared in advance.
+- External position: the separately qualified Silex/Clang comparison. Use it
+  to expose missed costs and challenge assumptions at mechanism changes and
+  final qualification. It is neither a presumed ceiling nor a requirement to
+  reproduce LLVM's passes. Keep unfavorable cases in the report.
+
+Start from Silex's dominant executed costs and ask whether semantics require
+the work or a representation introduces it. Investigate lost information,
+premature materialization, copies, lifetimes and call boundaries before adding
+another local adjustment. Record the hypothesis, a competing explanation, the
+observable discriminator and the stopping condition. Test a reduced case and
+an independent variant before widening the change. Suspected historical debt
+in either compiler is a hypothesis, not performance evidence.
+
+Balance execution order and predecessor effects. For a small or suspicious
+delta, include an identical-executable control; repetition can preserve a
+systematic bias. An unstable comparison remains inconclusive. A source-level
+witness that also removes allocation or other work diagnoses an opportunity
+but cannot replace the workload used to admit a compiler transformation.
+
+These development decisions do not change the implemented gate contracts.
+`Toolchain/Benchmarks/Native/campaign.py` can record a Silex baseline comparison
+alongside its Clang comparisons, but its `--require-parity` verdict still
+requires external parity. The balanced controls in `calibrate.py` remain
+diagnostic. An admission-policy migration needs separately protected baseline
+rules and tests of reports, exit codes and required statuses before replacing
+an existing gate. A documentation change cannot turn a failing run green.
+
+## Coverage registry
+
 `Toolchain/Benchmarks/Optimizer/Coverage.json` is the machine-readable control
 plane. It pins the Clang executable identity separately from the upstream LLVM
 source revision, target triple, CPU, features, floating-point policy, linker,
