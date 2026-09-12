@@ -32,3 +32,12 @@ inscrites au registre de budgets ARM64. Elles ne constituent pas un portail.
 Les validations natives macOS/Linux/Windows X64 et la mesure Intel physique
 sont dispatchées sur le SHA exact. Aucun gain ni parité n'est revendiqué en
 attendant ces résultats. Les seuils de stabilité et de parité sont inchangés.
+
+## Exécutions natives X64 validées
+
+Les trois exécutions du SHA exact sont vertes : macOS X64 `34663803459`
+(job `103471551999`), Linux X64 `34663804874` (job `103471555256`) et
+Windows X64 `34663806275` (job `103471559207`). Chaque cible exécute les
+témoins Debug/Release, dont les 22 sorties de FloatMemoryResidence.
+Les journaux et métadonnées sont scellés ici. La mesure Intel
+`34663807514` reste distincte de ces preuves de correction.
