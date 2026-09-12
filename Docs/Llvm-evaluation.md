@@ -61,6 +61,12 @@ synthetic result. Duplicate declarations must keep the same provider and exact
 signature; indirect calls and conflicts remain explicit refusals. Archive and
 framework linking is a separate stage and is not inferred by the emitter.
 
+Reachable global values are emitted only for statically initialized integers
+whose serialized value fits the single typed-IR word. Loads and stores
+refer to an internal LLVM global by stable IR index; stores additionally require
+a mutable declaration. Runtime initialization, aggregate payloads and object or
+optional representations remain explicit refusals.
+
 `verify.py` accepts `--native`, `--adapter`, `--shadercross`, `--llvm-dir`, `--sdk`,
 `--output-dir`, and `--report`. It compares exact stdout, stderr, and exit status in native Debug,
 native Release, LLVM O0, and LLVM O3; it also checks the interpreter on bounded

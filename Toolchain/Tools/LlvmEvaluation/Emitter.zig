@@ -42,10 +42,25 @@ pub fn emitWithBoundaries(
     const global_use = try inspectGlobalUse(allocator, program, reachable);
     defer allocator.free(global_use.loads);
     defer allocator.free(global_use.stores);
-    if (global_use.used != 0) {
+    var unsupported_globals: usize = 0;
+    var first_unsupported_global: ?usize = null;
+    for (program.globals, 0..) |global, index| {
+        if (global_use.loads[index] == 0 and global_use.stores[index] == 0) continue;
+        if (global_use.stores[index] != 0 and !global.mutable) return error.InvalidProgram;
+        if (supportsStaticGlobal(global)) continue;
+        unsupported_globals += 1;
+        if (first_unsupported_global == null) first_unsupported_global = index;
+    }
+    if (unsupported_globals != 0) {
         std.debug.print(
-            "silex LLVM evaluation: emitter rejected {d} reachable global values across {d} loads and {d} stores\n",
-            .{ global_use.used, global_use.load_sites, global_use.store_sites },
+            "silex LLVM evaluation: emitter rejected {d} of {d} reachable global values across {d} loads and {d} stores; first unsupported reachable global is '{s}'\n",
+            .{
+                unsupported_globals,
+                global_use.used,
+                global_use.load_sites,
+                global_use.store_sites,
+                program.globals[first_unsupported_global.?].name,
+            },
         );
         return error.UnsupportedInstruction;
     }
@@ -104,6 +119,7 @@ pub fn emitWithBoundaries(
         boundaries,
         boundary_use.direct_sites_by_function,
     );
+    try emitGlobalDeclarations(&output, allocator, program, global_use);
     for (program.structures, 0..) |structure, structure_index| {
         if (structure.collection != null) {
             try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
@@ -371,6 +387,32 @@ fn inspectGlobalUse(
     return result;
 }
 
+fn supportsStaticGlobal(global: Ir.Global) bool {
+    if (global.runtime_initialized or global.extra_bits.len != 0) return false;
+    return global.type.isInteger();
+}
+
+fn emitGlobalDeclarations(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    program: Ir.Program,
+    use: GlobalUse,
+) Error!void {
+    var emitted = false;
+    for (program.globals, 0..) |global, index| {
+        if (use.loads[index] == 0 and use.stores[index] == 0) continue;
+        if (!supportsStaticGlobal(global)) return error.UnsupportedType;
+        try appendFmt(output, allocator, "@sx.global.{d} = internal {s} {s} {d}\n", .{
+            index,
+            if (global.mutable) "global" else "constant",
+            try llvmType(allocator, program, global.type),
+            normalize(global.bits, global.type),
+        });
+        emitted = true;
+    }
+    if (emitted) try output.append(allocator, '\n');
+}
+
 const FunctionEmitter = struct {
     allocator: Allocator,
     output: *std.ArrayList(u8),
@@ -456,6 +498,8 @@ const FunctionEmitter = struct {
                 "  store {s} %v{d}, ptr %local{d}\n",
                 .{ try llvmType(self.allocator, self.program, try self.valueType(value.operand)), value.operand, value.local },
             ),
+            .global_load => |value| try self.emitGlobalLoad(value),
+            .global_store => |value| try self.emitGlobalStore(value),
             .local_address => |value| try self.emitLocalAddress(value),
             .reference_load => |value| try self.emitReferenceLoad(value),
             .reference_store => |value| try self.emitReferenceStore(value),
@@ -468,6 +512,30 @@ const FunctionEmitter = struct {
             .print => |value| try self.emitPrint(value),
             else => return error.UnsupportedInstruction,
         }
+    }
+
+    fn emitGlobalLoad(self: *FunctionEmitter, value: Ir.Instruction.GlobalLoad) Error!void {
+        if (value.global >= self.program.globals.len) return error.InvalidProgram;
+        const global = self.program.globals[value.global];
+        if (!supportsStaticGlobal(global) or try self.valueType(value.result) != global.type)
+            return error.InvalidProgram;
+        try self.write("  %v{d} = load {s}, ptr @sx.global.{d}\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, global.type),
+            value.global,
+        });
+    }
+
+    fn emitGlobalStore(self: *FunctionEmitter, value: Ir.Instruction.GlobalStore) Error!void {
+        if (value.global >= self.program.globals.len) return error.InvalidProgram;
+        const global = self.program.globals[value.global];
+        if (!global.mutable or !supportsStaticGlobal(global) or try self.valueType(value.operand) != global.type)
+            return error.InvalidProgram;
+        try self.write("  store {s} %v{d}, ptr @sx.global.{d}\n", .{
+            try llvmType(self.allocator, self.program, global.type),
+            value.operand,
+            value.global,
+        });
     }
 
     fn emitListResource(self: *FunctionEmitter, value: Ir.Instruction.ListResource, comptime operation: []const u8) Error!void {

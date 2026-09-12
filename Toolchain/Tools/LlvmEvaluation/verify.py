@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -56,6 +57,7 @@ def main():
         "LlvmEvaluation/Conversion.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
+        "LlvmEvaluation/GlobalInventory.sx": "2\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -150,36 +152,28 @@ def main():
     print("REACHABLE BOUNDARY INVENTORY PASS", flush=True)
 
     global_source = (corpus/"LlvmEvaluation/GlobalInventory.sx").resolve()
-    native_observable = None
-    for mode in ["debug", "release"]:
-        binary = output/("GlobalInventory-"+mode)
-        built = call("GlobalInventory-compile-"+mode,
-                     [args.native, "compile", global_source, "--"+mode, "--nocache", "--output", binary])
-        assert built["returncode"] == 0, built
-        run = call("GlobalInventory-run-"+mode, [binary])
-        observable = {key: run[key] for key in ["returncode", "stdout", "stderr"]}
-        assert observable == {"returncode": 0, "stdout": "2\n", "stderr": ""}, run
-        if native_observable is None:
-            native_observable = observable
-        else:
-            assert observable == native_observable, (native_observable, observable)
-    target = output/"GlobalInventory-refused.ll"
+    target = output/"GlobalInventory-reported.ll"
     closure_report = output/"GlobalInventory-closure.json"
-    target.write_bytes(b"existing output must survive global refusal")
-    rejected = call("GlobalInventory-closure-report", [
+    reported = call("GlobalInventory-closure-report", [
         args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
         "--silex-prefix", "none", "--closure-report", closure_report,
         global_source, target,
     ])
-    assert rejected["returncode"] != 0 and "reachable global values" in rejected["stderr"], rejected
-    assert target.read_bytes() == b"existing output must survive global refusal"
+    assert reported["returncode"] == 0, reported
     inventory = json.loads(closure_report.read_text())
     assert inventory["reachable_global_values"] == 1, inventory
     assert inventory["global_load_sites"] == 2 and inventory["global_store_sites"] == 1, inventory
     global_value = inventory["globals"][0]
     assert global_value["name"] == "LlvmEvaluation.GlobalInventory.State.counter", inventory
     assert global_value["type_name"] == "int" and global_value["bits"] == 1, inventory
-    print("REACHABLE GLOBAL INVENTORY PASS", flush=True)
+    raw_llvm = target.read_text()
+    for fragment in [
+        "@sx.global.0 = internal global i64 1",
+        "load i64, ptr @sx.global.0",
+    ]:
+        assert fragment in raw_llvm, fragment
+    assert re.search(r"store i64 %v\d+, ptr @sx\.global\.0", raw_llvm), raw_llvm
+    print("REACHABLE SCALAR GLOBAL EMISSION PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseString", "RefuseCallback"]:
