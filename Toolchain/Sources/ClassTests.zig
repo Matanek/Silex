@@ -37,6 +37,24 @@ test "primitive type spellings remain available as contextual method names" {
     try std.testing.expectEqualStrings("4 1\n", output);
 }
 
+test "interpret contextual move calls and cascades preserve ownership transfer" {
+    const output = try run(
+        \\class Actor {
+        \\    var position:int = 0
+        \\    func move(amount:int) int { self.position += amount; return self.position }
+        \\}
+        \\func main() {
+        \\    var actor = Actor()..move(2)
+        \\    print(actor.move(3))
+        \\    var values:int[] = [7]
+        \\    let transferred = move values
+        \\    print(transferred[0])
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("5\n7\n", output);
+}
+
 test "classes preserve shared identity through transport and containers" {
     const output = try run(
         \\class Player {

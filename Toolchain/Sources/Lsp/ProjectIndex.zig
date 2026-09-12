@@ -111,25 +111,15 @@ pub fn index(
     for (graph.packages[1..], excluded_roots) |package, *package_root| package_root.* = package.root;
     for (graph.packages, 0..) |package, owner| {
         for (package.module_roots) |module_root| {
-            const discovered = if (owner == 0)
-                try Modules.discoverOwnedExcludingAs(
-                    allocator,
-                    io,
-                    module_root.path,
-                    package.name,
-                    owner,
-                    excluded_roots,
-                    module_root.origin,
-                )
-            else
-                try Modules.discoverOwnedAs(
-                    allocator,
-                    io,
-                    module_root.path,
-                    package.name,
-                    owner,
-                    module_root.origin,
-                );
+            const discovered = try Modules.discoverForEditor(
+                allocator,
+                io,
+                module_root.path,
+                package.name,
+                owner,
+                if (owner == 0) excluded_roots else &.{},
+                module_root.origin,
+            );
             try indexes.append(allocator, discovered);
         }
     }
@@ -206,6 +196,36 @@ pub fn canonicalUsePath(
 
 pub fn projectRoot(allocator: Allocator, io: Io, document_path: []const u8, root_hint: ?[]const u8) ![]const u8 {
     return Paths.findRootWithin(allocator, io, document_path, root_hint);
+}
+
+pub fn invalidSourcePath(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+) !?[]const u8 {
+    const document_path = try pathFromUri(allocator, document_uri);
+    const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
+    const root = try projectRoot(allocator, io, document_path, root_hint);
+    var resolver = Packages.Resolver.initForTarget(allocator, io, global_packages_root, target);
+    resolver.enableDevelopmentDependencies();
+    const graph = try resolver.resolve(root);
+    const package = graph.packages[0];
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    // Validate the URI too: a newly opened document may not exist on disk yet.
+    for (package.module_roots) |module_root| {
+        const relative = try std.fs.path.relative(allocator, cwd, null, module_root.path, document_path);
+        if (std.mem.eql(u8, relative, "..") or std.mem.startsWith(u8, relative, "../") or
+            std.mem.startsWith(u8, relative, "..\\") or std.fs.path.isAbsolute(relative)) continue;
+        _ = Modules.sourceModuleName(allocator, relative, package.name) catch |err| switch (err) {
+            error.InvalidModulePath => return relative,
+            else => return err,
+        };
+        return null;
+    }
+    return null;
 }
 
 pub fn pathFromUri(allocator: Allocator, uri: []const u8) ![]const u8 {

@@ -169,8 +169,11 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
             if (try expressionName(self.allocator, expression)) |name| {
                 if (try self.targetForCall(module, name)) |target| {
                     try self.activateDeclaration(module, target);
-                } else try self.activateExpression(module, access.base);
-            } else try self.activateExpression(module, access.base);
+                }
+            }
+            // A qualified variant also needs its reexported enum activated;
+            // resolving the full path alone may stop at the facade module.
+            try self.activateExpression(module, access.base);
         },
         .unary => |unary| {
             try self.activateExpression(module, unary.operand);

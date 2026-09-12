@@ -35,7 +35,8 @@ pub fn parseIf(self: anytype) !Ast.Statement {
     const position = self.current.position;
     var branches: std.ArrayList(Ast.ConditionalBranch) = .empty;
 
-    while (self.current.tag == .keyword_if or self.current.tag == .keyword_elif) {
+    var else_statements: ?[]const Ast.Statement = null;
+    while (true) {
         const branch_position = self.current.position;
         try self.advance();
         const condition = try parseCondition(self);
@@ -45,34 +46,13 @@ pub fn parseIf(self: anytype) !Ast.Statement {
             .condition = condition,
             .statements = statements,
         });
-        if (self.current.tag != .keyword_elif) break;
-    }
-
-    var else_statements: ?[]const Ast.Statement = null;
-    if (self.current.tag == .keyword_else) {
-        try self.advance();
-        if (self.current.tag == .keyword_if) {
-            while (true) {
-                const branch_position = self.current.position;
-                try self.advance();
-                const condition = try parseCondition(self);
-                const statements = try self.parseBlock();
-                try branches.append(self.allocator, .{
-                    .position = branch_position,
-                    .condition = condition,
-                    .statements = statements,
-                });
-                if (self.current.tag == .keyword_elif) continue;
-                if (self.current.tag == .keyword_else) {
-                    try self.advance();
-                    if (self.current.tag == .keyword_if) continue;
-                    else_statements = try self.parseBlock();
-                }
-                break;
-            }
-        } else {
+        if (self.current.tag == .keyword_elif) continue;
+        if (self.current.tag == .keyword_else) {
+            try self.advance();
+            if (self.current.tag == .keyword_if) continue;
             else_statements = try self.parseBlock();
         }
+        break;
     }
 
     return .{ .if_statement = .{

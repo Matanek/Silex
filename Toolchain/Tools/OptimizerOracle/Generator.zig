@@ -154,6 +154,10 @@ pub const regressions = [_]RegressionEntry{
         .contract = .{ .forwards_known_views = "constantViews" },
     },
     .{
+        .name = "Regressions/LastElementNormalization.sx",
+        .concern = "repeated last-element normalization extends the value domain before use counting while preserving the first bounds check",
+    },
+    .{
         .name = "IntegerArithmetic.sx",
         .concern = "a hot scalar loop retains target registers across a terminal output barrier",
         .contract = .{ .native_loop_residence = .{

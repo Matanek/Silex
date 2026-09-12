@@ -123,10 +123,7 @@ pub fn enumTarget(self: anytype, module: usize, name: []const u8) !?Target {
 pub fn enumReceiverTarget(self: anytype, module: usize, name: []const u8) !?Target {
     const separator = std.mem.indexOfScalar(u8, name, '.');
     if (separator == null) return enumTarget(self, module, name);
-    if (try self.targetForCall(module, name)) |target| {
-        if (self.units[target.module].state != .loaded) return null;
-        if (try enumTarget(self, target.module, target.declaration)) |enumeration| return enumeration;
-    }
+    if (try enumTarget(self, module, name)) |enumeration| return enumeration;
     for (self.index.providers, 0..) |_, target_module| {
         if (self.units[target_module].state != .loaded) continue;
         for (self.units[target_module].program.?.enums) |enumeration| {

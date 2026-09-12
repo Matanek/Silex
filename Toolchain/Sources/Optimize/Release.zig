@@ -2115,7 +2115,9 @@ fn instructionProducing(function: Ir.Function, value: Ir.ValueId) ?Ir.Instructio
 
 fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) !Ir.Function {
     const dominated = try elideDominatedLastElementChecks(allocator, function);
-    const uses = try allocator.alloc(usize, function.value_types.len);
+    // Last-element normalization can append values. All following analyses
+    // must use the rewritten function's definitions and value domain.
+    const uses = try allocator.alloc(usize, dominated.value_types.len);
     @memset(uses, 0);
     for (dominated.blocks) |block| {
         for (block.instructions) |instruction| countUses(instruction, uses);
@@ -2129,7 +2131,7 @@ fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) 
             if (instruction == .collection_load) {
                 const load = instruction.collection_load;
                 if (load.checked and uses[load.result] == 0 and
-                    collectionCheckProven(function, block.instructions, instruction_index, load))
+                    collectionCheckProven(dominated, block.instructions, instruction_index, load))
                 {
                     changed = true;
                     continue;
@@ -2146,6 +2148,38 @@ fn removeRedundantCollectionChecks(allocator: Allocator, function: Ir.Function) 
     var result = dominated;
     result.blocks = blocks;
     return result;
+}
+
+test "collection check cleanup counts every value added by last-element normalization" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func select(values:@int[..], index:int) int {
+        \\    return values[index] + values[-1] + values[-1]
+        \\}
+        \\func main() {
+        \\    let values:int[] = [3, 5, 8, 13]
+        \\    print(select(@values[0:values.count()], 1))
+        \\}
+    );
+    for (compilation.ir.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "select")) continue;
+        const rewritten = try removeRedundantCollectionChecks(allocator, function);
+        try std.testing.expectEqual(function.value_types.len + 6, rewritten.value_types.len);
+        try Verifier.verifyFunction(allocator, compilation.ir, rewritten);
+        var checked: usize = 0;
+        var unchecked: usize = 0;
+        for (rewritten.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction != .collection_load) continue;
+            if (instruction.collection_load.checked) checked += 1 else unchecked += 1;
+        };
+        try std.testing.expectEqual(@as(usize, 1), checked);
+        try std.testing.expectEqual(@as(usize, 2), unchecked);
+        return;
+    }
+    return error.TestUnexpectedResult;
 }
 
 fn elideDominatedLastElementChecks(allocator: Allocator, function: Ir.Function) !Ir.Function {

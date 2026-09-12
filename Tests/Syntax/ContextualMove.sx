@@ -1,0 +1,15 @@
+class Actor {
+    var position:int = 0
+    func move(amount:int) int {
+        self.position += amount
+        return self.position
+    }
+}
+
+test "move remains a transfer operator and becomes a contextual method name" {
+    var actor = Actor()..move(2)
+    assert(actor.move(3) == 5)
+    var values:int[] = [2, 3]
+    let transferred = move values
+    assert(transferred[0] == 2)
+}

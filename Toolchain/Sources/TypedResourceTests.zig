@@ -291,6 +291,48 @@ const application_declaration =
 
 const application_source = resources_source ++ application_declaration;
 
+test "injected systems forward positional named and default process modes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application.Resources
+        \\struct Counter { var value:int }
+        \\class Host {
+        \\    private var store:Resources = Resources()
+        \\    func resources() Resources { return self.store }
+        \\    func add_system<System>(schedule:int, callback:System, process_mode:int = 0) Host { panic("unspecialized") }
+        \\    func add_after_system<System>(schedule:int, callback:System, process_mode:int = 0) Host { panic("unspecialized") }
+        \\    module func __silex_add_system(schedule:int, callback:func(Host, int), after:bool, reads:str[], writes:str[], flags:uint, process_mode:int = 0) Host {
+        \\        print(process_mode)
+        \\        callback(self, 0)
+        \\        return self
+        \\    }
+        \\}
+        \\func increment(counter:&Counter) { counter.value++ }
+        \\func main() {
+        \\    var host = Host()
+        \\    host.resources().insert(Counter(value:40))
+        \\    host.add_system(0, increment)
+        \\    host.add_system(0, increment, 7)
+        \\    host.add_after_system(process_mode:4, callback:increment, schedule:0)
+        \\    print(host.resources().get<Counter>().value)
+        \\}
+        ,
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("0\n7\n4\n43\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
 test "injected systems borrow the application resource store when the host exposes the compiler hook" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

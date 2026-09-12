@@ -2217,9 +2217,11 @@ fn encodeFunction(
         if (failure.bounds.upper != failure.bounds.negative) {
             try patch19(words.items, failure.bounds.upper, failure_label);
         }
-        if (function.register_slots.len != 0) if (function.register_slots[failure.index]) |number| {
-            try words.append(allocator, storeStack(@enumFromInt(number), failure.index));
-        };
+        // A resident index may have no stack home. Preserve it in cold-path
+        // scratch space rather than overwriting the caller's saved registers.
+        try loadOptionalValue(allocator, words, function, .x9, failure.index);
+        try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, false));
+        try words.append(allocator, storeStack(.x9, 0));
         try StringRuntime.emitWriteStatic(
             allocator,
             words,
@@ -2230,7 +2232,7 @@ fn encodeFunction(
             failure.header,
             2,
         );
-        try emitPrintInteger(allocator, words, external_call_sites, platform, null, failure.index, 2, false);
+        try emitPrintInteger(allocator, words, external_call_sites, platform, null, 0, 2, false);
         try StringRuntime.emitWriteStatic(
             allocator,
             words,
@@ -2241,6 +2243,7 @@ fn encodeFunction(
             failure.tail,
             2,
         );
+        try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, true));
         try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
         try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
     }
@@ -6211,6 +6214,47 @@ test "keep register-resident aggregate parameter leaves out of paired stack tran
     };
     try std.testing.expect(!pairAggregateParameterLeaves(function, parameter, 0));
     try std.testing.expect(pairAggregateParameterLeaves(function, parameter, 2));
+}
+
+test "bounds diagnostics preserve saved registers when an index has no stack home" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const function: Machine.Function = .{
+        .name = "checked_resident_index",
+        .parameter_count = 3,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = 0,
+        .register_slots = &.{ 19, 20, 21, 22 },
+        .instructions = &.{
+            .{ .collection_reference = .{
+                .result = 3,
+                .collection = .{ .start = 0, .width = 2, .aggregate = true },
+                .reference = null,
+                .index = 2,
+                .element_width = 1,
+                .count = 0,
+                .dynamic = true,
+                .view = true,
+                .header = 0,
+                .tail = 1,
+            } },
+            .return_void,
+        },
+    };
+    for ([_]Platform{ .darwin, .linux, .windows }) |platform| {
+        const image = try encodeForPlatform(allocator, .{ .functions = &.{function}, .strings = &.{ "index ", " out of bounds\n" } }, .none, platform);
+        var saves: usize = 0;
+        var offset: usize = 0;
+        while (offset + 4 <= image.code.len) : (offset += 4) {
+            const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+            if (word == storeStack(.x21, 2)) saves += 1;
+        }
+        // Slot 2 holds the caller's X21, not a stack copy of the resident index.
+        try std.testing.expectEqual(@as(usize, 1), saves);
+    }
 }
 
 test "recognize a comparison-only while header at its back edge" {

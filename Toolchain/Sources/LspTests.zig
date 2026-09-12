@@ -18,8 +18,11 @@ test {
     _ = @import("Lsp/Tests/MetamorphicCompletionCampaign.zig");
     _ = @import("Lsp/Tests/SealedCompletionCorpus.zig");
     _ = @import("Lsp/Tests/CallbackCompletion.zig");
+    _ = @import("Lsp/Tests/InheritanceCompletion.zig");
+    _ = @import("Lsp/Tests/InheritedCallCompletion.zig");
     _ = @import("Lsp/Tests/WorkspaceContracts.zig");
     _ = @import("Lsp/Tests/LoosePackages.zig");
+    _ = @import("Lsp/Tests/InvalidSourcePaths.zig");
     _ = @import("Lsp/Tests/Part03Contracts.zig");
     _ = @import("Lsp/Tests/Part04Contracts.zig");
     _ = @import("Lsp/Tests/WorkspaceTopologyOracle.zig");

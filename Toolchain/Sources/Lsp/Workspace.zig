@@ -54,6 +54,10 @@ const ImportedMemberQuery = struct {
     static_receiver: bool = false,
     inside_extension: bool = false,
     type_only: bool = false,
+    receiver_type: ?[]const u8 = null,
+    inherited_access: bool = false,
+    merge_local: bool = false,
+    override_context: ?Completion.Decision = null,
 };
 
 const IndexedProject = ProjectIndex.IndexedProject;
@@ -193,6 +197,14 @@ pub fn completionOutcomeAtForTargetWithDecision(
         .imported_member => |member| {
             var resolved = member;
             resolved.current_program = decision.program;
+            if (member.merge_local) {
+                const local = try Completion.itemsAtWithDecision(allocator, source, decision, null);
+                for (local) |item| {
+                    var candidate = item;
+                    candidate.label = item.filterText orelse item.label;
+                    try appendRanked(allocator, &ranked, candidate, if (item.kind == CompletionKind.method) Completion.memberMethodPriority else Completion.memberFieldPriority, true);
+                }
+            }
             try appendImportedMembers(
                 allocator,
                 io,
@@ -214,9 +226,13 @@ pub fn completionOutcomeAtForTargetWithDecision(
             result[index].insertText = entry.item.label;
             result[index].insertTextFormat = null;
         } else {
-            result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
-            result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
+            result[index].insertText = entry.item.insertText orelse try Completion.insertTextForAt(allocator, entry.item, source, cursor);
+            result[index].insertTextFormat = entry.item.insertTextFormat orelse Completion.insertTextFormatForAt(entry.item, source, cursor);
         }
+    }
+    if (decision.override_start != null) {
+        Completion.disambiguateCallableLabels(result);
+        return .{ .items = result };
     }
     const expanded = try Completion.expandOptionalCallVariants(allocator, result, source, cursor);
     const unique = Completion.deduplicateCallableShapes(expanded);
@@ -346,10 +362,22 @@ pub fn importedReceiverTypeAt(
     source: []const u8,
     cursor: usize,
 ) !?[]const u8 {
+    const receiver = try importedReceiverAt(allocator, io, documents, project, source, cursor) orelse return null;
+    return receiver.type_path;
+}
+
+pub fn importedReceiverAt(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    source: []const u8,
+    cursor: usize,
+) !?ImportedMemberQuery {
     const decision = try Completion.decisionAt(allocator, source, cursor, .invoked);
     const query = try queryAt(allocator, source, decision, project, io, documents) orelse return null;
     return switch (query) {
-        .imported_member => |member| member.type_path,
+        .imported_member => |member| member,
         else => null,
     };
 }
@@ -577,7 +605,7 @@ pub fn scopeItemsAtForTargetDecisionExpected(
     decision: Completion.Decision,
     expected_type: ?[]const u8,
 ) ![]const Types.CompletionItem {
-    if (decision.kind == .none) return allocator.alloc(Types.CompletionItem, 0);
+    if (decision.kind == .none or decision.override_start != null) return allocator.alloc(Types.CompletionItem, 0);
     const cursor = decision.cursor;
     const prefix = decision.prefix;
     const type_only = decision.kind == .type_name or decision.qualified_type_position;
@@ -857,6 +885,12 @@ fn queryAt(
         } };
     }
 
+    if (decision.override_start != null) {
+        const program = decision.program orelse return null;
+        const child = Completion.enclosingClass(source, program, cursor) orelse return null;
+        if (try inheritedQuery(allocator, project, program, child.name, decision, true)) |member| return .{ .imported_member = member };
+        return null;
+    }
     if (decision.kind != .member) return null;
     const receiver = decision.receiver orelse return null;
     const qualified_type = decision.qualified_type_position;
@@ -990,6 +1024,10 @@ fn queryAt(
             receiver,
             decision.safe_member_access,
         )) |local_type| {
+            if (!std.mem.eql(u8, receiver, Completion.nominalReceiverName(local_type))) {
+                if (try inheritedQuery(allocator, project, program, local_type, decision, if (Completion.enclosingClass(source, program, cursor)) |access| localDerivesFrom(program, access.name, local_type) else false)) |member|
+                    return .{ .imported_member = member };
+            }
             if (try importedNominalTypePath(
                 allocator,
                 io,
@@ -998,7 +1036,7 @@ fn queryAt(
                 project,
                 Completion.nominalReceiverName(local_type),
             )) |resolved| {
-                return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
+                return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor, .receiver_type = local_type } };
             }
         }
         if (try declaredCallReturnTypePath(
@@ -1069,6 +1107,45 @@ fn queryAt(
         }
     }
     return null;
+}
+
+fn localDerivesFrom(program: Ast.Program, child: []const u8, parent: []const u8) bool {
+    var name = child;
+    for (0..program.structures.len + 1) |_| {
+        if (std.mem.eql(u8, Completion.nominalReceiverName(name), Completion.nominalReceiverName(parent))) return true;
+        const structure = Completion.localStructure(program, name) orelse return false;
+        name = Completion.typeName(program, structure.base orelse return false);
+    }
+    return false;
+}
+
+fn inheritedQuery(allocator: Allocator, project: IndexedProject, program: Ast.Program, receiver_type: []const u8, decision: Completion.Decision, protected_access: bool) !?ImportedMemberQuery {
+    var current_type = receiver_type;
+    var found_local = false;
+    for (0..program.structures.len + 1) |_| {
+        const structure = Completion.localStructure(program, current_type) orelse break;
+        found_local = true;
+        const base = structure.base orelse return null;
+        if (std.mem.indexOfScalar(u8, current_type, '<') == null) current_type = try Completion.declaredReceiverType(allocator, structure);
+        current_type = try Completion.specializedTypeName(allocator, program, structure, current_type, base);
+    }
+    if (!found_local) return null;
+    const nominal = Completion.nominalReceiverName(current_type);
+    const path = (try importedTypePath(allocator, program, project, nominal)) orelse
+        if (ProjectIndex.currentProvider(project)) |provider|
+            try providerTypePath(allocator, project, program, provider, nominal)
+        else
+            return null;
+    if (declarationTarget(project.index, path) == null) return null;
+    return .{
+        .type_path = path,
+        .receiver_type = current_type,
+        .prefix = decision.prefix,
+        .cursor = decision.cursor,
+        .inherited_access = protected_access,
+        .merge_local = true,
+        .override_context = if (decision.override_start != null) decision else null,
+    };
 }
 
 fn indexProject(
@@ -1676,25 +1753,16 @@ fn appendImportedMembersDepth(
     ranked: *std.ArrayList(RankedItem),
     depth: usize,
 ) !void {
-    if (depth > project.index.providers.len) return;
+    if (depth > 128) return;
     const target = declarationTarget(project.index, query.type_path) orelse return;
-    var provider_index = target.provider;
-    const module_name = project.index.providers[target.provider].name;
-    for (project.index.providers, 0..) |candidate, candidate_index| {
-        if (!std.mem.eql(u8, candidate.name, module_name) or
-            !project.graph.canAccess(project.current_owner, candidate.owner, candidate.name)) continue;
-        const candidate_program = try loadProgram(allocator, io, documents, candidate) orelse continue;
-        if (programProvidesDeclaration(candidate_program.program, target.declaration)) {
-            provider_index = candidate_index;
-            break;
-        }
-    }
+    const provider_index = try declarationProviderIndex(allocator, io, documents, project, target.provider, target.declaration);
     const provider = project.index.providers[provider_index];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return;
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
     for (loaded.program.structures) |structure| {
         if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
         if (!structure.is_public) return;
+        if (query.override_context != null and !structure.is_class) return;
         if (query.static_receiver) {
             for (loaded.program.structures) |nested| {
                 const enclosing = nested.enclosing orelse continue;
@@ -1745,21 +1813,21 @@ fn appendImportedMembersDepth(
             }
             return;
         }
-        for (structure.fields) |field| {
-            if (!importedMemberVisible(project, provider, field)) continue;
+        if (query.override_context == null) for (structure.fields) |field| {
+            if (!inheritedMemberVisible(project, provider, query, field)) continue;
             if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = field.name,
                 .kind = if (field.property != null) CompletionKind.property else CompletionKind.field,
                 .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
                     field.name,
-                    Completion.typeName(loaded.program, if (field.property) |property| property.value_type else field.type),
+                    try Completion.specializedTypeName(allocator, loaded.program, structure, query.receiver_type orelse structure.name, if (field.property) |property| property.value_type else field.type),
                 }),
             }, Completion.memberFieldPriority, false);
-        }
+        };
         for (structure.methods) |method| {
             if (method.accessor) |accessor| {
-                if (structure.is_protocol and accessor.kind == .get and importedMemberVisible(project, provider, method) and std.mem.startsWith(u8, accessor.property, query.prefix)) {
+                if (query.override_context == null and structure.is_protocol and accessor.kind == .get and inheritedMemberVisible(project, provider, query, method) and std.mem.startsWith(u8, accessor.property, query.prefix)) {
                     try appendRanked(allocator, ranked, .{
                         .label = accessor.property,
                         .kind = CompletionKind.property,
@@ -1768,8 +1836,35 @@ fn appendImportedMembersDepth(
                 }
                 continue;
             }
-            if (method.is_static or !importedMemberVisible(project, provider, method)) continue;
+            if (method.is_static or !inheritedMemberVisible(project, provider, query, method)) continue;
             if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
+            if (query.override_context) |context| {
+                if (!Completion.overridable(method)) continue;
+                const signature = try qualifyOverrideTypes(allocator, project, loaded.program, provider, try Completion.overrideSignature(allocator, loaded.program, structure, query.receiver_type orelse structure.name, method));
+                const current = context.program orelse continue;
+                const child = Completion.enclosingClass(current_source, current, context.cursor) orelse continue;
+                var declared = false;
+                for (child.methods) |own_method| {
+                    const own = try Completion.overrideSignature(allocator, current, child, child.name, own_method);
+                    const canonical = if (ProjectIndex.currentProvider(project)) |own_provider|
+                        try qualifyOverrideTypes(allocator, project, current, own_provider, own)
+                    else
+                        own;
+                    if (Completion.sameOverrideSignature(canonical, signature)) {
+                        declared = true;
+                        break;
+                    }
+                }
+                if (declared) continue;
+                var duplicate = false;
+                for (ranked.items) |item| if (Completion.sameOverrideSignature(item.item.detail, signature)) {
+                    duplicate = true;
+                    break;
+                };
+                if (!duplicate) try appendRanked(allocator, ranked, try Completion.overrideItem(allocator, signature, method.name, context.override_has_func), Completion.memberMethodPriority, true);
+                continue;
+            }
+
             if (!Completion.callAcceptsParameters(
                 current_source,
                 query.cursor,
@@ -1779,26 +1874,36 @@ fn appendImportedMembersDepth(
             try appendRanked(allocator, ranked, .{
                 .label = method.name,
                 .kind = CompletionKind.method,
-                .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
+                .detail = try Completion.functionSignatureForReceiver(allocator, loaded.source, loaded.program, structure, query.receiver_type orelse structure.name, method),
             }, Completion.memberMethodPriority, true);
         }
-        try appendProviderExtensionMethods(
-            allocator,
-            project,
-            current_source,
-            query,
-            loaded,
-            structure,
-            provider,
-            ranked,
-        );
-        try appendCurrentExtensionMethods(
-            allocator,
-            project,
-            current_source,
-            query,
-            ranked,
-        );
+        if (query.override_context == null) {
+            try appendProviderExtensionMethods(
+                allocator,
+                project,
+                current_source,
+                query,
+                loaded,
+                structure,
+                provider,
+                ranked,
+            );
+            try appendCurrentExtensionMethods(
+                allocator,
+                project,
+                current_source,
+                query,
+                ranked,
+            );
+        }
+        if (structure.base) |base| {
+            const base_type = try Completion.specializedTypeName(allocator, loaded.program, structure, query.receiver_type orelse structure.name, base);
+            const nominal = Completion.nominalReceiverName(base_type);
+            var resolved = query;
+            resolved.receiver_type = base_type;
+            resolved.type_path = try providerTypePath(allocator, project, loaded.program, provider, nominal);
+            try appendImportedMembersDepth(allocator, io, documents, project, current_source, resolved, ranked, depth + 1);
+        }
         return;
     }
     for (loaded.program.enums) |enumeration| {
@@ -1818,7 +1923,7 @@ fn appendImportedMembersDepth(
         if (!exported.is_public or exported.alias == null or
             !std.mem.eql(u8, exported.alias.?, target.declaration)) continue;
         var resolved = query;
-        resolved.type_path = exported.path;
+        resolved.type_path = try ProjectIndex.canonicalUsePath(allocator, project, provider, exported.path);
         return appendImportedMembersDepth(
             allocator,
             io,
@@ -1851,6 +1956,74 @@ fn appendImportedMembersDepth(
             depth + 1,
         );
     }
+}
+
+pub fn providerTypePath(allocator: Allocator, project: IndexedProject, program: Ast.Program, provider: Modules.Provider, nominal: []const u8) ![]const u8 {
+    const anchored = try ProjectIndex.canonicalUsePath(allocator, project, provider, nominal);
+    if (!std.mem.eql(u8, anchored, nominal)) return anchored;
+    const separator = std.mem.indexOfScalar(u8, nominal, '.');
+    const first = if (separator) |dot| nominal[0..dot] else nominal;
+    if (findUseByAlias(program, first)) |use| {
+        const path = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
+        return if (separator) |dot| std.fmt.allocPrint(allocator, "{s}.{s}", .{ path, nominal[dot + 1 ..] }) else path;
+    }
+    if (try importedTypePath(allocator, program, project, nominal)) |path|
+        return ProjectIndex.canonicalUsePath(allocator, project, provider, path);
+    return std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, nominal });
+}
+
+fn qualifyOverrideTypes(allocator: Allocator, project: IndexedProject, program: Ast.Program, provider: Modules.Provider, signature: []const u8) ![]const u8 {
+    // A parent's short type names belong to its module, not the editing file.
+    // Use their canonical paths in the generated declaration without adding imports.
+    var result: std.Io.Writer.Allocating = .init(allocator);
+    var lexer = LexerModule.Lexer.init(signature);
+    var copied: usize = 0;
+    while (true) {
+        const token = lexer.next() catch break;
+        if (token.tag == .end) break;
+        if (token.tag != .identifier or token.start == 0) continue;
+        var end = token.end;
+        var lookahead = lexer;
+        var next = lookahead.next() catch break;
+        while (next.tag == .dot) {
+            const segment = lookahead.next() catch break;
+            if (segment.tag != .identifier) break;
+            end = segment.end;
+            lexer = lookahead;
+            next = lookahead.next() catch break;
+        }
+        if (next.tag == .colon) continue;
+        const name = signature[token.start..end];
+        var nominal = false;
+        for (program.type_names) |type_name| if (std.mem.eql(u8, name, type_name)) {
+            nominal = true;
+            break;
+        };
+        if (!nominal) continue;
+        const path = try providerTypePath(allocator, project, program, provider, name);
+        try result.writer.writeAll(signature[copied..token.start]);
+        try result.writer.writeAll(path);
+        copied = end;
+    }
+    try result.writer.writeAll(signature[copied..]);
+    return result.toOwnedSlice();
+}
+
+fn inheritedMemberVisible(project: IndexedProject, provider: Modules.Provider, query: ImportedMemberQuery, member: anytype) bool {
+    if (member.is_private or member.is_local) return false;
+    if (member.is_protected) return query.inherited_access;
+    return importedMemberVisible(project, provider, member);
+}
+
+fn declarationProviderIndex(allocator: Allocator, io: Io, documents: []const Types.Document, project: IndexedProject, initial: usize, declaration: []const u8) !usize {
+    const module_name = project.index.providers[initial].name;
+    for (project.index.providers, 0..) |candidate, index| {
+        if (!std.mem.eql(u8, candidate.name, module_name) or
+            !project.graph.canAccess(project.current_owner, candidate.owner, candidate.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, candidate) orelse continue;
+        if (programProvidesDeclaration(loaded.program, declaration)) return index;
+    }
+    return initial;
 }
 
 fn programProvidesDeclaration(program: Ast.Program, declaration: []const u8) bool {
@@ -2094,78 +2267,22 @@ fn declaredCallReturnTypePath(
     cursor: usize,
     receiver: []const u8,
 ) !?[]const u8 {
-    var tokens: std.ArrayList(LexerModule.Token) = .empty;
-    var lexer = LexerModule.Lexer.init(source[0..cursor]);
-    while (true) {
-        const token = lexer.next() catch break;
-        if (token.tag == .end) break;
-        try tokens.append(allocator, token);
+    const initializer = try Completion.localInitializerAt(allocator, source, current, cursor, receiver) orelse return null;
+    if (Completion.qualifiedCall(initializer.expression)) |call| {
+        if (try importedQualifiedCallReturnTypePath(allocator, io, documents, project, current, call)) |resolved| return resolved;
+        return importedInstanceCallReturnTypePath(allocator, io, documents, project, current, source, initializer.cursor, call);
     }
-    var index: usize = 0;
-    while (index + 4 < tokens.items.len) : (index += 1) {
-        if (tokens.items[index].tag != .keyword_let and tokens.items[index].tag != .keyword_var) continue;
-        if (tokens.items[index + 1].tag != .identifier or
-            !std.mem.eql(u8, tokens.items[index + 1].lexeme, receiver) or
-            tokens.items[index + 2].tag != .equal or
-            tokens.items[index + 3].tag != .identifier) continue;
-
-        if (tokens.items[index + 4].tag == .left_parenthesis) {
-            const arity = callArity(tokens.items, index + 4) orelse continue;
-            var result: ?[]const u8 = null;
-            for (current.functions) |function| {
-                if (function.operator != null or !std.mem.eql(u8, function.name, tokens.items[index + 3].lexeme) or
-                    !parametersAcceptArity(function.parameters, arity)) continue;
-                const local_type = returnTypeName(current, function.return_type) orelse continue;
-                const resolved = try importedTypePath(allocator, current, project, local_type) orelse continue;
-                if (result != null and !std.mem.eql(u8, result.?, resolved)) return null;
-                result = resolved;
-            }
-            return result;
-        }
-
-        if (index + 6 >= tokens.items.len or
-            tokens.items[index + 4].tag != .dot or
-            tokens.items[index + 5].tag != .identifier or
-            tokens.items[index + 6].tag != .left_parenthesis) continue;
-
-        const owner_alias = tokens.items[index + 3].lexeme;
-        const method_name = tokens.items[index + 5].lexeme;
-        const arguments = callArity(tokens.items, index + 6) orelse continue;
-
-        return importedQualifiedCallReturnTypePath(
-            allocator,
-            io,
-            documents,
-            project,
-            current,
-            .{ .owner = owner_alias, .name = method_name, .arity = arguments },
-        );
+    const call = Completion.directCall(initializer.expression) orelse return null;
+    var result: ?[]const u8 = null;
+    for (current.functions) |function| {
+        if (function.operator != null or !std.mem.eql(u8, function.name, call.name) or
+            !parametersAcceptArity(function.parameters, call.arity)) continue;
+        const local_type = returnTypeName(current, function.return_type) orelse continue;
+        const resolved = try importedTypePath(allocator, current, project, local_type) orelse continue;
+        if (result != null and !std.mem.eql(u8, result.?, resolved)) return null;
+        result = resolved;
     }
-    return null;
-}
-
-fn callArity(tokens: []const LexerModule.Token, opening: usize) ?usize {
-    var depth: usize = 1;
-    var arguments: usize = 0;
-    var has_argument = false;
-    var index = opening + 1;
-    while (index < tokens.len) : (index += 1) switch (tokens[index].tag) {
-        .left_parenthesis => {
-            if (depth == 1) has_argument = true;
-            depth += 1;
-        },
-        .right_parenthesis => {
-            depth -|= 1;
-            if (depth == 0) return arguments + @intFromBool(has_argument);
-        },
-        .comma => if (depth == 1) {
-            arguments += 1;
-        },
-        else => {
-            if (depth == 1) has_argument = true;
-        },
-    };
-    return null;
+    return result;
 }
 
 fn importedQualifiedCallReturnTypePath(
@@ -2235,41 +2352,53 @@ fn importedInstanceCallReturnTypePath(
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
     const local_type = Completion.resolveReceiverType(allocator, source, current, cursor, call.owner) orelse return null;
-    var owner_path = try importedTypePath(allocator, current, project, local_type) orelse return null;
+    const access = if (Completion.enclosingClass(source, current, cursor)) |child| localDerivesFrom(current, child.name, local_type) else false;
+    const inherited = try inheritedQuery(allocator, project, current, local_type, .{ .kind = .member, .prefix = "", .prefix_start = cursor, .cursor = cursor, .program = current }, access);
+    var query: ImportedMemberQuery = inherited orelse .{
+        .type_path = try importedTypePath(allocator, current, project, Completion.nominalReceiverName(local_type)) orelse return null,
+        .receiver_type = local_type,
+        .prefix = "",
+        .cursor = cursor,
+    };
     var depth: usize = 0;
-    while (depth <= project.index.providers.len) : (depth += 1) {
-        const target = declarationTarget(project.index, owner_path) orelse return null;
-        const provider = project.index.providers[target.provider];
+    while (depth <= 128) : (depth += 1) {
+        const target = declarationTarget(project.index, query.type_path) orelse return null;
+        const provider_index = try declarationProviderIndex(allocator, io, documents, project, target.provider, target.declaration);
+        const provider = project.index.providers[provider_index];
         if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
-        var matched_structure = false;
+        var parent: ?[]const u8 = null;
         for (loaded.program.structures) |structure| {
             if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
-            matched_structure = true;
             var return_name: ?[]const u8 = null;
             for (structure.methods) |method| {
-                if (method.is_static or !importedMemberVisible(project, provider, method) or
+                if (method.is_static or !inheritedMemberVisible(project, provider, query, method) or
                     !std.mem.eql(u8, method.name, call.name) or
                     !parametersAcceptArity(method.parameters, call.arity)) continue;
-                const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
-                if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
-                return_name = candidate;
+                const candidate = try Completion.specializedTypeName(allocator, loaded.program, structure, query.receiver_type orelse structure.name, method.return_type);
+                const resolved = try providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(candidate));
+                if (return_name != null and !std.mem.eql(u8, return_name.?, resolved)) return null;
+                return_name = resolved;
             }
-            const name = return_name orelse return null;
-            if (try importedTypePath(allocator, loaded.program, project, name)) |resolved| return resolved;
-            if (std.mem.indexOfScalar(u8, name, '.') != null and declarationTarget(project.index, name) != null) return name;
-            if (std.mem.eql(u8, name, target.declaration)) return owner_path;
-            return try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
+            if (return_name) |name| return name;
+            const base = structure.base orelse return null;
+            const base_type = try Completion.specializedTypeName(allocator, loaded.program, structure, query.receiver_type orelse structure.name, base);
+            query.receiver_type = base_type;
+            parent = try providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(base_type));
+            break;
         }
-        if (matched_structure) return null;
+        if (parent) |path| {
+            query.type_path = path;
+            continue;
+        }
         var reexport: ?[]const u8 = null;
         for (loaded.program.uses) |use| {
             if (!use.is_public or use.alias == null or
                 !std.mem.eql(u8, use.alias.?, target.declaration)) continue;
-            reexport = use.path;
+            reexport = try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path);
             break;
         }
-        owner_path = reexport orelse return null;
+        query.type_path = reexport orelse return null;
     }
     return null;
 }
@@ -4202,6 +4331,44 @@ test "module atoms provide project context to isolated diagnostics" {
         uri,
         "public class Node2D:Node {}",
     ));
+}
+
+test "inherited members cross atom boundaries and retain protected access" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Nodes");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Nodes/@Node.sx", .data =
+        \\public class Node {
+        \\    var name:str = ""
+        \\    func add_child(child:Node) {}
+        \\    protected func input() int { return 0 }
+        \\    protected func on_ready() {}
+        \\    private func secret() {}
+        \\    module func internal_hook() {}
+        \\    static func factory() {}
+        \\}
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Nodes/@Node2D.sx", .data = "public class Node2D:Node {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use Nodes
+        \\class Player:Nodes.Node2D {
+        \\    override func on_ready() {}
+        \\    func tick() {
+        \\        if self.
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "self.").? + 5;
+    const items = (try itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, source, cursor)).?;
+    for ([_][]const u8{ "name", "add_child", "input", "on_ready", "tick" }) |name| try std.testing.expect(hasLabel(items, name));
+    for ([_][]const u8{ "secret", "internal_hook", "factory", "if", "Node" }) |name| try std.testing.expect(!hasLabel(items, name));
 }
 
 test "workspace distinguishes a non-applicable context from an unresolved receiver" {

@@ -58,6 +58,8 @@ pub const Decision = struct {
     cascade: bool = false,
     system_callback: bool = false,
     static_container: bool = false,
+    override_start: ?usize = null,
+    override_has_func: bool = false,
     aggregate: ?AggregateContext = null,
     return_expression: bool = false,
     match_subject: bool = false,
@@ -183,6 +185,7 @@ pub fn itemsAtWithDecision(
 ) ![]const CompletionItem {
     const cursor = context.cursor;
     if (context.kind == .none or context.kind == .use_path) return allocator.alloc(CompletionItem, 0);
+    if (context.override_start != null) return overrideItems(allocator, source, context);
 
     var candidates: std.ArrayList(Candidate) = .empty;
     const completing_try_alternative = context.completing_try_alternative;
@@ -455,6 +458,17 @@ pub fn itemsAtWithDecision(
         else => {},
     };
 
+    if (context.kind == .structure_declaration) if (program) |parsed| {
+        if (enclosingClass(source, parsed, cursor)) |structure| {
+            if (structure.base) |base| {
+                const parent = localStructure(parsed, baseTypeName(parsed, base));
+                if (parent == null or parent.?.is_class) try appendKeywords(allocator, &candidates, context, &.{
+                    .{ "override", "Silex inherited method override" },
+                }, 70);
+            }
+        }
+    };
+
     std.mem.sort(Candidate, candidates.items, {}, candidateLessThan);
     const result = try allocator.alloc(CompletionItem, candidates.items.len);
     for (candidates.items, 0..) |candidate, index| {
@@ -474,6 +488,179 @@ pub fn itemsAtWithDecision(
     const unique = deduplicateCallableShapes(expanded);
     disambiguateCallableLabels(unique);
     return unique;
+}
+
+pub fn enclosingClass(source: []const u8, program: Ast.Program, cursor: usize) ?Ast.Structure {
+    var result: ?Ast.Structure = null;
+    for (program.structures) |structure| {
+        if (bodyContainsCursor(source, structure.position.offset, cursor) and
+            (result == null or structure.position.offset > result.?.position.offset)) result = structure;
+    }
+    const structure = result orelse return null;
+    return if (structure.is_class and !structure.is_static) structure else null;
+}
+
+pub fn localStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
+    for (program.structures) |structure| if (std.mem.eql(u8, structure.name, nominalReceiverName(name))) return structure;
+    return null;
+}
+
+pub fn declaredReceiverType(allocator: Allocator, structure: Ast.Structure) ![]const u8 {
+    var name = structure.name;
+    for (structure.type_parameters, 0..) |parameter, index| name = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+        name, if (index == 0) "<" else ", ", parameter.name,
+    });
+    return if (structure.type_parameters.len == 0) name else std.fmt.allocPrint(allocator, "{s}>", .{name});
+}
+
+pub fn overridable(method: Ast.Function) bool {
+    return !method.is_static and !method.is_private and method.extension == null and
+        method.accessor == null and method.operator == null;
+}
+
+pub fn overrideItem(allocator: Allocator, signature: []const u8, name: []const u8, has_func: bool) !CompletionItem {
+    const declaration = if (std.mem.endsWith(u8, signature, " void")) signature[0 .. signature.len - 5] else signature;
+    return .{
+        .label = name,
+        .kind = CompletionKind.method,
+        .detail = signature,
+        .filterText = name,
+        .insertText = try std.fmt.allocPrint(allocator, "{s}{s} {{\n    $0\n}}", .{ if (has_func) "" else "func ", declaration }),
+        .insertTextFormat = 2,
+    };
+}
+
+fn declaresOverrideSignature(allocator: Allocator, program: Ast.Program, structure: Ast.Structure, signature: []const u8) !bool {
+    for (structure.methods) |method| {
+        const existing = try overrideSignature(allocator, program, structure, structure.name, method);
+        if (sameOverrideSignature(existing, signature)) return true;
+    }
+    return false;
+}
+
+pub fn sameOverrideSignature(left: []const u8, right: []const u8) bool {
+    // Parameter labels may change in an override; types and borrow modes may not.
+    var lhs = LexerModule.Lexer.init(left);
+    var rhs = LexerModule.Lexer.init(right);
+    while (true) {
+        const a = signatureToken(&lhs) orelse return false;
+        const b = signatureToken(&rhs) orelse return false;
+        if (a.tag != b.tag or !std.mem.eql(u8, a.lexeme, b.lexeme)) return false;
+        if (a.tag == .end) return true;
+    }
+}
+
+fn signatureToken(lexer: *LexerModule.Lexer) ?Token {
+    var token = lexer.next() catch return null;
+    if (token.tag == .identifier) {
+        var lookahead = lexer.*;
+        const next = lookahead.next() catch return null;
+        if (next.tag == .colon) {
+            lexer.* = lookahead;
+            token = lexer.next() catch return null;
+        }
+    }
+    return token;
+}
+
+pub fn overrideSignature(allocator: Allocator, program: Ast.Program, structure: Ast.Structure, receiver_type: []const u8, method: Ast.Function) ![]const u8 {
+    var signature = try allocator.dupe(u8, method.name);
+    for (method.type_parameters, 0..) |parameter, index| {
+        signature = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ signature, if (index == 0) "<" else ", ", parameter.name });
+        if (parameter.constraint) |constraint| signature = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
+            signature, try overrideTypeName(allocator, program, structure, receiver_type, method, constraint),
+        });
+    }
+    if (method.type_parameters.len != 0) signature = try std.fmt.allocPrint(allocator, "{s}>", .{signature});
+    signature = try std.fmt.allocPrint(allocator, "{s}(", .{signature});
+    for (method.parameters, 0..) |parameter, index| signature = try std.fmt.allocPrint(allocator, "{s}{s}{s}:{s}{s}", .{
+        signature,
+        if (index == 0) "" else ", ",
+        parameter.name,
+        parameterModeText(parameter.mode),
+        try overrideTypeName(allocator, program, structure, receiver_type, method, parameter.type),
+    });
+    return std.fmt.allocPrint(allocator, "{s}) {s}{s}{s}{s}", .{
+        signature,
+        parameterModeText(method.return_mode),
+        method.return_provenance orelse "",
+        if (method.return_provenance != null) ":" else "",
+        try overrideTypeName(allocator, program, structure, receiver_type, method, method.return_type),
+    });
+}
+
+fn overrideTypeName(allocator: Allocator, program: Ast.Program, structure: Ast.Structure, receiver_type: []const u8, method: Ast.Function, value: Ast.Type) ![]const u8 {
+    if (value.optionalChild()) |child| return std.fmt.allocPrint(allocator, "{s}?", .{
+        try overrideTypeName(allocator, program, structure, receiver_type, method, child),
+    });
+    if (value.genericParameterIndex()) |index| {
+        if (index < method.type_parameters.len) return method.type_parameters[index].name;
+        if (genericArgumentSpelling(structure, receiver_type, index)) |argument| return argument;
+        if (index < structure.type_parameters.len) return structure.type_parameters[index].name;
+    }
+    if (value.functionIndex()) |index| {
+        const function = program.function_types[index];
+        var text: []const u8 = "func(";
+        for (function.parameters, 0..) |parameter, parameter_index| text = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}", .{
+            text,
+            if (parameter_index == 0) "" else ", ",
+            parameterModeText(parameter.mode),
+            try overrideTypeName(allocator, program, structure, receiver_type, method, parameter.type),
+        });
+        return std.fmt.allocPrint(allocator, "{s}) {s}{s}", .{ text, parameterModeText(function.return_mode), try overrideTypeName(allocator, program, structure, receiver_type, method, function.return_type) });
+    }
+    if (value.genericInstantiationIndex()) |index| {
+        const generic = program.generic_types[index];
+        var text = typeName(program, generic.base);
+        for (generic.arguments, 0..) |argument, argument_index| text = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+            text, if (argument_index == 0) "<" else ", ", try overrideTypeName(allocator, program, structure, receiver_type, method, argument),
+        });
+        return std.fmt.allocPrint(allocator, "{s}>", .{text});
+    }
+    return typeName(program, value);
+}
+
+fn parameterModeText(mode: Ast.Parameter.Mode) []const u8 {
+    return switch (mode) {
+        .value => "",
+        .read => "@",
+        .mutable => "&",
+    };
+}
+
+fn overrideItems(allocator: Allocator, source: []const u8, context: Decision) ![]const CompletionItem {
+    var result: std.ArrayList(CompletionItem) = .empty;
+    const program = context.program orelse return result.toOwnedSlice(allocator);
+    const child = enclosingClass(source, program, context.cursor) orelse return result.toOwnedSlice(allocator);
+    var current = child;
+    var current_type = try declaredReceiverType(allocator, child);
+    var depth: usize = 0;
+    while (depth < program.structures.len) : (depth += 1) {
+        const base = current.base orelse break;
+        current_type = try specializedTypeName(allocator, program, current, current_type, base);
+        current = localStructure(program, current_type) orelse break;
+        if (!current.is_class) break;
+        for (current.methods) |method| {
+            if (!overridable(method) or !std.mem.startsWith(u8, method.name, context.prefix)) continue;
+            const signature = try overrideSignature(allocator, program, current, current_type, method);
+            if (try declaresOverrideSignature(allocator, program, child, signature)) continue;
+            var duplicate = false;
+            for (result.items) |item| if (sameOverrideSignature(item.detail, signature)) {
+                duplicate = true;
+                break;
+            };
+            if (!duplicate) try result.append(allocator, try overrideItem(allocator, signature, method.name, context.override_has_func));
+        }
+    }
+    const items = try result.toOwnedSlice(allocator);
+    std.mem.sort(CompletionItem, items, {}, struct {
+        fn lessThan(_: void, left: CompletionItem, right: CompletionItem) bool {
+            return std.mem.lessThan(u8, left.detail, right.detail);
+        }
+    }.lessThan);
+    for (items, 0..) |*item, index| item.sortText = try std.fmt.allocPrint(allocator, "010-{d:0>6}", .{index});
+    disambiguateCallableLabels(items);
+    return items;
 }
 
 fn appendLiteralMatchPatterns(
@@ -1247,6 +1434,20 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
     const line_start = currentLineTokenStart(tokens, current_line);
     const line_tokens = tokens[line_start..];
 
+    if (scope.in_structure and !scope.in_callable) {
+        var last = tokens.len;
+        const has_func = last != 0 and tokens[last - 1].tag == .keyword_func;
+        if (has_func) last -= 1;
+        if (last != 0 and tokens[last - 1].tag == .keyword_override) return .{
+            .kind = .structure_declaration,
+            .prefix = prefix,
+            .prefix_start = prefix_start,
+            .has_use = has_use,
+            .override_start = tokens[last - 1].start,
+            .override_has_func = has_func,
+        };
+    }
+
     if (isUsePath(line_tokens)) return .{
         .kind = .use_path,
         .prefix = prefix,
@@ -1967,7 +2168,7 @@ fn functionIsExpectedReference(program: Ast.Program, function: Ast.Function, exp
     return functionMatchesType(program, function, function_type);
 }
 
-fn localMemberVisible(
+pub fn localMemberVisible(
     program: Ast.Program,
     access_structure: ?[]const u8,
     declaration: Ast.Structure,
@@ -2728,7 +2929,50 @@ const Local = struct {
     type_name: ?[]const u8,
     type_value: ?Ast.Type = null,
     depth: usize,
+    initializer: ?LocalInitializer = null,
 };
+
+pub const LocalInitializer = struct {
+    expression: []const u8,
+    cursor: usize,
+};
+
+fn declarationInitializer(source: []const u8, tokens: []const Token) ?LocalInitializer {
+    if (tokens.len == 0) return null;
+    var depth: usize = 0;
+    var end: usize = 0;
+    for (tokens, 0..) |token, index| {
+        if (depth == 0 and (token.tag == .semicolon or token.tag == .right_brace or
+            token.tag == .keyword_if or token.tag == .keyword_while or token.tag == .keyword_for or
+            token.tag == .keyword_match or token.tag == .keyword_mutex or
+            token.position.line > tokens[0].position.line)) break;
+        switch (token.tag) {
+            .left_parenthesis, .left_bracket, .left_brace => depth += 1,
+            .right_parenthesis, .right_bracket, .right_brace => {
+                if (depth == 0) break;
+                depth -= 1;
+            },
+            else => {},
+        }
+        end = index + 1;
+    }
+    if (end == 0 or depth != 0) return null;
+    return .{ .expression = source[tokens[0].start..tokens[end - 1].end], .cursor = tokens[0].start };
+}
+
+pub fn localInitializerAt(allocator: Allocator, source: []const u8, program: Ast.Program, cursor: usize, name: []const u8) !?LocalInitializer {
+    const callables = try containingCallables(allocator, source, program, cursor);
+    defer allocator.free(callables);
+    if (callables.len == 0) return null;
+    const locals = try visibleLocals(allocator, source, program, callables[0].position, cursor);
+    defer allocator.free(locals);
+    var index = locals.len;
+    while (index != 0) {
+        index -= 1;
+        if (std.mem.eql(u8, locals[index].name, name)) return locals[index].initializer;
+    }
+    return null;
+}
 
 fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program, start: usize, cursor: usize) ![]const Local {
     const tokens = try tokensUntil(allocator, source, cursor);
@@ -2792,6 +3036,10 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 const name = tokens[index + 1].lexeme;
                 try locals.append(allocator, .{
                     .name = name,
+                    .initializer = if (index + 3 < end and tokens[index + 2].tag == .equal)
+                        declarationInitializer(source, tokens[index + 3 ..])
+                    else
+                        null,
                     .type_name = inferDeclarationType(source, program, tokens[index..end]),
                     .type_value = inferDeclarationValueType(
                         source,
@@ -3276,7 +3524,7 @@ fn inferDeclarationValueType(
                 break;
             };
             if (end == index + 1) return null;
-            const spelling = std.mem.trim(u8, source[tokens[index + 1].start..tokens[end - 1].end], " \t\r\n");
+            const spelling = std.mem.trimStart(u8, std.mem.trim(u8, source[tokens[index + 1].start..tokens[end - 1].end], " \t\r\n"), "@& \t");
             return typeForSourceSpelling(program, spelling);
         }
         if (token.tag != .equal or index + 1 >= tokens.len or tokens[index + 1].tag != .identifier) continue;
@@ -3401,21 +3649,31 @@ pub fn resolveReceiverTypeForAccess(
         const static_access = findStructure(program, std.mem.trim(u8, access.base, " \t\r\n")) != null;
 
         if (directCall(access.member)) |call| {
-            var return_type: ?[]const u8 = null;
-            for (owner.methods) |method| {
-                if (method.is_static != static_access or !std.mem.eql(u8, method.name, call.name) or
-                    !acceptsArity(method.parameters, call.arity)) continue;
-                const candidate = specializedTypeName(
-                    allocator,
-                    program,
-                    owner,
-                    base_type,
-                    method.return_type,
-                ) catch return null;
-                if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
-                return_type = candidate;
+            var declaring = owner;
+            var declaring_type = base_type;
+            const access_structure = if (containingCallable(source, program, cursor)) |callable| callable.structure_name else null;
+            for (0..program.structures.len + 1) |_| {
+                var return_type: ?[]const u8 = null;
+                for (declaring.methods) |method| {
+                    if (method.is_static != static_access or !std.mem.eql(u8, method.name, call.name) or
+                        !localMemberVisible(program, access_structure, declaring, method) or
+                        !acceptsArity(method.parameters, call.arity)) continue;
+                    const candidate = specializedTypeName(
+                        allocator,
+                        program,
+                        declaring,
+                        declaring_type,
+                        method.return_type,
+                    ) catch return null;
+                    if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
+                    return_type = candidate;
+                }
+                if (return_type) |resolved| return typeAfterSafeAccess(resolved, safe_access);
+                if (static_access) return null;
+                declaring_type = specializedTypeName(allocator, program, declaring, declaring_type, declaring.base orelse return null) catch return null;
+                declaring = findStructure(program, nominalReceiverName(declaring_type)) orelse return null;
             }
-            return if (return_type) |resolved| typeAfterSafeAccess(resolved, safe_access) else null;
+            return null;
         }
 
         const fields = if (static_access) owner.static_fields else owner.fields;
@@ -3519,7 +3777,10 @@ pub fn resolveReceiverTypeForAccess(
             while (index != 0) {
                 index -= 1;
                 if (std.mem.eql(u8, locals[index].name, first)) {
-                    current_type = locals[index].type_name;
+                    current_type = if (locals[index].type_name) |name| std.mem.trimStart(u8, name, "@& \t") else null;
+                    if (locals[index].initializer) |initializer| {
+                        current_type = resolveReceiverType(allocator, source, program, initializer.cursor, initializer.expression) orelse current_type;
+                    }
                     break;
                 }
             }
@@ -4132,6 +4393,31 @@ fn parseForCompletionObserved(
         .recovery = .complete,
     } else |_| {}
 
+    if (context.kind == .structure_declaration) {
+        // Erase only the declaration being typed, keeping all source offsets
+        // and the following members intact for inheritance and override lookup.
+        const recovered = try allocator.dupe(u8, source);
+        var start = context.override_start orelse context.prefix_start;
+        const preceding = try tokensUntil(allocator, source, start);
+        var index = preceding.len;
+        while (index != 0) {
+            const token = preceding[index - 1];
+            switch (token.tag) {
+                .keyword_public, .keyword_private, .keyword_protected, .keyword_package, .keyword_module, .keyword_local => start = token.start,
+                else => break,
+            }
+            index -= 1;
+        }
+        for (recovered[start..cursor]) |*character| {
+            if (character.* != '\n' and character.* != '\r') character.* = ' ';
+        }
+        parser = ParserModule.Parser.init(allocator, recovered);
+        if (parser.parse()) |program| return .{
+            .program = mergeExtensionsForCompletion(allocator, program),
+            .recovery = .completion_site,
+        } else |_| {}
+    }
+
     if (context.cascade) {
         const recovered = try recoverCascadeForParsing(allocator, source, cursor) orelse return .{
             .program = null,
@@ -4218,7 +4504,7 @@ fn parseForCompletionObserved(
         else if (callFollows(source, cursor))
             if (context.prefix.len == 0) "__completion" else ""
         else if (context.prefix.len != 0)
-            "()"
+            if (control_body_missing) "() {}" else "()"
         else if (memberFollowedByAssignment(source, cursor))
             "__completion"
         else if ((for_source and !for_body_follows) or control_body_missing)
@@ -4226,7 +4512,7 @@ fn parseForCompletionObserved(
         else
             "__completion()",
         .type_name => "int",
-        .aggregate_field => "__completion:true",
+        .aggregate_field => if (control_body_missing) "__completion:true {}" else "__completion:true",
         .statement => if (control_body_missing or (for_source and !for_body_follows))
             "true {}"
         else if (lineHasAssignmentBeforeCursor(before_prefix))
@@ -4249,14 +4535,17 @@ fn parseForCompletionObserved(
         context.prefix_start;
     const block_suffix: []const u8 = if (std.mem.endsWith(u8, placeholder, " {}")) " {}" else "";
     const placeholder_expression = placeholder[0 .. placeholder.len - block_suffix.len];
-    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}", .{
+    // The condition's existing closing delimiters must precede its missing body.
+    const suffix_end = if (block_suffix.len != 0) completionClosersEnd(source, cursor) else cursor;
+    const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}{s}", .{
         source[0..replacement_start],
         placeholder_expression,
         closers,
+        source[cursor..suffix_end],
         block_suffix,
-        source[cursor..],
+        source[suffix_end..],
     });
-    const recovered_cursor = replacement_start + placeholder.len + closers.len;
+    const recovered_cursor = replacement_start + placeholder.len + closers.len + suffix_end - cursor;
     parser = ParserModule.Parser.init(allocator, recovered);
     if (parser.parse()) |program| return .{
         .program = mergeExtensionsForCompletion(allocator, program),
@@ -4368,9 +4657,19 @@ fn isControlConditionKeyword(tag: TokenTag) bool {
 }
 
 fn blockFollowsCompletion(source: []const u8, cursor: usize) bool {
-    var index = cursor;
+    var index = completionClosersEnd(source, cursor);
     while (index < source.len and std.ascii.isWhitespace(source[index])) index += 1;
     return index < source.len and source[index] == '{';
+}
+
+fn completionClosersEnd(source: []const u8, cursor: usize) usize {
+    var end = cursor;
+    var lexer = LexerModule.Lexer.init(source[cursor..]);
+    while (true) {
+        const token = lexer.next() catch return end;
+        if (token.tag != .right_parenthesis and token.tag != .right_bracket) return end;
+        end = cursor + token.end;
+    }
 }
 
 pub fn aggregateContextAt(allocator: Allocator, source: []const u8, cursor: usize) !?AggregateContext {
@@ -4465,7 +4764,7 @@ pub fn functionSignature(
     return std.fmt.allocPrint(allocator, "{s}) {s}", .{ result, typeName(program, function.return_type) });
 }
 
-fn functionSignatureForReceiver(
+pub fn functionSignatureForReceiver(
     allocator: Allocator,
     source: []const u8,
     program: Ast.Program,
@@ -4491,7 +4790,7 @@ fn functionSignatureForReceiver(
     });
 }
 
-fn specializedTypeName(
+pub fn specializedTypeName(
     allocator: Allocator,
     program: Ast.Program,
     structure: Ast.Structure,
@@ -5092,7 +5391,7 @@ pub fn qualifiedCall(receiver: []const u8) ?QualifiedCall {
     if (opening < 3 or tokens[opening - 2].tag != .dot or tokens[opening - 1].tag != .identifier) return null;
     for (tokens[0 .. opening - 2], 0..) |token, owner_index| {
         if (owner_index % 2 == 0) {
-            if (token.tag != .identifier) return null;
+            if (token.tag != .identifier and !(owner_index == 0 and token.tag == .keyword_self)) return null;
         } else if (token.tag != .dot) return null;
     }
 
@@ -6171,6 +6470,42 @@ test "complete fundamental and nominal names only in a type position" {
     try std.testing.expect(contains(items, "float32"));
     try std.testing.expect(contains(items, "float64"));
     try std.testing.expect(!contains(items, "func"));
+}
+
+test "complete inherited override declarations with signatures and exclusions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const header =
+        \\class Base<T> {
+        \\    protected func update(delta:T) {}
+        \\    func done() {}
+        \\    private func secret() {}
+        \\    static func factory() {}
+        \\}
+        \\class Player:Base<float> {
+        \\    override func done() {}
+        \\
+    ;
+    for ([_][]const u8{ "over", "override ", "override func ", "override func up" }) |editing| {
+        const source = try std.fmt.allocPrint(allocator, "{s}    {s}\n}}", .{ header, editing });
+        const cursor = source.len - 2;
+        const items = try itemsAt(allocator, source, cursor, .invoked);
+        if (std.mem.eql(u8, editing, "over")) {
+            try std.testing.expect(contains(items, "override"));
+        } else {
+            try std.testing.expectEqual(@as(usize, 1), items.len);
+            try std.testing.expect(contains(items, "update"));
+            const item = items[0];
+            try std.testing.expectEqual(@as(u8, 2), item.kind);
+            try std.testing.expectEqualStrings("update(delta:float) void", item.detail);
+            try std.testing.expectEqualStrings(if (std.mem.eql(u8, editing, "override "))
+                "func update(delta:float) {\n    $0\n}"
+            else
+                "update(delta:float) {\n    $0\n}", item.insertText.?);
+            try std.testing.expectEqual(@as(?u8, 2), item.insertTextFormat);
+        }
+    }
 }
 
 test "complete declaration keywords from partial module input" {
