@@ -1,0 +1,6 @@
+1/5 PrivateClassStateProbe.test_0...OK
+2/5 Optimize.PrivateClassStateTests.test.private class state keeps stores and ownership while forwarding a shared loop recurrence...OK
+3/5 Optimize.PrivateClassStateTests.test.private class state rejects addresses escapes mixed homes and reused identities...OK
+4/5 Optimize.PrivateClassStateTests.test.private class state cost policy follows the requested target architecture...OK
+5/5 Optimize.Release.test_0...OK
+All 5 tests passed.

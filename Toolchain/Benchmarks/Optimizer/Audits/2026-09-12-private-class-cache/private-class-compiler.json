@@ -1,0 +1,10 @@
+{
+  "parent": "7420a2d914da681131a977836317cb8b7ce6e003",
+  "baseline": "b8d01d73233a88a080170b53096f2a72bbd8d98e",
+  "compiler_sha256": "a9805acd01e8e64d040f11765708448c2a6a529548bd7e41a45c5224b7c0448f",
+  "source_hashes": {
+    "Toolchain/Sources/Optimize/PrivateClassState.zig": "aa83807da25a62153b93ac85aeb7ba4d6141e997ed6ee29455d45ef5a17b57db",
+    "Toolchain/Sources/Optimize/ReferenceMemory.zig": "a3a8276c28394510bea4058be478ffaef5a4176c946fcbfadd6cdf34a7043aa8",
+    "Toolchain/Sources/Optimize/Release.zig": "bbd440859ec9f7748219cfc3829c31571832c14b1763b1fea44de5186506f194"
+  }
+}

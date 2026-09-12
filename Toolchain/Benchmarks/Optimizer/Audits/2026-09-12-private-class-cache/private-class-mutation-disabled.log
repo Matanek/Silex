@@ -1,0 +1,27 @@
+1/4 PrivateClassStateProbe.test_0...OK
+2/4 Optimize.PrivateClassStateTests.test.private class state keeps stores and ownership while forwarding a shared loop recurrence...expected 0, found 4
+FAIL (TestExpectedEqual)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:118:17: 0x1003a67cb in expectEqualInner__anon_37321 (root)
+                return error.TestExpectedEqual;
+                ^
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:83:5: 0x10042b50b in expectEqual (root)
+    return expectEqualInner(T, expected, actual);
+    ^
+/private/tmp/silex-part03-evidence/PrivateClassMutationSources/Optimize/PrivateClassStateTests.zig:55:9: 0x10042b58f in test.private class state keeps stores and ownership while forwarding a shared loop recurrence (root)
+        try std.testing.expectEqual(@as(usize, 0), count(new, .field_load));
+        ^
+3/4 Optimize.PrivateClassStateTests.test.private class state rejects addresses escapes mixed homes and reused identities...expected 0, found 2
+FAIL (TestExpectedEqual)
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:118:17: 0x1003a67cb in expectEqualInner__anon_37321 (root)
+                return error.TestExpectedEqual;
+                ^
+/opt/homebrew/Cellar/zig/0.16.0_1/lib/zig/std/testing.zig:83:5: 0x1003a6a6b in expectEqual (root)
+    return expectEqualInner(T, expected, actual);
+    ^
+/private/tmp/silex-part03-evidence/PrivateClassMutationSources/Optimize/PrivateClassStateTests.zig:115:5: 0x1003a6adf in test.private class state rejects addresses escapes mixed homes and reused identities (root)
+    try std.testing.expectEqual(@as(usize, 0), count(accepted, .field_load));
+    ^
+4/4 Optimize.Release.test_0...OK
+2 passed; 0 skipped; 2 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/38ef9fb1b09b41d9804e481ba3f139bd/root --seed=0x6984362f

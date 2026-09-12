@@ -1,0 +1,12 @@
+[
+  "/opt/homebrew/Cellar/zig/0.16.0_1/bin/zig",
+  "build-exe",
+  "--dep",
+  "silex_optimizer_api",
+  "-Mroot=/private/tmp/silex-part03-evidence/X64HotBudgetTools/Main.zig",
+  "--dep",
+  "build_options",
+  "-Msilex_optimizer_api=/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Sources/OptimizerOracleApi.zig",
+  "-Mbuild_options=.zig-cache/c/c2b944db16cb19947f560e417ce671f1/options.zig",
+  "-femit-bin=/private/tmp/silex-part03-evidence/private-class-hot-budget"
+]

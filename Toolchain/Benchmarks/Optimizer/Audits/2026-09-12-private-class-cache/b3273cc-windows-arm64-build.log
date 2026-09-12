@@ -1,0 +1,212 @@
+﻿2026-09-12T06:52:13.9717041Z Current runner version: '2.337.0'
+2026-09-12T06:52:13.9743604Z ##[group]Runner Image Provisioner
+2026-09-12T06:52:13.9744589Z Hosted Compute Agent
+2026-09-12T06:52:13.9745203Z Version: 20260828.587
+2026-09-12T06:52:13.9745848Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-12T06:52:13.9746699Z Build Date: 2026-08-28T16:44:25Z
+2026-09-12T06:52:13.9747542Z Worker ID: {7f9adc53-50cc-4e50-a4df-3e3f1b1f6a5b}
+2026-09-12T06:52:13.9748331Z Azure Region: eastus2
+2026-09-12T06:52:13.9749112Z ##[endgroup]
+2026-09-12T06:52:13.9750496Z ##[group]Operating System
+2026-09-12T06:52:13.9751240Z Ubuntu
+2026-09-12T06:52:13.9751836Z 24.04.5
+2026-09-12T06:52:13.9752424Z LTS
+2026-09-12T06:52:13.9752987Z ##[endgroup]
+2026-09-12T06:52:13.9753566Z ##[group]Runner Image
+2026-09-12T06:52:13.9754331Z Image: ubuntu-24.04
+2026-09-12T06:52:13.9754962Z Version: 20260907.300.1
+2026-09-12T06:52:13.9756331Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-12T06:52:13.9757978Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-12T06:52:13.9759226Z ##[endgroup]
+2026-09-12T06:52:13.9760397Z ##[group]GITHUB_TOKEN Permissions
+2026-09-12T06:52:13.9771166Z Contents: read
+2026-09-12T06:52:13.9772270Z Metadata: read
+2026-09-12T06:52:13.9773117Z ##[endgroup]
+2026-09-12T06:52:13.9776463Z Secret source: Actions
+2026-09-12T06:52:13.9777889Z Cache mode: write
+2026-09-12T06:52:13.9779592Z Prepare workflow directory
+2026-09-12T06:52:14.0246892Z Prepare all required actions
+2026-09-12T06:52:14.0316674Z Getting action download info
+2026-09-12T06:52:14.2486599Z Download action repository 'actions/checkout@v6' (SHA:d23441a48e516b6c34aea4fa41551a30e30af803)
+2026-09-12T06:52:14.3546852Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-09-12T06:52:14.5728077Z Complete job name: windows-arm64-build
+2026-09-12T06:52:14.6493974Z ##[group]Run actions/checkout@v6
+2026-09-12T06:52:14.6494896Z with:
+2026-09-12T06:52:14.6495351Z   repository: Matanek/Silex
+2026-09-12T06:52:14.6499476Z   token: ***
+2026-09-12T06:52:14.6499956Z   ssh-strict: true
+2026-09-12T06:52:14.6500409Z   ssh-user: git
+2026-09-12T06:52:14.6500869Z   persist-credentials: true
+2026-09-12T06:52:14.6501365Z   clean: true
+2026-09-12T06:52:14.6501835Z   sparse-checkout-cone-mode: true
+2026-09-12T06:52:14.6502363Z   fetch-depth: 1
+2026-09-12T06:52:14.6502805Z   fetch-tags: false
+2026-09-12T06:52:14.6503261Z   show-progress: true
+2026-09-12T06:52:14.6503718Z   lfs: false
+2026-09-12T06:52:14.6504139Z   submodules: false
+2026-09-12T06:52:14.6504591Z   set-safe-directory: true
+2026-09-12T06:52:14.6505102Z   allow-unsafe-pr-checkout: false
+2026-09-12T06:52:14.6505930Z ##[endgroup]
+2026-09-12T06:52:14.7553903Z Syncing repository: Matanek/Silex
+2026-09-12T06:52:14.7557508Z ##[group]Getting Git version info
+2026-09-12T06:52:14.7558937Z Working directory is '/home/runner/work/Silex/Silex'
+2026-09-12T06:52:14.7560863Z [command]/usr/bin/git version
+2026-09-12T06:52:14.7600886Z git version 2.55.0
+2026-09-12T06:52:14.7624184Z ##[endgroup]
+2026-09-12T06:52:14.7639988Z Temporarily overriding HOME='/home/runner/work/_temp/e61551aa-0298-4d88-b4fb-a93efafa1002' before making global git config changes
+2026-09-12T06:52:14.7642353Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T06:52:14.7645691Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Silex/Silex
+2026-09-12T06:52:14.7706582Z Deleting the contents of '/home/runner/work/Silex/Silex'
+2026-09-12T06:52:14.7724273Z ##[group]Determining repository object format
+2026-09-12T06:52:14.7725686Z ##[endgroup]
+2026-09-12T06:52:14.7726789Z ##[group]Initializing the repository
+2026-09-12T06:52:14.7727840Z [command]/usr/bin/git init /home/runner/work/Silex/Silex
+2026-09-12T06:52:14.7825285Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-12T06:52:14.7827096Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-12T06:52:14.7829732Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-12T06:52:14.7832884Z hint: call:
+2026-09-12T06:52:14.7833974Z hint:
+2026-09-12T06:52:14.7835222Z hint: 	git config --global init.defaultBranch <name>
+2026-09-12T06:52:14.7836286Z hint:
+2026-09-12T06:52:14.7837199Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-12T06:52:14.7838915Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-12T06:52:14.7840103Z hint:
+2026-09-12T06:52:14.7840743Z hint: 	git branch -m <name>
+2026-09-12T06:52:14.7841478Z hint:
+2026-09-12T06:52:14.7842468Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-12T06:52:14.7844012Z Initialized empty Git repository in /home/runner/work/Silex/Silex/.git/
+2026-09-12T06:52:14.7846620Z [command]/usr/bin/git remote add origin https://github.com/Matanek/Silex
+2026-09-12T06:52:14.7897257Z ##[endgroup]
+2026-09-12T06:52:14.7899126Z ##[group]Disabling automatic garbage collection
+2026-09-12T06:52:14.7904586Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-12T06:52:14.7943330Z ##[endgroup]
+2026-09-12T06:52:14.7945058Z ##[group]Setting up auth
+2026-09-12T06:52:14.7945974Z Removing SSH command configuration
+2026-09-12T06:52:14.7951517Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T06:52:14.7991190Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T06:52:14.8372895Z Removing HTTP extra header
+2026-09-12T06:52:14.8380749Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T06:52:14.8426318Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T06:52:14.8683874Z Removing includeIf entries pointing to credentials config files
+2026-09-12T06:52:14.8692208Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T06:52:14.8733525Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T06:52:14.8983551Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-12T06:52:14.9030396Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Silex/Silex/.git.path /home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:52:14.9070241Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:52:14.9111989Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:52:14.9154457Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:52:14.9196612Z ##[endgroup]
+2026-09-12T06:52:14.9197757Z ##[group]Fetching the repository
+2026-09-12T06:52:14.9207234Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +b3273cc40505d50b94c3c03a82ef6abb6bbc12be:refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T06:52:16.5754129Z From https://github.com/Matanek/Silex
+2026-09-12T06:52:16.5756817Z  * [new ref]         b3273cc40505d50b94c3c03a82ef6abb6bbc12be -> origin/spec-silex-optimization-parity-completion
+2026-09-12T06:52:16.5764801Z [command]/usr/bin/git branch --list --remote origin/spec-silex-optimization-parity-completion
+2026-09-12T06:52:16.5795851Z   origin/spec-silex-optimization-parity-completion
+2026-09-12T06:52:16.5805282Z [command]/usr/bin/git rev-parse refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T06:52:16.5833025Z b3273cc40505d50b94c3c03a82ef6abb6bbc12be
+2026-09-12T06:52:16.5837684Z ##[endgroup]
+2026-09-12T06:52:16.5839257Z ##[group]Determining the checkout info
+2026-09-12T06:52:16.5840864Z ##[endgroup]
+2026-09-12T06:52:16.5843498Z [command]/usr/bin/git sparse-checkout disable
+2026-09-12T06:52:16.5896264Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-12T06:52:16.5929566Z ##[group]Checking out the ref
+2026-09-12T06:52:16.5932932Z [command]/usr/bin/git checkout --progress --force -B spec-silex-optimization-parity-completion refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T06:52:16.8999699Z Switched to a new branch 'spec-silex-optimization-parity-completion'
+2026-09-12T06:52:16.9002241Z branch 'spec-silex-optimization-parity-completion' set up to track 'origin/spec-silex-optimization-parity-completion'.
+2026-09-12T06:52:16.9029414Z ##[endgroup]
+2026-09-12T06:52:16.9080504Z [command]/usr/bin/git log -1 --format=%H
+2026-09-12T06:52:16.9111660Z b3273cc40505d50b94c3c03a82ef6abb6bbc12be
+2026-09-12T06:52:16.9341679Z ##[group]Run set -euo pipefail
+2026-09-12T06:52:16.9342163Z [36;1mset -euo pipefail[0m
+2026-09-12T06:52:16.9342508Z [36;1marchive="$RUNNER_TEMP/zig.tar.xz"[0m
+2026-09-12T06:52:16.9343230Z [36;1mcurl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"[0m
+2026-09-12T06:52:16.9344022Z [36;1mecho "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -[0m
+2026-09-12T06:52:16.9344659Z [36;1mtar -xJf "$archive" -C "$RUNNER_TEMP"[0m
+2026-09-12T06:52:16.9345101Z [36;1mecho "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"[0m
+2026-09-12T06:52:16.9392395Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-12T06:52:16.9392880Z ##[endgroup]
+2026-09-12T06:52:16.9557193Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-09-12T06:52:16.9558135Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-09-12T06:52:16.9559342Z 
+2026-09-12T06:52:17.4252171Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-09-12T06:52:18.4064241Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-09-12T06:52:19.4216773Z   1 52.9M    1  959k    0     0   661k      0  0:01:21  0:00:01  0:01:20  661k
+2026-09-12T06:52:20.4054149Z  29 52.9M   29 15.6M    0     0  6514k      0  0:00:08  0:00:02  0:00:06 6514k
+2026-09-12T06:52:20.7735258Z  80 52.9M   80 42.7M    0     0  12.4M      0  0:00:04  0:00:03  0:00:01 12.4M
+2026-09-12T06:52:20.9881097Z 100 52.9M  100 52.9M    0     0  13.8M      0  0:00:03  0:00:03 --:--:-- 13.8M
+2026-09-12T06:52:20.9881752Z /home/runner/work/_temp/zig.tar.xz: OK
+2026-09-12T06:52:24.9188128Z ##[group]Run set -euo pipefail
+2026-09-12T06:52:24.9188757Z [36;1mset -euo pipefail[0m
+2026-09-12T06:52:24.9189088Z [36;1mstage="$RUNNER_TEMP/windows-arm64-bootstrap"[0m
+2026-09-12T06:52:24.9189424Z [36;1mmkdir -p "$stage/boundary"[0m
+2026-09-12T06:52:24.9189843Z [36;1mzig build -Dtarget=aarch64-windows -Doptimize=ReleaseFast -Dcpu=baseline \[0m
+2026-09-12T06:52:24.9190268Z [36;1m  --prefix "$stage/silex" \[0m
+2026-09-12T06:52:24.9190578Z [36;1m  --build-file Toolchain/build.zig[0m
+2026-09-12T06:52:24.9191080Z [36;1mzig build-lib Tests/Target/windows-arm64/WindowsArm64BoundaryProbe/Provider.zig \[0m
+2026-09-12T06:52:24.9191567Z [36;1m  -O ReleaseSmall \[0m
+2026-09-12T06:52:24.9191828Z [36;1m  -target aarch64-windows \[0m
+2026-09-12T06:52:24.9192149Z [36;1m  -femit-bin="$stage/boundary/BoundaryProbe.lib"[0m
+2026-09-12T06:52:24.9192577Z [36;1mtest "$(head -c 8 "$stage/boundary/BoundaryProbe.lib")" = "!<arch>"[0m
+2026-09-12T06:52:24.9237701Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-12T06:52:24.9238093Z ##[endgroup]
+2026-09-12T06:56:11.0151661Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-12T06:56:11.0153684Z ##[group]Run actions/upload-artifact@v4
+2026-09-12T06:56:11.0153972Z with:
+2026-09-12T06:56:11.0154194Z   name: windows-arm64-bootstrap
+2026-09-12T06:56:11.0154508Z   path: /home/runner/work/_temp/windows-arm64-bootstrap
+2026-09-12T06:56:11.0154823Z   retention-days: 1
+2026-09-12T06:56:11.0155049Z   if-no-files-found: error
+2026-09-12T06:56:11.0155301Z   compression-level: 6
+2026-09-12T06:56:11.0155522Z   overwrite: false
+2026-09-12T06:56:11.0155770Z   include-hidden-files: false
+2026-09-12T06:56:11.0156053Z ##[endgroup]
+2026-09-12T06:56:11.1872246Z (node:2412) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-12T06:56:11.1873404Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-12T06:56:11.1974133Z With the provided path, there will be 3 files uploaded
+2026-09-12T06:56:11.1978902Z Artifact name is valid!
+2026-09-12T06:56:11.1980346Z Root directory input is valid!
+2026-09-12T06:56:11.4375878Z Beginning upload of artifact content to blob storage
+2026-09-12T06:56:12.3291515Z (node:2412) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-09-12T06:56:12.4452830Z Uploaded bytes 8388608
+2026-09-12T06:56:12.4809257Z Uploaded bytes 8789096
+2026-09-12T06:56:12.4936821Z Finished uploading artifact content to blob storage!
+2026-09-12T06:56:12.4937942Z SHA256 digest of uploaded artifact zip is afc598854751d129ad9a34b731942ed0293f170ec8b6c9ae267ef46a628dd1de
+2026-09-12T06:56:12.4940005Z Finalizing artifact upload
+2026-09-12T06:56:12.6830123Z Artifact windows-arm64-bootstrap.zip successfully finalized. Artifact ID 10294075987
+2026-09-12T06:56:12.6831453Z Artifact windows-arm64-bootstrap has been successfully uploaded! Final size is 8789096 bytes. Artifact ID is 10294075987
+2026-09-12T06:56:12.6834417Z Artifact download URL: https://github.com/Matanek/Silex/actions/runs/34679243046/artifacts/10294075987
+2026-09-12T06:56:12.7078337Z Post job cleanup.
+2026-09-12T06:56:12.7977133Z [command]/usr/bin/git version
+2026-09-12T06:56:12.8019247Z git version 2.55.0
+2026-09-12T06:56:12.8058931Z Temporarily overriding HOME='/home/runner/work/_temp/083ccb60-adaa-4200-94a3-4b944ba3d5dd' before making global git config changes
+2026-09-12T06:56:12.8060311Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T06:56:12.8064925Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Silex/Silex
+2026-09-12T06:56:12.8104373Z Removing SSH command configuration
+2026-09-12T06:56:12.8111437Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T06:56:12.8150857Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T06:56:12.8416321Z Removing HTTP extra header
+2026-09-12T06:56:12.8423235Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T06:56:12.8490598Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T06:56:12.8748935Z Removing includeIf entries pointing to credentials config files
+2026-09-12T06:56:12.8759547Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T06:56:12.8791264Z includeif.gitdir:/home/runner/work/Silex/Silex/.git.path
+2026-09-12T06:56:12.8792198Z includeif.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path
+2026-09-12T06:56:12.8793233Z includeif.gitdir:/github/workspace/.git.path
+2026-09-12T06:56:12.8794123Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-12T06:56:12.8801780Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Silex/Silex/.git.path
+2026-09-12T06:56:12.8831472Z /home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.8844112Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Silex/Silex/.git.path /home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.8891286Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path
+2026-09-12T06:56:12.8921442Z /home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.8933341Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Silex/Silex/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.8982756Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-12T06:56:12.9027877Z /github/runner_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.9035302Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.9077943Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-12T06:56:12.9106806Z /github/runner_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.9115864Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config
+2026-09-12T06:56:12.9159578Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T06:56:12.9434678Z Removing credentials config '/home/runner/work/_temp/git-credentials-f21085c4-f3a7-4a14-9606-d282928ae16f.config'
+2026-09-12T06:56:12.9595798Z Cleaning up orphan processes
+2026-09-12T06:56:12.9904379Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+

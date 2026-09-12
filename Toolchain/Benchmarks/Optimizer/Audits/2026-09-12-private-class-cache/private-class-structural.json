@@ -1,0 +1,10 @@
+{
+  "function": "Objects.calculate",
+  "class_field_reads": 0,
+  "snapshot_field_reads": 1,
+  "class_writes": 2,
+  "class_retain": 1,
+  "class_drop": 1,
+  "counter_allocation": 1,
+  "diagnostic_probe_exit": "HotFunctionNotRegistered after artifacts; not an admission verdict"
+}
