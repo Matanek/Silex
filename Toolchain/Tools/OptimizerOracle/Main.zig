@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Silex = @import("silex_optimizer_api");
 const Admission = @import("Admission.zig");
 const Advisor = @import("Advisor.zig");
@@ -7,16 +8,19 @@ const CacheStress = @import("CacheStress.zig");
 const Differential = @import("Differential.zig");
 const Generator = @import("Generator.zig");
 const HotBudget = @import("HotBudget.zig");
+const IntegerFailures = @import("IntegerFailures.zig");
 const IrStats = @import("IrStats.zig");
 const Llvm = @import("Llvm.zig");
 const LlvmStats = @import("LlvmStats.zig");
 const Metamorphic = @import("Metamorphic.zig");
 const Native = @import("Native.zig");
+const NumericConversions = @import("NumericConversions.zig");
 const NativeGenerator = @import("NativeGenerator.zig");
 const Parity = @import("Parity.zig");
 const ProjectStress = @import("ProjectStress.zig");
 const Qualification = @import("Qualification.zig");
 const Registry = @import("Registry.zig");
+const CoverageAudit = @import("CoverageAudit.zig");
 const Reducer = @import("Reducer.zig");
 const Report = @import("Report.zig");
 const Robustness = @import("Robustness.zig");
@@ -26,6 +30,8 @@ const usage =
     \\
     \\Commands:
     \\  audit               Validate coverage, baselines, passes and LLVM pins
+    \\  coverage-audit      Audit bounded evidence and LLVM bridge coverage without packages
+    \\  coverage-scan       Probe raw/Release LLVM emission for every registered case
     \\  verify              Compare raw and Release IR through the interpreter
     \\  passes              List the stable Release pass registry
     \\  verify-prefix PASS  Verify the corpus through one Release pass
@@ -62,6 +68,14 @@ const usage =
 const output_directory = ".zig-cache/optimizer-oracle";
 const generated_source_directory = output_directory ++ "/SilexOptimizerOracle";
 
+const TimingHostProfile = struct {
+    os: []const u8,
+    process_arch: []const u8,
+    hardware_arch: []const u8,
+    cpu_model: []const u8,
+    translated: bool,
+};
+
 pub fn main(init: std.process.Init) u8 {
     return run(init) catch |err| {
         std.debug.print("optimizer oracle: {t}\n", .{err});
@@ -81,6 +95,14 @@ fn run(init: std.process.Init) !u8 {
     const command = arguments[3];
     const registry = try Registry.load(allocator, init.io, corpus_directory);
     try Registry.audit(registry);
+    const assurance = try CoverageAudit.load(allocator, init.io, corpus_directory);
+    try CoverageAudit.audit(assurance, registry);
+    if (std.mem.eql(u8, command, "coverage-audit") or std.mem.eql(u8, command, "coverage-scan")) {
+        if (arguments.len != 4) return error.InvalidArguments;
+        try CoverageAudit.report(allocator, init.io, assurance, registry, corpus_directory);
+        if (std.mem.eql(u8, command, "coverage-scan")) try CoverageAudit.scan(allocator, init.io, corpus_directory);
+        return 0;
+    }
     if (std.mem.eql(u8, command, "admission-audit")) {
         if (arguments.len != 4) return error.InvalidArguments;
         const admission = try Admission.load(allocator, init.io, corpus_directory);
@@ -123,7 +145,7 @@ fn run(init: std.process.Init) !u8 {
         try Registry.auditParity(registry);
         try Registry.validateQualificationCorpus(allocator, init.io, registry, corpus_directory);
         try reportRegistry(init.io, allocator, registry);
-        try Report.heading(init.io, allocator, "optimizer parity registry closed");
+        try Report.heading(init.io, allocator, "registered fixed-corpus parity registry closed; general parity requires coverage-audit review");
         return 0;
     }
     if (std.mem.eql(u8, command, "verify")) {
@@ -294,6 +316,22 @@ fn qualifyNative(
             return err;
         };
         var ssa_counter: ?Qualification.SsaValueCounter = null;
+        var expression_counter: ?Qualification.ScalarExpressionCounter = null;
+        var field_counter: ?Qualification.ScalarExpressionCounter = null;
+        if (entry.contract == .reuses_dominated_fields) {
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
+                .verify_each_pass = true,
+                .disabled = .ssa_value_simplification,
+            });
+            field_counter = try Qualification.verifyDominatedFieldCounter(entry.contract.reuses_dominated_fields, differential, without);
+        }
+        if (entry.contract == .reuses_scalar_expressions) {
+            const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
+                .verify_each_pass = true,
+                .disabled = .ssa_value_simplification,
+            });
+            expression_counter = try Qualification.verifyScalarExpressionCounter(entry.contract.reuses_scalar_expressions, differential, without);
+        }
         if (entry.contract == .simplifies_ssa_values) {
             const without = try Differential.verifyPathWithOptions(io, allocator, source_path, .{
                 .verify_each_pass = true,
@@ -352,6 +390,7 @@ fn qualifyNative(
             .elides_reference_memory => |requirement| requirement.overwritten,
             .coalesces_view_memory => |function_name| function_name,
             .forwards_owning_collection => |function_name| function_name,
+            .forwards_known_views => |function_name| function_name,
             else => null,
         };
         if (memory_function) |function_name| {
@@ -405,6 +444,12 @@ fn qualifyNative(
         try Report.line(io, allocator, "  PASS {s}", .{entry.name});
         try Report.line(io, allocator, "    protects: {s}", .{entry.concern});
         try reportEvidence(io, allocator, evidence);
+        if (field_counter) |counter| {
+            try Report.line(io, allocator, "    counter: disabling ssa_value_simplification retains {d} field reads versus {d}", .{ counter.disabled, counter.enabled });
+        }
+        if (expression_counter) |counter| {
+            try Report.line(io, allocator, "    counter: disabling ssa_value_simplification retains {d} scalar products versus {d}", .{ counter.disabled, counter.enabled });
+        }
         if (ssa_counter) |counter| {
             try Report.line(
                 io,
@@ -484,6 +529,10 @@ fn qualifyNative(
             native.release_size,
         });
     }
+    const failure_count = try IntegerFailures.qualify(allocator, io, silex_binary, output_directory ++ "/integer-failures");
+    try Report.line(io, allocator, "qualified: {d} integer failures with ordered output in Debug/Release", .{failure_count});
+    const conversion_count = try NumericConversions.qualify(allocator, io, silex_binary, output_directory ++ "/numeric-conversions");
+    try Report.line(io, allocator, "qualified: {d} numeric conversions with exact values and diagnostics in Debug/Release", .{conversion_count});
     try qualifyGeneratedNative(io, allocator, silex_binary, generated_count, initial_seed);
     try Report.line(io, allocator, "qualified: {d} fixed regressions and {d} generated native scenarios", .{
         Generator.regressions.len,
@@ -607,6 +656,13 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
                 memory.optimized_stores,
                 memory.optimized_guards,
             },
+        ),
+        .dominated_fields => |fields| try Report.line(io, allocator, "    contract: dominated aggregate field reads {d} -> {d}", .{ fields.raw, fields.optimized }),
+        .scalar_expressions => |expressions| try Report.line(
+            io,
+            allocator,
+            "    contract: scalar products {d} -> {d}; changed-memory path retains {d}",
+            .{ expressions.raw_products, expressions.optimized_products, expressions.reloaded_products },
         ),
         .ssa_values => |ssa| try Report.line(
             io,
@@ -754,7 +810,10 @@ fn verifyCorpusWithOptions(
     for (Generator.corpus) |entry| {
         const path = try std.fs.path.join(allocator, &.{ corpus_directory, entry.name });
         const source = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
-        const result = try Differential.verifyWithOptions(allocator, source, options);
+        const result = if (entry.project)
+            try Differential.verifyPathWithOptions(io, allocator, path, options)
+        else
+            try Differential.verifyWithOptions(allocator, source, options);
         switch (result.execution) {
             .completed => |outcome| try Report.line(io, allocator, "  PASS {s} ({d} bytes output)", .{
                 entry.name,
@@ -866,8 +925,8 @@ fn qualifyMetamorphic(
             "{s}/{s}-right",
             .{ directory, pair.id },
         ), true);
-        const left_profile = IrStats.profile(left.optimized_ir);
-        const right_profile = IrStats.profile(right.optimized_ir);
+        const left_profile = try IrStats.profileReachable(allocator, left.optimized_ir);
+        const right_profile = try IrStats.profileReachable(allocator, right.optimized_ir);
         const structural_equivalent = structurallyEquivalent(pair.axis, left_profile, right_profile);
         const left_hash = sourceSha256(pair.left);
         const right_hash = sourceSha256(pair.right);
@@ -978,7 +1037,7 @@ fn fuzzLlvm(
             .completed => |outcome| outcome,
             .failed => return error.UnexpectedRuntimeFailure,
         };
-        try writeFile(io, llvm_path, try Llvm.emit(allocator, differential.raw_ir));
+        try writeFile(io, llvm_path, try Llvm.emitWithBoundaries(allocator, differential.raw_ir, differential.boundaries));
         const cpu_argument = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{oracle.cpu});
         _ = try successfulCommand(allocator, io, &.{
             oracle.executable, oracle.optimization, "-target", oracle.target_triple,
@@ -1032,8 +1091,19 @@ fn compareCorpus(
     enforce_parity: bool,
 ) !void {
     try std.Io.Dir.cwd().createDirPath(io, output_directory);
+    const host_profile = try timingHostProfile(allocator, io);
+    if (enforce_parity and host_profile.translated) return error.TranslatedTimingHost;
+    const evidence_mode = if (enforce_parity) "qualified" else "diagnostic";
     try Report.heading(io, allocator, "Silex Release versus LLVM -O3");
     try Report.line(io, allocator, "artifacts: {s}", .{output_directory});
+    try Report.line(io, allocator, "timing host: {s} {s} on {s}, CPU {s}, translated={any}, mode={s}", .{
+        host_profile.os,
+        host_profile.process_arch,
+        host_profile.hardware_arch,
+        host_profile.cpu_model,
+        host_profile.translated,
+        evidence_mode,
+    });
     var machine_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer machine_report.deinit();
     try machine_report.writer.writeAll(
@@ -1042,7 +1112,12 @@ fn compareCorpus(
     var parity_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer parity_report.deinit();
     try parity_report.writer.writeAll(
-        "workload\tsource_sha256\tsilex_binary_sha256\tllvm_binary_sha256\ttarget\tcpu\tsamples\tbatch\tlower_bound_ppm\tmedian_ppm\tupper_bound_ppm\tconfidence_ppm\n",
+        "workload\tsource_sha256\tsilex_binary_sha256\tllvm_binary_sha256\ttarget\tcpu\tevidence_mode\tsamples\tbatch\tlower_bound_ppm\tmedian_ppm\tupper_bound_ppm\tconfidence_ppm\tleft_half_shift_ppm\tright_half_shift_ppm\tratio_half_shift_ppm\n",
+    );
+    var observation_report: std.Io.Writer.Allocating = .init(allocator);
+    errdefer observation_report.deinit();
+    try observation_report.writer.writeAll(
+        "workload\tsource_sha256\tevidence_mode\tsample_index\tfirst_backend\tsilex_ns\tllvm_ns\tratio_ppm\n",
     );
     var opportunity_report: std.Io.Writer.Allocating = .init(allocator);
     errdefer opportunity_report.deinit();
@@ -1054,7 +1129,10 @@ fn compareCorpus(
         const name = entry.name;
         const source_path = try std.fs.path.join(allocator, &.{ corpus_directory, name });
         const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
-        const differential = try Differential.verify(allocator, source);
+        const differential = if (entry.project)
+            try Differential.verifyPath(io, allocator, source_path)
+        else
+            try Differential.verify(allocator, source);
         const expected = switch (differential.execution) {
             .completed => |outcome| outcome,
             .failed => return error.UnexpectedRuntimeFailure,
@@ -1068,8 +1146,8 @@ fn compareCorpus(
         const llvm_binary_path = try artifactPath(allocator, stem, "llvm");
         const native_binary_path = try artifactPath(allocator, stem, "silex");
 
-        const raw_llvm = try Llvm.emit(allocator, differential.raw_ir);
-        const silex_llvm = try Llvm.emit(allocator, differential.optimized_ir);
+        const raw_llvm = try Llvm.emitWithBoundaries(allocator, differential.raw_ir, differential.boundaries);
+        const silex_llvm = try Llvm.emitWithBoundaries(allocator, differential.optimized_ir, differential.boundaries);
         try writeFile(io, raw_silex_path, try Silex.Ir.writeText(allocator, differential.raw_ir));
         try writeFile(io, optimized_silex_path, try Silex.Ir.writeText(allocator, differential.optimized_ir));
         try writeFile(io, raw_llvm_path, raw_llvm);
@@ -1104,6 +1182,14 @@ fn compareCorpus(
             !std.mem.eql(u8, expected.stderr, llvm_result.stderr) or
             !std.mem.eql(u8, expected.stderr, native_result.stderr))
         {
+            std.debug.print("oracle semantic mismatch for {s}: LLVM stdout={} stderr={}, native stdout={} stderr={} (artifacts: {s})\n", .{
+                name,
+                std.mem.eql(u8, expected.stdout, llvm_result.stdout),
+                std.mem.eql(u8, expected.stderr, llvm_result.stderr),
+                std.mem.eql(u8, expected.stdout, native_result.stdout),
+                std.mem.eql(u8, expected.stderr, native_result.stderr),
+                output_directory,
+            });
             return error.SemanticMismatch;
         }
 
@@ -1186,6 +1272,7 @@ fn compareCorpus(
                 };
             }
         };
+        const stationarity = try Benchmark.stationarity(measurements);
         try Report.benchmark(io, allocator, "Silex Release", measurements.left);
         try Report.benchmark(io, allocator, "LLVM -O3", measurements.right);
         const relative_percent: u64 = if (measurements.right.median_ns == 0)
@@ -1203,20 +1290,42 @@ fn compareCorpus(
                 measurements.relative.confidence_ppm,
             },
         );
-        try parity_report.writer.print("{s}\t{s}\t{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{
+        try Report.line(
+            io,
+            allocator,
+            "  half-window shifts: Silex {d} ppm, LLVM {d} ppm, ratio {d} ppm (qualified maximum {d} ppm)",
+            .{
+                stationarity.left_half_shift_ppm,
+                stationarity.right_half_shift_ppm,
+                stationarity.ratio_half_shift_ppm,
+                Parity.maximum_half_window_shift_ppm,
+            },
+        );
+        try parity_report.writer.print("{s}\t{s}\t{s}\t{s}\t{s}\t{s}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{
             name,
             &source_hash,
             native_hash,
             llvm_hash,
             oracle.target_triple,
             oracle.cpu,
+            evidence_mode,
             measurements.relative.samples,
             measurements.left.batch,
             measurements.relative.lower_bound_ppm,
             measurements.relative.median_ppm,
             measurements.relative.upper_bound_ppm,
             measurements.relative.confidence_ppm,
+            stationarity.left_half_shift_ppm,
+            stationarity.right_half_shift_ppm,
+            stationarity.ratio_half_shift_ppm,
         });
+        try appendObservationRows(
+            &observation_report.writer,
+            name,
+            &source_hash,
+            evidence_mode,
+            measurements.observations,
+        );
         if (measurements.left.spreadPpm() > 200_000 or measurements.right.spreadPpm() > 200_000) {
             try Report.line(io, allocator, "  stability: noisy sample set; treat timing as diagnostic", .{});
         }
@@ -1255,6 +1364,12 @@ fn compareCorpus(
     const parity_path = output_directory ++ "/parity.tsv";
     try writeFile(io, parity_path, try parity_report.toOwnedSlice());
     try Report.line(io, allocator, "parity report: {s}", .{parity_path});
+    const observation_path = output_directory ++ "/timing-observations.tsv";
+    try writeFile(io, observation_path, try observation_report.toOwnedSlice());
+    try Report.line(io, allocator, "ordered timing observations: {s}", .{observation_path});
+    const profile_path = output_directory ++ "/timing-profile.tsv";
+    try writeTimingProfile(io, allocator, profile_path, evidence_mode, host_profile, oracle);
+    try Report.line(io, allocator, "timing profile: {s}", .{profile_path});
     const opportunities_path = output_directory ++ "/opportunities.tsv";
     try writeFile(io, opportunities_path, try opportunity_report.toOwnedSlice());
     try reportOpportunitySummary(io, allocator, opportunity_summary);
@@ -1319,6 +1434,115 @@ fn priority(finding_score: u8) []const u8 {
     if (finding_score >= 80) return "high";
     if (finding_score >= 70) return "medium";
     return "low";
+}
+
+fn appendObservationRows(
+    writer: *std.Io.Writer,
+    workload: []const u8,
+    source_hash: []const u8,
+    evidence_mode: []const u8,
+    observations: []const Benchmark.Observation,
+) !void {
+    for (observations) |observation| try writer.print(
+        "{s}\t{s}\t{s}\t{d}\t{s}\t{d}\t{d}\t{d}\n",
+        .{
+            workload,
+            source_hash,
+            evidence_mode,
+            observation.index,
+            @tagName(observation.first),
+            observation.left_ns,
+            observation.right_ns,
+            try observation.ratioPpm(),
+        },
+    );
+}
+
+fn writeTimingProfile(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    evidence_mode: []const u8,
+    profile: TimingHostProfile,
+    oracle: Registry.Oracle,
+) !void {
+    const contents = try std.fmt.allocPrint(
+        allocator,
+        "evidence_mode\thost_os\tprocess_arch\thardware_arch\tcpu_model\ttranslated\toracle_target\toracle_cpu\toracle_revision\toracle_executable\n{s}\t{s}\t{s}\t{s}\t{s}\t{any}\t{s}\t{s}\t{s}\t{s}\n",
+        .{
+            evidence_mode,
+            profile.os,
+            profile.process_arch,
+            profile.hardware_arch,
+            profile.cpu_model,
+            profile.translated,
+            oracle.target_triple,
+            oracle.cpu,
+            oracle.source_revision,
+            oracle.executable,
+        },
+    );
+    try writeFile(io, path, contents);
+}
+
+fn timingHostProfile(allocator: std.mem.Allocator, io: std.Io) !TimingHostProfile {
+    const uname_arch = try optionalCommandOutput(allocator, io, &.{ "uname", "-m" });
+    const cpu_model = switch (builtin.os.tag) {
+        .macos => try optionalCommandOutput(allocator, io, &.{ "sysctl", "-n", "machdep.cpu.brand_string" }),
+        .linux => try linuxCpuModel(allocator, io),
+        else => null,
+    };
+    const translated_output = if (builtin.os.tag == .macos)
+        try optionalCommandOutput(allocator, io, &.{ "sysctl", "-n", "sysctl.proc_translated" })
+    else
+        null;
+    return .{
+        .os = @tagName(builtin.os.tag),
+        .process_arch = @tagName(builtin.cpu.arch),
+        .hardware_arch = uname_arch orelse @tagName(builtin.cpu.arch),
+        .cpu_model = cpu_model orelse builtin.cpu.model.name,
+        .translated = if (translated_output) |value| std.mem.eql(u8, value, "1") else false,
+    };
+}
+
+fn optionalCommandOutput(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+) !?[]const u8 {
+    const result = std.process.run(allocator, io, .{
+        .argv = argv,
+        .stdout_limit = .limited(16 * 1024),
+        .stderr_limit = .limited(16 * 1024),
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    const success = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!success) return null;
+    const trimmed = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    return try allocator.dupe(u8, trimmed);
+}
+
+fn linuxCpuModel(allocator: std.mem.Allocator, io: std.Io) !?[]const u8 {
+    const contents = std.Io.Dir.cwd().readFileAlloc(
+        io,
+        "/proc/cpuinfo",
+        allocator,
+        .limited(1024 * 1024),
+    ) catch return null;
+    var lines = std.mem.splitScalar(u8, contents, '\n');
+    while (lines.next()) |line| {
+        const separator = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const key = std.mem.trim(u8, line[0..separator], " \t");
+        if (!std.mem.eql(u8, key, "model name") and !std.mem.eql(u8, key, "Hardware")) continue;
+        const value = std.mem.trim(u8, line[separator + 1 ..], " \t\r");
+        if (value.len != 0) return try allocator.dupe(u8, value);
+    }
+    return null;
 }
 
 fn appendMachineRow(
@@ -1441,18 +1665,35 @@ fn isHelp(argument: []const u8) bool {
 }
 
 test {
+    _ = CoverageAudit;
     _ = Advisor;
     _ = Benchmark;
     _ = Differential;
     _ = Generator;
     _ = HotBudget;
+    _ = IntegerFailures;
     _ = IrStats;
     _ = Llvm;
     _ = LlvmStats;
     _ = Metamorphic;
     _ = Native;
     _ = NativeGenerator;
+    _ = NumericConversions;
     _ = Qualification;
     _ = Registry;
     _ = Reducer;
+}
+
+test "metamorphic helper decomposition preserves the executable quality class" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for (Metamorphic.pairs) |pair| {
+        const left = try Differential.verify(allocator, pair.left);
+        const right = try Differential.verify(allocator, pair.right);
+        const left_profile = try IrStats.profileReachable(allocator, left.optimized_ir);
+        const right_profile = try IrStats.profileReachable(allocator, right.optimized_ir);
+        try std.testing.expect(executionEqual(left.execution, right.execution));
+        try std.testing.expect(structurallyEquivalent(pair.axis, left_profile, right_profile));
+    }
 }

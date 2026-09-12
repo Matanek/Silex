@@ -1,7 +1,9 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const ResidenceLiveness = @import("../Arm64/ResidenceLiveness.zig");
+const NumericConversion = @import("NumericConversion.zig");
 const Numeric = @import("../Numeric.zig");
+const IntegerArithmetic = @import("IntegerArithmetic.zig");
 const ConstantDivision = @import("../ConstantDivision.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
@@ -9,6 +11,7 @@ const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
 const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const FloatPairs = @import("FloatPairs.zig");
+const BranchSelection = @import("BranchSelection.zig");
 const Reachability = @import("Reachability.zig");
 const TextRuntime = @import("TextRuntime.zig");
 
@@ -161,12 +164,16 @@ fn encode(
         .darwin => {
             try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
             try appendCall(allocator, &bytes, &calls, main_id);
+            // The process boundary exposes success/failure, not the internal status enum.
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 });
             try emitMoveRegister(allocator, &bytes, .rax, .rdx);
             try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
         },
         .linux => {
             if (linked) try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
             try appendCall(allocator, &bytes, &calls, main_id);
+            // The process boundary exposes success/failure, not the internal status enum.
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 });
             if (linked) {
                 try emitMoveRegister(allocator, &bytes, .rax, .rdx);
                 try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
@@ -185,6 +192,8 @@ fn encode(
                 try ExternalCalls.emitWindowsImportCall(allocator, &bytes, &windows_import_sites, .initialize_critical_section);
             }
             try appendCall(allocator, &bytes, &calls, main_id);
+            // The process boundary exposes success/failure, not the internal status enum.
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 });
             if (linked) {
                 try bytes.appendSlice(allocator, &.{ 0x89, 0xd0, 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5f, 0x5e, 0x5b, 0xc3 });
             } else try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, 40, 0x89, 0xd0, 0xc3 });
@@ -347,7 +356,11 @@ fn encodeFunction(
     infallible_functions: []const bool,
     function: Machine.Function,
 ) Error!void {
-    if (function.float_register_slots.len != 0) return unsupported("X64 scalar floating register allocation");
+    var saved_floats: u16 = 0;
+    for (function.float_register_slots) |residence| if (residence) |register| {
+        if (register < 6 or register >= 16) return error.InvalidMachineProgram;
+        if (platform == .windows) saved_floats |= @as(u16, 1) << @intCast(register);
+    };
     try FloatPairs.validate(function);
     for (function.register_slots) |residence| if (residence) |register| {
         if (register >= 16 or register == @intFromEnum(Register.rsp) or register == @intFromEnum(Register.rbp)) {
@@ -356,7 +369,8 @@ fn encodeFunction(
     };
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
     const runtime_frame_size: u32 = if (enable_cycle_collector) 16 else 0;
-    const required_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const scalar_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const required_frame_size = std.math.add(u32, scalar_frame_size, @as(u32, @popCount(saved_floats)) * 16) catch return error.InvalidMachineProgram;
     const padded_frame_size = std.math.add(u32, required_frame_size, 15) catch return error.InvalidMachineProgram;
     const encoded_frame_size = padded_frame_size & ~@as(u32, 15);
     const stack_slot_bias = std.math.mul(u32, function.stack_slot_base, Machine.slot_size) catch
@@ -367,6 +381,8 @@ fn encodeFunction(
     // calls temporarily move RSP below this frame base.
     try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0xe5 });
     if (stack_slot_bias != 0) try emitSubtractImmediateRegister(allocator, bytes, .rbp, stack_slot_bias);
+    const float_save_offset = std.math.add(u32, stack_slot_bias, scalar_frame_size) catch return error.InvalidMachineProgram;
+    try emitPreservedFloats(allocator, bytes, saved_floats, float_save_offset, false);
     const cycle_context_slot = std.math.add(
         Machine.Slot,
         function.stack_slot_base,
@@ -397,7 +413,7 @@ fn encodeFunction(
             } else {
                 if (parameter.width != 1) return error.InvalidMachineProgram;
                 try emitLoadMemory(allocator, bytes, .rax, .rbp, incoming_displacement);
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, parameter.start);
+                try emitStoreScalar(allocator, bytes, function, .rax, parameter.start);
             }
         } else if (parameter.aggregate) {
             for (0..parameter.width) |leaf| {
@@ -406,7 +422,7 @@ fn encodeFunction(
             }
         } else {
             if (parameter.width != 1) return error.InvalidMachineProgram;
-            try emitStoreValue(allocator, bytes, function.register_slots, argument_registers[index], parameter.start);
+            try emitStoreScalar(allocator, bytes, function, argument_registers[index], parameter.start);
         }
     }
     for (function.capture_parameters, 0..) |capture, index| {
@@ -434,19 +450,19 @@ fn encodeFunction(
                 else
                     value.bits;
                 try emitImmediate(allocator, bytes, .rax, bits);
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .constant_bool => |value| {
                 try emitImmediate(allocator, bytes, .rax, @intFromBool(value.value));
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .constant_float32 => |value| {
                 try emitImmediate(allocator, bytes, .rax, value.bits);
-                try emitStoreStack(allocator, bytes, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .constant_float64 => |value| {
                 try emitImmediate(allocator, bytes, .rax, value.bits);
-                try emitStoreStack(allocator, bytes, .rax, value.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, value.result);
             },
             .global_load => |global| {
                 for (0..global.result.width) |leaf| {
@@ -486,10 +502,7 @@ fn encodeFunction(
                 program,
                 value,
             ),
-            .copy => |copy| {
-                try emitLoadValue(allocator, bytes, function.register_slots, .rax, copy.operand);
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, copy.result);
-            },
+            .copy => |copy| try emitScalarCopy(allocator, bytes, function, copy),
             .copy_range => |copy| try emitCopyRange(allocator, bytes, copy.result, copy.operand),
             .deep_copy => |copy| {
                 if (copy.operand.width != copy.result.width) return error.InvalidMachineProgram;
@@ -535,7 +548,7 @@ fn encodeFunction(
                 try emitLoadStack(allocator, bytes, .rcx, load.reference);
                 for (0..load.result.width) |leaf| {
                     try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));
-                    try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, load.result.start) + leaf));
+                    try emitStoreScalar(allocator, bytes, function, .rax, @intCast(@as(usize, load.result.start) + leaf));
                 }
             },
             .address_load => |load| {
@@ -624,7 +637,7 @@ fn encodeFunction(
             .list_init => |value| try emitListInit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .collection_load => |value| {
                 if (value.dynamic or value.view) {
-                    try emitDynamicCollectionLoad(allocator, bytes, &epilogue_fixups, value);
+                    try emitDynamicCollectionLoad(allocator, bytes, function, &epilogue_fixups, value);
                     continue;
                 }
                 if (!value.collection.aggregate or value.result.width == 0 or
@@ -649,7 +662,7 @@ fn encodeFunction(
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc1 });
                 for (0..value.result.width) |leaf| {
                     try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));
-                    try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
+                    try emitStoreScalar(allocator, bytes, function, .rax, @intCast(@as(usize, value.result.start) + leaf));
                 }
             },
             .collection_reference => |value| try emitCollectionReference(
@@ -728,31 +741,19 @@ fn encodeFunction(
                 try emitStoreStack(allocator, bytes, .rax, value.result);
             },
             .convert => |conversion| {
-                if (!conversion.source.isFloat() and conversion.target.isFloat()) {
-                    try emitLoadStack(allocator, bytes, .rax, conversion.operand);
-                    try bytes.appendSlice(allocator, if (conversion.target == .float32)
-                        &.{ 0xf3, 0x48, 0x0f, 0x2a, 0xc0 }
-                    else
-                        &.{ 0xf2, 0x48, 0x0f, 0x2a, 0xc0 });
-                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, conversion.target == .float64);
-                } else if (conversion.source.isFloat() and !conversion.target.isFloat()) {
-                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, conversion.source == .float64);
-                    try bytes.appendSlice(allocator, if (conversion.source == .float32)
-                        &.{ 0xf3, 0x48, 0x0f, 0x2c, 0xc0 }
-                    else
-                        &.{ 0xf2, 0x48, 0x0f, 0x2c, 0xc0 });
-                    try emitStoreStack(allocator, bytes, .rax, conversion.result);
-                } else if (conversion.source == .float32 and conversion.target == .float64) {
-                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, false);
-                    try bytes.appendSlice(allocator, &.{ 0xf3, 0x0f, 0x5a, 0xc0 });
-                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, true);
-                } else if (conversion.source == .float64 and conversion.target == .float32) {
-                    try emitLoadFloatStack(allocator, bytes, 0, conversion.operand, true);
-                    try bytes.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x5a, 0xc0 });
-                    try emitStoreFloatStack(allocator, bytes, 0, conversion.result, false);
-                } else {
-                    try emitLoadStack(allocator, bytes, .rax, conversion.operand);
-                    try emitStoreStack(allocator, bytes, .rax, conversion.result);
+                var failures: std.ArrayList(usize) = .empty;
+                defer failures.deinit(allocator);
+                try emitLoadScalar(allocator, bytes, function, .rax, conversion.operand);
+                try NumericConversion.emit(allocator, bytes, conversion, &failures);
+                try emitStoreScalar(allocator, bytes, function, .rax, conversion.result);
+                if (failures.items.len != 0) {
+                    try bytes.append(allocator, 0xe9);
+                    const completed = bytes.items.len;
+                    try bytes.appendNTimes(allocator, 0, 4);
+                    for (failures.items) |site| try patchRelative(bytes.items, site, bytes.items.len);
+                    try emitWriteStatic(allocator, bytes, data_fixups, windows_import_sites, platform, conversion.header);
+                    try emitRuntimeFailure(allocator, bytes, &epilogue_fixups);
+                    try patchRelative(bytes.items, completed, bytes.items.len);
                 }
             },
             .format_value => |format| try TextRuntime.emit(
@@ -766,7 +767,7 @@ fn encodeFunction(
                 format,
             ),
             .unary => |unary| {
-                try emitLoadValue(allocator, bytes, function.register_slots, .rax, unary.operand);
+                try emitLoadScalar(allocator, bytes, function, .rax, unary.operand);
                 if (unary.type == .float32) {
                     try bytes.append(allocator, 0x35);
                     try appendInt(allocator, bytes, u32, 0x8000_0000);
@@ -774,15 +775,20 @@ fn encodeFunction(
                     try emitImmediate(allocator, bytes, .rcx, 0x8000_0000_0000_0000);
                     try bytes.appendSlice(allocator, &.{ 0x48, 0x31, 0xc8 });
                 } else {
-                    try bytes.appendSlice(allocator, &.{ 0x48, 0xf7, 0xd8 });
+                    try IntegerArithmetic.negate(allocator, bytes, unary.type, &epilogue_fixups);
                 }
-                try emitStoreValue(allocator, bytes, function.register_slots, .rax, unary.result);
+                try emitStoreScalar(allocator, bytes, function, .rax, unary.result);
             },
             .binary => |binary| {
+                if (BranchSelection.comparison(function, instruction_index) != null) continue;
                 if (try FloatPairs.emit(allocator, bytes, function, binary)) continue;
+                if (binary.type.isFloat()) {
+                    try emitFloatBinary(allocator, bytes, function.float_register_slots, binary);
+                    continue;
+                }
                 if (constantDivisionConstant(function, instruction_index, binary)) |constant| {
                     try emitConstantDivision(allocator, bytes, function, binary, constant);
-                } else try emitBinary(allocator, bytes, function.register_slots, binary);
+                } else try emitBinary(allocator, bytes, function.register_slots, binary, &epilogue_fixups);
             },
             .string_byte_at => |access| {
                 try emitLoadStack(allocator, bytes, .rax, access.operand);
@@ -908,17 +914,31 @@ fn encodeFunction(
                 try appendBranch(allocator, bytes, &branches, target);
             },
             .branch => |branch| {
-                try emitLoadValue(allocator, bytes, function.register_slots, .rax, branch.condition);
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
-                const then_at = bytes.items.len;
-                try bytes.appendNTimes(allocator, 0, 4);
-                try branches.append(allocator, .{ .displacement_at = then_at, .instruction = branch.then_instruction });
-                try appendBranch(allocator, bytes, &branches, branch.else_instruction);
+                var condition: u8 = 0x85;
+                const comparison = if (instruction_index > 0) BranchSelection.comparison(function, instruction_index - 1) else null;
+                if (comparison) |binary| {
+                    if (binary.type.isFloat()) {
+                        const double = binary.type == .float64;
+                        const operands = try floatOperands(allocator, bytes, function.float_register_slots, binary);
+                        try emitScalarFloatOpcode(allocator, bytes, if (double) @as(?u8, 0x66) else null, 0x2e, operands.left, operands.right);
+                    } else {
+                        try emitIntegerComparison(allocator, bytes, function.register_slots, binary);
+                    }
+                    condition = BranchSelection.condition(binary).?;
+                    if (BranchSelection.unorderedResult(binary)) |unordered| {
+                        try appendConditionalBranch(allocator, bytes, &branches, 0x8a, if (unordered) branch.then_instruction else branch.else_instruction);
+                    }
+                } else {
+                    try emitLoadValue(allocator, bytes, function.register_slots, .rax, branch.condition);
+                    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0 });
+                }
+                try emitConditionalFlow(allocator, bytes, &branches, condition, instruction_index + 1, branch.then_instruction, branch.else_instruction);
             },
         }
     }
     instruction_offsets[function.instructions.len] = bytes.items.len;
     const epilogue = bytes.items.len;
+    try emitPreservedFloats(allocator, bytes, saved_floats, float_save_offset, true);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0xec });
     const restored_frame_size = std.math.add(u32, encoded_frame_size, stack_slot_bias) catch
         return error.InvalidMachineProgram;
@@ -1167,54 +1187,75 @@ fn emitBinary(
     bytes: *std.ArrayList(u8),
     residences: []const ?u5,
     binary: Machine.Instruction.Binary,
+    epilogue: *std.ArrayList(EpilogueFixup),
 ) Error!void {
-    if (binary.type.isFloat()) return emitFloatBinary(allocator, bytes, binary);
+    if (binary.type.isFloat()) return emitFloatBinary(allocator, bytes, &.{}, binary);
     if (binary.type == .str) return emitStringBinary(allocator, bytes, binary);
+    if (try emitResidentIntegerBinary(allocator, bytes, residences, binary, epilogue)) return;
     try emitLoadValue(allocator, bytes, residences, .rax, binary.left);
     try emitLoadValue(allocator, bytes, residences, .rcx, binary.right);
-    switch (binary.operator) {
-        .add => try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc8 }),
-        .subtract => try bytes.appendSlice(allocator, &.{ 0x48, 0x29, 0xc8 }),
-        .multiply => try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xc1 }),
-        .bit_and => try bytes.appendSlice(allocator, &.{ 0x48, 0x21, 0xc8 }),
-        .bit_xor => try bytes.appendSlice(allocator, &.{ 0x48, 0x31, 0xc8 }),
-        .shift_left, .shift_right => {
-            // Machine integers carry normalized typed bits. Constants and prior
-            // operations can nevertheless leave sign-extended bits in a 64-bit
-            // X64 register, so normalize before and after shifting. Silex right
-            // shifts are logical for signed and unsigned integer types.
-            try emitIntegerWidthMask(allocator, bytes, .rax, .rdx, binary.type.bitWidth());
-            try bytes.appendSlice(allocator, if (binary.operator == .shift_left)
-                &.{ 0x48, 0xd3, 0xe0 }
-            else
-                &.{ 0x48, 0xd3, 0xe8 });
-            try emitIntegerWidthMask(allocator, bytes, .rax, .rdx, binary.type.bitWidth());
-        },
-        .divide, .remainder => {
-            if (binary.type.isSignedInteger()) {
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x99, 0x48, 0xf7, 0xf9 });
-            } else {
-                try bytes.appendSlice(allocator, &.{ 0x31, 0xd2, 0x48, 0xf7, 0xf1 });
-            }
-            if (binary.operator == .remainder) try emitMoveRegister(allocator, bytes, .rax, .rdx);
-        },
-        .minimum, .maximum => return error.UnsupportedInstruction,
-        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
-            try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f });
-            const signed = binary.type.isSignedInteger();
-            const condition: u8 = switch (binary.operator) {
-                .less => if (signed) 0x9c else 0x92,
-                .less_equal => if (signed) 0x9e else 0x96,
-                .greater => if (signed) 0x9f else 0x97,
-                .greater_equal => if (signed) 0x9d else 0x93,
-                .equal => 0x94,
-                .not_equal => 0x95,
-                else => unreachable,
-            };
-            try bytes.appendSlice(allocator, &.{ condition, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 });
-        },
-    }
+    try IntegerArithmetic.binary(allocator, bytes, binary, epilogue);
     try emitStoreValue(allocator, bytes, residences, .rax, binary.result);
+}
+
+fn integerOperand(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, slot: Machine.Slot, scratch: Register) Allocator.Error!Register {
+    if (residences.len != 0) if (residences[slot]) |color| return @enumFromInt(color);
+    try emitLoadStack(allocator, bytes, scratch, slot);
+    return scratch;
+}
+
+fn emitIntegerComparison(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, binary: Machine.Instruction.Binary) Allocator.Error!void {
+    const width = if (binary.type.isInteger()) binary.type.bitWidth() else 64;
+    if (width == 64) {
+        const left = try integerOperand(allocator, bytes, residences, binary.left, .rax);
+        const right = try integerOperand(allocator, bytes, residences, binary.right, .rcx);
+        return emitRegisterBinary(allocator, bytes, 0x39, left, right);
+    }
+    // Narrow normalization must not change a resident input still used later.
+    try emitLoadValue(allocator, bytes, residences, .rax, binary.left);
+    try emitLoadValue(allocator, bytes, residences, .rcx, binary.right);
+    try IntegerArithmetic.normalize(allocator, bytes, 0, width, binary.type.isSignedInteger());
+    try IntegerArithmetic.normalize(allocator, bytes, 1, width, binary.type.isSignedInteger());
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+}
+
+fn emitResidentIntegerBinary(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    residences: []const ?u5,
+    binary: Machine.Instruction.Binary,
+    epilogue: *std.ArrayList(EpilogueFixup),
+) Allocator.Error!bool {
+    if (!binary.type.isInteger() or binary.type.bitWidth() != 64 or residences.len == 0) return false;
+    switch (binary.operator) {
+        .add, .subtract, .bit_and, .bit_xor => {},
+        .multiply => if (binary.checked and !binary.type.isSignedInteger()) return false,
+        else => return false,
+    }
+    // Integer residences are r8...r11, leaving both scratch inputs disjoint.
+    const left = try integerOperand(allocator, bytes, residences, binary.left, .rax);
+    const right = try integerOperand(allocator, bytes, residences, binary.right, .rcx);
+    var destination: Register = if (residences[binary.result]) |color| @enumFromInt(color) else .rax;
+    // Two-address instructions overwrite their left operand. If the result
+    // reuses the right input, compute in scratch until both inputs are read.
+    if (destination == right and destination != left) destination = .rax;
+    if (destination != left) try emitMoveRegister(allocator, bytes, destination, left);
+    switch (binary.operator) {
+        .add => try emitRegisterBinary(allocator, bytes, 0x01, destination, right),
+        .subtract => try emitRegisterBinary(allocator, bytes, 0x29, destination, right),
+        .multiply => try emitSignedMultiplyRegister(allocator, bytes, destination, right),
+        .bit_and => try emitRegisterBinary(allocator, bytes, 0x21, destination, right),
+        .bit_xor => try emitRegisterBinary(allocator, bytes, 0x31, destination, right),
+        else => unreachable,
+    }
+    if (binary.checked and (binary.operator == .add or binary.operator == .subtract or binary.operator == .multiply)) {
+        try IntegerArithmetic.guard(allocator, bytes, epilogue, if (binary.type.isSignedInteger()) 0 else 2, .integer_overflow);
+    }
+    if (residences[binary.result]) |color| {
+        const result: Register = @enumFromInt(color);
+        if (result != destination) try emitMoveRegister(allocator, bytes, result, destination);
+    } else try emitStoreStack(allocator, bytes, destination, binary.result);
+    return true;
 }
 
 fn emitStringBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.Instruction.Binary) Error!void {
@@ -1262,6 +1303,8 @@ fn emitAggregateEqual(
     bytes: *std.ArrayList(u8),
     value: Machine.Instruction.AggregateEqual,
 ) Error!void {
+    var epilogue: std.ArrayList(EpilogueFixup) = .empty;
+    defer epilogue.deinit(allocator);
     if (value.left.width != value.right.width) return error.InvalidMachineProgram;
     try emitImmediate(allocator, bytes, .r13, @intFromBool(value.equal));
     var mismatches: std.ArrayList(usize) = .empty;
@@ -1282,7 +1325,7 @@ fn emitAggregateEqual(
             .left = value.left.start + leaf.offset,
             .right = value.right.start + leaf.offset,
             .type = leaf.type,
-        });
+        }, &epilogue);
         try emitLoadStack(allocator, bytes, .rax, value.result);
         try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x84 });
         try mismatches.append(allocator, bytes.items.len);
@@ -1300,31 +1343,57 @@ fn emitAggregateEqual(
     try emitStoreStack(allocator, bytes, .r13, value.result);
 }
 
-fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.Instruction.Binary) Error!void {
+fn emitFloatBinary(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, binary: Machine.Instruction.Binary) Error!void {
     const double = binary.type == .float64;
-    try emitLoadFloatStack(allocator, bytes, 0, binary.left, double);
-    try emitLoadFloatStack(allocator, bytes, 1, binary.right, double);
     switch (binary.operator) {
         .add, .subtract, .multiply, .divide => {
-            try bytes.append(allocator, if (double) 0xf2 else 0xf3);
-            try bytes.appendSlice(allocator, &.{ 0x0f, switch (binary.operator) {
+            const operands = try floatOperands(allocator, bytes, residences, binary);
+            const result = if (residences.len != 0) residences[binary.result] else null;
+            var destination: u5 = result orelse 0;
+            // SSE is destructive on the left operand. If allocation reuses
+            // the right color, compute in the existing scratch register and
+            // move only the final result; never commute floating operands.
+            if (destination == operands.right and destination != operands.left) destination = 0;
+            try emitMoveFloat(allocator, bytes, destination, operands.left);
+            try emitScalarFloatOpcode(allocator, bytes, if (double) 0xf2 else 0xf3, switch (binary.operator) {
                 .add => 0x58,
                 .subtract => 0x5c,
                 .multiply => 0x59,
                 .divide => 0x5e,
                 else => unreachable,
-            }, 0xc1 });
-            try emitStoreFloatStack(allocator, bytes, 0, binary.result, double);
+            }, destination, operands.right);
+            if (result) |register| {
+                try emitMoveFloat(allocator, bytes, register, destination);
+            } else try emitStoreFloatStack(allocator, bytes, 0, binary.result, double);
         },
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
-            if (double) try bytes.append(allocator, 0x66);
-            try bytes.appendSlice(allocator, &.{ 0x0f, 0x2e, 0xc1 });
+            const operands = try floatOperands(allocator, bytes, residences, binary);
+            try emitScalarFloatOpcode(allocator, bytes, if (double) @as(?u8, 0x66) else null, 0x2e, operands.left, operands.right);
             try emitFloatComparisonResult(allocator, bytes, binary.operator);
             try emitStoreStack(allocator, bytes, .rax, binary.result);
         },
-        .minimum, .maximum => try emitFloatMinimumMaximum(allocator, bytes, binary, double),
+        .minimum, .maximum => {
+            try emitLoadFloatValue(allocator, bytes, residences, 0, binary.left, double);
+            try emitLoadFloatValue(allocator, bytes, residences, 1, binary.right, double);
+            try emitFloatMinimumMaximum(allocator, bytes, binary, double);
+        },
         else => return error.UnsupportedInstruction,
     }
+}
+
+fn floatOperands(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, binary: Machine.Instruction.Binary) Allocator.Error!struct { left: u5, right: u5 } {
+    const left = if (residences.len != 0) residences[binary.left] else null;
+    const right = if (residences.len != 0) residences[binary.right] else null;
+    if (left == null) try emitLoadFloatStack(allocator, bytes, 0, binary.left, binary.type == .float64);
+    if (right == null) try emitLoadFloatStack(allocator, bytes, 1, binary.right, binary.type == .float64);
+    return .{ .left = left orelse 0, .right = right orelse 1 };
+}
+
+fn emitScalarFloatOpcode(allocator: Allocator, bytes: *std.ArrayList(u8), prefix: ?u8, opcode: u8, destination: u5, source: u5) Allocator.Error!void {
+    if (prefix) |value| try bytes.append(allocator, value);
+    const rex: u8 = 0x40 | (@as(u8, @intFromBool(destination >= 8)) << 2) | @intFromBool(source >= 8);
+    if (rex != 0x40) try bytes.append(allocator, rex);
+    try bytes.appendSlice(allocator, &.{ 0x0f, opcode, 0xc0 | ((@as(u8, destination) & 7) << 3) | (@as(u8, source) & 7) });
 }
 
 fn emitFloatComparisonResult(
@@ -2248,6 +2317,7 @@ fn emitCollectionCount(
 fn emitDynamicCollectionLoad(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
+    function: Machine.Function,
     epilogue: *std.ArrayList(EpilogueFixup),
     value: Machine.Instruction.CollectionLoad,
 ) Error!void {
@@ -2273,7 +2343,7 @@ fn emitDynamicCollectionLoad(
     try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc3 });
     for (0..value.result.width) |leaf| {
         try emitLoadMemory(allocator, bytes, .rax, .rbx, @intCast(leaf * Machine.slot_size));
-        try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
+        try emitStoreScalar(allocator, bytes, function, .rax, @intCast(@as(usize, value.result.start) + leaf));
     }
 }
 
@@ -3245,6 +3315,39 @@ fn appendBranch(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.Ar
     try fixups.append(allocator, .{ .displacement_at = displacement_at, .instruction = instruction });
 }
 
+fn appendConditionalBranch(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(BranchFixup), condition: u8, target: usize) Allocator.Error!void {
+    try bytes.appendSlice(allocator, &.{ 0x0f, condition });
+    const displacement_at = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try fixups.append(allocator, .{ .displacement_at = displacement_at, .instruction = target });
+}
+
+fn emitConditionalFlow(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(BranchFixup), condition: u8, next: usize, then_target: usize, else_target: usize) Allocator.Error!void {
+    if (then_target == else_target) {
+        if (then_target != next) try appendBranch(allocator, bytes, fixups, then_target);
+    } else if (then_target == next) {
+        try appendConditionalBranch(allocator, bytes, fixups, condition ^ 1, else_target);
+    } else {
+        try appendConditionalBranch(allocator, bytes, fixups, condition, then_target);
+        if (else_target != next) try appendBranch(allocator, bytes, fixups, else_target);
+    }
+}
+
+test "X64 conditional flow inverts the predicate for a true fallthrough" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    var fixups: std.ArrayList(BranchFixup) = .empty;
+    defer fixups.deinit(std.testing.allocator);
+    try emitConditionalFlow(std.testing.allocator, &bytes, &fixups, 0x87, 5, 5, 8);
+    try std.testing.expectEqualSlices(u8, &.{ 0x0f, 0x86, 0, 0, 0, 0 }, bytes.items);
+    try std.testing.expectEqual(@as(usize, 8), fixups.items[0].instruction);
+    bytes.clearRetainingCapacity();
+    fixups.clearRetainingCapacity();
+    try emitConditionalFlow(std.testing.allocator, &bytes, &fixups, 0x8c, 5, 8, 5);
+    try std.testing.expectEqualSlices(u8, &.{ 0x0f, 0x8c, 0, 0, 0, 0 }, bytes.items);
+    try std.testing.expectEqual(@as(usize, 8), fixups.items[0].instruction);
+}
+
 fn jumpFallsThrough(instruction_index: usize, target: usize) bool {
     return target == instruction_index + 1;
 }
@@ -3450,6 +3553,72 @@ fn emitLoadValue(
         return;
     };
     try emitLoadStack(allocator, bytes, register, slot);
+}
+
+fn emitMoveFloat(allocator: Allocator, bytes: *std.ArrayList(u8), destination: u5, source: u5) Allocator.Error!void {
+    if (destination == source) return;
+    const rex: u8 = 0x40 | (@as(u8, @intFromBool(destination >= 8)) << 2) | @intFromBool(source >= 8);
+    if (rex != 0x40) try bytes.append(allocator, rex);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x28, 0xc0 | ((@as(u8, destination) & 7) << 3) | (@as(u8, source) & 7) });
+}
+
+fn emitLoadFloatValue(allocator: Allocator, bytes: *std.ArrayList(u8), residences: []const ?u5, destination: u3, slot: Machine.Slot, double: bool) Allocator.Error!void {
+    if (residences.len != 0) if (residences[slot]) |source| {
+        return emitMoveFloat(allocator, bytes, destination, source);
+    };
+    try emitLoadFloatStack(allocator, bytes, destination, slot, double);
+}
+
+fn emitScalarCopy(allocator: Allocator, bytes: *std.ArrayList(u8), function: Machine.Function, copy: Machine.Instruction.Copy) Error!void {
+    const source_float = if (function.float_register_slots.len != 0) function.float_register_slots[copy.operand] else null;
+    const destination_float = if (function.float_register_slots.len != 0) function.float_register_slots[copy.result] else null;
+    if (source_float != null and destination_float != null) {
+        return emitMoveFloat(allocator, bytes, destination_float.?, source_float.?);
+    }
+    if (source_float == null and destination_float == null and function.register_slots.len != 0) {
+        const source = function.register_slots[copy.operand];
+        const destination = function.register_slots[copy.result];
+        if (source != null and destination != null) {
+            if (source.? != destination.?) try emitMoveRegister(allocator, bytes, @enumFromInt(destination.?), @enumFromInt(source.?));
+            return;
+        }
+    }
+    try emitLoadScalar(allocator, bytes, function, .rax, copy.operand);
+    try emitStoreScalar(allocator, bytes, function, .rax, copy.result);
+}
+
+fn emitScalarBits(allocator: Allocator, bytes: *std.ArrayList(u8), xmm: u5, general: Register, load: bool) Allocator.Error!void {
+    const register: u8 = @intFromEnum(general);
+    const rex: u8 = 0x48 | (@as(u8, @intFromBool(xmm >= 8)) << 2) | @intFromBool(register >= 8);
+    try bytes.appendSlice(allocator, &.{ 0x66, rex, 0x0f, if (load) @as(u8, 0x7e) else 0x6e, 0xc0 | ((@as(u8, xmm) & 7) << 3) | (register & 7) });
+}
+
+fn emitLoadScalar(allocator: Allocator, bytes: *std.ArrayList(u8), function: Machine.Function, register: Register, slot: Machine.Slot) Allocator.Error!void {
+    if (function.float_register_slots.len != 0) if (function.float_register_slots[slot]) |xmm| {
+        return emitScalarBits(allocator, bytes, xmm, register, true);
+    };
+    try emitLoadValue(allocator, bytes, function.register_slots, register, slot);
+}
+
+fn emitStoreScalar(allocator: Allocator, bytes: *std.ArrayList(u8), function: Machine.Function, register: Register, slot: Machine.Slot) Allocator.Error!void {
+    if (function.float_register_slots.len != 0) if (function.float_register_slots[slot]) |xmm| {
+        return emitScalarBits(allocator, bytes, xmm, register, false);
+    };
+    try emitStoreValue(allocator, bytes, function.register_slots, register, slot);
+}
+
+// Win64 preserves all 128 bits of XMM6...XMM15, including when Silex only
+// uses the scalar low lane. SysV needs no prologue save for these colors.
+fn emitPreservedFloats(allocator: Allocator, bytes: *std.ArrayList(u8), mask: u16, offset: u32, restore: bool) Error!void {
+    var displacement = offset;
+    for (6..16) |xmm| {
+        if (mask & (@as(u16, 1) << @intCast(xmm)) == 0) continue;
+        try bytes.append(allocator, 0xf3);
+        if (xmm >= 8) try bytes.append(allocator, 0x44);
+        try bytes.appendSlice(allocator, &.{ 0x0f, if (restore) @as(u8, 0x6f) else 0x7f, 0x85 | ((@as(u8, @intCast(xmm)) & 7) << 3) });
+        try appendInt(allocator, bytes, i32, std.math.cast(i32, displacement) orelse return error.InvalidMachineProgram);
+        displacement = std.math.add(u32, displacement, 16) catch return error.InvalidMachineProgram;
+    }
 }
 
 fn emitLoadFloatStack(allocator: Allocator, bytes: *std.ArrayList(u8), xmm: u3, slot: Machine.Slot, double: bool) Allocator.Error!void {
@@ -3856,9 +4025,10 @@ test "encode a no-op Silex main for the X64 process and Mach-O entry contracts" 
 
     const darwin = try encodeDarwin(std.testing.allocator, .{ .functions = &functions });
     defer darwin.deinit(std.testing.allocator);
-    const darwin_entry = darwin.code[darwin.entry_offset..][0..27];
+    const darwin_entry = darwin.code[darwin.entry_offset..][0..36];
     try std.testing.expectEqualSlices(u8, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 }, darwin_entry[0..9]);
-    try std.testing.expectEqualSlices(u8, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 }, darwin_entry[17..27]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x48, 0x85, 0xd2, 0x0f, 0x95, 0xc2, 0x0f, 0xb6, 0xd2 }, darwin_entry[14..23]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 }, darwin_entry[26..36]);
     try std.testing.expect(std.mem.indexOf(u8, darwin_entry, &.{ 0x0f, 0x05 }) == null);
 
     const windows = try encodeWindows(std.testing.allocator, .{ .functions = &functions });
@@ -4096,7 +4266,7 @@ test "encode float32 to float64 widening on X64" {
 
     const image = try encodeLinux(std.testing.allocator, program);
     defer image.deinit(std.testing.allocator);
-    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf3, 0x0f, 0x5a, 0xc0 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf3, 0x0f, 0x5a, 0xdb }) != null);
 }
 
 test "encode float64 to float32 narrowing on X64" {
@@ -4125,7 +4295,7 @@ test "encode float64 to float32 narrowing on X64" {
 
     const image = try encodeLinux(std.testing.allocator, program);
     defer image.deinit(std.testing.allocator);
-    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf2, 0x0f, 0x5a, 0xc0 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xf2, 0x0f, 0x5a, 0xe3 }) != null);
 }
 
 test "encode indirect C ABI calls on Linux and Windows X64" {
@@ -4287,6 +4457,8 @@ test "encode narrow X64 right shifts with typed logical semantics" {
     var bytes: std.ArrayList(u8) = .empty;
     defer bytes.deinit(std.testing.allocator);
     const residences = [_]?u5{ null, null, null };
+    var epilogue: std.ArrayList(EpilogueFixup) = .empty;
+    defer epilogue.deinit(std.testing.allocator);
     try emitBinary(std.testing.allocator, &bytes, &residences, .{
         .result = 2,
         .operator = .shift_right,
@@ -4294,12 +4466,9 @@ test "encode narrow X64 right shifts with typed logical semantics" {
         .right = 1,
         .type = .uint32,
         .checked = true,
-    });
-    const mask = &.{
-        0x48, 0xba, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
-        0x48, 0x21, 0xd0,
-    };
-    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, bytes.items, mask));
+    }, &epilogue);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, bytes.items, &.{ 0x89, 0xc0 }));
+    try std.testing.expectEqual(@as(usize, 1), epilogue.items.len);
     try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0xd3, 0xe8 }) != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes.items, &.{ 0x48, 0xd3, 0xf8 }) == null);
 }
@@ -4518,4 +4687,137 @@ test "probe every Windows stack page in large X64 frames" {
     try std.testing.expectEqualSlices(u8, &.{
         0x48, 0x81, 0xec, 0x00, 0x20, 0x00, 0x00,
     }, bytes.items);
+}
+
+test "scalar XMM high colors encode raw bits and preserve full Win64 registers" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try emitScalarBits(std.testing.allocator, &bytes, 15, .r9, false);
+    try emitScalarBits(std.testing.allocator, &bytes, 15, .r9, true);
+    try emitMoveFloat(std.testing.allocator, &bytes, 14, 15);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x66, 0x4d, 0x0f, 0x6e, 0xf9,
+        0x66, 0x4d, 0x0f, 0x7e, 0xf9,
+        0x45, 0x0f, 0x28, 0xf7,
+    }, bytes.items);
+    bytes.clearRetainingCapacity();
+    try emitPreservedFloats(std.testing.allocator, &bytes, (1 << 6) | (1 << 15), 48, false);
+    try emitPreservedFloats(std.testing.allocator, &bytes, (1 << 6) | (1 << 15), 48, true);
+    try std.testing.expectEqualSlices(u8, &.{
+        0xf3, 0x0f, 0x7f, 0xb5, 48,   0,    0,  0,
+        0xf3, 0x44, 0x0f, 0x7f, 0xbd, 64,   0,  0,
+        0,    0xf3, 0x0f, 0x6f, 0xb5, 48,   0,  0,
+        0,    0xf3, 0x44, 0x0f, 0x6f, 0xbd, 64, 0,
+        0,    0,
+    }, bytes.items);
+}
+
+test "scalar SSE arithmetic uses allocated colors and preserves a reused right operand" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    const binary: Machine.Instruction.Binary = .{ .result = 2, .left = 0, .right = 1, .operator = .subtract, .type = .float64 };
+    // subSD xmm6,xmm15: the destination already contains the left operand.
+    try emitFloatBinary(allocator, &bytes, &.{ 6, 15, 6 }, binary);
+    try std.testing.expectEqualSlices(u8, &.{ 0xf2, 0x41, 0x0f, 0x5c, 0xf7 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    // If the result reuses the right operand, preserve its value until the
+    // subtraction has consumed it. The operand order cannot be reversed.
+    try emitFloatBinary(allocator, &bytes, &.{ 6, 15, 15 }, binary);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x0f, 0x28, 0xc6,
+        0xf2, 0x41, 0x0f,
+        0x5c, 0xc7, 0x44,
+        0x0f, 0x28, 0xf8,
+    }, bytes.items);
+    bytes.clearRetainingCapacity();
+    var single = binary;
+    single.operator = .divide;
+    single.type = .float32;
+    try emitFloatBinary(allocator, &bytes, &.{ 15, 6, 15 }, single);
+    try std.testing.expectEqualSlices(u8, &.{ 0xf3, 0x44, 0x0f, 0x5e, 0xfe }, bytes.items);
+    bytes.clearRetainingCapacity();
+    // Both high-register extension bits must be present after the prefix.
+    try emitScalarFloatOpcode(allocator, &bytes, 0x66, 0x2e, 14, 15);
+    try emitScalarFloatOpcode(allocator, &bytes, null, 0x2e, 15, 6);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x66, 0x45, 0x0f, 0x2e, 0xf7,
+        0x44, 0x0f, 0x2e, 0xfe,
+    }, bytes.items);
+}
+
+test "X64 scalar copies honor coalesced integer colors and FP transfers" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    var function: Machine.Function = .{
+        .name = "copy_colors",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 2,
+        .frame_size = 16,
+        .register_slots = &.{ 8, 8 },
+        .instructions = &.{},
+    };
+    const copy: Machine.Instruction.Copy = .{ .result = 1, .operand = 0 };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqual(@as(usize, 0), bytes.items.len);
+    function.register_slots = &.{ 8, 9 };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x89, 0xc1 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    function.float_register_slots = &.{ 6, 7 };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqualSlices(u8, &.{ 0x0f, 0x28, 0xfe }, bytes.items);
+    bytes.clearRetainingCapacity();
+    // A mixed-bank transfer must keep the full payload through the scalar
+    // bridge; the integer-color shortcut cannot read a stale GPR home.
+    function.float_register_slots = &.{ 6, null };
+    try emitScalarCopy(allocator, &bytes, function, copy);
+    try std.testing.expectEqualSlices(u8, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xf0, 0x49, 0x89, 0xc1 }, bytes.items);
+}
+
+test "X64 integer operands use colors without destroying a reused right input" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    var epilogue: std.ArrayList(EpilogueFixup) = .empty;
+    defer epilogue.deinit(allocator);
+    var binary: Machine.Instruction.Binary = .{ .result = 2, .left = 0, .right = 1, .operator = .subtract, .type = .int, .checked = false };
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x29, 0xd8 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 11 }, binary, &epilogue);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4c, 0x89, 0xc0, 0x4c, 0x29, 0xd8, 0x49, 0x89, 0xc3 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    binary.operator = .multiply;
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x0f, 0xaf, 0xc3 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    binary.operator = .add;
+    binary.checked = true;
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    // The overflow guard must read the arithmetic flags before any other
+    // operation and retain the exact status/epilogue protocol.
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x01, 0xd8, 0x71, 10, 0xba, 1, 0, 0, 0, 0xe9, 0, 0, 0, 0 }, bytes.items);
+    try std.testing.expectEqual(@as(usize, 1), epilogue.items.len);
+    try std.testing.expectEqual(@as(usize, 11), epilogue.items[0].displacement_at);
+    bytes.clearRetainingCapacity();
+    epilogue.clearRetainingCapacity();
+    binary.type = .uint;
+    try emitBinary(allocator, &bytes, &.{ 8, 11, 8 }, binary, &epilogue);
+    try std.testing.expectEqual(@as(u8, 0x73), bytes.items[3]);
+}
+
+test "X64 integer comparisons keep narrow normalization away from live colors" {
+    const allocator = std.testing.allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    var binary: Machine.Instruction.Binary = .{ .result = 2, .left = 0, .right = 1, .operator = .less, .type = .int };
+    try emitIntegerComparison(allocator, &bytes, &.{ 8, 11, null }, binary);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x39, 0xd8 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    binary.type = .int8;
+    try emitIntegerComparison(allocator, &bytes, &.{ 8, 11, null }, binary);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4c, 0x89, 0xc0, 0x4c, 0x89, 0xd9, 0x48, 0x0f, 0xbe, 0xc0, 0x48, 0x0f, 0xbe, 0xc9, 0x48, 0x39, 0xc8 }, bytes.items);
 }

@@ -1,0 +1,219 @@
+optimizer oracle: native optimizer regression qualification
+  PASS Regressions/ScalarClassLeaves.sx
+    protects: scalar class mutator leaves preserve shared identity, signed and floating updates, boolean fields, and resource replacement barriers
+    binaries: Debug 41215 bytes, Release 37080 bytes
+  PASS Regressions/BranchComparisons.sx
+    protects: single-use and shared comparisons preserve signed and unsigned widths, unordered floats, infinities and signed zero
+    binaries: Debug 28927 bytes, Release 16536 bytes
+  PASS Regressions/BranchSnapshots.sx
+    protects: arm-local scalar snapshots preserve alias writes, joined values, negative indices, NaN and signed zero
+    binaries: Debug 28927 bytes, Release 20664 bytes
+  PASS Regressions/PrivateCollectionLengths.sx
+    protects: private literal lengths cross branches and unrelated calls while mutation, copies, view escapes and terminal lifetimes stay exact
+    binaries: Debug 37119 bytes, Release 32952 bytes
+  PASS Regressions/ScalarFloatOperands.sx
+    protects: direct scalar SSE operands preserve subtraction/division order, widths, signed zero and unordered comparisons
+    binaries: Debug 20735 bytes, Release 16536 bytes
+  PASS Regressions/FloatMemoryResidence.sx
+    protects: FP recurrences across stack aggregate copies and fixed/view loads, widths, NaN and signed zero
+    binaries: Debug 24831 bytes, Release 16536 bytes
+  PASS Regressions/LoopExitResidence.sx
+    protects: loop-carried scalar state survives interleaved class exits and direct mutator calls
+    binaries: Debug 33023 bytes, Release 28856 bytes
+  PASS Regressions/ScalarFloatResidence.sx
+    protects: scalar FP pressure, loop recurrence, call barriers, addressed aliases, exact conversion, NaN and signed zero
+    binaries: Debug 20735 bytes, Release 12440 bytes
+  PASS Regressions/DominatedReferenceReads.sx
+    protects: dominated borrowed fields preserve branches, mutable aliases, signed zero, NaN and mixed scalar widths
+    binaries: Debug 20735 bytes, Release 16536 bytes
+  PASS Regressions/LateScalarClosure.sx
+    protects: helpers exposed as scalar leaves after collection cleanup preserve loop results and checked initialization
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/ValueModules/Main.sx
+    protects: module and generic boundaries preserve dominated values, partial paths, mutable aliases and strict floating observations
+    binaries: Debug 20735 bytes, Release 12440 bytes
+  PASS Regressions/AggregatePreparation.sx
+    protects: complete preparation observes all 26 fields across dynamic/fixed bodies, warm starts and detached results
+    contract: dominated aggregate field reads 820 -> 24
+    counter: disabling ssa_value_simplification retains 56 field reads versus 24
+    binaries: Debug 131327 bytes, Release 32952 bytes
+  PASS Regressions/ScalarExpressionReuse.sx
+    protects: identical scalar snapshots share calculations across stores while changed memory and floating edge values retain their observations
+    contract: scalar products 4 -> 2; changed-memory path retains 2
+    counter: disabling ssa_value_simplification retains 4 scalar products versus 2
+    binaries: Debug 20735 bytes, Release 12440 bytes
+  PASS Regressions/KnownViewElements.sx
+    protects: known scalar elements propagate through clamped nested views; aliases and branches retain observations
+    contract: constantViews view loads 2 -> 0, stores 0 -> 0, 2 guard(s) retained
+    counter: disabling reference_memory_elision retains 4 memory operation(s) versus 0 in constantViews; guards 6/2
+    binaries: Debug 24831 bytes, Release 16536 bytes
+  PASS IntegerArithmetic.sx
+    protects: a hot scalar loop retains target registers across a terminal output barrier
+    contract: main scalar residences ARM64 13/13, X64 13/13
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS AggregateScalarization.sx
+    protects: value aggregate copies, field updates and returns reduce to scalar leaves
+    contract: update value-aggregate operations 14 -> 3
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS ReferenceDeadStores.sx
+    protects: exact reference stores are eliminated while a possibly aliasing observation remains
+    contract: overwrite reference stores 2 -> 1; observed retains 1 load(s) and 2 store(s)
+    counter: disabling reference_memory_elision retains 2 memory operation(s) versus 1 in overwrite; guards 0/0
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS MutableViewMemory.sx
+    protects: exact mutable-view stores and loads coalesce without removing the surviving bounds guard
+    contract: rewrite view loads 5 -> 0, stores 2 -> 1, 1 guard(s) retained
+    counter: disabling reference_memory_elision retains 3 memory operation(s) versus 1 in rewrite; guards 3/1
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS OwningCollectionCopy.sx
+    protects: known owning-list values forward while copy-on-write mutation remains explicit
+    contract: main owning loads 4 -> 0, 1 mutation(s) and 0 guard(s) retained
+    counter: disabling reference_memory_elision retains 3 memory operation(s) versus 1 in main; guards 3/0
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/AggregateFieldStores.sx
+    protects: scalar field reads and writes preserve snapshots, alias mutations across calls and loops, and owning collection copies
+    binaries: Debug 45311 bytes, Release 32952 bytes
+  PASS Regressions/CheckedMemoryLanes.sx
+    protects: checked aggregate loads, independent arithmetic lanes, branches and borrowed writes
+    binaries: Debug 28927 bytes, Release 20664 bytes
+  PASS Regressions/AggregateControlFlow.sx
+    protects: immutable aggregate projections across branches and loops preserve snapshots and joined returns
+    binaries: Debug 20735 bytes, Release 12440 bytes
+  PASS Regressions/FloatSsaDiamond.sx
+    protects: float32 and float64 local values preserve both incoming edges of an SSA diamond
+    binaries: Debug 20735 bytes, Release 16536 bytes
+  PASS Regressions/FloatSsaLoop.sx
+    protects: float32 and float64 local recurrences preserve entry and back-edge values
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/BooleanSharedChain.sx
+    protects: shared boolean-chain blocks and reused branch values
+    contract: hot_chain blocks 13 -> 8
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/SsaValueFacts.sx
+    protects: unanimous SSA joins propagate exact constants while divergent joins retain their control
+    contract: unanimous branches 2 -> 1, arithmetic 1 -> 0
+    counter: disabling ssa_value_simplification retains 2 branches and 1 arithmetic operation(s), versus 1 and 0
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/SsaCriticalEdge.sx
+    protects: float32 and float64 locals cross a critical edge without memory traffic or a synthetic block
+    contract: choose64 local operations 3 -> 0, blocks 4 -> 3
+    counter: disabling ssa_promotion_post retains 3 local operation(s) versus 0, with blocks 3 versus 3
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/SsaForwardedPhiLoop.sx
+    protects: a loop-carried float value crosses an inner forwarding join without falling back to local storage
+    contract: accumulate local operations 9 -> 0, blocks 7 -> 6
+    counter: disabling ssa_promotion_post retains 4 local operation(s) versus 0, with blocks 6 versus 6
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/SsaDistinctPhiLoop.sx
+    protects: a float recurrence keeps distinct loop and branch joins without falling back to local storage
+    contract: accumulate local operations 13 -> 0, blocks 7 -> 7
+    counter: disabling ssa_promotion_post retains 8 local operation(s) versus 0, with blocks 7 versus 7
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/IntegerConversionConstants.sx
+    protects: unanimous integer facts cross representable conversions and expose dependent constant arithmetic
+    contract: joined conversions 5 -> 0, arithmetic 4 -> 0
+    counter: disabling ssa_value_simplification retains 1 conversions and 1 arithmetic operation(s), versus 0 and 0
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/IntegerShiftConstants.sx
+    protects: unanimous integer and count facts fold valid shifts while invalid counts preserve their failure
+    contract: shifted branches 2 -> 1, arithmetic 3 -> 0
+    counter: disabling ssa_value_simplification retains 2 branches and 3 arithmetic operation(s), versus 1 and 0
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/IntegerRangeChecks.sx
+    protects: dominating and loop-carried bounds remove only proven overflow and conversion checks
+    contract: increment, decrement, widen_unsigned, shift_bounded, accumulate proven checks 12 -> 0; 1 unproven check(s) retained
+    counter: disabling value_range_analysis retains 10 proven check(s) versus 0; unproven checks remain 1/1
+    binaries: Debug 20735 bytes, Release 12440 bytes
+  PASS Regressions/ConstantDivision.sx
+    protects: signed and unsigned constant division, including powers of two, preserves all Silex integer widths on native backends
+    binaries: Debug 28927 bytes, Release 16536 bytes
+  PASS Regressions/X64RegionalBarriers.sx
+    protects: a hot X64 scalar loop retains volatile registers while aggregate construction and a direct call remain stack barriers
+    contract: integrate X64 regional residence 13/15, 2 spilled values, 4 frame slots/32 bytes, loop stack 0 load/0 store, barriers 1 direct/0 indirect call and 2 aggregate leaf slots
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/X64IndirectAggregate.sx
+    protects: a hot X64 scalar loop retains registers before a wide aggregate and indirect call barrier
+    contract: integrate X64 regional residence 14/20, 6 spilled values, 8 frame slots/64 bytes, loop stack 0 load/0 store, barriers 0 direct/1 indirect call and 4 aggregate leaf slots
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/ArrayStorageAccess.sx
+    protects: fixed, dynamic, nested, and aggregate collection storage
+    binaries: Debug 28927 bytes, Release 24760 bytes
+  PASS Regressions/BoundedCollectionLoop.sx
+    protects: proven zero-origin collection traversal without weakening other bounds checks
+    contract: sum checked collection loads 1 -> 0
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/SequentialBoundedLoops.sx
+    protects: zero-origin recovery after a sequential loop resets its reused induction variable
+    contract: sum_sequential checked collection loads 2 -> 1
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/DenseScalarLoop.sx
+    protects: class count accessor inlining and redundant scalar loads inside a dense loop
+    contract: integrate collection loads 4 -> 2, calls 1 -> 0
+    binaries: Debug 37119 bytes, Release 32952 bytes
+  PASS Regressions/LoopExitFloatLaneXY.sx
+    protects: XY loop recurrences become stable vectorizable snapshots after loop exit
+    contract: finish SLP width 2 (required >= 2), ARM64 pairs 15 (required=yes), X64 pairs 0 (required=no)
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/FloatLaneXYZ.sx
+    protects: portable XYZ lane grouping through loads and arithmetic
+    contract: transform SLP width 3 (required >= 3), ARM64 pairs 3 (required=no), X64 pairs 0 (required=no)
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/LoopExitFloatLaneXYZW.sx
+    protects: XYZW loop recurrences become two stable vectorizable pairs after loop exit
+    contract: finish SLP width 4 (required >= 4), ARM64 pairs 30 (required=yes), X64 pairs 0 (required=no)
+    binaries: Debug 20735 bytes, Release 12440 bytes
+  PASS Regressions/TextOutputIntegrity.sx
+    protects: complete text output through branches and collection iteration
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/BoidsKernel.sx
+    protects: boids-like arrays, shared boolean chains, and native XY/Z realization
+    contract: steer SLP width 3 (required >= 3), ARM64 pairs 15 (required=yes), X64 pairs 6 (required=yes)
+    binaries: Debug 37119 bytes, Release 32952 bytes
+  PASS Regressions/Boids2DSteering.sx
+    protects: aggregate vector parameters keep pointer-terminated collection cursors disjoint from cached float literals
+    binaries: Debug 20735 bytes, Release 16536 bytes
+  PASS Regressions/ReversedFloatRecurrence.sx
+    protects: reversed float recurrence copies preserve lane order and exact unaligned compact-field loads
+    binaries: Debug 33023 bytes, Release 28856 bytes
+  PASS Regressions/CollectionCursor.sx
+    protects: a generic unit-stride float collection loop retains a post-indexed pointer-terminated cursor
+    contract: accumulate ARM64 cursor post-indexed=yes, pointer-terminated=yes
+    binaries: Debug 33023 bytes, Release 28856 bytes
+  PASS Regressions/ReferenceCursorReuse.sx
+    protects: ascending mutable view references preserve checked bounds and reuse stable element addresses across field writes
+    binaries: Debug 20735 bytes, Release 16536 bytes
+  PASS Regressions/MultipleReferenceCursors.sx
+    protects: independent mutable views carry every checked ascending element address in one loop
+    contract: shift ARM64 reference cursors unchecked=0, checked=2
+    binaries: Debug 20735 bytes, Release 16536 bytes
+  PASS Regressions/AggregateParameterResidence.sx
+    protects: read-only aggregate parameters keep scalar leaves in ARM64 registers unless storage is required
+    contract: evaluate ARM64 aggregate parameter residence 12/12
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/LoopForms.sx
+    protects: signed and unsigned inductions, nested control, break, continue, dynamic bounds, strided access and contiguous recurrence
+    binaries: Debug 33023 bytes, Release 28856 bytes
+  PASS Regressions/CallEffectsInlining.sx
+    protects: small reference and checked-view callees inline into the final caller without losing their memory effects
+    contract: main calls 2 -> 0, reference stores 1 -> 0 after scalar replacement
+    counter: disabling value_inlining retains 2 call(s) versus 0 in main
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/BranchingReferenceInlining.sx
+    protects: branching reference callees inline at hot loop sites while preserving their writes
+    contract: main calls 1 -> 0, reference stores 2 -> 2 after scalar replacement
+    counter: disabling value_inlining retains 1 call(s) versus 0 in main
+    binaries: Debug 16631 bytes, Release 12440 bytes
+  PASS Regressions/PureMathReferenceInlining.sx
+    protects: proven pure scalar-math effects remain exact while a native call barrier stays outside a branching reference caller
+    contract: main calls 1 -> 1, reference stores 4 -> 4 after scalar replacement
+    binaries: Debug 20790 bytes, Release 16686 bytes
+  PASS Regressions/HotReferenceLeafClosure.sx
+    protects: a pressure-heavy hot set of reference leaf callees stays out of line until expanded caller residences are proven profitable
+    contract: integrate calls 2 -> 2, reference stores 9 -> 9 after scalar replacement
+    binaries: Debug 37225 bytes, Release 29033 bytes
+  PASS Regressions/DynamicFieldClearAppend.sx
+    protects: a loop-local class call bound stays defined before clearing and rebuilding a dynamic field
+    binaries: Debug 45311 bytes, Release 41176 bytes
+qualified: 64 integer failures with ordered output in Debug/Release
+qualified: 43 numeric conversions with exact values and diagnostics in Debug/Release
+qualified: 56 fixed regressions and 8 generated native scenarios

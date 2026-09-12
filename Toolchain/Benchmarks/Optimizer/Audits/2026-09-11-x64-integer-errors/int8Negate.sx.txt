@@ -1,0 +1,2 @@
+func calculate(a:int8, b:int8) int8 { return -a }
+func main() { print(true); print(calculate(-128,0)); print(false) }

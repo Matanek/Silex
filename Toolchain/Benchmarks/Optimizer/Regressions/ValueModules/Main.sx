@@ -1,0 +1,13 @@
+use Module.Values
+func main() {
+    var value = Values.Pair(x:2.0, y:3.0)
+    print(Values.measure(value, true) == 7.0)
+    print(Values.measure(value, false) == 4.0)
+    print(Values.partial(value, true) == 2.0)
+    print(Values.mutate(value, value) == 11.0)
+    print(1.0 / Values.measure(Values.Pair(x:-0.0), false) < 0.0)
+    let nan = Values.measure(Values.Pair(x:0.0 / 0.0), false)
+    print(nan != nan)
+    print(Values.repeated<int>(4, 3, true) == 28)
+    print(Values.repeated<float64>(1.5, 2.0, false) == 6.0)
+}

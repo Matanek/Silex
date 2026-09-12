@@ -1,0 +1,125 @@
+{
+  "jobs": [
+    {
+      "id": 103480855384,
+      "name": "optimizer-x64-calibration",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Check out the calibration tools",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Verify calibration request",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Download the sealed native executables",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Calibrate original, reversed and identical Objects pairs",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Preserve the calibration evidence",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Post Check out the calibration tools",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13
+        }
+      ]
+    },
+    {
+      "id": 103480855905,
+      "name": "linux-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103480855915,
+      "name": "macos-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103480855936,
+      "name": "windows-arm64-build",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103480855938,
+      "name": "linux-arm64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103480855943,
+      "name": "windows-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103480856034,
+      "name": "optimizer-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103480856370,
+      "name": "windows-arm64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34667012897,
+      "logs_url": null,
+      "steps": null
+    }
+  ]
+}

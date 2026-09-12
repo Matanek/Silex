@@ -5,6 +5,51 @@ raw and Release portable IR, reference interpretation, native Debug and
 Release execution, and a pinned Clang/LLVM `-O3` configuration. LLVM output is
 never consumed by the Silex compiler.
 
+## Choose the reference for the question
+
+Use a frozen Silex version to measure progress, and retain the accepted
+long-term baseline to detect cumulative regressions. Compare the same source,
+work, dependency closure, modes and physical target. Record three distinct
+conclusions:
+
+- Correctness: expected observables, raw/optimized interpretation, native
+  Debug/Release, negative and metamorphic cases, plus independent witnesses
+  and LLVM where its bridge preserves the relevant semantics. Two Silex
+  execution paths can share a defect.
+- Progress: candidate versus Silex baseline, with raw paired observations and
+  the decision rule fixed before measuring. Distinguish improvement,
+  regression, no detected difference and inconclusive evidence. A confidence
+  interval containing equality does not itself establish non-regression;
+  that guarantee needs its own bound declared in advance.
+- External position: the separately qualified Silex/Clang comparison. Use it
+  to expose missed costs and challenge assumptions at mechanism changes and
+  final qualification. It is neither a presumed ceiling nor a requirement to
+  reproduce LLVM's passes. Keep unfavorable cases in the report.
+
+Start from Silex's dominant executed costs and ask whether semantics require
+the work or a representation introduces it. Investigate lost information,
+premature materialization, copies, lifetimes and call boundaries before adding
+another local adjustment. Record the hypothesis, a competing explanation, the
+observable discriminator and the stopping condition. Test a reduced case and
+an independent variant before widening the change. Suspected historical debt
+in either compiler is a hypothesis, not performance evidence.
+
+Balance execution order and predecessor effects. For a small or suspicious
+delta, include an identical-executable control; repetition can preserve a
+systematic bias. An unstable comparison remains inconclusive. A source-level
+witness that also removes allocation or other work diagnoses an opportunity
+but cannot replace the workload used to admit a compiler transformation.
+
+These development decisions do not change the implemented gate contracts.
+`Toolchain/Benchmarks/Native/campaign.py` can record a Silex baseline comparison
+alongside its Clang comparisons, but its `--require-parity` verdict still
+requires external parity. The balanced controls in `calibrate.py` remain
+diagnostic. An admission-policy migration needs separately protected baseline
+rules and tests of reports, exit codes and required statuses before replacing
+an existing gate. A documentation change cannot turn a failing run green.
+
+## Coverage registry
+
 `Toolchain/Benchmarks/Optimizer/Coverage.json` is the machine-readable control
 plane. It pins the Clang executable identity separately from the upstream LLVM
 source revision, target triple, CPU, features, floating-point policy, linker,
@@ -30,8 +75,10 @@ Schema version 2 replaces free-form evidence strings with `proof_ids`. Every
 identifier resolves through the top-level proof catalog to a repository and
 ancestor revision, a source and SHA-256, the exact command and configuration,
 the expected observation, and the result with its own SHA-256. The audit
-rejects unknown identifiers, stale source or result hashes, and duplicate
-references. A closed coverage or LLVM-transposition entry may reference only
+rejects unknown identifiers, source hashes inconsistent with the recorded Git
+revision, stale result hashes, and duplicate references. Historical proof sources
+are read from that revision, not from the current working tree: extending the
+oracle does not rewrite an older proof or turn it into a current execution. A closed coverage or LLVM-transposition entry may reference only
 passed proofs; `diagnostic-red` results remain usable to explain an open gap
 but cannot close it.
 
@@ -47,6 +94,14 @@ peephole elides an access, so both witnesses require zero dynamic stack traffic
 in their hot loops. The physical frame may contain more slots than the number
 of spilled values: contraction can omit only a contiguous resident prefix
 while preserving the virtual offsets of all remaining addressable homes.
+
+The indirect-call witness uses the three-word callback layout: code,
+environment, and receiver owner. Its four aggregate fields and three callback
+words occupy seven nonresident values; fourteen other values remain resident.
+Two resident slots after the first stack home leave nine physical frame slots,
+aligned to 80 bytes. The former two-word layout needed six nonresident values
+and 64 bytes. This representation change preserves the zero-load/zero-store
+loop contract; the minimum residence requirement is fourteen values.
 
 The registry audit fails when an IR operation, terminator, named type, machine
 operation, or Release pass is missing or duplicated. An `equivalent` coverage
@@ -93,6 +148,23 @@ compiler-owned revision and source hash locally while retaining the sealed
 external records in the registry. This makes source exports independently
 auditable without allowing a partially populated workspace to pass as a full
 qualification environment.
+An external workspace anchor may carry an explicit `reconciliation` when its
+historical branch was never merged into the current package line. This record
+keeps the original revision and adds a candidate ancestor of HEAD, their exact
+common ancestor, both tree identities, a SHA-256 of their deterministic Git diff,
+and a reason for the replacement. It applies only to that repository and that
+original revision. Compiler anchors cannot use this mechanism. Missing history,
+wrong ancestry, a different tree or an unreviewed delta fail qualification;
+other revisions retain the ordinary ancestry check. This is a reviewed closure
+change, not a claim that the two package trees are equivalent.
+
+Sealed corpus and hot-function sources must match their hashes both at the
+original revision and in the current working tree. Historical proofs instead
+bind their recorded source revision; their status never substitutes for running
+the current gate. The GFX.ECS reconciliation and fresh package/consumer evidence
+are recorded in
+`Toolchain/Benchmarks/Optimizer/Audits/2026-09-11-ecs-reconciliation/`.
+
 LLVM commands additionally refuse a different Clang version or host triple.
 `cache-proof` builds each selected case without cache, after priming, and from
 a warm hit, then compares executable hashes and outputs. `metamorphic` executes
@@ -181,10 +253,18 @@ forward an exact post-store load. A different reference root is never assumed
 disjoint: a read through it invalidates dead-store evidence, and calls, unknown
 memory effects, and block boundaries invalidate both transformations.
 
-Scalar read-only collection views are emitted to LLVM as `{data, count}`
-values. The oracle models list literals with non-owning stack storage, view
-construction, signed negative-index normalization, and checked element loads.
-For owning scalar lists, retains and drops have no LLVM-side lifetime effect;
+Collections of scalar values and plain nested aggregates are emitted to LLVM
+as `{data, count}` values. List literals use heap storage because they can escape
+their creating function. Element strides and allocation sizes follow LLVM typed
+GEP layout, including padding. The bridge models view construction, signed
+negative-index normalization, checked loads and borrowed element references.
+View bounds normalize negative offsets, clamp each endpoint to `[0, count]`,
+and produce an empty view when the end precedes the start, matching the
+interpreter and native backends. Construction does not trap for these bounds;
+an invalid element access still does. `KnownViewElements.sx` compares clamped,
+nested and empty views against LLVM as well as both native Silex modes.
+Owning element references requiring copy-on-write detachment remain unsupported.
+For owning lists, retains and drops have no LLVM-side lifetime effect;
 instead, each functional owning replacement allocates and copies its input
 storage before the checked write. This deliberately models Silex copy-on-write
 value semantics rather than its reference-count implementation. A source list
@@ -193,7 +273,7 @@ the allocation and copy when their observable scalar values make that legal.
 Resource-bearing elements and ownership edges remain unsupported rather than
 being approximated with different lifetime semantics.
 
-Mutable scalar views use the same `{data, count}` representation, but
+Mutable views of plain values use the same `{data, count}` representation, but
 `collection_replace` becomes a checked store through `data`. On an exact
 same-view, same-index chain with no intervening observable or possibly aliasing
 instruction, Release may discard an overwritten store and forward a following
@@ -201,6 +281,32 @@ exact load from the surviving store.
 Any access through another view is treated as possibly aliasing and ends the
 proof. The oracle counts checks attached to collection replacement and element
 references as safety guards, not only checks attached to collection loads.
+Before LLVM emission, multiply-defined portable virtual registers receive local
+homes and explicit edge stores/loads. This preserves short-circuit effects and
+loop edge copies without treating portable IR as SSA or applying Silex Release
+optimization to the raw oracle input. LLVM performs its own promotion. Exact
+`float32` to `float64` widening uses `fpext`; narrowing remains unsupported.
+
+Emission follows the closed function graph rooted at `main`. It does not emit
+unreachable package helpers, matching native dead-function removal and the
+reachability basis used by structural statistics. A reachable unsupported
+instruction still rejects the program. Direct boundary calls are emitted only
+when `Boundary.isPureScalarMath` proves a recognized system-math symbol with an
+exact scalar float signature and trusted provenance. Their declarations and
+calls preserve the source symbol and precision. Other native boundaries,
+indirect boundary calls and mismatched signatures remain unsupported.
+
+The autonomous `AggregateViewAliasing.sx`, `DampedIntegration.sx` and
+`PreparationMasses.sx` cases exercise mixed-width padded elements, escaping
+literals, aliasing, independent copies, reference helpers, damping/translation,
+effective masses, warm impulses, separation, relative velocity and dynamic or
+static softness selection. The `PureMathReferenceInlining.sx` and
+`HotReferenceLeafClosure.sx` corpus cases add scalar square root/copy-sign
+boundaries, rotation and independent linear/angular speed caps. They observe
+deterministic values and are not timed. They do not cover graph lookup,
+multi-point contact assembly or ownership. Their abstract lifetime model cannot
+qualify allocation, destruction or reference-count costs.
+
 Generated qualification also combines a nested scalar aggregate, an owning
 copy-on-write snapshot, a temporary mutable view, a loop, and a branch in one
 program. This interaction case is compiled and executed through the same
@@ -228,3 +334,8 @@ Timing remains separate from correctness. The comparison runner builds each
 candidate once, alternates execution order, and reports median, MAD, p10-p90,
 and limitations. A noisy or too-short workload is diagnostic evidence, not a
 performance verdict.
+
+For the distinction between a closed registry and general compiler parity, see
+[scope of optimizer evidence](Optimizer-coverage.md). The coverage audit records
+unsupported cases and historical proof identity without promoting either to
+current LLVM execution evidence.

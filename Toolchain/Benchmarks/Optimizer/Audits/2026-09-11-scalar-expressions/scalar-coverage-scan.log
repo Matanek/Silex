@@ -1,0 +1,4 @@
+coverage audit: 13 bounded families, 15 LLVM techniques, 28/69 modeled IR operation tags (including abstract lifetime operations)
+qualified timing policy: >= 21 pairs, <= 200000 ppm spread; global parity not established by this audit
+reports: .zig-cache/optimizer-oracle/assurance.tsv, llvm-operation-coverage.tsv, proof-scope.tsv
+LLVM case coverage written to .zig-cache/optimizer-oracle/llvm-case-coverage.tsv; emission alone is not execution evidence

@@ -1,0 +1,23 @@
+# Attribution finale des familles portables
+
+Cette lecture relie les avis de l'oracle aux mécanismes effectivement exécutés.
+Les comptes de programme de `opportunities.tsv` sont des pistes, pas des verdicts
+sur un noyau chaud. Les contrats de performance physiques restent indépendants.
+
+| Famille | Résultat et preuve | Limite conservée / propriétaire |
+| --- | --- | --- |
+| SSA, constantes, contrôle | Promotion, plages et simplification existantes requalifiées ; numérotation locale et dominante ajoutées ; branches partielles et retours de boucle protégés. | Un compte de blocs du programme de tests ne prouve pas le coût dynamique d'une branche. Sélections et résidence : travail machine. |
+| Plages, erreurs, inductions | `BranchingLoop` porte déjà trois dividendes `left_non_negative` ; les gardes non prouvées restent observables. `IntegerRangeChecks`, conversions et décalages passent avec leurs désactivations. | L'avis `srem`/`urem` ignore cette métadonnée ; il ne démontre pas une induction portable manquante. Le débordement X64 reste rouge et attribué à l'émetteur. |
+| Mémoire, alias, effets | Éléments de vues connus propagés ; stockage primitif sans observation retiré ; lectures/expressions dominantes admises sous effets bornés. | Appels inconnus, écritures adressables, ressources, nouvelles lectures après mutation et indices invalides restent des barrières ou erreurs. Les effacer ne serait pas une optimisation licite. |
+| Agrégats et copies | Préparation complète à 26 champs, corps fixes/dynamiques, warm start et copie détachée ; 56 lectures après Release deviennent 24. | Temps inchangé dans le bruit ; copies/retour/frame encore visibles. Le contrôle direct régresse de 4.7 %. Leur coût machine reste à résoudre, sans forcer l'aplatissement de l'appelant. |
+| Appels et spécialisation | Rapport métamorphique corrigé pour compter la fermeture accessible ; variantes helper/directe réellement équivalentes. Reprise unique des feuilles devenues scalaires après nettoyage, attribution par désactivation. | Gardes d'effets et coût d'inlining inchangés. Les expansions d'agrégats/références auparavant rejetées ne sont pas réadmises. Les fonctions de tests appelées une fois avec constantes ne justifient pas une expansion générale. |
+| Modules et génériques | `ValueModules` couvre limites de module, instanciations int/float64, alias et flottants exceptionnels ; variantes locales de collections et scalaires restent dans le corpus cumulatif. | Aucun nom de source, module, package ou helper n'est reconnu par les transformations. Les noms utilisés dans l'oracle désignent seulement des assertions de régression. |
+| Boucles, invariants, rotation | Corpus d'induction, plages, curseurs, résidence, régions chaudes et boucles métamorphiques requalifié. La fermeture tardive permet aux analyses existantes d'éliminer le trafic de boucle lié à l'appel. | Le nombre de PHI ajouté par LLVM ne mesure pas une absence de SSA Silex. Variantes stridées, multi-sorties et boucles imbriquées restent une extension de qualification adversariale, pas une parité déjà mesurée. |
+| Vectorisation et SLP | Contrats de largeurs 2/3/4, sorties de boucles et contre-exemples flottants conservés. | Les opérations vectorielles LLVM dans le programme de tests comprennent copies et observations. Coût de packing, extraction, spills et disponibilité par architecture : travail machine ; aucune nouvelle vectorisation spéculative ni qualification physique X64. |
+| Runtime et pont LLVM | Bornes de vues tronquées corrigées ; observations sémantiques et durées de vie propres au pont restent explicites. | Affichage décimal flottant, ressources et appels dynamiques non couverts ne sont jamais annoncés équivalents à LLVM. Les valeurs longues sont comparées via une égalité booléenne exacte, sans utiliser ces variantes pour les temps natifs. |
+| Invalidation et reproductibilité | Dominance recomputée sur chaque CFG courant ; types/définitions uniques et barrières conservés. Après inlining, plages et SSA sont recalculées. Désactivations et `verify_each_pass` restent opérants ; campagnes de cache/packages vertes. | La robustesse exhaustive du langage et l'admission distante du SHA exact appartiennent aux étapes dédiées, sans report des régressions de cette tranche. |
+
+Les transformations retenues ferment les causes portables réduites et attribuées.
+Les rejets de rentabilité et les limites de cible restent documentés ; ils ne sont
+ni effacés par la clôture de cette Part ni transformés en parité globale LLVM.
+La suite doit employer les mêmes témoins et références, sans abaisser les seuils.

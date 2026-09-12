@@ -1,0 +1,49 @@
+{
+  "median_ms": {
+    "debug": 18.51575,
+    "release": 8.571292,
+    "clang": 2.147125,
+    "clang-o3-slot8": 2.103042,
+    "baseline": 8.527583
+  },
+  "after_before": {
+    "samples": 21,
+    "lower_bound_ppm": 976609,
+    "median_ppm": 1001968,
+    "upper_bound_ppm": 1012414,
+    "confidence_ppm": 960823,
+    "release_half_shift_ppm": 3482,
+    "clang_half_shift_ppm": 4683,
+    "ratio_half_shift_ppm": 34500,
+    "ratios_ppm": [
+      955100,
+      976609,
+      929760,
+      1006676,
+      978003,
+      1063939,
+      898619,
+      1012414,
+      969141,
+      1088330,
+      926184,
+      1009433,
+      954107,
+      1031583,
+      1028612,
+      1011745,
+      1001968,
+      1000225,
+      1102748,
+      991630,
+      1041938
+    ]
+  },
+  "gain_failures": [
+    "Silex/Clang upper bound exceeds 1000000 ppm"
+  ],
+  "parity_failures": [
+    "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+    "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+  ]
+}

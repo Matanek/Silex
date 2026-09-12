@@ -1,0 +1,1 @@
+PASS static precision: original accepts the inexact conversion, candidate rejects it and accepts the exact control

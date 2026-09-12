@@ -1,0 +1,222 @@
+{
+  "schema": 1,
+  "captured_at": "2026-09-11T06:22:27.555311+00:00",
+  "base_revision": "da76ef46df36039b36c80be885d9ac79b29c4522",
+  "compiler_correction_revision": "16a7820fefe4619aef7d9ca62c591df5ae1588a3",
+  "candidate_identity": "Compiler correction commit plus the enclosing oracle reconciliation commit. Input hashes identify the exact precommit executions; no source changed after final validation.",
+  "host": {
+    "cpu": "Apple M3 Pro",
+    "os": "macOS 26.6.2",
+    "architecture": "arm64"
+  },
+  "oracle_profile": {
+    "executable": "clang",
+    "version_line": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "source_repository": "https://github.com/llvm/llvm-project.git",
+    "source_tag": "llvmorg-21.1.0",
+    "source_revision": "3623fe661ae35c6c80ac221f14d85be76aa870f1",
+    "target_triple": "arm64-apple-darwin25.6.0",
+    "cpu": "apple-m1",
+    "features": "+v8.6a,+bf16,+bti,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+i8mm,+jsconv,+lse,+neon,+pauth,+predres,+ras,+rcpc,+rdm,+sb,+ssbs",
+    "optimization": "-O3",
+    "floating_point": "strict Silex-equivalent operations; no fast-math; fp-contract=on",
+    "linker": "Apple ld 1267 through the pinned Xcode clang driver",
+    "libraries": [
+      "libSystem"
+    ]
+  },
+  "binaries": {
+    "silex": {
+      "path": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "sha256": "4bcc9a8d8d44e8aec06f69a0989579f40ef328a6236d5b1734e408dc82811534"
+    },
+    "oracle": {
+      "path": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61fa0aa6b096984c05c60d76347e418c/silex-optimizer-oracle",
+      "sha256": "0f158d4f087714f3c052f1379cef843f5699a07c296b919c22b9b0714435c3ca"
+    }
+  },
+  "validation": [
+    {
+      "argv": [
+        "zig",
+        "build",
+        "install",
+        "check",
+        "test",
+        "--summary",
+        "all"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain",
+      "exit_code": 0,
+      "log": "final-check-test.log"
+    },
+    {
+      "argv": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61fa0aa6b096984c05c60d76347e418c/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "gate"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-gate.log"
+    },
+    {
+      "argv": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61fa0aa6b096984c05c60d76347e418c/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "robustness-qualified"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-robustness.log"
+    },
+    {
+      "argv": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61fa0aa6b096984c05c60d76347e418c/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "parity-audit"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-parity-audit.log"
+    },
+    {
+      "argv": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/61fa0aa6b096984c05c60d76347e418c/silex-optimizer-oracle",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+        "coverage-audit"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-coverage-audit.log"
+    },
+    {
+      "argv": [
+        "Silex/Toolchain/zig-out/bin/silex",
+        "test",
+        "Packages/GFX.ECS/Tests"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-package.log"
+    },
+    {
+      "argv": [
+        "Silex/Toolchain/zig-out/bin/silex",
+        "test",
+        "Packages/GFX.ECS/Tests/Consumer/Tests"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-consumer.log"
+    },
+    {
+      "argv": [
+        "Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "Packages/GFX.ECS/Tests/ECSUpdateLifetimeProbe.sx",
+        "-d",
+        "-n",
+        "-o",
+        "/private/tmp/ecs-final-lifetime-debug"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-lifetime-debug.log"
+    },
+    {
+      "argv": [
+        "/private/tmp/ecs-final-lifetime-debug"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "stdout": "99999\n",
+      "log": "final-lifetime-debug.log",
+      "binary_sha256": "557b322fb9f86a77fc0bcf421ab16469263fdad5aba7a350f8455e319752e14e"
+    },
+    {
+      "argv": [
+        "Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "Packages/GFX.ECS/Tests/ECSUpdateLifetimeProbe.sx",
+        "-r",
+        "-n",
+        "-o",
+        "/private/tmp/ecs-final-lifetime-release"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "log": "final-lifetime-release.log"
+    },
+    {
+      "argv": [
+        "/private/tmp/ecs-final-lifetime-release"
+      ],
+      "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+      "exit_code": 0,
+      "stdout": "99999\n",
+      "log": "final-lifetime-release.log",
+      "binary_sha256": "846ed69fc6a82167eb674f5bc780dee0ed70e88256e9093799e02d4233c90a73"
+    }
+  ],
+  "input_sha256": {
+    "Toolchain/Sources/Arm64/ListRuntime.zig": "eaa10380ba0a1d33d3c6e77e2c30be24d816027782b3fdc28896b16b26ee800b",
+    "Toolchain/Sources/Arm64/MemoryResidence.zig": "64e66a44a28e5164b4e69e362d1b48b617c1ea63655f98222755316129cc44fc",
+    "Toolchain/Sources/Arm64/ViewReplacementTests.zig": "4036ba6de6f95f3d1edb51b507fdad8464b32cec372c28bf9c8d5809e4239704",
+    "Tests/Native/MultipleReferenceCursors.sx": "2a65cd952f37dd7ad7a8492824d9ba9c04b9ac0d7a34392473e55136c249a640",
+    "Toolchain/Tools/OptimizerOracle/Registry.zig": "3efc2740c524a9edd15d790e1334f25904a3d67eff9d8b05fa9972a37e666b75",
+    "Toolchain/Tools/OptimizerOracle/QualificationHistory.zig": "d8bacead3ce4982d49547e9301060016b00e8cc3d387842b472e186c57ae4284",
+    "Toolchain/Benchmarks/Optimizer/Coverage.json": "73b8fafe00c516c5f7f2c5912cf2324fef3c1040d7233d0c8acf529d3dd00a7b",
+    "Toolchain/Benchmarks/Optimizer/Assurance.json": "69b3a75dad2ca31b3522658dfb6fa40e68840a15616e57533b4392b13b72578a",
+    "Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json": "fdecbe9588e6ff21e6fb53e53ed577a9feeca391e5e79d6c518cfb52feba1a2b",
+    "Toolchain/Benchmarks/Optimizer/Admission.json": "5b29ce39f439a170137c239a7eda51d2e6fc77e012644176615099feef0bae82",
+    "Toolchain/Benchmarks/Optimizer/Regressions/MultipleReferenceCursors.sx": "4d10954043c909c83a50c05107b2f53fe923aa91bc2a690d57e02359c07018b9"
+  },
+  "limits": [
+    "The five timing pairs in gate are diagnostic, not a statistically qualified performance result.",
+    "Native execution is verified here on macOS ARM64. Linux and Windows ARM64 machine emission is checked; their native execution remains required before integration.",
+    "The impact-selected external performance qualification remains part of the active Spec. GFX.ECS package/consumer semantics do not establish general compiler or Box2D performance parity."
+  ],
+  "artifact_sha256": {
+    "Closure.json": "b3e16b925c66de46ed56c9db6dbff7aeb22327dba1a54a4a39945222024eb105",
+    "CursorRegression.json": "b217be825891b8c68dd05b05b7e973d6d5ae372ef61a2e5dc1df98a5ea628f4c",
+    "GFX.ECS.delta.patch": "3d351b0c24796774f56483eeaa933555a5bfe68af303add3c5de632ccdd8304a",
+    "README.md": "6958843d199d50f377279bf85fc9a72f2c44a4defe87481851edb988f1fc0e5c",
+    "Reconciliation.json": "b620a6b66fa6628f58a131fd57ef7f826879099ec3dc631ef011029313d2d56b",
+    "assurance.tsv": "670ddbb7ca6001341e78cfb0595be45461678c24c7aaae6379cfbee3161dbebd",
+    "closure-check-test.log": "8d84e8d01d3c457f75ea009db154349633d9264a491004c8fffac554cfe2f7b5",
+    "closure-oracle-audit.log": "489fef68176e408afe1ecd87811af408576239b490eea06daf44b5c0902f96b7",
+    "compiler-admission.log": "ed27a49d3dc1154c027a1f15a5c9a44be58b2161508da130b1a5e270f97e4d1c",
+    "coverage-plan.tsv": "c5ca428fa03d03fd9b72f5a0f878333abd4c61be029d8aa44a85ba8dd86e9da3",
+    "cursor-before-debug.log": "4603a4d2cc8f44260264fea2169561753b43086f3c92902da7b988209dc40fce",
+    "cursor-before-release.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cursor-crash-assembly.log": "b718f1442d37fca8dd44958366477eb6bbfa7cc5a4f170ff673b51bd87696689",
+    "cursor-crash-lldb.log": "91c4043b2afa48a2ce88fd71e7ce03f0b415163bcef72053d386349139fdabec",
+    "cursor-fixed-debug.log": "4603a4d2cc8f44260264fea2169561753b43086f3c92902da7b988209dc40fce",
+    "cursor-fixed-release.log": "4603a4d2cc8f44260264fea2169561753b43086f3c92902da7b988209dc40fce",
+    "ecs-consumer-tests.log": "e664668d1b2c2997c3695d32248a42ecd6c24e52808a907124e765d756d8f291",
+    "ecs-lifetime-debug.log": "27f8d822ea64f5bdb9564c533195e35d21689b84bf074d83bb2d7a866b5276d4",
+    "ecs-lifetime-release.log": "27f8d822ea64f5bdb9564c533195e35d21689b84bf074d83bb2d7a866b5276d4",
+    "ecs-resolution.log": "7d89ce4aa497e7932ad9e81d650712662ec145970694478f4920dc1ae578cdf7",
+    "ecs-tests.log": "4745ee1c86121f4e9b4e368da9f9bf2b30a9d5a5a793629e4d7f74f06018c0e6",
+    "final-check-test.log": "38446d6e5cf3319a4824faf986a4dbdf52cb3f7149b82ede4c9d0ac23d8ec273",
+    "final-consumer.log": "e664668d1b2c2997c3695d32248a42ecd6c24e52808a907124e765d756d8f291",
+    "final-coverage-audit.log": "4aa08156e4776c2ebe5f0e933c2db9117623f5cd0d88c96213706d885d13ed12",
+    "final-gate.log": "6e334dbaeea253e48b961530708ec72294307c1ef3d763c21c0328d1b4a7c672",
+    "final-lifetime-debug.log": "27f8d822ea64f5bdb9564c533195e35d21689b84bf074d83bb2d7a866b5276d4",
+    "final-lifetime-release.log": "27f8d822ea64f5bdb9564c533195e35d21689b84bf074d83bb2d7a866b5276d4",
+    "final-package.log": "4745ee1c86121f4e9b4e368da9f9bf2b30a9d5a5a793629e4d7f74f06018c0e6",
+    "final-parity-audit.log": "d55794195a0a9936f6de1557f5bfe00f6c92ed99a3024eb32a88f34b8c55129f",
+    "final-robustness.log": "51cb7604455d81b036c752635f2921a70b9aaf9d390b9b276c79aa40f595a934",
+    "gate-before-cursor-fix.log": "0492c14d1a8b96cea8a1195e5e99a484169c8e544796db8c54c16063235378b3",
+    "interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv": "f668eafdd03ae36169d1a10cff99f64f1a2e4fd894ebbb4c93d0461f3cd5909c",
+    "llvm-operation-coverage.tsv": "c93106558dc23a5415a080e45dc790c50804932905b34dfa881171ed437c8bd7",
+    "oracle-admission.log": "627061e1bed91a4898b80836b9910202a1340778141b5a06131a94c74b7070a7",
+    "proof-scope.tsv": "9fe52dcdef7365a8ab50b6352f82ed53c6b890b8b0cf131977d75673120b986d",
+    "run-qualified-1789107609510704000.tsv": "fec04a3eeafbfac92692fc0b1598b932d87f6b821742145aa49c090a99aba8c5"
+  }
+}

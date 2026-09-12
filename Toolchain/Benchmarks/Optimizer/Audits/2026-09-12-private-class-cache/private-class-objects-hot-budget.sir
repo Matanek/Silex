@@ -1,0 +1,115 @@
+protocol @Objects.Value {
+}
+
+struct @Objects.Snapshot {
+    let .value:int
+}
+
+struct @Objects.Counter {
+    var .value:int
+}
+
+struct @int[] {
+}
+
+struct @int[..] {
+}
+
+func @Objects.calculate(%0:int) -> int {
+entry:
+    %1:int = const 0
+    %2:@Objects.Counter = struct.init @Objects.Counter(.value=%1)
+    class.retain %2
+    store $0:structure, %2
+    %3:int = const 3
+    %4:int = const 5
+    %5:int = const 7
+    %6:int = const 11
+    %7:@int[] = list.init [%3, %4, %5, %6]
+    %8:int = const 0
+    %44:int = copy %8
+    %53:int = copy %1
+    jump bb1
+bb1:
+    %10:bool = lt %44, %0
+    branch %10, bb2, bb3
+bb2:
+    %12:int = const 2
+    %13:int = rem %44, %12
+    %14:int = const 0
+    %15:bool = eq %13, %14
+    branch %15, bb4, bb5
+bb3:
+    %31:@Objects.Snapshot = struct.init @Objects.Snapshot(.value=%53)
+    %32:@Objects.Value = protocol.init @Objects.Value from %31
+    %33:bool = protocol.test %32, @Objects.Snapshot
+    branch %33, bb7, bb7
+bb4:
+    %16:@Objects.Counter = load $0:structure
+    %18:int = const 4
+    %19:int = rem %44, %18
+    %20:int = collection.load %7, %19
+    %47:int = add %53, %20
+    %48:@Objects.Counter = class.store %16, .value, %47
+    %22:@Objects.Counter = copy %48
+    store $0:structure, %22
+    %53:int = copy %47
+    jump bb6
+bb5:
+    %23:@Objects.Counter = load $0:structure
+    %24:int = const 1
+    %50:int = add %53, %24
+    %51:@Objects.Counter = class.store %23, .value, %50
+    %25:@Objects.Counter = copy %51
+    store $0:structure, %25
+    %53:int = copy %50
+    jump bb6
+bb6:
+    %27:int = const 1
+    %28:int = add %44, %27
+    %44:int = copy %28
+    jump bb1
+bb7:
+    %35:@Objects.Value = copy %32
+    %38:@Objects.Snapshot = protocol.extract %35 as @Objects.Snapshot
+    %52:int = field %38, .value
+    %36:@Objects.Value = protocol.init @Objects.Value from %38
+    %40:@Objects.Value = copy %36
+    %41:bool = protocol.test %40, @Objects.Snapshot
+    branch %41, bb8, bb8
+bb8:
+    list.drop %7
+    %43:@Objects.Counter = load $0:structure
+    class.drop %43, Objects.Counter => [@Objects.Counter.$fields]
+    return %52
+}
+
+func @Objects.identity<int>(%0:int) -> int {
+entry:
+    return %0
+}
+
+func @Objects.Snapshot.get#0(%0:@Objects.Snapshot) -> int {
+entry:
+    %1:int = field %0, .value
+    return %1
+}
+
+func @Objects.Counter.add#0(%0:@Objects.Counter, %1:int) -> @Objects.Counter {
+entry:
+    %3:int = field %0, .value
+    %4:int = add %3, %1
+    %7:@Objects.Counter = class.store %0, .value, %4
+    return %7
+}
+
+func @Objects.Counter.get#1(%0:@Objects.Counter) -> int {
+entry:
+    %1:int = field %0, .value
+    return %1
+}
+
+func @Objects.Counter.$fields(%0:@Objects.Counter) -> void {
+entry:
+    return
+}

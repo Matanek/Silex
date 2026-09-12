@@ -1,0 +1,332 @@
+{
+  "mode": "diagnostic",
+  "scope": "process wall time including startup; fixed 250000-iteration view reduction; no LLVM comparator or physical X64 claim",
+  "warmup_rotations": 6,
+  "rotations": 21,
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "Apple M3 Pro",
+  "binary_sha256": {
+    "before": "7f79deddb2f8383f5da2a003ca5fb26516ef437ca290bbc7fceec03f375d8602",
+    "forwarding": "11a19f410bbd70fcc720117653854b71384f6ceef7150c91d93770942fe94799",
+    "after": "c335ae35d59cc70ca85020852301abb34bdc641253c7a0b280cba500d3b9dddc"
+  },
+  "binary_bytes": {
+    "before": 32952,
+    "forwarding": 32952,
+    "after": 32952
+  },
+  "source_sha256": "7fdb0c8f16c97951f93ffdb633504f6ae8dc09ed57fdac1b1ea784b1e496e453",
+  "observations": [
+    {
+      "index": 0,
+      "order": [
+        "before",
+        "forwarding",
+        "after"
+      ],
+      "before_ns": 350275583,
+      "forwarding_ns": 361487334,
+      "after_ns": 3656042,
+      "after_before": 0.010437615915694587,
+      "after_forwarding": 0.010113886867195186
+    },
+    {
+      "index": 1,
+      "order": [
+        "forwarding",
+        "after",
+        "before"
+      ],
+      "forwarding_ns": 372775958,
+      "after_ns": 3838166,
+      "before_ns": 359536583,
+      "after_before": 0.010675314228037818,
+      "after_forwarding": 0.010296173660426889
+    },
+    {
+      "index": 2,
+      "order": [
+        "after",
+        "before",
+        "forwarding"
+      ],
+      "after_ns": 3600667,
+      "before_ns": 349994375,
+      "forwarding_ns": 360465417,
+      "after_before": 0.01028778533940724,
+      "after_forwarding": 0.00998893882793755
+    },
+    {
+      "index": 3,
+      "order": [
+        "before",
+        "forwarding",
+        "after"
+      ],
+      "before_ns": 343792625,
+      "forwarding_ns": 370446792,
+      "after_ns": 4115458,
+      "after_before": 0.011970757080667452,
+      "after_forwarding": 0.011109444295039272
+    },
+    {
+      "index": 4,
+      "order": [
+        "forwarding",
+        "after",
+        "before"
+      ],
+      "forwarding_ns": 366511875,
+      "after_ns": 3616291,
+      "before_ns": 344525917,
+      "after_before": 0.010496426601195288,
+      "after_forwarding": 0.009866777167861204
+    },
+    {
+      "index": 5,
+      "order": [
+        "after",
+        "before",
+        "forwarding"
+      ],
+      "after_ns": 3741084,
+      "before_ns": 349506583,
+      "forwarding_ns": 374576917,
+      "after_before": 0.010703901391179233,
+      "after_forwarding": 0.009987492101655586
+    },
+    {
+      "index": 6,
+      "order": [
+        "before",
+        "forwarding",
+        "after"
+      ],
+      "before_ns": 357909875,
+      "forwarding_ns": 337898083,
+      "after_ns": 3849291,
+      "after_before": 0.010754917002499581,
+      "after_forwarding": 0.011391869897054136
+    },
+    {
+      "index": 7,
+      "order": [
+        "forwarding",
+        "after",
+        "before"
+      ],
+      "forwarding_ns": 343755417,
+      "after_ns": 3518458,
+      "before_ns": 337275084,
+      "after_before": 0.010432012819541689,
+      "after_forwarding": 0.01023535288754446
+    },
+    {
+      "index": 8,
+      "order": [
+        "after",
+        "before",
+        "forwarding"
+      ],
+      "after_ns": 3506166,
+      "before_ns": 347489584,
+      "forwarding_ns": 361159291,
+      "after_before": 0.01008998876927488,
+      "after_forwarding": 0.009708087504247537
+    },
+    {
+      "index": 9,
+      "order": [
+        "before",
+        "forwarding",
+        "after"
+      ],
+      "before_ns": 338016916,
+      "forwarding_ns": 337259208,
+      "after_ns": 3910292,
+      "after_before": 0.011568332278376269,
+      "after_forwarding": 0.011594322429886035
+    },
+    {
+      "index": 10,
+      "order": [
+        "forwarding",
+        "after",
+        "before"
+      ],
+      "forwarding_ns": 348158750,
+      "after_ns": 3742167,
+      "before_ns": 337209666,
+      "after_before": 0.011097448790213505,
+      "after_forwarding": 0.010748450240012638
+    },
+    {
+      "index": 11,
+      "order": [
+        "after",
+        "before",
+        "forwarding"
+      ],
+      "after_ns": 3707292,
+      "before_ns": 367896917,
+      "forwarding_ns": 354809000,
+      "after_before": 0.010076985776969694,
+      "after_forwarding": 0.010448697750057074
+    },
+    {
+      "index": 12,
+      "order": [
+        "before",
+        "forwarding",
+        "after"
+      ],
+      "before_ns": 342095833,
+      "forwarding_ns": 357014709,
+      "after_ns": 3533875,
+      "after_before": 0.010330073210801139,
+      "after_forwarding": 0.009898401693023803
+    },
+    {
+      "index": 13,
+      "order": [
+        "forwarding",
+        "after",
+        "before"
+      ],
+      "forwarding_ns": 337959291,
+      "after_ns": 3728584,
+      "before_ns": 345598625,
+      "after_before": 0.010788769775921418,
+      "after_forwarding": 0.011032642390056382
+    },
+    {
+      "index": 14,
+      "order": [
+        "after",
+        "before",
+        "forwarding"
+      ],
+      "after_ns": 3405167,
+      "before_ns": 359456417,
+      "forwarding_ns": 359661458,
+      "after_before": 0.009473101157629355,
+      "after_forwarding": 0.00946770059526367
+    },
+    {
+      "index": 15,
+      "order": [
+        "before",
+        "forwarding",
+        "after"
+      ],
+      "before_ns": 342529625,
+      "forwarding_ns": 360751333,
+      "after_ns": 3435958,
+      "after_before": 0.010031126504751232,
+      "after_forwarding": 0.009524449906883642
+    },
+    {
+      "index": 16,
+      "order": [
+        "forwarding",
+        "after",
+        "before"
+      ],
+      "forwarding_ns": 350766625,
+      "after_ns": 3440750,
+      "before_ns": 343213084,
+      "after_before": 0.01002511314516203,
+      "after_forwarding": 0.009809228571846025
+    },
+    {
+      "index": 17,
+      "order": [
+        "after",
+        "before",
+        "forwarding"
+      ],
+      "after_ns": 3488667,
+      "before_ns": 343313625,
+      "forwarding_ns": 363240417,
+      "after_before": 0.010161749333426543,
+      "after_forwarding": 0.009604291914465013
+    },
+    {
+      "index": 18,
+      "order": [
+        "before",
+        "forwarding",
+        "after"
+      ],
+      "before_ns": 345422958,
+      "forwarding_ns": 353222875,
+      "after_ns": 3483208,
+      "after_before": 0.010083892570915914,
+      "after_forwarding": 0.009861218642762024
+    },
+    {
+      "index": 19,
+      "order": [
+        "forwarding",
+        "after",
+        "before"
+      ],
+      "forwarding_ns": 344992500,
+      "after_ns": 3887625,
+      "before_ns": 364078333,
+      "after_before": 0.01067799055210462,
+      "after_forwarding": 0.011268723233113764
+    },
+    {
+      "index": 20,
+      "order": [
+        "after",
+        "before",
+        "forwarding"
+      ],
+      "after_ns": 3604084,
+      "before_ns": 360636583,
+      "forwarding_ns": 363621542,
+      "after_before": 0.009993672771683287,
+      "after_forwarding": 0.00991163499328651
+    }
+  ],
+  "summary": {
+    "before_ns": {
+      "median": 345598625,
+      "minimum": 337209666,
+      "maximum": 367896917,
+      "mad": 4395750,
+      "half_shift": -0.008571903667298097
+    },
+    "forwarding_ns": {
+      "median": 359661458,
+      "minimum": 337259208,
+      "maximum": 374576917,
+      "mad": 6850417,
+      "half_shift": -0.014976775128507702
+    },
+    "after_ns": {
+      "median": 3616291,
+      "minimum": 3405167,
+      "maximum": 4115458,
+      "mad": 125876,
+      "half_shift": -0.05063912660133141
+    },
+    "after_before": {
+      "median": 0.010432012819541689,
+      "minimum": 0.009473101157629355,
+      "maximum": 0.011970757080667452,
+      "mad": 0.0003420240502668096,
+      "half_shift": -0.04774583675007671
+    },
+    "after_forwarding": {
+      "median": 0.00998893882793755,
+      "minimum": 0.00946770059526367,
+      "maximum": 0.011594322429886035,
+      "mad": 0.0003072348324893396,
+      "half_shift": -0.028975009683911424
+    }
+  }
+}

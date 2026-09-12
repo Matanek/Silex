@@ -51,6 +51,27 @@ pub fn verify(
     return result;
 }
 
+// Runtime errors have an ordered observable prefix and a normal exit status.
+// A signal or merely matching Debug/Release failures cannot satisfy this gate.
+pub fn verifyFailure(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    silex_binary: []const u8,
+    source_path: []const u8,
+    artifact_stem: []const u8,
+    prefix: []const u8,
+) !void {
+    const expected = .{ .exit_code = @as(u8, 1), .stdout = prefix, .stderr = @as([]const u8, "") };
+    for ([_]Mode{ .debug, .release }) |mode| {
+        const path = try std.fmt.allocPrint(allocator, "{s}-{s}", .{ artifact_stem, @tagName(mode) });
+        const actual = try compileAndRun(allocator, io, silex_binary, source_path, path, mode);
+        if (!equal(expected, actual)) {
+            reportMismatch(@tagName(mode), source_path, expected, actual);
+            return error.NativeFailureMismatch;
+        }
+    }
+}
+
 fn compileAndRun(
     allocator: std.mem.Allocator,
     io: std.Io,

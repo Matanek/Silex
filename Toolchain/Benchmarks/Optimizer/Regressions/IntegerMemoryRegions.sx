@@ -1,0 +1,70 @@
+protocol Value { func get() int }
+struct Snapshot:Value {
+    let value:int
+    func get() int { return self.value }
+}
+class Counter {
+    var value:int
+    func add(amount:int) { self.value += amount }
+    func get() int { return self.value }
+}
+func calculate(iterations:int) int {
+    var counter = Counter()
+    var observer = counter
+    let values = [3, 5, 7, 11]
+    var index = 0
+    while index < iterations {
+        if index % 2 == 0 { counter.add(values[index % values.count()]) }
+        else { counter.add(1) }
+        index++
+    }
+    var result:Value = Snapshot(value:observer.get())
+    return result.get()
+}
+func signedSteps(count:int) int {
+    var value = 7
+    var index = 0
+    while index < count {
+        value = (value * 3 + index) % 1023 - 17
+        index++
+    }
+    return value
+}
+func unsignedSteps(count:int) uint {
+    var value:uint = 7
+    var index = 0
+    while index < count {
+        value = ((value * 3 + index as uint) & 1023) ^ 17
+        index++
+    }
+    return value
+}
+func narrowSteps(count:int) int8 {
+    var value:int8 = 7
+    var index = 0
+    while index < count {
+        value = (value + (index % 7) as int8) % 97
+        index++
+    }
+    return value
+}
+func main() {
+    print(calculate(-1) == 0)
+    print(calculate(0) == 0)
+    print(calculate(1) == 3)
+    print(calculate(2) == 4)
+    print(calculate(3) == 11)
+    print(calculate(4) == 12)
+    print(calculate(5) == 15)
+    print(calculate(20) == 60)
+    print(calculate(100) == 300)
+    print(calculate(10000) == 30000)
+    print(signedSteps(0) == 7)
+    print(signedSteps(1) == 4)
+    print(signedSteps(2) == -4)
+    print(signedSteps(1000) == 376)
+    print(unsignedSteps(0) == 7)
+    print(unsignedSteps(1000) == 635)
+    print(narrowSteps(0) == 7)
+    print(narrowSteps(1000) == 94)
+}

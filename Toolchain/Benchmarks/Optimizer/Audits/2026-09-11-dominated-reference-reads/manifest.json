@@ -1,0 +1,25 @@
+{
+  "candidate": "b7f8603e0f797d42a789ecec9bc86fee7efe6177",
+  "files": {
+    "DominatedReferenceReads.sx.txt": "3e57f274e30b4dbd5c4059f5c3e6b5fb15b1486eedf220b5616bd70c0c88f506",
+    "README.md": "23957bc342fe7c64f190f9ddd238666f92c8d71156579d9a8903f8fdc00f6dae",
+    "binaries.json": "73afe0360240ad9348d4e94fbbbc1416cac1919fd729dc6e0ac561561128afcc",
+    "measure_preparation_reference.py": "f3ab6737f80edcd7c8a0720ed632e7e6335eed3358783138da2f436ed79e88e7",
+    "metrics.json": "cb6715412929832bcb700c21d61a7cd9c5aa9e7254e036e32313f17fedd956f0",
+    "preparation-clang-all.asm": "784c0f57d32c63433a95d79730c2d77f15e4122ed170a290fcfdf9a7982fc74a",
+    "preparation-reference-all.asm": "99244d2c77a8cdfa44d42c19492a18b653fca59eb54a5f6473e640f025f641ee",
+    "preparation-reference-correctness.json": "1343fea6009ddd347f724031b3e1fefa78355b929c1b3276e562f219c710e024",
+    "preparation-reference-main.asm": "1a8a5c9370bac332043317767004df432887c3419f5b9a57c9402b1cb10c9a9b",
+    "preparation-reference-prepare.asm": "ebe3eaa280e77868cad3e2acd6b8ebba380fbd127e21d6d21fe5c1d3f2b961eb",
+    "preparation-reference-states.txt": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+    "preparation-reference-timing.json": "72cba37eb724dfd5caecf2b9ca657033a11bb51de143edb178261233e3fae03e",
+    "preparation-reference-timing.log": "087dad22ea3252d8338f4d96fbbff54938a1535f3ebbad5ae8fd5d0d21ac4ba3",
+    "reference-check-test.log": "1986e88475ad04f61b748f21bb56dd9fd39103b45069ef08fc5808d7aa891075",
+    "reference-main-hot-budget-machine.json": "5f61836da008ac3c5e33d9727a5a6f868632cb19109cde5e048c720295fe2db2",
+    "reference-main-hot-budget.sir": "b9e4d504ceec74b520d774898b0e0ebdde59e8f1d9e1c878e59d96b383140529",
+    "reference-main-profile.log": "a390958f6589e651c460d2295d27307bd4c638361ac2d85fb95afa854b504629",
+    "reference-optimizer-gate.log": "165f3d17adfd398c333d9286df62f9e70561264ea40aea606d7f2d77e55ae364",
+    "reference-qualify-x64.log": "c14815aec6a7a0811d1ceab485ba7b6703b53681639e3d3bf7417744eab508a2",
+    "reference-robustness.log": "fb8d2322d33ca647b8ca8ca4f27a3109a9d6ccbbec4bb789052456ec9d38f109"
+  }
+}

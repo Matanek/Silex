@@ -1,0 +1,82 @@
+{
+  "workflow_sha256": "4b87d5a65025b844e35922588a7ee30e991b8f601dcb317615c1c83e2a7de7f7",
+  "yaml_parsed": true,
+  "bash_bodies": [
+    {
+      "job": "macos-x64",
+      "step": "Install Zig 0.16.0",
+      "bash_syntax": true
+    },
+    {
+      "job": "macos-x64",
+      "step": "Build and validate Silex on macOS X64",
+      "bash_syntax": true
+    },
+    {
+      "job": "optimizer-x64",
+      "step": "Install Zig 0.16.0",
+      "bash_syntax": true
+    },
+    {
+      "job": "optimizer-x64",
+      "step": "Record the native candidate",
+      "bash_syntax": true
+    },
+    {
+      "job": "optimizer-x64",
+      "step": "Isolate the optimizer fixture workspace",
+      "bash_syntax": true
+    },
+    {
+      "job": "optimizer-x64",
+      "step": "Qualify native optimizer regressions",
+      "bash_syntax": true
+    },
+    {
+      "job": "optimizer-x64",
+      "step": "Build the frozen baseline executables",
+      "bash_syntax": true
+    },
+    {
+      "job": "optimizer-x64",
+      "step": "Run the native X64 campaign",
+      "bash_syntax": true
+    },
+    {
+      "job": "linux-arm64",
+      "step": "Verify native ARM64 runner",
+      "bash_syntax": true
+    },
+    {
+      "job": "linux-arm64",
+      "step": "Install Zig 0.16.0 for Linux ARM64",
+      "bash_syntax": true
+    },
+    {
+      "job": "linux-arm64",
+      "step": "Build and validate Silex on Linux ARM64",
+      "bash_syntax": true
+    },
+    {
+      "job": "linux-x64",
+      "step": "Install Zig 0.16.0",
+      "bash_syntax": true
+    },
+    {
+      "job": "linux-x64",
+      "step": "Build and validate Silex on Linux X64",
+      "bash_syntax": true
+    },
+    {
+      "job": "windows-arm64-build",
+      "step": "Install Zig 0.16.0",
+      "bash_syntax": true
+    },
+    {
+      "job": "windows-arm64-build",
+      "step": "Cross-build the Windows ARM64 bootstrap",
+      "bash_syntax": true
+    }
+  ],
+  "powershell": "inspected; native execution delegated to the exact candidate workflow"
+}

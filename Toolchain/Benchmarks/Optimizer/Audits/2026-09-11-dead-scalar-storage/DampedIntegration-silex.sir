@@ -1,0 +1,570 @@
+struct @Body {
+    var .vx:float
+    var .vy:float
+    var .w:float
+    var .px:float
+    var .py:float
+}
+
+struct @Forces {
+    var .x:float
+    var .y:float
+    var .torque:float
+    var .inverse_mass:float
+    var .inverse_inertia:float
+    var .gravity_scale:float
+    var .damping:float
+    var .angular_damping:float
+}
+
+struct @Body[..] {
+}
+
+struct @Forces[..] {
+}
+
+struct @Body[] {
+}
+
+struct @Forces[] {
+}
+
+func @velocity(%0:internal address, %1:internal address, %2:float) -> void {
+entry:
+    %3:float = const 1
+    %4:float = const 1
+    %80:internal address = reference.field %1, damping
+    %5:float = reference.load %80
+    %6:float = mul %2, %5
+    %7:float = add %4, %6
+    %8:float = div %3, %7
+    %9:float = const 1
+    %10:float = const 1
+    %81:internal address = reference.field %1, angular_damping
+    %11:float = reference.load %81
+    %12:float = mul %2, %11
+    %13:float = add %10, %12
+    %14:float = div %9, %13
+    %15:float = const 0
+    %82:internal address = reference.field %1, inverse_mass
+    %16:float = reference.load %82
+    %17:float = const 0
+    %18:bool = gt %16, %17
+    %98:float = copy %15
+    branch %18, bb1, bb2
+bb1:
+    %83:internal address = reference.field %1, gravity_scale
+    %19:float = reference.load %83
+    %98:float = copy %19
+    jump bb2
+bb2:
+    %84:internal address = reference.field %1, inverse_mass
+    %22:float = reference.load %84
+    %23:float = mul %2, %22
+    %85:internal address = reference.field %1, x
+    %24:float = reference.load %85
+    %25:float = mul %23, %24
+    %95:internal address = reference.field %0, vx
+    %92:float = reference.load %95
+    %27:float = copy %92
+    %29:float = mul %8, %27
+    %30:float = add %25, %29
+    %89:internal address = reference.field %0, vx
+    reference.store %89, %30
+    %41:float = mul %2, %22
+    %86:internal address = reference.field %1, y
+    %42:float = reference.load %86
+    %43:float = mul %41, %42
+    %44:float = copy %98
+    %45:float = mul %2, %44
+    %47:float = const -10
+    %48:float = mul %45, %47
+    %49:float = add %43, %48
+    %96:internal address = reference.field %0, vy
+    %93:float = reference.load %96
+    %51:float = copy %93
+    %53:float = mul %8, %51
+    %54:float = add %49, %53
+    %90:internal address = reference.field %0, vy
+    reference.store %90, %54
+    %87:internal address = reference.field %1, inverse_inertia
+    %64:float = reference.load %87
+    %65:float = mul %2, %64
+    %88:internal address = reference.field %1, torque
+    %66:float = reference.load %88
+    %67:float = mul %65, %66
+    %97:internal address = reference.field %0, w
+    %94:float = reference.load %97
+    %69:float = copy %94
+    %71:float = mul %14, %69
+    %72:float = add %67, %71
+    %91:internal address = reference.field %0, w
+    reference.store %91, %72
+    return
+}
+
+func @position(%0:internal address, %1:float) -> void {
+entry:
+    %36:internal address = reference.field %0, px
+    %32:float = reference.load %36
+    %37:internal address = reference.field %0, vx
+    %33:float = reference.load %37
+    %7:float = mul %1, %33
+    %8:float = add %32, %7
+    %30:internal address = reference.field %0, px
+    reference.store %30, %8
+    %38:internal address = reference.field %0, py
+    %34:float = reference.load %38
+    %39:internal address = reference.field %0, vy
+    %35:float = reference.load %39
+    %21:float = mul %1, %35
+    %22:float = add %34, %21
+    %31:internal address = reference.field %0, py
+    reference.store %31, %22
+    return
+}
+
+func @integrate(%0:@Body[..], %1:@Forces[..], %2:float) -> void {
+entry:
+    store $0:structure, %0
+    %3:int = const 0
+    %35:int = copy %3
+    jump bb1
+bb1:
+    %5:@Body[..] = load $0:structure
+    %6:int = collection.count %5
+    %7:bool = lt %35, %6
+    branch %7, bb2, bb3
+bb2:
+    %12:internal address = collection.reference %1, %35
+    %13:internal address = address $0:structure
+    %14:@Body[..] = load $0:structure
+    %16:internal address = collection.reference %14, %35, through %13 bounded
+    %53:float = const 1
+    %54:float = const 1
+    %130:internal address = reference.field %12, damping
+    %55:float = reference.load %130
+    %56:float = mul %2, %55
+    %57:float = add %54, %56
+    %58:float = div %53, %57
+    %59:float = const 1
+    %60:float = const 1
+    %131:internal address = reference.field %12, angular_damping
+    %61:float = reference.load %131
+    %62:float = mul %2, %61
+    %63:float = add %60, %62
+    %64:float = div %59, %63
+    %65:float = const 0
+    %132:internal address = reference.field %12, inverse_mass
+    %66:float = reference.load %132
+    %67:float = const 0
+    %68:bool = gt %66, %67
+    %148:float = copy %65
+    branch %68, bb7, bb8
+bb3:
+    %20:int = const 0
+    %36:int = copy %20
+    jump bb4
+bb4:
+    %22:@Body[..] = load $0:structure
+    %23:int = collection.count %22
+    %24:bool = lt %36, %23
+    branch %24, bb5, bb6
+bb5:
+    %28:internal address = address $0:structure
+    %29:@Body[..] = load $0:structure
+    %31:internal address = collection.reference %29, %36, through %28 bounded
+    %37:internal address = reference.field %31, px
+    %38:float = reference.load %37
+    %39:internal address = reference.field %31, vx
+    %40:float = reference.load %39
+    %41:float = mul %2, %40
+    %42:float = add %38, %41
+    %44:internal address = reference.field %31, px
+    reference.store %44, %42
+    %45:internal address = reference.field %31, py
+    %46:float = reference.load %45
+    %47:internal address = reference.field %31, vy
+    %48:float = reference.load %47
+    %49:float = mul %2, %48
+    %50:float = add %46, %49
+    %52:internal address = reference.field %31, py
+    reference.store %52, %50
+    %33:int = const 1
+    %34:int = add %36, %33
+    %36:int = copy %34
+    jump bb4
+bb6:
+    return
+bb7:
+    %133:internal address = reference.field %12, gravity_scale
+    %69:float = reference.load %133
+    %148:float = copy %69
+    jump bb8
+bb8:
+    %134:internal address = reference.field %12, inverse_mass
+    %72:float = reference.load %134
+    %73:float = mul %2, %72
+    %135:internal address = reference.field %12, x
+    %74:float = reference.load %135
+    %75:float = mul %73, %74
+    %145:internal address = reference.field %16, vx
+    %142:float = reference.load %145
+    %79:float = mul %58, %142
+    %80:float = add %75, %79
+    %139:internal address = reference.field %16, vx
+    reference.store %139, %80
+    %91:float = mul %2, %72
+    %136:internal address = reference.field %12, y
+    %92:float = reference.load %136
+    %93:float = mul %91, %92
+    %94:float = copy %148
+    %95:float = mul %2, %94
+    %97:float = const -10
+    %98:float = mul %95, %97
+    %99:float = add %93, %98
+    %146:internal address = reference.field %16, vy
+    %143:float = reference.load %146
+    %103:float = mul %58, %143
+    %104:float = add %99, %103
+    %140:internal address = reference.field %16, vy
+    reference.store %140, %104
+    %137:internal address = reference.field %12, inverse_inertia
+    %114:float = reference.load %137
+    %115:float = mul %2, %114
+    %138:internal address = reference.field %12, torque
+    %116:float = reference.load %138
+    %117:float = mul %115, %116
+    %147:internal address = reference.field %16, w
+    %144:float = reference.load %147
+    %121:float = mul %64, %144
+    %122:float = add %117, %121
+    %141:internal address = reference.field %16, w
+    reference.store %141, %122
+    %18:int = const 1
+    %19:int = add %35, %18
+    %35:int = copy %19
+    jump bb1
+}
+
+func @main() -> void {
+entry:
+    %0:float = const 4
+    %1:float = const 2
+    %2:float = const 1
+    %3:float = const 0
+    %4:float = const 0
+    %5:@Body = struct.init @Body(.vx=%0, .vy=%1, .w=%2, .px=%3, .py=%4)
+    %6:float = const 1
+    %8:float = const -2
+    %9:float = const 0.5
+    %10:float = const 8
+    %12:float = const -8
+    %13:@Body = struct.init @Body(.vx=%6, .vy=%8, .w=%9, .px=%10, .py=%12)
+    %14:@Body[] = list.init [%5, %13]
+    store $0:structure, %14
+    %15:float = const 2
+    %17:float = const -4
+    %18:float = const 8
+    %19:float = const 0.5
+    %20:float = const 0.25
+    %21:float = const 1
+    %22:float = const 8
+    %23:float = const 8
+    %24:@Forces = struct.init @Forces(.x=%15, .y=%17, .torque=%18, .inverse_mass=%19, .inverse_inertia=%20, .gravity_scale=%21, .damping=%22, .angular_damping=%23)
+    %25:float = const 0
+    %26:float = const 0
+    %27:float = const 0
+    %28:float = const 0
+    %29:float = const 0
+    %30:float = const 1
+    %31:float = const 0
+    %32:float = const 0
+    %33:@Forces = struct.init @Forces(.x=%25, .y=%26, .torque=%27, .inverse_mass=%28, .inverse_inertia=%29, .gravity_scale=%30, .damping=%31, .angular_damping=%32)
+    %34:@Forces[] = list.init [%24, %33]
+    %35:@Body[] = load $0:structure
+    %36:internal address = address $0:structure
+    %38:int = const 0
+    %39:int = const 2
+    %40:@Body[..] = collection.view %35, %38, %39, through %36
+    store $1:structure, %40
+    %41:int = const 0
+    %42:int = const 2
+    %43:@Forces[..] = collection.view %34, %41, %42
+    %44:@Body[..] = load $1:structure
+    %45:float = const 0.125
+    call @integrate(%44, %43, %45)
+    %46:@Body[..] = load $1:structure
+    %47:int = const 0
+    %226:internal address = collection.reference %46, %47
+    %227:internal address = reference.field %226, vx
+    %206:float = reference.load %227
+    %49:float = copy %206
+    %50:float = const 2.125
+    %51:bool = eq %49, %50
+    branch %51, bb1, bb3
+bb1:
+    %53:@Body[..] = load $1:structure
+    %54:int = const 0
+    %228:internal address = collection.reference %53, %54
+    %229:internal address = reference.field %228, vy
+    %207:float = reference.load %229
+    %56:float = copy %207
+    %58:float = const -0.5
+    %59:bool = eq %56, %58
+    branch %59, bb2, bb3
+bb2:
+    %61:@Body[..] = load $1:structure
+    %62:int = const 0
+    %230:internal address = collection.reference %61, %62
+    %231:internal address = reference.field %230, w
+    %208:float = reference.load %231
+    %64:float = copy %208
+    %65:float = const 0.75
+    %66:bool = eq %64, %65
+    %60:bool = copy %66
+    jump bb4
+bb3:
+    %60:bool = const false
+    jump bb4
+bb4:
+    print %60
+    %67:@Body[..] = load $1:structure
+    %68:int = const 0
+    %232:internal address = collection.reference %67, %68
+    %233:internal address = reference.field %232, px
+    %209:float = reference.load %233
+    %70:float = copy %209
+    %71:float = const 0.265625
+    %72:bool = eq %70, %71
+    branch %72, bb5, bb6
+bb5:
+    %74:@Body[..] = load $1:structure
+    %75:int = const 0
+    %234:internal address = collection.reference %74, %75
+    %235:internal address = reference.field %234, py
+    %210:float = reference.load %235
+    %77:float = copy %210
+    %79:float = const -0.0625
+    %80:bool = eq %77, %79
+    %73:bool = copy %80
+    jump bb7
+bb6:
+    %73:bool = const false
+    jump bb7
+bb7:
+    print %73
+    %81:@Body[..] = load $1:structure
+    %82:int = const 1
+    %236:internal address = collection.reference %81, %82
+    %237:internal address = reference.field %236, vx
+    %211:float = reference.load %237
+    %84:float = copy %211
+    %85:float = const 1
+    %86:bool = eq %84, %85
+    branch %86, bb8, bb10
+bb8:
+    %88:@Body[..] = load $1:structure
+    %89:int = const 1
+    %238:internal address = collection.reference %88, %89
+    %239:internal address = reference.field %238, vy
+    %212:float = reference.load %239
+    %91:float = copy %212
+    %93:float = const -2
+    %94:bool = eq %91, %93
+    branch %94, bb9, bb10
+bb9:
+    %96:@Body[..] = load $1:structure
+    %97:int = const 1
+    %240:internal address = collection.reference %96, %97
+    %241:internal address = reference.field %240, w
+    %213:float = reference.load %241
+    %99:float = copy %213
+    %100:float = const 0.5
+    %101:bool = eq %99, %100
+    %95:bool = copy %101
+    jump bb11
+bb10:
+    %95:bool = const false
+    jump bb11
+bb11:
+    print %95
+    %102:@Body[..] = load $1:structure
+    %103:int = const 1
+    %242:internal address = collection.reference %102, %103
+    %243:internal address = reference.field %242, px
+    %214:float = reference.load %243
+    %105:float = copy %214
+    %106:float = const 8.125
+    %107:bool = eq %105, %106
+    branch %107, bb12, bb13
+bb12:
+    %109:@Body[..] = load $1:structure
+    %110:int = const 1
+    %244:internal address = collection.reference %109, %110
+    %245:internal address = reference.field %244, py
+    %215:float = reference.load %245
+    %112:float = copy %215
+    %114:float = const -8.25
+    %115:bool = eq %112, %114
+    %108:bool = copy %115
+    jump bb14
+bb13:
+    %108:bool = const false
+    jump bb14
+bb14:
+    print %108
+    %116:@Body[..] = load $1:structure
+    %117:float = const 0.125
+    call @integrate(%116, %43, %117)
+    %118:@Body[..] = load $1:structure
+    %119:int = const 0
+    %246:internal address = collection.reference %118, %119
+    %247:internal address = reference.field %246, vx
+    %216:float = reference.load %247
+    %121:float = copy %216
+    %122:float = const 1.1875
+    %123:bool = eq %121, %122
+    branch %123, bb15, bb17
+bb15:
+    %125:@Body[..] = load $1:structure
+    %126:int = const 0
+    %248:internal address = collection.reference %125, %126
+    %249:internal address = reference.field %248, vy
+    %217:float = reference.load %249
+    %128:float = copy %217
+    %130:float = const -1.75
+    %131:bool = eq %128, %130
+    branch %131, bb16, bb17
+bb16:
+    %133:@Body[..] = load $1:structure
+    %134:int = const 0
+    %250:internal address = collection.reference %133, %134
+    %251:internal address = reference.field %250, w
+    %218:float = reference.load %251
+    %136:float = copy %218
+    %137:float = const 0.625
+    %138:bool = eq %136, %137
+    %132:bool = copy %138
+    jump bb18
+bb17:
+    %132:bool = const false
+    jump bb18
+bb18:
+    print %132
+    %139:@Body[..] = load $1:structure
+    %140:int = const 0
+    %252:internal address = collection.reference %139, %140
+    %253:internal address = reference.field %252, px
+    %219:float = reference.load %253
+    %142:float = copy %219
+    %143:float = const 0.4140625
+    %144:bool = eq %142, %143
+    branch %144, bb19, bb20
+bb19:
+    %146:@Body[..] = load $1:structure
+    %147:int = const 0
+    %254:internal address = collection.reference %146, %147
+    %255:internal address = reference.field %254, py
+    %220:float = reference.load %255
+    %149:float = copy %220
+    %151:float = const -0.28125
+    %152:bool = eq %149, %151
+    %145:bool = copy %152
+    jump bb21
+bb20:
+    %145:bool = const false
+    jump bb21
+bb21:
+    print %145
+    %153:@Body[..] = load $1:structure
+    %154:int = const 1
+    %256:internal address = collection.reference %153, %154
+    %257:internal address = reference.field %256, vx
+    %221:float = reference.load %257
+    %156:float = copy %221
+    %157:float = const 1
+    %158:bool = eq %156, %157
+    branch %158, bb22, bb24
+bb22:
+    %160:@Body[..] = load $1:structure
+    %161:int = const 1
+    %258:internal address = collection.reference %160, %161
+    %259:internal address = reference.field %258, vy
+    %222:float = reference.load %259
+    %163:float = copy %222
+    %165:float = const -2
+    %166:bool = eq %163, %165
+    branch %166, bb23, bb24
+bb23:
+    %168:@Body[..] = load $1:structure
+    %169:int = const 1
+    %260:internal address = collection.reference %168, %169
+    %261:internal address = reference.field %260, w
+    %223:float = reference.load %261
+    %171:float = copy %223
+    %172:float = const 0.5
+    %173:bool = eq %171, %172
+    %167:bool = copy %173
+    jump bb25
+bb24:
+    %167:bool = const false
+    jump bb25
+bb25:
+    print %167
+    %174:@Body[..] = load $1:structure
+    %175:int = const 1
+    %262:internal address = collection.reference %174, %175
+    %263:internal address = reference.field %262, px
+    %224:float = reference.load %263
+    %177:float = copy %224
+    %178:float = const 8.25
+    %179:bool = eq %177, %178
+    branch %179, bb26, bb27
+bb26:
+    %181:@Body[..] = load $1:structure
+    %182:int = const 1
+    %264:internal address = collection.reference %181, %182
+    %265:internal address = reference.field %264, py
+    %225:float = reference.load %265
+    %184:float = copy %225
+    %186:float = const -8.5
+    %187:bool = eq %184, %186
+    %180:bool = copy %187
+    jump bb28
+bb27:
+    %180:bool = const false
+    jump bb28
+bb28:
+    print %180
+    %188:int = const 0
+    %189:@Forces = collection.load %34, %188
+    %190:float = field %189, .x
+    %191:float = const 2
+    %192:bool = eq %190, %191
+    branch %192, bb29, bb31
+bb29:
+    %194:int = const 0
+    %195:@Forces = collection.load %34, %194
+    %196:float = field %195, .damping
+    %197:float = const 8
+    %198:bool = eq %196, %197
+    branch %198, bb30, bb31
+bb30:
+    %200:int = const 1
+    %201:@Forces = collection.load %34, %200
+    %202:float = field %201, .inverse_mass
+    %203:float = const 0
+    %204:bool = eq %202, %203
+    %199:bool = copy %204
+    jump bb32
+bb31:
+    %199:bool = const false
+    jump bb32
+bb32:
+    print %199
+    list.drop %34
+    %205:@Body[] = load $0:structure
+    list.drop %205
+    return
+}

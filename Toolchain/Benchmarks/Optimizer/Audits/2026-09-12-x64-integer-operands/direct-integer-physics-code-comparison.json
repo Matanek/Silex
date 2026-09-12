@@ -1,0 +1,36 @@
+[
+  {
+    "stage": "preparation",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/PreparationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/preparation-direct-integer"
+    ],
+    "baseline_file": "/private/tmp/silex-part03-evidence/preparation-gpr-exhaustive",
+    "binary_sha256": "b18b3f075351a364d48a3c7ac6c7482238b8666404260ef89e4cd35210bc0994",
+    "text_sha256": "adfba02ce5f0a3307a94b1ec4c5c43903cc81af46be7eae28cd7f03f4a00d6c7",
+    "same_text_as_40dc120": true,
+    "text_bytes": 42756
+  },
+  {
+    "stage": "integration",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/IntegrationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/integration-direct-integer"
+    ],
+    "baseline_file": "/private/tmp/silex-part03-evidence/integration-gpr-exhaustive",
+    "binary_sha256": "6535d1c21613f00626af4a4ca269399698e096bc0d574ed3be0c16853a3711c7",
+    "text_sha256": "36d1f9bffe850384651ad897fed622907a85b13e12a1f6777781430ba8db2313",
+    "same_text_as_40dc120": true,
+    "text_bytes": 49860
+  }
+]

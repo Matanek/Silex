@@ -1,0 +1,29 @@
+{
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "compiler_sha256": "c5cfa8d5a9d449c7a6adffc58e58e0f8b28f64815d8705e20ff7b8e8e7dde5bc",
+  "oracle": {
+    "executable": "clang",
+    "version_line": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "source_repository": "https://github.com/llvm/llvm-project.git",
+    "source_tag": "llvmorg-21.1.0",
+    "source_revision": "3623fe661ae35c6c80ac221f14d85be76aa870f1",
+    "target_triple": "arm64-apple-darwin25.6.0",
+    "cpu": "apple-m1",
+    "features": "+v8.6a,+bf16,+bti,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+i8mm,+jsconv,+lse,+neon,+pauth,+predres,+ras,+rcpc,+rdm,+sb,+ssbs",
+    "optimization": "-O3",
+    "floating_point": "strict Silex-equivalent operations; no fast-math; fp-contract=on",
+    "linker": "Apple ld 1267 through the pinned Xcode clang driver",
+    "libraries": [
+      "libSystem"
+    ]
+  },
+  "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+  "zig": "0.16.0\n",
+  "clang_path": "/usr/bin/clang",
+  "clang_binary_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
+  "cpu": "Apple M3 Pro",
+  "installed_clang_path": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+  "installed_clang_sha256": "7def90dd8829726686213a747fc5bff1583df933dae5edc55d755479e0bfe00a",
+  "oracle_binary_sha256": "7026c5b7e361957a94017edab1234fbdff305a6c21de6f96b258a8c0a8455ace"
+}

@@ -1,0 +1,4 @@
+optimizer oracle: HotFunctionNotRegistered
+unregistered diagnostic probe budget exit 1
+before frame 1664 parameter floats [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None] lanes [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, {'register': 21, 'lane': 0, 'partner': 18}, {'register': 21, 'lane': 1, 'partner': 17}, None, None, None, None, None]
+after frame 1664 parameter floats [24, 25, 26, 27, 16, 17, 20, 23, 19, 22, 18, 4, 5, 0, 8, 13, 31, None, None, 14, None, None, None, None] lanes [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, {'register': 21, 'lane': 0, 'partner': 18}, {'register': 21, 'lane': 1, 'partner': 17}, None, None, None, None, None]

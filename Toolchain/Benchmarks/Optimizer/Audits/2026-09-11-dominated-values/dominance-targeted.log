@@ -1,0 +1,10 @@
+1/6 DominanceTestProbe.test.dominated tests...OK
+2/6 Sources.Optimize.DominatedValuesTests.test.dominated values handle shuffled blocks and unreachable predecessors...OK
+3/6 Sources.Optimize.DominatedValuesTests.test.dominated values preserve conditional availability and loop entry...OK
+4/6 Sources.Optimize.DominatedValuesTests.test.dominated fields preserve aliases signed zero and partial availability...expected 2, found 3
+FAIL (TestExpectedEqual)
+5/6 Sources.Optimize.DominatedValuesTests.test.dominated expressions retain their first checked failure...OK
+6/6 Sources.Optimize.Release.test_0...OK
+5 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/98aba21694e56a0ba776bf23de681d22/root --seed=0xe35a95da

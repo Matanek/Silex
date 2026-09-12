@@ -1,0 +1,2 @@
+func discard(value:int) { let unused:int[] = [value + 1] }
+func main() { discard(9223372036854775807) }

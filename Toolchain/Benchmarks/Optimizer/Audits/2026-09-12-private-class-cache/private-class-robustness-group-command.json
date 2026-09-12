@@ -1,0 +1,12 @@
+{
+  "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+  "environment": {
+    "SILEX_USER_PACKAGE_ALLOWLIST": "STD"
+  },
+  "command": [
+    "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/o/a72cac0af3cc61e5d28b7fb8fad85537/silex-optimizer-oracle",
+    "/private/tmp/silex-part03-evidence/silex-after-private-class",
+    "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer",
+    "robustness-qualified"
+  ]
+}

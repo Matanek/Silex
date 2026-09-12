@@ -1,0 +1,14 @@
+func main() {
+    var value:float64 = 1.0
+    var index = 0
+    while index < 12000000 {
+        let before = copy value
+        let denominator = 2.0 + (index % 5) as float64 * 0.125
+        let first = before / denominator
+        var result = first
+        if index % 2 == 0 { result += 0.125 }
+        value = result + first
+        index++
+    }
+    print(value)
+}

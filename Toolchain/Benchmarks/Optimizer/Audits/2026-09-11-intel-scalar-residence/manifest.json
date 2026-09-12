@@ -1,0 +1,99 @@
+{
+  "artifacts": [
+    {
+      "path": "README.md",
+      "sha256": "f4e26c2f31ca3d2e042aa07f2642724c38a4f6282f50071b52dca3adbafaa133",
+      "bytes": 2989
+    },
+    {
+      "path": "artifact/benchmark-native/report.txt",
+      "sha256": "4d7fd314e9ebdc048fe7418148fde95127213a64192ffac45c11943719aa1eba",
+      "bytes": 1813
+    },
+    {
+      "path": "artifact/optimizer-x64/benchmark-build.log",
+      "sha256": "4d7fd314e9ebdc048fe7418148fde95127213a64192ffac45c11943719aa1eba",
+      "bytes": 1813
+    },
+    {
+      "path": "artifact/optimizer-x64/campaign.json",
+      "sha256": "86b60d221b5ded53e363a043f0483dc7a6435f9b561c247e2ac31aeeaef3cfed",
+      "bytes": 30896
+    },
+    {
+      "path": "artifact/optimizer-x64/environment.txt",
+      "sha256": "a41ff216842737e9115f9712ab4cfb47b0b30277cff394ece0e49db1a2b37ea5",
+      "bytes": 184
+    },
+    {
+      "path": "artifact/optimizer-x64/qualification.log",
+      "sha256": "d81319e12e479d087af0defda73eec45c373f1590de7a6ec9c2d5e2f8937a0ef",
+      "bytes": 14214
+    },
+    {
+      "path": "ebc20fb-artifacts.json",
+      "sha256": "c5ac39e4f59d0954fa1b6b3117a6de0915afa68d454cd097353b769d36e39c4f",
+      "bytes": 879
+    },
+    {
+      "path": "ebc20fb-dispatch-all.json",
+      "sha256": "f3c7fc17663e9a542566884e497c9e84d98ac20a06e56ddf226d1a52e0f06c65",
+      "bytes": 82
+    },
+    {
+      "path": "ebc20fb-dispatch-optimizer-x64.json",
+      "sha256": "41a427192ffb9513a53d53a8ac63520cfbfaa6ddd08875a087043943d572f6c9",
+      "bytes": 92
+    },
+    {
+      "path": "ebc20fb-intel-summary.json",
+      "sha256": "16e4dc2785b93e9316b40051f802586bd20372a4589aeb691679144daaf2b1d4",
+      "bytes": 1327
+    },
+    {
+      "path": "ebc20fb-intel.zip",
+      "sha256": "a5c24fbf1b70b1f807ede30d2af51a66ff60b97c38c064282760891ad0934d64",
+      "bytes": 10216
+    },
+    {
+      "path": "ebc20fb-job-103313363933.log",
+      "sha256": "17e9c9d9547c235abf01d97a4fb2253512038ecc9d8943d27391d88ab06db35c",
+      "bytes": 37661
+    },
+    {
+      "path": "ebc20fb-job-103313364231.log",
+      "sha256": "39c81828071a080aeac0eb97acbc13ab5dd0a1c9c27ea5731baac5bc805bf890",
+      "bytes": 17895
+    },
+    {
+      "path": "ebc20fb-job-103313364250.log",
+      "sha256": "f4c44c3300153cf92e0a969647add32ff74395c464c4232c75720642f571da18",
+      "bytes": 23496
+    },
+    {
+      "path": "ebc20fb-job-103313364353.log",
+      "sha256": "ee71e72e3a85cb1cea8a728978185f93747c812629264727cd5246a15e4d6164",
+      "bytes": 22457
+    },
+    {
+      "path": "ebc20fb-job-103313364655.log",
+      "sha256": "b1ad394912e13f8904a0065dee0602e0b9948ce2976bbd6b0ee8a2a568eac0ea",
+      "bytes": 34023
+    },
+    {
+      "path": "ebc20fb-job-103313373534.log",
+      "sha256": "81fc95654c781734f8b6b41bbdf07c427bb25cb78e17bf3f34595bf780ae6f8c",
+      "bytes": 62006
+    },
+    {
+      "path": "ebc20fb-runs.json",
+      "sha256": "5944ecdae397717e66fd1fe3ef4056cb8ea2518045a5da02102952a13bd5cbdd",
+      "bytes": 34548
+    },
+    {
+      "path": "flocking-steer-structural.json",
+      "sha256": "359e9ef989be5567d6f5f8117dd34631264bbf380a1b03773d342a323dbeaf90",
+      "bytes": 1475
+    }
+  ]
+}

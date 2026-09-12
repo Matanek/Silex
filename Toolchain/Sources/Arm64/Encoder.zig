@@ -200,6 +200,10 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             const offset: u32 = @intCast(words.items.len * 4);
             try words.append(allocator, saveFrame());
             try words.append(allocator, moveFramePointer());
+            // This entry is called through the platform C ABI. Silex scratch
+            // registers d9-d12 are volatile internally, but C preserves d8-d15.
+            try emitStackAdjustment(allocator, &words, 64, false);
+            for (8..16) |register| try words.append(allocator, A64.storeFloat64Stack(@enumFromInt(register), @intCast(register - 8)));
             if (platform == .windows) if (program.mutex_global) |global| {
                 try emitWindowsMutexCall(
                     allocator,
@@ -219,6 +223,8 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             // runner instead preserves the tested function result in X0 and
             // reads the Silex runtime status from X1.
             try words.append(allocator, moveRegister(if (platform == .linux) .x0 else .x1, .x8));
+            for (8..16) |register| try words.append(allocator, A64.loadFloat64Stack(@enumFromInt(register), @intCast(register - 8)));
+            try emitStackAdjustment(allocator, &words, 64, true);
             try words.append(allocator, restoreFrame());
             try words.append(allocator, returnInstruction());
             break :entry offset;
@@ -878,11 +884,20 @@ fn encodeFunction(
                     leaf += 2;
                     continue;
                 }
-                try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
                 if (floatResidence(function, slot) != null or floatLaneResidence(function, slot) != null) {
-                    try words.append(allocator, moveGeneralToFloat(.x10, .x9, true));
-                    try storeFloatValue(allocator, words, function, .x10, slot, true);
-                } else try storeValue(allocator, words, function, .x9, slot);
+                    const destination: Register = if (floatResidence(function, slot)) |number| @enumFromInt(number) else .x10;
+                    const byte_offset = leaf * Machine.slot_size;
+                    if (byte_offset <= std.math.maxInt(u15)) {
+                        try words.append(allocator, A64.loadVector64(destination, incoming, @intCast(byte_offset)));
+                    } else {
+                        try emitLoadAtOffset(allocator, words, .x9, incoming, byte_offset);
+                        try words.append(allocator, moveGeneralToFloat(destination, .x9, true));
+                    }
+                    try storeFloatValue(allocator, words, function, destination, slot, true);
+                } else {
+                    try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
+                    try storeValue(allocator, words, function, .x9, slot);
+                }
                 leaf += 1;
             }
         }
@@ -1833,8 +1848,10 @@ fn encodeFunction(
                 }
                 if (call.result) |result| if (!result.aggregate) {
                     if (floatResidence(function, result.start) != null) {
-                        try words.append(allocator, moveGeneralToFloat(.x9, .x0, false));
-                        try storeFloatValue(allocator, words, function, .x9, result.start, false);
+                        // The internal scalar ABI transfers a complete machine
+                        // slot, including float64 payloads and signed zero.
+                        try words.append(allocator, moveGeneralToFloat(.x9, .x0, true));
+                        try storeFloatValue(allocator, words, function, .x9, result.start, true);
                     } else try storeValue(allocator, words, function, .x0, result.start);
                 };
             },
@@ -2630,8 +2647,8 @@ fn emitCallArguments(
                     try words.append(allocator, moveWideZero64(outgoing, 0, 0));
                 } else try emitStackAddress(allocator, words, outgoing, argument.start);
             } else if (use_residences and floatResidence(function, argument.start) != null) {
-                try loadFloatValue(allocator, words, function, .x9, argument.start, false);
-                try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
+                try loadFloatValue(allocator, words, function, .x9, argument.start, true);
+                try words.append(allocator, moveFloatToGeneral(outgoing, .x9, true));
             } else if (use_residences) {
                 try loadValue(allocator, words, function, outgoing, argument.start);
             } else try words.append(allocator, loadStack(outgoing, argument.start));
@@ -2647,8 +2664,8 @@ fn emitCallArguments(
                 try words.append(allocator, moveWideZero64(outgoing, 0, 0));
             } else try emitStackAddress(allocator, words, outgoing, argument.start);
         } else if (use_residences and floatResidence(function, argument.start) != null) {
-            try loadFloatValue(allocator, words, function, .x9, argument.start, false);
-            try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
+            try loadFloatValue(allocator, words, function, .x9, argument.start, true);
+            try words.append(allocator, moveFloatToGeneral(outgoing, .x9, true));
         } else if (use_residences) {
             try loadValue(allocator, words, function, outgoing, argument.start);
         } else try words.append(allocator, loadStack(outgoing, argument.start));
@@ -2676,7 +2693,7 @@ fn emitCallArguments(
                 try words.append(allocator, moveFloatToGeneral(.x9, .x9, false));
             }
         } else if (floatResidence(function, argument.start)) |number| {
-            try words.append(allocator, moveFloatToGeneral(.x9, @enumFromInt(number), false));
+            try words.append(allocator, moveFloatToGeneral(.x9, @enumFromInt(number), true));
         } else if (valueResultRegister(function, argument.start)) |source| {
             if (source != .x9) try words.append(allocator, moveRegister(.x9, source));
         } else try emitLoadAtOffset(
@@ -4656,8 +4673,10 @@ fn encodeFloatFusedArithmetic(
     multiply_value: Machine.Instruction.Binary,
 ) Error!void {
     const double = arithmetic.type == .float64;
-    const left = try prepareFloatOperand(allocator, words, function, .x9, multiply_value.left, double);
-    const right = try prepareFloatOperand(allocator, words, function, .x10, multiply_value.right, double);
+    const left = cachedFloatBinaryOperand(function, multiply_value, multiply_value.left) orelse
+        try prepareFloatOperand(allocator, words, function, .x9, multiply_value.left, double);
+    const right = cachedFloatBinaryOperand(function, multiply_value, multiply_value.right) orelse
+        try prepareFloatOperand(allocator, words, function, .x10, multiply_value.right, double);
     const accumulator_slot = if (arithmetic.left == multiply_value.result) arithmetic.right else arithmetic.left;
     const accumulator = try prepareFloatOperand(allocator, words, function, .x11, accumulator_slot, double);
     const destination = floatResultRegister(function, arithmetic.result) orelse .x12;
@@ -4680,6 +4699,10 @@ fn multiplyFeedsNextFusedArithmetic(
     binary: Machine.Instruction.Binary,
 ) bool {
     if (!binary.type.isFloat() or binary.operator != .multiply or index + 1 >= function.instructions.len) return false;
+    // The producer is already consumed by an earlier encoding rule. A later
+    // FMA cannot reread its inputs: negation or packed lanes may be elided.
+    if (negatedOperandForMultiply(function, index, binary) != null or
+        floatLaneResidence(function, binary.result) != null) return false;
     const arithmetic = switch (function.instructions[index + 1]) {
         .binary => |value| value,
         else => return false,
@@ -4760,6 +4783,17 @@ fn encodeConversion(
         const result = floatResultRegister(function, conversion.result) orelse .x10;
         try words.append(allocator, integerToFloat(result, operand, conversion.source.isSignedInteger(), double));
         if (conversion.checked) {
+            if (conversion.source.bitWidth() == 64) {
+                // FCVTZS/FCVTZU saturate at the positive integer endpoint.
+                // Reject a rounded power-of-two upper bound before comparing
+                // the reconverted value with the original integer.
+                const upper: f64 = @floatFromInt(@as(u128, Numeric.integerMax(conversion.source)) + 1);
+                const bits: u64 = if (double) @bitCast(upper) else @as(u32, @bitCast(@as(f32, @floatCast(upper))));
+                try emitImmediate64(allocator, words, .x11, bits);
+                try words.append(allocator, moveGeneralToFloat(.x11, .x11, double));
+                try words.append(allocator, floatCompare(result, .x11, double));
+                try emitConversionGuard(allocator, words, fixups, data_fixups, external_call_sites, platform, program, conversion.header, .minus);
+            }
             try words.append(allocator, floatToInteger(.x11, result, conversion.source.isSignedInteger(), double));
             try words.append(allocator, compareRegisters(operand, .x11));
             try emitConversionGuard(allocator, words, fixups, data_fixups, external_call_sites, platform, program, conversion.header, .equal);
@@ -5882,14 +5916,14 @@ test "resolve calls and append a native test entry" {
     try std.testing.expect(image.entry_offset.? > 0);
     try std.testing.expectEqual(@as(usize, 0), image.code.len % 4);
     const entry_word = std.mem.readInt(u32, image.code[image.entry_offset.?..][0..4], .little);
-    const call_word = image.entry_offset.? / 4 + 9;
+    const call_word = image.entry_offset.? / 4 + 18;
     const delta: i32 = -@as(i32, @intCast(call_word));
     const expected = @as(u32, 0x94000000) | (@as(u32, @bitCast(delta)) & 0x03ffffff);
     const encoded_call = std.mem.readInt(u32, image.code[call_word * 4 ..][0..4], .little);
-    const status_word_offset = image.entry_offset.? + 13 * @sizeOf(u32);
+    const status_word_offset = image.entry_offset.? + 22 * @sizeOf(u32);
     const status_word = std.mem.readInt(u32, image.code[status_word_offset..][0..4], .little);
     const linux_image = try encodeLinux(arena.allocator(), .{ .functions = &functions }, .{ .test_function = 0 });
-    const linux_status_word_offset = linux_image.entry_offset.? + 13 * @sizeOf(u32);
+    const linux_status_word_offset = linux_image.entry_offset.? + 22 * @sizeOf(u32);
     const linux_status_word = std.mem.readInt(u32, linux_image.code[linux_status_word_offset..][0..4], .little);
     try std.testing.expectEqual(@as(u32, 0xa9bf7bfd), entry_word);
     try std.testing.expectEqual(expected, encoded_call);

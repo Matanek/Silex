@@ -1,0 +1,7 @@
+CLASSIFICATION optimizer-oracle-and-corpus
+CLASSIFICATION optimizer-documentation
+REQUIRED_CHECK optimizer-admission-quick	optimizer admission / quick	cd Toolchain && zig build check
+REQUIRED_CHECK optimizer-qualified-internal	optimizer admission / qualified internal	cd Toolchain && zig build optimizer-gate
+REQUIRED_CHECK optimizer-robustness-qualified	optimizer admission / robustness	cd Toolchain && zig build optimizer-robustness-qualified
+REQUIRED_CHECK native-portability-matrix	optimizer admission / native portability	run native-portability.yml for every affected target
+REQUIRED_CHECK external-qualification-selected	optimizer admission / external qualification	run the Silex-Benchmarks qualification selected by this matrix against the exact Silex SHA

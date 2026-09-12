@@ -1,0 +1,85 @@
+{
+  "preparation": {
+    "records": {
+      "before": {
+        "binary": "/private/tmp/silex-part03-evidence/preparation-snapshot-before",
+        "binary_sha256": "71a43af9eabf74d341d0a5d1fec31852787343872c8d89abad90132de6842967",
+        "output_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+        "records": 32768,
+        "maximum_difference_from_clang": 2.700000001354397e-07,
+        "signature_interval": [
+          4744923546.294779,
+          32456.933433117374
+        ]
+      },
+      "after": {
+        "binary": "/private/tmp/silex-part03-evidence/preparation-snapshot-after",
+        "binary_sha256": "1e0e6da873f05d9726b8f958d06c75e2d9b8fbff6aa9664ff516298893177a7e",
+        "output_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+        "records": 32768,
+        "maximum_difference_from_clang": 2.700000001354397e-07,
+        "signature_interval": [
+          4744923546.294779,
+          32456.933433117374
+        ]
+      },
+      "clang": {
+        "binary": "/private/tmp/silex-part03-evidence/preparation-full-clang",
+        "binary_sha256": "8d7380b05b04989829c693b61d927ec6b34fb2e0b3146aae54e63e887934eb76",
+        "output_sha256": "664117316ce24dd059b592daf4d875bfdb31c45caace9db76340f740273ae491",
+        "records": 32768,
+        "signature_interval": [
+          4744923547.477649,
+          32456.933485190275
+        ]
+      }
+    },
+    "signature_interval": [
+      4744923547.477649,
+      32456.933485190275
+    ],
+    "exact_before_after": true
+  },
+  "integration": {
+    "records": {
+      "before": {
+        "binary": "/private/tmp/silex-part03-evidence/integration-snapshot-before",
+        "binary_sha256": "fac0d1abd9f0db8acefebe2e23343ec2ce54b5a6bde9f6fde13cc9740410d3bb",
+        "output_sha256": "f6d5bf68307949686c87a6240d645438fce66653710382e32baf5236610b9725",
+        "records": 32768,
+        "maximum_replay_difference": 1.1400000005323818e-05,
+        "signature_interval": [
+          -1454735.8306216497,
+          3.7457540533370017
+        ]
+      },
+      "after": {
+        "binary": "/private/tmp/silex-part03-evidence/integration-snapshot-after",
+        "binary_sha256": "baa38c9af32b794c28d61b383bdfbf61dce05c12b206fdad3d8698c9ba570687",
+        "output_sha256": "f6d5bf68307949686c87a6240d645438fce66653710382e32baf5236610b9725",
+        "records": 32768,
+        "maximum_replay_difference": 1.1400000005323818e-05,
+        "signature_interval": [
+          -1454735.8306216497,
+          3.7457540533370017
+        ]
+      },
+      "clang": {
+        "binary": "/private/tmp/silex-part03-evidence/integration-snapshot-clang",
+        "binary_sha256": "6e5d43a55e0e2f39abe81482712314fab915e84943864afb4ff9bc0b40a962eb",
+        "output_sha256": "c643f67e4ce6af842e24b6a484fab2a30443a71b46b541a51cb9378c0b590740",
+        "records": 32768,
+        "signature_interval": [
+          -1454797.190864043,
+          3.745747222196988
+        ]
+      }
+    },
+    "signature_interval": [
+      -1454797.190864043,
+      3.745747222196988
+    ],
+    "exact_before_after": true,
+    "measurement_note": "Initial timing harness incorrectly used the independent Clang trajectory signature for every executable and rejected the first Silex warmup. No integration samples from that attempt are used. Canonical RunStageKernels validates each signature against its own fully replayed checked trajectory; that existing contract is applied here."
+  }
+}

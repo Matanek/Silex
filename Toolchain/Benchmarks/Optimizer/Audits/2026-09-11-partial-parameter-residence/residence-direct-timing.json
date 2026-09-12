@@ -1,0 +1,334 @@
+{
+  "mode": "diagnostic",
+  "scope": "process wall time including startup; 1000000 complete preparations and all 26 output fields; baseline, partial parameter residence with intermediate transfers, and direct float capture; no physical X64 claim",
+  "warmup_rotations": 6,
+  "rotations": 21,
+  "host": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpu": "Apple M3 Pro",
+  "binary_sha256": {
+    "before": "07a0d1233cc83fa5985f689aa494673fee526a0cf659bf64f9209415114e173d",
+    "partial": "32e7abf03b76f36cfcd73b3cc165a400600e08ae44a6b9e48450cd70ee80d659",
+    "after": "c989e8592887cf7b8c16fb34879e953353c0d442eff971a2db90b112a1e5c3a8"
+  },
+  "binary_bytes": {
+    "before": 32952,
+    "partial": 32952,
+    "after": 32952
+  },
+  "source_sha256": {
+    "original": "bc39b6dc1109b5ed3818517bf3a31388580e834d1cfced71e2c5dabc673bf14d"
+  },
+  "observations": [
+    {
+      "index": 0,
+      "order": [
+        "before",
+        "partial",
+        "after"
+      ],
+      "before_ns": 88476375,
+      "partial_ns": 93198833,
+      "after_ns": 85027042,
+      "after_before": 0.9610140786170319,
+      "after_partial": 0.9123187411584864
+    },
+    {
+      "index": 1,
+      "order": [
+        "partial",
+        "after",
+        "before"
+      ],
+      "partial_ns": 93057625,
+      "after_ns": 86022750,
+      "before_ns": 87741625,
+      "after_before": 0.9804098111928061,
+      "after_partial": 0.9244030244700528
+    },
+    {
+      "index": 2,
+      "order": [
+        "after",
+        "before",
+        "partial"
+      ],
+      "after_ns": 85499166,
+      "before_ns": 87598250,
+      "partial_ns": 89864875,
+      "after_before": 0.976037375175874,
+      "after_partial": 0.9514191835241522
+    },
+    {
+      "index": 3,
+      "order": [
+        "before",
+        "partial",
+        "after"
+      ],
+      "before_ns": 87653500,
+      "partial_ns": 93880375,
+      "after_ns": 86121000,
+      "after_before": 0.9825163855407941,
+      "after_partial": 0.9173482743331607
+    },
+    {
+      "index": 4,
+      "order": [
+        "partial",
+        "after",
+        "before"
+      ],
+      "partial_ns": 93543208,
+      "after_ns": 85694250,
+      "before_ns": 88138583,
+      "after_before": 0.9722671624979494,
+      "after_partial": 0.9160927001776548
+    },
+    {
+      "index": 5,
+      "order": [
+        "after",
+        "before",
+        "partial"
+      ],
+      "after_ns": 85272875,
+      "before_ns": 87821459,
+      "partial_ns": 93972917,
+      "after_before": 0.9709799401078044,
+      "after_partial": 0.9074196877383299
+    },
+    {
+      "index": 6,
+      "order": [
+        "before",
+        "partial",
+        "after"
+      ],
+      "before_ns": 88603291,
+      "partial_ns": 90152459,
+      "after_ns": 86109917,
+      "after_before": 0.971859126541925,
+      "after_partial": 0.9551588271152981
+    },
+    {
+      "index": 7,
+      "order": [
+        "partial",
+        "after",
+        "before"
+      ],
+      "partial_ns": 93130500,
+      "after_ns": 85874625,
+      "before_ns": 87890000,
+      "after_before": 0.9770693480486973,
+      "after_partial": 0.9220891652036658
+    },
+    {
+      "index": 8,
+      "order": [
+        "after",
+        "before",
+        "partial"
+      ],
+      "after_ns": 87740458,
+      "before_ns": 88201083,
+      "partial_ns": 88024625,
+      "after_before": 0.9947775584569636,
+      "after_partial": 0.9967717329099669
+    },
+    {
+      "index": 9,
+      "order": [
+        "before",
+        "partial",
+        "after"
+      ],
+      "before_ns": 87663250,
+      "partial_ns": 92998500,
+      "after_ns": 86021959,
+      "after_before": 0.9812773197434501,
+      "after_partial": 0.9249822201433356
+    },
+    {
+      "index": 10,
+      "order": [
+        "partial",
+        "after",
+        "before"
+      ],
+      "partial_ns": 93272000,
+      "after_ns": 85324000,
+      "before_ns": 87998333,
+      "after_before": 0.9696092765757278,
+      "after_partial": 0.9147868599365298
+    },
+    {
+      "index": 11,
+      "order": [
+        "after",
+        "before",
+        "partial"
+      ],
+      "after_ns": 86022708,
+      "before_ns": 87729000,
+      "partial_ns": 89013208,
+      "after_before": 0.980550422323291,
+      "after_partial": 0.9664038622223344
+    },
+    {
+      "index": 12,
+      "order": [
+        "before",
+        "partial",
+        "after"
+      ],
+      "before_ns": 87673334,
+      "partial_ns": 93003042,
+      "after_ns": 83648250,
+      "after_before": 0.9540899859015285,
+      "after_partial": 0.899414128841076
+    },
+    {
+      "index": 13,
+      "order": [
+        "partial",
+        "after",
+        "before"
+      ],
+      "partial_ns": 93374375,
+      "after_ns": 85811541,
+      "before_ns": 88181667,
+      "after_before": 0.9731222363941022,
+      "after_partial": 0.9190052517085121
+    },
+    {
+      "index": 14,
+      "order": [
+        "after",
+        "before",
+        "partial"
+      ],
+      "after_ns": 85870750,
+      "before_ns": 89067875,
+      "partial_ns": 93442250,
+      "after_before": 0.9641046224578728,
+      "after_partial": 0.9189713432628174
+    },
+    {
+      "index": 15,
+      "order": [
+        "before",
+        "partial",
+        "after"
+      ],
+      "before_ns": 88161084,
+      "partial_ns": 91173292,
+      "after_ns": 83546917,
+      "after_before": 0.9476620886376579,
+      "after_partial": 0.9163529709994458
+    },
+    {
+      "index": 16,
+      "order": [
+        "partial",
+        "after",
+        "before"
+      ],
+      "partial_ns": 87706750,
+      "after_ns": 84613000,
+      "before_ns": 88544791,
+      "after_before": 0.9555954567671858,
+      "after_partial": 0.9647262040834942
+    },
+    {
+      "index": 17,
+      "order": [
+        "after",
+        "before",
+        "partial"
+      ],
+      "after_ns": 83965209,
+      "before_ns": 88831375,
+      "partial_ns": 90856375,
+      "after_before": 0.9452201882499286,
+      "after_partial": 0.9241531923324038
+    },
+    {
+      "index": 18,
+      "order": [
+        "before",
+        "partial",
+        "after"
+      ],
+      "before_ns": 87426000,
+      "partial_ns": 93350708,
+      "after_ns": 85933792,
+      "after_before": 0.9829317594308329,
+      "after_partial": 0.9205478334454624
+    },
+    {
+      "index": 19,
+      "order": [
+        "partial",
+        "after",
+        "before"
+      ],
+      "partial_ns": 93320083,
+      "after_ns": 87332667,
+      "before_ns": 87931709,
+      "after_before": 0.9931874177493809,
+      "after_partial": 0.9358400056287991
+    },
+    {
+      "index": 20,
+      "order": [
+        "after",
+        "before",
+        "partial"
+      ],
+      "after_ns": 83797792,
+      "before_ns": 87919209,
+      "partial_ns": 89837125,
+      "after_before": 0.9531226787993509,
+      "after_partial": 0.9327746407735109
+    }
+  ],
+  "summary": {
+    "before_ns": {
+      "median": 87931709,
+      "minimum": 87426000,
+      "maximum": 89067875,
+      "mad": 258375,
+      "half_shift": 0.002170228408381769
+    },
+    "partial_ns": {
+      "median": 93057625,
+      "minimum": 87706750,
+      "maximum": 93972917,
+      "mad": 485583,
+      "half_shift": -0.010805152047156596
+    },
+    "after_ns": {
+      "median": 85811541,
+      "minimum": 83546917,
+      "maximum": 87740458,
+      "mad": 312375,
+      "half_shift": -0.00856353841214208
+    },
+    "after_before": {
+      "median": 0.9722671624979494,
+      "minimum": 0.9452201882499286,
+      "maximum": 0.9947775584569636,
+      "mad": 0.009010157245500694,
+      "half_shift": -0.017104361785390987
+    },
+    "after_partial": {
+      "median": 0.9220891652036658,
+      "minimum": 0.899414128841076,
+      "maximum": 0.9967717329099669,
+      "mad": 0.0073023052671360444,
+      "half_shift": -0.0009700359989981422
+    }
+  }
+}

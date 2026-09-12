@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "captured_at": "2026-09-11T00:00:11.826266+00:00",
+  "base_revision": "09b7a5ffaa438e808f920a534fefb1ccabce20ac",
+  "package_closure": {
+    "STD": {
+      "revision": "1f3847430b7a7a814ad0b4e3dd2e4f3711cfd4e9",
+      "clean": true
+    }
+  },
+  "candidate_identity": "The enclosing commit plus the source hashes below; this run was performed before the commit.",
+  "validation": [
+    {
+      "command": [
+        "zig",
+        "build",
+        "check",
+        "--summary",
+        "all"
+      ],
+      "exit_code": 0,
+      "log": "check.log"
+    },
+    {
+      "command": [
+        "zig",
+        "build",
+        "test",
+        "--summary",
+        "all"
+      ],
+      "exit_code": 0,
+      "log": "test.log"
+    },
+    {
+      "command": [
+        "zig",
+        "build",
+        "optimizer-oracle",
+        "--summary",
+        "all",
+        "--",
+        "coverage-scan"
+      ],
+      "exit_code": 0,
+      "log": "coverage-scan.log"
+    },
+    {
+      "command": [
+        "zig",
+        "build",
+        "test-optimizer-oracle",
+        "--summary",
+        "all"
+      ],
+      "exit_code": 0,
+      "log": "oracle-tests.log"
+    }
+  ],
+  "source_sha256": {
+    "Toolchain/Benchmarks/Optimizer/Assurance.json": "db0193f2c7ba2b6904ccacf98441a384ae73774631932105bf5ed524d27eb3b2",
+    "Toolchain/Benchmarks/Optimizer/Admission.json": "5b29ce39f439a170137c239a7eda51d2e6fc77e012644176615099feef0bae82",
+    "Toolchain/Benchmarks/Optimizer/Coverage.json": "3436824e1354c04ad3f89f4988abcd4de1d36f49ac248800e9aeedab153b34bd",
+    "Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json": "fdecbe9588e6ff21e6fb53e53ed577a9feeca391e5e79d6c518cfb52feba1a2b",
+    "Toolchain/build.zig": "2971104a1f52a5685395e5a1e1a5f7961fe60d83f6f8d4faaf2af644e631d867",
+    "Toolchain/Tools/OptimizerOracle/Admission.zig": "f25523282f60f4f6f5a9d3ffdf497e7a0e73a6a22f4acb78ff607f7ed836254c",
+    "Toolchain/Tools/OptimizerOracle/Advisor.zig": "22f05f360e7c0b9dc002cb31dcc1b23f0aeeaee8a760bd72219abed72b7eb330",
+    "Toolchain/Tools/OptimizerOracle/Benchmark.zig": "f5d61244688611ef1772dba2d996e9aa935607e4711384fcb968424653416cfe",
+    "Toolchain/Tools/OptimizerOracle/CacheStress.zig": "f4ea630710c59b0e8bb8bb5ee01e9e6362c5b81e281766ecd0c7dd598eed2ab2",
+    "Toolchain/Tools/OptimizerOracle/CoverageAudit.zig": "86d5e20fdaa6083d3c6230ea0dede48568619aa4f638acd0f6ced92edab4fa56",
+    "Toolchain/Tools/OptimizerOracle/Differential.zig": "d3fa218db43bfe8c5712d052caaca26a5922278a87f6c6b0a1cc6ecef02cd49e",
+    "Toolchain/Tools/OptimizerOracle/Generator.zig": "baaff3ec18b02a7cf6538b97278f29ccfd0b74f04faaed248b12c1d8da4d8665",
+    "Toolchain/Tools/OptimizerOracle/HotBudget.zig": "63fd345e1c09ddeb78e962b61ef307b4397899c18861673181d55467e66978d4",
+    "Toolchain/Tools/OptimizerOracle/InteractionGenerator.zig": "b14e87d816a9ef5881b1837f993d0617a0eb3fdfe77dbbd7e218d470d534f7aa",
+    "Toolchain/Tools/OptimizerOracle/IrStats.zig": "1c41f6b05f0e48e68bac02fb2777f9dc98913a275521812947aa60c319ed323b",
+    "Toolchain/Tools/OptimizerOracle/Llvm.zig": "10e3e4898d622e0c920e71decbf0b40160913505481c76ebe9d674cafc826b1f",
+    "Toolchain/Tools/OptimizerOracle/LlvmCoverage.zig": "7dec9948537212dd7328d83cfa3bb6e1b070487795eb76b6d72cf0f346c92c50",
+    "Toolchain/Tools/OptimizerOracle/LlvmStats.zig": "683a1e6c1dbbe2441018d2d53a09f101fc76b7d10450d4bf2346574ce7d7add5",
+    "Toolchain/Tools/OptimizerOracle/Main.zig": "8e3864bd7bac2be7efc9efeb1f1029577d5c9e42e28b64f41219c83533226c7f",
+    "Toolchain/Tools/OptimizerOracle/Metamorphic.zig": "b7051f762b179ac4ad19ba167adb7d1259d04f4bb7a41e5e8ef503b5bd09e003",
+    "Toolchain/Tools/OptimizerOracle/Native.zig": "31efd9c85925a76535ebaa36a81a12a4231941cd0e079eba74bc4e11bc01cf5b",
+    "Toolchain/Tools/OptimizerOracle/NativeGenerator.zig": "a9ff119dbbb556f37f05efb5d84db4c954fee0d44bd3427b6fa0fc2386c79b50",
+    "Toolchain/Tools/OptimizerOracle/Parity.zig": "88dbb2673a6ae60f535b004f9e23d4db82a72cb9bccfa92ae159e30d56befb70",
+    "Toolchain/Tools/OptimizerOracle/ProjectStress.zig": "858fc5ccc0423b19f8eb2393d64a3243bc95c2a12921e5c60c26dcdcd91fa486",
+    "Toolchain/Tools/OptimizerOracle/Qualification.zig": "435248e9bd342fb21369b0d2c72cb97c89fa58318576fb8015256ac9fd1c33ae",
+    "Toolchain/Tools/OptimizerOracle/Reducer.zig": "546d68d73b9abba20132dad78d044758d7c454545a568daf747efbd002c58fc6",
+    "Toolchain/Tools/OptimizerOracle/Registry.zig": "f4ef17d280a98d04ff6cd91e8f8ad4e8cc87b3bd7955286cc993392c7f95a987",
+    "Toolchain/Tools/OptimizerOracle/Report.zig": "ba84350293e5329cdcf29f82ba05707f54a23f9ed4b2e9fc3873b0e837ffddc6",
+    "Toolchain/Tools/OptimizerOracle/Robustness.zig": "37c8535980afe6da107c2437e600127f8114ab98ef4bc20901c1590f86eda993"
+  },
+  "artifacts_sha256": {
+    ".gitattributes": "539b5d3589eeddc188b0e7f51e8d8dfe9593d29d9c75f07da71c18e26be814e8",
+    "README.md": "0f8a0579da676c0f4edf49993273bb8de6f13ceccd9c1584c8d49a4911971624",
+    "assurance.tsv": "670ddbb7ca6001341e78cfb0595be45461678c24c7aaae6379cfbee3161dbebd",
+    "baseline-opportunities.tsv": "94f24cc6ee066c25c4543efb339da9d8a1e246779d8503df139cbf7ad1a87589",
+    "baseline-parity.tsv": "b899b07dbcdaf48ee3c17371b772737cedc62248083c385c2caad4fab6142882",
+    "baseline-report.tsv": "baac44181f3e6d64ed45ca32d623a5198df7d05410de4d08e99bb449926c0765",
+    "check.log": "c43676719aa02f5604b87f580424a2c5c06c88b4340034add99180c5af0d6198",
+    "coverage-scan.log": "2a0fceb3de6bb32729eeeff901aac682a030735e3b4e47d2d6886f956685cd00",
+    "inherited-audit.log": "f2579751bed2f4c633a82ddcf7e00b09f548122c569bf4af9f5a71a6f76370de",
+    "inherited-compare.log": "6b5670050850c5cadbc7063d6c7730461dc42c18b195c4a905fc97c5d55fc2c4",
+    "llvm-case-coverage.tsv": "3a4ba8f6a26c1d7ae480ccac05481e2e10947ad4201536124c8b8de02bba5dae",
+    "llvm-operation-coverage.tsv": "bb2ce606ec92c3e14d3845f11ecc099a069d16f9c0900287414f79c5a3048e7c",
+    "oracle-tests.log": "2533f53d74419a9e11579c06aef7a514431c9d317a78996a05927872b9fba8c1",
+    "proof-scope.tsv": "7ab08477c28e65ebb874a0a4d19a43c3aab9745dde50597abd6243770f0aebde",
+    "test.log": "ef3e230e7cf3bdebbd5f723d879cfd84fc0c1204b513b482dff01b6dbb528af7"
+  }
+}

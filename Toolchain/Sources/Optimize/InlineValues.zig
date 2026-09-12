@@ -12,9 +12,32 @@ const Info = struct {
 };
 
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithMode(allocator, program, false);
+}
+
+// Memory and SSA cleanup can expose scalar leaves after the first inline pass.
+// Revisit only these leaves: no aggregate, reference or call expansion.
+pub fn optimizeScalarLeaves(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithMode(allocator, program, true);
+}
+
+fn optimizeWithMode(allocator: Allocator, program: Ir.Program, scalar_leaves_only: bool) !Ir.Program {
     const information = try allocator.alloc(Info, program.functions.len);
     @memset(information, .{});
     for (program.functions, 0..) |_, index| resolve(program, information, index);
+    if (scalar_leaves_only) {
+        for (program.functions, information) |function, *info| {
+            if (!scalarLeaf(function)) info.state = .rejected;
+        }
+        const has_call = found: {
+            for (program.functions) |function| for (function.blocks) |block| for (block.instructions) |instruction| {
+                if (instruction == .call and information[instruction.call.function].state == .eligible)
+                    break :found true;
+            };
+            break :found false;
+        };
+        if (!has_call) return program;
+    }
     const summaries = try CallSummary.analyze(allocator, program);
 
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
@@ -26,18 +49,48 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     return result;
 }
 
+fn scalarLeaf(function: Ir.Function) bool {
+    if (!function.return_type.isNumeric() and function.return_type != .bool) return false;
+    for (function.parameter_types) |value_type| {
+        if (!value_type.isNumeric() and value_type != .bool) return false;
+    }
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        switch (instruction) {
+            .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .local_load, .local_store, .unary, .binary, .convert => {},
+            else => return false,
+        }
+        // SSA cleanup can leave unused descriptor types in the value table.
+        // Only operands/results still used by this leaf constrain its domain.
+        switch (instruction) {
+            inline .constant_int, .constant_bool, .constant_float32, .constant_float64, .copy, .local_load, .local_store, .unary, .binary, .convert => |value| {
+                if (@TypeOf(value) != void) {
+                    inline for (.{ "result", "operand", "left", "right" }) |field| {
+                        if (@hasField(@TypeOf(value), field)) {
+                            const value_type = function.value_types[@field(value, field)];
+                            if (!value_type.isNumeric() and value_type != .bool) return false;
+                        }
+                    }
+                }
+            },
+            else => unreachable,
+        }
+    };
+    return true;
+}
+
 fn resolve(program: Ir.Program, information: []Info, function_index: usize) void {
     var info = &information[function_index];
     if (info.state != .unresolved) return;
     info.state = .visiting;
     const function = program.functions[function_index];
+    const scalar_class_leaf = scalarClassLeaf(program, function);
     if (function.capture_types.len != 0 or function.blocks.len != 1 or
-        (function.return_type != .void and !isValueType(program, function.return_type, 0)))
+        (function.return_type != .void and !isValueType(program, function.return_type, 0) and !scalar_class_leaf))
     {
         info.state = .rejected;
         return;
     }
-    var previously_eligible = true;
+    var previously_eligible = !scalar_class_leaf;
     for (function.parameter_types) |parameter_type| {
         if (!isParameterType(program, parameter_type)) {
             info.state = .rejected;
@@ -108,6 +161,13 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                 cost += 1;
             },
             .copy, .local_load, .local_store => {},
+            .field_store => {
+                if (!scalar_class_leaf) {
+                    info.state = .rejected;
+                    return;
+                }
+                cost += 1;
+            },
             .call => |call| {
                 if (call.function >= program.functions.len or call.function == function_index) {
                     info.state = .rejected;
@@ -139,6 +199,45 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
     info.cost = cost;
     info.previously_eligible = previously_eligible;
     info.state = .eligible;
+}
+
+// Class identities may be returned by a scalar mutator without transferring
+// an allocation across a call boundary. Admit only leaves that cannot create,
+// retain, drop, derive an address or replace a resource; class values have one type
+// and can originate only from parameters, local copies and scalar field stores.
+fn scalarClassLeaf(program: Ir.Program, function: Ir.Function) bool {
+    const index = function.return_type.structureIndex() orelse return false;
+    if (index >= program.structures.len or !program.structures[index].is_class or
+        program.structures[index].is_static or function.blocks.len != 1) return false;
+    for (function.value_types) |value_type| {
+        if (value_type != function.return_type and !value_type.isNumeric() and value_type != .bool) return false;
+    }
+    for (function.local_types) |value_type| {
+        if (value_type != function.return_type and !value_type.isNumeric() and value_type != .bool) return false;
+    }
+    for (function.blocks[0].instructions) |instruction| switch (instruction) {
+        .constant_int,
+        .constant_bool,
+        .constant_float32,
+        .constant_float64,
+        .copy,
+        .local_load,
+        .local_store,
+        .unary,
+        .binary,
+        .convert,
+        => {},
+        .field_load => |value| {
+            if (function.value_types[value.base] != function.return_type or
+                (!function.value_types[value.result].isNumeric() and function.value_types[value.result] != .bool)) return false;
+        },
+        .field_store => |value| {
+            if (function.value_types[value.base] != function.return_type or
+                (!function.value_types[value.replacement].isNumeric() and function.value_types[value.replacement] != .bool)) return false;
+        },
+        else => return false,
+    };
+    return true;
 }
 
 fn isPreviousParameterType(program: Ir.Program, value_type: Ir.Type) bool {
@@ -299,6 +398,16 @@ fn emitCall(
                 .result = result,
                 .base = mapped(mapping, value.base),
                 .field = value.field,
+            } });
+        },
+        .field_store => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .field_store = .{
+                .result = result,
+                .base = mapped(mapping, value.base),
+                .field = value.field,
+                .replacement = mapped(mapping, value.replacement),
             } });
         },
         .collection_count => |value| {
@@ -628,6 +737,74 @@ test "preserve previous boundary inlining while gating new reference forms" {
     const body = text[start..];
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @previous_boundary"));
     try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "call @extended_boundary"));
+}
+
+test "inline scalar class leaves while preserving aliases and call effects" {
+    const Frontend = @import("../Frontend.zig");
+    const Interpreter = @import("../Interpreter.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Counter {
+        \\    var value:int
+        \\    func add(amount:int) { self.value += amount }
+        \\    func observed(amount:int) { print(amount); self.value += amount }
+        \\}
+        \\func calculate(rounds:int) int {
+        \\    var counter = Counter()
+        \\    var observer = counter
+        \\    var index = 0
+        \\    while index < rounds { counter.add(3); index++ }
+        \\    counter.observed(2)
+        \\    return observer.value
+        \\}
+        \\func main() { print(calculate(4)); print(calculate(0)) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    var checked = false;
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "calculate")) continue;
+        var stores: usize = 0;
+        var observed_calls: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction == .field_store) stores += 1;
+            if (instruction == .call) {
+                const name = optimized.functions[instruction.call.function].name;
+                try std.testing.expect(std.mem.indexOf(u8, name, "Counter.add") == null);
+                if (std.mem.indexOf(u8, name, "Counter.observed") != null) observed_calls += 1;
+            }
+        };
+        try std.testing.expectEqual(@as(usize, 1), stores);
+        try std.testing.expectEqual(@as(usize, 1), observed_calls);
+        checked = true;
+    }
+    try std.testing.expect(checked);
+    const before = try Interpreter.runCapture(allocator, compilation.ir);
+    const after = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("2\n14\n2\n2\n", before.stdout);
+    try std.testing.expectEqualStrings(before.stdout, after.stdout);
+    try std.testing.expectEqualStrings(before.stderr, after.stderr);
+    try std.testing.expectEqual(before.exit_code, after.exit_code);
+
+    for (compilation.ir.functions) |function| {
+        if (std.mem.indexOf(u8, function.name, "Counter.add") == null) continue;
+        try std.testing.expect(scalarClassLeaf(compilation.ir, function));
+        const barriers = [_]Ir.Instruction{
+            .{ .class_retain = .{ .operand = 0 } },
+            .{ .class_drop = .{ .operand = 0, .static_type = function.return_type.structureIndex().?, .plans = &.{} } },
+            .{ .call = .{ .result = 0, .function = 0, .arguments = &.{0} } },
+        };
+        for (barriers) |barrier| {
+            var forbidden = function;
+            const instructions = try allocator.alloc(Ir.Instruction, function.blocks[0].instructions.len + 1);
+            @memcpy(instructions[0..function.blocks[0].instructions.len], function.blocks[0].instructions);
+            instructions[instructions.len - 1] = barrier;
+            forbidden.blocks = &.{.{ .instructions = instructions, .terminator = function.blocks[0].terminator }};
+            try std.testing.expect(!scalarClassLeaf(compilation.ir, forbidden));
+        }
+    }
 }
 
 test "inline numeric reads from aggregates that contain resources" {

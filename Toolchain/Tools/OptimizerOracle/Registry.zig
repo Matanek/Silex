@@ -1,6 +1,7 @@
 const std = @import("std");
 const Silex = @import("silex_optimizer_api");
 const Parity = @import("Parity.zig");
+const History = @import("QualificationHistory.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -59,6 +60,7 @@ const WorkspaceRepository = struct {
     repository: []const u8,
     revision: []const u8,
     role: []const u8,
+    reconciliation: ?History.Reconciliation = null,
 };
 
 const InventoryFamily = struct {
@@ -240,7 +242,7 @@ pub fn validateQualificationCorpus(
             workspace_root,
             entry.repository,
         );
-        try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
+        try validateQualificationRevision(allocator, io, manifest, repository_root, entry.repository, entry.revision);
     }
     for (manifest.qualification_corpus) |entry| {
         if (!repositoryRequired(entry.repository, standalone)) continue;
@@ -250,7 +252,8 @@ pub fn validateQualificationCorpus(
             workspace_root,
             entry.repository,
         );
-        try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
+        try validateQualificationRevision(allocator, io, manifest, repository_root, entry.repository, entry.revision);
+        try History.source(allocator, io, repository_root, entry.revision, entry.path, entry.sha256);
         try validateSourceHash(allocator, io, repository_root, entry.path, entry.sha256);
     }
     for (manifest.hot_functions) |entry| {
@@ -261,7 +264,8 @@ pub fn validateQualificationCorpus(
             workspace_root,
             entry.repository,
         );
-        try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
+        try validateQualificationRevision(allocator, io, manifest, repository_root, entry.repository, entry.revision);
+        try History.source(allocator, io, repository_root, entry.revision, entry.source, entry.source_sha256);
         try validateSourceHash(allocator, io, repository_root, entry.source, entry.source_sha256);
     }
     for (manifest.proofs) |entry| {
@@ -272,8 +276,8 @@ pub fn validateQualificationCorpus(
             workspace_root,
             entry.repository,
         );
-        try validateRevisionAncestor(allocator, io, repository_root, entry.revision);
-        try validateSourceHash(allocator, io, repository_root, entry.source, entry.source_sha256);
+        try validateQualificationRevision(allocator, io, manifest, repository_root, entry.repository, entry.revision);
+        try History.source(allocator, io, repository_root, entry.revision, entry.source, entry.source_sha256);
     }
 }
 
@@ -335,15 +339,23 @@ pub fn validateHotMeasurement(
     return error.HotFunctionNotRegistered;
 }
 
-fn validateRevisionAncestor(
+fn validateQualificationRevision(
     allocator: Allocator,
     io: std.Io,
+    manifest: Manifest,
     repository_root: []const u8,
+    repository: []const u8,
     revision: []const u8,
 ) !void {
-    _ = try successfulCommand(allocator, io, &.{
-        "git", "-C", repository_root, "merge-base", "--is-ancestor", revision, "HEAD",
-    });
+    for (manifest.workspace_baseline) |entry| {
+        if (!std.mem.eql(u8, entry.repository, repository) or
+            !std.mem.eql(u8, entry.revision, revision)) continue;
+        if (entry.reconciliation) |record| {
+            try History.audit(repository, revision, record);
+            return History.validate(allocator, io, repository_root, revision, record);
+        }
+    }
+    try History.ancestor(allocator, io, repository_root, revision);
 }
 
 fn validateSourceHash(
@@ -527,6 +539,7 @@ fn auditWorkspaceBaseline(repositories: []const WorkspaceRepository) !void {
     for (repositories, 0..) |entry, index| {
         if (entry.repository.len == 0 or entry.role.len == 0) return error.IncompleteWorkspaceBaseline;
         try requireHex(entry.revision, 40);
+        if (entry.reconciliation) |record| try History.audit(entry.repository, entry.revision, record);
         has_silex = has_silex or std.mem.eql(u8, entry.repository, "Silex");
         has_benchmarks = has_benchmarks or std.mem.eql(u8, entry.repository, "Silex-Benchmarks");
         for (repositories[0..index]) |previous| if (std.mem.eql(u8, previous.repository, entry.repository))
@@ -735,6 +748,70 @@ test "standalone qualification retains compiler proofs without requiring sibling
     try std.testing.expect(!repositoryRequired("Silex-Benchmarks", true));
     try std.testing.expect(!repositoryRequired("Packages/GFX.Physics", true));
     try std.testing.expect(repositoryRequired("Silex-Benchmarks", false));
+}
+
+test "closure reconciliation applies only to its exact repository and historical revision" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var manifest = try load(allocator, std.testing.io, "Benchmarks/Optimizer");
+    const repositories = try allocator.dupe(WorkspaceRepository, manifest.workspace_baseline);
+    manifest.workspace_baseline = repositories;
+    for (repositories) |*entry| {
+        if (entry.reconciliation) |*record| {
+            // Invalid metadata proves that only the exact key selects this record.
+            record.reason = "";
+            try std.testing.expectError(error.InvalidReconciliation, validateQualificationRevision(
+                allocator,
+                std.testing.io,
+                manifest,
+                "/nonexistent-qualification-repository",
+                entry.repository,
+                entry.revision,
+            ));
+            try std.testing.expectError(error.UnavailableQualificationHistory, validateQualificationRevision(
+                allocator,
+                std.testing.io,
+                manifest,
+                "/nonexistent-qualification-repository",
+                "Packages/Unregistered",
+                entry.revision,
+            ));
+            try std.testing.expectError(error.UnavailableQualificationHistory, validateQualificationRevision(
+                allocator,
+                std.testing.io,
+                manifest,
+                "/nonexistent-qualification-repository",
+                entry.repository,
+                record.candidate_revision,
+            ));
+            return;
+        }
+    }
+    return error.MissingReconciliationFixture;
+}
+
+test "current sealed qualification sources still reject changed bytes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const relative = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, relative, allocator);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Sealed.sx", .data = "sealed\n" });
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash("sealed\n", &digest, .{});
+    const expected = std.fmt.bytesToHex(digest, .lower);
+    try validateSourceHash(allocator, std.testing.io, root, "Sealed.sx", &expected);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Sealed.sx", .data = "changed\n" });
+    try std.testing.expectError(error.QualificationSourceMismatch, validateSourceHash(
+        allocator,
+        std.testing.io,
+        root,
+        "Sealed.sx",
+        &expected,
+    ));
 }
 
 test "coverage audit rejects a stable entry without its cost proof" {

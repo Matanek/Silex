@@ -1,0 +1,287 @@
+struct @PreparationShared.Input {
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .separation:float
+    var .vax:float
+    var .vay:float
+    var .wa:float
+    var .vbx:float
+    var .vby:float
+    var .wb:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+}
+
+struct @PreparationShared.Prepared {
+    var .separation:float
+    var .normal_mass:float
+    var .tangent_mass:float
+    var .relative_velocity:float
+    var .rolling_mass:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+    var .bias_rate:float
+    var .mass_scale:float
+    var .impulse_scale:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .total:float
+}
+
+func @PreparationShared.prepare(%0:@PreparationShared.Input, %1:bool) -> @PreparationShared.Prepared {
+entry:
+    %2:float = field %0, .ax
+    %3:float = deep_copy %2
+    %4:float = field %0, .ay
+    %5:float = deep_copy %4
+    %6:float = field %0, .bx
+    %7:float = deep_copy %6
+    %8:float = field %0, .by
+    %9:float = deep_copy %8
+    %10:float = field %0, .ia
+    %11:float = deep_copy %10
+    %12:float = field %0, .ib
+    %13:float = deep_copy %12
+    %14:float = field %0, .ma
+    %15:float = deep_copy %14
+    %16:float = field %0, .mb
+    %17:float = deep_copy %16
+    %18:float = field %0, .nx
+    %19:float = deep_copy %18
+    %20:float = field %0, .ny
+    %21:float = deep_copy %20
+    %23:float = const 0
+    %24:float = const 0
+    %26:float = const 0
+    %49:float = const 0
+    %1760:float = copy %49
+    branch %1, bb1, bb2
+bb1:
+    %50:float = const 1
+    %1760:float = copy %50
+    jump bb2
+bb2:
+    %53:float = field %0, .separation
+    %54:float = sub %7, %3
+    %55:float = mul %54, %19
+    %56:float = sub %9, %5
+    %57:float = mul %56, %21
+    %58:float = add %55, %57
+    %59:float = sub %53, %58
+    %88:float = mul %3, %21
+    %89:float = mul %5, %19
+    %90:float = sub %88, %89
+    %91:float = mul %7, %21
+    %92:float = mul %9, %19
+    %93:float = sub %91, %92
+    %94:float = add %15, %17
+    %95:float = mul %11, %90
+    %96:float = mul %95, %90
+    %97:float = add %94, %96
+    %98:float = mul %13, %93
+    %99:float = mul %98, %93
+    %100:float = add %97, %99
+    %101:float = const 0
+    %102:bool = gt %100, %101
+    %1761:float = copy %23
+    branch %102, bb3, bb4
+bb3:
+    %105:float = const 1
+    %106:float = div %105, %100
+    %1761:float = copy %106
+    jump bb4
+bb4:
+    %135:float = neg %19
+    %136:float = mul %3, %135
+    %137:float = mul %5, %21
+    %138:float = sub %136, %137
+    %139:float = mul %7, %135
+    %140:float = mul %9, %21
+    %141:float = sub %139, %140
+    %142:float = add %15, %17
+    %143:float = mul %11, %138
+    %144:float = mul %143, %138
+    %145:float = add %142, %144
+    %146:float = mul %13, %141
+    %147:float = mul %146, %141
+    %148:float = add %145, %147
+    %149:float = const 0
+    %150:bool = gt %148, %149
+    %1762:float = copy %24
+    branch %150, bb5, bb6
+bb5:
+    %153:float = const 1
+    %154:float = div %153, %148
+    %1762:float = copy %154
+    jump bb6
+bb6:
+    %183:float = add %11, %13
+    %184:float = const 0
+    %185:bool = gt %183, %184
+    %1763:float = copy %26
+    branch %185, bb7, bb8
+bb7:
+    %188:float = const 1
+    %189:float = div %188, %183
+    %1763:float = copy %189
+    jump bb8
+bb8:
+    %218:float = field %0, .vax
+    %219:float = deep_copy %218
+    %220:float = field %0, .vay
+    %221:float = deep_copy %220
+    %222:float = field %0, .wa
+    %223:float = deep_copy %222
+    %224:float = field %0, .vbx
+    %225:float = deep_copy %224
+    %226:float = field %0, .vby
+    %227:float = deep_copy %226
+    %228:float = field %0, .wb
+    %229:float = deep_copy %228
+    %230:float = const 0
+    %231:bool = eq %15, %230
+    %1764:float = copy %219
+    %1766:float = copy %223
+    %1765:float = copy %221
+    branch %231, bb9, bb10
+bb9:
+    %232:float = const 0
+    %233:float = const 0
+    %234:float = const 0
+    %1764:float = copy %232
+    %1766:float = copy %234
+    %1765:float = copy %233
+    jump bb10
+bb10:
+    %235:float = const 0
+    %236:bool = eq %17, %235
+    %1767:float = copy %225
+    %1769:float = copy %229
+    %1768:float = copy %227
+    branch %236, bb11, bb12
+bb11:
+    %237:float = const 0
+    %238:float = const 0
+    %239:float = const 0
+    %1767:float = copy %237
+    %1769:float = copy %239
+    %1768:float = copy %238
+    jump bb12
+bb12:
+    %242:float = copy %1767
+    %243:float = copy %1769
+    %244:float = mul %243, %9
+    %245:float = sub %242, %244
+    %246:float = copy %1764
+    %247:float = copy %1766
+    %248:float = mul %247, %5
+    %249:float = sub %246, %248
+    %250:float = sub %245, %249
+    %251:float = mul %19, %250
+    %252:float = copy %1768
+    %253:float = copy %1769
+    %254:float = mul %253, %7
+    %255:float = add %252, %254
+    %256:float = copy %1765
+    %257:float = copy %1766
+    %258:float = mul %257, %3
+    %259:float = add %256, %258
+    %260:float = sub %255, %259
+    %261:float = mul %21, %260
+    %262:float = add %251, %261
+    %293:float = copy %1760
+    %294:float = field %0, .normal
+    %295:float = mul %293, %294
+    %326:float = copy %1760
+    %327:float = field %0, .tangent
+    %328:float = mul %326, %327
+    %359:float = copy %1760
+    %360:float = field %0, .rolling
+    %361:float = mul %359, %360
+    %392:float = const 12
+    %423:float = const 0.75
+    %454:float = const 0.25
+    %483:float = const 0
+    %484:bool = eq %15, %483
+    branch %484, bb14, bb13
+bb13:
+    %486:float = const 0
+    %487:bool = eq %17, %486
+    %485:bool = copy %487
+    jump bb15
+bb14:
+    %485:bool = const true
+    jump bb15
+bb15:
+    %1770:float = copy %392
+    %1772:float = copy %454
+    %1771:float = copy %423
+    branch %485, bb16, bb17
+bb16:
+    %490:float = const 24
+    %521:float = const 0.875
+    %552:float = const 0.125
+    %1770:float = copy %490
+    %1772:float = copy %552
+    %1771:float = copy %521
+    jump bb17
+bb17:
+    %583:float = field %0, .friction
+    %614:float = field %0, .restitution
+    %645:float = field %0, .tangent_speed
+    %676:float = field %0, .rolling_resistance
+    %1734:float = copy %59
+    %1735:float = copy %1761
+    %1736:float = copy %1762
+    %1737:float = copy %262
+    %1738:float = copy %1763
+    %1739:float = copy %295
+    %1740:float = copy %328
+    %1741:float = copy %361
+    %1742:float = copy %583
+    %1743:float = copy %614
+    %1744:float = copy %645
+    %1745:float = copy %676
+    %1746:float = copy %1770
+    %1747:float = copy %1771
+    %1748:float = copy %1772
+    %1749:float = copy %19
+    %1750:float = copy %21
+    %1751:float = copy %3
+    %1752:float = copy %5
+    %1753:float = copy %7
+    %1754:float = copy %9
+    %1755:float = copy %15
+    %1756:float = copy %17
+    %1757:float = copy %11
+    %1758:float = copy %13
+    %1759:float = const 0
+    %1005:@PreparationShared.Prepared = struct.init @PreparationShared.Prepared(.separation=%1734, .normal_mass=%1735, .tangent_mass=%1736, .relative_velocity=%1737, .rolling_mass=%1738, .normal=%1739, .tangent=%1740, .rolling=%1741, .friction=%1742, .restitution=%1743, .tangent_speed=%1744, .rolling_resistance=%1745, .bias_rate=%1746, .mass_scale=%1747, .impulse_scale=%1748, .nx=%1749, .ny=%1750, .ax=%1751, .ay=%1752, .bx=%1753, .by=%1754, .ma=%1755, .mb=%1756, .ia=%1757, .ib=%1758, .total=%1759)
+    return %1005
+}

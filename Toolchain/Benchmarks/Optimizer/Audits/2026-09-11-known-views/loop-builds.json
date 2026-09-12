@@ -1,0 +1,40 @@
+[
+  {
+    "name": "before",
+    "command": [
+      "/private/tmp/silex-part02-evidence/silex-before",
+      "compile",
+      "/private/tmp/silex-part02-evidence/KnownViewLoop.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part02-evidence/view-loop-before"
+    ],
+    "exit": 0,
+    "stderr": "",
+    "compiler_sha256": "4bcc9a8d8d44e8aec06f69a0989579f40ef328a6236d5b1734e408dc82811534",
+    "binary_sha256": "7f79deddb2f8383f5da2a003ca5fb26516ef437ca290bbc7fceec03f375d8602",
+    "binary_bytes": 32952,
+    "stdout": "266\n",
+    "run_exit": 0
+  },
+  {
+    "name": "after",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part02-evidence/KnownViewLoop.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part02-evidence/view-loop-after"
+    ],
+    "exit": 0,
+    "stderr": "",
+    "compiler_sha256": "16086c113a84e2c2fd7c4a8d457cb07b5e73bfb12845eb766361fab919447258",
+    "binary_sha256": "11a19f410bbd70fcc720117653854b71384f6ceef7150c91d93770942fe94799",
+    "binary_bytes": 32952,
+    "stdout": "266\n",
+    "run_exit": 0
+  }
+]

@@ -1,0 +1,14 @@
+family	legacy_state	legacy_timing_proofs	current_timing_cases	interaction_axes	risk_triplets	proofs	budgets	budget_gap	scope	owner	open_questions
+scalar-integers	equivalent	1	1	3	1	3	0	true	bounded-corpus	optimizer	1
+scalar-floating-point	equivalent	1	1	3	1	3	2	false	bounded-corpus	optimizer	1
+branches-diamonds-and-phi	equivalent	0	0	2	1	2	2	false	bounded-corpus	optimizer	1
+loops-inductions-and-ranges	equivalent	1	1	3	1	2	2	false	bounded-corpus	optimizer	1
+references-and-alias	equivalent	0	0	3	1	2	3	false	bounded-corpus	optimizer	1
+aggregates-copies-and-returns	equivalent	0	0	4	1	2	2	false	bounded-corpus	optimizer	1
+collections-ownership-and-bounds	equivalent	0	0	3	1	2	3	false	bounded-corpus	llvm-bridge	1
+calls-closure-and-inlining	equivalent	0	0	3	2	3	5	false	bounded-corpus	optimizer	1
+errors-and-overflow	equivalent	0	0	2	1	2	0	true	bounded-corpus	llvm-bridge	1
+simd-and-vectorization	equivalent	0	0	3	1	2	2	false	bounded-corpus	machine	1
+runtime-effects-and-text	equivalent	0	0	4	1	2	2	false	bounded-corpus	llvm-bridge	1
+registers-spills-and-stack	equivalent	0	1	3	1	2	5	false	bounded-corpus	machine	1
+packages-and-real-consumers	equivalent	0	0	3	1	5	5	false	bounded-corpus	qualification	1

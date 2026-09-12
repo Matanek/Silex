@@ -1,0 +1,95 @@
+{
+  "final_code_matches_probe": true,
+  "before_binary_sha256": "69b0e4ad0178694ef43b38900f5455f302513cba87079d71b23d096352da7f4c",
+  "after_binary_sha256": "b531ff7948a92cc0247e96756a1fda25174b36295f76e4102fd0c22005e5dfcf",
+  "after_compiler_sha256": "3e5e4a59a9bb733882af80e1aad16c4b9e578e2e0c4f262e19f08226cc69035b",
+  "structural": {
+    "before": {
+      "start": "0x1000025d9",
+      "end": "0x10000301a",
+      "instructions": 463,
+      "spans": [
+        {
+          "start": "0x10000278e",
+          "end": "0x100002956",
+          "instructions": 85,
+          "stack_accesses": 33,
+          "boolean_materializations": 2,
+          "branches": 6
+        },
+        {
+          "start": "0x10000291f",
+          "end": "0x1000029db",
+          "instructions": 35,
+          "stack_accesses": 13,
+          "boolean_materializations": 3,
+          "branches": 5
+        },
+        {
+          "start": "0x10000291f",
+          "end": "0x100002b8c",
+          "instructions": 108,
+          "stack_accesses": 57,
+          "boolean_materializations": 5,
+          "branches": 9
+        },
+        {
+          "start": "0x10000291f",
+          "end": "0x100002cc6",
+          "instructions": 162,
+          "stack_accesses": 85,
+          "boolean_materializations": 6,
+          "branches": 12
+        }
+      ]
+    },
+    "after-probe": {
+      "start": "0x100002500",
+      "end": "0x100002ec9",
+      "instructions": 437,
+      "spans": [
+        {
+          "start": "0x1000026b5",
+          "end": "0x100002843",
+          "instructions": 73,
+          "stack_accesses": 29,
+          "boolean_materializations": 0,
+          "branches": 4
+        },
+        {
+          "start": "0x10000280c",
+          "end": "0x10000288d",
+          "instructions": 22,
+          "stack_accesses": 9,
+          "boolean_materializations": 0,
+          "branches": 4
+        },
+        {
+          "start": "0x10000280c",
+          "end": "0x100002893",
+          "instructions": 23,
+          "stack_accesses": 9,
+          "boolean_materializations": 0,
+          "branches": 5
+        },
+        {
+          "start": "0x10000280c",
+          "end": "0x100002a3f",
+          "instructions": 95,
+          "stack_accesses": 53,
+          "boolean_materializations": 2,
+          "branches": 8
+        },
+        {
+          "start": "0x10000280c",
+          "end": "0x100002b75",
+          "instructions": 148,
+          "stack_accesses": 81,
+          "boolean_materializations": 3,
+          "branches": 10
+        }
+      ]
+    }
+  },
+  "scope": "Static address spans, not instruction frequencies or physical timing. X64 executed under Rosetta only."
+}

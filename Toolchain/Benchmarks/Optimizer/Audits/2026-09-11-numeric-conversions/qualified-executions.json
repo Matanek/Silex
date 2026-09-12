@@ -1,0 +1,1722 @@
+[
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatFraction",
+    "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+    "binary_sha256": "bd07ebdcf68d4b129adf6cd85065fd5e9e4d3907465427417e9bde12674d95ee",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatFraction.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatFraction",
+    "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+    "binary_sha256": "fbf84ce2e947048960461176391dbb278dc1aa8fdbf75021cf75bf5f74fdda7a",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatFraction.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatInfinityInteger",
+    "source_sha256": "98731c856ff53a8c5dc68ea1bd23dec72a243d31331b67454f3b85e2d7c337fe",
+    "binary_sha256": "87dabeb76d03e2dceb3fd8e62ac57d2d334db350f9828a2d7221ffe2789202f8",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatInfinityInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatInfinityInteger",
+    "source_sha256": "98731c856ff53a8c5dc68ea1bd23dec72a243d31331b67454f3b85e2d7c337fe",
+    "binary_sha256": "c1ed0695003bc8a6923112de1afa2ab543f73fbb75f38db84ca14e1b36a73617",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatInfinityInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatMinimum",
+    "source_sha256": "5fdbc0b41aee68dfc267acdca1902bf582f37027b968ffed2e532599ee099329",
+    "binary_sha256": "b7758da08bfe2dda00c18209b32ce531c2d7ee4bbae131abb60926df39de5c3d",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatMinimum",
+    "source_sha256": "5fdbc0b41aee68dfc267acdca1902bf582f37027b968ffed2e532599ee099329",
+    "binary_sha256": "277dba884817dfcb6d1c0bb0f332cc6aa16fcbdc455a74e3b948b20fb1ab4362",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatNaNInteger",
+    "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+    "binary_sha256": "788f627ddbacb6e30a23f19376f1e88df16763fa5d438d84a66b6b67070d8084",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatNaNInteger",
+    "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+    "binary_sha256": "f69fe5b6df3574ae3eb08069c8a267ac847e2623502cd35c0a83de333d6dd6b9",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatNaNNarrow",
+    "source_sha256": "93568aa56bf40f110bcc65801e3c4ffa8a9fe50428dc7b16500fb97263cb8c50",
+    "binary_sha256": "5f2741786518b9ad547bdc660dae9d622dcc8de8aa7051cfd6ceab0c907445bb",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNNarrow.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatNaNNarrow",
+    "source_sha256": "93568aa56bf40f110bcc65801e3c4ffa8a9fe50428dc7b16500fb97263cb8c50",
+    "binary_sha256": "885d4e7797304a37b7141b5178586f43fcd676894155e1a2c3bdba4d08201e6d",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNNarrow.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatNarrowExact",
+    "source_sha256": "ef944e65bc919ac3e199aa20a6ff2ae1dccb8185a0753e973108ac831cef79c5",
+    "binary_sha256": "42b304fa29bb60c4b5ab20b621037baf59f688a5aca1e28f351cbb15f34870f4",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatNarrowExact",
+    "source_sha256": "ef944e65bc919ac3e199aa20a6ff2ae1dccb8185a0753e973108ac831cef79c5",
+    "binary_sha256": "d36f28d607d68dd9f39c3bd84d4f671dcb00caa244d15ec21800f747a07696e3",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatNarrowLoss",
+    "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+    "binary_sha256": "1f2d521b53e460726481222f6042486a7223e7654a25dbdbf7c399fa61ba64da",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowLoss.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatNarrowLoss",
+    "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+    "binary_sha256": "36e9d2d25ef18ef913c197edd21ffb23013c35af52b075616601d8e7460c8ddb",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowLoss.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatNegativeUnsigned",
+    "source_sha256": "f4b05bc7abc34b664f409622288c5a566b3216ef18b37aab56b9373f504364c4",
+    "binary_sha256": "6dc69ead46d6dcdd4e1610e78b8c62564e9b8ecbeaa13b05240a7bce0d41669b",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeUnsigned.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatNegativeUnsigned",
+    "source_sha256": "f4b05bc7abc34b664f409622288c5a566b3216ef18b37aab56b9373f504364c4",
+    "binary_sha256": "3e8d60e949f75cf1b3dad9e4ae239c78be682b6e0f3e5e7916d29231eb398862",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeUnsigned.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatNegativeZero",
+    "source_sha256": "c51dd3f806546273273aea91cfec6d0247247bfc530e2ec988a02aaef01e70fc",
+    "binary_sha256": "31f90008b8437a60a0ac9c68551a5cff090a4a5363b38b53bfeae709d093a0e6",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatNegativeZero",
+    "source_sha256": "c51dd3f806546273273aea91cfec6d0247247bfc530e2ec988a02aaef01e70fc",
+    "binary_sha256": "ca75ed9c63627cdbf00a103ca6bd6546e29c305471e1a20e1ec5ea7a7f8851ae",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatUnsignedHigh",
+    "source_sha256": "0db80a786caf08b3887322fec18c0279476afa7bbec22c6decc199de18bc5661",
+    "binary_sha256": "168ade4509cde17db94b55aa571d753614f57408240c9a9a290f336484bf21c9",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatUnsignedHigh",
+    "source_sha256": "0db80a786caf08b3887322fec18c0279476afa7bbec22c6decc199de18bc5661",
+    "binary_sha256": "cdd0572f6e2779f82c72b2159dc6b5a7b08e7758c554420863d433d3c21bb9c5",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatUnsignedUpper",
+    "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+    "binary_sha256": "28277c1af54a246afe32cc586fb210896d6e4bd760543fa693b1f423e5356b0e",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedUpper.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatUnsignedUpper",
+    "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+    "binary_sha256": "198b777ff0ca03bd3b08ab93d8f86b135a5f4da38837467e79fafef87d63ae22",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedUpper.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "FloatUpper",
+    "source_sha256": "59f21d5ad20fb30339f904c0a3ca7002c37b91154ef424f6196e09542d4fd776",
+    "binary_sha256": "75b443fb999e35bf87243ea5b6cf8309464dde0b4a54b44b65102da3b8d634a8",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "FloatUpper",
+    "source_sha256": "59f21d5ad20fb30339f904c0a3ca7002c37b91154ef424f6196e09542d4fd776",
+    "binary_sha256": "8be64d67acf5cf3f6753bf4eebfb772d14d35288697e37922f65573970f876a3",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "IntegerDoubleLoss",
+    "source_sha256": "46b52e2d6ea1315fa03b2926cef26d3f1b869c5bda981284b49519d090b814df",
+    "binary_sha256": "65c3f226bc6eea9d01f355f9c2f7cd300bf6dfa0f6296467ef16cc36cd640f2b",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerDoubleLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "IntegerDoubleLoss",
+    "source_sha256": "46b52e2d6ea1315fa03b2926cef26d3f1b869c5bda981284b49519d090b814df",
+    "binary_sha256": "f53871068b80616a3104626c75ca807a38590cf1e6303c52303b96dd69c5b968",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerDoubleLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "IntegerFloatLoss",
+    "source_sha256": "e2b81dc912d49c2eb08e12ae97d460de114b2f62bc455e21f77a5ed2c83d747e",
+    "binary_sha256": "670df14330a61ec6c737b3bf7ab29128a365bb1eeeebf5aab3328d7db735824f",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerFloatLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "IntegerFloatLoss",
+    "source_sha256": "e2b81dc912d49c2eb08e12ae97d460de114b2f62bc455e21f77a5ed2c83d747e",
+    "binary_sha256": "d9cb10c8f6a4f29a6ce4e0175453be1def1a8690a45e4136ed05669893c3b057",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerFloatLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "NegativeUnsigned16",
+    "source_sha256": "868b85621cba0f43431a8c63d744bd0ce1828d03d71da739a26ef56d07b87bb8",
+    "binary_sha256": "843f567f7a1d86d814e15294daa4482b5f43036e3bddfa1a6af9875777c1a6fd",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "NegativeUnsigned16",
+    "source_sha256": "868b85621cba0f43431a8c63d744bd0ce1828d03d71da739a26ef56d07b87bb8",
+    "binary_sha256": "49a3c6281f7f49b4d0cedd136a7306d03b3330a94dad72800d8313057b5d3568",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "NegativeUnsigned32",
+    "source_sha256": "8963ddbdf435518b68de05c4b6c46e8e94134b54d27c9cf5b2090e8c0ba59940",
+    "binary_sha256": "b661a3359b4913b0effb2b9ae33d7e9c5399d1772911fe1b4e58bbd63fda21ca",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "NegativeUnsigned32",
+    "source_sha256": "8963ddbdf435518b68de05c4b6c46e8e94134b54d27c9cf5b2090e8c0ba59940",
+    "binary_sha256": "c1216320aee0a61bbc145b1ec61a47e2bc017c38c470d4d5376335c9cb16c9aa",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "NegativeUnsigned64",
+    "source_sha256": "a70dea76bc38fdaeb8f25411a31ad67e8b6ca8c123c7f1fd784051fb07235c37",
+    "binary_sha256": "f67921d77b8dda1eba9afdf4aed2fe14531fbf85099646c89c0a2da220af5837",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "NegativeUnsigned64",
+    "source_sha256": "a70dea76bc38fdaeb8f25411a31ad67e8b6ca8c123c7f1fd784051fb07235c37",
+    "binary_sha256": "1329b73f27e29b7bdf441c14f6dfa993100ac86e0dec1348cab5d461a2910a1d",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "NegativeUnsigned8",
+    "source_sha256": "325c7906e88ff7aa3a352eed4a746806baec1b53c7593c205fb5b7635879f87f",
+    "binary_sha256": "69c8fcf7b13952fdd31c147fdd1268c1e40bc88313d720c93a498fef2b48f6fa",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "NegativeUnsigned8",
+    "source_sha256": "325c7906e88ff7aa3a352eed4a746806baec1b53c7593c205fb5b7635879f87f",
+    "binary_sha256": "aa7f3a7b2d4add92d134ffcbc5bd5f2b574d87b42fe1abf675968fbcacebea33",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedFloatMinimum",
+    "source_sha256": "e92ec6faede0ddea1c4d5deb826e4cac7afcb979250f9221803bbdfd87ea2699",
+    "binary_sha256": "a06779cec64e95739dd0f7e04b42b1d223a216eeaae19bcc2e429db1c7235b4e",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedFloatMinimum",
+    "source_sha256": "e92ec6faede0ddea1c4d5deb826e4cac7afcb979250f9221803bbdfd87ea2699",
+    "binary_sha256": "c4a3f1eda08165ffdb5789aa51803890f3cc1a06a0471c2b9d6232ac1b9e1618",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedFloatUpper",
+    "source_sha256": "8f7a432d8ad85ca6a68c04b11e67666232f9403e5d72e1a718d9883d75417ea3",
+    "binary_sha256": "98f2a38a2eae7e1292fbccd1629cb2afd56ef4042f8b80ce9ec3ed016f9ba0e5",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedFloatUpper",
+    "source_sha256": "8f7a432d8ad85ca6a68c04b11e67666232f9403e5d72e1a718d9883d75417ea3",
+    "binary_sha256": "a858d535bf497946fd6cc8217564ccf33350c5bd7919b7fa655576c0b8799398",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedNarrow16",
+    "source_sha256": "88ac57625a37b5d6aa7248d105fb254301d7e206098a6b7246196c8c034df319",
+    "binary_sha256": "918c8a6619d9a5281ebed1f107da0e3a6cca17bd541ab27e0388925ab4f3e76c",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow16.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedNarrow16",
+    "source_sha256": "88ac57625a37b5d6aa7248d105fb254301d7e206098a6b7246196c8c034df319",
+    "binary_sha256": "27e1251f6bd53822bf5abf03292e0eebd475edb3cfe4cd3c3a5297aeb6dd79f0",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow16.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedNarrow32",
+    "source_sha256": "0891bc570a5ec12db336a83a94be7b88694c53337b5ad90d8ddf979e18b6b6c5",
+    "binary_sha256": "d221798f4304b5e629c589ae7e81cd9379903e1793c28a993f5bdec9eb753749",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow32.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedNarrow32",
+    "source_sha256": "0891bc570a5ec12db336a83a94be7b88694c53337b5ad90d8ddf979e18b6b6c5",
+    "binary_sha256": "c14615110548ed868b9af820a2ed4003b27a70abff96cc96e4647bcb0e875c37",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow32.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedNarrow8",
+    "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+    "binary_sha256": "a9231bd991183738da4766524fd7806465bff554c2e351f2e40e82bfdb29a6f2",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedNarrow8",
+    "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+    "binary_sha256": "316a914782ee5146206e8d69f9b9c758cdfc4a44aec81fbe9ba038dffd551b57",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedWiden16",
+    "source_sha256": "5612e4cf2bae2e4450133cd58bb056ac358762c77a1f16fefae82a42306c6bd0",
+    "binary_sha256": "aa1bfdc914f2242bac83155f894119841b6b4fd3490bcbf5933af4de45aa9818",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedWiden16",
+    "source_sha256": "5612e4cf2bae2e4450133cd58bb056ac358762c77a1f16fefae82a42306c6bd0",
+    "binary_sha256": "c5fc847b1af40590b87379d63c7e0e8692470b5da75c2a6aeb657916e32a33cf",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedWiden32",
+    "source_sha256": "20bec877a3e2d8be19a3cd3c693c2b38ff1d93ef4a86914e8230efee6dae93f1",
+    "binary_sha256": "71b3dea5b0656aa5d9f48f6f89ad4d8daaddd11d7d885828e596e2d828c207b5",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedWiden32",
+    "source_sha256": "20bec877a3e2d8be19a3cd3c693c2b38ff1d93ef4a86914e8230efee6dae93f1",
+    "binary_sha256": "d6bd58c9a91173de186831087aef4352694a2c27fa7e170a9b242f19fcdfc61d",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SignedWiden8",
+    "source_sha256": "55371c6e82b4dc8edd4b3541cb23c539f3f69aa0c44d99311cae8d3236fd2809",
+    "binary_sha256": "897edb96b6262bdc700e3b1d205bb68e4943dd7159ca684dba509b8416355f1e",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SignedWiden8",
+    "source_sha256": "55371c6e82b4dc8edd4b3541cb23c539f3f69aa0c44d99311cae8d3236fd2809",
+    "binary_sha256": "71c1c4620e2308df379ff26f83bf2e662134510800f04cf7cacc24b1822f20cf",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SingleExact",
+    "source_sha256": "c9465feddafb8d33fdd8d617702f928380a0b4e668980d6ee7524a0f6a319cdf",
+    "binary_sha256": "8f2f278444a164f74d6917fc831aa47d8c03947fe802366c5e953326e229f949",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SingleExact",
+    "source_sha256": "c9465feddafb8d33fdd8d617702f928380a0b4e668980d6ee7524a0f6a319cdf",
+    "binary_sha256": "c5dd418789b541ae7dec3210b3af39d5b6732147c68ce142f031144b92d06b84",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SingleFraction",
+    "source_sha256": "eebb1befb663c19de5f9c70d4f1723cc0db836640a1525bbe40e4286dcfa86ce",
+    "binary_sha256": "87cf7801a0f26f09cdb9d59eceab5df190251310cd2685d3dc1479269f2f3676",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleFraction.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SingleFraction",
+    "source_sha256": "eebb1befb663c19de5f9c70d4f1723cc0db836640a1525bbe40e4286dcfa86ce",
+    "binary_sha256": "9755a347e4a11bebd0b89957d12b36489e57d1ae11b8a5ed0c6cb3d220e187c6",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleFraction.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "SingleUpper",
+    "source_sha256": "91e3b882695c82e67d421150fca7884412eb621a815f4d91b6242592ef8c0d50",
+    "binary_sha256": "004cec7ad08481007e23016df161957974e296bfd27868123fed19892463b78f",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "SingleUpper",
+    "source_sha256": "91e3b882695c82e67d421150fca7884412eb621a815f4d91b6242592ef8c0d50",
+    "binary_sha256": "739e0f4f4963740990a51c14c03d7d89c8181637145dcf2556393234b4c0b599",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedFloatHigh",
+    "source_sha256": "f6423ac9a00a44e1df3af53c5f40c247471992c218f9b91824e12d7946c09716",
+    "binary_sha256": "35e57ad2cc3d4e232e8a05b26aa6f0bb7e09a472f122d6971153db497d6e8ebd",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedFloatHigh",
+    "source_sha256": "f6423ac9a00a44e1df3af53c5f40c247471992c218f9b91824e12d7946c09716",
+    "binary_sha256": "cf3c0c059a9ea6622871101fc54bf4a72b607d2dd193a23908ee4c917b6472d3",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedFloatLoss",
+    "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+    "binary_sha256": "84ae43ab6521d57ae430f2c2ed9eceb8bff851f3ea0df5ee87de73ee70d20595",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedFloatLoss",
+    "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+    "binary_sha256": "59babf32d21f1687051acfda9ed56c65acffaa29cd279bfcb500de8bb107e292",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedNarrow16",
+    "source_sha256": "47e28d7cb59a4009b1387d0565cfd5af4b2163b17d1075954b4456f9ec4b8b13",
+    "binary_sha256": "4d76898ea274f766002c62dcf6c4a601df67c8d75464002703e4511089bfa880",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow16.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedNarrow16",
+    "source_sha256": "47e28d7cb59a4009b1387d0565cfd5af4b2163b17d1075954b4456f9ec4b8b13",
+    "binary_sha256": "6118746bb95a7630238934f1b47f99fa14cfbfe3695d5a639a871d50ac6347b3",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow16.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedNarrow32",
+    "source_sha256": "161fe84c84b808435fffd874b63ceca2dc4332ac8bfe23b11cc7d702cbc0e495",
+    "binary_sha256": "c66d01cf1304953b33504bf70dd425ed5864ae5d85228f865e66861080c61ed5",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow32.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedNarrow32",
+    "source_sha256": "161fe84c84b808435fffd874b63ceca2dc4332ac8bfe23b11cc7d702cbc0e495",
+    "binary_sha256": "ec6ac34c3551cf37b90a2f524ceab998702132e9139c67fed04d43abc4c1d8b6",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow32.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedNarrow8",
+    "source_sha256": "205ad305b7bf94abdc7e1932804d9692492b40fb602bd61ac9a1fec7d2cb5b9b",
+    "binary_sha256": "d95d12e1be3f8ba828b8196feb5b6606c50e2c35fcf6156a94398b272b6f9571",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow8.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedNarrow8",
+    "source_sha256": "205ad305b7bf94abdc7e1932804d9692492b40fb602bd61ac9a1fec7d2cb5b9b",
+    "binary_sha256": "a2f5fb903436bf5a54e4df96a488ca8b51b890f57d69f6cb2a8755749b65fec8",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow8.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedSigned16",
+    "source_sha256": "45a3c90da2ed475dee433112ae3949f928bb0172422799cf919f6a3c4d1006d3",
+    "binary_sha256": "a43b254a71a48a3dce3f2774b6333da64e2cb0db10bac6049ddf19e54054c6cd",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedSigned16",
+    "source_sha256": "45a3c90da2ed475dee433112ae3949f928bb0172422799cf919f6a3c4d1006d3",
+    "binary_sha256": "c43caaa84eb9cbf910e71e4bd9c29d0fbbc03c58bf39aa0e8b73f1f19b3a9c91",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedSigned32",
+    "source_sha256": "b4df9633e147af67b25b8dc555a4b2cb366bc2b547719542bdcd9122527b8e83",
+    "binary_sha256": "ab9135891afa8a448f9598bd3d8ca06ac3d52adc2c348b0fc65d1f9b8bf62ce9",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedSigned32",
+    "source_sha256": "b4df9633e147af67b25b8dc555a4b2cb366bc2b547719542bdcd9122527b8e83",
+    "binary_sha256": "4e78019cedcd475854407fa983bb3434c133c7c5bde87df0daae244ffb9f2a1e",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedSigned64",
+    "source_sha256": "86f9428342509bc589b678bf9ff9ae8c0708258b66aee0c0fd5db29d75d693e3",
+    "binary_sha256": "1fee442ce3e62fb9d08514392a39ad93b2323fa5f21b4f338a02a098b0418cf0",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedSigned64",
+    "source_sha256": "86f9428342509bc589b678bf9ff9ae8c0708258b66aee0c0fd5db29d75d693e3",
+    "binary_sha256": "fcce77cde603ec7432808c440cd1ccb7f4c7fc7f6bef17cbf32602690dcdea39",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedSigned8",
+    "source_sha256": "387387037f0542dba5d6308448cfeed2c07c10492871f7b4b1cac89128b15fd1",
+    "binary_sha256": "bbfb6f8920f8926a294d87ca6244310392e4681b0fa15bae437e7775a3ac6f5c",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedSigned8",
+    "source_sha256": "387387037f0542dba5d6308448cfeed2c07c10492871f7b4b1cac89128b15fd1",
+    "binary_sha256": "d2d7a5e7df60046d2b277fa21e0263aaf04067194618dacbc754c6f70133d73c",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedSingleHigh",
+    "source_sha256": "24abdf725c0e7f921f1af3351b6b8d096516c7a49d4d0d8184b478ea8fe303da",
+    "binary_sha256": "8596807f789f608f540d059e9f49e08df20be016bc919ff1eac4e651716802a2",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedSingleHigh",
+    "source_sha256": "24abdf725c0e7f921f1af3351b6b8d096516c7a49d4d0d8184b478ea8fe303da",
+    "binary_sha256": "f71894fa21aa67b68cd287ef2cdc32e6337b261d36328685fcf168ad3c5d1709",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedSingleLoss",
+    "source_sha256": "fb7cbaf173cf382c79351ba6ef2215e4528508d5b765e9a23d8d9733a44c757f",
+    "binary_sha256": "23699c09e0dc7452511a753a9ec6d0ee7725f39a9accfd542671b92e9a3c8a22",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedSingleLoss",
+    "source_sha256": "fb7cbaf173cf382c79351ba6ef2215e4528508d5b765e9a23d8d9733a44c757f",
+    "binary_sha256": "820a21de4c3241d10340b0d385b2d14e67aabb1febf5058057de54f051f74f93",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedWiden16",
+    "source_sha256": "4d6ed0e1e8639966a7365b0f159ac3ad2c5fe0a2a8e30df591ccd4e4a30020d0",
+    "binary_sha256": "2e96075ea87c9a28539550009cabeb524096d2a9972cb0ed83d29adf6ab519b1",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedWiden16",
+    "source_sha256": "4d6ed0e1e8639966a7365b0f159ac3ad2c5fe0a2a8e30df591ccd4e4a30020d0",
+    "binary_sha256": "3167395519181c1642ccd15f88d8b93cfc6fcafa1ddc70fd4f7ad6c1ba68e01d",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedWiden32",
+    "source_sha256": "532d07c82b811d9e26939b8fdc9a269c9e4cd1dc2dd12e0a6fdca7e7d066b704",
+    "binary_sha256": "1ede4d908cb8566ee5b9a07b6295eb0a6910eafcc94939013b4e0ab92b846d6f",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedWiden32",
+    "source_sha256": "532d07c82b811d9e26939b8fdc9a269c9e4cd1dc2dd12e0a6fdca7e7d066b704",
+    "binary_sha256": "4f35d7a3e730e1f6df344ad153ad2135a7e47a46e887fdea667735e0c30ffd4e",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "case": "UnsignedWiden8",
+    "source_sha256": "d63694adcb77fade0addb07b2fec586da2ac02787ce4cee536a042c125181de3",
+    "binary_sha256": "6c7737d39f6a3c0680e99f7fdf8dce6bb1923396c6dc065923a43e481b9fb1f8",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "case": "UnsignedWiden8",
+    "source_sha256": "d63694adcb77fade0addb07b2fec586da2ac02787ce4cee536a042c125181de3",
+    "binary_sha256": "725e823540cac5160b6fe458ff465069ab28789760e19404145ff7c701d13fb5",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatFraction",
+    "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+    "binary_sha256": "7b0730de3540cc6eeef008b82b180ed5cd56371742296c75738c7d265dec1d8f",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatFraction.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatFraction",
+    "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+    "binary_sha256": "ea6f3646da19cad3a09e665c79af038b011faf44192f0585d8b1fc07774b191d",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatFraction.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatInfinityInteger",
+    "source_sha256": "98731c856ff53a8c5dc68ea1bd23dec72a243d31331b67454f3b85e2d7c337fe",
+    "binary_sha256": "25f77a7af55d90cd63995b6528a090d166513acd5e69a3637712b96b8d2e9c14",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatInfinityInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatInfinityInteger",
+    "source_sha256": "98731c856ff53a8c5dc68ea1bd23dec72a243d31331b67454f3b85e2d7c337fe",
+    "binary_sha256": "0b701cb9c0f2a72c903540cbfe01a156a637bb7a6703727148a2bc7db4394d99",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatInfinityInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatMinimum",
+    "source_sha256": "5fdbc0b41aee68dfc267acdca1902bf582f37027b968ffed2e532599ee099329",
+    "binary_sha256": "b53292fe4827fb9655088f8f316ad9946ed2cf77cf2ad1318363c99bae0c4393",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatMinimum",
+    "source_sha256": "5fdbc0b41aee68dfc267acdca1902bf582f37027b968ffed2e532599ee099329",
+    "binary_sha256": "c291445a22203551a73425428d220916d82d2f1feb44262d61afe9ab6daf4247",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatNaNInteger",
+    "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+    "binary_sha256": "2afee4c6d8f26dcbc4dfe8f1d4e6326a4a02acb42138c7a192d82dad36f73600",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatNaNInteger",
+    "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+    "binary_sha256": "5f5cd417ad2c25be912b535561c5926d8dd37ff6e53bf0944ba02200eeaa528d",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatNaNNarrow",
+    "source_sha256": "93568aa56bf40f110bcc65801e3c4ffa8a9fe50428dc7b16500fb97263cb8c50",
+    "binary_sha256": "553e12148e133bfe9a277202afe76f3c381346b41b08fe3100eda09d72d28bfd",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNNarrow.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatNaNNarrow",
+    "source_sha256": "93568aa56bf40f110bcc65801e3c4ffa8a9fe50428dc7b16500fb97263cb8c50",
+    "binary_sha256": "51bb5621daae21428611132e58ca18815e5380719366bb8659f417433be7a533",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNaNNarrow.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatNarrowExact",
+    "source_sha256": "ef944e65bc919ac3e199aa20a6ff2ae1dccb8185a0753e973108ac831cef79c5",
+    "binary_sha256": "4d99ee865a6dda5a8b3b168758263a3b5591b99dc2a6a32872005aa5e6995647",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatNarrowExact",
+    "source_sha256": "ef944e65bc919ac3e199aa20a6ff2ae1dccb8185a0753e973108ac831cef79c5",
+    "binary_sha256": "0f039ed19ed36cbb68e4125567c9cf73a077841a5366e0632ed21667d1921b51",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatNarrowLoss",
+    "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+    "binary_sha256": "6f8b16423fec062fb8ece7fa9114c6ab9b70dd866bace62961ba0c7c8ca253d6",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowLoss.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatNarrowLoss",
+    "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+    "binary_sha256": "89d0e7a0bf90010547ea88c36bae07b0aec9ec842216b189ce492227b5c32b7a",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNarrowLoss.sx:1:52: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatNegativeUnsigned",
+    "source_sha256": "f4b05bc7abc34b664f409622288c5a566b3216ef18b37aab56b9373f504364c4",
+    "binary_sha256": "d6310536b1dc54a6ca2f5854d67f63da368417396b176e6e53c4c3f1d2234f03",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeUnsigned.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatNegativeUnsigned",
+    "source_sha256": "f4b05bc7abc34b664f409622288c5a566b3216ef18b37aab56b9373f504364c4",
+    "binary_sha256": "2b07ea83fe4ac456739a71a110e0194aa1bdd5ced0a1f1078767c02e810cb243",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatNegativeUnsigned.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatNegativeZero",
+    "source_sha256": "c51dd3f806546273273aea91cfec6d0247247bfc530e2ec988a02aaef01e70fc",
+    "binary_sha256": "1eb5891c0938f4fa1ebc90513e0ccbe5cfecc4f8dce3317df43621f9567ad9c3",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatNegativeZero",
+    "source_sha256": "c51dd3f806546273273aea91cfec6d0247247bfc530e2ec988a02aaef01e70fc",
+    "binary_sha256": "2f6f4209c7fd611c4e49e0d7ff733403e549ffe9db8b9d82df02ebaef5831e09",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatUnsignedHigh",
+    "source_sha256": "0db80a786caf08b3887322fec18c0279476afa7bbec22c6decc199de18bc5661",
+    "binary_sha256": "1de665b2f950b9e8e2e4d89b1cce33d199b6415885d3095d78d0b7d2b2cecb6b",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatUnsignedHigh",
+    "source_sha256": "0db80a786caf08b3887322fec18c0279476afa7bbec22c6decc199de18bc5661",
+    "binary_sha256": "e9a8e3d96e4a3f36fc3ef58bb60d015ccad6a1f3efc1d00238b9a9dd74ceaaf6",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatUnsignedUpper",
+    "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+    "binary_sha256": "55e097526bf6a7340f3e08e26e2bc0807a4c175e7b5a8d9f3dbdd92292b75b96",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedUpper.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatUnsignedUpper",
+    "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+    "binary_sha256": "0c9058f5745cf507bb4be357af7e27319cd699d14cbc9eb4ba3ff4053cea4eac",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUnsignedUpper.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "FloatUpper",
+    "source_sha256": "59f21d5ad20fb30339f904c0a3ca7002c37b91154ef424f6196e09542d4fd776",
+    "binary_sha256": "4af84c61b4e5e2bef361c4992485ee70cb1230e5ab92e29a544c923bd557c91e",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "FloatUpper",
+    "source_sha256": "59f21d5ad20fb30339f904c0a3ca7002c37b91154ef424f6196e09542d4fd776",
+    "binary_sha256": "f9ee707e897c320970db8fe847b8bf6aba927b5fc9d1b530e4d5f9433e8bb3ba",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/FloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "IntegerDoubleLoss",
+    "source_sha256": "46b52e2d6ea1315fa03b2926cef26d3f1b869c5bda981284b49519d090b814df",
+    "binary_sha256": "3e7d2b6ff94da175d10e437436b47fdfdfa116e8ad11c28a2fb1db0494e6351e",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerDoubleLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "IntegerDoubleLoss",
+    "source_sha256": "46b52e2d6ea1315fa03b2926cef26d3f1b869c5bda981284b49519d090b814df",
+    "binary_sha256": "f3ec1e49c93cf4b49f4b135b372a8a3e0170adfa45dae4e4e5ac1257ec7ff895",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerDoubleLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "IntegerFloatLoss",
+    "source_sha256": "e2b81dc912d49c2eb08e12ae97d460de114b2f62bc455e21f77a5ed2c83d747e",
+    "binary_sha256": "a24a27ad46cfa13ef388782f43c98dd6524a0a5b52e7faa728edd5320b317252",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerFloatLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "IntegerFloatLoss",
+    "source_sha256": "e2b81dc912d49c2eb08e12ae97d460de114b2f62bc455e21f77a5ed2c83d747e",
+    "binary_sha256": "398628a72301f548f75160898a13c4de25f899fe2aa07e8f0d3fd67cd99a1361",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/IntegerFloatLoss.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "NegativeUnsigned16",
+    "source_sha256": "868b85621cba0f43431a8c63d744bd0ce1828d03d71da739a26ef56d07b87bb8",
+    "binary_sha256": "f97c0255d4d3d39a09eb86c795fe0e0100d34f46ceba72251290abb94af8c54f",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "NegativeUnsigned16",
+    "source_sha256": "868b85621cba0f43431a8c63d744bd0ce1828d03d71da739a26ef56d07b87bb8",
+    "binary_sha256": "136b6927c407d4713212280b238f6283e19edb228f2a3719da32f1485975d293",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "NegativeUnsigned32",
+    "source_sha256": "8963ddbdf435518b68de05c4b6c46e8e94134b54d27c9cf5b2090e8c0ba59940",
+    "binary_sha256": "e4e9348ba5853d10e223d7729c4d47c3602d9102c64ea09ebc919ae270c70d9b",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "NegativeUnsigned32",
+    "source_sha256": "8963ddbdf435518b68de05c4b6c46e8e94134b54d27c9cf5b2090e8c0ba59940",
+    "binary_sha256": "bb08e88fee7ec43b7213ad37254c7b0fa42b38aa8b5824d40a749ffc15120dfc",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "NegativeUnsigned64",
+    "source_sha256": "a70dea76bc38fdaeb8f25411a31ad67e8b6ca8c123c7f1fd784051fb07235c37",
+    "binary_sha256": "1c810d5886ddefff94dc1b7b94aa3ee6c4063669ffbb7ee53594543b05be647d",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "NegativeUnsigned64",
+    "source_sha256": "a70dea76bc38fdaeb8f25411a31ad67e8b6ca8c123c7f1fd784051fb07235c37",
+    "binary_sha256": "58154c57f31e6c325ebb42540c51b445f5b133d8d1aee77d6591de00f17c70c1",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "NegativeUnsigned8",
+    "source_sha256": "325c7906e88ff7aa3a352eed4a746806baec1b53c7593c205fb5b7635879f87f",
+    "binary_sha256": "68d9cb82bec37ae95207ee9b86f348438f2c627b13b8c5e61158b46d5ed5d0f4",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "NegativeUnsigned8",
+    "source_sha256": "325c7906e88ff7aa3a352eed4a746806baec1b53c7593c205fb5b7635879f87f",
+    "binary_sha256": "5c903c8d396d8740833464e0ab60c6f7daf7dbce4a2328c2959c0391cbd75f16",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/NegativeUnsigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedFloatMinimum",
+    "source_sha256": "e92ec6faede0ddea1c4d5deb826e4cac7afcb979250f9221803bbdfd87ea2699",
+    "binary_sha256": "360a77b1aa65a2c772f931702f22ad2b09512b8d1f84b52e8e1a6baa9b862c80",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedFloatMinimum",
+    "source_sha256": "e92ec6faede0ddea1c4d5deb826e4cac7afcb979250f9221803bbdfd87ea2699",
+    "binary_sha256": "fa64bd6ecb8e280c14e507864e41c61b8ec75fd9f605b983b8052defe4bf0a37",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedFloatUpper",
+    "source_sha256": "8f7a432d8ad85ca6a68c04b11e67666232f9403e5d72e1a718d9883d75417ea3",
+    "binary_sha256": "c1ae8e90b803a76c175655981031f69133de201fbe96121b2c4111c4350282e3",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedFloatUpper",
+    "source_sha256": "8f7a432d8ad85ca6a68c04b11e67666232f9403e5d72e1a718d9883d75417ea3",
+    "binary_sha256": "961ad0f7b8d39b714a8b64c3ca7275ee5302edb24e3990be7d09a78292d10af2",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedFloatUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedNarrow16",
+    "source_sha256": "88ac57625a37b5d6aa7248d105fb254301d7e206098a6b7246196c8c034df319",
+    "binary_sha256": "8ce7903769158070d3401cd30a9b3d38258663f9cf07570e8330e04dec47c932",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow16.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedNarrow16",
+    "source_sha256": "88ac57625a37b5d6aa7248d105fb254301d7e206098a6b7246196c8c034df319",
+    "binary_sha256": "f4840188af53f18bcd5dd94fe0bee0976f64eb0283f9dfdb407fcf5429e2afc8",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow16.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedNarrow32",
+    "source_sha256": "0891bc570a5ec12db336a83a94be7b88694c53337b5ad90d8ddf979e18b6b6c5",
+    "binary_sha256": "1846e024960e3e088265fe43a9526d87c884d2d2bde15260f01ca487f1f23e07",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow32.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedNarrow32",
+    "source_sha256": "0891bc570a5ec12db336a83a94be7b88694c53337b5ad90d8ddf979e18b6b6c5",
+    "binary_sha256": "50edbbd7582a7c1bb94ce8dfddb3e623ffef37b387e4d75c11763d20d32b766f",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow32.sx:1:48: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedNarrow8",
+    "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+    "binary_sha256": "3be283987597a449a5071f44275c89c14092ef2b03b7b6e157a6a3112226cc69",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedNarrow8",
+    "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+    "binary_sha256": "9a82059e20d100b380969b69caf748c9797d2876c7e926af5450b236c946a3a3",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SignedNarrow8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedWiden16",
+    "source_sha256": "5612e4cf2bae2e4450133cd58bb056ac358762c77a1f16fefae82a42306c6bd0",
+    "binary_sha256": "428cc0b28651ae39563c0273a1b6192eb614e5f015bb4dce3fdf044682109c6e",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedWiden16",
+    "source_sha256": "5612e4cf2bae2e4450133cd58bb056ac358762c77a1f16fefae82a42306c6bd0",
+    "binary_sha256": "9f505b8afccad0ad36d5042701bed035f88fb6f93b13fd61318b033e999beacc",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedWiden32",
+    "source_sha256": "20bec877a3e2d8be19a3cd3c693c2b38ff1d93ef4a86914e8230efee6dae93f1",
+    "binary_sha256": "2032d3f5ebf831512aee2923382ea339f6f6c68aa6f7cd2dd44162453635e680",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedWiden32",
+    "source_sha256": "20bec877a3e2d8be19a3cd3c693c2b38ff1d93ef4a86914e8230efee6dae93f1",
+    "binary_sha256": "4308a1b429742dbc08cdb46266fdc06c18a2f05a8dc7fbb70b2fdc2a3bd43d38",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SignedWiden8",
+    "source_sha256": "55371c6e82b4dc8edd4b3541cb23c539f3f69aa0c44d99311cae8d3236fd2809",
+    "binary_sha256": "8055a2ebfccf7c083788f097a8966a053fae3b52cadc407dda84c128879107a5",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SignedWiden8",
+    "source_sha256": "55371c6e82b4dc8edd4b3541cb23c539f3f69aa0c44d99311cae8d3236fd2809",
+    "binary_sha256": "e95db1c045ea285fdc6eae358a08643f187be1b3903e255991ee966bda74990f",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SingleExact",
+    "source_sha256": "c9465feddafb8d33fdd8d617702f928380a0b4e668980d6ee7524a0f6a319cdf",
+    "binary_sha256": "4896b157f322d8c84d5372192683565296f11074449efe8977511c54cbece3f8",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SingleExact",
+    "source_sha256": "c9465feddafb8d33fdd8d617702f928380a0b4e668980d6ee7524a0f6a319cdf",
+    "binary_sha256": "10a48511bee85ed5b5ee8b96f851d597dafb9613228c390bb3106e45be0adf87",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SingleFraction",
+    "source_sha256": "eebb1befb663c19de5f9c70d4f1723cc0db836640a1525bbe40e4286dcfa86ce",
+    "binary_sha256": "c4e6d9812c4fcd91798b387f58a0b7ec3554a44c0cd52849a8f03618e05e314a",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleFraction.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SingleFraction",
+    "source_sha256": "eebb1befb663c19de5f9c70d4f1723cc0db836640a1525bbe40e4286dcfa86ce",
+    "binary_sha256": "75b1c9ee90683490cc35126d9ebd792cecb9081b03b4351edf5cdf6cc9e33eef",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleFraction.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "SingleUpper",
+    "source_sha256": "91e3b882695c82e67d421150fca7884412eb621a815f4d91b6242592ef8c0d50",
+    "binary_sha256": "ea4005a62e629c321ee8212cb6541572e50b6e99f41c56b886b81cd2532276a3",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "SingleUpper",
+    "source_sha256": "91e3b882695c82e67d421150fca7884412eb621a815f4d91b6242592ef8c0d50",
+    "binary_sha256": "6cfd42bf91cf298794f5b9f5416f96b3ec6779941e2b96a6f753ac279b5cf2ba",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/SingleUpper.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedFloatHigh",
+    "source_sha256": "f6423ac9a00a44e1df3af53c5f40c247471992c218f9b91824e12d7946c09716",
+    "binary_sha256": "f80cc5b336f89fac78193d94e83e71a24319fc6f3eb95b768aacf447c4e0dfdb",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedFloatHigh",
+    "source_sha256": "f6423ac9a00a44e1df3af53c5f40c247471992c218f9b91824e12d7946c09716",
+    "binary_sha256": "b68a24e631bfe58d9032ac30c6e1046dad9764dcfb209da0699e1b458c79d6d6",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedFloatLoss",
+    "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+    "binary_sha256": "32328fd9c2ab1f39163aa8aa525b781e64067eb008a125ec60bd9e91f26203c0",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedFloatLoss",
+    "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+    "binary_sha256": "7b8e159179db2f5704d12b71e4852fc9159be9430b9692a4cac57a93827eb589",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedFloatLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedNarrow16",
+    "source_sha256": "47e28d7cb59a4009b1387d0565cfd5af4b2163b17d1075954b4456f9ec4b8b13",
+    "binary_sha256": "a8cf0fafcb49731a20e796c8b41deb3910a39b7bfe34b75bd1697d181017b794",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow16.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedNarrow16",
+    "source_sha256": "47e28d7cb59a4009b1387d0565cfd5af4b2163b17d1075954b4456f9ec4b8b13",
+    "binary_sha256": "fc66318b7ed63ffd8ff2a8e365edbcd336e9b393c2b71e1b8147dc0f8b440bc4",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow16.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedNarrow32",
+    "source_sha256": "161fe84c84b808435fffd874b63ceca2dc4332ac8bfe23b11cc7d702cbc0e495",
+    "binary_sha256": "891eab4fda1ba6b240abedeec87bbf10268eed6f0c5f9da040b82fd6948115bf",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow32.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedNarrow32",
+    "source_sha256": "161fe84c84b808435fffd874b63ceca2dc4332ac8bfe23b11cc7d702cbc0e495",
+    "binary_sha256": "449abcc0de112362fd3837bffdcedbcc8ebf6abaa560504287f5d0ec6d4710c7",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow32.sx:1:50: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedNarrow8",
+    "source_sha256": "205ad305b7bf94abdc7e1932804d9692492b40fb602bd61ac9a1fec7d2cb5b9b",
+    "binary_sha256": "1736603e75e3124b520ce672a41821e1e11c20d46bb48a664da80900266fdd7e",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow8.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedNarrow8",
+    "source_sha256": "205ad305b7bf94abdc7e1932804d9692492b40fb602bd61ac9a1fec7d2cb5b9b",
+    "binary_sha256": "548cbc3eea2cae6d6f1de372c7232039bfc9cb34e0dc2283491670969dd9933e",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedNarrow8.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedSigned16",
+    "source_sha256": "45a3c90da2ed475dee433112ae3949f928bb0172422799cf919f6a3c4d1006d3",
+    "binary_sha256": "55cd390a1bd20c7067b952e13719ee2e1880c78c259137bdc006054693d4a49f",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedSigned16",
+    "source_sha256": "45a3c90da2ed475dee433112ae3949f928bb0172422799cf919f6a3c4d1006d3",
+    "binary_sha256": "c22b9fbdbc002781787ee5c299ac7539a16a7c419eed12197f083d9a1989650a",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned16.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedSigned32",
+    "source_sha256": "b4df9633e147af67b25b8dc555a4b2cb366bc2b547719542bdcd9122527b8e83",
+    "binary_sha256": "08130422049414b448041561859879a86b4be225eac4c9f180494c4bfa979d74",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedSigned32",
+    "source_sha256": "b4df9633e147af67b25b8dc555a4b2cb366bc2b547719542bdcd9122527b8e83",
+    "binary_sha256": "e9cc0a5f4133c67a939cb6cba208dd90da18358c36430c0387e8253e38755b68",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned32.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedSigned64",
+    "source_sha256": "86f9428342509bc589b678bf9ff9ae8c0708258b66aee0c0fd5db29d75d693e3",
+    "binary_sha256": "9b07c8ff3e690b64965545f4b1489081bacdc7058b1fd64475b540e8c90790ba",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedSigned64",
+    "source_sha256": "86f9428342509bc589b678bf9ff9ae8c0708258b66aee0c0fd5db29d75d693e3",
+    "binary_sha256": "9831d8cb7f5451731b4e3e5d68f195696a067527d3b98dc9b55aab1d1ad2e55c",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned64.sx:1:49: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedSigned8",
+    "source_sha256": "387387037f0542dba5d6308448cfeed2c07c10492871f7b4b1cac89128b15fd1",
+    "binary_sha256": "6a5ca3bc0696dc8584c084c211c76ad9e08b422fb5e3d2abb43a07f6d5f6d29c",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedSigned8",
+    "source_sha256": "387387037f0542dba5d6308448cfeed2c07c10492871f7b4b1cac89128b15fd1",
+    "binary_sha256": "b70bf813f637245db48d7c9f33167269bc5e51c49e3272a7afa5fc51e5ed11f5",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSigned8.sx:1:47: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedSingleHigh",
+    "source_sha256": "24abdf725c0e7f921f1af3351b6b8d096516c7a49d4d0d8184b478ea8fe303da",
+    "binary_sha256": "e2682c42c3a4d6a668820ce17a4e65d70d0c50c833c49976ffc956ca8de50411",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedSingleHigh",
+    "source_sha256": "24abdf725c0e7f921f1af3351b6b8d096516c7a49d4d0d8184b478ea8fe303da",
+    "binary_sha256": "a2ed4a89a50ca37194761358087b54d9e7d4fa5f1b0a57c5c43a824afdd18bca",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedSingleLoss",
+    "source_sha256": "fb7cbaf173cf382c79351ba6ef2215e4528508d5b765e9a23d8d9733a44c757f",
+    "binary_sha256": "2ef859b1e9b18edc2c9657cfd250eb10e3078184550da57e1ecd400924a18300",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedSingleLoss",
+    "source_sha256": "fb7cbaf173cf382c79351ba6ef2215e4528508d5b765e9a23d8d9733a44c757f",
+    "binary_sha256": "bf3d701cc50f73a60d0bdc7ff03e8b9b04639affbc086de1d4a7f89e0c5afd2b",
+    "exit": 1,
+    "stdout": "true\n",
+    "stderr": ".zig-cache/optimizer-oracle/numeric-conversions/UnsignedSingleLoss.sx:1:51: runtime error: invalid numeric conversion\n"
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedWiden16",
+    "source_sha256": "4d6ed0e1e8639966a7365b0f159ac3ad2c5fe0a2a8e30df591ccd4e4a30020d0",
+    "binary_sha256": "18df5cc7ced1607553566821ca109b0d46c744a79bccd82dee9c66c20816d7d0",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedWiden16",
+    "source_sha256": "4d6ed0e1e8639966a7365b0f159ac3ad2c5fe0a2a8e30df591ccd4e4a30020d0",
+    "binary_sha256": "c97d49e5389127e1901e9d862def24a4528e031a947eedeab3c1208002840925",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedWiden32",
+    "source_sha256": "532d07c82b811d9e26939b8fdc9a269c9e4cd1dc2dd12e0a6fdca7e7d066b704",
+    "binary_sha256": "3138db056fe988bb9c16b21fe49b112fae80c66f1bb53704a047d0baaadb3b44",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedWiden32",
+    "source_sha256": "532d07c82b811d9e26939b8fdc9a269c9e4cd1dc2dd12e0a6fdca7e7d066b704",
+    "binary_sha256": "78219cf591804e99b4743374c1c4cedb0192caa70f53f395647485804d792be3",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "case": "UnsignedWiden8",
+    "source_sha256": "d63694adcb77fade0addb07b2fec586da2ac02787ce4cee536a042c125181de3",
+    "binary_sha256": "c13bd41a2e7aeb306f824bab277fc51a47cd384a70964a4b2aa9dc03d55fe474",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "case": "UnsignedWiden8",
+    "source_sha256": "d63694adcb77fade0addb07b2fec586da2ac02787ce4cee536a042c125181de3",
+    "binary_sha256": "7c42ea37ea7fe5f313f7f114669c4896156a8fde04f526c249c7151ebeefc2dd",
+    "exit": 0,
+    "stdout": "true\ntrue\nfalse\n",
+    "stderr": ""
+  }
+]

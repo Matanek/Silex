@@ -1,0 +1,24 @@
+{
+  "preparation": {
+    "records": 32768,
+    "binary_sha256": "9a3dc50e8d6b0e7e55d5e9be6f0e8c677658fa686e3f54865ecadc86e46900a7",
+    "output_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+    "exact_snapshot_output": true,
+    "maximum_oracle_difference": 2.700000001354397e-07,
+    "signature_interval": [
+      4744923546.294779,
+      32456.933433117374
+    ]
+  },
+  "integration": {
+    "records": 32768,
+    "binary_sha256": "0484f3ca981320b46d5fc5ae82081b12892980fb97712351f26ecfadc659a4ed",
+    "output_sha256": "f6d5bf68307949686c87a6240d645438fce66653710382e32baf5236610b9725",
+    "exact_snapshot_output": true,
+    "maximum_oracle_difference": 1.1400000005323818e-05,
+    "signature_interval": [
+      -1454735.8306216497,
+      3.7457540533370017
+    ]
+  }
+}

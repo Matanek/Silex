@@ -1328,10 +1328,11 @@ fn compileNativeOptions(
         defer optimize_span.finish();
         break :native_ir switch (options.mode) {
             .debug => scoped_program,
-            .release => (if (options.cache)
-                ReleaseOptimizer.optimizeCachedWithWorkers(allocator, init.io, scoped_program, worker_count)
-            else
-                ReleaseOptimizer.optimizeWithWorkers(allocator, scoped_program, worker_count)) catch |err| {
+            .release => ReleaseOptimizer.optimizeWithOptions(
+                allocator,
+                scoped_program,
+                ReleaseOptimizer.Options.forTarget(target, worker_count),
+            ) catch |err| {
                 std.debug.print("silex: optimizer rejected the portable IR: {t}\n", .{err});
                 return 1;
             },

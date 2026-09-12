@@ -1,0 +1,3 @@
+Timestamp               Ty Process[PID:TID]
+2026-09-12 02:18:24.714 Df kernel[0:1596131] (AppleSystemPolicy) ASP: Security policy would not allow process: 25247, /Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.silex/test/Main-5df35c5feacacfec571059e1950e097fe8dfb481b14ca660df7a436d8edaf354
+2026-09-12 02:19:46.282 Df log[26194:15970ef] [com.apple.log:] log run noninteractively, parent: 98995 (codex), args: '/usr/bin/log' 'show' '--last' '8m' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Security policy would not allow"'

@@ -1,0 +1,2 @@
+func convert(value:uint8) uint64 { return value as uint64 }
+func main() { print(true); print(convert(255) == 255); print(false) }

@@ -1,0 +1,229 @@
+{
+  "scope": "ELF/PE emission only, no Linux or Windows execution",
+  "cases": [
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx",
+      "target": "linux-x64",
+      "mode": "debug",
+      "artifacts": {
+        "ScalarFloatResidence-linux-x64-debug": "e73018e3fd82a978df548fde6b37b88b1682a497d17d8645ab74dcb9a1734688"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx",
+      "target": "linux-x64",
+      "mode": "release",
+      "artifacts": {
+        "ScalarFloatResidence-linux-x64-release": "82cb311fc2edad40956dc553718166a81947e2c523d433ba00b7857bcac453f5"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx",
+      "target": "windows-x64",
+      "mode": "debug",
+      "artifacts": {
+        "ScalarFloatResidence-windows-x64-debug": "0e0f91b86870c252f5471e98dec4dd2c3e590a56094ab7ff5044397d87ad09bf"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx",
+      "target": "windows-x64",
+      "mode": "release",
+      "artifacts": {
+        "ScalarFloatResidence-windows-x64-release": "088c504bcdee510f52a66c1714dcd2749f1ad48e265450f33b6d92e6aaa907f4"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXY.sx",
+      "target": "linux-x64",
+      "mode": "debug",
+      "artifacts": {
+        "LoopExitFloatLaneXY-linux-x64-debug": "a8368cbfc365b03b860428c5f88d007444e7d3096098cc3c45929a1b966937dd"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXY.sx",
+      "target": "linux-x64",
+      "mode": "release",
+      "artifacts": {
+        "LoopExitFloatLaneXY-linux-x64-release": "a8a1f777669540e59d6fdd5dae302fc9aa237af068f43cb37f4a8f2588fbd289"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXY.sx",
+      "target": "windows-x64",
+      "mode": "debug",
+      "artifacts": {
+        "LoopExitFloatLaneXY-windows-x64-debug": "a96eae097a0abad51b4df4aaf6ace4de44e953642110fa25c36ea866ab1f69d4"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXY.sx",
+      "target": "windows-x64",
+      "mode": "release",
+      "artifacts": {
+        "LoopExitFloatLaneXY-windows-x64-release": "1f59a2cda48bbfbd05ad909ff923310078f60465cf403a6ed76a446bbdaa2616"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/FloatLaneXYZ.sx",
+      "target": "linux-x64",
+      "mode": "debug",
+      "artifacts": {
+        "FloatLaneXYZ-linux-x64-debug": "d02c6021fb63e88a07f8716e8fc8528fe0c152f70f0a5e014ca489b786616efe"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/FloatLaneXYZ.sx",
+      "target": "linux-x64",
+      "mode": "release",
+      "artifacts": {
+        "FloatLaneXYZ-linux-x64-release": "56caafd8362ef91d73ee3ae98d3d37e2411c6954863163e6435f8cb9b4f4c238"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/FloatLaneXYZ.sx",
+      "target": "windows-x64",
+      "mode": "debug",
+      "artifacts": {
+        "FloatLaneXYZ-windows-x64-debug": "4c49c8b01ab27263eb854aa34aff75e4e4adab45b711d1925d43f7b680d6d20b"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/FloatLaneXYZ.sx",
+      "target": "windows-x64",
+      "mode": "release",
+      "artifacts": {
+        "FloatLaneXYZ-windows-x64-release": "87df6f3bc96f6b4f924d27bcbe32ad03092c756070478e682dc808fb386d5735"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXYZW.sx",
+      "target": "linux-x64",
+      "mode": "debug",
+      "artifacts": {
+        "LoopExitFloatLaneXYZW-linux-x64-debug": "1693c50d8b0239ba5bac924fb3f3b74202c2bb7a5388f74c01531c5325d6e615"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXYZW.sx",
+      "target": "linux-x64",
+      "mode": "release",
+      "artifacts": {
+        "LoopExitFloatLaneXYZW-linux-x64-release": "85ea6485f1824b6a2f6da96ad81d3338055b70817b34d706a18cc6bc5a2abfae"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXYZW.sx",
+      "target": "windows-x64",
+      "mode": "debug",
+      "artifacts": {
+        "LoopExitFloatLaneXYZW-windows-x64-debug": "e0c678c107086a55e0f6dc51a88808e004f3c90542ff8b3edf68a1b8acc8ed1a"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitFloatLaneXYZW.sx",
+      "target": "windows-x64",
+      "mode": "release",
+      "artifacts": {
+        "LoopExitFloatLaneXYZW-windows-x64-release": "c88d61e131cb583f1c6967100be64081b063dec19beb4cbdfa56c4b26f03b695"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/AggregatePreparation.sx",
+      "target": "linux-x64",
+      "mode": "debug",
+      "artifacts": {
+        "AggregatePreparation-linux-x64-debug": "4cfaff89ab73fe709850cd3a5352d61f4f86a114e2aaa2ac2526ebef42812a29"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/AggregatePreparation.sx",
+      "target": "linux-x64",
+      "mode": "release",
+      "artifacts": {
+        "AggregatePreparation-linux-x64-release": "1cbf08e04269c82a67b848240392a3d7f0863287b9e52fef9b50af4afe062566"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/AggregatePreparation.sx",
+      "target": "windows-x64",
+      "mode": "debug",
+      "artifacts": {
+        "AggregatePreparation-windows-x64-debug": "872a3557f6af39c8ef0abbab1ecb94c608c0771725195d3c34c59ee67b098cdd"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/AggregatePreparation.sx",
+      "target": "windows-x64",
+      "mode": "release",
+      "artifacts": {
+        "AggregatePreparation-windows-x64-release": "192bf20f705fd3f0179ddd41de66afc07748a099a7765c46f39aa4c766385fcb"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/DominatedReferenceReads.sx",
+      "target": "linux-x64",
+      "mode": "debug",
+      "artifacts": {
+        "DominatedReferenceReads-linux-x64-debug": "be057f8e16997be3cc0ae26e2b7fc9d3ccffa39a4776a3545885245116c4b45d"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/DominatedReferenceReads.sx",
+      "target": "linux-x64",
+      "mode": "release",
+      "artifacts": {
+        "DominatedReferenceReads-linux-x64-release": "057cfbddef9b41a350795f8487132f6a5d0491b7a38bb35452a5586eaace82aa"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/DominatedReferenceReads.sx",
+      "target": "windows-x64",
+      "mode": "debug",
+      "artifacts": {
+        "DominatedReferenceReads-windows-x64-debug": "85ee413e2805891a50ae44b3860fd602957740bd8dc20b1f55adc9b63631ef8f"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/DominatedReferenceReads.sx",
+      "target": "windows-x64",
+      "mode": "release",
+      "artifacts": {
+        "DominatedReferenceReads-windows-x64-release": "ca8d888a762e04f931082194ccd19306b8238760f61b7613488f7896f714949f"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ConstantDivision.sx",
+      "target": "linux-x64",
+      "mode": "debug",
+      "artifacts": {
+        "ConstantDivision-linux-x64-debug": "6cb0f2e4fa241c6cfce35fff4b6c810f4bce925e04624bde958bd68c5f8856ed"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ConstantDivision.sx",
+      "target": "linux-x64",
+      "mode": "release",
+      "artifacts": {
+        "ConstantDivision-linux-x64-release": "e36765804c5818f186f7d8e716d6e08924c39ab0529dc0c878a8b1e7e49839d4"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ConstantDivision.sx",
+      "target": "windows-x64",
+      "mode": "debug",
+      "artifacts": {
+        "ConstantDivision-windows-x64-debug": "e2d0f1000ec7af86a4b90be1872a2102fa4d675c62e36dd12aa228c8f03b6a9a"
+      }
+    },
+    {
+      "source": "Silex/Toolchain/Benchmarks/Optimizer/Regressions/ConstantDivision.sx",
+      "target": "windows-x64",
+      "mode": "release",
+      "artifacts": {
+        "ConstantDivision-windows-x64-release": "9162dcc7496c6f65872d54df79f9a07cd110241169c3daf9a473276690daf1f1"
+      }
+    }
+  ]
+}

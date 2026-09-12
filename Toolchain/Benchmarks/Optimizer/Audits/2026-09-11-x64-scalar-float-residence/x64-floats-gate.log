@@ -1,0 +1,104 @@
+optimizer oracle: optimization coverage registry
+  schema: 2
+  LLVM executable: Apple clang version 21.0.0 (clang-2100.1.1.101)
+  LLVM sources: 3623fe661ae35c6c80ac221f14d85be76aa870f1 (llvmorg-21.1.0)
+  target: arm64-apple-darwin25.6.0, CPU apple-m1, -O3
+  coverage: 13 families, 7 baselines, 5 hot functions, 21 workspace repositories, 15 sealed qualification projects
+  interactions: 144 pairwise cases, 5 risk triplets, SHA-256 c5ca428fa03d03fd9b72f5a0f878333abd4c61be029d8aa44a85ba8dd86e9da3
+  plan: .zig-cache/optimizer-oracle/coverage-plan.tsv
+optimizer oracle: semantic verification
+  PASS Regressions/ScalarFloatResidence.sx (45 bytes output)
+  PASS Regressions/DominatedReferenceReads.sx (140 bytes output)
+  PASS Regressions/LateScalarClosure.sx (5 bytes output)
+  PASS Regressions/ValueModules/Main.sx (40 bytes output)
+  PASS Regressions/AggregatePreparation.sx (795 bytes output)
+  PASS Regressions/ScalarExpressionReuse.sx (40 bytes output)
+  PASS Regressions/KnownViewElements.sx (35 bytes output)
+  PASS DampedIntegration.sx (45 bytes output)
+  PASS PreparationMasses.sx (105 bytes output)
+  PASS AggregateViewAliasing.sx (45 bytes output)
+  PASS IntegerArithmetic.sx (7 bytes output)
+  PASS BranchingLoop.sx (7 bytes output)
+  PASS FloatArithmetic.sx (5 bytes output)
+  PASS IntegerControlFlow.sx (6 bytes output)
+  PASS IntegerWidths.sx (3 bytes output)
+  PASS UnsignedBitwise.sx (11 bytes output)
+  PASS AggregateScalarization.sx (6 bytes output)
+  PASS ReferenceAliasing.sx (6 bytes output)
+  PASS ReferenceDeadStores.sx (9 bytes output)
+  PASS ReadonlyViewMemory.sx (3 bytes output)
+  PASS MutableViewMemory.sx (3 bytes output)
+  PASS NestedAggregateWidths.sx (15 bytes output)
+  PASS OwningCollectionCopy.sx (10 bytes output)
+  PASS Regressions/LoopExitFloatLaneXY.sx (20 bytes output)
+  PASS Regressions/FloatLaneXYZ.sx (15 bytes output)
+  PASS Regressions/LoopExitFloatLaneXYZW.sx (40 bytes output)
+  PASS Regressions/PureMathReferenceInlining.sx (20 bytes output)
+  PASS Regressions/HotReferenceLeafClosure.sx (50 bytes output)
+verified: 28 corpus programs
+optimizer oracle: cold and warm cache reproducibility
+  PASS IntegerArithmetic.sx: 9abf1f5b0548ed1a9c64aa813dd04a9da151c91cf4205182e782ca58a9eb6af9
+  PASS BranchingLoop.sx: 6c7067dd5dad67ec392f3471b674e5f1ef2e7cd4aabe7e4f97d5eb92abe7ea96
+  PASS Regressions/AggregateFieldStores.sx: c7e57f2229713c19eb0046184d323c678c8ca671291c519e0deb61215d62ce52
+  PASS Regressions/DenseScalarLoop.sx: cc0c80ad880775576cb0f47225c23607672043f277c4699619238b2e40b2a3b4
+cache proof: .zig-cache/optimizer-oracle/cache-proof.tsv
+optimizer oracle: metamorphic qualification
+  PASS direct-or-helper: semantics and native modes agree, structure equivalent
+  PASS declaration-order: semantics and native modes agree, structure equivalent
+  PASS inline-or-nested-helper: semantics and native modes agree, structure equivalent
+  PASS scalar-or-aggregate-branch: semantics and native modes agree, structure equivalent
+  PASS while-or-for-collection: semantics and native modes agree, structure equivalent
+metamorphic report: .zig-cache/optimizer-oracle/metamorphic.tsv
+optimizer oracle: native optimizer regression qualification
+native Release mismatch for /Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx
+  expected exit=0 stdout={ 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10 } stderr={  }
+  actual term=.{ .exited = 0 } stdout={ 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 102, 97, 108, 115, 101, 10, 102, 97, 108, 115, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10 } stderr={  }
+optimizer oracle: NativeReleaseMismatch
+optimizer-gate
++- run test w
+parity registry: coverage gap 'known-gap' owned by silex-llvm-opt-02
+parity registry: required LLVM family missing: instcombine-and-simplifycfg
+failed command: ./.zig-cache/o/760d261c5bc37525307fa5661dd44c07/test --cache-dir=./.zig-cache --seed=0x26ea1e32 --listen=-
+
+optimizer-gate
++- run exe silex-optimizer-oracle failure
+error: process exited with error code 1
+failed command: ./.zig-cache/o/fa069eca04b5621cbf15b82b6476c428/silex-optimizer-oracle ./.zig-cache/o/478e6e558cd9e926d070f9cf176cd941/silex /Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer gate
+
+Build Summary: 29/31 steps succeeded (1 failed); 74/74 tests passed
+optimizer-gate transitive failure
++- run exe silex-optimizer-oracle failure
+|  +- compile exe silex-optimizer-oracle ReleaseFast native cached 120ms MaxRSS:35M
+|  |  +- options cached
+|  +- compile exe silex ReleaseFast native cached 53ms MaxRSS:35M
+|     +- options (reused)
+|     +- WriteFile silex-float-runtime.macho cached
+|     |  +- compile exe silex-float-runtime ReleaseSmall aarch64-macos cached 105ms MaxRSS:35M
+|     +- WriteFile silex-float-runtime-linux-arm64.elf cached
+|     |  +- compile exe silex-float-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 99ms MaxRSS:35M
+|     +- WriteFile silex-float-runtime-x64.elf cached
+|     |  +- compile exe silex-float-runtime-x64 ReleaseSmall x86_64-linux cached 107ms MaxRSS:35M
+|     +- WriteFile silex-float-runtime-macos-x64.macho cached
+|     |  +- compile exe silex-float-runtime-macos-x64 ReleaseSmall x86_64-macos cached 99ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime.macho cached
+|     |  +- compile exe silex-deep-copy-runtime ReleaseSmall aarch64-macos cached 110ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime-linux-arm64.elf cached
+|     |  +- compile exe silex-deep-copy-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 103ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime-x64.elf cached
+|     |  +- compile exe silex-deep-copy-runtime-x64 ReleaseSmall x86_64-linux cached 37ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime-macos-x64.macho cached
+|     |  +- compile exe silex-deep-copy-runtime-macos-x64 ReleaseSmall x86_64-macos cached 81ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime.macho cached
+|     |  +- compile exe silex-cycle-runtime ReleaseSmall aarch64-macos cached 104ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime-linux-arm64.elf cached
+|     |  +- compile exe silex-cycle-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 79ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime-x64.elf cached
+|     |  +- compile exe silex-cycle-runtime-x64 ReleaseSmall x86_64-linux cached 109ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime-macos-x64.macho cached
+|        +- compile exe silex-cycle-runtime-macos-x64 ReleaseSmall x86_64-macos cached 39ms MaxRSS:35M
++- run test 74 pass (74 total) 265ms MaxRSS:46M
+   +- compile test ReleaseFast native cached 120ms MaxRSS:35M
+      +- options (reused)
+
+error: the following build command failed with exit code 1:
+.zig-cache/o/1db1c0bf7cfdc052107baf7ebe63baef/build /opt/homebrew/Cellar/zig/0.16.0_1/bin/zig /opt/homebrew/Cellar/zig/0.16.0_1/lib/zig /Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain .zig-cache /Users/nekmata/.cache/zig --seed 0x26ea1e32 -Z59afa7c95b8c3367 optimizer-gate --summary all

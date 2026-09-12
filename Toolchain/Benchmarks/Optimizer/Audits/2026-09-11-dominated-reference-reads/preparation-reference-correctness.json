@@ -1,0 +1,7 @@
+{
+  "states": 32768,
+  "fields": 26,
+  "before_maximum": 0.0,
+  "clang_maximum": 2.700000001354397e-07,
+  "binary_sha256": "a624612d1a1fd272657b855a519d5e91c160528bf098e5629808ebac3bc9b01d"
+}

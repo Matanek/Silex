@@ -1,20 +1,35 @@
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
 
 namespace {
 
+#ifdef SILEX_SLOT8
+constexpr std::size_t k_fieldAlignment = 8;
+#else
+constexpr std::size_t k_fieldAlignment = alignof(float);
+#endif
+
 struct Sample {
-    float positionX { 0.0F };
-    float positionY { 0.0F };
-    float velocityX { 0.0F };
-    float velocityY { 0.0F };
+    alignas(k_fieldAlignment) float positionX { 0.0F };
+    alignas(k_fieldAlignment) float positionY { 0.0F };
+    alignas(k_fieldAlignment) float velocityX { 0.0F };
+    alignas(k_fieldAlignment) float velocityY { 0.0F };
 };
 
 struct Steering {
-    float x { 0.0F };
-    float y { 0.0F };
+    alignas(k_fieldAlignment) float x { 0.0F };
+    alignas(k_fieldAlignment) float y { 0.0F };
 };
+
+static_assert(sizeof(Sample) == 4 * k_fieldAlignment);
+static_assert(offsetof(Sample, positionX) == 0);
+static_assert(offsetof(Sample, positionY) == k_fieldAlignment);
+static_assert(offsetof(Sample, velocityX) == 2 * k_fieldAlignment);
+static_assert(offsetof(Sample, velocityY) == 3 * k_fieldAlignment);
+static_assert(sizeof(Steering) == 2 * k_fieldAlignment);
+static_assert(offsetof(Steering, y) == k_fieldAlignment);
 
 std::vector<Sample> makeSamples(std::int64_t count) {
     std::vector<Sample> samples;

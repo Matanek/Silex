@@ -1,0 +1,20 @@
+{
+  "repeated": {
+    "instructions": 212,
+    "loads": 71,
+    "stores": 41,
+    "calls": 0
+  },
+  "shared": {
+    "instructions": 171,
+    "loads": 38,
+    "stores": 40,
+    "calls": 0
+  },
+  "dominance": {
+    "instructions": 183,
+    "loads": 40,
+    "stores": 42,
+    "calls": 0
+  }
+}

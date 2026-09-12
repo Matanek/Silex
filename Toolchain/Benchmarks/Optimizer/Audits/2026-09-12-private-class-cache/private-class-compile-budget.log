@@ -1,0 +1,36 @@
+[
+  {
+    "target": "macos-arm64",
+    "measurements": {
+      "before": {
+        "elapsed_ns": 3562208,
+        "cpu_seconds": 0.002555,
+        "max_rss_bytes": 5554176,
+        "binary_bytes": 32952
+      },
+      "after": {
+        "elapsed_ns": 3440583,
+        "cpu_seconds": 0.002496,
+        "max_rss_bytes": 5668864,
+        "binary_bytes": 32952
+      }
+    }
+  },
+  {
+    "target": "macos-x64",
+    "measurements": {
+      "before": {
+        "elapsed_ns": 3444500,
+        "cpu_seconds": 0.0024749999999999998,
+        "max_rss_bytes": 5668864,
+        "binary_bytes": 28856
+      },
+      "after": {
+        "elapsed_ns": 3308209,
+        "cpu_seconds": 0.002398,
+        "max_rss_bytes": 5783552,
+        "binary_bytes": 28856
+      }
+    }
+  }
+]

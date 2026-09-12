@@ -1,0 +1,1 @@
+struct Values { static let high:uint64 = 9223372036854775808; static let converted:float32 = Values.high as float32 } func main() { print(Values.converted) }

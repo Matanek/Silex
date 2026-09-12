@@ -1,0 +1,314 @@
+[
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-macos-arm64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "4f11a83a6ecc7186a008b482931af21107c3a05510d5c611351cd8601ea14eaf",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-macos-arm64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "5fd8564dbf633258c86caa51e5e497b09a6db98997bae850fbbd84b4a650344e",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-macos-x64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "d75d71c0306fff4d97cae4e6ada9f901369442ad7705c4eb6d49868580324bea",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-macos-x64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "d40f7acaf4bdf0cd94fb67ac3fd72eb4b72667bf0bcb182abd63f7610ff42b36",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-linux-arm64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-arm64",
+    "mode": "debug",
+    "sha256": "88dab0a3dc2a8c685346f782895982f1e1f400956d5e25a6244e8281ad7ad068",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-linux-arm64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-arm64",
+    "mode": "release",
+    "sha256": "f64e0430b09a6b81f7c1238f98113a83c8b8c1197d79c58b6f6d1feef9d04bba",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-linux-x64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-x64",
+    "mode": "debug",
+    "sha256": "ea30dd0792b4520308b6df776afac0bc9c9f2cf508eac7491dfc20367977f28f",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-linux-x64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-x64",
+    "mode": "release",
+    "sha256": "9e1c73a5a8a002ab5d4948a969e2afa2de9665c2d80aad3b9842c6286761cec1",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-windows-arm64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-arm64",
+    "mode": "debug",
+    "sha256": "78f85f7af15e86e08020aa214c4724f1322138c549a35236596dbcbb190601e5",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-windows-arm64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-arm64",
+    "mode": "release",
+    "sha256": "8159c49658529aeb4fa9d8a94ec7485e31ab79d502d91936bc8b466924337396",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-windows-x64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-x64",
+    "mode": "debug",
+    "sha256": "ed2db1284b8b5af614d207410e147665bf0346fb3d751572a1eb5fa22bea311f",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-integer-windows-x64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-x64",
+    "mode": "release",
+    "sha256": "c63cdcca2f2c5f0939a791ed98719c04551f9c47564327f0d2bdbeaa53ddfc03",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-protocol/NativePortability.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-protocol-macos-arm64-debug"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "f8012c1fd078961f910fcb04d2fd10bec01a936de7b896d757cd660c3ea8fc6d",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-protocol/NativePortability.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-protocol-macos-arm64-release"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "7cbda8ed5b4b9062929e83843346defad8cf17c5e66c48f4a5d2d814288e8b3a",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-protocol/NativePortability.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-protocol-macos-x64-debug"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "ca23417e3f1e9b23660ddb88b9633d4869ad51ebb1ab3b3d654488f9b7a9fac5",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/GprExhaustive-protocol/NativePortability.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/gpr-exhaustive-protocol-macos-x64-release"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "5d376b4f58a5b9f300e3b4651031a0ae2b9ac1693398d2efce0f8f0aef022de8",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  }
+]

@@ -1,0 +1,2 @@
+optimizer oracle: HotFunctionNotRegistered
+exit 1

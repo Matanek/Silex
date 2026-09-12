@@ -1,0 +1,297 @@
+struct @PreparationRepeated.Input {
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .separation:float
+    var .vax:float
+    var .vay:float
+    var .wa:float
+    var .vbx:float
+    var .vby:float
+    var .wb:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+}
+
+struct @PreparationRepeated.Prepared {
+    var .separation:float
+    var .normal_mass:float
+    var .tangent_mass:float
+    var .relative_velocity:float
+    var .rolling_mass:float
+    var .normal:float
+    var .tangent:float
+    var .rolling:float
+    var .friction:float
+    var .restitution:float
+    var .tangent_speed:float
+    var .rolling_resistance:float
+    var .bias_rate:float
+    var .mass_scale:float
+    var .impulse_scale:float
+    var .nx:float
+    var .ny:float
+    var .ax:float
+    var .ay:float
+    var .bx:float
+    var .by:float
+    var .ma:float
+    var .mb:float
+    var .ia:float
+    var .ib:float
+    var .total:float
+}
+
+func @PreparationRepeated.prepare(%0:@PreparationRepeated.Input, %1:bool) -> @PreparationRepeated.Prepared {
+entry:
+    %3:float = const 0
+    %4:float = const 0
+    %6:float = const 0
+    %29:float = const 0
+    %1790:float = copy %29
+    branch %1, bb1, bb2
+bb1:
+    %30:float = const 1
+    %1790:float = copy %30
+    jump bb2
+bb2:
+    %33:float = field %0, .separation
+    %34:float = field %0, .bx
+    %35:float = field %0, .ax
+    %36:float = sub %34, %35
+    %37:float = field %0, .nx
+    %38:float = mul %36, %37
+    %39:float = field %0, .by
+    %40:float = field %0, .ay
+    %41:float = sub %39, %40
+    %42:float = field %0, .ny
+    %43:float = mul %41, %42
+    %44:float = add %38, %43
+    %45:float = sub %33, %44
+    %76:float = mul %35, %42
+    %79:float = mul %40, %37
+    %80:float = sub %76, %79
+    %83:float = mul %34, %42
+    %86:float = mul %39, %37
+    %87:float = sub %83, %86
+    %88:float = field %0, .ma
+    %89:float = field %0, .mb
+    %90:float = add %88, %89
+    %91:float = field %0, .ia
+    %92:float = mul %91, %80
+    %93:float = mul %92, %80
+    %94:float = add %90, %93
+    %95:float = field %0, .ib
+    %96:float = mul %95, %87
+    %97:float = mul %96, %87
+    %98:float = add %94, %97
+    %99:float = const 0
+    %100:bool = gt %98, %99
+    %1791:float = copy %3
+    branch %100, bb3, bb4
+bb3:
+    %103:float = const 1
+    %104:float = div %103, %98
+    %1791:float = copy %104
+    jump bb4
+bb4:
+    %133:float = copy %42
+    %134:float = copy %37
+    %135:float = neg %134
+    %136:float = copy %35
+    %137:float = mul %136, %135
+    %138:float = copy %40
+    %139:float = mul %138, %133
+    %140:float = sub %137, %139
+    %141:float = copy %34
+    %142:float = mul %141, %135
+    %143:float = copy %39
+    %144:float = mul %143, %133
+    %145:float = sub %142, %144
+    %148:float = copy %90
+    %149:float = copy %91
+    %150:float = mul %149, %140
+    %151:float = mul %150, %140
+    %152:float = add %148, %151
+    %153:float = copy %95
+    %154:float = mul %153, %145
+    %155:float = mul %154, %145
+    %156:float = add %152, %155
+    %157:float = const 0
+    %158:bool = gt %156, %157
+    %1792:float = copy %4
+    branch %158, bb5, bb6
+bb5:
+    %161:float = const 1
+    %162:float = div %161, %156
+    %1792:float = copy %162
+    jump bb6
+bb6:
+    %191:float = copy %91
+    %192:float = copy %95
+    %193:float = add %191, %192
+    %194:float = const 0
+    %195:bool = gt %193, %194
+    %1793:float = copy %6
+    branch %195, bb7, bb8
+bb7:
+    %198:float = const 1
+    %199:float = div %198, %193
+    %1793:float = copy %199
+    jump bb8
+bb8:
+    %228:float = field %0, .vax
+    %230:float = field %0, .vay
+    %232:float = field %0, .wa
+    %234:float = field %0, .vbx
+    %236:float = field %0, .vby
+    %238:float = field %0, .wb
+    %240:float = copy %88
+    %241:float = const 0
+    %242:bool = eq %240, %241
+    %1794:float = copy %228
+    %1796:float = copy %232
+    %1795:float = copy %230
+    branch %242, bb9, bb10
+bb9:
+    %243:float = const 0
+    %244:float = const 0
+    %245:float = const 0
+    %1794:float = copy %243
+    %1796:float = copy %245
+    %1795:float = copy %244
+    jump bb10
+bb10:
+    %246:float = copy %89
+    %247:float = const 0
+    %248:bool = eq %246, %247
+    %1797:float = copy %234
+    %1799:float = copy %238
+    %1798:float = copy %236
+    branch %248, bb11, bb12
+bb11:
+    %249:float = const 0
+    %250:float = const 0
+    %251:float = const 0
+    %1797:float = copy %249
+    %1799:float = copy %251
+    %1798:float = copy %250
+    jump bb12
+bb12:
+    %254:float = copy %37
+    %255:float = copy %1797
+    %256:float = copy %1799
+    %257:float = copy %39
+    %258:float = mul %256, %257
+    %259:float = sub %255, %258
+    %260:float = copy %1794
+    %261:float = copy %1796
+    %262:float = copy %40
+    %263:float = mul %261, %262
+    %264:float = sub %260, %263
+    %265:float = sub %259, %264
+    %266:float = mul %254, %265
+    %267:float = copy %42
+    %268:float = copy %1798
+    %270:float = copy %34
+    %271:float = mul %256, %270
+    %272:float = add %268, %271
+    %273:float = copy %1795
+    %275:float = copy %35
+    %276:float = mul %261, %275
+    %277:float = add %273, %276
+    %278:float = sub %272, %277
+    %279:float = mul %267, %278
+    %280:float = add %266, %279
+    %311:float = copy %1790
+    %312:float = field %0, .normal
+    %313:float = mul %311, %312
+    %345:float = field %0, .tangent
+    %346:float = mul %311, %345
+    %378:float = field %0, .rolling
+    %379:float = mul %311, %378
+    %410:float = const 12
+    %441:float = const 0.75
+    %472:float = const 0.25
+    %501:float = copy %88
+    %502:float = const 0
+    %503:bool = eq %501, %502
+    branch %503, bb14, bb13
+bb13:
+    %505:float = copy %89
+    %506:float = const 0
+    %507:bool = eq %505, %506
+    %504:bool = copy %507
+    jump bb15
+bb14:
+    %504:bool = const true
+    jump bb15
+bb15:
+    %1800:float = copy %410
+    %1802:float = copy %472
+    %1801:float = copy %441
+    branch %504, bb16, bb17
+bb16:
+    %510:float = const 24
+    %541:float = const 0.875
+    %572:float = const 0.125
+    %1800:float = copy %510
+    %1802:float = copy %572
+    %1801:float = copy %541
+    jump bb17
+bb17:
+    %603:float = field %0, .friction
+    %634:float = field %0, .restitution
+    %665:float = field %0, .tangent_speed
+    %696:float = field %0, .rolling_resistance
+    %727:float = copy %37
+    %758:float = copy %42
+    %789:float = copy %35
+    %820:float = copy %40
+    %851:float = copy %34
+    %882:float = copy %39
+    %913:float = copy %88
+    %944:float = copy %89
+    %975:float = copy %91
+    %1006:float = copy %95
+    %1764:float = copy %45
+    %1765:float = copy %1791
+    %1766:float = copy %1792
+    %1767:float = copy %280
+    %1768:float = copy %1793
+    %1769:float = copy %313
+    %1770:float = copy %346
+    %1771:float = copy %379
+    %1772:float = copy %603
+    %1773:float = copy %634
+    %1774:float = copy %665
+    %1775:float = copy %696
+    %1776:float = copy %1800
+    %1777:float = copy %1801
+    %1778:float = copy %1802
+    %1779:float = copy %727
+    %1780:float = copy %758
+    %1781:float = copy %789
+    %1782:float = copy %820
+    %1783:float = copy %851
+    %1784:float = copy %882
+    %1785:float = copy %913
+    %1786:float = copy %944
+    %1787:float = copy %975
+    %1788:float = copy %1006
+    %1789:float = const 0
+    %1035:@PreparationRepeated.Prepared = struct.init @PreparationRepeated.Prepared(.separation=%1764, .normal_mass=%1765, .tangent_mass=%1766, .relative_velocity=%1767, .rolling_mass=%1768, .normal=%1769, .tangent=%1770, .rolling=%1771, .friction=%1772, .restitution=%1773, .tangent_speed=%1774, .rolling_resistance=%1775, .bias_rate=%1776, .mass_scale=%1777, .impulse_scale=%1778, .nx=%1779, .ny=%1780, .ax=%1781, .ay=%1782, .bx=%1783, .by=%1784, .ma=%1785, .mb=%1786, .ia=%1787, .ib=%1788, .total=%1789)
+    return %1035
+}

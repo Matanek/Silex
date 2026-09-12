@@ -1,0 +1,2 @@
+func convert(value:int64) int32 { return value as int32 }
+func main() { print(true); print(convert(2147483648)); print(false) }

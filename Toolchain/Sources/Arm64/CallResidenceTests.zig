@@ -137,3 +137,93 @@ test "direct calls preserve resident view loop state and checked diagnostics" {
     try std.testing.expectEqual(@as(u64, 41), values[0]);
     try std.testing.expectEqual(@as(u64, 100), values[1]);
 }
+
+test "native floating regions survive a callee clobbering every allocatable FP register" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var caller: Machine.Function = .{
+        .name = "floating_caller",
+        .parameter_count = 0,
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 7,
+        .frame_size = try Machine.frameSize(7),
+        .instructions = &.{
+            .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 3)) } },
+            .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 4)) } },
+            .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+            .{ .binary = .{ .result = 3, .operator = .add, .left = 2, .right = 1, .type = .float32 } },
+            .{ .call = .{ .function = 1, .arguments = &.{}, .result = null } },
+            .{ .binary = .{ .result = 4, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+            .{ .binary = .{ .result = 5, .operator = .add, .left = 4, .right = 3, .type = .float32 } },
+            .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 0, .type = .float32 } },
+            .{ .return_value = .{ .start = 6, .width = 1 } },
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, caller);
+    caller.register_slots = allocation.residences;
+    caller.float_register_slots = allocation.float_residences;
+    caller.float_lane_slots = allocation.float_lane_residences;
+    var clobbers: std.ArrayList(Machine.Instruction) = .empty;
+    const colors = [_]?u5{ 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 8, 13, 14, 15 };
+    for (colors, 0..) |_, slot| try clobbers.append(allocator, .{
+        .constant_float32 = .{ .result = @intCast(slot), .bits = @bitCast(@as(f32, 99)) },
+    });
+    try clobbers.append(allocator, .return_void);
+    const callee: Machine.Function = .{
+        .name = "clobber_all",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = colors.len,
+        .frame_size = try Machine.frameSize(colors.len),
+        .float_register_slots = &colors,
+        .instructions = clobbers.items,
+    };
+    const result = try Runner.invoke(allocator, .{ .functions = &.{ caller, callee } }, 0, &.{});
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(i64, @as(u32, @bitCast(@as(f32, 31)))), result.value);
+}
+
+test "resident float64 call arguments and results preserve every bit in registers and stack" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]u64{ 0x8000000000000000, 0x7ff8000000000123, 0x3ff4000000000000 }) |bits| {
+        for ([_]u12{ 1, 9 }) |count| {
+            const arguments = try allocator.alloc(Machine.Span, count);
+            @memset(arguments, .{ .start = 0, .width = 1 });
+            const parameters = try allocator.alloc(Machine.Span, count);
+            for (parameters, 0..) |*parameter, index| parameter.* = .{ .start = @intCast(index), .width = 1 };
+            const caller: Machine.Function = .{
+                .name = "caller",
+                .parameter_count = 0,
+                .return_type = .float64,
+                .return_width = 1,
+                .slot_count = 2,
+                .frame_size = try Machine.frameSize(2),
+                .float_register_slots = &.{ 8, 13 },
+                .instructions = &.{
+                    .{ .constant_float64 = .{ .result = 0, .bits = bits } },
+                    .{ .call = .{ .function = 1, .arguments = arguments, .result = .{ .start = 1, .width = 1 } } },
+                    .{ .return_value = .{ .start = 1, .width = 1 } },
+                },
+            };
+            const callee: Machine.Function = .{
+                .name = "callee",
+                .parameter_count = count,
+                .parameters = parameters,
+                .return_type = .float64,
+                .return_width = 1,
+                .slot_count = count,
+                .frame_size = try Machine.frameSize(@intCast(count)),
+                .instructions = &.{.{ .return_value = .{ .start = @intCast(count - 1), .width = 1 } }},
+            };
+            const result = try Runner.invoke(allocator, .{ .functions = &.{ caller, callee } }, 0, &.{});
+            try std.testing.expectEqual(Machine.Status.success, result.status);
+            try std.testing.expectEqual(@as(i64, @bitCast(bits)), result.value);
+        }
+    }
+}

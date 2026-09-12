@@ -1,0 +1,1135 @@
+{
+  "diagnostic_only": true,
+  "samples": 11,
+  "warmups": 2,
+  "summary": [
+    {
+      "target": "macos-arm64",
+      "measurements": {
+        "before": {
+          "elapsed_ns": 3840542,
+          "cpu_seconds": 0.002764,
+          "max_rss_bytes": 5554176,
+          "binary_bytes": 32952
+        },
+        "after": {
+          "elapsed_ns": 3615416,
+          "cpu_seconds": 0.002609,
+          "max_rss_bytes": 5668864,
+          "binary_bytes": 32952
+        }
+      }
+    },
+    {
+      "target": "macos-x64",
+      "measurements": {
+        "before": {
+          "elapsed_ns": 3420334,
+          "cpu_seconds": 0.002547,
+          "max_rss_bytes": 5668864,
+          "binary_bytes": 28856
+        },
+        "after": {
+          "elapsed_ns": 3433291,
+          "cpu_seconds": 0.002556,
+          "max_rss_bytes": 5718016,
+          "binary_bytes": 28856
+        }
+      }
+    }
+  ],
+  "observations": [
+    {
+      "target": "macos-arm64",
+      "index": 0,
+      "warmup": true,
+      "configuration": "before",
+      "elapsed_ns": 15734209,
+      "cpu_seconds": 0.005225,
+      "max_rss_bytes": 5537792,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 0,
+      "warmup": true,
+      "configuration": "after",
+      "elapsed_ns": 23595959,
+      "cpu_seconds": 0.006045999999999999,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 1,
+      "warmup": true,
+      "configuration": "after",
+      "elapsed_ns": 4137792,
+      "cpu_seconds": 0.003019,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 1,
+      "warmup": true,
+      "configuration": "before",
+      "elapsed_ns": 3722500,
+      "cpu_seconds": 0.002728,
+      "max_rss_bytes": 5537792,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 2,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 6882041,
+      "cpu_seconds": 0.002862,
+      "max_rss_bytes": 5537792,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 2,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 6484167,
+      "cpu_seconds": 0.0033569999999999997,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 3,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3229166,
+      "cpu_seconds": 0.002351,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 3,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3840542,
+      "cpu_seconds": 0.0028439999999999997,
+      "max_rss_bytes": 5537792,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 4,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3344750,
+      "cpu_seconds": 0.002387,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 4,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3615416,
+      "cpu_seconds": 0.002681,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 5,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3661959,
+      "cpu_seconds": 0.002606,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 5,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3467834,
+      "cpu_seconds": 0.00263,
+      "max_rss_bytes": 5537792,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 6,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 8519292,
+      "cpu_seconds": 0.003197,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 6,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 4152709,
+      "cpu_seconds": 0.003005,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 7,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3568542,
+      "cpu_seconds": 0.002609,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 7,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3745708,
+      "cpu_seconds": 0.0027,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 8,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3354667,
+      "cpu_seconds": 0.002452,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 8,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3879125,
+      "cpu_seconds": 0.002868,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 9,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3367417,
+      "cpu_seconds": 0.002456,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 9,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 6839250,
+      "cpu_seconds": 0.0031190000000000002,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 10,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3905708,
+      "cpu_seconds": 0.002764,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 10,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3752375,
+      "cpu_seconds": 0.002745,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 11,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3137792,
+      "cpu_seconds": 0.002332,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 11,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3903625,
+      "cpu_seconds": 0.002897,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 12,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3256125,
+      "cpu_seconds": 0.002361,
+      "max_rss_bytes": 5554176,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-before"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "index": 12,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3446292,
+      "cpu_seconds": 0.0025989999999999997,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 32952,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-arm64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 0,
+      "warmup": true,
+      "configuration": "before",
+      "elapsed_ns": 4513083,
+      "cpu_seconds": 0.002789,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 0,
+      "warmup": true,
+      "configuration": "after",
+      "elapsed_ns": 4761333,
+      "cpu_seconds": 0.0032949999999999998,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 1,
+      "warmup": true,
+      "configuration": "after",
+      "elapsed_ns": 3596875,
+      "cpu_seconds": 0.0026439999999999996,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 1,
+      "warmup": true,
+      "configuration": "before",
+      "elapsed_ns": 3662042,
+      "cpu_seconds": 0.002835,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 2,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3521500,
+      "cpu_seconds": 0.002575,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 2,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 4137667,
+      "cpu_seconds": 0.003248,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 3,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3493667,
+      "cpu_seconds": 0.002556,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 3,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3687833,
+      "cpu_seconds": 0.002797,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 4,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3847500,
+      "cpu_seconds": 0.002799,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 4,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3433291,
+      "cpu_seconds": 0.0025589999999999996,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 5,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3686166,
+      "cpu_seconds": 0.002793,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 5,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3305208,
+      "cpu_seconds": 0.0024389999999999998,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 6,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3299125,
+      "cpu_seconds": 0.0025199999999999997,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 6,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3252167,
+      "cpu_seconds": 0.0024269999999999995,
+      "max_rss_bytes": 5701632,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 7,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3073750,
+      "cpu_seconds": 0.002288,
+      "max_rss_bytes": 5701632,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 7,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3629708,
+      "cpu_seconds": 0.002699,
+      "max_rss_bytes": 5652480,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 8,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3151459,
+      "cpu_seconds": 0.002388,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 8,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3474125,
+      "cpu_seconds": 0.002685,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 9,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3218125,
+      "cpu_seconds": 0.0023699999999999997,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 9,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3420334,
+      "cpu_seconds": 0.002547,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 10,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3620291,
+      "cpu_seconds": 0.002675,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 10,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3262583,
+      "cpu_seconds": 0.002421,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 11,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3610833,
+      "cpu_seconds": 0.002746,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 11,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3274750,
+      "cpu_seconds": 0.002366,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 12,
+      "warmup": false,
+      "configuration": "before",
+      "elapsed_ns": 3381125,
+      "cpu_seconds": 0.002476,
+      "max_rss_bytes": 5668864,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-direct-integer",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-before"
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "index": 12,
+      "warmup": false,
+      "configuration": "after",
+      "elapsed_ns": 3395375,
+      "cpu_seconds": 0.002483,
+      "max_rss_bytes": 5718016,
+      "binary_bytes": 28856,
+      "command": [
+        "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+        "compile",
+        "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "macos-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/private-class-final-compile-budget-macos-x64-after"
+      ]
+    }
+  ]
+}

@@ -667,8 +667,11 @@ fn convertConstant(self: anytype, value: Constant, target: Ast.Type, position: S
         const signed: i64 = if (value.type.isSignedInteger()) @bitCast(Numeric.signExtend(value.bits, value.type.bitWidth())) else 0;
         if (target == .float32) {
             const result: f32 = if (value.type.isSignedInteger()) @floatFromInt(signed) else @floatFromInt(value.bits);
-            const exact: f64 = if (value.type.isSignedInteger()) @floatFromInt(signed) else @floatFromInt(value.bits);
-            if (checked and @as(f64, result) != exact) return self.fail(position, "static initializer numeric conversion loses information");
+            if (checked) {
+                if (value.type.isSignedInteger()) {
+                    if (@as(i128, @intFromFloat(result)) != signed) return self.fail(position, "static initializer numeric conversion loses information");
+                } else if (@as(u128, @intFromFloat(result)) != value.bits) return self.fail(position, "static initializer numeric conversion loses information");
+            }
             return .{ .type = .float32, .bits = @as(u32, @bitCast(result)) };
         }
         const result: f64 = if (value.type.isSignedInteger()) @floatFromInt(signed) else @floatFromInt(value.bits);

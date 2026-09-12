@@ -1,0 +1,23 @@
+struct @int[..] {
+}
+
+struct @int[] {
+}
+
+func @select(%0:@int[..], %1:int) -> int {
+entry:
+    %2:int = collection.load %0, %1
+    %6:int = collection.count %0
+    %7:int = const 1
+    %8:int = sub %6, %7
+    %4:int = collection.load %0, %8 bounded
+    %5:int = add %2, %4
+    return %5
+}
+
+func @main() -> void {
+entry:
+    %15:int = const 18
+    print %15
+    return
+}

@@ -1,0 +1,94 @@
+{
+  "stage": "preparation",
+  "median_ms": {
+    "baseline": 329.834,
+    "release": 292.244,
+    "clang": 234.475
+  },
+  "after_before": {
+    "samples": 21,
+    "lower_bound_ppm": 872629,
+    "median_ppm": 879391,
+    "upper_bound_ppm": 895153,
+    "confidence_ppm": 960823,
+    "release_half_shift_ppm": 25447,
+    "clang_half_shift_ppm": 8585,
+    "ratio_half_shift_ppm": 5878,
+    "ratios_ppm": [
+      872629,
+      898220,
+      910478,
+      895153,
+      880142,
+      867213,
+      878493,
+      835165,
+      829178,
+      879164,
+      889060,
+      902520,
+      884332,
+      913674,
+      924748,
+      879391,
+      913602,
+      872135,
+      867110,
+      876033,
+      864919
+    ]
+  },
+  "after_clang": 1238768,
+  "gain_failures": [],
+  "parity_failures": [
+    "Silex/Clang upper bound exceeds 1000000 ppm"
+  ]
+}
+{
+  "stage": "integration",
+  "median_ms": {
+    "baseline": 81.888,
+    "release": 82.387,
+    "clang": 51.284
+  },
+  "after_before": {
+    "samples": 21,
+    "lower_bound_ppm": 988280,
+    "median_ppm": 1000530,
+    "upper_bound_ppm": 1013888,
+    "confidence_ppm": 960823,
+    "release_half_shift_ppm": 1602,
+    "clang_half_shift_ppm": 9615,
+    "ratio_half_shift_ppm": 12126,
+    "ratios_ppm": [
+      990923,
+      971337,
+      1022473,
+      1034298,
+      996420,
+      962811,
+      974627,
+      1022129,
+      1000530,
+      1013888,
+      959847,
+      988280,
+      1022639,
+      1044694,
+      1019546,
+      1004119,
+      959983,
+      996514,
+      1013542,
+      981663,
+      1012663
+    ]
+  },
+  "after_clang": 1600194,
+  "gain_failures": [
+    "Silex/Clang upper bound exceeds 1000000 ppm"
+  ],
+  "parity_failures": [
+    "Silex/Clang upper bound exceeds 1000000 ppm"
+  ]
+}

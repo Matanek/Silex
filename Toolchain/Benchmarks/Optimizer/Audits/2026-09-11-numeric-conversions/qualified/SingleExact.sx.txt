@@ -1,0 +1,2 @@
+func convert(value:float32) int8 { return value as int8 }
+func main() { print(true); print(convert(127.0) == 127); print(false) }

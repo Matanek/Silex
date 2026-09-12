@@ -1,0 +1,18 @@
+{
+  "before": {
+    "reference_loads": 56,
+    "instructions": 184,
+    "load_instructions": 62,
+    "store_instructions": 32,
+    "loaded_words": 63,
+    "stored_words": 33
+  },
+  "after": {
+    "reference_loads": 24,
+    "instructions": 147,
+    "load_instructions": 26,
+    "store_instructions": 28,
+    "loaded_words": 27,
+    "stored_words": 29
+  }
+}

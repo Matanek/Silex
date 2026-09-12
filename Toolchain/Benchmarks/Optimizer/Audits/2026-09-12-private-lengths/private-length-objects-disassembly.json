@@ -1,0 +1,26 @@
+[
+  {
+    "target": "macos-arm64",
+    "prefix": "direct-sse",
+    "binary_sha256": "357dfaccf8f349090307261caa4e377b7bdae459d45d7587ba25f3830eb2be51",
+    "disassembly": "/private/tmp/silex-part03-evidence/direct-sse-objects-macos-arm64.asm"
+  },
+  {
+    "target": "macos-arm64",
+    "prefix": "private-length",
+    "binary_sha256": "c5376cee1c4f35ce74091019e64047c89108f7d340a809e0de12272ab9f1f55f",
+    "disassembly": "/private/tmp/silex-part03-evidence/private-length-objects-macos-arm64.asm"
+  },
+  {
+    "target": "macos-x64",
+    "prefix": "direct-sse",
+    "binary_sha256": "2c82a007e36fcf200000cfece59238daf85939e3be5c0966922eaf5b1e746d8c",
+    "disassembly": "/private/tmp/silex-part03-evidence/direct-sse-objects-macos-x64.asm"
+  },
+  {
+    "target": "macos-x64",
+    "prefix": "private-length",
+    "binary_sha256": "ca298083ef76a5380b7f929d00abc0ed2c1775f1553f3a9368d11b5653ef0e6c",
+    "disassembly": "/private/tmp/silex-part03-evidence/private-length-objects-macos-x64.asm"
+  }
+]

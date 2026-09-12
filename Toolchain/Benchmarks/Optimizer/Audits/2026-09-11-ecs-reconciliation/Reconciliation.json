@@ -1,0 +1,21 @@
+{
+  "repository": "Packages/GFX.ECS",
+  "historical_revision": "0fb019cf2f5bf0fc56078ba0a01618fca868fd87",
+  "candidate_revision": "9ddd3347bf630365ee9147ad024618f72af11f4c",
+  "common_ancestor": "8e2511419d548a21dfb396e790f3d303dab915af",
+  "historical_tree": "31c512611da7c33ba9f0ae669feca916c43e301a",
+  "candidate_tree": "c8b1f1500755fa30ef99d8787bd0511f6badb643",
+  "delta_sha256": "3d351b0c24796774f56483eeaa933555a5bfe68af303add3c5de632ccdd8304a",
+  "reason": "The historical anchor belongs to an unmerged ECS branch exposing Commands construction and flush. Canonical main keeps those methods module-private and adds mutable-query regressions. This explicitly reviewed closure replacement is not package or performance equivalence; the original ECS.sx seal is unchanged.",
+  "sealed_source": "Tests/ECS.sx",
+  "sealed_source_sha256": "3815c87360c6e1a625aa8d0d6f179fdb885b543b67e4d3993024f9977a66e7f3",
+  "compiler_revision": "da76ef46df36039b36c80be885d9ac79b29c4522",
+  "compiler_sha256": "c5cfa8d5a9d449c7a6adffc58e58e0f8b28f64815d8705e20ff7b8e8e7dde5bc",
+  "validation": {
+    "native_debug_package": "19 passed; 0 failed in 7 files",
+    "native_debug_public_consumer": "1 passed; 0 failed in 1 files",
+    "lifetime_probe_debug_nocache": "99999",
+    "lifetime_probe_release_nocache": "99999"
+  },
+  "scope": "Host macOS ARM64 semantic validation; no timing or general LLVM parity claim."
+}

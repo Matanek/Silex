@@ -1,0 +1,397 @@
+{
+  "candidate": "1badca9d9c6b2a290db2242299faa9521c0ede5f",
+  "baseline": "0b0374430f8c52bdaecf41d33439e7574d7f32d7",
+  "workflow_runs": [
+    34643090825,
+    34643157776
+  ],
+  "binary_hashes_checked_against_campaign": [
+    "artifact/benchmark-native/arithmetic-debug",
+    "artifact/benchmark-native/arithmetic-release",
+    "artifact/benchmark-native/arithmetic-clang",
+    "artifact/benchmark-native/arithmetic-clang-o3-slot8",
+    "artifact/benchmark-before/arithmetic-release",
+    "artifact/benchmark-native/objects-debug",
+    "artifact/benchmark-native/objects-release",
+    "artifact/benchmark-native/objects-clang",
+    "artifact/benchmark-native/objects-clang-o3-slot8",
+    "artifact/benchmark-before/objects-release",
+    "artifact/benchmark-native/flocking-debug",
+    "artifact/benchmark-native/flocking-release",
+    "artifact/benchmark-native/flocking-clang",
+    "artifact/benchmark-native/flocking-clang-o3-slot8",
+    "artifact/benchmark-before/flocking-release"
+  ],
+  "files": [
+    {
+      "path": "1badca9-dispatch-all.json",
+      "sha256": "419a60380c7a6d825a7a9d093056f5192131f691c9585afa6940abd7b08ba848",
+      "size": 96
+    },
+    {
+      "path": "1badca9-dispatch-optimizer-x64.json",
+      "sha256": "fd201f334fcbf738d2acaf5306bc83febae9f1aceea5164dccbc9ba89ad36a0d",
+      "size": 170
+    },
+    {
+      "path": "1badca9-intel-job.log",
+      "sha256": "e0c1972e3bfbc4a9495faf5e4bacf1ff60e1fc76ae38cb415ca33c22daa052e9",
+      "size": 75947
+    },
+    {
+      "path": "1badca9-intel-summary.json",
+      "sha256": "218742baf3131cd9c6a0668b0d0837469178b5058d5684330ade233646ad45fb",
+      "size": 5011
+    },
+    {
+      "path": "1badca9-linux-arm64.log",
+      "sha256": "6fdde9622385de0f66ce3c7f471797ec66bf8b736d9ceb96b1a7723bb985d8e2",
+      "size": 24957
+    },
+    {
+      "path": "1badca9-linux-x64.log",
+      "sha256": "d5772b7edaf978c65dcedbd9cb1ff024873cd6453f2a51006036e7db4983b6d4",
+      "size": 37031
+    },
+    {
+      "path": "1badca9-macos-x64.log",
+      "sha256": "0e183dda6121721da895908379f61919c5579fdcfeb428e784944781abab51be",
+      "size": 25038
+    },
+    {
+      "path": "1badca9-native-jobs.json",
+      "sha256": "d644a7addd1ddf3b2824e7f2d6463668c216ce5479b426d5320033dc3caea210",
+      "size": 7363
+    },
+    {
+      "path": "1badca9-runs.json",
+      "sha256": "26baf90c9acdd155b3137c7bff9fdcfd2de1245850025bd77224e2e73f8968de",
+      "size": 1714
+    },
+    {
+      "path": "1badca9-windows-arm64-build.log",
+      "sha256": "1fb72838b8cbaa10b2ea7fd86925d0c9fa07a66cbbe1f49b83153449e362cdb5",
+      "size": 19300
+    },
+    {
+      "path": "1badca9-windows-arm64.log",
+      "sha256": "9a740758d7965ff8044b64bfbb50e63db6b7006616693b662d2c67796d48c3a8",
+      "size": 45959
+    },
+    {
+      "path": "1badca9-windows-x64.log",
+      "sha256": "18652ee30c3695f7d966a821dfadcd09095ae7a5b2769a078bd50d87680b22ac",
+      "size": 38154
+    },
+    {
+      "path": "README.md",
+      "sha256": "2236b50fa58494950730031557799c6d9804963a242ddbeb7533d6cd1818c812",
+      "size": 4158
+    },
+    {
+      "path": "artifact/benchmark-before/arithmetic-release",
+      "sha256": "f6f953cc4fdd09c057b76f604d343985cfe26b5912836ffed0dde0d2cbb720a2",
+      "size": 12440
+    },
+    {
+      "path": "artifact/benchmark-before/flocking-release",
+      "sha256": "268c0c902a729d79cf145ec8d880abd7047be090c37d71c62b1e9160ff46da3f",
+      "size": 24760
+    },
+    {
+      "path": "artifact/benchmark-before/objects-release",
+      "sha256": "a5239bf6d3cde6c0b7bcf6bb0c20afcca6f92cf4719b0fff932d5b256afea508",
+      "size": 28856
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-clang",
+      "sha256": "5c96f3547b32c4de6d3369083416e4ff3fef67dc21695e5794d3f23bd753673d",
+      "size": 8496
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-clang-compile.time",
+      "sha256": "e4faa647f5f45ffa16fc37b33663c40b48dce2b46bf7cd8fea1b25ef8d451b84",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-clang-o3-slot8",
+      "sha256": "c1e26da1d46530f24c386fb409d916177d69c3704e3970e94df9d372fbce81f2",
+      "size": 8496
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-clang-o3-slot8-compile.time",
+      "sha256": "e05e43663239876e3428e7201759234276fb380cf83eeb81d20d6b73990e2f91",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-clang-o3-slot8-run.time",
+      "sha256": "ac148848dd5934439bb7dabf6eae3bce3ec40974ded29a3d32a9d64386347ab6",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-clang-run.time",
+      "sha256": "ac148848dd5934439bb7dabf6eae3bce3ec40974ded29a3d32a9d64386347ab6",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-debug",
+      "sha256": "b5c7a6542fbb1b02997f3454660808b4a4b5adfb59357aff3834e89fba2be246",
+      "size": 16631
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-debug-compile.time",
+      "sha256": "cd1bb0598d91351baf3a7e6f54a57f6017d56058aa8a8b0c4410f6b69df10832",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-debug-run.time",
+      "sha256": "ac148848dd5934439bb7dabf6eae3bce3ec40974ded29a3d32a9d64386347ab6",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-debug.silex.o",
+      "sha256": "9249c7261ae43844a359e00846e813ae58cd004eccbb26558238ff0baeb68262",
+      "size": 4583
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-release",
+      "sha256": "a0f3208932b8b1ba80afa53a3c8278d4f6d57d31f134a4f08364f3ffdb162da8",
+      "size": 12440
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-release-compile.time",
+      "sha256": "7a677c357c0f63ce1f5a0c1fc5402e0bf2ff42c18c8dcedda99c8382b7006047",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/arithmetic-release-run.time",
+      "sha256": "ac148848dd5934439bb7dabf6eae3bce3ec40974ded29a3d32a9d64386347ab6",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-clang",
+      "sha256": "34f2788a3d96ae9fe9e53c71b77a81a1986be584bc16673d04de8affad934c06",
+      "size": 9904
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-clang-compile.time",
+      "sha256": "a3155aacbd6ba833791ef8e89fc690d36f3027c42751e7c0eae786384dcd7b29",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-clang-o3-slot8",
+      "sha256": "3295f1d4da0a3ae7391a63596311054db9eb4f26d0525b8a641ed13ba75814c3",
+      "size": 14000
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-clang-o3-slot8-compile.time",
+      "sha256": "7db282850ae80ed607abb53a4cbdc69a76e4f1cb727b08b73300b0e06660367a",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-clang-o3-slot8-run.time",
+      "sha256": "d436b01f3132e0897c6029cfa9acdcebc4bd542884ed71a675d98a696c413838",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-clang-run.time",
+      "sha256": "e123c7d2a0da18d51b45ef93de7e54ce19a85779cde5ed52389fe761580af9b4",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-debug",
+      "sha256": "18851ff18a80ad6f7de186ad757e8b12d8d0b74c806cb2c43dc90614fcef9827",
+      "size": 28927
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-debug-compile.time",
+      "sha256": "4b05121ba646773db5c2ab0957b0993f1e912b4758875265ae60d367917737d7",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-debug-run.time",
+      "sha256": "fa1cc113d8796d7521afccc5f3e61c37d6b99f50f7628ebb9dfd4a903c3133ec",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-debug.silex.o",
+      "sha256": "24f020687ca33a5233d2131fa10732df0a75de92d005f49f96d99b0e7590d355",
+      "size": 19363
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-release",
+      "sha256": "4c435e7eeb99d679306e23311c448d32904773fb331b54b4eb765d68d63b4975",
+      "size": 20664
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-release-compile.time",
+      "sha256": "d30f80be14a6832b66d80e63ab1cde45ad3d339bb561e6adf0fcc72d91b31853",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/flocking-release-run.time",
+      "sha256": "72a44789a8ca05e2c51219924efcf44e921233085900cefa936c8fa0ea25697a",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-clang",
+      "sha256": "5e414125170d15913f8bf8400b696485029d90cbf57756ee7ee99df1bbc813e0",
+      "size": 8584
+    },
+    {
+      "path": "artifact/benchmark-native/objects-clang-compile.time",
+      "sha256": "eda60891f71e83a961b83207eb5921c57622f76effe032807f361d64c0a30799",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-clang-o3-slot8",
+      "sha256": "3776804e7a48ce1909fbee1f424508c76efefce6916b1c4099775071fcf19a51",
+      "size": 8584
+    },
+    {
+      "path": "artifact/benchmark-native/objects-clang-o3-slot8-compile.time",
+      "sha256": "2f392c4ebddd59cbe53e372e780b17809bdca80455b442ce59ed1c60a5c7a8e8",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-clang-o3-slot8-run.time",
+      "sha256": "ac148848dd5934439bb7dabf6eae3bce3ec40974ded29a3d32a9d64386347ab6",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-clang-run.time",
+      "sha256": "ac148848dd5934439bb7dabf6eae3bce3ec40974ded29a3d32a9d64386347ab6",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-debug",
+      "sha256": "864251c8f0a2a7804aeea56fd62efd9509ac044cd76932a314b274ce9adf56ee",
+      "size": 33023
+    },
+    {
+      "path": "artifact/benchmark-native/objects-debug-compile.time",
+      "sha256": "f73e740c69d30ec746853150cb40f76fa3aa6c50ab7b467967a5cf8765a19771",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-debug-run.time",
+      "sha256": "58cd708b2d9baf3268f11667f9b3d17a5f39dd086b9639da649a93105e3fb855",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-debug.silex.o",
+      "sha256": "125bf547ccb9d8154cac485032f038f8b60f3be5881dc4dc7a7bf37f98577757",
+      "size": 21417
+    },
+    {
+      "path": "artifact/benchmark-native/objects-release",
+      "sha256": "6b39787a8d412909065048353038bc3d7fdea32ed5b019791d2c0f192ddb1629",
+      "size": 28856
+    },
+    {
+      "path": "artifact/benchmark-native/objects-release-compile.time",
+      "sha256": "7a677c357c0f63ce1f5a0c1fc5402e0bf2ff42c18c8dcedda99c8382b7006047",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/objects-release-run.time",
+      "sha256": "40e43a344ba6d8765f942a5abb6d4bc05ba72aa232fdd7d4b5cab42e85e462a6",
+      "size": 29
+    },
+    {
+      "path": "artifact/benchmark-native/report.txt",
+      "sha256": "5fc2f0399c77ca717647c7541729ce36381dd494bbcbf64ae686472561156a9e",
+      "size": 2687
+    },
+    {
+      "path": "artifact/optimizer-x64/baseline-build.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "artifact/optimizer-x64/benchmark-build.log",
+      "sha256": "5fc2f0399c77ca717647c7541729ce36381dd494bbcbf64ae686472561156a9e",
+      "size": 2687
+    },
+    {
+      "path": "artifact/optimizer-x64/campaign.json",
+      "sha256": "0c552922ca0e6f7aabb84e47574fc352ce53fe405b7e715eea861d89625d5c5b",
+      "size": 53346
+    },
+    {
+      "path": "artifact/optimizer-x64/environment.txt",
+      "sha256": "5055854e0ca4e4827351fadf2d02607791f0b559e855b87b74d7caf0091aa7de",
+      "size": 232
+    },
+    {
+      "path": "artifact/optimizer-x64/qualification.log",
+      "sha256": "a4811d7278bb70f9c16d6b91582a065ccdd8e966c4a1386d6aeccc90bcf0d5ae",
+      "size": 14437
+    },
+    {
+      "path": "artifact.json",
+      "sha256": "c7c03f95d4ca9ae323c1bf7544275f394478787341a46be40c1ae3856356fc36",
+      "size": 277
+    },
+    {
+      "path": "branch-arm64-artifact-architecture.json",
+      "sha256": "1fd06275bea19aad7dcffeb27bd3fe367119bbee933708db87eb137b296256cd",
+      "size": 115757
+    },
+    {
+      "path": "branch-final-gate.log",
+      "sha256": "bb587a3abdae37c0790a8c3c10c74334b2459e20f460abf4b9dab6e0d71e5891",
+      "size": 23054
+    },
+    {
+      "path": "branch-final-native-validation.json",
+      "sha256": "a8a9b6a5e7120324786b5276ff907dc2bc66a540a411ece9f52a51796bb4f85a",
+      "size": 4961
+    },
+    {
+      "path": "branch-optimizer-gates.log",
+      "sha256": "ec9e55adfc29bb29612e61e475561a7bad4a23a223c170ebe9dff9f0e9ea4d1d",
+      "size": 38217
+    },
+    {
+      "path": "branch-selection-mutation.log",
+      "sha256": "d6c064d2d696f426d6e5864da85520dea230ae0593c7ada691ad5ed13a2f1ebd",
+      "size": 776
+    },
+    {
+      "path": "branch-selection-targeted.log",
+      "sha256": "d87fd6184a5abba6b7f3b6576102c715531c21fa3f18af269cd98c8646c2360e",
+      "size": 980
+    },
+    {
+      "path": "branch-steer-structural-probe.json",
+      "sha256": "b97edc4ebb16af18cf6066034754e54e38a164c230f5d97aa7f38dc3b06160fb",
+      "size": 2029
+    },
+    {
+      "path": "branch-steer-structural.json",
+      "sha256": "82c11412d8190c5552819ddefd7d1d0ac52f342179f36a80215ba9c79c50c4f5",
+      "size": 2658
+    },
+    {
+      "path": "branch-workflow-validation.json",
+      "sha256": "bba027dbda60c8c46bd1bb88c4084b2509603996a9e6fba10117f6eb6bf6b5d8",
+      "size": 111
+    },
+    {
+      "path": "branch-x64-isolated-qualification.log",
+      "sha256": "60221686ffa7b7f1475e1a2ecd34f8d979208cb83d77fdcf78ed53dbfe9c1bd9",
+      "size": 14437
+    },
+    {
+      "path": "else-if-parser-test.log",
+      "sha256": "86c555ca1d0e046146bef01985b594fda301175280a3f71b060f6e35f9664680",
+      "size": 95
+    },
+    {
+      "path": "native-reference-validation.log",
+      "sha256": "c935555c701df07cee8d869e8f9417ae466560f12c39665783e0f8b76641b149",
+      "size": 2569
+    }
+  ]
+}

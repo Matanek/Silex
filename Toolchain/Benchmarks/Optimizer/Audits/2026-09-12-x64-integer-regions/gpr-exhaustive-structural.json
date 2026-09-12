@@ -1,0 +1,25 @@
+{
+  "scope": "Whole first function; includes cold paths, not timing evidence",
+  "functions": {
+    "objects": {
+      "before": {
+        "instructions": 340,
+        "stack_accesses": 114
+      },
+      "after": {
+        "instructions": 325,
+        "stack_accesses": 87
+      }
+    },
+    "arithmetic": {
+      "before": {
+        "instructions": 98,
+        "stack_accesses": 2
+      },
+      "after": {
+        "instructions": 90,
+        "stack_accesses": 2
+      }
+    }
+  }
+}

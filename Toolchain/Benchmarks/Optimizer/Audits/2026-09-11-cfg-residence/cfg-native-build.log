@@ -1,0 +1,108 @@
+Silex native benchmark
+host: Darwin-arm64
+clang: Apple clang version 21.0.0 (clang-2100.1.1.101)
+references: clang=-O2/native-layout; clang-o3-slot8=-O3/8-byte-fields
+workload: Arithmetic
+result: 143997165
+sizes:
+   50800 /private/tmp/silex-part03-evidence/cfg-native-arm64/arithmetic-debug
+   32952 /private/tmp/silex-part03-evidence/cfg-native-arm64/arithmetic-release
+   33488 /private/tmp/silex-part03-evidence/cfg-native-arm64/arithmetic-clang
+   33496 /private/tmp/silex-part03-evidence/cfg-native-arm64/arithmetic-clang-o3-slot8
+  150736 total
+compile times:
+  debug real 0.10
+  debug user 0.04
+  debug sys 0.04
+  release real 0.00
+  release user 0.00
+  release sys 0.00
+  clang real 0.07
+  clang user 0.05
+  clang sys 0.02
+  clang-o3-slot8 real 0.05
+  clang-o3-slot8 user 0.06
+  clang-o3-slot8 sys 0.02
+run times:
+  debug real 0.00
+  debug user 0.00
+  debug sys 0.00
+  release real 0.00
+  release user 0.00
+  release sys 0.00
+  clang real 0.00
+  clang user 0.00
+  clang sys 0.00
+  clang-o3-slot8 real 0.00
+  clang-o3-slot8 user 0.00
+  clang-o3-slot8 sys 0.00
+references: clang=-O2/native-layout; clang-o3-slot8=-O3/8-byte-fields
+workload: Objects
+result: 6000000
+sizes:
+   53008 /private/tmp/silex-part03-evidence/cfg-native-arm64/objects-debug
+   32952 /private/tmp/silex-part03-evidence/cfg-native-arm64/objects-release
+   33584 /private/tmp/silex-part03-evidence/cfg-native-arm64/objects-clang
+   33592 /private/tmp/silex-part03-evidence/cfg-native-arm64/objects-clang-o3-slot8
+  153136 total
+compile times:
+  debug real 0.08
+  debug user 0.05
+  debug sys 0.04
+  release real 0.00
+  release user 0.00
+  release sys 0.00
+  clang real 0.30
+  clang user 0.23
+  clang sys 0.05
+  clang-o3-slot8 real 0.25
+  clang-o3-slot8 user 0.23
+  clang-o3-slot8 sys 0.04
+run times:
+  debug real 0.02
+  debug user 0.02
+  debug sys 0.00
+  release real 0.01
+  release user 0.00
+  release sys 0.00
+  clang real 0.00
+  clang user 0.00
+  clang sys 0.00
+  clang-o3-slot8 real 0.00
+  clang-o3-slot8 user 0.00
+  clang-o3-slot8 sys 0.00
+references: clang=-O2/native-layout; clang-o3-slot8=-O3/8-byte-fields
+workload: Flocking
+result: true
+sizes:
+   63632 /private/tmp/silex-part03-evidence/cfg-native-arm64/flocking-debug
+   32952 /private/tmp/silex-part03-evidence/cfg-native-arm64/flocking-release
+   35008 /private/tmp/silex-part03-evidence/cfg-native-arm64/flocking-clang
+   34920 /private/tmp/silex-part03-evidence/cfg-native-arm64/flocking-clang-o3-slot8
+  166512 total
+compile times:
+  debug real 0.08
+  debug user 0.04
+  debug sys 0.05
+  release real 0.02
+  release user 0.02
+  release sys 0.00
+  clang real 0.22
+  clang user 0.20
+  clang sys 0.04
+  clang-o3-slot8 real 0.22
+  clang-o3-slot8 user 0.20
+  clang-o3-slot8 sys 0.04
+run times:
+  debug real 2.50
+  debug user 2.48
+  debug sys 0.00
+  release real 0.14
+  release user 0.14
+  release sys 0.00
+  clang real 0.15
+  clang user 0.15
+  clang sys 0.00
+  clang-o3-slot8 real 0.16
+  clang-o3-slot8 user 0.16
+  clang-o3-slot8 sys 0.00

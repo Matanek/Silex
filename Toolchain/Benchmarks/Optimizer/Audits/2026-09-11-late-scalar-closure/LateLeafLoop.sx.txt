@@ -1,0 +1,19 @@
+func endpoints(values:@int[..]) int {
+    return values[0] + values[-1]
+}
+
+func evaluate(value:int) int {
+    let values:int[] = [value, 3, value + 1, 7]
+    let view = @values[0:values.count()]
+    return endpoints(view)
+}
+
+func main() {
+    var value = 1
+    var round = 0
+    while round < 30000000 {
+        value = evaluate(value % 997)
+        round++
+    }
+    print(value)
+}

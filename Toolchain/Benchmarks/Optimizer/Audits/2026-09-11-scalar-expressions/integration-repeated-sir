@@ -1,0 +1,95 @@
+struct @IntegrationRepeatedLong.Body {
+    var .vx:float
+    var .vy:float
+    var .w:float
+    var .px:float
+    var .py:float
+}
+
+struct @IntegrationRepeatedLong.Forces {
+    var .x:float
+    var .y:float
+    var .torque:float
+    var .inverse_mass:float
+    var .inverse_inertia:float
+    var .gravity_scale:float
+    var .damping:float
+    var .angular_damping:float
+}
+
+struct @IntegrationRepeatedLong.Body[..] {
+}
+
+struct @IntegrationRepeatedLong.Forces[..] {
+}
+
+struct @IntegrationRepeatedLong.Body[] {
+}
+
+struct @IntegrationRepeatedLong.Forces[] {
+}
+
+func @IntegrationRepeatedLong.velocity(%0:internal address, %1:@IntegrationRepeatedLong.Forces, %2:float) -> void {
+entry:
+    %3:float = const 1
+    %4:float = const 1
+    %5:float = field %1, .damping
+    %6:float = mul %2, %5
+    %7:float = add %4, %6
+    %8:float = div %3, %7
+    %9:float = const 1
+    %10:float = const 1
+    %11:float = field %1, .angular_damping
+    %12:float = mul %2, %11
+    %13:float = add %10, %12
+    %14:float = div %9, %13
+    %15:float = const 0
+    %16:float = field %1, .inverse_mass
+    %17:float = const 0
+    %18:bool = gt %16, %17
+    %89:float = copy %15
+    branch %18, bb1, bb2
+bb1:
+    %19:float = field %1, .gravity_scale
+    %89:float = copy %19
+    jump bb2
+bb2:
+    %22:float = field %1, .inverse_mass
+    %23:float = mul %2, %22
+    %24:float = field %1, .x
+    %25:float = mul %23, %24
+    %86:internal address = reference.field %0, vx
+    %83:float = reference.load %86
+    %27:float = copy %83
+    %29:float = mul %8, %27
+    %30:float = add %25, %29
+    %80:internal address = reference.field %0, vx
+    reference.store %80, %30
+    %41:float = mul %2, %22
+    %42:float = field %1, .y
+    %43:float = mul %41, %42
+    %44:float = copy %89
+    %45:float = mul %2, %44
+    %47:float = const -10
+    %48:float = mul %45, %47
+    %49:float = add %43, %48
+    %87:internal address = reference.field %0, vy
+    %84:float = reference.load %87
+    %51:float = copy %84
+    %53:float = mul %8, %51
+    %54:float = add %49, %53
+    %81:internal address = reference.field %0, vy
+    reference.store %81, %54
+    %64:float = field %1, .inverse_inertia
+    %65:float = mul %2, %64
+    %66:float = field %1, .torque
+    %67:float = mul %65, %66
+    %88:internal address = reference.field %0, w
+    %85:float = reference.load %88
+    %69:float = copy %85
+    %71:float = mul %14, %69
+    %72:float = add %67, %71
+    %82:internal address = reference.field %0, w
+    reference.store %82, %72
+    return
+}

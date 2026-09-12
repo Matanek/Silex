@@ -1,0 +1,5 @@
+{
+  "yaml": "passed",
+  "bash_bodies": 15,
+  "bootstrap": "ReleaseFast baseline for both compiler revisions"
+}

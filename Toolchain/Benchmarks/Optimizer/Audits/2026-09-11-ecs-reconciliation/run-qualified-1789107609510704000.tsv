@@ -1,0 +1,2 @@
+level	pairwise_seed	triplet_seed	pairwise_cases	risk_triplets	native_cases	negative_cases	elapsed_ns	maximum_source_bytes	maximum_ir_bytes	maximum_native_bytes
+qualified	7640891576956012809	13503953896175478587	144	5	41	4	48288958459	524288	4194304	16777216

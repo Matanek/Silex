@@ -1,0 +1,3 @@
+hot-budget optimizer rejected the selected function: DefinitionDoesNotDominateUse
+  verifier failure after input: Objects.calculate: DefinitionDoesNotDominateUse
+optimizer oracle: DefinitionDoesNotDominateUse

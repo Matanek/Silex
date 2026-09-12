@@ -1,0 +1,4 @@
+ok - class value parameters preserve shared identity
+ok - mutable class references can replace caller storage
+ok - a mutating final override updates the whole virtual contract
+3 passed; 0 failed

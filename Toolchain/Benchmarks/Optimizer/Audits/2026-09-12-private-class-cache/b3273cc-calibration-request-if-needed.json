@@ -1,0 +1,8 @@
+{
+  "ref": "spec-silex-optimization-parity-completion",
+  "inputs": {
+    "target": "optimizer-x64-calibration",
+    "calibration_run_id": "34679245713",
+    "calibration_candidate": "b3273cc40505d50b94c3c03a82ef6abb6bbc12be"
+  }
+}

@@ -85,16 +85,28 @@ pub fn profile(program: Silex.Ir.Program) Profile {
 /// full table would therefore charge an inlined body twice instead of
 /// measuring the final caller.
 pub fn profileReachable(allocator: @import("std").mem.Allocator, program: Silex.Ir.Program) !Profile {
+    const reachable = try reachableFunctions(allocator, program);
+    defer allocator.free(reachable);
+
+    var result: Profile = .{};
+    for (program.functions, 0..) |function, index| if (reachable[index]) {
+        result.counts.functions += 1;
+        profileFunction(&result, function);
+    };
+    return result;
+}
+
+/// Returns the closed execution surface rooted at `main`. The caller owns the
+/// returned mask. A library-shaped program without `main` keeps every function.
+pub fn reachableFunctions(allocator: @import("std").mem.Allocator, program: Silex.Ir.Program) ![]bool {
     var main_index: ?usize = null;
     for (program.functions, 0..) |function, index| if (@import("std").mem.eql(u8, function.name, "main")) {
         main_index = index;
         break;
     };
-    if (main_index == null) return profile(program);
-
     const reachable = try allocator.alloc(bool, program.functions.len);
-    defer allocator.free(reachable);
-    @memset(reachable, false);
+    @memset(reachable, main_index == null);
+    if (main_index == null) return reachable;
     reachable[main_index.?] = true;
     var changed = true;
     while (changed) {
@@ -118,12 +130,7 @@ pub fn profileReachable(allocator: @import("std").mem.Allocator, program: Silex.
         }
     }
 
-    var result: Profile = .{};
-    for (program.functions, 0..) |function, index| if (reachable[index]) {
-        result.counts.functions += 1;
-        profileFunction(&result, function);
-    };
-    return result;
+    return reachable;
 }
 
 fn markReachable(reachable: []bool, function: usize, changed: *bool) void {

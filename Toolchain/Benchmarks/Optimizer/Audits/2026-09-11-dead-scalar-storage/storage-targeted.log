@@ -1,0 +1,5 @@
+1/4 OptimizationProbe.test_0...OK
+2/4 Sources.Optimize.KnownCollectionsTests.test.release removes only unobserved scalar collection storage...OK
+3/4 Sources.Optimize.KnownCollectionsTests.test.dead scalar collection storage preserves initializer failures...OK
+4/4 Sources.Optimize.Release.test_0...OK
+All 4 tests passed.

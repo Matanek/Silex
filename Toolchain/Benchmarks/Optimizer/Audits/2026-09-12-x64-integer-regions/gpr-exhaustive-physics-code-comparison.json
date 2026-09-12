@@ -1,0 +1,30 @@
+[
+  {
+    "stage": "preparation",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/PreparationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/preparation-gpr-exhaustive"
+    ],
+    "sha256": "320a217b9b8ead06525265e2614247cfffe61edf5f3d47291937ab5f957238c0",
+    "same_machine_text_as_class_leaves": true
+  },
+  {
+    "stage": "integration",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/IntegrationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/integration-gpr-exhaustive"
+    ],
+    "sha256": "88dd249f59caa9a16411befceb64e08a04f1830c3567c99ad1b7fa70976d1a5f",
+    "same_machine_text_as_class_leaves": true
+  }
+]

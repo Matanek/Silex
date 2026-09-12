@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const ValueOperands = @import("ValueOperands.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -30,6 +31,7 @@ pub const Summary = struct {
     direct_calls: usize = 0,
     checked_operations: usize = 0,
     scalar_values: usize = 0,
+    peak_block_scalar_values: usize = 0,
     aggregate_values: usize = 0,
     effects: Effects = .{},
     may_fail: bool = false,
@@ -79,22 +81,23 @@ pub fn analyze(allocator: Allocator, program: Ir.Program) ![]Summary {
 
 /// Models caller-wide cost instead of using callee size alone. Hot sites earn
 /// a larger budget because removing a repeated call can expose range, alias,
-/// and scalarization passes; register-pressure and effectful operations make
-/// cloning more expensive. A callee already accepted by the previous inliner
-/// remains accepted: compatibility is the conservative floor while the model
-/// governs newly supported IR forms. Observable boundary, ownership, and
-/// synchronization effects otherwise require a dedicated proof.
+/// and scalarization passes. The pressure proxy is regional: values touched by
+/// mutually exclusive blocks do not count as simultaneously resident. The
+/// native allocator remains the final proof of actual residence. A callee
+/// already accepted by the previous inliner remains accepted; observable
+/// boundary, ownership, and synchronization effects otherwise require a
+/// dedicated proof.
 pub fn shouldInline(summary: Summary, expanded_cost: usize, hot_site: bool, previously_eligible: bool) bool {
     if (previously_eligible) return true;
     if (summary.recursive or summary.effects.crosses_boundary or summary.effects.synchronizes or
         summary.effects.observes_output or summary.effects.manages_ownership)
         return false;
-    const pressure_penalty = summary.scalar_values -| 16;
+    const pressure_penalty = summary.peak_block_scalar_values -| 16;
     const effect_penalty = @as(usize, @intFromBool(summary.effects.reads_memory)) * 2 +
         @as(usize, @intFromBool(summary.effects.writes_memory)) * 4;
     const cost = expanded_cost + summary.blocks * 2 + summary.direct_calls * 4 +
         summary.checked_operations * 2 + pressure_penalty + summary.aggregate_values * 2 + effect_penalty;
-    const budget: usize = if (hot_site) 192 else 128;
+    const budget: usize = if (hot_site) 320 else 128;
     return cost <= budget;
 }
 
@@ -114,6 +117,8 @@ fn localSummary(allocator: Allocator, program: Ir.Program, function: Ir.Function
     var result: Summary = .{ .blocks = function.blocks.len };
     const materialized = try allocator.alloc(bool, function.value_types.len);
     defer allocator.free(materialized);
+    const block_values = try allocator.alloc(usize, function.value_types.len);
+    defer allocator.free(block_values);
     @memset(materialized, false);
     const input_count = @min(function.capture_types.len + function.parameter_types.len, materialized.len);
     @memset(materialized[0..input_count], true);
@@ -129,6 +134,20 @@ fn localSummary(allocator: Allocator, program: Ir.Program, function: Ir.Function
         } else result.aggregate_values += 1;
     }
     for (function.blocks) |block| {
+        @memset(block_values, 0);
+        for (block.instructions) |instruction| {
+            ValueOperands.countUses(instruction, block_values);
+            if (ValueOperands.instructionResult(instruction)) |value| {
+                if (value < block_values.len) block_values[value] += 1;
+            }
+        }
+        ValueOperands.countTerminatorUses(block.terminator, block_values);
+        var block_scalar_values: usize = 0;
+        for (function.value_types, block_values) |value_type, present| {
+            if (present != 0 and (value_type.isNumeric() or value_type == .bool or value_type == .address))
+                block_scalar_values += 1;
+        }
+        result.peak_block_scalar_values = @max(result.peak_block_scalar_values, block_scalar_values);
         result.instructions += block.instructions.len;
         for (block.instructions) |instruction| classifyInstruction(program, &result, instruction);
         switch (block.terminator) {
@@ -299,6 +318,7 @@ test "inlining cost accounts for effects pressure and hot call sites" {
     const small: Summary = .{
         .blocks = 1,
         .scalar_values = 8,
+        .peak_block_scalar_values = 8,
         .effects = .{ .reads_memory = true, .writes_memory = true },
     };
     try std.testing.expect(shouldInline(small, 32, false, false));
@@ -308,6 +328,7 @@ test "inlining cost accounts for effects pressure and hot call sites" {
         .direct_calls = 1,
         .checked_operations = 2,
         .scalar_values = 24,
+        .peak_block_scalar_values = 24,
         .aggregate_values = 2,
         .effects = .{ .reads_memory = true, .writes_memory = true },
     };
@@ -316,7 +337,7 @@ test "inlining cost accounts for effects pressure and hot call sites" {
 
     try std.testing.expect(!shouldInline(.{ .recursive = true }, 1, true, false));
     try std.testing.expect(!shouldInline(.{ .effects = .{ .observes_output = true } }, 1, true, false));
-    try std.testing.expect(!shouldInline(.{ .aggregate_values = 64 }, 96, true, false));
+    try std.testing.expect(!shouldInline(.{ .aggregate_values = 128 }, 96, true, false));
     try std.testing.expect(shouldInline(.{ .effects = .{ .observes_output = true } }, 1, false, true));
 }
 
@@ -371,6 +392,47 @@ test "call pressure excludes values removed by earlier optimizer passes" {
     defer arena.deinit();
     const summaries = try analyze(arena.allocator(), .{ .functions = &functions });
     try std.testing.expectEqual(@as(usize, 2), summaries[0].scalar_values);
+    try std.testing.expectEqual(@as(usize, 2), summaries[0].peak_block_scalar_values);
+}
+
+test "call pressure does not accumulate mutually exclusive block values" {
+    const block_zero = [_]Ir.Instruction{.{ .binary = .{
+        .result = 3,
+        .operator = .add,
+        .left = 0,
+        .right = 1,
+    } }};
+    const block_one = [_]Ir.Instruction{.{ .binary = .{
+        .result = 4,
+        .operator = .subtract,
+        .left = 0,
+        .right = 1,
+    } }};
+    const block_two = [_]Ir.Instruction{.{ .binary = .{
+        .result = 5,
+        .operator = .multiply,
+        .left = 0,
+        .right = 1,
+    } }};
+    const functions = [_]Ir.Function{.{
+        .name = "regional_pressure",
+        .parameter_types = &.{ .float32, .float32, .bool },
+        .return_type = .float32,
+        .value_types = &.{ .float32, .float32, .bool, .float32, .float32, .float32 },
+        .blocks = &.{
+            .{
+                .instructions = &block_zero,
+                .terminator = .{ .branch = .{ .condition = 2, .then_block = 1, .else_block = 2 } },
+            },
+            .{ .instructions = &block_one, .terminator = .{ .return_value = 4 } },
+            .{ .instructions = &block_two, .terminator = .{ .return_value = 5 } },
+        },
+    }};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const summaries = try analyze(arena.allocator(), .{ .functions = &functions });
+    try std.testing.expectEqual(@as(usize, 6), summaries[0].scalar_values);
+    try std.testing.expectEqual(@as(usize, 4), summaries[0].peak_block_scalar_values);
 }
 
 test "backedges classify only their loop range as hot" {

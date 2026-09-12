@@ -1,0 +1,43 @@
+REPOSITORY                                 ACTIONS
+.agents                                    PUSH
+Silex                                      PUSH
+Silex-Benchmarks                           PUSH
+Silex-Documentation                        PUSH
+Silex-Examples                             OK
+Silex-Extension-VSCode                     PUSH
+Silex-Extension-Zed                        PUSH
+Silex-Registry                             PUSH
+Silex-Toolchain-Assets                     OK
+Silex-Website                              PUSH
+Packages/AI                                PUSH
+Packages/GFX                               PUSH
+Packages/GFX.Animation                     PUSH
+Packages/GFX.Application                   PUSH
+Packages/GFX.Assets                        OK
+Packages/GFX.Audio                         PUSH
+Packages/GFX.Canvas                        OK
+Packages/GFX.ECS                           PUSH
+Packages/GFX.Font                          OK
+Packages/GFX.GPU                           OK
+Packages/GFX.Nodes                         TAG, PUSH
+Packages/GFX.Physics                       PUSH
+Packages/GFX.Rendering                     OK
+Packages/GFX.Scene2D                       PUSH
+Packages/GFX.Scene3D                       PUSH
+Packages/GFX.Stats                         PUSH
+Packages/GFX.UI                            OK
+Packages/GFX.UI.Terminal                   OK
+Packages/GFX.Viewer                        PUSH
+Packages/GFX.WebView                       PUSH
+Packages/HTML                              OK
+Packages/HTTP                              OK
+Packages/Image                             OK
+Packages/JSON                              OK
+Packages/Plot                              OK
+Packages/STD                               PUSH
+Packages/Sync                              OK
+Packages/Tensor                            PUSH
+Packages/XML                               OK
+Packages/YAML                              OK
+
+23 of 40 repositories have pending actions.

@@ -1370,3 +1370,50 @@ test "release drops overwritten aggregate stores but retains branch snapshots" {
     const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
     try std.testing.expect(std.mem.count(u8, tail[0..end], "struct.init @Pair") <= 3);
 }
+
+test "protocol dispatch defines results and updated receivers on every returning path" {
+    for ([_][]const u8{
+        "",
+        \\struct Other:Value {
+        \\    var value:int
+        \\    func get() int { return self.value }
+        \\    func add(amount:int) { self.value += amount }
+        \\    func increment() int { self.value += 1; return self.value }
+        \\}
+        ,
+    }) |extra| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var frontend = Frontend.Frontend.init(allocator);
+        const source = try std.mem.concat(allocator, u8, &.{
+            \\protocol Value { func get() int; func add(amount:int); func increment() int }
+            \\struct Counter:Value {
+            \\    var value:int
+            \\    func get() int { return self.value }
+            \\    func add(amount:int) { self.value += amount }
+            \\    func increment() int { self.value += 1; return self.value }
+            \\}
+            \\func exercise(value:Value) {
+            \\    var counter = value
+            \\    print(counter.get())
+            \\    counter.add(4)
+            \\    print(counter.increment())
+            \\    print(counter.get())
+            \\}
+            \\
+            ,
+            extra,
+            if (extra.len == 0) "\nfunc main() { exercise(Counter(value:3)) }" else "\nfunc main() { exercise(Counter(value:3)); exercise(Other(value:10)) }",
+        });
+        const compilation = try frontend.compile(source);
+        try Verifier.verify(allocator, compilation.ir);
+        const optimized = try Release.optimizeWithOptions(allocator, compilation.ir, .{ .verify_each_pass = true });
+        const raw = try Interpreter.runCapture(allocator, compilation.ir);
+        const after = try Interpreter.runCapture(allocator, optimized);
+        try std.testing.expectEqualStrings(if (extra.len == 0) "3\n8\n8\n" else "3\n8\n8\n10\n15\n15\n", raw.stdout);
+        try std.testing.expectEqual(@as(u8, 0), raw.exit_code);
+        try std.testing.expectEqualStrings(raw.stdout, after.stdout);
+        try std.testing.expectEqual(raw.exit_code, after.exit_code);
+    }
+}

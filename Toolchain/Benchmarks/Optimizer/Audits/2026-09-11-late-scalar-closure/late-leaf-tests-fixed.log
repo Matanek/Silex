@@ -1,0 +1,6 @@
+1/5 LateClosureProbe.test.late scalar probe...OK
+2/5 Sources.Optimize.LateScalarClosureTests.test.late scalar closure revisits cleaned leaves and respects disabling...OK
+3/5 Sources.Optimize.LateScalarClosureTests.test.late scalar closure preserves unused initializer failure...OK
+4/5 Sources.Optimize.LateScalarClosureTests.test.late scalar closure leaves ordered effects out of the revisit...OK
+5/5 Sources.Optimize.Release.test_0...OK
+All 5 tests passed.

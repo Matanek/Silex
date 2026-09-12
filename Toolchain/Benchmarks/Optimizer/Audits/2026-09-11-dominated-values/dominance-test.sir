@@ -1,0 +1,112 @@
+struct @Pair {
+    var .x:float64
+    var .y:float64
+}
+
+func @evaluate(%0:@Pair, %1:bool) -> float64 {
+entry:
+    %2:float64 = field %0, .x
+    %3:float64 = deep_copy %2
+    %10:float64 = copy %3
+    branch %1, bb1, bb2
+bb1:
+    %4:float64 = copy %3
+    %5:float64 = field %0, .y
+    %6:float64 = add %4, %5
+    %10:float64 = copy %6
+    jump bb2
+bb2:
+    %7:float64 = copy %10
+    %8:float64 = field %0, .x
+    %9:float64 = add %7, %8
+    return %9
+}
+
+func @partial(%0:@Pair, %1:bool) -> float64 {
+entry:
+    branch %1, bb1, bb3
+bb1:
+    %2:float64 = field %0, .x
+    %3:float64 = const 0
+    %4:bool = lt %2, %3
+    branch %4, bb2, bb3
+bb2:
+    %6:float64 = const -1
+    return %6
+bb3:
+    %7:float64 = field %0, .x
+    return %7
+}
+
+func @aliasing(%0:internal address, %1:internal address) -> float64 {
+entry:
+    %20:internal address = reference.field %0, x
+    %18:float64 = reference.load %20
+    %8:float64 = const 9
+    %17:internal address = reference.field %1, x
+    reference.store %17, %8
+    %21:internal address = reference.field %0, x
+    %19:float64 = reference.load %21
+    %16:float64 = add %18, %19
+    return %16
+}
+
+func @main() -> void {
+entry:
+    %0:float64 = const 2
+    %1:float64 = const 3
+    %2:@Pair = struct.init @Pair(.x=%0, .y=%1)
+    store $0:structure, %2
+    %4:bool = const true
+    %5:float64 = call @evaluate(%2, %4)
+    %6:float64 = const 7
+    %7:bool = eq %5, %6
+    print %7
+    %8:@Pair = load $0:structure
+    %9:bool = const false
+    %10:float64 = call @evaluate(%8, %9)
+    %11:float64 = const 4
+    %12:bool = eq %10, %11
+    print %12
+    %13:@Pair = load $0:structure
+    %44:float64 = field %13, .x
+    %45:float64 = const 0
+    %46:bool = lt %44, %45
+    branch %46, bb1, bb2
+bb1:
+    %48:float64 = const -1
+    %15:float64 = copy %48
+    jump bb3
+bb2:
+    %49:float64 = field %13, .x
+    %15:float64 = copy %49
+    jump bb3
+bb3:
+    %16:float64 = const 2
+    %17:bool = eq %15, %16
+    print %17
+    %20:internal address = address $0:structure
+    %36:internal address = reference.field %20, x
+    %37:float64 = reference.load %36
+    %38:float64 = const 9
+    %40:internal address = reference.field %20, x
+    reference.store %40, %38
+    %42:float64 = const 9
+    %43:float64 = add %37, %42
+    %22:float64 = copy %43
+    %23:float64 = const 11
+    %24:bool = eq %22, %23
+    print %24
+    %25:float = const 1
+    %27:float64 = const -0
+    %28:float64 = const 0
+    %29:@Pair = struct.init @Pair(.x=%27, .y=%28)
+    %30:bool = const false
+    %31:float64 = call @evaluate(%29, %30)
+    %32:float64 = convert %25 to float64
+    %33:float64 = div %32, %31
+    %34:float64 = const 0
+    %35:bool = lt %33, %34
+    print %35
+    return
+}

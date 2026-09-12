@@ -1,0 +1,7 @@
+1/6 OptimizationProbe.test_0...OK
+2/6 Sources.Optimize.ScalarExpressionsTests.test.scalar expressions reuse snapshots across stores but stop at calls...OK
+3/6 Sources.Optimize.ScalarExpressionsTests.test.scalar expressions retain operand order flags and edge redefinitions...OK
+4/6 Sources.Optimize.ScalarExpressionsTests.test.scalar expressions do not infer availability across control flow...OK
+5/6 Sources.Optimize.ScalarExpressionsTests.test.release reuses identical scalar expressions without reassociation...OK
+6/6 Sources.Optimize.Release.test_0...OK
+All 6 tests passed.

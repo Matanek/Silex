@@ -1,0 +1,6 @@
+Build Summary: 4/4 steps succeeded; 425/425 tests passed
+test-lsp success
++- run test 425 pass (425 total) 25s MaxRSS:137M
+   +- compile test ReleaseFast native success 4m MaxRSS:1G
+      +- options cached
+

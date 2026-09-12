@@ -1,0 +1,32 @@
+{
+  "records": [
+    {
+      "label": "before",
+      "binary_sha256": "7becb3b511ab03acccca325323feb0999ab258f13c68d072bb978139852d7558",
+      "output_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+      "records": 32768
+    },
+    {
+      "label": "after",
+      "binary_sha256": "b2850dde0604a910620fb9bc5064b39837b72139c6d043114ff3628410ee69ec",
+      "output_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40",
+      "records": 32768
+    },
+    {
+      "label": "clang",
+      "binary_sha256": "8d7380b05b04989829c693b61d927ec6b34fb2e0b3146aae54e63e887934eb76",
+      "output_sha256": "664117316ce24dd059b592daf4d875bfdb31c45caace9db76340f740273ae491",
+      "records": 32768
+    }
+  ],
+  "maximum_difference_from_clang": {
+    "before": 2.700000001354397e-07,
+    "after": 2.700000001354397e-07,
+    "clang": 0.0
+  },
+  "before_after_maximum_difference": 0.0,
+  "signature_interval": [
+    4744923547.477649,
+    32456.933485190275
+  ]
+}

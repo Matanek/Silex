@@ -1,0 +1,84 @@
+Silex native benchmark
+host: Darwin-x86_64
+clang: Apple clang version 17.0.0 (clang-1700.0.13.5)
+workload: Arithmetic
+result: 143997165
+sizes:
+   16631 .zig-cache/benchmark-native/arithmetic-debug
+   12440 .zig-cache/benchmark-native/arithmetic-release
+    8496 .zig-cache/benchmark-native/arithmetic-clang
+   37567 total
+compile times:
+  debug real 0.27
+  debug user 0.11
+  debug sys 0.12
+  release real 0.02
+  release user 0.01
+  release sys 0.01
+  clang real 1.94
+  clang user 0.16
+  clang sys 1.43
+run times:
+  debug real 0.01
+  debug user 0.00
+  debug sys 0.00
+  release real 0.00
+  release user 0.00
+  release sys 0.00
+  clang real 0.00
+  clang user 0.00
+  clang sys 0.00
+workload: Objects
+result: 6000000
+sizes:
+   33023 .zig-cache/benchmark-native/objects-debug
+   28856 .zig-cache/benchmark-native/objects-release
+    8584 .zig-cache/benchmark-native/objects-clang
+   70463 total
+compile times:
+  debug real 0.15
+  debug user 0.09
+  debug sys 0.06
+  release real 0.03
+  release user 0.01
+  release sys 0.01
+  clang real 1.95
+  clang user 1.02
+  clang sys 0.50
+run times:
+  debug real 0.04
+  debug user 0.03
+  debug sys 0.00
+  release real 0.03
+  release user 0.02
+  release sys 0.00
+  clang real 0.00
+  clang user 0.00
+  clang sys 0.00
+workload: Flocking
+result: true
+sizes:
+   28927 .zig-cache/benchmark-native/flocking-debug
+   24760 .zig-cache/benchmark-native/flocking-release
+    9904 .zig-cache/benchmark-native/flocking-clang
+   63591 total
+compile times:
+  debug real 0.15
+  debug user 0.09
+  debug sys 0.06
+  release real 0.05
+  release user 0.03
+  release sys 0.01
+  clang real 1.00
+  clang user 0.87
+  clang sys 0.15
+run times:
+  debug real 4.93
+  debug user 4.90
+  debug sys 0.02
+  release real 3.74
+  release user 3.71
+  release sys 0.02
+  clang real 0.47
+  clang user 0.46
+  clang sys 0.00

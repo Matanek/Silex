@@ -1,0 +1,9 @@
+1/8 Main.test_0...OK
+2/8 Main.test_1...OK
+3/8 Arm64.Lower.test_0...OK
+4/8 Optimize.Release.test_0...OK
+5/8 Arm64.RegisterAllocation.test_0...OK
+6/8 EmbeddedFilesTests.test.embed arbitrary bytes compactly and track the source as a cache dependency...OK
+7/8 LspTests.test_0...OK
+8/8 Arm64.MemoryResidence.test_0...OK
+All 8 tests passed.

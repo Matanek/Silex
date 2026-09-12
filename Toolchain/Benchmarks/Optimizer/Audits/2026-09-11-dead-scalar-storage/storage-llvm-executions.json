@@ -1,0 +1,90 @@
+[
+  {
+    "mode": "raw",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/KnownViewElements-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/storage-views-raw-O0"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "b2df14755d376a64f8f4ad6ee0cdb5e53e4f41a70fbcac2f72b757fafb825576",
+    "binary_sha256": "ce30d55d51f0be5cd70c37a69d2a870db85f71de5ce4e504b517b78663730544",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "mode": "raw",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/KnownViewElements-raw.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/storage-views-raw-O3"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "b2df14755d376a64f8f4ad6ee0cdb5e53e4f41a70fbcac2f72b757fafb825576",
+    "binary_sha256": "65702caaf29860ebccd793d776208bb2390fd9426414e4c0a4f21362b2ccd142",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "mode": "silex",
+    "level": "O0",
+    "command": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/KnownViewElements-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/storage-views-silex-O0"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "3df34b0fb824a26877d250f962cb797dc0eef39444aaf4feef6fe2bba09a66a7",
+    "binary_sha256": "b63428bfb6fea0f8ebd6248d7b4f79eff00f9457b29340474d34d4597d478924",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "mode": "silex",
+    "level": "O3",
+    "command": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "-ffp-contract=on",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/KnownViewElements-silex.ll",
+      "-o",
+      "/private/tmp/silex-part02-evidence/storage-views-silex-O3"
+    ],
+    "build_exit": 0,
+    "build_stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n",
+    "source_sha256": "3df34b0fb824a26877d250f962cb797dc0eef39444aaf4feef6fe2bba09a66a7",
+    "binary_sha256": "29eee85d59a621757ba4312b287afc82d0455eb612924019a41b00aa4c9edd81",
+    "exit": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  }
+]

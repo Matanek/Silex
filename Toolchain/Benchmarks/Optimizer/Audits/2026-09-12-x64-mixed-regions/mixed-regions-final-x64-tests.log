@@ -1,0 +1,60 @@
+1/59 X64MixedProbe.test_0...OK
+2/59 X64.RegisterAllocation.test.allocate X64 volatile scalar residences and spill incompatible functions...OK
+3/59 X64.RegisterAllocation.test.keep operands used by the same X64 instruction in distinct residences...OK
+4/59 X64.RegisterAllocation.test.unused X64 incoming parameters cannot clobber a live parameter...OK
+5/59 X64.RegisterAllocation.test.allocate X64 scalar values globally across a loop...OK
+6/59 X64.RegisterAllocation.test.allocate portable float32 pairs in baseline X64 SIMD registers...OK
+7/59 X64.RegisterAllocation.test.X64 allocation consumes the shared scheduled machine order...OK
+8/59 X64.RegisterAllocation.test.hot X64 scalar loops retain registers before a terminal print barrier...OK
+9/59 X64.RegisterAllocation.test.hot X64 scalar loops retain registers before aggregate and call barriers...OK
+10/59 X64.RegisterAllocation.test.X64 scalar floats retain temporaries but pin call and addressed values...OK
+11/59 X64.RegisterAllocation.test.X64 scalar collection results reside while memory inputs and stack copies stay pinned...OK
+12/59 X64.RegisterAllocation.test.X64 scalar floats survive an interleaved return on another branch...OK
+13/59 X64.RegisterAllocation.test.X64 memory regions retain loop indices across interleaved cold calls...OK
+14/59 X64.RegisterAllocation.test.X64 mixed loops retain integer indices with aggregate inputs and returns...OK
+15/59 X64.Encoder.test.X64 conditional flow inverts the predicate for a true fallthrough...OK
+16/59 X64.Encoder.test.omit an X64 jump to the adjacent machine instruction...OK
+17/59 X64.Encoder.test.encode a no-op Silex main for the X64 process and Mach-O entry contracts...OK
+18/59 X64.Encoder.test.omit X64 status checks only for proven infallible direct callees...OK
+19/59 X64.Encoder.test.encode X64 panic diagnostics for both process contracts...OK
+20/59 X64.Encoder.test.encode X64 floating-point print with the bundled formatter...OK
+21/59 X64.Encoder.test.preserve an X64 integer print operand resident in r8...OK
+22/59 X64.Encoder.test.encode ABI callback thunks for Silex function addresses...OK
+23/59 X64.Encoder.test.encode internal X64 arguments beyond the register window...OK
+24/59 X64.Encoder.test.encode float32 to float64 widening on X64...OK
+25/59 X64.Encoder.test.encode float64 to float32 narrowing on X64...OK
+26/59 X64.Encoder.test.encode indirect C ABI calls on Linux and Windows X64...OK
+27/59 X64.Encoder.test.encode X64 dynamic protocol calls beyond the register window...OK
+28/59 X64.Encoder.test.encode X64 ownership and deep-copy runtime callbacks...OK
+29/59 X64.Encoder.test.X64 scalar allocation reduces leaf arithmetic code...OK
+30/59 X64.Encoder.test.encode X64 reciprocal division primitives...OK
+31/59 X64.Encoder.test.normalize narrow X64 shifts to typed integer bits...OK
+32/59 X64.Encoder.test.encode narrow X64 right shifts with typed logical semantics...OK
+33/59 X64.Encoder.test.sign extend narrow signed constants on X64...OK
+34/59 X64.Encoder.test.select X64 reciprocal remainder for an adjacent constant...OK
+35/59 X64.Encoder.test.select X64 signed power-of-two division with truncation correction...OK
+36/59 X64.Encoder.test.encode IEEE unordered float comparison results on X64...OK
+37/59 X64.Encoder.test.X64 keeps the scalar fallback when portable SLP groups are present...OK
+38/59 X64.Encoder.test.encode owned strings with allocation retain and release on both X64 hosts...OK
+39/59 X64.Encoder.test.encode memory operands based on R12 with the required SIB byte...OK
+40/59 X64.Encoder.test.probe every Windows stack page in large X64 frames...OK
+41/59 X64.Encoder.test.scalar XMM high colors encode raw bits and preserve full Win64 registers...OK
+42/59 X64.Encoder.test.scalar SSE arithmetic uses allocated colors and preserves a reused right operand...OK
+43/59 X64.Encoder.test.X64 scalar copies honor coalesced integer colors and FP transfers...OK
+44/59 X64.FloatRuntime.test.bundled X64 float formatter is an ELF image...OK
+45/59 X64.FloatRuntime.test.bundled macOS X64 float formatter is a Mach-O image...OK
+46/59 X64.DeepCopyRuntime.test.bundled X64 deep-copy runtime is an ELF image...OK
+47/59 X64.DeepCopyRuntime.test.bundled macOS X64 deep-copy runtime is a Mach-O image...OK
+48/59 X64.CycleRuntime.test.bundled X64 cycle runtime is an ELF image...OK
+49/59 X64.CycleRuntime.test.bundled macOS X64 cycle runtime is a Mach-O image...OK
+50/59 X64.ExternalCalls.test.encode syscall immediates in extended registers...OK
+51/59 X64.ExternalCalls.test.x64 boundary calls sign extend int32 results before storing them...OK
+52/59 X64.ExternalCalls.test.Windows x64 imports sign extend int32 results before storing them...OK
+53/59 X64.FloatPairs.test.emit a selected portable float32 pair with packed SSE...OK
+54/59 X64.TextRuntime.test.encode immediate destinations in extended registers...OK
+55/59 X64.BranchSelection.test.branch fusion rejects shared booleans, independent entries, and reused slots...OK
+56/59 Arm64.Lower.test_0...OK
+57/59 Arm64.RegisterAllocation.test_0...OK
+58/59 Arm64.MemoryResidence.test_0...OK
+59/59 Packages.test.resolve Mach-O X64, ELF and COFF boundary archives with system libraries...OK
+All 59 tests passed.

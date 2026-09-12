@@ -1,0 +1,108 @@
+Silex native benchmark
+host: Darwin-x86_64
+clang: Apple clang version 17.0.0 (clang-1700.0.13.5)
+references: clang=-O2/native-layout; clang-o3-slot8=-O3/8-byte-fields
+workload: Arithmetic
+result: 143997165
+sizes:
+   16631 .zig-cache/benchmark-native/arithmetic-debug
+   12440 .zig-cache/benchmark-native/arithmetic-release
+    8496 .zig-cache/benchmark-native/arithmetic-clang
+    8496 .zig-cache/benchmark-native/arithmetic-clang-o3-slot8
+   46063 total
+compile times:
+  debug real 0.28
+  debug user 0.10
+  debug sys 0.13
+  release real 0.02
+  release user 0.01
+  release sys 0.01
+  clang real 1.98
+  clang user 0.16
+  clang sys 1.43
+  clang-o3-slot8 real 0.14
+  clang-o3-slot8 user 0.12
+  clang-o3-slot8 sys 0.06
+run times:
+  debug real 0.01
+  debug user 0.00
+  debug sys 0.00
+  release real 0.00
+  release user 0.00
+  release sys 0.00
+  clang real 0.00
+  clang user 0.00
+  clang sys 0.00
+  clang-o3-slot8 real 0.00
+  clang-o3-slot8 user 0.00
+  clang-o3-slot8 sys 0.00
+references: clang=-O2/native-layout; clang-o3-slot8=-O3/8-byte-fields
+workload: Objects
+result: 6000000
+sizes:
+   33023 .zig-cache/benchmark-native/objects-debug
+   28856 .zig-cache/benchmark-native/objects-release
+    8584 .zig-cache/benchmark-native/objects-clang
+    8584 .zig-cache/benchmark-native/objects-clang-o3-slot8
+   79047 total
+compile times:
+  debug real 0.15
+  debug user 0.09
+  debug sys 0.06
+  release real 0.03
+  release user 0.01
+  release sys 0.01
+  clang real 2.00
+  clang user 1.04
+  clang sys 0.50
+  clang-o3-slot8 real 0.98
+  clang-o3-slot8 user 0.88
+  clang-o3-slot8 sys 0.13
+run times:
+  debug real 0.03
+  debug user 0.03
+  debug sys 0.00
+  release real 0.01
+  release user 0.01
+  release sys 0.00
+  clang real 0.00
+  clang user 0.00
+  clang sys 0.00
+  clang-o3-slot8 real 0.00
+  clang-o3-slot8 user 0.00
+  clang-o3-slot8 sys 0.00
+references: clang=-O2/native-layout; clang-o3-slot8=-O3/8-byte-fields
+workload: Flocking
+result: true
+sizes:
+   28927 .zig-cache/benchmark-native/flocking-debug
+   20664 .zig-cache/benchmark-native/flocking-release
+    9904 .zig-cache/benchmark-native/flocking-clang
+   14000 .zig-cache/benchmark-native/flocking-clang-o3-slot8
+   73495 total
+compile times:
+  debug real 0.15
+  debug user 0.09
+  debug sys 0.06
+  release real 0.07
+  release user 0.05
+  release sys 0.01
+  clang real 1.17
+  clang user 0.98
+  clang sys 0.18
+  clang-o3-slot8 real 1.09
+  clang-o3-slot8 user 0.99
+  clang-o3-slot8 sys 0.14
+run times:
+  debug real 5.08
+  debug user 5.04
+  debug sys 0.03
+  release real 1.92
+  release user 1.86
+  release sys 0.04
+  clang real 0.42
+  clang user 0.41
+  clang sys 0.00
+  clang-o3-slot8 real 0.60
+  clang-o3-slot8 user 0.60
+  clang-o3-slot8 sys 0.00

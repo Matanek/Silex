@@ -1,0 +1,32 @@
+[
+  {
+    "stage": "Preparation",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-direct-sse",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/PreparationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/preparation-private-length-before"
+    ],
+    "baseline_sha256": "09fabe12474dbb7534678b0db36329da8163cbb6499d265fa542ffc0e3c4a1c1",
+    "identical_225ba12": false,
+    "new_identical_baseline": false
+  },
+  {
+    "stage": "Integration",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-direct-sse",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/IntegrationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/integration-private-length-before"
+    ],
+    "baseline_sha256": "3f782d2764a1ecb39b7be95649471f101becba514105d8a9223a748cc2e83006",
+    "identical_225ba12": false,
+    "new_identical_baseline": false
+  }
+]

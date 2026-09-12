@@ -1,0 +1,6 @@
+{
+  "code_candidate": "cf06ca97a5ef247b96d8942f6ec020c1b4ad4fc7",
+  "arm64_abi_fix": "559ede0956042ef98c9763886618e0f72cfcbe08",
+  "compiler_sha256": "ec904e3fc4a49159ed1dedac10f7306c9b2097780181de2cc2a126073e0fcda2",
+  "x64_qualification_note": "X64 qualification preceded the ARM64-only transfer correction; X64 sources and generated witness outputs are unchanged."
+}

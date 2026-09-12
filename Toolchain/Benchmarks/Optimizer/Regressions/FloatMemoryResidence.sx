@@ -1,0 +1,144 @@
+struct Pair { let x:float64; let y:float64 }
+
+func sum(values:@Pair[..], count:int) float64 {
+    var x:float64 = 1.0
+    var y:float64 = 2.0
+    var round = 0
+    while round < count {
+        for value in values {
+            x += value.x
+            y += value.y
+        }
+        round++
+    }
+    return x + y
+}
+
+func fixed(values:float32[3], count:int) float32 {
+    var total:float32 = 0.5
+    var index = 0
+    while index < count {
+        total += values[index % 3]
+        index++
+    }
+    return total
+}
+
+func edges(values:@Pair[..], zero:float64, nan:float64) {
+    var negative = zero
+    var unordered = nan
+    for value in values {
+        negative *= value.x
+        unordered += value.y
+    }
+    print(1.0 / negative < 0.0)
+    print(unordered != unordered)
+}
+
+func select(values:@Pair[..], empty:bool) Pair {
+    var x:float64 = 1.0
+    var y:float64 = 2.0
+    for value in values {
+        x += value.x
+        y += value.y
+    }
+    if empty { return Pair(x:0.0, y:0.0) }
+    return Pair(x:x, y:y)
+}
+
+func loadedEdges(values:@Pair[..], index:int) {
+    let value = values[index]
+    print(1.0 / value.x < 0.0)
+    print(value.y != value.y)
+}
+
+func loadedNarrow(values:float32[3], index:int) {
+    let value = values[index]
+    print(1.0 / value < 0.0)
+}
+
+struct NarrowPair { let x:float32; let y:float32 }
+
+func mixedPair(values:@NarrowPair[..], count:int) NarrowPair {
+    var x:float32 = 0.0
+    var y:float32 = 0.0
+    var index = 0
+    while index < count {
+        let value = values[index % values.count()]
+        if index % 2 == 0 { x += value.x; y += value.y }
+        else { x -= value.y; y += value.x }
+        index++
+    }
+    return NarrowPair(x:x, y:y)
+}
+
+func mixedScalar(values:@NarrowPair[..], count:int) float32 {
+    var total:float32 = -0.0
+    var index = 0
+    while index < count {
+        let value = values[index % values.count()]
+        total += value.x * 0.5 - value.y
+        index++
+    }
+    return total
+}
+
+func wideCounter(count:int) float64 {
+    var total:float64 = 0.5
+    var index = 0
+    while index < count {
+        total += 0.25
+        index++
+    }
+    return total
+}
+
+func mixedArguments(first:@NarrowPair[..], count:int, b:int, c:int, second:@NarrowPair[..], d:int, e:int, f:int, g:int) float32 {
+    var total:float32 = 0.0
+    var index = 0
+    while index < count {
+        let left = first[index % first.count()]
+        let right = second[index % second.count()]
+        total += left.x + right.y + (b + c + d + e + f + g) as float32
+        index++
+    }
+    return total
+}
+
+func main() {
+    let values:Pair[] = [Pair(x:1.0, y:2.0), Pair(x:3.0, y:4.0)]
+    let view = @values[0:values.count()]
+    print(sum(view, 0) == 3.0)
+    print(sum(view, 1) == 13.0)
+    print(sum(view, 100) == 1003.0)
+    let narrow:float32[3] = [0.5, 1.0, 1.5]
+    print(fixed(narrow, 0) == 0.5)
+    print(fixed(narrow, 9) == 9.5)
+    edges(view, -0.0, 0.0 / 0.0)
+    let selected = select(view, false)
+    print(selected.x == 5.0)
+    print(selected.y == 8.0)
+    let special:Pair[] = [Pair(x:-0.0, y:0.0 / 0.0)]
+    loadedEdges(@special[0:special.count()], -1)
+    let narrowEdges:float32[3] = [0.0, 1.0, -0.0]
+    loadedNarrow(narrowEdges, -1)
+    let empty = select(view, true)
+    print(empty.x == 0.0 && empty.y == 0.0)
+    let mixed:NarrowPair[] = [NarrowPair(x:1.0, y:2.0), NarrowPair(x:3.0, y:4.0)]
+    let mixedView = @mixed[0:mixed.count()]
+    let none = mixedPair(mixedView, 0)
+    print(none.x == 0.0 && none.y == 0.0)
+    let one = mixedPair(mixedView, 1)
+    print(one.x == 1.0 && one.y == 2.0)
+    let two = mixedPair(mixedView, 2)
+    print(two.x == -3.0 && two.y == 5.0)
+    let many = mixedPair(mixedView, 1000)
+    print(many.x == -1500.0 && many.y == 2500.0)
+    print(mixedScalar(mixedView, 1000) == -2000.0)
+    print(1.0 / mixedScalar(mixedView, 0) < 0.0)
+    print(wideCounter(1000) == 250.5)
+    let unordered:NarrowPair[] = [NarrowPair(x:0.0 / 0.0, y:1.0)]
+    let result = mixedScalar(@unordered[0:unordered.count()], 10)
+    print(result != result)
+    print(mixedArguments(mixedView, 2, 1, 1, mixedView, 1, 1, 1, 1) == 22.0)
+}

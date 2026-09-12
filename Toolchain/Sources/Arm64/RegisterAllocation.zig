@@ -13,6 +13,7 @@ const spanContains = ResidenceLiveness.spanContains;
 
 test {
     _ = @import("MemoryResidence.zig");
+    _ = @import("LoopExitResidenceTests.zig");
 }
 
 const Allocator = std.mem.Allocator;
@@ -46,6 +47,128 @@ pub fn allocateFloatLanePairsFor(
     return residences;
 }
 
+pub const ScalarFloatAccess = enum {
+    resident,
+    collection_inputs,
+    stack_operands,
+    barrier,
+};
+
+/// Allocates scalar FP regions for a backend with an explicit encoder subset.
+/// Unsupported operations retain complete stack intervals; address-taken spans
+/// stay pinned even when their address is consumed outside the scalar region.
+pub fn allocateFloatScalarsFor(
+    allocator: Allocator,
+    function: Machine.Function,
+    registers: []const u5,
+    comptime access: fn (Machine.Instruction) ScalarFloatAccess,
+) Allocator.Error![]const ?u5 {
+    if (function.reuses_slots or function.capture_parameters.len != 0 or registers.len == 0) return &.{};
+    const residences = try allocator.alloc(?u5, function.slot_count);
+    @memset(residences, null);
+    const floats = try allocator.alloc(bool, function.slot_count);
+    defer allocator.free(floats);
+    @memset(floats, false);
+    inferFloatSlots(function, floats);
+    const forced = try allocator.alloc(bool, function.slot_count);
+    defer allocator.free(forced);
+    @memset(forced, false);
+    // The caller supplies a bank disjoint from its packed lanes. Packed
+    // emitters consume stack operands and materialize both results in memory.
+    for (function.float_lane_slots, 0..) |lane, slot| if (lane != null) {
+        forced[slot] = true;
+    };
+    for (function.instructions) |instruction| if (instruction == .binary) {
+        const binary = instruction.binary;
+        if (function.float_lane_slots.len != 0 and function.float_lane_slots[binary.result] != null) {
+            forced[binary.left] = true;
+            forced[binary.right] = true;
+        }
+    };
+    const first = try allocator.alloc(usize, function.slot_count);
+    defer allocator.free(first);
+    const last = try allocator.alloc(usize, function.slot_count);
+    defer allocator.free(last);
+    const weights = try allocator.alloc(u64, function.slot_count);
+    defer allocator.free(weights);
+    const instruction_weights = try allocator.alloc(u64, function.instructions.len);
+    defer allocator.free(instruction_weights);
+    @memset(first, std.math.maxInt(usize));
+    @memset(last, 0);
+    @memset(weights, 0);
+    @memset(instruction_weights, 1);
+    weightLoops(function.instructions, instruction_weights);
+    for (function.parameters) |parameter| {
+        if (parameter.aggregate or parameter.width != 1) forceSpan(parameter, forced) else touch(parameter.start, 0, first, last, weights, 1);
+    }
+    for (function.instructions, 0..) |instruction, index| {
+        visitBarrier(instruction, index, first, last, weights, instruction_weights[index]);
+        // Collection input homes are pinned by the target contract below.
+        // Its scalar result emitter can handle each leaf independently.
+        if (access(instruction) != .collection_inputs) MemoryResidence.pin(instruction, forced);
+    }
+    extendLoopCarriedIntervals(function.instructions, first, last);
+    const collection_live = if (for (function.instructions) |instruction| {
+        if (access(instruction) == .collection_inputs) break true;
+    } else false) try ResidenceLiveness.compute(allocator, function.instructions, function.slot_count) else null;
+    defer if (collection_live) |live| allocator.free(live);
+    for (function.instructions, 0..) |instruction, index| {
+        switch (access(instruction)) {
+            .resident => {},
+            .collection_inputs => for (0..function.slot_count) |slot| {
+                if (instructionUses(instruction, @intCast(slot))) forced[slot] = true;
+                // A dead sibling must not share and overwrite a live result's
+                // color while the emitter transfers the complete element.
+                if (instructionDefines(instruction, @intCast(slot)) and
+                    !successorLive(function.instructions, collection_live.?, function.slot_count, index, slot)) forced[slot] = true;
+            },
+            // These emitters preserve the FP bank but read and write stack
+            // homes. Pin their complete spans, not unrelated live values.
+            .stack_operands => for (0..function.slot_count) |slot| {
+                if (instructionUses(instruction, @intCast(slot)) or
+                    instructionDefines(instruction, @intCast(slot))) forced[slot] = true;
+            },
+            .barrier => for (first, last, 0..) |start, end, slot| {
+                if (start <= index and end >= index) forced[slot] = true;
+            },
+        }
+    }
+    // Preserve the established scalar allocation first. A short-lived loaded
+    // result may use a free color, but must not evict a loop recurrence merely
+    // because making the load resident adds another graph affinity component.
+    const baseline_forced = try allocator.dupe(bool, forced);
+    defer allocator.free(baseline_forced);
+    for (function.instructions) |instruction| if (access(instruction) == .collection_inputs) {
+        forceSpan(instruction.collection_load.result, baseline_forced);
+    };
+    var intervals: std.ArrayList(Interval) = .empty;
+    defer intervals.deinit(allocator);
+    var loaded: std.ArrayList(Interval) = .empty;
+    defer loaded.deinit(allocator);
+    for (first, 0..) |start, slot| {
+        if (start == std.math.maxInt(usize) or forced[slot] or !floats[slot]) continue;
+        const interval: Interval = .{ .slot = @intCast(slot), .first = start, .last = last[slot], .weight = weights[slot] };
+        if (baseline_forced[slot]) try loaded.append(allocator, interval) else try intervals.append(allocator, interval);
+    }
+    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.slot_count, baseline_forced, &.{}, &.{}, false);
+    if (loaded.items.len != 0) {
+        // No component merging can alter the already assigned colors here.
+        const roots = try allocator.alloc(Machine.Slot, function.slot_count);
+        defer allocator.free(roots);
+        for (roots, 0..) |*root, slot| root.* = @intCast(slot);
+        std.mem.sort(Interval, loaded.items, {}, heavierThan);
+        for (loaded.items) |interval| {
+            for (registers) |register| {
+                if (!colorConflicts(interval.slot, register, residences, roots, collection_live.?, function.instructions, function.slot_count)) {
+                    residences[interval.slot] = register;
+                    break;
+                }
+            }
+        }
+    }
+    return residences;
+}
+
 /// Keeps scalar values in the callee-saved ARM64 registers x19...x28. Large
 /// frames reserve x28 as the base of their second directly addressed window.
 /// The
@@ -59,11 +182,11 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Err
 pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, externals: []const Machine.ExternalFunction) (Allocator.Error || Machine.Error)!Result {
     if (!isCompatibleFunction(function, true, externals)) return spilled(allocator, function);
     const fully_compatible = isFullyResidenceCompatible(function, externals);
-    if (!fully_compatible and !hasProfitableScalarRegion(function.instructions, externals)) return spilled(allocator, function);
+    if (!fully_compatible and !(try hasProfitableScalarRegion(allocator, function.instructions, externals))) return spilled(allocator, function);
     if (!fully_compatible and hasLoopAggregateCall(function.instructions)) return spilled(allocator, function);
     // Actual C calls preserve x19...x28 and only the low 64 bits of v8...v15.
-    // Keep the existing argument/result stack homes and use preserved colors
-    // for the whole function. Scratch v9...v12 remain excluded as before.
+    // Keep argument/result stack homes. Scalar regions may borrow volatile
+    // floating colors only when their live values do not meet a call.
     const has_calls = for (function.instructions) |instruction| {
         if (instruction == .call) break true;
         if (instruction == .external_call) {
@@ -95,8 +218,8 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         0,  1,  2,  3,  4,  5,  8,  13,
         14, 15,
     };
-    const float_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
-    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, float_registers);
+    const lane_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
+    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, lane_registers);
     var cursor_probe = function;
     cursor_probe.float_lane_slots = float_lane_residences;
     const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
@@ -127,13 +250,15 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             for (0..parameter.width) |leaf| {
                 touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
             }
-        } else if (parameter.aggregate and aggregateParameterCanRemainResident(parameter, has_calls, float_slots)) {
-            // The proven fast path is deliberately narrow: a call-free,
-            // float-only aggregate can be consumed leaf by leaf without
-            // exposing or forwarding its pointer-backed storage. Resource and
-            // mixed aggregates retain their stable stack representation.
+        } else if (parameter.aggregate and !has_calls) {
+            // Capture each proven floating leaf independently. A passthrough
+            // or resource field must not pin unrelated numeric fields; their
+            // address uses are still pinned below before graph allocation.
             for (0..parameter.width) |leaf| {
-                touch(@intCast(@as(usize, parameter.start) + leaf), 0, first, last, weights, 1);
+                const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+                if (float_slots[slot]) {
+                    touch(slot, 0, first, last, weights, 1);
+                } else forced[slot] = true;
             }
         } else if (parameter.aggregate or parameter.width != 1) {
             forceSpan(parameter, forced);
@@ -155,9 +280,13 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         touch(cursor.result, cursor.initialize, first, last, weights, instruction_weights[cursor.initialize]);
         touch(cursor.result, cursor.increment, first, last, weights, instruction_weights[cursor.increment]);
     }
-    for (function.instructions, 0..) |instruction, index| {
-        if (!isResidenceCompatibleInstruction(instruction, externals)) {
-            pinIntervalsAt(instruction, index, first, last, forced);
+    if (!fully_compatible) {
+        const live = try ResidenceLiveness.compute(allocator, function.instructions, function.slot_count);
+        defer allocator.free(live);
+        for (function.instructions, 0..) |instruction, index| {
+            if (!isResidenceCompatibleInstruction(instruction, externals)) {
+                pinLiveAt(function.instructions, index, live, function.slot_count, forced);
+            }
         }
     }
 
@@ -212,6 +341,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         forced,
         reference_cursors,
         checked_reference_cursors,
+        false,
     );
     // Incoming arguments occupy x0 up to the last register parameter until
     // the prologue captures them. Lower volatile registers beyond that point
@@ -246,12 +376,13 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         allocator,
         float_residences,
         float_intervals.items,
-        float_registers,
+        &pair_registers,
         function.instructions,
         function.slot_count,
         forced,
         reference_cursors,
         checked_reference_cursors,
+        has_calls,
     );
     for (float_lane_residences, 0..) |lane, slot| if (lane != null) {
         float_residences[slot] = null;
@@ -423,29 +554,10 @@ fn allocateGraph(
     forced: []const bool,
     reference_cursors: []const LoopCursor.ReferenceCursor,
     checked_reference_cursors: []const LoopCursor.ReferenceCursor,
+    regional_float_colors: bool,
 ) Allocator.Error!void {
-    const live = try allocator.alloc(bool, instructions.len * slot_count);
+    const live = try ResidenceLiveness.compute(allocator, instructions, slot_count);
     defer allocator.free(live);
-    @memset(live, false);
-
-    var changed = true;
-    while (changed) {
-        changed = false;
-        var reverse = instructions.len;
-        while (reverse != 0) {
-            reverse -= 1;
-            for (0..slot_count) |slot| {
-                const out = successorLive(instructions, live, slot_count, reverse, slot);
-                const value = instructionUses(instructions[reverse], slot) or
-                    (out and !instructionDefines(instructions[reverse], slot));
-                const at = reverse * slot_count + slot;
-                if (live[at] != value) {
-                    live[at] = value;
-                    changed = true;
-                }
-            }
-        }
-    }
     for (reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
     for (checked_reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
 
@@ -454,23 +566,45 @@ fn allocateGraph(
     try buildPureAliasRoots(allocator, alias_roots, instructions, live, slot_count, forced);
     coalesceCopyAffinityRoots(alias_roots, instructions, live, slot_count, forced);
 
+    // Constrain the whole coalesced component, including call operands and
+    // results. CFG liveness keeps a call on another path from extending an
+    // unrelated region; values genuinely crossing it use preserved colors.
+    const preserved = try allocator.alloc(bool, slot_count);
+    defer allocator.free(preserved);
+    @memset(preserved, false);
+    if (regional_float_colors) {
+        for (instructions, 0..) |instruction, index| {
+            if (instruction != .call and instruction != .external_call) continue;
+            for (0..slot_count) |slot| {
+                if (live[index * slot_count + slot] or successorLive(instructions, live, slot_count, index, slot))
+                    preserved[alias_roots[slot]] = true;
+            }
+        }
+    }
+
     std.mem.sort(Interval, intervals, {}, heavierThan);
     for (intervals) |interval| {
         const root = alias_roots[interval.slot];
         if (componentResidence(root, residences, alias_roots)) |precolored| {
-            if (!componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals)) {
+            if ((!preserved[root] or (precolored >= 8 and precolored < 16)) and
+                !componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals))
+            {
                 assignComponentResidence(root, precolored, residences, alias_roots, intervals);
             }
             continue;
         }
         if (preferredComponentResidence(root, residences, alias_roots, instructions)) |preferred| {
-            if (!componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals)) {
+            if ((!preserved[root] or (preferred >= 8 and preferred < 16)) and
+                !componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals))
+            {
                 assignComponentResidence(root, preferred, residences, alias_roots, intervals);
                 continue;
             }
         }
         for (registers) |register| {
-            if (!componentColorConflicts(root, register, residences, alias_roots, live, instructions, slot_count, intervals)) {
+            if ((!preserved[root] or (register >= 8 and register < 16)) and
+                !componentColorConflicts(root, register, residences, alias_roots, live, instructions, slot_count, intervals))
+            {
                 assignComponentResidence(root, register, residences, alias_roots, intervals);
                 break;
             }
@@ -1033,8 +1167,8 @@ fn isFullyResidenceCompatible(function: Machine.Function, externals: []const Mac
     return true;
 }
 
-fn hasProfitableScalarRegion(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
-    if (hasProfitableLoopRegion(instructions, externals)) return true;
+fn hasProfitableScalarRegion(allocator: Allocator, instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) Allocator.Error!bool {
+    if (try hasProfitableLoopRegion(allocator, instructions, externals)) return true;
 
     const has_wide_float_candidate = for (instructions) |instruction| {
         if (instruction == .collection_load and instruction.collection_load.result.width >= 16) break true;
@@ -1058,23 +1192,51 @@ fn hasProfitableScalarRegion(instructions: []const Machine.Instruction, external
     return false;
 }
 
-fn hasProfitableLoopRegion(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+fn hasProfitableLoopRegion(allocator: Allocator, instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) Allocator.Error!bool {
+    const reaches_latch = try allocator.alloc(bool, instructions.len);
+    defer allocator.free(reaches_latch);
     for (instructions, 0..) |instruction, source| switch (instruction) {
-        .jump => |target| if (target <= source and profitableLoopRange(instructions[target .. source + 1], externals)) return true,
+        .jump => |target| if (target <= source and profitableLoopRange(instructions, target, source, reaches_latch, externals)) return true,
         .branch => |branch| {
             if (branch.then_instruction <= source and
-                profitableLoopRange(instructions[branch.then_instruction .. source + 1], externals)) return true;
+                profitableLoopRange(instructions, branch.then_instruction, source, reaches_latch, externals)) return true;
             if (branch.else_instruction <= source and
-                profitableLoopRange(instructions[branch.else_instruction .. source + 1], externals)) return true;
+                profitableLoopRange(instructions, branch.else_instruction, source, reaches_latch, externals)) return true;
         },
         else => {},
     };
     return false;
 }
 
-fn profitableLoopRange(instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+// The linear span of a back edge can contain an exit block laid out before
+// the loop body. Only paths that can reach its latch contribute to this cost
+// estimate. Actual safety still comes from CFG liveness and pinned operands.
+fn profitableLoopRange(instructions: []const Machine.Instruction, header: usize, latch: usize, reaches_latch: []bool, externals: []const Machine.ExternalFunction) bool {
+    @memset(reaches_latch, false);
+    reaches_latch[latch] = true;
+    var changed = true;
+    while (changed) {
+        changed = false;
+        var index = latch;
+        while (index > header) {
+            index -= 1;
+            if (reaches_latch[index]) continue;
+            const reaches = switch (instructions[index]) {
+                .jump => |target| reaches_latch[target],
+                .branch => |value| reaches_latch[value.then_instruction] or reaches_latch[value.else_instruction],
+                .return_value, .return_void, .panic => false,
+                else => reaches_latch[index + 1],
+            };
+            if (reaches) {
+                reaches_latch[index] = true;
+                changed = true;
+            }
+        }
+    }
+    if (!reaches_latch[header]) return false;
     var arithmetic: usize = 0;
-    for (instructions) |instruction| {
+    for (instructions[header .. latch + 1], header..) |instruction, index| {
+        if (!reaches_latch[index]) continue;
         if (!isResidenceCompatibleInstruction(instruction, externals)) return false;
         arithmetic += switch (instruction) {
             .binary => |value| @intFromBool(value.type != .str),
@@ -1111,13 +1273,14 @@ fn isResidenceCompatibleInstruction(instruction: Machine.Instruction, externals:
     };
 }
 
-fn pinIntervalsAt(
-    instruction: Machine.Instruction,
+fn pinLiveAt(
+    instructions: []const Machine.Instruction,
     index: usize,
-    first: []const usize,
-    last: []const usize,
+    live: []const bool,
+    slot_count: usize,
     forced: []bool,
 ) void {
+    const instruction = instructions[index];
     const terminal_operand: ?Machine.Slot = switch (instruction) {
         .print => |value| switch (value.kind) {
             .signed_integer, .unsigned_integer, .boolean => value.value,
@@ -1125,9 +1288,13 @@ fn pinIntervalsAt(
         },
         else => null,
     };
-    for (first, last, forced, 0..) |start, end, *pinned, slot| {
-        if (terminal_operand != null and terminal_operand.? == slot and end == index) continue;
-        if (start != std.math.maxInt(usize) and start <= index and end >= index) pinned.* = true;
+    for (forced, 0..) |*pinned, slot| {
+        const live_out = successorLive(instructions, live, slot_count, index, slot);
+        if (terminal_operand != null and terminal_operand.? == slot and !live_out) continue;
+        // Unsupported emitters still read and write stack homes. A value on
+        // another CFG path need not be spilled merely because its numeric
+        // interval surrounds this instruction in the emitted layout.
+        if (live[index * slot_count + slot] or live_out or instructionDefines(instruction, slot)) pinned.* = true;
     }
 }
 
@@ -1176,14 +1343,6 @@ fn addressOnlyAnnotatesViewReferences(function: Machine.Function, address: Machi
 
 fn forceSpan(span: Machine.Span, forced: []bool) void {
     for (0..span.width) |leaf| forced[@as(usize, span.start) + leaf] = true;
-}
-
-fn aggregateParameterCanRemainResident(parameter: Machine.Span, has_calls: bool, float_slots: []const bool) bool {
-    if (has_calls or parameter.width == 0) return false;
-    for (0..parameter.width) |leaf| {
-        if (!float_slots[@as(usize, parameter.start) + leaf]) return false;
-    }
-    return true;
 }
 
 fn visit(
@@ -1597,6 +1756,38 @@ test "unaddressed aggregate parameter leaves use scalar float registers" {
     defer std.testing.allocator.free(result.float_lane_residences);
     for (0..4) |slot| try std.testing.expect(result.float_residences[slot] != null or
         result.float_lane_residences[slot] != null);
+}
+
+test "mixed aggregate parameters retain only unaddressed proven float leaves" {
+    for ([_]bool{ false, true }) |addressed| {
+        var instructions: std.ArrayList(Machine.Instruction) = .empty;
+        defer instructions.deinit(std.testing.allocator);
+        try instructions.appendSlice(std.testing.allocator, &.{
+            .{ .constant_float32 = .{ .result = 3, .bits = 0x3f800000 } },
+            .{ .binary = .{ .result = 4, .operator = .add, .left = 0, .right = 3, .type = .float32 } },
+            .{ .constant_int = .{ .result = 5, .bits = 7 } },
+            .{ .binary = .{ .result = 6, .operator = .add, .left = 1, .right = 5, .type = .int } },
+            .{ .binary = .{ .result = 7, .operator = .add, .left = 2, .right = 3, .type = .float32 } },
+        });
+        if (addressed) try instructions.append(std.testing.allocator, .{ .local_address = .{ .result = 8, .local = 0, .width = 3 } });
+        try instructions.append(std.testing.allocator, .return_void);
+        const function: Machine.Function = .{
+            .name = "mixed_parameter",
+            .parameter_count = 1,
+            .parameters = &.{.{ .start = 0, .width = 3, .aggregate = true }},
+            .return_type = .void,
+            .slot_count = 9,
+            .frame_size = try Machine.frameSize(9),
+            .instructions = instructions.items,
+        };
+        const result = try allocate(std.testing.allocator, function);
+        defer std.testing.allocator.free(result.residences);
+        defer std.testing.allocator.free(result.float_residences);
+        defer std.testing.allocator.free(result.float_lane_residences);
+        try std.testing.expectEqual(@as(?u5, null), result.residences[1]);
+        try std.testing.expectEqual(@as(?u5, null), result.float_residences[1]);
+        for ([_]usize{ 0, 2 }) |slot| try std.testing.expectEqual(!addressed, result.float_residences[slot] != null or result.float_lane_residences[slot] != null);
+    }
 }
 
 test "addressed aggregate parameter leaves remain stack resident" {
@@ -2015,4 +2206,35 @@ test "hot scalar loops retain registers across a terminal print barrier" {
     try std.testing.expect(result.residences[8] != null);
     try std.testing.expect(result.residences[10] != null);
     try std.testing.expect(result.residences[11] != null);
+}
+
+test "floating regions borrow volatile colors without carrying them across calls" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0x3f800000 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0x40000000 } },
+        .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+        .{ .binary = .{ .result = 3, .operator = .multiply, .left = 2, .right = 1, .type = .float32 } },
+        .{ .call = .{ .function = 0, .arguments = &.{.{ .start = 3, .width = 1 }}, .result = null } },
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 0, .right = 1, .type = .float32 } },
+        .{ .return_value = .{ .start = 4, .width = 1 } },
+    };
+    const function: Machine.Function = .{
+        .name = "regions",
+        .parameter_count = 0,
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+    const temporary = result.float_residences[2] orelse return error.ExpectedVolatileResidence;
+    try std.testing.expect(temporary < 8 or temporary >= 16);
+    for ([_]usize{ 0, 1, 3 }) |slot| {
+        const register = result.float_residences[slot] orelse return error.ExpectedPreservedResidence;
+        try std.testing.expect(register >= 8 and register < 16);
+    }
 }

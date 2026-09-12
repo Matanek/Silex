@@ -1,0 +1,432 @@
+﻿2026-09-11T21:33:29.6053186Z Current runner version: '2.337.0'
+2026-09-11T21:33:29.6074228Z ##[group]Runner Image Provisioner
+2026-09-11T21:33:29.6075084Z Hosted Compute Agent
+2026-09-11T21:33:29.6075565Z Version: 20260828.587
+2026-09-11T21:33:29.6076260Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-11T21:33:29.6076821Z Build Date: 2026-08-28T16:44:25Z
+2026-09-11T21:33:29.6077333Z Worker ID: {9cbebf7c-fb3a-4705-87b7-f14e93519d94}
+2026-09-11T21:33:29.6077875Z Azure Region: eastus
+2026-09-11T21:33:29.6078297Z ##[endgroup]
+2026-09-11T21:33:29.6079333Z ##[group]Operating System
+2026-09-11T21:33:29.6079834Z Microsoft Windows Server 2025
+2026-09-11T21:33:29.6080288Z 10.0.26100
+2026-09-11T21:33:29.6080716Z Datacenter
+2026-09-11T21:33:29.6081101Z ##[endgroup]
+2026-09-11T21:33:29.6081489Z ##[group]Runner Image
+2026-09-11T21:33:29.6081952Z Image: windows-2025-vs2026
+2026-09-11T21:33:29.6082401Z Version: 20260907.229.1
+2026-09-11T21:33:29.6083528Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20260907.229/images/windows/Windows2025-VS2026-Readme.md
+2026-09-11T21:33:29.6084794Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20260907.229
+2026-09-11T21:33:29.6085591Z ##[endgroup]
+2026-09-11T21:33:29.6086454Z ##[group]GITHUB_TOKEN Permissions
+2026-09-11T21:33:29.6088102Z Contents: read
+2026-09-11T21:33:29.6088568Z Metadata: read
+2026-09-11T21:33:29.6088975Z ##[endgroup]
+2026-09-11T21:33:29.6090644Z Secret source: Actions
+2026-09-11T21:33:29.6091345Z Cache mode: write
+2026-09-11T21:33:29.6091921Z Prepare workflow directory
+2026-09-11T21:33:29.6401260Z Prepare all required actions
+2026-09-11T21:33:29.6446879Z Getting action download info
+2026-09-11T21:33:29.7775626Z Download action repository 'actions/checkout@v6' (SHA:d23441a48e516b6c34aea4fa41551a30e30af803)
+2026-09-11T21:33:29.9908117Z Complete job name: windows-x64
+2026-09-11T21:33:30.1433603Z ##[group]Run actions/checkout@v6
+2026-09-11T21:33:30.1434442Z with:
+2026-09-11T21:33:30.1434758Z   repository: Matanek/Silex
+2026-09-11T21:33:30.1438076Z   token: ***
+2026-09-11T21:33:30.1438389Z   ssh-strict: true
+2026-09-11T21:33:30.1438705Z   ssh-user: git
+2026-09-11T21:33:30.1439028Z   persist-credentials: true
+2026-09-11T21:33:30.1439383Z   clean: true
+2026-09-11T21:33:30.1439700Z   sparse-checkout-cone-mode: true
+2026-09-11T21:33:30.1440076Z   fetch-depth: 1
+2026-09-11T21:33:30.1440385Z   fetch-tags: false
+2026-09-11T21:33:30.1440703Z   show-progress: true
+2026-09-11T21:33:30.1441022Z   lfs: false
+2026-09-11T21:33:30.1441321Z   submodules: false
+2026-09-11T21:33:30.1441644Z   set-safe-directory: true
+2026-09-11T21:33:30.1442291Z   allow-unsafe-pr-checkout: false
+2026-09-11T21:33:30.1442921Z ##[endgroup]
+2026-09-11T21:33:30.2591015Z Syncing repository: Matanek/Silex
+2026-09-11T21:33:30.2592346Z ##[group]Getting Git version info
+2026-09-11T21:33:30.2592858Z Working directory is 'D:\a\Silex\Silex'
+2026-09-11T21:33:30.3200542Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-11T21:33:30.7400409Z git version 2.55.0.windows.5
+2026-09-11T21:33:30.7442897Z ##[endgroup]
+2026-09-11T21:33:30.7459070Z Temporarily overriding HOME='D:\a\_temp\c7161204-1204-425c-b204-4518ae67f938' before making global git config changes
+2026-09-11T21:33:30.7460182Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-11T21:33:30.7467884Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\Silex\Silex
+2026-09-11T21:33:30.8102211Z Deleting the contents of 'D:\a\Silex\Silex'
+2026-09-11T21:33:30.8107219Z ##[group]Determining repository object format
+2026-09-11T21:33:30.8109432Z ##[endgroup]
+2026-09-11T21:33:30.8110098Z ##[group]Initializing the repository
+2026-09-11T21:33:30.8116753Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\Silex\Silex
+2026-09-11T21:33:30.8865027Z Initialized empty Git repository in D:/a/Silex/Silex/.git/
+2026-09-11T21:33:30.8903388Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/Matanek/Silex
+2026-09-11T21:33:30.9508115Z ##[endgroup]
+2026-09-11T21:33:30.9509495Z ##[group]Disabling automatic garbage collection
+2026-09-11T21:33:30.9515625Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-09-11T21:33:30.9747800Z ##[endgroup]
+2026-09-11T21:33:30.9749049Z ##[group]Setting up auth
+2026-09-11T21:33:30.9749739Z Removing SSH command configuration
+2026-09-11T21:33:30.9758126Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-11T21:33:30.9985571Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-11T21:33:33.4223756Z Removing HTTP extra header
+2026-09-11T21:33:33.4232215Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-11T21:33:33.4468565Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-11T21:33:33.8940832Z Removing includeIf entries pointing to credentials config files
+2026-09-11T21:33:33.8950302Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-11T21:33:33.9190892Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-11T21:33:34.3563112Z [command]"C:\Program Files\Git\bin\git.exe" config --file D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-09-11T21:33:34.3860536Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/Silex/Silex/.git.path D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:33:34.4147185Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/Silex/Silex/.git/worktrees/*.path D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:33:34.4450971Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:33:34.4717512Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:33:34.4992137Z ##[endgroup]
+2026-09-11T21:33:34.4992628Z ##[group]Fetching the repository
+2026-09-11T21:33:34.5005374Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +225ba12f8d8b4f2e434c0ae18bd0b6269c909373:refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-11T21:33:36.3960879Z From https://github.com/Matanek/Silex
+2026-09-11T21:33:36.3961622Z  * [new ref]         225ba12f8d8b4f2e434c0ae18bd0b6269c909373 -> origin/spec-silex-optimization-parity-completion
+2026-09-11T21:33:36.4009601Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/spec-silex-optimization-parity-completion
+2026-09-11T21:33:36.4337256Z   origin/spec-silex-optimization-parity-completion
+2026-09-11T21:33:36.4380177Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-11T21:33:36.4716147Z 225ba12f8d8b4f2e434c0ae18bd0b6269c909373
+2026-09-11T21:33:36.4745411Z ##[endgroup]
+2026-09-11T21:33:36.4745783Z ##[group]Determining the checkout info
+2026-09-11T21:33:36.4746969Z ##[endgroup]
+2026-09-11T21:33:36.4754606Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-09-11T21:33:36.5125187Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-09-11T21:33:36.5368878Z ##[group]Checking out the ref
+2026-09-11T21:33:36.5377528Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B spec-silex-optimization-parity-completion refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-11T21:33:37.0449679Z Switched to a new branch 'spec-silex-optimization-parity-completion'
+2026-09-11T21:33:37.0513311Z branch 'spec-silex-optimization-parity-completion' set up to track 'origin/spec-silex-optimization-parity-completion'.
+2026-09-11T21:33:37.0562189Z ##[endgroup]
+2026-09-11T21:33:37.0909738Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-09-11T21:33:37.1132116Z 225ba12f8d8b4f2e434c0ae18bd0b6269c909373
+2026-09-11T21:33:37.1536903Z ##[group]Run actions/checkout@v6
+2026-09-11T21:33:37.1537184Z with:
+2026-09-11T21:33:37.1537371Z   repository: Matanek/Silex-Lib-STD
+2026-09-11T21:33:37.1537605Z   ref: 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-11T21:33:37.1537854Z   path: Dependencies/STD
+2026-09-11T21:33:37.1540084Z   token: ***
+2026-09-11T21:33:37.1540245Z   ssh-strict: true
+2026-09-11T21:33:37.1540407Z   ssh-user: git
+2026-09-11T21:33:37.1540581Z   persist-credentials: true
+2026-09-11T21:33:37.1540753Z   clean: true
+2026-09-11T21:33:37.1540909Z   sparse-checkout-cone-mode: true
+2026-09-11T21:33:37.1541095Z   fetch-depth: 1
+2026-09-11T21:33:37.1541236Z   fetch-tags: false
+2026-09-11T21:33:37.1541379Z   show-progress: true
+2026-09-11T21:33:37.1541527Z   lfs: false
+2026-09-11T21:33:37.1541664Z   submodules: false
+2026-09-11T21:33:37.1541813Z   set-safe-directory: true
+2026-09-11T21:33:37.1541996Z   allow-unsafe-pr-checkout: false
+2026-09-11T21:33:37.1542183Z ##[endgroup]
+2026-09-11T21:33:37.2416752Z Syncing repository: Matanek/Silex-Lib-STD
+2026-09-11T21:33:37.2423802Z ##[group]Getting Git version info
+2026-09-11T21:33:37.2424254Z Working directory is 'D:\a\Silex\Silex\Dependencies\STD'
+2026-09-11T21:33:37.2903146Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-11T21:33:37.3116359Z git version 2.55.0.windows.5
+2026-09-11T21:33:37.3154518Z ##[endgroup]
+2026-09-11T21:33:37.3169924Z Temporarily overriding HOME='D:\a\_temp\8b080dd5-8d3c-4413-b061-97487bcfc093' before making global git config changes
+2026-09-11T21:33:37.3170837Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-11T21:33:37.3178788Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\Silex\Silex\Dependencies\STD
+2026-09-11T21:33:37.3415399Z ##[group]Determining repository object format
+2026-09-11T21:33:37.3417590Z ##[endgroup]
+2026-09-11T21:33:37.3417990Z ##[group]Initializing the repository
+2026-09-11T21:33:37.3425287Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\Silex\Silex\Dependencies\STD
+2026-09-11T21:33:37.3686973Z Initialized empty Git repository in D:/a/Silex/Silex/Dependencies/STD/.git/
+2026-09-11T21:33:37.3721079Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/Matanek/Silex-Lib-STD
+2026-09-11T21:33:37.3953975Z ##[endgroup]
+2026-09-11T21:33:37.3954297Z ##[group]Disabling automatic garbage collection
+2026-09-11T21:33:37.3961750Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-09-11T21:33:37.4187818Z ##[endgroup]
+2026-09-11T21:33:37.4188260Z ##[group]Setting up auth
+2026-09-11T21:33:37.4189630Z Removing SSH command configuration
+2026-09-11T21:33:37.4200193Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-11T21:33:37.4525528Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-11T21:33:37.9432799Z Removing HTTP extra header
+2026-09-11T21:33:37.9441552Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-11T21:33:37.9684104Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-11T21:33:38.4035977Z Removing includeIf entries pointing to credentials config files
+2026-09-11T21:33:38.4046421Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-11T21:33:38.4288694Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-11T21:33:38.8963129Z [command]"C:\Program Files\Git\bin\git.exe" config --file D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-09-11T21:33:38.9218108Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git.path D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:33:38.9470875Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git/worktrees/*.path D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:33:38.9720364Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/Dependencies/STD/.git.path /github/runner_temp/git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:33:39.0040376Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path /github/runner_temp/git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:33:39.0227555Z ##[endgroup]
+2026-09-11T21:33:39.0227846Z ##[group]Fetching the repository
+2026-09-11T21:33:39.0239580Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-11T21:33:39.3713346Z From https://github.com/Matanek/Silex-Lib-STD
+2026-09-11T21:33:39.3713725Z  * branch            5a018305fb470dfe00e94466150b3c04f207e252 -> FETCH_HEAD
+2026-09-11T21:33:39.3755507Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse --verify --quiet 5a018305fb470dfe00e94466150b3c04f207e252^{object}
+2026-09-11T21:33:39.3969252Z 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-11T21:33:39.3999480Z ##[endgroup]
+2026-09-11T21:33:39.3999864Z ##[group]Determining the checkout info
+2026-09-11T21:33:39.4001078Z ##[endgroup]
+2026-09-11T21:33:39.4009602Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-09-11T21:33:39.4295288Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-09-11T21:33:39.4535394Z ##[group]Checking out the ref
+2026-09-11T21:33:39.4543947Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-11T21:33:39.5561289Z Note: switching to '5a018305fb470dfe00e94466150b3c04f207e252'.
+2026-09-11T21:33:39.5561670Z 
+2026-09-11T21:33:39.5561911Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-11T21:33:39.5562527Z changes and commit them, and you can discard any commits you make in this
+2026-09-11T21:33:39.5563101Z state without impacting any branches by switching back to a branch.
+2026-09-11T21:33:39.5563447Z 
+2026-09-11T21:33:39.5563675Z If you want to create a new branch to retain commits you create, you may
+2026-09-11T21:33:39.5564212Z do so (now or later) by using -c with the switch command. Example:
+2026-09-11T21:33:39.5564531Z 
+2026-09-11T21:33:39.5564755Z   git switch -c <new-branch-name>
+2026-09-11T21:33:39.5564983Z 
+2026-09-11T21:33:39.5565098Z Or undo this operation with:
+2026-09-11T21:33:39.5565292Z 
+2026-09-11T21:33:39.5565372Z   git switch -
+2026-09-11T21:33:39.5565795Z 
+2026-09-11T21:33:39.5566063Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-11T21:33:39.5566445Z 
+2026-09-11T21:33:39.5566581Z HEAD is now at 5a01830 Prepare STD 0.21.0
+2026-09-11T21:33:39.5619655Z ##[endgroup]
+2026-09-11T21:33:39.5902386Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-09-11T21:33:39.6136878Z 5a018305fb470dfe00e94466150b3c04f207e252
+2026-09-11T21:33:39.6449479Z ##[group]Run $ErrorActionPreference = "Stop"
+2026-09-11T21:33:39.6449874Z [36;1m$ErrorActionPreference = "Stop"[0m
+2026-09-11T21:33:39.6450263Z [36;1m$archive = Join-Path $env:RUNNER_TEMP "zig.zip"[0m
+2026-09-11T21:33:39.6450864Z [36;1mInvoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $archive[0m
+2026-09-11T21:33:39.6451352Z [36;1m$actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()[0m
+2026-09-11T21:33:39.6451798Z [36;1mif ($actual -ne "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e") {[0m
+2026-09-11T21:33:39.6452174Z [36;1m  throw "Zig archive checksum mismatch"[0m
+2026-09-11T21:33:39.6452378Z [36;1m}[0m
+2026-09-11T21:33:39.6452775Z [36;1mExpand-Archive $archive -DestinationPath $env:RUNNER_TEMP[0m
+2026-09-11T21:33:39.6453161Z [36;1mAdd-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig-x86_64-windows-0.16.0")[0m
+2026-09-11T21:33:39.7162272Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-09-11T21:33:39.7162577Z ##[endgroup]
+2026-09-11T21:34:08.5311237Z ##[group]Run $ErrorActionPreference = "Stop"
+2026-09-11T21:34:08.5311674Z [36;1m$ErrorActionPreference = "Stop"[0m
+2026-09-11T21:34:08.5311948Z [36;1m$PSNativeCommandUseErrorActionPreference = $true[0m
+2026-09-11T21:34:08.5312235Z [36;1mif ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {[0m
+2026-09-11T21:34:08.5312566Z [36;1m  throw "expected Windows X64 runner, got $env:PROCESSOR_ARCHITECTURE"[0m
+2026-09-11T21:34:08.5312841Z [36;1m}[0m
+2026-09-11T21:34:08.5313056Z [36;1m$env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"[0m
+2026-09-11T21:34:08.5313315Z [36;1m$env:HOME = $env:USERPROFILE[0m
+2026-09-11T21:34:08.5313589Z [36;1mNew-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null[0m
+2026-09-11T21:34:08.5313911Z [36;1mzig build -Doptimize=ReleaseFast -Dcpu=baseline `[0m
+2026-09-11T21:34:08.5314183Z [36;1m  --prefix "$env:RUNNER_TEMP/silex-prefix" `[0m
+2026-09-11T21:34:08.5314443Z [36;1m  --build-file Toolchain/build.zig[0m
+2026-09-11T21:34:08.5314780Z [36;1m$silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"[0m
+2026-09-11T21:34:08.5315048Z [36;1m& $silex setup[0m
+2026-09-11T21:34:08.5315389Z [36;1m& $silex link (Join-Path $env:GITHUB_WORKSPACE "Dependencies/STD") --workspace $env:GITHUB_WORKSPACE[0m
+2026-09-11T21:34:08.5315832Z [36;1m& $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")[0m
+2026-09-11T21:34:08.5316204Z [36;1m& $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")[0m
+2026-09-11T21:34:08.5316607Z [36;1m& $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx")[0m
+2026-09-11T21:34:08.5317002Z [36;1m$portability = Join-Path $env:RUNNER_TEMP "native-portability.exe"[0m
+2026-09-11T21:34:08.5317395Z [36;1m& $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx") `[0m
+2026-09-11T21:34:08.5317724Z [36;1m  --release -o $portability[0m
+2026-09-11T21:34:08.5317942Z [36;1m$portabilityOutput = @(& $portability)[0m
+2026-09-11T21:34:08.5318210Z [36;1m$portabilityOutput | ForEach-Object { Write-Output $_ }[0m
+2026-09-11T21:34:08.5318576Z [36;1m$cycleDrops = @($portabilityOutput | Where-Object { $_ -eq "native cycle drop" }).Count[0m
+2026-09-11T21:34:08.5318896Z [36;1mif ($cycleDrops -ne 6) {[0m
+2026-09-11T21:34:08.5319159Z [36;1m  throw "expected 6 native cycle finalizers, got $cycleDrops"[0m
+2026-09-11T21:34:08.5319405Z [36;1m}[0m
+2026-09-11T21:34:08.5319607Z [36;1m$smoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"[0m
+2026-09-11T21:34:08.5320753Z [36;1m& $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx") `[0m
+2026-09-11T21:34:08.5321076Z [36;1m  --release -o $smoke[0m
+2026-09-11T21:34:08.5321262Z [36;1m$smokeOutput = @(& $smoke)[0m
+2026-09-11T21:34:08.5321623Z [36;1mif ($LASTEXITCODE -ne 0 -or $smokeOutput.Count -ne 1 -or $smokeOutput[0] -ne "silex distribution ready") {[0m
+2026-09-11T21:34:08.5322012Z [36;1m  throw "standalone distribution smoke failed"[0m
+2026-09-11T21:34:08.5322337Z [36;1m}[0m
+2026-09-11T21:34:08.5322743Z [36;1m$aggregateFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/AggregateFieldStores.sx"[0m
+2026-09-11T21:34:08.5323230Z [36;1m$interpreted = @(& $silex interpret $aggregateFixture --nocache)[0m
+2026-09-11T21:34:08.5323687Z [36;1mif ($LASTEXITCODE -ne 0 -or $interpreted.Count -ne 1 -or $interpreted[0] -ne "aggregate field stores preserved") {[0m
+2026-09-11T21:34:08.5324143Z [36;1m  throw "aggregate field interpreter regression failed"[0m
+2026-09-11T21:34:08.5324385Z [36;1m}[0m
+2026-09-11T21:34:08.5324555Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T21:34:08.5324876Z [36;1m  $aggregateBinary = Join-Path $env:RUNNER_TEMP "aggregate-fields-$mode.exe"[0m
+2026-09-11T21:34:08.5325271Z [36;1m  & $silex compile $aggregateFixture "--$mode" --nocache -o $aggregateBinary[0m
+2026-09-11T21:34:08.5326639Z [36;1m  $aggregateOutput = @(& $aggregateBinary)[0m
+2026-09-11T21:34:08.5327102Z [36;1m  if ($LASTEXITCODE -ne 0 -or $aggregateOutput.Count -ne 1 -or $aggregateOutput[0] -ne "aggregate field stores preserved") {[0m
+2026-09-11T21:34:08.5327564Z [36;1m    throw "aggregate field $mode regression failed"[0m
+2026-09-11T21:34:08.5327791Z [36;1m  }[0m
+2026-09-11T21:34:08.5327935Z [36;1m}[0m
+2026-09-11T21:34:08.5328241Z [36;1m$minmaxFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Native/ScalarMathMinMax.sx"[0m
+2026-09-11T21:34:08.5328887Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T21:34:08.5329285Z [36;1m  $minmaxBinary = Join-Path $env:RUNNER_TEMP "scalar-math-minmax-$mode.exe"[0m
+2026-09-11T21:34:08.5329659Z [36;1m  & $silex compile $minmaxFixture "--$mode" --nocache -o $minmaxBinary[0m
+2026-09-11T21:34:08.5329948Z [36;1m  $minmaxOutput = @(& $minmaxBinary)[0m
+2026-09-11T21:34:08.5330339Z [36;1m  if ($LASTEXITCODE -ne 0 -or $minmaxOutput.Count -ne 1 -or $minmaxOutput[0] -ne "scalar-math-minmax: pass") {[0m
+2026-09-11T21:34:08.5330779Z [36;1m    throw "scalar math minmax $mode regression failed"[0m
+2026-09-11T21:34:08.5331021Z [36;1m  }[0m
+2026-09-11T21:34:08.5331147Z [36;1m}[0m
+2026-09-11T21:34:08.5331408Z [36;1m# Copy bytes unchanged into a standalone fixture, without the optimizer's STD graph.[0m
+2026-09-11T21:34:08.5331797Z [36;1m$scalarRoot = Join-Path $env:RUNNER_TEMP "scalar-float-fixture"[0m
+2026-09-11T21:34:08.5332142Z [36;1mNew-Item -ItemType Directory -Force -Path $scalarRoot | Out-Null[0m
+2026-09-11T21:34:08.5332533Z [36;1mSet-Content -Path (Join-Path $scalarRoot "Package.json") -Value '{"sources":"."}'[0m
+2026-09-11T21:34:08.5332914Z [36;1m$scalarFixture = Join-Path $scalarRoot "ScalarFloatResidence.sx"[0m
+2026-09-11T21:34:08.5333447Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx") $scalarFixture[0m
+2026-09-11T21:34:08.5333922Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T21:34:08.5334246Z [36;1m  $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"[0m
+2026-09-11T21:34:08.5334626Z [36;1m  & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary[0m
+2026-09-11T21:34:08.5334911Z [36;1m  $scalarOutput = @(& $scalarBinary)[0m
+2026-09-11T21:34:08.5335309Z [36;1m  if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {[0m
+2026-09-11T21:34:08.5335929Z [36;1m    throw "scalar float residence $mode regression failed"[0m
+2026-09-11T21:34:08.5336176Z [36;1m  }[0m
+2026-09-11T21:34:08.5336311Z [36;1m}[0m
+2026-09-11T21:34:08.5336525Z [36;1m$branchFixture = Join-Path $scalarRoot "BranchComparisons.sx"[0m
+2026-09-11T21:34:08.5337038Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx") $branchFixture[0m
+2026-09-11T21:34:08.5337531Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T21:34:08.5337846Z [36;1m  $branchBinary = Join-Path $env:RUNNER_TEMP "branch-comparisons-$mode.exe"[0m
+2026-09-11T21:34:08.5338224Z [36;1m  & $silex compile $branchFixture "--$mode" --nocache -o $branchBinary[0m
+2026-09-11T21:34:08.5338593Z [36;1m  if ($LASTEXITCODE -ne 0) { throw "branch comparison compilation failed" }[0m
+2026-09-11T21:34:08.5338888Z [36;1m  $branchOutput = @(& $branchBinary)[0m
+2026-09-11T21:34:08.5339222Z [36;1m  if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {[0m
+2026-09-11T21:34:08.5339590Z [36;1m    throw "branch comparison $mode regression failed"[0m
+2026-09-11T21:34:08.5339812Z [36;1m  }[0m
+2026-09-11T21:34:08.5339947Z [36;1m}[0m
+2026-09-11T21:34:08.5340158Z [36;1m$snapshotFixture = Join-Path $scalarRoot "BranchSnapshots.sx"[0m
+2026-09-11T21:34:08.5340664Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx") $snapshotFixture[0m
+2026-09-11T21:34:08.5341512Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T21:34:08.5341840Z [36;1m  $snapshotBinary = Join-Path $env:RUNNER_TEMP "branch-snapshots-$mode.exe"[0m
+2026-09-11T21:34:08.5342223Z [36;1m  & $silex compile $snapshotFixture "--$mode" --nocache -o $snapshotBinary[0m
+2026-09-11T21:34:08.5342584Z [36;1m  if ($LASTEXITCODE -ne 0) { throw "branch snapshot compilation failed" }[0m
+2026-09-11T21:34:08.5342878Z [36;1m  $snapshotOutput = @(& $snapshotBinary)[0m
+2026-09-11T21:34:08.5343309Z [36;1m  if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {[0m
+2026-09-11T21:34:08.5343757Z [36;1m    throw "branch snapshot $mode regression failed"[0m
+2026-09-11T21:34:08.5343975Z [36;1m  }[0m
+2026-09-11T21:34:08.5344106Z [36;1m}[0m
+2026-09-11T21:34:08.5344317Z [36;1m$loopExitFixture = Join-Path $scalarRoot "LoopExitResidence.sx"[0m
+2026-09-11T21:34:08.5344832Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx") $loopExitFixture[0m
+2026-09-11T21:34:08.5345286Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T21:34:08.5345600Z [36;1m  $loopExitBinary = Join-Path $env:RUNNER_TEMP "loop-exit-residence-$mode.exe"[0m
+2026-09-11T21:34:08.5345986Z [36;1m  & $silex compile $loopExitFixture "--$mode" --nocache -o $loopExitBinary[0m
+2026-09-11T21:34:08.5346375Z [36;1m  if ($LASTEXITCODE -ne 0) { throw "loop exit residence compilation failed" }[0m
+2026-09-11T21:34:08.5346678Z [36;1m  $loopExitOutput = @(& $loopExitBinary)[0m
+2026-09-11T21:34:08.5347088Z [36;1m  if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {[0m
+2026-09-11T21:34:08.5347527Z [36;1m    throw "loop exit residence $mode regression failed"[0m
+2026-09-11T21:34:08.5347760Z [36;1m  }[0m
+2026-09-11T21:34:08.5347884Z [36;1m}[0m
+2026-09-11T21:34:08.5407282Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-09-11T21:34:08.5407563Z ##[endgroup]
+2026-09-11T21:38:31.4352843Z silex: installed Shadercross for windows-x64
+2026-09-11T21:38:42.3292542Z silex: installed Native linker for windows-x64
+2026-09-11T21:38:42.3396394Z silex: linked STD@0.21.0 to D:\a\Silex\Silex\Dependencies\STD for this workspace
+2026-09-11T21:40:10.1395608Z ok - str concatenation operand positions
+2026-09-11T21:40:10.2995326Z ok - str compound concatenation
+2026-09-11T21:40:10.4753079Z ok - str equality and interpolation
+2026-09-11T21:40:10.6550267Z ok - str unicode scalar count
+2026-09-11T21:40:10.6551751Z 4 passed; 0 failed
+2026-09-11T21:40:12.6126687Z ok - str return positions
+2026-09-11T21:40:12.6127394Z 1 passed; 0 failed
+2026-09-11T21:40:12.8068583Z ok - execute direct indirect and dynamic calls beyond native registers
+2026-09-11T21:40:12.9665012Z ok - preserve paired float32 arithmetic on native
+2026-09-11T21:40:13.1232844Z ok - mutate a class-owned native list without changing its snapshot
+2026-09-11T21:40:13.2795863Z ok - replace class elements in a class-owned native list
+2026-09-11T21:40:13.4572262Z ok - preserve embedded byte contents on native
+2026-09-11T21:40:13.6163685Z ok - format native floats through the standalone runtime
+2026-09-11T21:40:13.7713832Z ok - convert native float precision in both directions
+2026-09-11T21:40:13.9256920Z ok - replace and preserve an aliased native list
+2026-09-11T21:40:14.0834959Z ok - swap and reverse a native list
+2026-09-11T21:40:14.2402624Z ok - grow a native list at every position
+2026-09-11T21:40:14.3986339Z ok - remove native list elements from every position
+2026-09-11T21:40:14.5599750Z ok - slice view mutate and clear native lists
+2026-09-11T21:40:14.7166957Z ok - mutable aggregate view detaches shared native list
+2026-09-11T21:40:14.8773244Z copy state drop
+2026-09-11T21:40:14.8773603Z copy state drop
+2026-09-11T21:40:14.8774028Z ok - deep-copy repeated native class roots without collections
+2026-09-11T21:40:15.0328370Z native cycle drop
+2026-09-11T21:40:15.0328783Z native cycle drop
+2026-09-11T21:40:15.0329137Z ok - finalize a direct native class cycle
+2026-09-11T21:40:15.1928898Z native cycle drop
+2026-09-11T21:40:15.1929317Z native cycle drop
+2026-09-11T21:40:15.1929704Z ok - finalize a native class cycle through lists
+2026-09-11T21:40:15.3492767Z native cycle drop
+2026-09-11T21:40:15.3493139Z native cycle drop
+2026-09-11T21:40:15.3493547Z ok - finalize a native class cycle through protocols
+2026-09-11T21:40:15.5326651Z ok - execute the complete native collection mutation slice
+2026-09-11T21:40:15.6891441Z copy state drop
+2026-09-11T21:40:15.6891822Z copy state drop
+2026-09-11T21:40:15.6892197Z ok - execute native ownership and deep-copy runtime
+2026-09-11T21:40:15.8441611Z ok - preserve resource aggregates across native list growth
+2026-09-11T21:40:16.0013540Z ok - serialize native mutations with mutex
+2026-09-11T21:40:16.1640845Z native cycle drop
+2026-09-11T21:40:16.1641217Z native cycle drop
+2026-09-11T21:40:16.1641608Z native cycle drop
+2026-09-11T21:40:16.1641906Z native cycle drop
+2026-09-11T21:40:16.1642193Z native cycle drop
+2026-09-11T21:40:16.1642800Z native cycle drop
+2026-09-11T21:40:16.1643274Z ok - finalize native cycles across direct collection and protocol edges
+2026-09-11T21:40:16.1651237Z 22 passed; 0 failed
+2026-09-11T21:40:16.2791772Z copy state drop
+2026-09-11T21:40:16.2794664Z copy state drop
+2026-09-11T21:40:16.2796684Z native cycle drop
+2026-09-11T21:40:16.2798371Z native cycle drop
+2026-09-11T21:40:16.2800040Z native cycle drop
+2026-09-11T21:40:16.2801741Z native cycle drop
+2026-09-11T21:40:16.2803444Z native cycle drop
+2026-09-11T21:40:16.2805238Z native cycle drop
+2026-09-11T21:40:18.2138058Z Post job cleanup.
+2026-09-11T21:40:18.3521895Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-11T21:40:18.3761405Z git version 2.55.0.windows.5
+2026-09-11T21:40:18.3820056Z Temporarily overriding HOME='D:\a\_temp\b7dd897b-b64d-4d5d-afed-8dac7ef4a43a' before making global git config changes
+2026-09-11T21:40:18.3821494Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-11T21:40:18.3830239Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\Silex\Silex\Dependencies\STD
+2026-09-11T21:40:18.4112488Z Removing SSH command configuration
+2026-09-11T21:40:18.4125606Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-11T21:40:18.4402320Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-11T21:40:19.5805202Z Removing HTTP extra header
+2026-09-11T21:40:19.5813941Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-11T21:40:19.6057923Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-11T21:40:20.0562040Z Removing includeIf entries pointing to credentials config files
+2026-09-11T21:40:20.0571977Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-11T21:40:20.0778411Z includeif.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git.path
+2026-09-11T21:40:20.0779216Z includeif.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git/worktrees/*.path
+2026-09-11T21:40:20.0779626Z includeif.gitdir:/github/workspace/Dependencies/STD/.git.path
+2026-09-11T21:40:20.0780054Z includeif.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path
+2026-09-11T21:40:20.0809686Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git.path
+2026-09-11T21:40:20.1008493Z D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.1040080Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git.path D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.1278824Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git/worktrees/*.path
+2026-09-11T21:40:20.1484103Z D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.1517986Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/Silex/Silex/Dependencies/STD/.git/worktrees/*.path D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.1766552Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/Dependencies/STD/.git.path
+2026-09-11T21:40:20.1990617Z /github/runner_temp/git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.2029839Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/Dependencies/STD/.git.path /github/runner_temp/git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.2292513Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path
+2026-09-11T21:40:20.2513215Z /github/runner_temp/git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.2553136Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/Dependencies/STD/.git/worktrees/*.path /github/runner_temp/git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config
+2026-09-11T21:40:20.2822124Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-11T21:40:20.7226840Z Removing credentials config 'D:\a\_temp\git-credentials-74c8deec-b2f3-4075-ad87-f409a92f867a.config'
+2026-09-11T21:40:20.7527917Z Post job cleanup.
+2026-09-11T21:40:20.8950069Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-11T21:40:20.9171718Z git version 2.55.0.windows.5
+2026-09-11T21:40:20.9224493Z Temporarily overriding HOME='D:\a\_temp\672f8f74-c853-4070-91d8-86eee70defd7' before making global git config changes
+2026-09-11T21:40:20.9225327Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-11T21:40:20.9233068Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\Silex\Silex
+2026-09-11T21:40:20.9481341Z Removing SSH command configuration
+2026-09-11T21:40:20.9490752Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-11T21:40:20.9752248Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-11T21:40:21.4364636Z Removing HTTP extra header
+2026-09-11T21:40:21.4373320Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-11T21:40:21.4627651Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-11T21:40:21.9234575Z Removing includeIf entries pointing to credentials config files
+2026-09-11T21:40:21.9245462Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-11T21:40:21.9460489Z includeif.gitdir:D:/a/Silex/Silex/.git.path
+2026-09-11T21:40:21.9460899Z includeif.gitdir:D:/a/Silex/Silex/.git/worktrees/*.path
+2026-09-11T21:40:21.9461252Z includeif.gitdir:/github/workspace/.git.path
+2026-09-11T21:40:21.9461625Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-11T21:40:21.9499303Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/Silex/Silex/.git.path
+2026-09-11T21:40:21.9717184Z D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:21.9753956Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/Silex/Silex/.git.path D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:22.0011029Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/Silex/Silex/.git/worktrees/*.path
+2026-09-11T21:40:22.0228770Z D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:22.0263569Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/Silex/Silex/.git/worktrees/*.path D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:22.0511943Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-11T21:40:22.0727853Z /github/runner_temp/git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:22.0762771Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:22.1014404Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-11T21:40:22.1230076Z /github/runner_temp/git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:22.1268097Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config
+2026-09-11T21:40:22.1532015Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-11T21:40:22.5925798Z Removing credentials config 'D:\a\_temp\git-credentials-2b441d62-ab80-435e-93cc-96c9a6b0d3c5.config'
+2026-09-11T21:40:22.6100531Z Cleaning up orphan processes
+

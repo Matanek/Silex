@@ -1,0 +1,218 @@
+[
+  {
+    "target": "macos-arm64",
+    "mode": "debug",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-macos-arm64-debug"
+    ],
+    "sha256": "3ff61f933d85fd42a5aadd6d7739fc761ab9fbaeab4d393046daa93b9d0bb485",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit_code": 0
+  },
+  {
+    "target": "macos-arm64",
+    "mode": "release",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-macos-arm64-release"
+    ],
+    "sha256": "c8708d721a56777bbe27cdf6bce5b066cef4b5db4298aa4c699312f1adaab5b5",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit_code": 0
+  },
+  {
+    "target": "macos-x64",
+    "mode": "debug",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-macos-x64-debug"
+    ],
+    "sha256": "5a63f8122a0c2a0e7e1d96cb1f7d0e80b60f3a966c0af580556ba87dcec6dbae",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit_code": 0
+  },
+  {
+    "target": "macos-x64",
+    "mode": "release",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-macos-x64-release"
+    ],
+    "sha256": "53ff0577f5a55ade132647b9f271847a4bc55429b42613d63c9d128044ff314c",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit_code": 0
+  },
+  {
+    "target": "linux-arm64",
+    "mode": "debug",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-linux-arm64-debug"
+    ],
+    "sha256": "182f0721efc8cab65586886fdc669dc694c9d81e8457b36c41e54679cbaac9ef",
+    "executed": false
+  },
+  {
+    "target": "linux-arm64",
+    "mode": "release",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-linux-arm64-release"
+    ],
+    "sha256": "9f68fdf793a301caa184c570a9feb019c2296f587099cf1ce56fdecd279555a3",
+    "executed": false
+  },
+  {
+    "target": "linux-x64",
+    "mode": "debug",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-linux-x64-debug"
+    ],
+    "sha256": "34fa591675181da810a025d2e0a7b0134a2a843a1e797c8e60d2daf801ab8ae8",
+    "executed": false
+  },
+  {
+    "target": "linux-x64",
+    "mode": "release",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-linux-x64-release"
+    ],
+    "sha256": "49e25b6cfac965fb845ca28e32fa9c5a0b4b5b79d2eecd759ed69ad383058b0e",
+    "executed": false
+  },
+  {
+    "target": "windows-arm64",
+    "mode": "debug",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-windows-arm64-debug"
+    ],
+    "sha256": "caa0a530ebbda2818571329f1e2e560a015a2c5a52725ff2c90d3c38152af38c",
+    "executed": false
+  },
+  {
+    "target": "windows-arm64",
+    "mode": "release",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-windows-arm64-release"
+    ],
+    "sha256": "bafb3bbb7cdcd0955285266b7132180680e87f394b299ed579785dffa6f5679e",
+    "executed": false
+  },
+  {
+    "target": "windows-x64",
+    "mode": "debug",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-windows-x64-debug"
+    ],
+    "sha256": "3223f2ca3830ef555eaac48a4e041bedbc47892bbc6f7f5d4a1c05cbd5705417",
+    "executed": false
+  },
+  {
+    "target": "windows-x64",
+    "mode": "release",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/PrivateClassNative/ScalarClassLeaves.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-fixture-windows-x64-release"
+    ],
+    "sha256": "0330e960112c853a3d9b4706fa29b0e1425403f28ad59e48237749008fd834f1",
+    "executed": false
+  }
+]

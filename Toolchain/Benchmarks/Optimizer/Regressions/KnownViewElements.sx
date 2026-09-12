@@ -1,0 +1,57 @@
+func select(values:@int[..], index:int) int {
+    return values[index] + values[-1]
+}
+
+func constantViews(first:int, second:int) int {
+    let values:int[] = [first, second, 8, 13]
+    let whole = @values[-99:99]
+    let middle = @whole[1:-1]
+    let tail = @whole[-2:99]
+    return middle[0] + tail[-1] + select(whole, 1)
+}
+
+func directViews(first:int, second:int) int {
+    let values:int[] = [first, second, 8, 13]
+    return values[1] + values[-1] + values[1] + values[-1]
+}
+
+func emptyViews() int {
+    let values:int[] = [3, 5, 8]
+    let reversed = @values[2:1]
+    let before = @values[-99:-99]
+    let after = @values[99:99]
+    return reversed.count() + before.count() + after.count()
+}
+
+func floatView(value:float64) float64 {
+    let values:float64[] = [value, 2.5, -0.0]
+    let view = @values[0:3]
+    return view[0] + view[1]
+}
+
+func change(values:&int[..]) { values[-1] = 34 }
+
+func aliasView() int {
+    var values:int[] = [3, 5, 8]
+    var view = &values[0:3]
+    let before = copy view[-1]
+    change(view)
+    return before + view[-1]
+}
+
+func branchView(flag:bool) int {
+    var values:int[] = [3, 5, 8]
+    var view = &values[0:3]
+    if flag { view[1] = 21 }
+    return view[1]
+}
+
+func main() {
+    print(constantViews(3, 5) == 36)
+    print(constantViews(7, 11) == directViews(7, 11))
+    print(emptyViews() == 0)
+    print(floatView(1.5) == 4.0)
+    print(aliasView() == 42)
+    print(branchView(false) == 5)
+    print(branchView(true) == 21)
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "workload": "Arithmetic",
+    "target": "macos-arm64",
+    "sha256": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
+    "identical_886cc17": true,
+    "stdout": "143997165\n"
+  },
+  {
+    "workload": "Objects",
+    "target": "macos-arm64",
+    "sha256": "c5376cee1c4f35ce74091019e64047c89108f7d340a809e0de12272ab9f1f55f",
+    "identical_886cc17": false,
+    "stdout": "6000000\n"
+  },
+  {
+    "workload": "Flocking",
+    "target": "macos-arm64",
+    "sha256": "cda996604e707451cd4c2cfc855e741d9df9a42bebbc9c773e34d1def4b528e7",
+    "identical_886cc17": true,
+    "stdout": "true\n"
+  },
+  {
+    "workload": "Arithmetic",
+    "target": "macos-x64",
+    "sha256": "a0f3208932b8b1ba80afa53a3c8278d4f6d57d31f134a4f08364f3ffdb162da8",
+    "identical_886cc17": true,
+    "stdout": "143997165\n"
+  },
+  {
+    "workload": "Objects",
+    "target": "macos-x64",
+    "sha256": "ca298083ef76a5380b7f929d00abc0ed2c1775f1553f3a9368d11b5653ef0e6c",
+    "identical_886cc17": false,
+    "stdout": "6000000\n"
+  },
+  {
+    "workload": "Flocking",
+    "target": "macos-x64",
+    "sha256": "922656cebf8ee4cc8909e16f05e17fb8761011d0e688036580970b1eeaa0d171",
+    "identical_886cc17": true,
+    "stdout": "true\n"
+  }
+]

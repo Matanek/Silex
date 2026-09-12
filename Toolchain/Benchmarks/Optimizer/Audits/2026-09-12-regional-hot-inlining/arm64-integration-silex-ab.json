@@ -1,0 +1,767 @@
+{
+  "scope": "diagnostic physical ARM64 canonical Integration; Silex candidate versus frozen Silex baseline and identical-file control",
+  "host": {
+    "system": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "processor": "arm",
+    "translated": false
+  },
+  "warmups": 6,
+  "samples": 21,
+  "binaries": {
+    "baseline": {
+      "path": "/private/tmp/silex-part03-evidence/integration-before-inline",
+      "sha256": "df728315c6cba011477b68d33457332c4093302fffaebbe6556632b2e3af6ae8",
+      "bytes": 84952
+    },
+    "release": {
+      "path": "/private/tmp/silex-part03-evidence/integration-physics-inline-regional",
+      "sha256": "b4aebd8f0d375ebf713bf9b42349908d2f2a00391e5fb51f3d0c38dbda88e7fe",
+      "bytes": 84960
+    },
+    "control": {
+      "path": "/private/tmp/silex-part03-evidence/integration-before-inline-control",
+      "sha256": "df728315c6cba011477b68d33457332c4093302fffaebbe6556632b2e3af6ae8",
+      "bytes": 84952
+    }
+  },
+  "observations": [
+    {
+      "index": 0,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 78.152,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.152 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.444,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.444 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 79.246,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.246 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78152000,
+        "release": 69444000,
+        "control": 79246000
+      }
+    },
+    {
+      "index": 1,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 70.77901,
+          "stdout": "KERNEL integration silex slots8 8192 2048 70.77901 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 77.761,
+          "stdout": "KERNEL integration silex slots8 8192 2048 77.761 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 79.705,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.705 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 79705000,
+        "release": 70779010,
+        "control": 77761000
+      }
+    },
+    {
+      "index": 2,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 81.0,
+          "stdout": "KERNEL integration silex slots8 8192 2048 81.0 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 81.276,
+          "stdout": "KERNEL integration silex slots8 8192 2048 81.276 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 68.877,
+          "stdout": "KERNEL integration silex slots8 8192 2048 68.877 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 81276000,
+        "release": 68877000,
+        "control": 81000000
+      }
+    },
+    {
+      "index": 3,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 78.669,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.669 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 72.404,
+          "stdout": "KERNEL integration silex slots8 8192 2048 72.404 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 78.484,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.484 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78669000,
+        "release": 72404000,
+        "control": 78484000
+      }
+    },
+    {
+      "index": 4,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 71.756,
+          "stdout": "KERNEL integration silex slots8 8192 2048 71.756 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 79.406,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.406 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 78.337,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.337 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78337000,
+        "release": 71756000,
+        "control": 79406000
+      }
+    },
+    {
+      "index": 5,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 78.87601,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.87601 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 78.786,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.786 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.143,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.143 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78786000,
+        "release": 69143000,
+        "control": 78876010
+      }
+    },
+    {
+      "index": 6,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 78.79,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.79 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.829,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.829 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 78.841,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.841 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78790000,
+        "release": 69829000,
+        "control": 78841000
+      }
+    },
+    {
+      "index": 7,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 69.726,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.726 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 78.753,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.753 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 80.525,
+          "stdout": "KERNEL integration silex slots8 8192 2048 80.525 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 80525000,
+        "release": 69726000,
+        "control": 78753000
+      }
+    },
+    {
+      "index": 8,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 78.868004,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.868004 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 81.019,
+          "stdout": "KERNEL integration silex slots8 8192 2048 81.019 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 70.22,
+          "stdout": "KERNEL integration silex slots8 8192 2048 70.22 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 81019000,
+        "release": 70220000,
+        "control": 78868004
+      }
+    },
+    {
+      "index": 9,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 78.239,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.239 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.56,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.56 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 79.634,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.634 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78239000,
+        "release": 69560000,
+        "control": 79634000
+      }
+    },
+    {
+      "index": 10,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 69.052,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.052 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 78.933,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.933 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 78.965004,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.965004 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78965004,
+        "release": 69052000,
+        "control": 78933000
+      }
+    },
+    {
+      "index": 11,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 78.454,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.454 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 79.037,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.037 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.487,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.487 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 79037000,
+        "release": 69487000,
+        "control": 78454000
+      }
+    },
+    {
+      "index": 12,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 78.06,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.06 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.33,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.33 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 77.958,
+          "stdout": "KERNEL integration silex slots8 8192 2048 77.958 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78060000,
+        "release": 69330000,
+        "control": 77958000
+      }
+    },
+    {
+      "index": 13,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 68.869,
+          "stdout": "KERNEL integration silex slots8 8192 2048 68.869 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 79.207,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.207 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 82.521996,
+          "stdout": "KERNEL integration silex slots8 8192 2048 82.521996 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 82521996,
+        "release": 68869000,
+        "control": 79207000
+      }
+    },
+    {
+      "index": 14,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 79.866,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.866 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 79.549995,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.549995 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.575,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.575 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 79549995,
+        "release": 69575000,
+        "control": 79866000
+      }
+    },
+    {
+      "index": 15,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 80.049,
+          "stdout": "KERNEL integration silex slots8 8192 2048 80.049 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.321,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.321 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 79.209,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.209 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 80049000,
+        "release": 69321000,
+        "control": 79209000
+      }
+    },
+    {
+      "index": 16,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 69.78,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.78 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 77.840004,
+          "stdout": "KERNEL integration silex slots8 8192 2048 77.840004 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 80.801,
+          "stdout": "KERNEL integration silex slots8 8192 2048 80.801 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 80801000,
+        "release": 69780000,
+        "control": 77840004
+      }
+    },
+    {
+      "index": 17,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 79.311,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.311 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 80.087,
+          "stdout": "KERNEL integration silex slots8 8192 2048 80.087 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 69.722,
+          "stdout": "KERNEL integration silex slots8 8192 2048 69.722 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 80087000,
+        "release": 69722000,
+        "control": 79311000
+      }
+    },
+    {
+      "index": 18,
+      "order": [
+        "baseline",
+        "release",
+        "control"
+      ],
+      "runs": {
+        "baseline": {
+          "elapsed_ms": 78.046005,
+          "stdout": "KERNEL integration silex slots8 8192 2048 78.046005 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 70.40199,
+          "stdout": "KERNEL integration silex slots8 8192 2048 70.40199 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 79.356995,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.356995 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 78046005,
+        "release": 70401990,
+        "control": 79356995
+      }
+    },
+    {
+      "index": 19,
+      "order": [
+        "release",
+        "control",
+        "baseline"
+      ],
+      "runs": {
+        "release": {
+          "elapsed_ms": 68.952,
+          "stdout": "KERNEL integration silex slots8 8192 2048 68.952 -1454735.8486328125\n"
+        },
+        "control": {
+          "elapsed_ms": 83.663,
+          "stdout": "KERNEL integration silex slots8 8192 2048 83.663 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 79.529,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.529 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 79529000,
+        "release": 68952000,
+        "control": 83663000
+      }
+    },
+    {
+      "index": 20,
+      "order": [
+        "control",
+        "baseline",
+        "release"
+      ],
+      "runs": {
+        "control": {
+          "elapsed_ms": 79.837006,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.837006 -1454735.8486328125\n"
+        },
+        "baseline": {
+          "elapsed_ms": 79.204,
+          "stdout": "KERNEL integration silex slots8 8192 2048 79.204 -1454735.8486328125\n"
+        },
+        "release": {
+          "elapsed_ms": 71.193,
+          "stdout": "KERNEL integration silex slots8 8192 2048 71.193 -1454735.8486328125\n"
+        }
+      },
+      "timings_ns": {
+        "baseline": 79204000,
+        "release": 71193000,
+        "control": 79837006
+      }
+    }
+  ],
+  "configurations": {
+    "baseline": {
+      "minimum_ns": 78046005,
+      "p10_ns": 78152000,
+      "median_ns": 79204000,
+      "p90_ns": 81019000,
+      "maximum_ns": 82521996,
+      "mad_ns": 867000,
+      "mad_ppm": 10946,
+      "spread_ppm": 36197,
+      "samples_ns": [
+        78152000,
+        79705000,
+        81276000,
+        78669000,
+        78337000,
+        78786000,
+        78790000,
+        80525000,
+        81019000,
+        78239000,
+        78965004,
+        79037000,
+        78060000,
+        82521996,
+        79549995,
+        80049000,
+        80801000,
+        80087000,
+        78046005,
+        79529000,
+        79204000
+      ]
+    },
+    "release": {
+      "minimum_ns": 68869000,
+      "p10_ns": 68952000,
+      "median_ns": 69575000,
+      "p90_ns": 71193000,
+      "maximum_ns": 72404000,
+      "mad_ns": 432000,
+      "mad_ppm": 6209,
+      "spread_ppm": 32209,
+      "samples_ns": [
+        69444000,
+        70779010,
+        68877000,
+        72404000,
+        71756000,
+        69143000,
+        69829000,
+        69726000,
+        70220000,
+        69560000,
+        69052000,
+        69487000,
+        69330000,
+        68869000,
+        69575000,
+        69321000,
+        69780000,
+        69722000,
+        70401990,
+        68952000,
+        71193000
+      ]
+    },
+    "control": {
+      "minimum_ns": 77761000,
+      "p10_ns": 77958000,
+      "median_ns": 79207000,
+      "p90_ns": 79866000,
+      "maximum_ns": 83663000,
+      "mad_ns": 427000,
+      "mad_ppm": 5390,
+      "spread_ppm": 24088,
+      "samples_ns": [
+        79246000,
+        77761000,
+        81000000,
+        78484000,
+        79406000,
+        78876010,
+        78841000,
+        78753000,
+        78868004,
+        79634000,
+        78933000,
+        78454000,
+        77958000,
+        79207000,
+        79866000,
+        79209000,
+        77840004,
+        79311000,
+        79356995,
+        83663000,
+        79837006
+      ]
+    }
+  },
+  "comparisons": {
+    "candidate_vs_baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 867004,
+      "median_ppm": 877605,
+      "upper_bound_ppm": 888162,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 3637,
+      "clang_half_shift_ppm": 9645,
+      "ratio_half_shift_ppm": 15095,
+      "ratios_ppm": [
+        888576,
+        888012,
+        847445,
+        920362,
+        915991,
+        877605,
+        886267,
+        865892,
+        866710,
+        889070,
+        874463,
+        879170,
+        888162,
+        834553,
+        874607,
+        865982,
+        863603,
+        870578,
+        902057,
+        867004,
+        898856
+      ]
+    },
+    "control_vs_baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 990310,
+      "median_ppm": 998693,
+      "upper_bound_ppm": 1003972,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 5514,
+      "clang_half_shift_ppm": 9645,
+      "ratio_half_shift_ppm": 1952,
+      "ratios_ppm": [
+        1013998,
+        975610,
+        996604,
+        997648,
+        1013646,
+        1001142,
+        1000647,
+        977994,
+        973450,
+        1017829,
+        999594,
+        992623,
+        998693,
+        959828,
+        1003972,
+        989506,
+        963354,
+        990310,
+        1016797,
+        1051981,
+        1007992
+      ]
+    }
+  }
+}

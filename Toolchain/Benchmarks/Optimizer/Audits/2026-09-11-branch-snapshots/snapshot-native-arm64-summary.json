@@ -1,0 +1,134 @@
+[
+  {
+    "id": "arithmetic",
+    "median_ms": {
+      "debug": 4.810542,
+      "release": 1.906,
+      "clang": 1.941584,
+      "clang-o3-slot8": 1.955917,
+      "baseline": 1.90075
+    },
+    "baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 986033,
+      "median_ppm": 1010719,
+      "upper_bound_ppm": 1017644,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 42619,
+      "clang_half_shift_ppm": 21461,
+      "ratio_half_shift_ppm": 2037
+    },
+    "references": {
+      "clang": {
+        "samples": 21,
+        "lower_bound_ppm": 966281,
+        "median_ppm": 981267,
+        "upper_bound_ppm": 994632,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 42619,
+        "clang_half_shift_ppm": 21856,
+        "ratio_half_shift_ppm": 3383
+      },
+      "clang-o3-slot8": {
+        "samples": 21,
+        "lower_bound_ppm": 962366,
+        "median_ppm": 978110,
+        "upper_bound_ppm": 983515,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 42619,
+        "clang_half_shift_ppm": 15514,
+        "ratio_half_shift_ppm": 2471
+      }
+    },
+    "failures": []
+  },
+  {
+    "id": "objects",
+    "median_ms": {
+      "debug": 18.439959,
+      "release": 9.483542,
+      "clang": 2.136459,
+      "clang-o3-slot8": 2.104458,
+      "baseline": 9.495875
+    },
+    "baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 983503,
+      "median_ppm": 1007751,
+      "upper_bound_ppm": 1018824,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 22927,
+      "clang_half_shift_ppm": 8070,
+      "ratio_half_shift_ppm": 23122
+    },
+    "references": {
+      "clang": {
+        "samples": 21,
+        "lower_bound_ppm": 4433374,
+        "median_ppm": 4494630,
+        "upper_bound_ppm": 4550221,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 22927,
+        "clang_half_shift_ppm": 31904,
+        "ratio_half_shift_ppm": 20438
+      },
+      "clang-o3-slot8": {
+        "samples": 21,
+        "lower_bound_ppm": 4500109,
+        "median_ppm": 4541377,
+        "upper_bound_ppm": 4602253,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 22927,
+        "clang_half_shift_ppm": 27327,
+        "ratio_half_shift_ppm": 4827
+      }
+    },
+    "failures": [
+      "clang: Silex/Clang upper bound exceeds 1000000 ppm",
+      "clang-o3-slot8: Silex/Clang upper bound exceeds 1000000 ppm"
+    ]
+  },
+  {
+    "id": "flocking",
+    "median_ms": {
+      "debug": 2454.776042,
+      "release": 141.028792,
+      "clang": 155.238542,
+      "clang-o3-slot8": 166.619917,
+      "baseline": 140.089333
+    },
+    "baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 1001544,
+      "median_ppm": 1006762,
+      "upper_bound_ppm": 1012226,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 2844,
+      "clang_half_shift_ppm": 21805,
+      "ratio_half_shift_ppm": 6946
+    },
+    "references": {
+      "clang": {
+        "samples": 21,
+        "lower_bound_ppm": 895816,
+        "median_ppm": 911868,
+        "upper_bound_ppm": 950336,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 2844,
+        "clang_half_shift_ppm": 28260,
+        "ratio_half_shift_ppm": 35793
+      },
+      "clang-o3-slot8": {
+        "samples": 21,
+        "lower_bound_ppm": 820572,
+        "median_ppm": 849964,
+        "upper_bound_ppm": 853772,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 2844,
+        "clang_half_shift_ppm": 5493,
+        "ratio_half_shift_ppm": 2162
+      }
+    },
+    "failures": []
+  }
+]

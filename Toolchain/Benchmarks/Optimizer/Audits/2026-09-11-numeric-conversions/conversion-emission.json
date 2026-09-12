@@ -1,0 +1,1069 @@
+{
+  "compiler_sha256": "ecbde18f772c2f0ccf7100053a8b76c585c9467b62c79245cbd6c7d56ef04cdc",
+  "records": [
+    {
+      "case": "SignedNarrow",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-arm64-debug"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "c3301f130c37d50ca52bf9d3c8068b1fa0a8049a6c4f6b8ee58510736833cb63",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "SignedNarrow",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-arm64-release"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "2e6fbf423ca94659280a23f481ce2d197f02e879a5b55035acc7f1bc8693d37b",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "SignedNarrow",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-x64-debug"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "bf8436e15d4957f24a7a2180211f53b01109fb4a8f40dcf0c8554ae4d122230e",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "SignedNarrow",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-x64-release"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "0c6a32a237175cefbcb6faf7e10f8464905ec9db57016142ffff24b799321335",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "SignedNarrow",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-arm64-debug"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "9fdf33ab6a5430d88f387b2aa077a5aff0f549db6d1028627fc04ebb36826c6c",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "SignedNarrow",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-arm64-release"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "e715fcdfd2d5bc1a9868a23b47a5c1a62d67a562715557c1363ec7ab5554f914",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "SignedNarrow",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-x64-debug"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "5bb77c51594fc80300fab06541400e09dea0b9d226f4b20137d25e22c37eacee",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "SignedNarrow",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/SignedNarrow.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-x64-release"
+      ],
+      "source_sha256": "9f509e2e1b918022dd543db45944e930dd941dfd98614a8fb775383fb6a8a0fa",
+      "sha256": "07fd198536f0a5a0669c91a815a14d9f83c041f7ee435e434c2cfa063d11c8ea",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-SignedNarrow-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-arm64-debug"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "3971dbac22e044e75176d3f94fa93104591dfccd69537c04ff852e31499a7d7d",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-arm64-release"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "71f4de2714ce6d9ee0f897a79bb023c0938cd21c032fbfefb6de886db12e774f",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-x64-debug"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "588e7d3a5d8445d6a8f23336d529280416a683cd4d7859cea988190a3934a11d",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-x64-release"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "96f1a584cc9c9bcb65bfbeea2f55d95f1eaf3af6ffb044b746157f9cfba32866",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-arm64-debug"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "7a24bc4a1e9d0b781f279414ed54f2cd82dba73fa1acb5999b0ed0f941b952dd",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-arm64-release"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "19913b22b02fafa0b19f3e5c02588b808177482c8741a5233b8d63ccdaafcc94",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-x64-debug"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "afd1b37636cbafa20483712df57e7fc33d92b8af697a007d71dcda1b9da4f9ed",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatHigh",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatHigh.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-x64-release"
+      ],
+      "source_sha256": "d9e99fcf5d9ceba7d9a454b722de96fd0db025d7a5effa2cd7fbb362d39148bc",
+      "sha256": "555abd6fe8344e00eb6e10d9756ad5d71eb0974106c67aed1be034610fd8789a",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatHigh-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-arm64-debug"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "7167bba417957310ee5ad473c2fd353ac157e8228106da7d21305c475bd05d78",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-arm64-release"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "1b75e9ecd00be6b98b231feb1c238d504798466aec29f9e0a5f4818cea775b0b",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-x64-debug"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "24b1db6fc220ff4aa32e818135dae12b9ff50707aae3ce164ac46eb06af7ca16",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-x64-release"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "11a79782fc3ab249167f11a2deeb1114f78c25ed8e91c003cd18c9df8e2b7af2",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-arm64-debug"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "9dd49b5acfa9a00e7fc84520732a9a5cf5343425cdbb45a1e4f563a7dbcea04e",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-arm64-release"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "e02f53580b40ed1853e80bdb1f27a934de1cefb14fa34a33a86f8eaa2c21e496",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-x64-debug"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "ccf800b29bc37fde2c151012bede1b153778f3592e633d9e004e941fd1879f23",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "UnsignedFloatLoss",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/UnsignedFloatLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-x64-release"
+      ],
+      "source_sha256": "bac4cb60da51099b1f35bcef1a70693814e2e9fca687fa48bb2612e187d0cb70",
+      "sha256": "cf20e44c2d7bf33045e4fbda92f5f685725e281b31f136561ea538ee545f7ee2",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-UnsignedFloatLoss-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-arm64-debug"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "821cee56da135d138444f12249c9195b7ba5314e333f6fcdd0b265f1caf8d4e2",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-arm64-release"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "0dd4aa7ff893797971e7ba82566e86823410c5be68697539b0ca394d8564c816",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-x64-debug"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "79d5a48a4651928c48fd88e181970baa3e29991611a429fec3f4644a3cfe3156",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-x64-release"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "69fd084c9d22f410d82c71095e7c489c660a282856052a61d9cab7f5eccccde5",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-arm64-debug"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "2e0e5b3aec96cdcbb1547b4f5ac2bba8ec8df24d6e9af47b465428f0e651dea9",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-arm64-release"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "28fa3273fb44e802580810baa92e8f2986f93d54b60bcfb9dbc64e63c63f2407",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-x64-debug"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "e7b6b2274e7db6e55ef8d1de7ca05e46069c54dedd8e42ed82a75a2435717203",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatFraction",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatFraction.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-x64-release"
+      ],
+      "source_sha256": "2fd701513480150f59e33158ce7c24eaea087e3ccd8253198d56ed07fe689b3f",
+      "sha256": "c0de86254beb14de612ba46fa268d6d10edcc47c990879b57603558732fcdf9e",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatFraction-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-arm64-debug"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "edc7592dd4925181f7f5600326b157776feb2d9aaf14566f45ea601ec6a62da6",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-arm64-release"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "5075acfc84cd45afb690391080a71dc27e23f366cba13d6bbd65e18e99a2ca2e",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-x64-debug"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "4faafbad6c91882d38b293ba7f6f2f4e5108d1a22b320a56a81317127f715210",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-x64-release"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "f9e44f27e1a9ec23d8bece9a39278b8efe8ee33d8f308ca519010ff7d82d0b84",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-arm64-debug"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "eb4f61f562dcecb91151035e1b79f91ea89563e18e7f8a3a2f25eb8170338aef",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-arm64-release"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "9a725c606ff67ddd99d542fa2bd8dd0f529b5024378ae0c49776bbcaa9857649",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-x64-debug"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "584d46343252bdcfda4e1711fe65d270f12658c166104f2b96920cdecb498c7d",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatUnsignedUpper",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatUnsignedUpper.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-x64-release"
+      ],
+      "source_sha256": "d0babb2296191a0e9b70fbb673b6eae4c1e9e042ee7d05d627ea16facbb580fa",
+      "sha256": "789ff4092bddb04da7a99f60ab6e991e1d63abc21d5b2ce4b67a1df83fff96b2",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatUnsignedUpper-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-arm64-debug"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "3f060278c3ff7eacc1cc9bbd51225c53307858b62bdfc0f738dcd6473f93992a",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-arm64-release"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "25897e5363b58f33990586f5efe201064fee7156f8647cbd9438a10c846e6807",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-x64-debug"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "df8f274cc90861ccaad477baf0f110999a0525cc2d1ec3c9d925ab03edaed4b5",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-x64-release"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "041b4049ffdfe5da7d1e9f030146b8b5ea14dbd6781c8e603d2f51546f40bf51",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-arm64-debug"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "b90bde1ddf13424f7110776d84f9f00faf093f351f4cec764c16c0dbad5e8fd3",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-arm64-release"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "710decfcb1fe2b1a2860960dd2aa4943e1d347062a7e9d5bb8722e47c1a74546",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-x64-debug"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "bafd21b43ecc53955cb485228debf195827cd452144e81db9e36febd12ce5035",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatNarrowLoss",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/private/tmp/silex-part03-evidence/FloatNarrowLoss.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-x64-release"
+      ],
+      "source_sha256": "03105c62ee2129a8fe296232fd9223765b872090e6014eb5a60f7679678ff1cc",
+      "sha256": "0e209d3c848aed52a8da2fef3b22f5b025753513e08475025d60373a890107c9",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNarrowLoss-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "linux-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-arm64-debug"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "0ee96434afe1e8a39046c4f58587e7f620b3740fec2fb83badef3aa35f65e5dd",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "linux-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-arm64-release"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "b5a00a0501d01607e640419491c59a285167a5c463dcd7cebd7b42e8528f38d7",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "linux-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-x64-debug"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "7cf22afb7519620cae65cef2336876dd12f3ebc4848a0d0f4e020b8cec0fd6d4",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "linux-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "linux-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-x64-release"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "a3777b728b5bfd1c3cfe7bde0b69975f4ca9722d6a42fa6a3f76dd8a16eb7bff",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "windows-arm64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-arm64-debug"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "8b927d57b9ce64325dc5d625fa4f75262890f019c046312c18c88f2518ff504d",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "windows-arm64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-arm64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-arm64-release"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "6b6ea7c4331a5f81a468e2918d680208264c1b312ad1f5dbb61028785f1b3614",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "windows-x64",
+      "mode": "debug",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--debug",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-x64-debug"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "46db472f575a52b253b2958ea1dbd0a98f35f365b4ead60a483423f7395319d8",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "case": "FloatNaNInteger",
+      "target": "windows-x64",
+      "mode": "release",
+      "command": [
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+        "compile",
+        "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/numeric-conversions/FloatNaNInteger.sx",
+        "--release",
+        "--nocache",
+        "--target",
+        "windows-x64",
+        "-o",
+        "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-x64-release"
+      ],
+      "source_sha256": "e670f3b5470e93fa70a2127db60e3d0c5f5c7ec78bfa0a9574d461da2f184292",
+      "sha256": "622118d978d80c9aaabe4dfe725886ca02dab15cb0533c264fa3b8960cee56c7",
+      "format": "/private/tmp/silex-part03-evidence/conversion-emission-FloatNaNInteger-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    }
+  ]
+}

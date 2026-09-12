@@ -1,0 +1,158 @@
+{
+  "jobs": [
+    {
+      "id": 103447280840,
+      "name": "optimizer-x64",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": 34655627073,
+      "logs_url": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Check out Silex",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Check out the pinned STD optimizer fixture dependency",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Install Zig 0.16.0",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Record the native candidate",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        },
+        {
+          "name": "Isolate the optimizer fixture workspace",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6
+        },
+        {
+          "name": "Qualify native optimizer regressions",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7
+        },
+        {
+          "name": "Check out the frozen compiler baseline",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8
+        },
+        {
+          "name": "Build the frozen baseline executables",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9
+        },
+        {
+          "name": "Run the native X64 campaign",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 10
+        },
+        {
+          "name": "Upload X64 evidence",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11
+        },
+        {
+          "name": "Post Check out the frozen compiler baseline",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 20
+        },
+        {
+          "name": "Post Check out the pinned STD optimizer fixture dependency",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 21
+        },
+        {
+          "name": "Post Check out Silex",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 22
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 23
+        }
+      ]
+    },
+    {
+      "id": 103447281658,
+      "name": "windows-arm64-build",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34655627073,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103447281885,
+      "name": "windows-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34655627073,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103447281974,
+      "name": "linux-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34655627073,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103447282595,
+      "name": "windows-arm64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34655627073,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103447301023,
+      "name": "linux-arm64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34655627073,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103447306435,
+      "name": "macos-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34655627073,
+      "logs_url": null,
+      "steps": null
+    }
+  ]
+}

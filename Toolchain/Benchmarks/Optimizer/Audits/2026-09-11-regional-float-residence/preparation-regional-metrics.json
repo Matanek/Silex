@@ -1,0 +1,22 @@
+{
+  "preparation-reference-prepare": {
+    "instructions": 147,
+    "loads": 26,
+    "stores": 28
+  },
+  "preparation-reference-main": {
+    "instructions": 2987,
+    "loads": 536,
+    "stores": 414
+  },
+  "preparation-regional-prepare": {
+    "instructions": 147,
+    "loads": 26,
+    "stores": 28
+  },
+  "preparation-regional-main": {
+    "instructions": 2943,
+    "loads": 514,
+    "stores": 392
+  }
+}

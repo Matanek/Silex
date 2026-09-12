@@ -1,0 +1,12 @@
+test-optimizer-oracle
++- run test w
+parity registry: coverage gap 'known-gap' owned by silex-llvm-opt-02
+parity registry: required LLVM family missing: instcombine-and-simplifycfg
+failed command: ./.zig-cache/o/7a3222ee9a080bb7dd992373eb304e2c/test --cache-dir=./.zig-cache --seed=0x2062dcf8 --listen=-
+
+Build Summary: 4/4 steps succeeded; 58/58 tests passed
+test-optimizer-oracle success
++- run test 58 pass (58 total) 6ms MaxRSS:4M
+   +- compile test ReleaseFast native cached 47ms MaxRSS:35M
+      +- options cached
+

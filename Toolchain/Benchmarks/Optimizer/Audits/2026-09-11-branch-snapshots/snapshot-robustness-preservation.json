@@ -1,0 +1,6 @@
+{
+  "original": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv",
+  "preserved": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/.zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587-prior-f668eafdd03ae361.tsv",
+  "sha256": "f668eafdd03ae36169d1a10cff99f64f1a2e4fd894ebbb4c93d0461f3cd5909c",
+  "reason": "The registered pass list and optimized IR changed; the previous immutable table is preserved under its content hash before producing the new qualified table."
+}

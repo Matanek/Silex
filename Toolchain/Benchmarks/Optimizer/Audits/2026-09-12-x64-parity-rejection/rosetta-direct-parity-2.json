@@ -1,0 +1,1645 @@
+{
+  "host": "arm64",
+  "diagnostic_only": "macos-x64 executables under Rosetta",
+  "samples": 21,
+  "warmups": 6,
+  "launches_per_configuration_per_observation": 4,
+  "output_sha256": "1c7cd8ac9fb27ed65519b199e36de4575a0f257dc0c204e2b4f9bb3c1d75e210",
+  "executables": {
+    "baseline": {
+      "path": "/private/tmp/silex-part03-evidence/x64-power-remainder/objects-before",
+      "sha256": "593cca4028ddce19abbcc760fdbbccc9f6f2fdef55803701e90daa6e1c5f5caa"
+    },
+    "parity_only": {
+      "path": "/private/tmp/silex-part03-evidence/x64-power-remainder/objects-direct-parity",
+      "sha256": "5933050694c719064d47f78da3826698ba59a7f9ea8284ba082e7f3deb44b84a"
+    },
+    "mask_only": {
+      "path": "/private/tmp/silex-part03-evidence/x64-power-remainder/objects-mask-only",
+      "sha256": "97932878626b0402c268027a7e4aad616b33d98cfd2f8ba4094502c406e34390"
+    },
+    "combined": {
+      "path": "/private/tmp/silex-part03-evidence/x64-power-remainder/objects-compact-combined",
+      "sha256": "ecf69a90ddde214da124ce17243297fc489baf4f1a3c97108c50732217941450"
+    }
+  },
+  "observations": [
+    {
+      "index": 0,
+      "timings_ns": {
+        "baseline": 50447626,
+        "parity_only": 52155042,
+        "mask_only": 55119000,
+        "combined": 52442041
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12941375
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13085209
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14061958
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12666917
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12398167
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12804375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14248083
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13130333
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12571042
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13380250
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12615500
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13905333
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12537042
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12885208
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14193459
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12739458
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "timings_ns": {
+        "baseline": 51981083,
+        "parity_only": 52090251,
+        "mask_only": 52949707,
+        "combined": 54308167
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13738833
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 14254667
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13000875
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12766958
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12386000
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13018541
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13540166
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12628542
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12942459
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 14195917
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13034916
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13955959
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12913791
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12839042
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13373750
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12738792
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "timings_ns": {
+        "baseline": 52974625,
+        "parity_only": 51664625,
+        "mask_only": 53730584,
+        "combined": 53455833
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13152917
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 14208750
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13975875
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12786708
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14009959
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12619000
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13151917
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13320500
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12817208
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13316042
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12492458
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12618250
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13750500
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13312041
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13354375
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12939167
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "timings_ns": {
+        "baseline": 52177541,
+        "parity_only": 51972751,
+        "mask_only": 53142167,
+        "combined": 51859375
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14050209
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12779209
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13267166
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13305667
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13504708
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13797333
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13955750
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12704083
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12749333
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12898500
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12711083
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13279500
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12837917
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12497709
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12243542
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12570125
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "timings_ns": {
+        "baseline": 54456792,
+        "parity_only": 52933543,
+        "mask_only": 56427957,
+        "combined": 54294208
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13246458
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12825250
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14041458
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13306125
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13691875
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13195417
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14497125
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13487333
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13940000
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12915292
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14152708
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13427791
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13578459
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13997584
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13736666
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 14072959
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "timings_ns": {
+        "baseline": 52766375,
+        "parity_only": 52677749,
+        "mask_only": 50914374,
+        "combined": 53143041
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13089292
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13463833
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13938541
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13148292
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12958459
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13310458
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12759250
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13995583
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12864791
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13544375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 10513292
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12614666
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13853833
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12824375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13703291
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12919208
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "timings_ns": {
+        "baseline": 51222751,
+        "parity_only": 51499167,
+        "mask_only": 53271291,
+        "combined": 52561708
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12742750
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13173833
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12789958
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12995083
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13540500
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13441542
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12800417
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13061167
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12993791
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12800375
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12160209
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12757292
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13994250
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13145958
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13472167
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12685625
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "timings_ns": {
+        "baseline": 52470792,
+        "parity_only": 51287583,
+        "mask_only": 53671043,
+        "combined": 52373375
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14175791
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12750250
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13533875
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13267541
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13427584
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12834375
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12966167
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12655375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13488209
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12676916
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13871333
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13156875
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12579459
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13026042
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12099417
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13293584
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "timings_ns": {
+        "baseline": 52342000,
+        "parity_only": 55775832,
+        "mask_only": 53184666,
+        "combined": 54788625
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13332667
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13211750
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13805334
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 14212375
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12654292
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 16105416
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13488500
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13877500
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13711500
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13791208
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12898291
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12769000
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12643541
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12667458
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12992541
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13929750
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "timings_ns": {
+        "baseline": 52407333,
+        "parity_only": 53565918,
+        "mask_only": 52150417,
+        "combined": 53222625
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13099750
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13231375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12868584
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13326125
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12972291
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13193792
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12720416
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13480292
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13672417
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13594750
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13536334
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13284584
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12662875
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13202708
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13025083
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13474917
+        }
+      ]
+    },
+    {
+      "index": 10,
+      "timings_ns": {
+        "baseline": 51731540,
+        "parity_only": 52828459,
+        "mask_only": 52655542,
+        "combined": 52482041
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13558709
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13051208
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12919667
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13089084
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12712375
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13189166
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13130916
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13757125
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12941500
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13073667
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12859541
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13133500
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13442958
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13168000
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12821416
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12848750
+        }
+      ]
+    },
+    {
+      "index": 11,
+      "timings_ns": {
+        "baseline": 52494125,
+        "parity_only": 51501541,
+        "mask_only": 55225499,
+        "combined": 52073501
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14896375
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12569583
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13320250
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12581458
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13009042
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13204708
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12068291
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13113584
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13381916
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12866167
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13325167
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13321292
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13938166
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12861083
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13780417
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13057167
+        }
+      ]
+    },
+    {
+      "index": 12,
+      "timings_ns": {
+        "baseline": 52282626,
+        "parity_only": 52544874,
+        "mask_only": 55363001,
+        "combined": 52887084
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12661041
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13267750
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13599709
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13387709
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12132917
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13170708
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13469000
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13750084
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13323834
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13095375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13301542
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12615583
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 14164834
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13011041
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14992750
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13133708
+        }
+      ]
+    },
+    {
+      "index": 13,
+      "timings_ns": {
+        "baseline": 52002001,
+        "parity_only": 54445584,
+        "mask_only": 55431499,
+        "combined": 52570916
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13785167
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12655750
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14059333
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12775791
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12717584
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12640375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14176750
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 14482917
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12210750
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13255666
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13707750
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13400834
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13288500
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 14019125
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13487666
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13786042
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "timings_ns": {
+        "baseline": 50911416,
+        "parity_only": 52677500,
+        "mask_only": 53952374,
+        "combined": 53108542
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14329250
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12888084
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12728750
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12680459
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12773166
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13729167
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12457958
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13089166
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13476291
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13309666
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13503875
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13432125
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13373667
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13181625
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12220833
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13475750
+        }
+      ]
+    },
+    {
+      "index": 15,
+      "timings_ns": {
+        "baseline": 50856666,
+        "parity_only": 52761709,
+        "mask_only": 53710833,
+        "combined": 51314500
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12881292
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13205625
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13399500
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12814500
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 14113458
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13161917
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12236000
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13206500
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13106583
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13365125
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12151791
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12674125
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13609500
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13029042
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13069375
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12619375
+        }
+      ]
+    },
+    {
+      "index": 16,
+      "timings_ns": {
+        "baseline": 51669042,
+        "parity_only": 53216083,
+        "mask_only": 54286250,
+        "combined": 51905459
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12453542
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12640417
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13549750
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12723375
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 14392625
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13985583
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13713209
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13278375
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12386833
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13273916
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13455333
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13252750
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12436042
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13316167
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13567958
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12650959
+        }
+      ]
+    },
+    {
+      "index": 17,
+      "timings_ns": {
+        "baseline": 51284959,
+        "parity_only": 52105626,
+        "mask_only": 55507750,
+        "combined": 53343417
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13218959
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13383291
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13545958
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13519042
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12309042
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13322959
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 15035042
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12574125
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12865292
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13381375
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13419708
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13294250
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12891666
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13255792
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13507042
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12718209
+        }
+      ]
+    },
+    {
+      "index": 18,
+      "timings_ns": {
+        "baseline": 51842417,
+        "parity_only": 51843543,
+        "mask_only": 52660375,
+        "combined": 51831541
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13049334
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13118792
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13427000
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13340250
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12651375
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13091833
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12894542
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13034459
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13498666
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12846416
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13372000
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12753250
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13461000
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12774500
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12148875
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12715584
+        }
+      ]
+    },
+    {
+      "index": 19,
+      "timings_ns": {
+        "baseline": 51524583,
+        "parity_only": 52879668,
+        "mask_only": 53378417,
+        "combined": 53850499
+      },
+      "launches": [
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13329625
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12762417
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12576917
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12433042
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13295417
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13212667
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12954833
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13917000
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13846292
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13547875
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12967625
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 13214041
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12907083
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13356709
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13025208
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 14286416
+        }
+      ]
+    },
+    {
+      "index": 20,
+      "timings_ns": {
+        "baseline": 51598917,
+        "parity_only": 51710374,
+        "mask_only": 52801417,
+        "combined": 50879501
+      },
+      "launches": [
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 13264042
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12746708
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13401125
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12727584
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12639208
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12577750
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12801042
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12806791
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12702667
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 12597958
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 13828083
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12695084
+        },
+        {
+          "configuration": "baseline",
+          "elapsed_ns": 12993000
+        },
+        {
+          "configuration": "parity_only",
+          "elapsed_ns": 13787958
+        },
+        {
+          "configuration": "mask_only",
+          "elapsed_ns": 12771167
+        },
+        {
+          "configuration": "combined",
+          "elapsed_ns": 12650042
+        }
+      ]
+    }
+  ],
+  "baseline_median_ns": 51981083,
+  "comparisons": {
+    "parity_only": {
+      "paired_ratio_median": 1.0053963521014324,
+      "paired_ratio_ci95": [
+        1.0000217196663497,
+        1.0262997761670385
+      ],
+      "gain_median": -0.005396352101432411,
+      "gain_ci95": [
+        -0.02629977616703849,
+        -2.171966634967326e-05
+      ],
+      "median_ns": 52544874
+    },
+    "mask_only": {
+      "paired_ratio_median": 1.0359796022027,
+      "paired_ratio_ci95": [
+        1.0184873794646627,
+        1.0520319940564777
+      ],
+      "gain_median": -0.03597960220269991,
+      "gain_ci95": [
+        -0.05203199405647774,
+        -0.018487379464662723
+      ],
+      "median_ns": 53671043
+    },
+    "combined": {
+      "paired_ratio_median": 1.0109402520876072,
+      "paired_ratio_ci95": [
+        1.0045756025435888,
+        1.0261398885038409
+      ],
+      "gain_median": -0.010940252087607183,
+      "gain_ci95": [
+        -0.026139888503840858,
+        -0.004575602543588797
+      ],
+      "median_ns": 52570916
+    }
+  }
+}

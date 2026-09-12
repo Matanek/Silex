@@ -1,0 +1,58 @@
+// Autonomous velocity/translation reduction. Rotation normalization and speed
+// caps belong to separate probes; this case makes no full-stage parity claim.
+struct Body { var vx:float; var vy:float; var w:float; var px:float; var py:float }
+struct Forces {
+    var x:float; var y:float; var torque:float
+    var inverse_mass:float; var inverse_inertia:float; var gravity_scale:float
+    var damping:float; var angular_damping:float
+}
+
+func velocity(body:&Body, forces:@Forces, step:float) {
+    let damping = 1.0 / (1.0 + step * forces.damping)
+    let angular = 1.0 / (1.0 + step * forces.angular_damping)
+    var gravity = 0.0
+    if forces.inverse_mass > 0.0 { gravity = forces.gravity_scale }
+    body.vx = (step * forces.inverse_mass) * forces.x + damping * body.vx
+    body.vy = (step * forces.inverse_mass) * forces.y + (step * gravity) * -10.0 + damping * body.vy
+    body.w = step * forces.inverse_inertia * forces.torque + angular * body.w
+}
+
+func position(body:&Body, step:float) {
+    body.px += step * body.vx
+    body.py += step * body.vy
+}
+
+func integrate(bodies:&Body[..], forces:@Forces[..], step:float) {
+    var index = 0
+    while index < bodies.count() {
+        velocity(bodies[index], forces[index], step)
+        index++
+    }
+    index = 0
+    while index < bodies.count() {
+        position(bodies[index], step)
+        index++
+    }
+}
+
+func main() {
+    var bodies:Body[] = [Body(vx:4.0, vy:2.0, w:1.0), Body(vx:1.0, vy:-2.0, w:0.5, px:8.0, py:-8.0)]
+    let forces:Forces[] = [
+        Forces(x:2.0, y:-4.0, torque:8.0, inverse_mass:0.5, inverse_inertia:0.25,
+            gravity_scale:1.0, damping:8.0, angular_damping:8.0),
+        Forces(gravity_scale:1.0)
+    ]
+    var editable = &bodies[0:2]
+    let inputs = @forces[0:2]
+    integrate(editable, inputs, 0.125)
+    print(editable[0].vx == 2.125 && editable[0].vy == -0.5 && editable[0].w == 0.75)
+    print(editable[0].px == 0.265625 && editable[0].py == -0.0625)
+    print(editable[1].vx == 1.0 && editable[1].vy == -2.0 && editable[1].w == 0.5)
+    print(editable[1].px == 8.125 && editable[1].py == -8.25)
+    integrate(editable, inputs, 0.125)
+    print(editable[0].vx == 1.1875 && editable[0].vy == -1.75 && editable[0].w == 0.625)
+    print(editable[0].px == 0.4140625 && editable[0].py == -0.28125)
+    print(editable[1].vx == 1.0 && editable[1].vy == -2.0 && editable[1].w == 0.5)
+    print(editable[1].px == 8.25 && editable[1].py == -8.5)
+    print(forces[0].x == 2.0 && forces[0].damping == 8.0 && forces[1].inverse_mass == 0.0)
+}

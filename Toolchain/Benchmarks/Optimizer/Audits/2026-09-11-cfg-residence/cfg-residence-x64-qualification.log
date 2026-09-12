@@ -1,0 +1,3 @@
+optimizer oracle: native optimizer regression qualification
+Benchmarks/Optimizer/Regressions/BranchComparisons.sx:1:1: optimizer differential compile error: package 'application' requires 'STD' ^0.21.0, but no package named 'STD' is available
+optimizer oracle: InvalidSource

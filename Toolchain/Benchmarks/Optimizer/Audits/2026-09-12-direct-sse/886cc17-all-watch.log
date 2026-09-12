@@ -1,0 +1,1008 @@
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+* linux-x64 (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Linux X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* windows-arm64-build (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Cross-build the Windows ARM64 bootstrap
+  * Transfer the Windows ARM64 bootstrap
+  * Post Check out Silex
+* linux-arm64 (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  * Build and validate Silex on Linux ARM64
+  * Post Check out Silex
+- optimizer-x64 (ID 103441518186)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+* linux-x64 (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Linux X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* windows-arm64-build (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Cross-build the Windows ARM64 bootstrap
+  * Transfer the Windows ARM64 bootstrap
+  * Post Check out Silex
+* linux-arm64 (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  * Build and validate Silex on Linux ARM64
+  * Post Check out Silex
+- optimizer-x64 (ID 103441518186)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+* linux-x64 (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Linux X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* windows-arm64-build (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Cross-build the Windows ARM64 bootstrap
+  * Transfer the Windows ARM64 bootstrap
+  * Post Check out Silex
+* linux-arm64 (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  * Build and validate Silex on Linux ARM64
+  * Post Check out Silex
+- optimizer-x64 (ID 103441518186)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+* linux-x64 (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Linux X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* windows-arm64-build (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Cross-build the Windows ARM64 bootstrap
+  * Transfer the Windows ARM64 bootstrap
+  * Post Check out Silex
+* linux-arm64 (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  * Build and validate Silex on Linux ARM64
+  * Post Check out Silex
+- optimizer-x64 (ID 103441518186)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+* linux-x64 (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Linux X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* windows-arm64-build (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Cross-build the Windows ARM64 bootstrap
+  * Transfer the Windows ARM64 bootstrap
+  * Post Check out Silex
+* linux-arm64 (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  * Build and validate Silex on Linux ARM64
+  * Post Check out Silex
+- optimizer-x64 (ID 103441518186)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+* linux-x64 (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Linux X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* windows-arm64-build (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Cross-build the Windows ARM64 bootstrap
+  * Transfer the Windows ARM64 bootstrap
+  * Post Check out Silex
+* linux-arm64 (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  * Build and validate Silex on Linux ARM64
+  * Post Check out Silex
+- optimizer-x64 (ID 103441518186)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+* linux-x64 (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Linux X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* windows-arm64-build (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+* linux-arm64 (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  * Build and validate Silex on Linux ARM64
+  * Post Check out Silex
+- optimizer-x64 (ID 103441518186)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on macOS X64
+  * Post Check out Silex
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  * Build and validate Silex on Windows X64
+  * Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+* macos-x64 (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  * Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 7 minutes ago
+
+JOBS
+* windows-x64 (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  * Post Check out Silex
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 7 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 8 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 8 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 9 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 9 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 10 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 10 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 11 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  * Build and validate Silex natively on Windows ARM64
+  * Post Check out Silex
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 11 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+* windows-arm64 (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  ✓ Build and validate Silex natively on Windows ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ spec-silex-optimization-parity-completion Validate Silex native portability · 34653738617
+Triggered via workflow_dispatch about 12 minutes ago
+
+JOBS
+✓ windows-x64 in 7m6s (ID 103441516817)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Windows X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ macos-x64 in 6m33s (ID 103441516955)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on macOS X64
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-x64 in 5m54s (ID 103441516968)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Check out the pinned STD fixture dependency
+  ✓ Install Zig 0.16.0
+  ✓ Build and validate Silex on Linux X64
+  ✓ Post Check out the pinned STD fixture dependency
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ windows-arm64-build in 5m26s (ID 103441517052)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Install Zig 0.16.0
+  ✓ Cross-build the Windows ARM64 bootstrap
+  ✓ Transfer the Windows ARM64 bootstrap
+  ✓ Post Check out Silex
+  ✓ Complete job
+✓ linux-arm64 in 5m33s (ID 103441517067)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Verify native ARM64 runner
+  ✓ Install Zig 0.16.0 for Linux ARM64
+  ✓ Build and validate Silex on Linux ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+- optimizer-x64 (ID 103441518186)
+✓ windows-arm64 in 6m18s (ID 103442766542)
+  ✓ Set up job
+  ✓ Check out Silex
+  ✓ Download the Windows ARM64 bootstrap
+  ✓ Build and validate Silex natively on Windows ARM64
+  ✓ Post Check out Silex
+  ✓ Complete job
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/download-artifact@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+windows-arm64: .github#2
+
+- "The windows-11-arm label will migrate to use Visual Studio 2026 by default beginning September 21, 2026. For more information see https://github.com/actions/runner-images/issues/14602"
+windows-arm64: .github#1
+

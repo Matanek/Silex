@@ -1,0 +1,19 @@
+{
+  "baseline": "c3a4b391f4d6ba3e656ee66fb82bc57fe7a13beb",
+  "withdrawal": "a92677a8d18f0125e6d8b165a458e485f662d1e9",
+  "verdict": "rejected_before_intel_measurement",
+  "runs": {
+    "7d5e1fa2e8bdff19a90c464d3d527ef21425af08": 34685630351,
+    "28c16fa": 34686423471,
+    "4ed6babb4678680823101b514c9a66bd565c276c": 34687217645
+  },
+  "files": {
+    "28c16fa-intel-failed.log": "ebb837afd485964d37f9edc2248227aa3c92888162aeb7777a39bb191552bb53",
+    "4ed6bab-intel-failed.log": "394b0a9c901539571debba10193d35677fd626ae351f1460c28db2f534bfc259",
+    "7d5e1fa-intel-failed.log": "0ac8026a65198ede7de3aa2c8f145622b3f61bc32b6609f171726e916436f93b",
+    "README.md": "c76e0814dba8c346d503b3ed257623114dd3a375862abccc4581eb282b5633bf",
+    "measure_variants.py": "2e9bfdd551da8e1ce44a4e9342da8aa4b281104313f5e38d2abd6e8985242648",
+    "rosetta-direct-parity-1.json": "8e29af835ab78e8dfa6106240cef93815c54f0f5233cbd58ec20868fc7c09290",
+    "rosetta-direct-parity-2.json": "c4639282e2b913f738e6cebc6f8fd988e295ecd7eb01f5b43a8335f3014ebfab"
+  }
+}

@@ -1,0 +1,314 @@
+[
+  {
+    "target": "macos-arm64",
+    "workload": "Arithmetic",
+    "cached": false,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-arithmetic-macos-arm64",
+      "--nocache"
+    ],
+    "sha256": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-arithmetic-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Arithmetic",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-arithmetic-macos-arm64"
+    ],
+    "sha256": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-arithmetic-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Arithmetic",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-arithmetic-macos-arm64"
+    ],
+    "sha256": "6759dc02e3116fce74a0b02b2370d2c2354ee9e03bf25c198a97aa576e30bb9e",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-arithmetic-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Objects",
+    "cached": false,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-objects-macos-arm64",
+      "--nocache"
+    ],
+    "sha256": "989c97f35c135851ec759dbf7b2e87533b34ba3dafe61baa552602df5bd0e538",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-objects-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Objects",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-objects-macos-arm64"
+    ],
+    "sha256": "989c97f35c135851ec759dbf7b2e87533b34ba3dafe61baa552602df5bd0e538",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-objects-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Objects",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-objects-macos-arm64"
+    ],
+    "sha256": "989c97f35c135851ec759dbf7b2e87533b34ba3dafe61baa552602df5bd0e538",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-objects-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Flocking",
+    "cached": false,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-flocking-macos-arm64",
+      "--nocache"
+    ],
+    "sha256": "cda996604e707451cd4c2cfc855e741d9df9a42bebbc9c773e34d1def4b528e7",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-flocking-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Flocking",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-flocking-macos-arm64"
+    ],
+    "sha256": "cda996604e707451cd4c2cfc855e741d9df9a42bebbc9c773e34d1def4b528e7",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-flocking-macos-arm64"
+  },
+  {
+    "target": "macos-arm64",
+    "workload": "Flocking",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-flocking-macos-arm64"
+    ],
+    "sha256": "cda996604e707451cd4c2cfc855e741d9df9a42bebbc9c773e34d1def4b528e7",
+    "identical_to": "/private/tmp/silex-part03-evidence/private-class-flocking-macos-arm64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Arithmetic",
+    "cached": false,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-arithmetic-macos-x64",
+      "--nocache"
+    ],
+    "sha256": "e59bd04a9b359925eeaf41545c1a5d2ceee84bb35bee4e2e2400d6441f1b6c6f",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-arithmetic-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Arithmetic",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-arithmetic-macos-x64"
+    ],
+    "sha256": "e59bd04a9b359925eeaf41545c1a5d2ceee84bb35bee4e2e2400d6441f1b6c6f",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-arithmetic-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Arithmetic",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Arithmetic.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-arithmetic-macos-x64"
+    ],
+    "sha256": "e59bd04a9b359925eeaf41545c1a5d2ceee84bb35bee4e2e2400d6441f1b6c6f",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-arithmetic-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Objects",
+    "cached": false,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-objects-macos-x64",
+      "--nocache"
+    ],
+    "sha256": "25ce60ce307df14eba38a3cec44e0b61c91a60c3e7fc81ead5db1882de6665f9",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-objects-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Objects",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-objects-macos-x64"
+    ],
+    "sha256": "25ce60ce307df14eba38a3cec44e0b61c91a60c3e7fc81ead5db1882de6665f9",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-objects-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Objects",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Objects.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-objects-macos-x64"
+    ],
+    "sha256": "25ce60ce307df14eba38a3cec44e0b61c91a60c3e7fc81ead5db1882de6665f9",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-objects-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Flocking",
+    "cached": false,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-flocking-macos-x64",
+      "--nocache"
+    ],
+    "sha256": "439db8699d8223032dd7d542bf80c9dd5db32bd888df5f89aa2d9f324022950b",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-flocking-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Flocking",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-flocking-macos-x64"
+    ],
+    "sha256": "439db8699d8223032dd7d542bf80c9dd5db32bd888df5f89aa2d9f324022950b",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-flocking-macos-x64"
+  },
+  {
+    "target": "macos-x64",
+    "workload": "Flocking",
+    "cached": true,
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-after-private-class-target-policy",
+      "compile",
+      "/private/tmp/silex-part03-evidence/NativeReference/Flocking.sx",
+      "--release",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/private-class-final-flocking-macos-x64"
+    ],
+    "sha256": "439db8699d8223032dd7d542bf80c9dd5db32bd888df5f89aa2d9f324022950b",
+    "identical_to": "/private/tmp/silex-part03-evidence/direct-integer-flocking-macos-x64"
+  }
+]

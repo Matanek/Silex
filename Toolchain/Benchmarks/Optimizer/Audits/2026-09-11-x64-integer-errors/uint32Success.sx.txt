@@ -1,0 +1,2 @@
+func check(a:uint32, zero:uint32, one:uint32) bool { return a+zero==a && a-zero==a && a*one==a && a/one==a && a%one==zero && a>=zero && a>zero && zero<a && zero<=a && a!=zero && -zero==zero }
+func main() { print(check(4294967295,0,1)) }

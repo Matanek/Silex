@@ -1,0 +1,517 @@
+[
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "interpret",
+      "Silex/Toolchain/Benchmarks/Optimizer/AggregateViewAliasing.sx"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "Silex/Toolchain/Benchmarks/Optimizer/AggregateViewAliasing.sx",
+      "-d",
+      "-n",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-debug"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-debug"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "48d552827e41f890eb1f6860a65765795c78fc64fe2433cc1e30a940db43938e"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "Silex/Toolchain/Benchmarks/Optimizer/AggregateViewAliasing.sx",
+      "-r",
+      "-n",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-release"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-release"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "85e5201da06ded8a17fd3343145d5bdb7df1a56a0cc8064e556e7136b6b205a2"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-raw.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-raw-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-raw-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "95c68e57d0bc2b06e2e794f76fe1fef5c86d43afe81a9f7efd15280eff6b1c1b"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-raw.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-raw-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-raw-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "873811a49dad8bb9c09195fd0e73c571435f1275930eb492f06a917ad3051d26"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-silex.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-silex-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-silex-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "39d57e5f5d28e962f9a54430c83ce7d773701550624614a4e2e946ab8816065d"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-silex.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-silex-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/AggregateViewAliasing-proof-silex-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "1a0a7a5163912d2058ecc63e835c55e53ec1e31640b29a67c7594c33992fcd13"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "interpret",
+      "Silex/Toolchain/Benchmarks/Optimizer/DampedIntegration.sx"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "Silex/Toolchain/Benchmarks/Optimizer/DampedIntegration.sx",
+      "-d",
+      "-n",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-debug"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-debug"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "8a57d8c8d12e173622cb098ed99401875356cc2c94a837fa2a848ef42c41cfee"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "Silex/Toolchain/Benchmarks/Optimizer/DampedIntegration.sx",
+      "-r",
+      "-n",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-release"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-release"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "e6e8e16d9c031f291dfbf8f9d2b23a288f21acbb93ee1f73370f134cd9480b07"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-raw.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-raw-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-raw-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "1ceb428b012da2ad5014a1766291ca0e751d7ec33d0a9ddd130f9400bcf3dd5b"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-raw.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-raw-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-raw-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "9ce30b2c4f265319733811d237d4809441ff2f6bd394330a73112e8807c72fc4"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-silex.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-silex-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-silex-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "3ebcac5aa04a995d0dcd7a44d0f3f34ecb7aa531c2d8bb7777a3a625ad9fdd0e"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-silex.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-silex-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/DampedIntegration-proof-silex-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "91bd28221f62f216663b96f9d84a63b3ebfbffc011c309f50359b3ab79286520"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "interpret",
+      "Silex/Toolchain/Benchmarks/Optimizer/PreparationMasses.sx"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "Silex/Toolchain/Benchmarks/Optimizer/PreparationMasses.sx",
+      "-d",
+      "-n",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-debug"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-debug"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "70d4810a125970bcc02674c31533fa1de5631ef5d90f4289dda5e09e5f89fc23"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "Silex/Toolchain/Benchmarks/Optimizer/PreparationMasses.sx",
+      "-r",
+      "-n",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-release"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-release"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "fce89954207fa89ceccbd98d8586144dbb659e32cb60c9f2cdbb02d760e023f4"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-raw.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-raw-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-raw-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "3c3b4fb0dc65f22f5fbfca51dee83b1148204c6949545449a4c9668ba11c9196"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-raw.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-raw-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-raw-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "98d82b3822ae88f9166cdf8ac8ce84bab836a311efbd8914294c41ee159c975b"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O0",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-silex.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-silex-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-silex-O0"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "e543a4f2fa2cea3cd23099460f1cdf677bc9e83adfee74c12e13c5ee09c07eaa"
+  },
+  {
+    "argv": [
+      "clang",
+      "-O3",
+      "-target",
+      "arm64-apple-darwin25.6.0",
+      "-mcpu=apple-m1",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-silex.ll",
+      "-o",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-silex-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "warning: overriding the module target triple with arm64-apple-macosx26.0.0 [-Woverride-module]\n1 warning generated.\n"
+  },
+  {
+    "argv": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/.zig-cache/optimizer-oracle/PreparationMasses-proof-silex-O3"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "binary_sha256": "0dbb358524260be554b1e133d145a287c35a54d2e314c24d7e51c357c479b88e"
+  },
+  {
+    "argv": [
+      "clang",
+      "--version"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "zig",
+      "version"
+    ],
+    "cwd": "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree",
+    "exit_code": 0,
+    "stdout": "0.16.0\n",
+    "stderr": ""
+  }
+]

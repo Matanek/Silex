@@ -1,0 +1,2 @@
+func calculate(a:uint32, b:uint32) uint32 { return a%b }
+func main() { print(true); print(calculate(7,0)); print(false) }

@@ -1,0 +1,15 @@
+{
+  "command": [
+    "/private/tmp/silex-part03-evidence/silex-before-residence",
+    "compile",
+    "/private/tmp/silex-part03-evidence/Preparation.sx",
+    "--release",
+    "--nocache",
+    "-o",
+    "/private/tmp/silex-part03-evidence/preparation-before-residence"
+  ],
+  "compiler_sha256": "ecbde18f772c2f0ccf7100053a8b76c585c9467b62c79245cbd6c7d56ef04cdc",
+  "source_sha256": "bc39b6dc1109b5ed3818517bf3a31388580e834d1cfced71e2c5dabc673bf14d",
+  "binary_sha256": "07a0d1233cc83fa5985f689aa494673fee526a0cf659bf64f9209415114e173d",
+  "stdout": "28580565.3615036\n"
+}

@@ -1,0 +1,4 @@
+optimizer oracle: HotFunctionNotRegistered
+unregistered diagnostic probe budget exit 1
+debug 159 observations passed
+release 159 observations passed

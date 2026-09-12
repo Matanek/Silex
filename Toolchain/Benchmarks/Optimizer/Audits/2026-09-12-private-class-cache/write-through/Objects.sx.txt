@@ -1,0 +1,50 @@
+protocol Value {
+    func get() int
+}
+
+struct Snapshot:Value {
+    let value:int
+
+    func get() int {
+        return self.value
+    }
+}
+
+class Counter {
+    var value:int
+
+    func add(amount:int) {
+        self.value += amount
+    }
+
+    func get() int {
+        return self.value
+    }
+}
+
+func identity<T>(value:T) T {
+    return value
+}
+
+func calculate(iterations:int) int {
+    var counter = Counter()
+    var state = counter.get()
+    let values = [3, 5, 7, 11]
+    var index = 0
+    while index < iterations {
+        if index % 2 == 0 {
+            state += identity(values[index % values.count()])
+            counter.value = state
+        } else {
+            state += 1
+            counter.value = state
+        }
+        index += 1
+    }
+    var result:Value = Snapshot(value:counter.get())
+    return result.get()
+}
+
+func main() {
+    print(calculate(2000000))
+}

@@ -1,0 +1,98 @@
+{
+  "run_id": 34667012897,
+  "candidate": "b8d01d73233a88a080170b53096f2a72bbd8d98e",
+  "baseline": "901c6f5594841a277da00c53c29051bb7ab23076",
+  "host": {
+    "system": "Darwin",
+    "release": "24.6.0",
+    "machine": "x86_64",
+    "processor": "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+    "translated": false
+  },
+  "archive_sha256": "c4120a1f94aab2018b23a2a8d63eea4a183b6fd76a7ad380577ba9a704c09b2e",
+  "controls": {
+    "forward": {
+      "ratio": {
+        "samples": 21,
+        "lower_bound_ppm": 970443,
+        "median_ppm": 1020490,
+        "upper_bound_ppm": 1055425,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 125715,
+        "clang_half_shift_ppm": 156832,
+        "ratio_half_shift_ppm": 5760
+      },
+      "stability_failures": [
+        "release spread exceeds 200000 ppm",
+        "baseline spread exceeds 200000 ppm",
+        "release_half_shift_ppm exceeds 100000 ppm",
+        "clang_half_shift_ppm exceeds 100000 ppm"
+      ],
+      "spread_ppm": {
+        "release": 871710,
+        "baseline": 1090903
+      }
+    },
+    "reverse": {
+      "ratio": {
+        "samples": 21,
+        "lower_bound_ppm": 988348,
+        "median_ppm": 993019,
+        "upper_bound_ppm": 1001610,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 261105,
+        "clang_half_shift_ppm": 270507,
+        "ratio_half_shift_ppm": 11252
+      },
+      "stability_failures": [
+        "release spread exceeds 200000 ppm",
+        "baseline spread exceeds 200000 ppm",
+        "release_half_shift_ppm exceeds 100000 ppm",
+        "clang_half_shift_ppm exceeds 100000 ppm"
+      ],
+      "spread_ppm": {
+        "release": 417284,
+        "baseline": 408307
+      }
+    },
+    "same_bytes": {
+      "ratio": {
+        "samples": 21,
+        "lower_bound_ppm": 989436,
+        "median_ppm": 1001725,
+        "upper_bound_ppm": 1010240,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 102578,
+        "clang_half_shift_ppm": 110243,
+        "ratio_half_shift_ppm": 20923
+      },
+      "stability_failures": [
+        "release spread exceeds 200000 ppm",
+        "baseline spread exceeds 200000 ppm",
+        "release_half_shift_ppm exceeds 100000 ppm",
+        "clang_half_shift_ppm exceeds 100000 ppm"
+      ],
+      "spread_ppm": {
+        "release": 386730,
+        "baseline": 362614
+      }
+    },
+    "same_file": {
+      "ratio": {
+        "samples": 21,
+        "lower_bound_ppm": 987257,
+        "median_ppm": 999458,
+        "upper_bound_ppm": 1009260,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 29818,
+        "clang_half_shift_ppm": 544,
+        "ratio_half_shift_ppm": 6903
+      },
+      "stability_failures": [],
+      "spread_ppm": {
+        "release": 143651,
+        "baseline": 145182
+      }
+    }
+  }
+}

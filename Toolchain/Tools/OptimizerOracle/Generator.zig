@@ -3,6 +3,7 @@ const std = @import("std");
 pub const CorpusEntry = struct {
     name: []const u8,
     timing: bool,
+    project: bool = false,
     llvm_float_width_minimum: u3 = 0,
     silex_arm64_pair_function: ?[]const u8 = null,
 };
@@ -19,6 +20,13 @@ pub const StructuralContract = union(enum) {
     },
     coalesces_view_memory: []const u8,
     forwards_owning_collection: []const u8,
+    forwards_known_views: []const u8,
+    reuses_dominated_fields: []const u8,
+    reuses_scalar_expressions: struct {
+        repeated: []const u8,
+        stored: []const u8,
+        reloaded: []const u8,
+    },
     simplifies_ssa_values: []const u8,
     promotes_critical_edge: []const u8,
     coalesces_forwarded_phi: []const u8,
@@ -79,6 +87,15 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "Regressions/DominatedReferenceReads.sx", .timing = false },
+    .{ .name = "Regressions/LateScalarClosure.sx", .timing = false },
+    .{ .name = "Regressions/ValueModules/Main.sx", .timing = false, .project = true },
+    .{ .name = "Regressions/AggregatePreparation.sx", .timing = false },
+    .{ .name = "Regressions/ScalarExpressionReuse.sx", .timing = false },
+    .{ .name = "Regressions/KnownViewElements.sx", .timing = false },
+    .{ .name = "DampedIntegration.sx", .timing = false },
+    .{ .name = "PreparationMasses.sx", .timing = false },
+    .{ .name = "AggregateViewAliasing.sx", .timing = false },
     .{ .name = "IntegerArithmetic.sx", .timing = true },
     .{ .name = "BranchingLoop.sx", .timing = true },
     .{ .name = "FloatArithmetic.sx", .timing = true },
@@ -95,9 +112,47 @@ pub const corpus = [_]CorpusEntry{
     .{ .name = "Regressions/LoopExitFloatLaneXY.sx", .timing = false, .llvm_float_width_minimum = 2, .silex_arm64_pair_function = "finish" },
     .{ .name = "Regressions/FloatLaneXYZ.sx", .timing = false },
     .{ .name = "Regressions/LoopExitFloatLaneXYZW.sx", .timing = false, .llvm_float_width_minimum = 4, .silex_arm64_pair_function = "finish" },
+    .{ .name = "Regressions/PureMathReferenceInlining.sx", .timing = false, .project = true },
+    .{ .name = "Regressions/HotReferenceLeafClosure.sx", .timing = false, .project = true },
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{ .name = "Regressions/ScalarClassLeaves.sx", .concern = "scalar class state and mutator leaves preserve shared identity, reassignment barriers, signed updates, NaN, signed zero, boolean fields, and resource replacement barriers" },
+    .{ .name = "Regressions/IntegerMemoryRegions.sx", .concern = "integer loop regions and direct signed/unsigned operands preserve aliases, narrow normalization, cold exits and empty iterations" },
+    .{ .name = "Regressions/BranchComparisons.sx", .concern = "single-use and shared comparisons preserve signed and unsigned widths, unordered floats, infinities and signed zero" },
+    .{ .name = "Regressions/BranchSnapshots.sx", .concern = "arm-local scalar snapshots preserve alias writes, joined values, negative indices, NaN and signed zero" },
+    .{ .name = "Regressions/PrivateCollectionLengths.sx", .concern = "private literal lengths cross branches and unrelated calls while mutation, copies, view escapes and terminal lifetimes stay exact" },
+    .{ .name = "Regressions/ScalarFloatOperands.sx", .concern = "direct scalar SSE operands preserve subtraction/division order, widths, signed zero and unordered comparisons" },
+    .{ .name = "Regressions/FloatMemoryResidence.sx", .concern = "mixed integer and FP recurrences across aggregate inputs and returns, stack copies and fixed/view loads, widths, NaN and signed zero" },
+    .{ .name = "Regressions/LoopExitResidence.sx", .concern = "loop-carried scalar state survives interleaved class exits and direct mutator calls" },
+    // Native-only: the strict LLVM oracle does not lower float-to-integer conversions.
+    .{ .name = "Regressions/ScalarFloatResidence.sx", .concern = "scalar FP pressure, loop recurrence, call barriers, addressed aliases, exact conversion, NaN and signed zero" },
+    .{ .name = "Regressions/DominatedReferenceReads.sx", .concern = "dominated borrowed fields preserve branches, mutable aliases, signed zero, NaN and mixed scalar widths" },
+    .{
+        .name = "Regressions/LateScalarClosure.sx",
+        .concern = "helpers exposed as scalar leaves after collection cleanup preserve loop results and checked initialization",
+        .contract = .none,
+    },
+    .{
+        .name = "Regressions/ValueModules/Main.sx",
+        .concern = "module and generic boundaries preserve dominated values, partial paths, mutable aliases and strict floating observations",
+        .contract = .none,
+    },
+    .{
+        .name = "Regressions/AggregatePreparation.sx",
+        .concern = "complete preparation observes all 26 fields across dynamic/fixed bodies, warm starts and detached results",
+        .contract = .{ .reuses_dominated_fields = "prepare" },
+    },
+    .{
+        .name = "Regressions/ScalarExpressionReuse.sx",
+        .concern = "identical scalar snapshots share calculations across stores while changed memory and floating edge values retain their observations",
+        .contract = .{ .reuses_scalar_expressions = .{ .repeated = "repeated", .stored = "storeBetween", .reloaded = "reloadBetween" } },
+    },
+    .{
+        .name = "Regressions/KnownViewElements.sx",
+        .concern = "known scalar elements propagate through clamped nested views; aliases and branches retain observations",
+        .contract = .{ .forwards_known_views = "constantViews" },
+    },
     .{
         .name = "Regressions/LastElementNormalization.sx",
         .concern = "repeated last-element normalization extends the value domain before use counting while preserving the first bounds check",
@@ -223,9 +278,12 @@ pub const regressions = [_]RegressionEntry{
         .concern = "a hot X64 scalar loop retains registers before a wide aggregate and indirect call barrier",
         .contract = .{ .x64_regional_budget = .{
             .function = "integrate",
-            .minimum_resident = 8,
-            .stack_slots = 6,
-            .frame_bytes = 64,
+            .minimum_resident = 14,
+            // Four Snapshot fields plus code, environment and receiver owner.
+            // The owner word adds one slot to the former two-word callback;
+            // loop residence and the zero loop-stack-traffic contract stay intact.
+            .stack_slots = 7,
+            .frame_bytes = 80,
             .direct_calls = 0,
             .indirect_calls = 1,
             .aggregate_width = 4,
@@ -324,13 +382,13 @@ pub const regressions = [_]RegressionEntry{
     },
     .{
         .name = "Regressions/PureMathReferenceInlining.sx",
-        .concern = "proven pure scalar-math effects remain exact while a native call barrier stays outside a branching reference caller",
-        .contract = .{ .preserves_branching_reference_calls = "main" },
+        .concern = "a bounded branching reference callee crosses only a proven pure scalar-math boundary and closes in its hot caller",
+        .contract = .{ .specializes_branching_reference_calls = "main" },
     },
     .{
         .name = "Regressions/HotReferenceLeafClosure.sx",
-        .concern = "a pressure-heavy hot set of reference leaf callees stays out of line until expanded caller residences are proven profitable",
-        .contract = .{ .preserves_branching_reference_calls = "integrate" },
+        .concern = "regional pressure admits a bounded hot reference leaf set without accumulating values from mutually exclusive paths",
+        .contract = .{ .specializes_branching_reference_calls = "integrate" },
     },
     .{
         .name = "Regressions/DynamicFieldClearAppend.sx",

@@ -1509,6 +1509,8 @@ fn copyReplacementToAddress(
         }
         return;
     }
+    // The address has consumed the index and stride. Reuse only reserved
+    // scratch x9/x11: x5/x6 may still hold live view descriptors.
     try stackAddress(allocator, words, .x12, replacement.start);
     // View replacement is compatible with register residence: x0...x8 may
     // still hold live values. Use only reserved scratch registers for copies.

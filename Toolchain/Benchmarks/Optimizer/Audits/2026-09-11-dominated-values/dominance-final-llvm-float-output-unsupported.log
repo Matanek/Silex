@@ -1,0 +1,4 @@
+1/1 DominanceOracleProbe.test.emit dominance oracle...FAIL (UnsupportedType)
+0 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/9b522b1cb2c70460a75e35af0f9b27a0/root --seed=0x7af6b6fa

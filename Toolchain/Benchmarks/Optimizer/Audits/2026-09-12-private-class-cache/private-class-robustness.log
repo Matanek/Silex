@@ -1,0 +1,7 @@
+optimizer oracle: qualified adversarial interaction campaign
+error: sub-compilation of libubsan failed
+    note: failed to check cache: manifest_create PermissionDenied
+error: sub-compilation of compiler_rt failed
+    note: failed to check cache: manifest_create PermissionDenied
+silex: cannot link native package artifacts: LinkFailed
+optimizer oracle: NativeCompilationFailed

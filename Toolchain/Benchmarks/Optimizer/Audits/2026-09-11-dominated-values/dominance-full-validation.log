@@ -1,0 +1,822 @@
+check
++- optimizer-admission-quick
+   +- run test w
+parity registry: coverage gap 'known-gap' owned by silex-llvm-opt-02
+parity registry: required LLVM family missing: instcombine-and-simplifycfg
+failed command: ./.zig-cache/o/4e761290375fa231932398b837e496e2/test --cache-dir=./.zig-cache --seed=0x85936583 --listen=-
+
+optimizer oracle: optimization coverage registry
+  schema: 2
+  LLVM executable: Apple clang version 21.0.0 (clang-2100.1.1.101)
+  LLVM sources: 3623fe661ae35c6c80ac221f14d85be76aa870f1 (llvmorg-21.1.0)
+  target: arm64-apple-darwin25.6.0, CPU apple-m1, -O3
+  coverage: 13 families, 7 baselines, 5 hot functions, 21 workspace repositories, 15 sealed qualification projects
+  interactions: 144 pairwise cases, 5 risk triplets, SHA-256 c5ca428fa03d03fd9b72f5a0f878333abd4c61be029d8aa44a85ba8dd86e9da3
+  plan: .zig-cache/optimizer-oracle/coverage-plan.tsv
+optimizer oracle: semantic verification
+  PASS Regressions/AggregatePreparation.sx (795 bytes output)
+  PASS Regressions/ScalarExpressionReuse.sx (40 bytes output)
+  PASS Regressions/KnownViewElements.sx (35 bytes output)
+  PASS DampedIntegration.sx (45 bytes output)
+  PASS PreparationMasses.sx (105 bytes output)
+  PASS AggregateViewAliasing.sx (45 bytes output)
+  PASS IntegerArithmetic.sx (7 bytes output)
+  PASS BranchingLoop.sx (7 bytes output)
+  PASS FloatArithmetic.sx (5 bytes output)
+  PASS IntegerControlFlow.sx (6 bytes output)
+  PASS IntegerWidths.sx (3 bytes output)
+  PASS UnsignedBitwise.sx (11 bytes output)
+  PASS AggregateScalarization.sx (6 bytes output)
+  PASS ReferenceAliasing.sx (6 bytes output)
+  PASS ReferenceDeadStores.sx (9 bytes output)
+  PASS ReadonlyViewMemory.sx (3 bytes output)
+  PASS MutableViewMemory.sx (3 bytes output)
+  PASS NestedAggregateWidths.sx (15 bytes output)
+  PASS OwningCollectionCopy.sx (10 bytes output)
+  PASS Regressions/LoopExitFloatLaneXY.sx (20 bytes output)
+  PASS Regressions/FloatLaneXYZ.sx (15 bytes output)
+  PASS Regressions/LoopExitFloatLaneXYZW.sx (40 bytes output)
+  PASS Regressions/PureMathReferenceInlining.sx (20 bytes output)
+  PASS Regressions/HotReferenceLeafClosure.sx (50 bytes output)
+verified: 24 corpus programs
+optimizer oracle: cold and warm cache reproducibility
+  PASS IntegerArithmetic.sx: 9abf1f5b0548ed1a9c64aa813dd04a9da151c91cf4205182e782ca58a9eb6af9
+  PASS BranchingLoop.sx: 6c7067dd5dad67ec392f3471b674e5f1ef2e7cd4aabe7e4f97d5eb92abe7ea96
+  PASS Regressions/AggregateFieldStores.sx: ccdadba991dd03dca098207fad32a92face462132503de04779f74fb7af01dd2
+  PASS Regressions/DenseScalarLoop.sx: 1a0b52105c074562009dbd14087241c8e0458471fc66d490287559771ff242c0
+cache proof: .zig-cache/optimizer-oracle/cache-proof.tsv
+optimizer oracle: metamorphic qualification
+  PASS direct-or-helper: semantics and native modes agree, structure equivalent
+  PASS declaration-order: semantics and native modes agree, structure equivalent
+  PASS inline-or-nested-helper: semantics and native modes agree, structure equivalent
+  PASS scalar-or-aggregate-branch: semantics and native modes agree, structure equivalent
+  PASS while-or-for-collection: semantics and native modes agree, structure equivalent
+metamorphic report: .zig-cache/optimizer-oracle/metamorphic.tsv
+optimizer oracle: native optimizer regression qualification
+  PASS Regressions/AggregatePreparation.sx
+    protects: complete preparation observes all 26 fields across dynamic/fixed bodies, warm starts and detached results
+    contract: dominated aggregate field reads 820 -> 24
+    counter: disabling ssa_value_simplification retains 56 field reads versus 24
+    binaries: Debug 145464 bytes, Release 32952 bytes
+  PASS Regressions/ScalarExpressionReuse.sx
+    protects: identical scalar snapshots share calculations across stores while changed memory and floating edge values retain their observations
+    contract: scalar products 4 -> 2; changed-memory path retains 2
+    counter: disabling ssa_value_simplification retains 4 scalar products versus 2
+    binaries: Debug 56712 bytes, Release 32952 bytes
+  PASS Regressions/KnownViewElements.sx
+    protects: known scalar elements propagate through clamped nested views; aliases and branches retain observations
+    contract: constantViews view loads 2 -> 0, stores 0 -> 0, 2 guard(s) retained
+    counter: disabling reference_memory_elision retains 4 memory operation(s) versus 0 in constantViews; guards 6/2
+    binaries: Debug 76528 bytes, Release 32952 bytes
+  PASS IntegerArithmetic.sx
+    protects: a hot scalar loop retains target registers across a terminal output barrier
+    contract: main scalar residences ARM64 13/13, X64 13/13
+    binaries: Debug 51568 bytes, Release 32952 bytes
+  PASS AggregateScalarization.sx
+    protects: value aggregate copies, field updates and returns reduce to scalar leaves
+    contract: update value-aggregate operations 14 -> 3
+    binaries: Debug 54104 bytes, Release 32952 bytes
+  PASS ReferenceDeadStores.sx
+    protects: exact reference stores are eliminated while a possibly aliasing observation remains
+    contract: overwrite reference stores 2 -> 1; observed retains 1 load(s) and 2 store(s)
+    counter: disabling reference_memory_elision retains 2 memory operation(s) versus 1 in overwrite; guards 0/0
+    binaries: Debug 52856 bytes, Release 32952 bytes
+  PASS MutableViewMemory.sx
+    protects: exact mutable-view stores and loads coalesce without removing the surviving bounds guard
+    contract: rewrite view loads 5 -> 0, stores 2 -> 1, 1 guard(s) retained
+    counter: disabling reference_memory_elision retains 3 memory operation(s) versus 1 in rewrite; guards 3/1
+    binaries: Debug 51376 bytes, Release 32952 bytes
+  PASS OwningCollectionCopy.sx
+    protects: known owning-list values forward while copy-on-write mutation remains explicit
+    contract: main owning loads 4 -> 0, 1 mutation(s) and 0 guard(s) retained
+    counter: disabling reference_memory_elision retains 3 memory operation(s) versus 1 in main; guards 3/0
+    binaries: Debug 50888 bytes, Release 32952 bytes
+  PASS Regressions/AggregateFieldStores.sx
+    protects: scalar field reads and writes preserve snapshots, alias mutations across calls and loops, and owning collection copies
+    binaries: Debug 105592 bytes, Release 49368 bytes
+  PASS Regressions/CheckedMemoryLanes.sx
+    protects: checked aggregate loads, independent arithmetic lanes, branches and borrowed writes
+    binaries: Debug 81680 bytes, Release 49368 bytes
+  PASS Regressions/AggregateControlFlow.sx
+    protects: immutable aggregate projections across branches and loops preserve snapshots and joined returns
+    binaries: Debug 64712 bytes, Release 32952 bytes
+  PASS Regressions/FloatSsaDiamond.sx
+    protects: float32 and float64 local values preserve both incoming edges of an SSA diamond
+    binaries: Debug 67984 bytes, Release 32952 bytes
+  PASS Regressions/FloatSsaLoop.sx
+    protects: float32 and float64 local recurrences preserve entry and back-edge values
+    binaries: Debug 54240 bytes, Release 32952 bytes
+  PASS Regressions/BooleanSharedChain.sx
+    protects: shared boolean-chain blocks and reused branch values
+    contract: hot_chain blocks 13 -> 8
+    binaries: Debug 57216 bytes, Release 32952 bytes
+  PASS Regressions/SsaValueFacts.sx
+    protects: unanimous SSA joins propagate exact constants while divergent joins retain their control
+    contract: unanimous branches 2 -> 1, arithmetic 1 -> 0
+    counter: disabling ssa_value_simplification retains 2 branches and 1 arithmetic operation(s), versus 1 and 0
+    binaries: Debug 56224 bytes, Release 32952 bytes
+  PASS Regressions/SsaCriticalEdge.sx
+    protects: float32 and float64 locals cross a critical edge without memory traffic or a synthetic block
+    contract: choose64 local operations 3 -> 0, blocks 4 -> 3
+    counter: disabling ssa_promotion_post retains 3 local operation(s) versus 0, with blocks 3 versus 3
+    binaries: Debug 53744 bytes, Release 32952 bytes
+  PASS Regressions/SsaForwardedPhiLoop.sx
+    protects: a loop-carried float value crosses an inner forwarding join without falling back to local storage
+    contract: accumulate local operations 9 -> 0, blocks 7 -> 6
+    counter: disabling ssa_promotion_post retains 4 local operation(s) versus 0, with blocks 6 versus 6
+    binaries: Debug 52968 bytes, Release 32952 bytes
+  PASS Regressions/SsaDistinctPhiLoop.sx
+    protects: a float recurrence keeps distinct loop and branch joins without falling back to local storage
+    contract: accumulate local operations 13 -> 0, blocks 7 -> 7
+    counter: disabling ssa_promotion_post retains 8 local operation(s) versus 0, with blocks 7 versus 7
+    binaries: Debug 53664 bytes, Release 32952 bytes
+  PASS Regressions/IntegerConversionConstants.sx
+    protects: unanimous integer facts cross representable conversions and expose dependent constant arithmetic
+    contract: joined conversions 5 -> 0, arithmetic 4 -> 0
+    counter: disabling ssa_value_simplification retains 1 conversions and 1 arithmetic operation(s), versus 0 and 0
+    binaries: Debug 52424 bytes, Release 32952 bytes
+  PASS Regressions/IntegerShiftConstants.sx
+    protects: unanimous integer and count facts fold valid shifts while invalid counts preserve their failure
+    contract: shifted branches 2 -> 1, arithmetic 3 -> 0
+    counter: disabling ssa_value_simplification retains 2 branches and 3 arithmetic operation(s), versus 1 and 0
+    binaries: Debug 54296 bytes, Release 32952 bytes
+  PASS Regressions/IntegerRangeChecks.sx
+    protects: dominating and loop-carried bounds remove only proven overflow and conversion checks
+    contract: increment, decrement, widen_unsigned, shift_bounded, accumulate proven checks 12 -> 0; 1 unproven check(s) retained
+    counter: disabling value_range_analysis retains 10 proven check(s) versus 0; unproven checks remain 1/1
+    binaries: Debug 58656 bytes, Release 32952 bytes
+  PASS Regressions/ConstantDivision.sx
+    protects: signed and unsigned constant division, including powers of two, preserves all Silex integer widths on native backends
+    binaries: Debug 77056 bytes, Release 32952 bytes
+  PASS Regressions/X64RegionalBarriers.sx
+    protects: a hot X64 scalar loop retains volatile registers while aggregate construction and a direct call remain stack barriers
+    contract: integrate X64 regional residence 13/15, 2 spilled values, 4 frame slots/32 bytes, loop stack 0 load/0 store, barriers 1 direct/0 indirect call and 2 aggregate leaf slots
+    binaries: Debug 52792 bytes, Release 32952 bytes
+  PASS Regressions/X64IndirectAggregate.sx
+    protects: a hot X64 scalar loop retains registers before a wide aggregate and indirect call barrier
+    contract: integrate X64 regional residence 14/20, 6 spilled values, 8 frame slots/64 bytes, loop stack 0 load/0 store, barriers 0 direct/1 indirect call and 4 aggregate leaf slots
+    binaries: Debug 53080 bytes, Release 32952 bytes
+  PASS Regressions/ArrayStorageAccess.sx
+    protects: fixed, dynamic, nested, and aggregate collection storage
+    binaries: Debug 69856 bytes, Release 49368 bytes
+  PASS Regressions/BoundedCollectionLoop.sx
+    protects: proven zero-origin collection traversal without weakening other bounds checks
+    contract: sum checked collection loads 1 -> 0
+    binaries: Debug 53976 bytes, Release 32952 bytes
+  PASS Regressions/SequentialBoundedLoops.sx
+    protects: zero-origin recovery after a sequential loop resets its reused induction variable
+    contract: sum_sequential checked collection loads 2 -> 1
+    binaries: Debug 54008 bytes, Release 32952 bytes
+  PASS Regressions/DenseScalarLoop.sx
+    protects: class count accessor inlining and redundant scalar loads inside a dense loop
+    contract: integrate collection loads 4 -> 2, calls 1 -> 0
+    binaries: Debug 56432 bytes, Release 32952 bytes
+  PASS Regressions/LoopExitFloatLaneXY.sx
+    protects: XY loop recurrences become stable vectorizable snapshots after loop exit
+    contract: finish SLP width 2 (required >= 2), ARM64 pairs 15 (required=yes), X64 pairs 0 (required=no)
+    binaries: Debug 53624 bytes, Release 32952 bytes
+  PASS Regressions/FloatLaneXYZ.sx
+    protects: portable XYZ lane grouping through loads and arithmetic
+    contract: transform SLP width 3 (required >= 3), ARM64 pairs 3 (required=no), X64 pairs 0 (required=no)
+    binaries: Debug 51408 bytes, Release 32952 bytes
+  PASS Regressions/LoopExitFloatLaneXYZW.sx
+    protects: XYZW loop recurrences become two stable vectorizable pairs after loop exit
+    contract: finish SLP width 4 (required >= 4), ARM64 pairs 30 (required=yes), X64 pairs 0 (required=no)
+    binaries: Debug 55496 bytes, Release 32952 bytes
+  PASS Regressions/TextOutputIntegrity.sx
+    protects: complete text output through branches and collection iteration
+    binaries: Debug 54312 bytes, Release 32952 bytes
+  PASS Regressions/BoidsKernel.sx
+    protects: boids-like arrays, shared boolean chains, and native XY/Z realization
+    contract: steer SLP width 3 (required >= 3), ARM64 pairs 15 (required=yes), X64 pairs 6 (required=yes)
+    binaries: Debug 58144 bytes, Release 32952 bytes
+  PASS Regressions/Boids2DSteering.sx
+    protects: aggregate vector parameters keep pointer-terminated collection cursors disjoint from cached float literals
+    binaries: Debug 60208 bytes, Release 32952 bytes
+  PASS Regressions/ReversedFloatRecurrence.sx
+    protects: reversed float recurrence copies preserve lane order and exact unaligned compact-field loads
+    binaries: Debug 53544 bytes, Release 32952 bytes
+  PASS Regressions/CollectionCursor.sx
+    protects: a generic unit-stride float collection loop retains a post-indexed pointer-terminated cursor
+    contract: accumulate ARM64 cursor post-indexed=yes, pointer-terminated=yes
+    binaries: Debug 54992 bytes, Release 32952 bytes
+  PASS Regressions/ReferenceCursorReuse.sx
+    protects: ascending mutable view references preserve checked bounds and reuse stable element addresses across field writes
+    binaries: Debug 55592 bytes, Release 32952 bytes
+  PASS Regressions/MultipleReferenceCursors.sx
+    protects: independent mutable views carry every checked ascending element address in one loop
+    contract: shift ARM64 reference cursors unchecked=0, checked=2
+    binaries: Debug 53400 bytes, Release 32952 bytes
+  PASS Regressions/AggregateParameterResidence.sx
+    protects: read-only aggregate parameters keep scalar leaves in ARM64 registers unless storage is required
+    contract: evaluate ARM64 aggregate parameter residence 12/12
+    binaries: Debug 51120 bytes, Release 32952 bytes
+  PASS Regressions/LoopForms.sx
+    protects: signed and unsigned inductions, nested control, break, continue, dynamic bounds, strided access and contiguous recurrence
+    binaries: Debug 59352 bytes, Release 32952 bytes
+  PASS Regressions/CallEffectsInlining.sx
+    protects: small reference and checked-view callees inline into the final caller without losing their memory effects
+    contract: main calls 2 -> 0, reference stores 1 -> 0 after scalar replacement
+    counter: disabling value_inlining retains 2 call(s) versus 0 in main
+    binaries: Debug 52568 bytes, Release 32952 bytes
+  PASS Regressions/BranchingReferenceInlining.sx
+    protects: branching reference callees inline at hot loop sites while preserving their writes
+    contract: main calls 1 -> 0, reference stores 2 -> 2 after scalar replacement
+    counter: disabling value_inlining retains 1 call(s) versus 0 in main
+    binaries: Debug 53528 bytes, Release 32952 bytes
+  PASS Regressions/PureMathReferenceInlining.sx
+    protects: proven pure scalar-math effects remain exact while a native call barrier stays outside a branching reference caller
+    contract: main calls 1 -> 1, reference stores 4 -> 4 after scalar replacement
+    binaries: Debug 57368 bytes, Release 51072 bytes
+  PASS Regressions/HotReferenceLeafClosure.sx
+    protects: a pressure-heavy hot set of reference leaf callees stays out of line until expanded caller residences are proven profitable
+    contract: integrate calls 2 -> 2, reference stores 9 -> 9 after scalar replacement
+    binaries: Debug 85976 bytes, Release 67640 bytes
+  PASS Regressions/DynamicFieldClearAppend.sx
+    protects: a loop-local class call bound stays defined before clearing and rebuilding a dynamic field
+    binaries: Debug 75752 bytes, Release 49368 bytes
+qualified: 45 fixed regressions and 8 generated native scenarios
+optimizer oracle: deterministic numeric fuzzing
+verified: 128 generated programs (seed 1..128)
+optimizer oracle: LLVM differential fuzzing
+verified: 32 LLVM programs (seed 1..32)
+optimizer oracle: Silex Release versus LLVM -O3
+artifacts: .zig-cache/optimizer-oracle
+timing host: macos aarch64 on arm64, CPU Apple M3 Pro, translated=false, mode=diagnostic
+  PASS Regressions/AggregatePreparation.sx
+  IR: 1839 -> 649 instructions, 27 -> 20 blocks, 1744 -> 2941 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 35 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [high 84] control-flow graph simplification
+      evidence: LLVM retains 3 block(s); Silex retains 20.
+      action: Merge equivalent blocks and branches after propagation while preserving reused values.
+    [high 82] interprocedural specialization and inlining
+      evidence: LLVM retains 6 internal call(s); Silex retains 12.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 32952 bytes, LLVM 33544 bytes
+  timing: skipped correctness probe
+  PASS Regressions/ScalarExpressionReuse.sx
+  IR: 125 -> 96 instructions, 14 -> 14 blocks, 123 -> 171 values
+  LLVM guidance:
+    [high 89] scalar replacement of value aggregates
+      evidence: LLVM retains 0 value-aggregate operation(s); Silex retains 5.
+      action: Decompose non-escaping value aggregates into scalar leaves while preserving snapshots and observable copies.
+    [low 69] redundant conversion elimination
+      evidence: LLVM retains 0 conversion(s); Silex retains 1.
+      action: Compose consecutive conversions and remove those whose source range already fits the target.
+  size: Silex 32952 bytes, LLVM 33704 bytes
+  timing: skipped correctness probe
+  PASS Regressions/KnownViewElements.sx
+  IR: 167 -> 103 instructions, 12 -> 11 blocks, 155 -> 179 values
+  LLVM guidance:
+    [high 87] proven safety-check elimination
+      evidence: LLVM retains 8 safety guard(s); Silex retains 11.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [high 84] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 8.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 32952 bytes, LLVM 33720 bytes
+  timing: skipped correctness probe
+  PASS DampedIntegration.sx
+  IR: 386 -> 436 instructions, 55 -> 46 blocks, 351 -> 554 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 87 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 97] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 24.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 16 block(s) with 4 added PHI node(s); Silex retains 42 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 78] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 2.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 49368 bytes, LLVM 33576 bytes
+  timing: skipped correctness probe
+  PASS PreparationMasses.sx
+  IR: 1034 -> 889 instructions, 156 -> 107 blocks, 938 -> 1329 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 95 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 98] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 65.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 53 block(s) with 22 added PHI node(s); Silex retains 107 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 2 internal call(s); Silex retains 3.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 65784 bytes, LLVM 33640 bytes
+  timing: skipped correctness probe
+  PASS AggregateViewAliasing.sx
+  IR: 304 -> 410 instructions, 46 -> 32 blocks, 264 -> 457 values
+  LLVM guidance:
+    [critical 98] proven safety-check elimination
+      evidence: LLVM retains 6 safety guard(s); Silex retains 50.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 95] alias-aware reference-memory elimination
+      evidence: LLVM retains at most 24 comparable reference-memory operation(s); Silex retains 34.
+      action: Remove dead reference reads and stores without forwarding values across writes that may alias.
+    [high 84] control-flow graph simplification
+      evidence: LLVM retains 18 block(s); Silex retains 30.
+      action: Merge equivalent blocks and branches after propagation while preserving reused values.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 1.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+    [medium 70] redundant conversion elimination
+      evidence: LLVM retains 1 conversion(s); Silex retains 3.
+      action: Compose consecutive conversions and remove those whose source range already fits the target.
+  size: Silex 65784 bytes, LLVM 33608 bytes
+  timing: skipped correctness probe
+  PASS IntegerArithmetic.sx
+  IR: 22 -> 29 instructions, 5 -> 8 blocks, 19 -> 37 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  Silex Release: median 15345636 ns, MAD 5906 ppm, p10..p90 15255000..16871101 ns
+  LLVM -O3: median 17918881 ns, MAD 8808 ppm, p10..p90 17761047..18827630 ns
+  relative median: Silex 85% of LLVM time
+  paired median interval: 824556..897800 ppm at 968750 ppm one-sided confidence (1000000 = parity)
+  half-window shifts: Silex 90418 ppm, LLVM 48266 ppm, ratio 43325 ppm (qualified maximum 100000 ppm)
+  PASS BranchingLoop.sx
+  IR: 35 -> 48 instructions, 8 -> 14 blocks, 29 -> 61 values
+  LLVM guidance:
+    [medium 70] range and signedness analysis
+      evidence: LLVM retains 2 signed and 6 unsigned remainder operation(s); Silex retains 4 signed and 0 unsigned.
+      action: Propagate ranges, signedness, and non-negativity to select simpler operations and prove checks.
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  Silex Release: median 15559006 ns, MAD 10393 ppm, p10..p90 15397298..16846604 ns
+  LLVM -O3: median 17489680 ns, MAD 22890 ppm, p10..p90 16982055..18450451 ns
+  relative median: Silex 88% of LLVM time
+  paired median interval: 843285..963231 ppm at 968750 ppm one-sided confidence (1000000 = parity)
+  half-window shifts: Silex 56494 ppm, LLVM 54933 ppm, ratio 76767 ppm (qualified maximum 100000 ppm)
+  PASS FloatArithmetic.sx
+  IR: 22 -> 34 instructions, 5 -> 8 blocks, 19 -> 35 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  Silex Release: median 10270115 ns, MAD 2365 ppm, p10..p90 10239763..11086833 ns
+  LLVM -O3: median 10331921 ns, MAD 1693 ppm, p10..p90 10311796..10473981 ns
+  relative median: Silex 99% of LLVM time
+  paired median interval: 991666..1058511 ppm at 968750 ppm one-sided confidence (1000000 = parity)
+  half-window shifts: Silex 75857 ppm, LLVM 13563 ppm, ratio 61876 ppm (qualified maximum 100000 ppm)
+  PASS IntegerControlFlow.sx
+  IR: 20 -> 12 instructions, 5 -> 5 blocks, 17 -> 38 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS IntegerWidths.sx
+  IR: 9 -> 7 instructions, 2 -> 2 blocks, 10 -> 15 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  timing: skipped correctness probe
+  PASS UnsignedBitwise.sx
+  IR: 10 -> 9 instructions, 2 -> 2 blocks, 10 -> 17 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS AggregateScalarization.sx
+  IR: 72 -> 24 instructions, 6 -> 9 blocks, 67 -> 262 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33544 bytes
+  timing: skipped correctness probe
+  PASS ReferenceAliasing.sx
+  IR: 58 -> 29 instructions, 4 -> 4 blocks, 57 -> 159 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33576 bytes
+  timing: skipped correctness probe
+  PASS ReferenceDeadStores.sx
+  IR: 63 -> 15 instructions, 3 -> 3 blocks, 60 -> 93 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33544 bytes
+  timing: skipped correctness probe
+  PASS ReadonlyViewMemory.sx
+  IR: 16 -> 8 instructions, 2 -> 2 blocks, 16 -> 25 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS MutableViewMemory.sx
+  IR: 34 -> 15 instructions, 2 -> 2 blocks, 32 -> 35 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS NestedAggregateWidths.sx
+  IR: 72 -> 17 instructions, 2 -> 2 blocks, 67 -> 81 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS OwningCollectionCopy.sx
+  IR: 28 -> 14 instructions, 1 -> 1 blocks, 21 -> 21 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33480 bytes
+  timing: skipped correctness probe
+  PASS Regressions/LoopExitFloatLaneXY.sx
+  LLVM oracle: float vector width 2 (required >= 2)
+  Silex ARM64: finish has 15 native XY pair(s)
+  IR: 67 -> 90 instructions, 5 -> 8 blocks, 58 -> 122 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS Regressions/FloatLaneXYZ.sx
+  IR: 35 -> 19 instructions, 2 -> 2 blocks, 33 -> 52 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33504 bytes
+  timing: skipped correctness probe
+  PASS Regressions/LoopExitFloatLaneXYZW.sx
+  LLVM oracle: float vector width 4 (required >= 4)
+  Silex ARM64: finish has 30 native XY pair(s)
+  IR: 118 -> 160 instructions, 5 -> 8 blocks, 101 -> 249 values
+  LLVM guidance: no missing transformation identified
+  size: Silex 32952 bytes, LLVM 33512 bytes
+  timing: skipped correctness probe
+  PASS Regressions/PureMathReferenceInlining.sx
+  IR: 4445 -> 7388 instructions, 939 -> 1614 blocks, 4753 -> 12141 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 21 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 94] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 6 block(s) with 5 added PHI node(s); Silex retains 19 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [critical 93] alias-aware reference-memory elimination
+      evidence: LLVM retains at most 5 comparable reference-memory operation(s); Silex retains 13.
+      action: Remove dead reference reads and stores without forwarding values across writes that may alias.
+    [medium 77] interprocedural specialization and inlining
+      evidence: LLVM retains 0 internal call(s); Silex retains 1.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 51056 bytes, LLVM 33616 bytes
+  timing: skipped correctness probe
+  PASS Regressions/HotReferenceLeafClosure.sx
+  IR: 4796 -> 7693 instructions, 953 -> 1623 blocks, 5078 -> 12555 values
+  LLVM guidance:
+    [critical 100] loop and lane vectorization
+      evidence: LLVM introduces 101 vector operation(s) absent from the initial IR.
+      action: Extend SLP and dependence analysis to loops where LLVM materializes vector operations.
+    [critical 94] proven safety-check elimination
+      evidence: LLVM retains 1 safety guard(s); Silex retains 17.
+      action: Use range and dominance proofs to remove only checks already implied by control flow.
+    [critical 90] alias-aware reference-memory elimination
+      evidence: LLVM retains at most 43 comparable reference-memory operation(s); Silex retains 48.
+      action: Remove dead reference reads and stores without forwarding values across writes that may alias.
+    [high 86] loop induction variables and PHI nodes
+      evidence: LLVM rotates the loop and retains 24 block(s) with 6 added PHI node(s); Silex retains 28 block(s).
+      action: Recognize induction variables and represent them with PHI nodes to expose loop invariants.
+    [medium 78] interprocedural specialization and inlining
+      evidence: LLVM retains 1 internal call(s); Silex retains 3.
+      action: Specialize small calls for known arguments before inlining and dead-code elimination.
+  size: Silex 67632 bytes, LLVM 33792 bytes
+  timing: skipped correctness probe
+machine report: .zig-cache/optimizer-oracle/report.tsv
+parity report: .zig-cache/optimizer-oracle/parity.tsv
+ordered timing observations: .zig-cache/optimizer-oracle/timing-observations.tsv
+timing profile: .zig-cache/optimizer-oracle/timing-profile.tsv
+optimizer oracle: ranked Silex optimization priorities
+  1. interprocedural specialization and inlining (7 workloads, score 553)
+  2. loop and lane vectorization (5 workloads, score 500)
+  3. proven safety-check elimination (5 workloads, score 474)
+  4. loop induction variables and PHI nodes (4 workloads, score 368)
+  5. alias-aware reference-memory elimination (3 workloads, score 278)
+  6. control-flow graph simplification (2 workloads, score 168)
+  7. redundant conversion elimination (2 workloads, score 139)
+  8. scalar replacement of value aggregates (1 workloads, score 89)
+  9. range and signedness analysis (1 workloads, score 70)
+optimization guidance: .zig-cache/optimizer-oracle/opportunities.tsv
+optimizer oracle: optimizer qualification gate passed
+optimizer oracle: semantic verification
+  PASS Regressions/AggregatePreparation.sx (795 bytes output)
+  PASS Regressions/ScalarExpressionReuse.sx (40 bytes output)
+  PASS Regressions/KnownViewElements.sx (35 bytes output)
+  PASS DampedIntegration.sx (45 bytes output)
+  PASS PreparationMasses.sx (105 bytes output)
+  PASS AggregateViewAliasing.sx (45 bytes output)
+  PASS IntegerArithmetic.sx (7 bytes output)
+  PASS BranchingLoop.sx (7 bytes output)
+  PASS FloatArithmetic.sx (5 bytes output)
+  PASS IntegerControlFlow.sx (6 bytes output)
+  PASS IntegerWidths.sx (3 bytes output)
+  PASS UnsignedBitwise.sx (11 bytes output)
+  PASS AggregateScalarization.sx (6 bytes output)
+  PASS ReferenceAliasing.sx (6 bytes output)
+  PASS ReferenceDeadStores.sx (9 bytes output)
+  PASS ReadonlyViewMemory.sx (3 bytes output)
+  PASS MutableViewMemory.sx (3 bytes output)
+  PASS NestedAggregateWidths.sx (15 bytes output)
+  PASS OwningCollectionCopy.sx (10 bytes output)
+  PASS Regressions/LoopExitFloatLaneXY.sx (20 bytes output)
+  PASS Regressions/FloatLaneXYZ.sx (15 bytes output)
+  PASS Regressions/LoopExitFloatLaneXYZW.sx (40 bytes output)
+  PASS Regressions/PureMathReferenceInlining.sx (20 bytes output)
+  PASS Regressions/HotReferenceLeafClosure.sx (50 bytes output)
+verified: 24 corpus programs
+optimizer oracle: optimizer quick admission passed
+optimizer oracle: qualified adversarial interaction campaign
+robustness report: .zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv
+campaign record: .zig-cache/optimizer-oracle/robustness/run-qualified-1789125120257307000.tsv (48427839042 ns)
+qualified: 144 pairwise cases, 5 risk triplets, 41 native cases, 4 negative cases
+optimizer oracle: cache invalidation and concurrency stress passed
+optimizer oracle: large package graph and function stress passed
+test
++- run test 1453 pass, 1 fail (1454 total)
+<source>:6:11: runtime error: collection index -3 is out of bounds for count <source>:4:26: runtime error: collection index 2 is out of bounds for count 
+error: 'Optimize.DominatedValuesTests.test.dominated fields preserve aliases signed zero and partial availability' failed:
+       invalid view index 2 count 2
+       invalid view index -3 count 2
+       invalid view index 2 count 2
+       invalid view index -3 count 2
+       invalid view index 2 count 
+failed command: ./.zig-cache/o/4cb6c9ebff2aa1078a86efba726fd6f7/test --cache-dir=./.zig-cache --seed=0x85936583 --listen=-
+
+ok - ControlFlow/AnonymousScopes.sx :: anonymous scopes execute once and release bound receiver borrows
+ok - ControlFlow/AnonymousScopes.sx :: successive anonymous scopes can reuse local names
+ok - ControlFlow/BranchesAndLoops.sx :: conditional branches select one path
+ok - ControlFlow/BranchesAndLoops.sx :: while break and continue control the nearest loop
+ok - ControlFlow/BranchesAndLoops.sx :: range and indexed collection iteration are complete
+ok - ControlFlow/CustomIterators.sx :: custom structure iterator runs to completion
+ok - ControlFlow/CustomIterators.sx :: custom class iterator shares its visible progress
+ok - ControlFlow/CustomIterators.sx :: custom iterator source is evaluated once and honors control flow
+ok - ControlFlow/CustomIterators.sx :: custom iterator accepts explicit cursor transfer and copied values
+ok - ControlFlow/LiteralMatch.sx :: literal match evaluates its subject once and selects integer values
+ok - ControlFlow/LiteralMatch.sx :: literal match selects strings and proves exhaustive booleans
+ok - ControlFlow/LiteralMatch.sx :: imperative literal match uses isolated branches without fallthrough
+ok - ControlFlow/MatchExpressive.sx :: ignored payloads and ordered guards classify complete matches
+ok - ControlFlow/MatchValues.sx :: ordered conditions select the first true branch
+ok - ControlFlow/MatchValues.sx :: yield resolves recursive value matches at their nearest level
+ok - ControlFlow/MatchValues.sx :: statement matches accept concise call branches
+ok - ControlFlow/MatchValues.sx :: return exits a mutating method while yield resolves its nearest match
+ok - ControlFlow/Slices.sx :: copied slice is independent and fully iterable
+ok - ControlFlow/Slices.sx :: slice bounds normalize before control flow
+ok - ControlFlow/Slices.sx :: shared slice view reads its source and crosses a parameter
+ok - ControlFlow/Slices.sx :: mutable slice view writes through a complete iteration
+ok - ControlFlow/StringIteration.sx :: string iteration yields Unicode scalars
+ok - ControlFlow/StringIteration.sx :: string iteration covers two three four and combining scalars
+ok - ControlFlow/StringIteration.sx :: empty string skips its body
+ok - ControlFlow/StringIteration.sx :: string source is evaluated once and obeys loop control
+ok - Functions/Callbacks/BoundMethods.sx :: instance method extraction preserves parameters and result
+ok - Functions/Callbacks/BoundMethods.sx :: bound mutating method writes through to its receiver
+ok - Functions/Callbacks/BoundMethods.sx :: temporary receiver is evaluated once when extracting a read method
+ok - Functions/Callbacks/BoundMethods.sx :: expected callback type selects overloads and callable defaults
+ok - Functions/Callbacks/Captures.sx :: anonymous callback captures immutable context
+ok - Functions/Callbacks/Captures.sx :: anonymous callback mutates surrounding context
+ok - Functions/Callbacks/Captures.sx :: copies of a closure share captured variables
+ok - Functions/Callbacks/Captures.sx :: capturing callback stored in a local structure
+ok - Functions/Callbacks/Levels.sx :: callback crosses several synchronous call levels
+ok - Functions/Callbacks/Levels.sx :: method forwards a capturing callback through helpers
+ok - Functions/Callbacks/Levels.sx :: callbacks form a complete transformation pipeline
+ok - Functions/Callbacks/Levels.sx :: nested anonymous callbacks capture both lexical levels
+ok - Functions/Callbacks/ModesAndGenerics.sx :: callback signatures preserve value read and mutable modes
+ok - Functions/Callbacks/ModesAndGenerics.sx :: generic callbacks infer input and output types
+ok - Functions/Callbacks/ModesAndGenerics.sx :: void callback accepts several parameters and captures context
+ok - Functions/Callbacks/Positions.sx :: callback variables parameters and returns
+ok - Functions/Callbacks/Positions.sx :: callbacks stored in structure and class fields
+ok - Functions/Callbacks/Positions.sx :: callback copies remain callable values
+ok - Functions/Callbacks/Positions.sx :: callback locals shadow outer bindings without creating captures
+ok - Functions/Calls.sx :: function overload named and default arguments
+ok - Functions/Calls.sx :: generic function inference and explicit specialization
+ok - Native/AggregateResultPreservesLocals.sx :: preserve fixed collection addresses after a large aggregate result
+ok - Native/DistributionSmoke.sx :: standalone compiler evaluates the distribution fixture
+ok - Native/FusedFloatArithmetic.sx :: negated products preserve their values when adjacent arithmetic can fuse
+ok - Native/FusedFloatArithmetic.sx :: fused arithmetic uses hoisted loop constants
+ok - Native/LeafMemoryKernel.sx :: leaf memory arithmetic preserves view writes and reference siblings
+ok - Native/LeafMemoryKernel.sx :: resident view and reference loads preserve float64 and negative indices
+ok - Native/MultipleReferenceCursors.sx :: parallel mutable views preserve their descriptors across aggregate writes
+ok - Native/NativePortability.sx :: execute direct indirect and dynamic calls beyond native registers
+ok - Native/NativePortability.sx :: preserve paired float32 arithmetic on native
+ok - Native/NativePortability.sx :: mutate a class-owned native list without changing its snapshot
+ok - Native/NativePortability.sx :: replace class elements in a class-owned native list
+ok - Native/NativePortability.sx :: preserve embedded byte contents on native
+ok - Native/NativePortability.sx :: format native floats through the standalone runtime
+ok - Native/NativePortability.sx :: convert native float precision in both directions
+ok - Native/NativePortability.sx :: replace and preserve an aliased native list
+ok - Native/NativePortability.sx :: swap and reverse a native list
+ok - Native/NativePortability.sx :: grow a native list at every position
+ok - Native/NativePortability.sx :: remove native list elements from every position
+ok - Native/NativePortability.sx :: slice view mutate and clear native lists
+ok - Native/NativePortability.sx :: mutable aggregate view detaches shared native list
+copy state drop
+copy state drop
+ok - Native/NativePortability.sx :: deep-copy repeated native class roots without collections
+native cycle drop
+native cycle drop
+ok - Native/NativePortability.sx :: finalize a direct native class cycle
+native cycle drop
+native cycle drop
+ok - Native/NativePortability.sx :: finalize a native class cycle through lists
+native cycle drop
+native cycle drop
+ok - Native/NativePortability.sx :: finalize a native class cycle through protocols
+ok - Native/NativePortability.sx :: execute the complete native collection mutation slice
+copy state drop
+copy state drop
+ok - Native/NativePortability.sx :: execute native ownership and deep-copy runtime
+ok - Native/NativePortability.sx :: preserve resource aggregates across native list growth
+ok - Native/NativePortability.sx :: serialize native mutations with mutex
+native cycle drop
+native cycle drop
+native cycle drop
+native cycle drop
+native cycle drop
+native cycle drop
+ok - Native/NativePortability.sx :: finalize native cycles across direct collection and protocol edges
+ok - Native/ScalarMathMinMax.sx :: scalar float32 minimum and maximum preserve exact edge semantics
+ok - Native/ScalarMathMinMax.sx :: scalar float64 minimum and maximum preserve exact edge semantics
+ok - Ownership/ClassFieldListReplacementPreservesOwnership.sx :: replacing elements preserves ownership of a class field list
+ok - Ownership/ClassFieldListReplacementPreservesOwnership.sx :: indexed assignment releases only the replaced class element
+ok - Ownership/ClassOwnedCollections.sx :: a returned class keeps its owned dynamic collection alive
+ok - Ownership/ClassOwnedCollections.sx :: an enum payload keeps its owned dynamic collection alive
+ok - Ownership/CollectionTemporaryInsertion.sx :: collection insertion transfers resource-bearing temporaries
+ok - Ownership/CollectionTemporaryInsertion.sx :: class field insertion converts transferred roots to owned edges
+ok - Ownership/CollectionTemporaryInsertion.sx :: ignored replacements release removed resource values
+ok - Ownership/CompositeResourceCopies.sx :: a returned structure keeps its owned resources alive
+ok - Ownership/CompositeResourceCopies.sx :: iterating enum values retains their resource payloads
+ok - Ownership/ConstructorResourceTransfer.sx :: constructor parameters transfer into resource-bearing structure fields
+ok - Ownership/ConstructorResourceTransfer.sx :: constructor initialization retains only assigned class fields
+ok - Ownership/CopyMoveAndReferences.sx :: ordinary structure copies and explicit moves
+ok - Ownership/CopyMoveAndReferences.sx :: read and mutable references operate on ordinary places
+ok - Ownership/CopyMoveAndReferences.sx :: copy detaches reached class identity
+ok - Ownership/ListFieldReplacementStress.sx :: repeatedly replace owned list fields
+ok - Ownership/MemoryReclamationStress.sx :: reclaim cyclic and deeply copied memory under sustained load
+ok - Ownership/NestedClassCollections.sx :: nested list ownership survives static construction
+ok - Ownership/NestedClassCollections.sx :: continue keeps resources declared outside a mutating method loop alive
+ok - Ownership/NestedStructMutationPreservesClassIdentity.sx :: mutating a nested structure preserves its owning class identity
+ok - Reflection/Values.sx :: reflect enums structures and functions
+ok - Syntax/Comments.sx :: line and nested block comments are ignored
+ok - Syntax/Comments.sx :: comment markers remain string content
+ok - Types/Bool/Operators.sx :: bool logical operators and equality
+ok - Types/Bool/Operators.sx :: bool logical operators short circuit
+ok - Types/Bool/Positions.sx :: bool field parameter and return positions
+ok - Types/Bool/Positions.sx :: bool collection and callback positions
+ok - Types/Bool/Variables.sx :: bool local variables and intrinsic value
+ok - Types/Bool/Variables.sx :: bool assignments preserve independent values
+ok - Types/Classes/Identity.sx :: class value parameters preserve shared identity
+ok - Types/Classes/Identity.sx :: mutable class references can replace caller storage
+ok - Types/Classes/Identity.sx :: a mutating final override updates the whole virtual contract
+ok - Types/Enums/Values.sx :: associated enum construction comparison and matching
+ok - Types/Enums/Values.sx :: raw and generic enum positions
+ok - Types/Floats/Conversions.sx :: floating precision widening
+ok - Types/Floats/Conversions.sx :: checked explicit numeric conversions
+ok - Types/Floats/Operators.sx :: floating arithmetic and comparisons
+ok - Types/Floats/Operators.sx :: floating compound assignments
+ok - Types/Floats/Positions.sx :: float field parameter and return positions
+ok - Types/Floats/Positions.sx :: float collection and callback positions
+ok - Types/Floats/Positions.sx :: float32 aggregate lists preserve append replacement and removal
+ok - Types/Floats/Positions.sx :: float32 aggregate slices preserve compact values and independence
+ok - Types/Floats/Variables.sx :: floating point local variables and intrinsic values
+ok - Types/Floats/Variables.sx :: floating point exponent literals
+ok - Types/Floats/Variables.sx :: floating assignments preserve independent values
+ok - Types/Integers/Conversions.sx :: integer widening within one signedness family
+ok - Types/Integers/Conversions.sx :: checked explicit integer conversions
+ok - Types/Integers/Operators.sx :: signed integer arithmetic and comparisons
+ok - Types/Integers/Operators.sx :: integer compound assignments increment and decrement
+ok - Types/Integers/Operators.sx :: unsigned integer bitwise operators
+ok - Types/Integers/Positions.sx :: integer field parameter and return positions
+ok - Types/Integers/Positions.sx :: integer collection and callback positions
+ok - Types/Integers/Variables.sx :: signed integer local variables
+ok - Types/Integers/Variables.sx :: unsigned integer local variables
+ok - Types/Integers/Variables.sx :: integer literal forms and separators
+ok - Types/Optionals/Expressive.sx :: safe assignment forced extraction and fallback compose
+ok - Types/Optionals/Expressive.sx :: nested optionals preserve three distinct states
+ok - Types/Optionals/Values.sx :: optional intrinsic promotion comparison and binding
+ok - Types/Optionals/Values.sx :: optional refinement and safe mutation
+ok - Types/Optionals/Values.sx :: optionals compose with collections
+ok - Types/Optionals/Values.sx :: collection literals use the payload type of an optional context
+ok - Types/Str/Callbacks.sx :: str named callbacks
+ok - Types/Str/Callbacks.sx :: str anonymous callbacks and captures
+ok - Types/Str/Callbacks.sx :: str callbacks stored in fields
+ok - Types/Str/Collections.sx :: str fixed arrays and lists
+ok - Types/Str/Collections.sx :: str collections preserve copied values
+ok - Types/Str/Collections.sx :: str list iteration is complete
+ok - Types/Str/Composition.sx :: str optional positions
+ok - Types/Str/Composition.sx :: str enum payload positions
+ok - Types/Str/Composition.sx :: str generic and tuple positions
+ok - Types/Str/Fields.sx :: str structure fields
+ok - Types/Str/Fields.sx :: str nested structure fields
+ok - Types/Str/Fields.sx :: str class fields
+ok - Types/Str/Operators.sx :: str concatenation operand positions
+ok - Types/Str/Operators.sx :: str compound concatenation
+ok - Types/Str/Operators.sx :: str equality and interpolation
+ok - Types/Str/Operators.sx :: str unicode scalar count
+ok - Types/Str/Parameters.sx :: str value and read parameters
+ok - Types/Str/Parameters.sx :: str mutable parameters replace the caller value
+ok - Types/Str/Parameters.sx :: str named and default arguments
+ok - Types/Str/Returns.sx :: str return positions
+ok - Types/Str/Variables.sx :: str local variables
+ok - Types/Str/Variables.sx :: str assignments preserve independent values
+ok - Types/Str/Variables.sx :: block strings remove structural indentation and interpolate values
+ok - Types/Structures/Initialization.sx :: field initializer expressions run for each instance
+ok - Types/Structures/Initialization.sx :: constructors initialize non-intrinsic structure fields
+ok - Types/Structures/Initialization.sx :: constructors initialize non-intrinsic class fields
+ok - Types/Structures/Initialization.sx :: constructors may loop while later fields remain pending
+ok - Types/Structures/Methods.sx :: structure instance and static methods
+ok - Types/Structures/Methods.sx :: generic structure positions
+ok - Types/Structures/Methods.sx :: compound field assignment preserves sibling method mutation
+ok - Types/Structures/Methods.sx :: match is a contextual method name
+ok - Types/Structures/Operators.sx :: operator functions cover vector arithmetic and scalar orientation
+ok - Types/Structures/Operators.sx :: compound assignments derive from binary operator functions
+ok - Types/Structures/Positions.sx :: copyable structure in every ordinary value position
+ok - Types/Structures/Positions.sx :: structure fields copy independently
+ok - Types/Structures/Properties.sx :: computed property reads through its getter
+ok - Types/Structures/Properties.sx :: static let property initializes its own backing storage once
+ok - Types/Structures/Properties.sx :: exact property assignment invokes its setter
+ok - Types/Structures/Properties.sx :: property initializer and implicit setter share one backing value
+ok - Types/Structures/Properties.sx :: stored fields and accessors satisfy protocol property requirements
+ok - Types/Structures/Properties.sx :: nested mutation follows class identity without invoking a setter
+ok - Types/Structures/ZeroSized.sx :: zero-sized structures can be stored in lists
+ok - Types/Structures/ZeroSized.sx :: zero-sized structures cross protocol erasure
+ok - Types/Structures/ZeroSized.sx :: zero-sized structures inhabit generic optionals
+ok - Types/Tuples/Values.sx :: named tuple fields return and destructuring
+ok - Types/Tuples/Values.sx :: positional tuple parameters returns and collections
+183 passed; 0 failed in 63 files
+math-call-residence: pass
+math-call-residence: pass
+Build Summary: 50/53 steps succeeded (1 failed); 2134/2135 tests passed (1 failed)
+check transitive failure
++- run test 1453 pass, 1 fail (1454 total)
+|  +- compile test ReleaseFast native success 1m MaxRSS:4G
+|     +- options cached
+|     +- WriteFile silex-float-runtime.macho cached
+|     |  +- compile exe silex-float-runtime ReleaseSmall aarch64-macos cached 111ms MaxRSS:35M
+|     +- WriteFile silex-float-runtime-linux-arm64.elf cached
+|     |  +- compile exe silex-float-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 116ms MaxRSS:35M
+|     +- WriteFile silex-float-runtime-x64.elf cached
+|     |  +- compile exe silex-float-runtime-x64 ReleaseSmall x86_64-linux cached 107ms MaxRSS:35M
+|     +- WriteFile silex-float-runtime-macos-x64.macho cached
+|     |  +- compile exe silex-float-runtime-macos-x64 ReleaseSmall x86_64-macos cached 85ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime.macho cached
+|     |  +- compile exe silex-deep-copy-runtime ReleaseSmall aarch64-macos cached 99ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime-linux-arm64.elf cached
+|     |  +- compile exe silex-deep-copy-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 110ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime-x64.elf cached
+|     |  +- compile exe silex-deep-copy-runtime-x64 ReleaseSmall x86_64-linux cached 74ms MaxRSS:35M
+|     +- WriteFile silex-deep-copy-runtime-macos-x64.macho cached
+|     |  +- compile exe silex-deep-copy-runtime-macos-x64 ReleaseSmall x86_64-macos cached 78ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime.macho cached
+|     |  +- compile exe silex-cycle-runtime ReleaseSmall aarch64-macos cached 92ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime-linux-arm64.elf cached
+|     |  +- compile exe silex-cycle-runtime-linux-arm64 ReleaseSmall aarch64-linux cached 104ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime-x64.elf cached
+|     |  +- compile exe silex-cycle-runtime-x64 ReleaseSmall x86_64-linux cached 80ms MaxRSS:35M
+|     +- WriteFile silex-cycle-runtime-macos-x64.macho cached
+|        +- compile exe silex-cycle-runtime-macos-x64 ReleaseSmall x86_64-macos cached 98ms MaxRSS:35M
++- run test 2 pass (2 total) 24ms MaxRSS:2M
+|  +- compile test Debug aarch64-macos cached 55ms MaxRSS:35M
++- run test 5 pass (5 total) 5ms MaxRSS:2M
+|  +- compile test Debug aarch64-macos cached 56ms MaxRSS:35M
++- run exe silex success 1m
+|  +- compile exe silex ReleaseFast native success 1m MaxRSS:3G
+|     +- options (reused)
+|     +- WriteFile silex-float-runtime.macho (+1 more reused dependencies)
+|     +- WriteFile silex-float-runtime-linux-arm64.elf (+1 more reused dependencies)
+|     +- WriteFile silex-float-runtime-x64.elf (+1 more reused dependencies)
+|     +- WriteFile silex-float-runtime-macos-x64.macho (+1 more reused dependencies)
+|     +- WriteFile silex-deep-copy-runtime.macho (+1 more reused dependencies)
+|     +- WriteFile silex-deep-copy-runtime-linux-arm64.elf (+1 more reused dependencies)
+|     +- WriteFile silex-deep-copy-runtime-x64.elf (+1 more reused dependencies)
+|     +- WriteFile silex-deep-copy-runtime-macos-x64.macho (+1 more reused dependencies)
+|     +- WriteFile silex-cycle-runtime.macho (+1 more reused dependencies)
+|     +- WriteFile silex-cycle-runtime-linux-arm64.elf (+1 more reused dependencies)
+|     +- WriteFile silex-cycle-runtime-x64.elf (+1 more reused dependencies)
+|     +- WriteFile silex-cycle-runtime-macos-x64.macho (+1 more reused dependencies)
++- check-lsp-completion success
+|  +- run test 425 pass (425 total) 2s MaxRSS:68M
+|     +- compile test ReleaseFast native cached 121ms MaxRSS:35M
+|        +- options (reused)
++- optimizer-admission-quick success
+|  +- run test 72 pass (72 total) 686ms MaxRSS:45M
+|  |  +- compile test ReleaseFast native success 40s MaxRSS:1G
+|  |     +- options (reused)
+|  +- run exe silex-optimizer-oracle success 3s
+|     +- compile exe silex-optimizer-oracle ReleaseFast native success 1m MaxRSS:2G
+|     |  +- options (reused)
+|     +- compile exe silex ReleaseFast native (+13 more reused dependencies)
++- run exe silex success 303ms
+   +- compile exe silex ReleaseFast native (+13 more reused dependencies)
+   +- run exe silex success 393ms
+      +- compile exe silex ReleaseFast native (+13 more reused dependencies)
+test transitive failure
++- run test (+1 more reused dependencies)
++- run test (+1 more reused dependencies)
++- run test (+1 more reused dependencies)
++- run exe silex (+1 more reused dependencies)
++- run exe silex (+2 more reused dependencies)
+optimizer-gate success
++- run exe silex-optimizer-oracle success 1m
+|  +- compile exe silex-optimizer-oracle ReleaseFast native (+1 more reused dependencies)
+|  +- compile exe silex ReleaseFast native (+13 more reused dependencies)
++- run test (+1 more reused dependencies)
+optimizer-robustness-qualified success
++- run test (+1 more reused dependencies)
++- run exe silex-optimizer-oracle success 50s
+   +- compile exe silex-optimizer-oracle ReleaseFast native (+1 more reused dependencies)
+   +- compile exe silex ReleaseFast native (+13 more reused dependencies)
+install success
++- install silex success
+|  +- compile exe silex ReleaseFast native (+13 more reused dependencies)
++- run test 177 pass (177 total) 216ms MaxRSS:13M
+   +- compile test ReleaseFast native cached 94ms MaxRSS:35M
+      +- options (reused)
+
+error: the following build command failed with exit code 1:
+.zig-cache/o/1db1c0bf7cfdc052107baf7ebe63baef/build /opt/homebrew/Cellar/zig/0.16.0_1/bin/zig /opt/homebrew/Cellar/zig/0.16.0_1/lib/zig /Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain .zig-cache /Users/nekmata/.cache/zig --seed 0x85936583 -Z0949b5c377dca216 check test optimizer-gate optimizer-robustness-qualified install --summary all

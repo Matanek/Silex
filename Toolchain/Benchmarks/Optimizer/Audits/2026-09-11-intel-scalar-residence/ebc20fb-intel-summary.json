@@ -1,0 +1,55 @@
+[
+  {
+    "workload": "arithmetic",
+    "release_median_ms": 12.013045,
+    "clang_O2_median_ms": 7.937467,
+    "paired_ratio": 1.464907,
+    "interval": [
+      1.416501,
+      1.533888
+    ],
+    "release_spread_percent": 23.9032,
+    "clang_spread_percent": 21.2363,
+    "qualified": false,
+    "failures": [
+      "release spread exceeds 200000 ppm",
+      "clang spread exceeds 200000 ppm",
+      "Silex/Clang upper bound exceeds 1000000 ppm"
+    ]
+  },
+  {
+    "workload": "objects",
+    "release_median_ms": 37.158162,
+    "clang_O2_median_ms": 8.399844,
+    "paired_ratio": 4.54757,
+    "interval": [
+      3.984914,
+      5.1413
+    ],
+    "release_spread_percent": 27.9501,
+    "clang_spread_percent": 65.1602,
+    "qualified": false,
+    "failures": [
+      "release spread exceeds 200000 ppm",
+      "clang spread exceeds 200000 ppm",
+      "Silex/Clang upper bound exceeds 1000000 ppm"
+    ]
+  },
+  {
+    "workload": "flocking",
+    "release_median_ms": 3700.083169,
+    "clang_O2_median_ms": 474.926082,
+    "paired_ratio": 7.781661,
+    "interval": [
+      7.366719,
+      8.030247
+    ],
+    "release_spread_percent": 10.6661,
+    "clang_spread_percent": 20.4737,
+    "qualified": false,
+    "failures": [
+      "clang spread exceeds 200000 ppm",
+      "Silex/Clang upper bound exceeds 1000000 ppm"
+    ]
+  }
+]

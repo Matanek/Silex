@@ -1,0 +1,13 @@
+{
+  "yaml": "passed",
+  "bash_bodies": 17,
+  "fixture_jobs": [
+    "macos-x64",
+    "linux-arm64",
+    "linux-x64",
+    "windows-x64",
+    "windows-arm64"
+  ],
+  "expected_true_lines": 18,
+  "PowerShell": "reviewed; native CI pending"
+}

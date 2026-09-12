@@ -6,6 +6,12 @@ const IrStats = @import("IrStats.zig");
 
 pub const Evidence = union(enum) {
     none,
+    dominated_fields: struct { raw: usize, optimized: usize },
+    scalar_expressions: struct {
+        raw_products: usize,
+        optimized_products: usize,
+        reloaded_products: usize,
+    },
     blocks: struct {
         function: []const u8,
         raw: usize,
@@ -194,6 +200,9 @@ pub fn verifyContract(
         .elides_reference_memory => |requirement| verifyReferenceMemory(requirement, differential),
         .coalesces_view_memory => |function_name| verifyViewMemory(function_name, differential),
         .forwards_owning_collection => |function_name| verifyOwningCollection(function_name, differential),
+        .forwards_known_views => |function_name| verifyKnownViews(function_name, differential),
+        .reuses_dominated_fields => |name| verifyDominatedFields(name, differential),
+        .reuses_scalar_expressions => |requirement| verifyScalarExpressions(requirement, differential),
         .simplifies_ssa_values => |function_name| verifySsaValueSimplification(function_name, differential),
         .promotes_critical_edge => |function_name| verifyCriticalEdgePromotion(function_name, differential),
         .coalesces_forwarded_phi => |function_name| verifyCriticalEdgePromotion(function_name, differential),
@@ -418,6 +427,65 @@ fn verifyOwningCollection(function_name: []const u8, differential: Differential.
         .optimized_stores = optimized.other_stores,
         .optimized_guards = optimized.safety_guards,
     } };
+}
+
+fn verifyKnownViews(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const optimized_function = findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const raw = IrStats.profile(.{ .functions = &.{findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing} });
+    const optimized = IrStats.profile(.{ .functions = &.{optimized_function} });
+    // Arithmetic on unknown inputs can still overflow. This contract removes
+    // collection reads and their bounds checks, not unrelated numeric checks.
+    if (raw.other_loads < 2 or optimized.other_loads != 0)
+        return error.ExpectedKnownViewForwardingMissing;
+    for (optimized_function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .list_init, .collection_view, .list_retain, .list_drop => return error.ExpectedDeadScalarStorageRemovalMissing,
+        else => {},
+    };
+    return .{ .view_memory = .{
+        .function = function_name,
+        .raw_loads = raw.other_loads,
+        .optimized_loads = optimized.other_loads,
+        .raw_stores = raw.other_stores,
+        .optimized_stores = optimized.other_stores,
+        .optimized_guards = optimized.safety_guards,
+    } };
+}
+
+fn productCount(program: Silex.Ir.Program, name: []const u8) !usize {
+    const function = findFunction(program, name) orelse return error.ContractFunctionMissing;
+    var count: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        if (instruction == .binary and instruction.binary.operator == .multiply) count += 1;
+    };
+    return count;
+}
+
+fn verifyScalarExpressions(requirement: anytype, differential: Differential.Result) !Evidence {
+    const raw = try productCount(differential.raw_ir, requirement.repeated) +
+        try productCount(differential.raw_ir, requirement.stored);
+    const repeated = try productCount(differential.optimized_ir, requirement.repeated);
+    const stored = try productCount(differential.optimized_ir, requirement.stored);
+    const reloaded = try productCount(differential.optimized_ir, requirement.reloaded);
+    if (raw != 4 or repeated != 1 or stored != 1 or reloaded != 2)
+        return error.ExpectedScalarExpressionReuseMissing;
+    return .{ .scalar_expressions = .{
+        .raw_products = raw,
+        .optimized_products = repeated + stored,
+        .reloaded_products = reloaded,
+    } };
+}
+
+pub const ScalarExpressionCounter = struct { enabled: usize, disabled: usize };
+
+pub fn verifyScalarExpressionCounter(requirement: anytype, enabled: Differential.Result, disabled: Differential.Result) !ScalarExpressionCounter {
+    const with_count = try productCount(enabled.optimized_ir, requirement.repeated) +
+        try productCount(enabled.optimized_ir, requirement.stored);
+    const without_count = try productCount(disabled.optimized_ir, requirement.repeated) +
+        try productCount(disabled.optimized_ir, requirement.stored);
+    if (with_count != 2 or without_count != 4) return error.ExpectedScalarExpressionCounterMissing;
+    return .{ .enabled = with_count, .disabled = without_count };
 }
 
 pub fn verifyMemoryCounter(
@@ -1124,4 +1192,27 @@ fn findFunction(program: Silex.Ir.Program, name: []const u8) ?Silex.Ir.Function 
 fn qualifiedNameMatches(candidate: []const u8, leaf: []const u8) bool {
     if (candidate.len <= leaf.len or candidate[candidate.len - leaf.len - 1] != '.') return false;
     return std.mem.endsWith(u8, candidate, leaf);
+}
+
+fn fieldLoadCount(program: Silex.Ir.Program, name: []const u8) !usize {
+    const function = findFunction(program, name) orelse return error.ContractFunctionMissing;
+    var count: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| {
+        if (instruction == .field_load) count += 1;
+    };
+    return count;
+}
+
+fn verifyDominatedFields(name: []const u8, differential: Differential.Result) !Evidence {
+    const raw = try fieldLoadCount(differential.raw_ir, name);
+    const optimized = try fieldLoadCount(differential.optimized_ir, name);
+    if (raw <= optimized or optimized != 24) return error.ExpectedDominatedFieldReuseMissing;
+    return .{ .dominated_fields = .{ .raw = raw, .optimized = optimized } };
+}
+
+pub fn verifyDominatedFieldCounter(name: []const u8, enabled: Differential.Result, disabled: Differential.Result) !ScalarExpressionCounter {
+    const with_count = try fieldLoadCount(enabled.optimized_ir, name);
+    const without_count = try fieldLoadCount(disabled.optimized_ir, name);
+    if (with_count != 24 or without_count <= with_count) return error.ExpectedDominatedFieldCounterMissing;
+    return .{ .enabled = with_count, .disabled = without_count };
 }

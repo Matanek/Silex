@@ -1,0 +1,2 @@
+func calculate(a:int16, b:int16) int16 { return a*b }
+func main() { print(true); print(calculate(32767,2)); print(false) }

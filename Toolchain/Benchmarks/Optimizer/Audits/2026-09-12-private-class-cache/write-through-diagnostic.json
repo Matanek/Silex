@@ -1,0 +1,3044 @@
+{
+  "diagnostic_only": true,
+  "host": {
+    "system": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "processor": "Apple M3 Pro",
+    "translated": false
+  },
+  "source": "/private/tmp/silex-part03-evidence/ObjectsWriteThroughDiagnostic/Objects.sx",
+  "source_sha256": "679d3029dc3042e6107ea5dd9aa3bf007cc4faf334dc1723511385129f3cad88",
+  "compiler_sha256": "d19794be31e2f5bedc555a190e9160579f64bf84aaa3b91d69d76d00232eb94a",
+  "workload": {
+    "id": "objects",
+    "output_sha256": "1c7cd8ac9fb27ed65519b199e36de4575a0f257dc0c204e2b4f9bb3c1d75e210",
+    "launches_per_configuration_per_observation": 16,
+    "executables": {
+      "release": {
+        "path": "/private/tmp/silex-part03-evidence/write-through-measurement/after/objects-release",
+        "sha256": "20308afda4e0903ddde5d80831b9b882a856812fdc09af5a861002b9320e8eb5"
+      },
+      "baseline": {
+        "path": "/private/tmp/silex-part03-evidence/write-through-measurement/before/objects-release",
+        "sha256": "9960f656e75a02c8773945dec6e628120682b6cabf79f842114f60e7b4dfe891"
+      }
+    },
+    "observations": [
+      {
+        "index": 0,
+        "timings_ns": {
+          "release": 123446667,
+          "baseline": 138320584
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7639583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8861458
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8547209
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7634875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8473709
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7510416
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7758292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8837333
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7947333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8389459
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8553042
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7774708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8494625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7640292
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7678500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8393791
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7743375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8757125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8603417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7593209
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8462083
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7874584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7967292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8682250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7590083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9247709
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8756125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7748500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8744041
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7645625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7700000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8517208
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "timings_ns": {
+          "release": 123318373,
+          "baseline": 140435210
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8839125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7716750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7612916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8439791
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7699875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8797041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8396625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7540041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8754125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7765375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7714292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8536875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7977583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9232292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8811334
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7751084
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8377584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7604125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7893458
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8934625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7909583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9434000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8755959
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7610333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8777583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7640500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7570458
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8795750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7655708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8802834
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8749667
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7656292
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "timings_ns": {
+          "release": 124733084,
+          "baseline": 140217586
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7669750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8645250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9172083
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7800333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8468375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7878084
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7799208
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8615750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7694208
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8460167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8915042
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7720458
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8860584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7894458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7805334
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8779000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7981292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8462542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8978167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7690167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8919959
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7954750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7599042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8822875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7781792
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8826125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8536375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7790875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8928750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8083250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7590083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8826542
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "timings_ns": {
+          "release": 124308166,
+          "baseline": 139983830
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8795125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7960750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7686000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8554583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7670000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8834708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8973791
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7859041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9335458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7851917
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7739166
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8665541
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7990792
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8842708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8879083
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7670333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8921250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7812375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7685292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8583541
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7741458
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8856708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8467333
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7670167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8425209
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7754875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7686583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8611750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7826875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8752125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8484917
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7702542
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "timings_ns": {
+          "release": 123702248,
+          "baseline": 140588749
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7604333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8747333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8555792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7533833
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9321292
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7973625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7736375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8942958
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7825583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8818583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8800709
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7643708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8811250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7661375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7684166
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8493709
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7675125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8703875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8788666
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8070792
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8639166
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7700875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7664958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8796333
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7775750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8909750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8700708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7699125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8681708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7696458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7756167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8876917
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "timings_ns": {
+          "release": 122574210,
+          "baseline": 138955124
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8434958
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7718875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7811166
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9341709
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7598500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8455333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8491792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7527125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8513084
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7578666
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7521958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8525541
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7792667
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9026916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8510875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7670250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8508917
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7688709
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7612209
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8686417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7549125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8784458
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8725416
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7734542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8895208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7673375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7546417
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8868125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7897584
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8742000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8444375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7653042
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "timings_ns": {
+          "release": 123368126,
+          "baseline": 138755500
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7611708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8866083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8943375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8015667
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8876583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7698542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7681209
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8822167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7827958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8437625
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8348792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7685209
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8742208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7675667
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7590667
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8351709
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7635167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8633583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8866041
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7674584
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8703000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7737083
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7781917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8718750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7809791
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8330709
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8860584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7741250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8685500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7693541
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7508166
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8568791
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "timings_ns": {
+          "release": 124093791,
+          "baseline": 141170540
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8756291
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7570833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7568083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8323875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7756375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9055375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8650500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7595583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8433875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7743584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7955958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8905750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8166125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9054000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8818333
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7701750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9252500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7792792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7830833
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9358542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7966500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8853000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8764458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7595541
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8459625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7708125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7664166
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8687958
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7851584
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8933750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8862708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7625959
+          }
+        ]
+      },
+      {
+        "index": 8,
+        "timings_ns": {
+          "release": 124115624,
+          "baseline": 140324501
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7564333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8430042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8535792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7747208
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8556542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7755417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7563416
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8910917
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7958041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8831083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8856209
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7689209
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9190500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7789208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7638792
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8494833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7650042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8799833
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9179500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7766291
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8511167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8122000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7947125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9137417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7798834
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8732583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8872500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7764000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8642542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7657833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7703875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8643041
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "timings_ns": {
+          "release": 124675541,
+          "baseline": 140495374
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8447166
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7764125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7917708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8683875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7673125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8504792
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8976167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7984916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8832875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7808125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7778959
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8931167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8031917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8904708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8534916
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7599750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8925750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7869875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7650041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8746417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7880834
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8882917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9450292
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7754041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8933916
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7670250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7764125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8558833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7724791
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8410375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8771208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7802959
+          }
+        ]
+      },
+      {
+        "index": 10,
+        "timings_ns": {
+          "release": 122798584,
+          "baseline": 139641586
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7719542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8463125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8713667
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7614250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8897542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7706458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7627541
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8716667
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7640917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8544500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8448375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7646834
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9266000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7642084
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7780041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8906167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7649083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8353291
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8351334
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7736791
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8914334
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7555750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7668917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8796209
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7665375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8870916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8894542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7580250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8729500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7688667
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7876084
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8775417
+          }
+        ]
+      },
+      {
+        "index": 11,
+        "timings_ns": {
+          "release": 125289251,
+          "baseline": 141883707
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9070291
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8063666
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8085459
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9520875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7895708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8596875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8635583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7827167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8992583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7774750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7777292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8906000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7751959
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8502542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8548833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7743000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8930666
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7787625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7746042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8912125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7733417
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8945667
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9016458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7844375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8770542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7726750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7926041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9344167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7849250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8596500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8594000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7756750
+          }
+        ]
+      },
+      {
+        "index": 12,
+        "timings_ns": {
+          "release": 125857877,
+          "baseline": 139729457
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 8006417
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8483708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8471542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7682042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8779250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7850708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8090875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8582791
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7940250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8976666
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8850083
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7953500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9026208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8082667
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7871709
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8774292
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7755667
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8740459
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8522125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7882542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8686542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7877125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7742000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8920500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7764292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8605292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8678583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7770625
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8557916
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7801542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7785916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9073500
+          }
+        ]
+      },
+      {
+        "index": 13,
+        "timings_ns": {
+          "release": 124764793,
+          "baseline": 141156499
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9029958
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7722834
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7740792
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8505833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7748875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8816584
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8796250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7665541
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8911125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7715250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7687625
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8545708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8059292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9296791
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8718458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7583583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8775083
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8075750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7881583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8748375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7829292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8556875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8991334
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7850542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9087875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7906834
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7808958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8925584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7804625
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8894083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8556583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7683417
+          }
+        ]
+      },
+      {
+        "index": 14,
+        "timings_ns": {
+          "release": 123917456,
+          "baseline": 142285583
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7682334
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8951042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8983958
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7756916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8834791
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7732291
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7733167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9173208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7694500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9319791
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8642583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7687250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8743000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7680708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7706750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8966167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7795708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8973583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9293792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7762708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8613875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7711958
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7791958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9015792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7740250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8537750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8713209
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7931958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8677875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7782000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7727000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8845167
+          }
+        ]
+      },
+      {
+        "index": 15,
+        "timings_ns": {
+          "release": 124715040,
+          "baseline": 140621416
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8676625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7675542
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7617125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8815750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7796541
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8705583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8792417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7658458
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8743208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7895291
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8041917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8636833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7785666
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8451583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8550334
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7807208
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8884584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7853250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7640958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8892000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7847875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8927917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8935458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7737667
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8932458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7782584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7783125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8757833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7796625
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8823250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9095583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7995208
+          }
+        ]
+      },
+      {
+        "index": 16,
+        "timings_ns": {
+          "release": 124750749,
+          "baseline": 140918082
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7819083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8554958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9100833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7870125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8631917
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7759959
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7928958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8869959
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7737000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8478708
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8718250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7638167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8832042
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7808500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7629709
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8709791
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7612875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8793250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9004500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7841666
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8658166
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7769583
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7988041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9160750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8030916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8955125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8926750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7969042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8688500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7759584
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7587541
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8834583
+          }
+        ]
+      },
+      {
+        "index": 17,
+        "timings_ns": {
+          "release": 123065918,
+          "baseline": 140194003
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8767125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8048708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7648667
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8706417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7657875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8609500
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8866375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7826375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8647667
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7510833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7569709
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8574167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7715875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8456792
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8810250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7637958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8899834
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7718417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7632167
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8458500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7831834
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9333083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9353292
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7734625
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8432459
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7617041
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7674916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8778625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7569709
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8837542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8662375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7671209
+          }
+        ]
+      },
+      {
+        "index": 18,
+        "timings_ns": {
+          "release": 123389999,
+          "baseline": 138493001
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7636916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8760292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8358500
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7540000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8807875
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7684916
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7556541
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8777167
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7538292
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8847542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8833792
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7904542
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8324042
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7566125
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7685208
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8724041
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7593209
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8599750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8317709
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7676084
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9015375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7640458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7749125
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8897833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7891083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8675250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8483208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7675917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8601000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7960833
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 8090750
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8469625
+          }
+        ]
+      },
+      {
+        "index": 19,
+        "timings_ns": {
+          "release": 122597206,
+          "baseline": 138823582
+        },
+        "launches": [
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8831208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7726625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7443041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8556750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7689250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8458250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9485417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7633042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8558000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7711166
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7635083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8445750
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7580583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8694250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8705375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7496333
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8690458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7804000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7654959
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8599375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7687583
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8389166
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8321292
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7723625
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8990958
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7642250
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7559958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8296625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7956916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9028291
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8772417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7652792
+          }
+        ]
+      },
+      {
+        "index": 20,
+        "timings_ns": {
+          "release": 123092292,
+          "baseline": 141216624
+        },
+        "launches": [
+          {
+            "configuration": "release",
+            "elapsed_ns": 7626417
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8589916
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8742292
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7643875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8810417
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7738625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7717375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8910334
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7704042
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8259000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9165000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7889083
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8795416
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7556625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7623250
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8968625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7943000
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8723958
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8870000
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7644917
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8885625
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7783375
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7679875
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8838916
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7584959
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 9452375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8899708
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7727375
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8365208
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7537458
+          },
+          {
+            "configuration": "release",
+            "elapsed_ns": 7692041
+          },
+          {
+            "configuration": "baseline",
+            "elapsed_ns": 8939834
+          }
+        ]
+      }
+    ],
+    "configurations": {
+      "release": {
+        "minimum_ns": 122574210,
+        "p10_ns": 122798584,
+        "median_ns": 123917456,
+        "p90_ns": 124764793,
+        "maximum_ns": 125857877,
+        "mad_ns": 797584,
+        "mad_ppm": 6436,
+        "spread_ppm": 15867,
+        "samples_ns": [
+          123446667,
+          123318373,
+          124733084,
+          124308166,
+          123702248,
+          122574210,
+          123368126,
+          124093791,
+          124115624,
+          124675541,
+          122798584,
+          125289251,
+          125857877,
+          124764793,
+          123917456,
+          124715040,
+          124750749,
+          123065918,
+          123389999,
+          122597206,
+          123092292
+        ]
+      },
+      "baseline": {
+        "minimum_ns": 138320584,
+        "p10_ns": 138755500,
+        "median_ns": 140324501,
+        "p90_ns": 141216624,
+        "maximum_ns": 142285583,
+        "mad_ns": 682915,
+        "mad_ppm": 4866,
+        "spread_ppm": 17538,
+        "samples_ns": [
+          138320584,
+          140435210,
+          140217586,
+          139983830,
+          140588749,
+          138955124,
+          138755500,
+          141170540,
+          140324501,
+          140495374,
+          139641586,
+          141883707,
+          139729457,
+          141156499,
+          142285583,
+          140621416,
+          140918082,
+          140194003,
+          138493001,
+          138823582,
+          141216624
+        ]
+      }
+    },
+    "release_vs_baseline": {
+      "samples": 21,
+      "lower_bound_ppm": 879887,
+      "median_ppm": 883875,
+      "upper_bound_ppm": 887399,
+      "confidence_ppm": 960823,
+      "release_half_shift_ppm": 5006,
+      "clang_half_shift_ppm": 4230,
+      "ratio_half_shift_ppm": 3971,
+      "ratios_ppm": [
+        892467,
+        878115,
+        889568,
+        888018,
+        879887,
+        882113,
+        889104,
+        879034,
+        884490,
+        887399,
+        879384,
+        883041,
+        900725,
+        883875,
+        870906,
+        886885,
+        885271,
+        877825,
+        890947,
+        883115,
+        871655
+      ]
+    },
+    "release_vs_references": {
+      "baseline": {
+        "samples": 21,
+        "lower_bound_ppm": 879887,
+        "median_ppm": 883875,
+        "upper_bound_ppm": 887399,
+        "confidence_ppm": 960823,
+        "release_half_shift_ppm": 5006,
+        "clang_half_shift_ppm": 4230,
+        "ratio_half_shift_ppm": 3971,
+        "ratios_ppm": [
+          892467,
+          878115,
+          889568,
+          888018,
+          879887,
+          882113,
+          889104,
+          879034,
+          884490,
+          887399,
+          879384,
+          883041,
+          900725,
+          883875,
+          870906,
+          886885,
+          885271,
+          877825,
+          890947,
+          883115,
+          871655
+        ]
+      }
+    },
+    "stability_failures": []
+  }
+}

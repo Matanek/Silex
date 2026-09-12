@@ -7,6 +7,7 @@ const Benchmark = @import("Benchmark.zig");
 pub const minimum_samples = 21;
 pub const inconclusive_retry_samples = 63;
 pub const maximum_spread_ppm = 200_000;
+pub const maximum_half_window_shift_ppm = 100_000;
 
 comptime {
     std.debug.assert(inconclusive_retry_samples > minimum_samples);
@@ -77,7 +78,8 @@ pub fn auditClosedTransposition(transposition: anytype) !void {
 pub fn qualifyTiming(pair: Benchmark.Pair) !void {
     if (pair.left.samples < minimum_samples or pair.right.samples < minimum_samples or
         pair.left.samples % 2 == 0 or pair.right.samples % 2 == 0 or
-        pair.left.samples != pair.right.samples or pair.left.batch != pair.right.batch)
+        pair.left.samples != pair.right.samples or pair.left.batch != pair.right.batch or
+        pair.observations.len != pair.left.samples)
     {
         return error.InsufficientQualifiedSamples;
     }
@@ -85,6 +87,13 @@ pub fn qualifyTiming(pair: Benchmark.Pair) !void {
         pair.right.spreadPpm() > maximum_spread_ppm)
     {
         return error.ExcessiveTimingDispersion;
+    }
+    const ordered = try Benchmark.stationarity(pair);
+    if (ordered.left_half_shift_ppm > maximum_half_window_shift_ppm or
+        ordered.right_half_shift_ppm > maximum_half_window_shift_ppm or
+        ordered.ratio_half_shift_ppm > maximum_half_window_shift_ppm)
+    {
+        return error.NonStationaryTiming;
     }
     if (pair.relative.samples != pair.left.samples or pair.relative.upper_bound_ppm == 0)
         return error.InvalidTimingReference;
@@ -116,42 +125,85 @@ fn relative(samples: usize, lower: u64, median: u64, upper: u64) Benchmark.Relat
     };
 }
 
+fn observations(comptime samples: usize, left_ns: u64, right_ns: u64) [samples]Benchmark.Observation {
+    var result: [samples]Benchmark.Observation = undefined;
+    for (&result, 0..) |*observation, index| observation.* = .{
+        .index = index,
+        .first = if (index % 2 == 0) .left else .right,
+        .left_ns = left_ns,
+        .right_ns = right_ns,
+    };
+    return result;
+}
+
 test "qualified timing accepts only a Silex upper bound at or below LLVM" {
+    const ordered = observations(21, 85, 95);
     try qualifyTiming(.{
         .left = summary(21, 80, 85, 90),
         .right = summary(21, 90, 95, 100),
         .relative = relative(21, 800_000, 880_000, 950_000),
+        .observations = &ordered,
     });
 }
 
 test "qualified timing rejects a ratio whose ranges are entirely slower" {
+    const ordered = observations(21, 115, 100);
     try std.testing.expectError(error.SlowerThanLlvm, qualifyTiming(.{
         .left = summary(21, 111, 115, 119),
         .right = summary(21, 96, 100, 104),
         .relative = relative(21, 1_100_000, 1_150_000, 1_190_000),
+        .observations = &ordered,
     }));
 }
 
 test "qualified timing rejects excessive dispersion" {
+    const ordered = observations(21, 100, 100);
     try std.testing.expectError(error.ExcessiveTimingDispersion, qualifyTiming(.{
         .left = summary(21, 70, 100, 130),
         .right = summary(21, 90, 100, 110),
         .relative = relative(21, 700_000, 1_000_000, 1_300_000),
+        .observations = &ordered,
     }));
 }
 
 test "qualified timing rejects an inconclusive overlap" {
+    const ordered = observations(21, 99, 100);
     try std.testing.expectError(error.InconclusiveTiming, qualifyTiming(.{
         .left = summary(21, 92, 99, 106),
         .right = summary(21, 95, 100, 105),
         .relative = relative(21, 950_000, 990_000, 1_050_000),
+        .observations = &ordered,
     }));
 }
 
 test "qualified timing rejects a diagnostic five-sample comparison" {
+    const ordered = observations(5, 85, 95);
     try std.testing.expectError(error.InsufficientQualifiedSamples, qualifyTiming(.{
         .left = summary(5, 80, 85, 90),
         .right = summary(5, 90, 95, 100),
         .relative = relative(5, 800_000, 880_000, 950_000),
+        .observations = &ordered,
+    }));
+}
+
+test "qualified timing rejects a reordered campaign" {
+    var ordered = observations(21, 85, 95);
+    ordered[1].first = .left;
+    try std.testing.expectError(error.InvalidObservationOrder, qualifyTiming(.{
+        .left = summary(21, 80, 85, 90),
+        .right = summary(21, 90, 95, 100),
+        .relative = relative(21, 800_000, 880_000, 950_000),
+        .observations = &ordered,
+    }));
+}
+
+test "qualified timing rejects half-window drift" {
+    var ordered = observations(21, 85, 95);
+    for (ordered[11..]) |*observation| observation.left_ns = 105;
+    try std.testing.expectError(error.NonStationaryTiming, qualifyTiming(.{
+        .left = summary(21, 80, 85, 90),
+        .right = summary(21, 90, 95, 100),
+        .relative = relative(21, 800_000, 880_000, 950_000),
+        .observations = &ordered,
     }));
 }

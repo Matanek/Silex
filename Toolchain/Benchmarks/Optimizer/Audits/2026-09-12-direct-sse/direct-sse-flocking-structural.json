@@ -1,0 +1,93 @@
+{
+  "scope": "Static whole-function counts only; no path or timing attribution",
+  "functions": {
+    "before": [
+      {
+        "index": 0,
+        "start": "0x100001000",
+        "instructions": 388,
+        "moves": 12,
+        "stack_accesses": 74
+      },
+      {
+        "index": 1,
+        "start": "0x1000018ff",
+        "instructions": 515,
+        "moves": 120,
+        "stack_accesses": 179
+      },
+      {
+        "index": 2,
+        "start": "0x100002442",
+        "instructions": 425,
+        "moves": 108,
+        "stack_accesses": 166
+      },
+      {
+        "index": 3,
+        "start": "0x100002dbe",
+        "instructions": 303,
+        "moves": 30,
+        "stack_accesses": 99
+      },
+      {
+        "index": 4,
+        "start": "0x1000034cd",
+        "instructions": 135,
+        "moves": 6,
+        "stack_accesses": 73
+      },
+      {
+        "index": 5,
+        "start": "0x1000037fb",
+        "instructions": 290,
+        "moves": 8,
+        "stack_accesses": 69
+      }
+    ],
+    "after": [
+      {
+        "index": 0,
+        "start": "0x100001000",
+        "instructions": 384,
+        "moves": 8,
+        "stack_accesses": 74
+      },
+      {
+        "index": 1,
+        "start": "0x1000018f3",
+        "instructions": 419,
+        "moves": 24,
+        "stack_accesses": 179
+      },
+      {
+        "index": 2,
+        "start": "0x100002300",
+        "instructions": 355,
+        "moves": 38,
+        "stack_accesses": 166
+      },
+      {
+        "index": 3,
+        "start": "0x100002b9e",
+        "instructions": 292,
+        "moves": 19,
+        "stack_accesses": 99
+      },
+      {
+        "index": 4,
+        "start": "0x10000328c",
+        "instructions": 129,
+        "moves": 0,
+        "stack_accesses": 73
+      },
+      {
+        "index": 5,
+        "start": "0x1000035a8",
+        "instructions": 288,
+        "moves": 4,
+        "stack_accesses": 69
+      }
+    ]
+  }
+}

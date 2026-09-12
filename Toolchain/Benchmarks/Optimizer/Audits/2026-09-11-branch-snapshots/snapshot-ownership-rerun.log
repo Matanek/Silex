@@ -1,0 +1,4 @@
+ok - ordinary structure copies and explicit moves
+ok - read and mutable references operate on ordinary places
+ok - copy detaches reached class identity
+3 passed; 0 failed

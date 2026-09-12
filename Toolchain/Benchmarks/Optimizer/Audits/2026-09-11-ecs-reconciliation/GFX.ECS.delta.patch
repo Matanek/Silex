@@ -1,0 +1,232 @@
+diff --git a/Docs/EN/README.md b/Docs/EN/README.md
+index 387cabe7023abfc6dd3a976848a01a5b5b2ee072..d20975ec47dbd6876b90256710d5cec1998cfccd 100644
+--- a/Docs/EN/README.md
++++ b/Docs/EN/README.md
+@@ -42,11 +42,6 @@ An `ECS.Query` exposes the components it reads and changes in its signature.
+ `ECS.Commands` defers structural changes — creating or destroying entities and
+ adding or removing components — so an active iteration remains stable.
+ 
+-A context that directly owns its `World` may also construct `ECS.Commands`,
+-record changes, and call `flush(world)` at its chosen boundary. This applies
+-and clears only the current queue; the Application plugin keeps doing that
+-automatically for the global context.
+-
+ ## Integrate a GFX application
+ 
+ `ECS.Plugin` installs the world, deferred commands, and system integration into
+diff --git a/Docs/FR/README.md b/Docs/FR/README.md
+index c1ac98b12189b40810c7b28e6b601e4a896db8e9..333ac94a5bae4be3521fa4550f10521b437bd54d 100644
+--- a/Docs/FR/README.md
++++ b/Docs/FR/README.md
+@@ -43,12 +43,6 @@ modifie. `ECS.Commands` diffère les changements structurels — création,
+ destruction, ajout ou retrait de composants — afin qu’une itération active
+ reste stable.
+ 
+-Un contexte qui possède directement son `World` peut aussi construire
+-`ECS.Commands`, enregistrer ses changements puis appeler `flush(world)` à la
+-frontière qu’il contrôle. Cette opération applique uniquement la file courante
+-et la vide ; le plugin Application conserve ce travail automatique pour le
+-contexte global.
+-
+ ## Intégrer une application GFX
+ 
+ `ECS.Plugin` installe le monde, les commandes différées et l’intégration des
+diff --git a/Module/Commands.sx b/Module/Commands.sx
+index 428589f5d340ee49828aefbf794b26f55e756fdc..300acd4ff39d3ee79bf9b822a093e36eb183da04 100644
+--- a/Module/Commands.sx
++++ b/Module/Commands.sx
+@@ -64,7 +64,7 @@ public class Commands {
+     private var interval_order:int
+     private var next_sequence:int
+ 
+-    init() {
++    module init() {
+         self.pending = []
+         self.parent_address = 0
+         self.system_order = -1
+@@ -110,7 +110,7 @@ public class Commands {
+         self.append(Command.structural(RemoveCommand<T>(entity)))
+     }
+ 
+-    func flush(world:&World) {
++    module func flush(world:&World) {
+         if self.parent_address != 0 {
+             var root = C.object_from_address<Commands>(self.parent_address)
+             root.flush(world)
+diff --git a/Package.json b/Package.json
+index 38be09f82ca2b36f82743d2e7f6cc6eb99b5ab21..c39cc5b56918f031abfb5453fab3a4b648d09f28 100644
+--- a/Package.json
++++ b/Package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "GFX.ECS",
+-  "version": "0.2.2",
++  "version": "0.2.3",
+   "description": {
+     "en": "Stable entities, typed components, queries, spawn recipes, and deferred commands.",
+     "fr": "Entités stables, composants typés, requêtes, recettes de création et commandes différées."
+diff --git a/README.md b/README.md
+index 93db58d69af57b883dbf2f7d4fbcd566b0870662..d4526019076cd3fd11526058556641126dd180e0 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,7 @@ silex install GFX.ECS
+ 
+ ## Documentation
+ 
+-- [Documentation française](Docs/FR/README.md)
++- [French documentation](Docs/FR/README.md)
+ - [English documentation](Docs/EN/README.md)
+ 
+ The package requires Silex 0.43.0 or newer.
+diff --git a/Tests/Consumer/Tests/Catalogs.sx b/Tests/Consumer/Tests/Catalogs.sx
+index 82f798cbc5b1ae886f146c3e6c69ec0f26a0460a..64d13cdb1c98aa30706a41260249331d1c813175 100644
+--- a/Tests/Consumer/Tests/Catalogs.sx
++++ b/Tests/Consumer/Tests/Catalogs.sx
+@@ -12,15 +12,6 @@ test "consume ECS directly and through the GFX catalogs" {
+     let entity = world.spawn(ECS.EntityRecipe()..with(Health(value:100)))
+     world.update<Health>(entity, func(health:&Health) { health.value -= 10 })
+ 
+-    var deferred_world = ECS.World()
+-    var commands = ECS.Commands()
+-    commands.spawn(ECS.EntityRecipe()..with(Health(value:42)))
+-    assert(deferred_world.entities().count() == 0)
+-    commands.flush(deferred_world)
+-    let deferred_entities = deferred_world.entities()
+-    assert(deferred_entities.count() == 1)
+-    assert(deferred_world.get<Health>(deferred_entities[0]).value == 42)
+-
+     let plugin = Plugins.ECS()
+     var application = Application()..add_plugin(plugin)
+     application.prepare()
+diff --git a/Tests/MutableQuery.sx b/Tests/MutableQuery.sx
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a5084948c4590a5c55b9ae1fb26ddb931545556
+--- /dev/null
++++ b/Tests/MutableQuery.sx
+@@ -0,0 +1,126 @@
++use GFX.Application
++use GFX.Application.Schedule
++use GFX.ECS
++
++struct Payload { var numbers:int[]; var label:str }
++struct Counter { var value:int }
++struct Extra { let value:int }
++struct Missing { var value:int }
++
++class Probe {
++    var visits:int = 0
++    var previous:int[] = []
++}
++
++func mutate(query:ECS.Query<(ECS.Entity, &Payload, &Counter)>, probe:&Probe) {
++    for (entity, payload, counter) in query {
++        assert(entity.is_valid())
++        probe.visits++
++        counter.value += 1
++        payload.numbers[0] += counter.value
++        payload.numbers.append(counter.value)
++        payload.label += "!"
++    }
++}
++
++func missing(query:ECS.Query<(ECS.Entity, &Missing)>) {
++    for (entity, value) in query { panic("unallocated component pool matched") }
++}
++
++func run_twice(application:Application) int {
++    application.run_schedule(Schedule.update)
++    application.run_schedule(Schedule.update)
++    return 0
++}
++
++test "mutable queries preserve dense identity and owned fields across archetypes and generations" {
++    var probe = Probe()
++    probe.previous = [10]
++    var application = Application()
++        ..add_plugin(ECS.Plugin())
++        ..add_system(Schedule.update, mutate)
++        ..add_system(Schedule.update, missing)
++        ..with_runner(run_twice)
++    application.prepare()
++    var entities:ECS.Entity[] = []
++    var excluded = ECS.Entity()
++    if true {
++        var resources = application.resources()
++        resources.insert(probe)
++        var world:&ECS.World = resources.get_mut<ECS.World>()
++        let removed = world.spawn(ECS.EntityRecipe()
++            ..with(Payload(numbers:[999], label:"removed"))
++            ..with(Counter(value:99)))
++        entities.append(world.spawn(ECS.EntityRecipe()
++            ..with(Payload(numbers:probe.previous, label:"first"))
++            ..with(Counter(value:0))))
++        entities.append(world.spawn(ECS.EntityRecipe()
++            ..with(Payload(numbers:[20], label:"second"))
++            ..with(Counter(value:0))
++            ..with(Extra(value:1))))
++        excluded = world.spawn(ECS.EntityRecipe()..with(Payload(numbers:[77], label:"excluded")))
++        world.destroy(removed)
++        let reused = world.spawn(ECS.EntityRecipe()
++            ..with(Payload(numbers:[30], label:"third"))
++            ..with(Counter(value:0)))
++        assert(reused.index == removed.index)
++        assert(reused.generation > removed.generation)
++        entities.append(reused)
++    }
++    assert(application.run() == 0)
++    assert(probe.visits == 6)
++    assert(probe.previous.count() == 1)
++    assert(probe.previous[0] == 10)
++    var resources = application.resources()
++    let world:@ECS.World = resources.get<ECS.World>()
++    var index = 0
++    for entity in entities {
++        let payload = world.get<Payload>(entity)
++        assert(payload.numbers.count() == 3)
++        assert(payload.numbers[0] == (index + 1) * 10 + 3)
++        assert(payload.numbers[1] == 1 && payload.numbers[2] == 2)
++        assert(world.get<Counter>(entity).value == 2)
++        index++
++    }
++    assert(world.get<Payload>(entities[0]).label == "first!!")
++    assert(world.get<Payload>(entities[1]).label == "second!!")
++    assert(world.get<Payload>(entities[2]).label == "third!!")
++    assert(world.get<Payload>(excluded).numbers[0] == 77)
++}
++
++func with_control_flow(query:ECS.Query<(ECS.Entity, &Counter)>, probe:&Probe) {
++    for (entity, counter) in query {
++        if counter.value == 0 { continue }
++        counter.value += 10
++        probe.visits++
++        break
++    }
++    for (entity, counter) in query {
++        counter.value += 1
++    }
++}
++
++test "mutable pool references survive continue break and repeated iteration" {
++    var probe = Probe()
++    var application = Application()
++        ..add_plugin(ECS.Plugin())
++        ..add_system(Schedule.update, with_control_flow)
++        ..with_runner(run_twice)
++    application.prepare()
++    var entities:ECS.Entity[] = []
++    if true {
++        var resources = application.resources()
++        resources.insert(probe)
++        var world:&ECS.World = resources.get_mut<ECS.World>()
++        for index in 0...3 {
++            entities.append(world.spawn(ECS.EntityRecipe()..with(Counter(value:index))))
++        }
++    }
++    assert(application.run() == 0)
++    assert(probe.visits == 2)
++    var resources = application.resources()
++    let world:@ECS.World = resources.get<ECS.World>()
++    assert(world.get<Counter>(entities[0]).value == 12)
++    assert(world.get<Counter>(entities[1]).value == 13)
++    assert(world.get<Counter>(entities[2]).value == 4)
++}

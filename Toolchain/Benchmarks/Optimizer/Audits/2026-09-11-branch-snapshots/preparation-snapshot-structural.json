@@ -1,0 +1,14 @@
+{
+  "before": {
+    "instructions": 2943,
+    "stack_accesses": 624,
+    "loads": 513,
+    "stores": 391
+  },
+  "after": {
+    "instructions": 2977,
+    "stack_accesses": 632,
+    "loads": 543,
+    "stores": 395
+  }
+}

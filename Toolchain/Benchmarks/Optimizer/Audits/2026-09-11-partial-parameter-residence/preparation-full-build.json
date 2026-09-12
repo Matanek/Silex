@@ -1,0 +1,49 @@
+[
+  {
+    "label": "before",
+    "command": [
+      "/private/tmp/silex-part03-evidence/silex-before-residence",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/PreparationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/preparation-full-before"
+    ],
+    "compiler_sha256": "ecbde18f772c2f0ccf7100053a8b76c585c9467b62c79245cbd6c7d56ef04cdc",
+    "binary_sha256": "7becb3b511ab03acccca325323feb0999ab258f13c68d072bb978139852d7558"
+  },
+  {
+    "label": "after",
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/PreparationKernel2D.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part03-evidence/preparation-full-after"
+    ],
+    "compiler_sha256": "15481e4950494657d3475f54307f8545f54833fc93698457b5b7d2af2c254187",
+    "binary_sha256": "b2850dde0604a910620fb9bc5064b39837b72139c6d043114ff3628410ee69ec"
+  },
+  {
+    "label": "clang",
+    "command": [
+      "clang",
+      "-std=c17",
+      "-O3",
+      "-ffp-contract=fast",
+      "-Wall",
+      "-Wextra",
+      "-Wpedantic",
+      "-DNDEBUG",
+      "-DSLOT8",
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Packages/GFX.Physics/Benchmarks/Oracle2D/PreparationKernel.c",
+      "-o",
+      "/private/tmp/silex-part03-evidence/preparation-full-clang"
+    ],
+    "binary_sha256": "8d7380b05b04989829c693b61d927ec6b34fb2e0b3146aae54e63e887934eb76",
+    "source_sha256": "b824f59303ba899173fb15dbffd51c1cede2886fec89ba870ab500b2ed074df4"
+  }
+]

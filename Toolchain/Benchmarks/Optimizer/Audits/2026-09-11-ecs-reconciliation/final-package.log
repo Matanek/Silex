@@ -1,0 +1,20 @@
+ok - Consumer/Tests/Catalogs.sx :: consume ECS directly and through the GFX catalogs
+ok - ECS.sx :: store typed components on stable entities
+ok - ECS.sx :: reuse entity slots without reviving stale handles
+ok - ECS.sx :: the latest duplicate recipe component wins without duplicating membership
+ok - ECS.sx :: dense component columns survive swap removal and structural migration
+ok - ECSQuery.sx :: query filters components, mutates in place, and commands flush later
+ok - ECSQuery.sx :: query injection preserves the resource world across repeated frames
+ok - ECSQuery.sx :: query injection preserves the world owned by resources
+ok - ECSQuery.sx :: readonly queries retrieve dense components after pool compaction
+ok - ECSQuery.sx :: readonly query skips a component type with no allocated pool
+ok - ECSQuery.sx :: query injection preserves a world in a temporary fluent application
+ok - MutableQuery.sx :: mutable queries preserve dense identity and owned fields across archetypes and generations
+ok - MutableQuery.sx :: mutable pool references survive continue break and repeated iteration
+ok - ParallelQueries.sx :: preserve results for small and large queries
+ok - ParallelQueries.sx :: preserve component results and command order between executions
+ok - ParallelQueries.sx :: stress deterministic structural commands and generation reuse
+ok - Plugin.sx :: install and remove ECS through its plugin
+ok - SystemDescriptors.sx :: derive resource, component, World, and Application access descriptors
+ok - SystemDescriptors.sx :: preserve transitive registration dependencies between stages
+19 passed; 0 failed in 7 files

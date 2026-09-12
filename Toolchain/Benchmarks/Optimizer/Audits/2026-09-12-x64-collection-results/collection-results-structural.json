@@ -1,0 +1,81 @@
+{
+  "scope": "Whole function static counts, including cold exits; not loop timing proof. Function index 2 is Flocking.steer.",
+  "functions": {
+    "before": [
+      {
+        "index": 0,
+        "start": "100001000",
+        "instructions": 384,
+        "stack_accesses": 74
+      },
+      {
+        "index": 1,
+        "start": "1000018f3",
+        "instructions": 419,
+        "stack_accesses": 179
+      },
+      {
+        "index": 2,
+        "start": "100002300",
+        "instructions": 355,
+        "stack_accesses": 166
+      },
+      {
+        "index": 3,
+        "start": "100002b9e",
+        "instructions": 292,
+        "stack_accesses": 99
+      },
+      {
+        "index": 4,
+        "start": "10000328c",
+        "instructions": 129,
+        "stack_accesses": 73
+      },
+      {
+        "index": 5,
+        "start": "1000035a8",
+        "instructions": 270,
+        "stack_accesses": 69
+      }
+    ],
+    "after": [
+      {
+        "index": 0,
+        "start": "100001000",
+        "instructions": 384,
+        "stack_accesses": 74
+      },
+      {
+        "index": 1,
+        "start": "1000018f3",
+        "instructions": 419,
+        "stack_accesses": 177
+      },
+      {
+        "index": 2,
+        "start": "1000022fc",
+        "instructions": 354,
+        "stack_accesses": 163
+      },
+      {
+        "index": 3,
+        "start": "100002b8e",
+        "instructions": 292,
+        "stack_accesses": 99
+      },
+      {
+        "index": 4,
+        "start": "10000327c",
+        "instructions": 129,
+        "stack_accesses": 73
+      },
+      {
+        "index": 5,
+        "start": "100003598",
+        "instructions": 266,
+        "stack_accesses": 65
+      }
+    ]
+  }
+}

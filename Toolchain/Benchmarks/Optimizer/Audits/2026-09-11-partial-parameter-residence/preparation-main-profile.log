@@ -1,0 +1,11 @@
+optimizer oracle: HotFunctionNotRegistered
+budget exit 1
+2 {'call': {'result': {'start': 2, 'width': 6, 'aggregate': True}, 'function': 3, 'arguments': [], 'result_forwarded': False}}
+20 {'collection_load': {'result': {'start': 21, 'width': 1, 'aggregate': False}, 'collection': {'start': 20, 'width': 1, 'aggregate': False}, 'index': 442, 'count': 0, 'dynamic': True, 'view': False, 'checked': False, 'element_stride': 8, 'header': 8, 'tail': 9, 'forwarded_function': None}}
+49 {'collection_load': {'result': {'start': 36, 'width': 1, 'aggregate': False}, 'collection': {'start': 15, 'width': 1, 'aggregate': False}, 'index': 35, 'count': 0, 'dynamic': True, 'view': False, 'checked': True, 'element_stride': 8, 'header': 12, 'tail': 9, 'forwarded_function': None}}
+88 {'call': {'result': {'start': 51, 'width': 24, 'aggregate': True}, 'function': 1, 'arguments': [{'start': 447, 'width': 1, 'aggregate': False}, {'start': 446, 'width': 1, 'aggregate': False}], 'result_forwarded': False}}
+155 {'call': {'result': {'start': 161, 'width': 7, 'aggregate': True}, 'function': 12, 'arguments': [{'start': 155, 'width': 6, 'aggregate': True}], 'result_forwarded': False}}
+181 {'collection_load': {'result': {'start': 215, 'width': 26, 'aggregate': True}, 'collection': {'start': 181, 'width': 2, 'aggregate': True}, 'index': 450, 'count': 0, 'dynamic': True, 'view': True, 'checked': True, 'element_stride': 208, 'header': 15, 'tail': 9, 'forwarded_function': 0}}
+188 {'call': {'result': {'start': 215, 'width': 26, 'aggregate': True}, 'function': 0, 'arguments': [{'start': 210, 'width': 1, 'aggregate': False}, {'start': 214, 'width': 1, 'aggregate': False}], 'result_forwarded': True}}
+190 {'collection_replace': {'result': {'start': 243, 'width': 2, 'aggregate': True}, 'collection': {'start': 241, 'width': 2, 'aggregate': True}, 'index': 450, 'replacement': {'start': 215, 'width': 26, 'aggregate': True}, 'ownership': 'root', 'count': 0, 'dynamic': True, 'view': True, 'checked': True, 'element_stride': 208, 'header': 15, 'tail': 9, 'forwarded_replacement': 0}}
+489 {'call': {'result': {'start': 423, 'width': 7, 'aggregate': True}, 'function': 12, 'arguments': [{'start': 417, 'width': 6, 'aggregate': True}], 'result_forwarded': False}}

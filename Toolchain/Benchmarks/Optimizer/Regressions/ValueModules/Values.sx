@@ -1,0 +1,22 @@
+public struct Pair { var x:float64; var y:float64 }
+public func measure(input:@Pair, flag:bool) float64 {
+    let first = copy input.x
+    var total = first
+    if flag { total += input.y }
+    return total + input.x
+}
+public func partial(input:@Pair, flag:bool) float64 {
+    if flag { if input.x < 0.0 { return -1.0 } }
+    return input.x
+}
+public func mutate(input:&Pair, alias:&Pair) float64 {
+    let before = copy input.x
+    alias.x = 9.0
+    return before + input.x
+}
+public func repeated<T>(a:T, b:T, flag:bool) T {
+    let first = a * b
+    var result = first
+    if flag { result += a }
+    return result + a * b
+}

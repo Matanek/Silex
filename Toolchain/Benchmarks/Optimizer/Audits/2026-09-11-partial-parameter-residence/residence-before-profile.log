@@ -1,0 +1,10 @@
+optimizer oracle: HotFunctionNotRegistered
+budget exit 1
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/shutil.py", line 475, in copy2
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '.zig-cache/optimizer-oracle/hot-budget.tsv'

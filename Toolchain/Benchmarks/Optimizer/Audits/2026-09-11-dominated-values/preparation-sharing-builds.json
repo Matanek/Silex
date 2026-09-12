@@ -1,0 +1,40 @@
+[
+  {
+    "command": [
+      "Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part02-evidence/PreparationRepeated.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part02-evidence/preparation-repeated"
+    ],
+    "build_exit": 0,
+    "build_stderr": "",
+    "compiler_sha256": "439efc36bbf25e4e6fd0cd4e108b26dcd340f277abc51c47967d3a12f650f77e",
+    "source_sha256": "bc39b6dc1109b5ed3818517bf3a31388580e834d1cfced71e2c5dabc673bf14d",
+    "binary_sha256": "95c7cb25f1774e6a496db9f9e132df8198431c3407e4d252fce866828e0318b3",
+    "exit": 0,
+    "stdout": "28580565.3615036\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part02-evidence/PreparationShared.sx",
+      "--release",
+      "--nocache",
+      "-o",
+      "/private/tmp/silex-part02-evidence/preparation-shared"
+    ],
+    "build_exit": 0,
+    "build_stderr": "",
+    "compiler_sha256": "439efc36bbf25e4e6fd0cd4e108b26dcd340f277abc51c47967d3a12f650f77e",
+    "source_sha256": "f49689317d4a6aab233300150001a6003b531f650d776159fca3091306b4af67",
+    "binary_sha256": "25ba05e429beb127feeecb79769277b890795e2eeab146d227176b1ec401d0e8",
+    "exit": 0,
+    "stdout": "28580565.3615036\n",
+    "stderr": ""
+  }
+]

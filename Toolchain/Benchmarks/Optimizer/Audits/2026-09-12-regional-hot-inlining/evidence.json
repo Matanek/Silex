@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "baseline_revision": "45af0ae",
+  "equivalent_product_revision": "c3a4b391f4d6ba3e656ee66fb82bc57fe7a13beb",
+  "candidate_revision": "55f6b7df8a46baa94e34f89ade451b754b9d585a",
+  "qualification_descriptor_revision": "b858fb26ef9e86817a4ecc0cc5069517abc79165",
+  "mechanism": {
+    "pressure": "maximum distinct scalar values touched in one control-flow block",
+    "hot_budget_before": 192,
+    "hot_budget_after": 320,
+    "absolute_expansion_ceiling": 256,
+    "transparent_boundaries": "direct boundaries explicitly classified pure"
+  },
+  "integration_structure": {
+    "before": {
+      "machine_instructions": 36,
+      "slots": 36,
+      "frame_bytes": 288,
+      "direct_calls": 2,
+      "branches": 2,
+      "gpr_residences": 29,
+      "float_residences": 0
+    },
+    "after": {
+      "machine_instructions": 244,
+      "slots": 222,
+      "frame_bytes": 240,
+      "direct_calls": 0,
+      "external_calls": 3,
+      "branches": 7,
+      "gpr_residences": 70,
+      "float_residences": 145
+    }
+  },
+  "correctness": {
+    "integration_state_lines": 32768,
+    "integration_state_sha256": "f6d5bf68307949686c87a6240d645438fce66653710382e32baf5236610b9725",
+    "preparation_state_lines": 32768,
+    "preparation_state_sha256": "8975b93c5bf19616ae02749bbf167c3fac89e67a073b9495c8732e94b3c5ce40"
+  },
+  "arm64_integration": {
+    "candidate_median_ns": 69575000,
+    "baseline_median_ns": 79204000,
+    "median_ratio_ppm": 877605,
+    "lower_bound_ppm": 867004,
+    "upper_bound_ppm": 888162,
+    "confidence_ppm": 960823,
+    "same_file_control_median_ratio_ppm": 998693,
+    "same_file_control_lower_bound_ppm": 990310,
+    "same_file_control_upper_bound_ppm": 1003972
+  },
+  "arm64_preparation_control": {
+    "candidate_median_ns": 280651980,
+    "baseline_median_ns": 281281000,
+    "median_ratio_ppm": 1017920,
+    "lower_bound_ppm": 984111,
+    "upper_bound_ppm": 1026214,
+    "verdict": "inconclusive"
+  },
+  "local_checks": {
+    "check": "passed: 44/44 steps, 1996/1996 tests",
+    "optimizer_gate": "passed: 31/31 steps, 74/74 tests",
+    "optimizer_robustness_qualified": "passed: 144 pairwise, 5 triplets, 41 native, 4 negative, cache and graph stress"
+  },
+  "github_actions": {
+    "native_portability": {
+      "repository": "Silex",
+      "run_id": 34690135833,
+      "status": "success",
+      "targets": [
+        "macos-x64",
+        "linux-arm64",
+        "linux-x64",
+        "windows-arm64",
+        "windows-x64"
+      ]
+    },
+    "optimizer_x64": {
+      "repository": "Silex",
+      "run_id": 34690143709,
+      "baseline_revision": "c3a4b391f4d6ba3e656ee66fb82bc57fe7a13beb",
+      "status": "external-parity-failure",
+      "native_regressions": "passed",
+      "unchanged_release_binaries": [
+        "arithmetic",
+        "objects",
+        "flocking"
+      ]
+    },
+    "external_harness": {
+      "complete_history_revision": "aac6e98a2714085c1f58ed81ae8d8ef73cd11b89",
+      "historical_blob_revision": "b257271e26a0a3a25d48773815d441757ea8fb6e",
+      "evidence_retention_revision": "da1dedbda216db7f8c23eebd952c85381bcbd7b3",
+      "superseded_runs": [
+        {
+          "run_id": 34690301749,
+          "status": "cancelled"
+        },
+        {
+          "run_id": 34690315453,
+          "status": "shallow-ancestry-failure"
+        },
+        {
+          "run_id": 34690675660,
+          "status": "historical-hash-failure"
+        },
+        {
+          "run_id": 34690684373,
+          "status": "cancelled"
+        },
+        {
+          "run_id": 34691343744,
+          "status": "cancelled"
+        },
+        {
+          "run_id": 34691346837,
+          "status": "cancelled"
+        },
+        {
+          "run_id": 34691469647,
+          "status": "unsealed-owner-metadata-failure"
+        },
+        {
+          "run_id": 34691473556,
+          "status": "cancelled"
+        }
+      ],
+      "sealed_owner_metadata_revision": "b858fb26ef9e86817a4ecc0cc5069517abc79165"
+    },
+    "external_physics_integration_arm64": {
+      "repository": "Silex-Benchmarks",
+      "run_id": 34692143710,
+      "status": "external-parity-failure",
+      "silex_ab_verdict": "improvement"
+    },
+    "external_physics_integration_x64": {
+      "repository": "Silex-Benchmarks",
+      "run_id": 34692147157,
+      "status": "external-parity-failure",
+      "silex_ab_verdict": "improvement"
+    }
+  },
+  "arm64_github_silex_ab": {
+    "host": "Apple M1 (Virtual), native arm64",
+    "run_id": 34692143710,
+    "candidate_median_ratio_ppm": 953041,
+    "lower_bound_ppm": 932087,
+    "upper_bound_ppm": 974105,
+    "confidence_ppm": 960823,
+    "same_file_control_median_ratio_ppm": 1011653,
+    "same_file_control_lower_bound_ppm": 991893,
+    "same_file_control_upper_bound_ppm": 1029855,
+    "full_state_sha256": "f6d5bf68307949686c87a6240d645438fce66653710382e32baf5236610b9725",
+    "verdict": "improvement"
+  },
+  "x64_github_silex_ab": {
+    "host": "Intel Core i7-8700B, native x86_64",
+    "run_id": 34692147157,
+    "candidate_median_ratio_ppm": 961849,
+    "lower_bound_ppm": 950216,
+    "upper_bound_ppm": 972457,
+    "confidence_ppm": 960823,
+    "same_file_control_median_ratio_ppm": 997046,
+    "same_file_control_lower_bound_ppm": 977059,
+    "same_file_control_upper_bound_ppm": 1014418,
+    "full_state_sha256": "c0e39f760c6ca75e376de5d5d6c99fef230e309dda8e2a5b915c7a2cfec1f63c",
+    "candidate_binary_bytes": 66080,
+    "baseline_binary_bytes": 66080,
+    "verdict": "improvement"
+  },
+  "external_reference": {
+    "arm64_silex_over_clang_same_layout": {
+      "lower_bound_ppm": 1289227,
+      "median_ppm": 1299257,
+      "upper_bound_ppm": 1322777
+    },
+    "x64_silex_over_clang_same_layout": {
+      "lower_bound_ppm": 6997326,
+      "median_ppm": 7179965,
+      "upper_bound_ppm": 7440023
+    },
+    "role": "separate absolute-distance qualification; not the slice attribution oracle"
+  },
+  "verdict": {
+    "regional_hot_inlining": "accepted",
+    "arm64": "repeated improvement",
+    "x64": "improvement",
+    "clang_gap": "still open"
+  }
+}

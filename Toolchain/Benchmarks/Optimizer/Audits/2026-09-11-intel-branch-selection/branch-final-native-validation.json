@@ -1,0 +1,126 @@
+{
+  "compiler_sha256": "3e5e4a59a9bb733882af80e1aad16c4b9e578e2e0c4f262e19f08226cc69035b",
+  "source_sha256": "52928035238fdf6944a378d55315eb17c5b94c3967e3a8babd9e977d93b67d2d",
+  "observations": [
+    {
+      "target": "macos-arm64",
+      "mode": "debug",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "f75b56ee7a978897ca4e50e42020f730f00952809f3561bf6e5b631cb27f0786",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-macos-arm64-debug: Mach-O 64-bit executable arm64",
+      "exit": 0,
+      "stdout": "true\n",
+      "stderr": ""
+    },
+    {
+      "target": "macos-arm64",
+      "mode": "release",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "69a4fc185d09f818db4e1b7a8a28786c14c77f2d95700b4c38064756d363a51b",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-macos-arm64-release: Mach-O 64-bit executable arm64",
+      "exit": 0,
+      "stdout": "true\n",
+      "stderr": ""
+    },
+    {
+      "target": "macos-x64",
+      "mode": "debug",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "db139baf295292fa8725227b5cfc90a71078a7c82b770dfd2459818b61671a60",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-macos-x64-debug: Mach-O 64-bit executable x86_64",
+      "exit": 0,
+      "stdout": "true\n",
+      "stderr": ""
+    },
+    {
+      "target": "macos-x64",
+      "mode": "release",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "c99e665c0f692e0264d9cbc4c70ad8a4758a46a7fad0304505a9d0c735f7a341",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-macos-x64-release: Mach-O 64-bit executable x86_64",
+      "exit": 0,
+      "stdout": "true\n",
+      "stderr": ""
+    },
+    {
+      "target": "linux-arm64",
+      "mode": "debug",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "253cf370f2c341383c9af9b1db1e399382d6f497b703bb4b5b509aef0d16bd73",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-linux-arm64-debug: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "linux-arm64",
+      "mode": "release",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "3eb580cf00c1e690ec8abff8b5f39b64248a7ce1a1940eeedb11ea9ee46f5ea8",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-linux-arm64-release: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "linux-x64",
+      "mode": "debug",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "da8f8d7b9ca0f0ad30c239e9df74a38f30d64bd634d9c9cfecbf2d38967bcac8",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-linux-x64-debug: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "linux-x64",
+      "mode": "release",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "cffce0cfd531c2fe8f2894fc854563eb820e042e447b6436795ec6414c4aa2ca",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-linux-x64-release: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, no section header"
+    },
+    {
+      "target": "windows-arm64",
+      "mode": "debug",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "5778184c4535c26a61ae008a360a7bd6769eadf48073939ec5a3412bae05d4cd",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-windows-arm64-debug: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "target": "windows-arm64",
+      "mode": "release",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "604cc29ab16a7f1354f104a591466796741e7f9786f8647096079f63405ee183",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-windows-arm64-release: PE32+ executable (console) Aarch64, for MS Windows"
+    },
+    {
+      "target": "windows-x64",
+      "mode": "debug",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "8e61926179df171579901f0e4f80551a8bd3ebef48735b99df045c48a2f996fb",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-windows-x64-debug: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    },
+    {
+      "target": "windows-x64",
+      "mode": "release",
+      "build_status": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "sha256": "0f647a2ef4fcc980f5753ab3953c23be8886bb92d08bf84f38e761c0caa4d0e7",
+      "format": "/private/tmp/silex-part03-evidence/branch-final-windows-x64-release: MS-DOS executable PE32+ executable (console) x86-64, for MS Windows"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "ref": "spec-silex-optimization-parity-completion",
+  "inputs": {
+    "target": "optimizer-x64",
+    "baseline_ref": "1badca9d9c6b2a290db2242299faa9521c0ede5f"
+  }
+}

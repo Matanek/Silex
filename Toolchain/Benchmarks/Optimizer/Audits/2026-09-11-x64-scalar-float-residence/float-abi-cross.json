@@ -1,0 +1,35 @@
+{
+  "scope": "emission only, no native Linux/Windows execution",
+  "cases": [
+    {
+      "target": "linux-arm64",
+      "mode": "debug",
+      "artifacts": {
+        "ScalarFloatResidence-linux-arm64-debug": "7cda1fbab95ac31487fb28593139f90ebbc33cad5f96504516b00d4c59dcdda0"
+      }
+    },
+    {
+      "target": "linux-arm64",
+      "mode": "release",
+      "artifacts": {
+        "ScalarFloatResidence-linux-arm64-release": "35c91d42f3e6da66ea93db33e93b050632037d2af0f4d0b12b6d3c79db08cf89"
+      }
+    },
+    {
+      "target": "windows-arm64",
+      "mode": "debug",
+      "artifacts": {
+        "ScalarFloatResidence-windows-arm64-debug": "c82ee5adfde41d77ea6b82ae87a5d51b2ccb294104dfe50119372a80bd9c8fe5",
+        "ScalarFloatResidence-windows-arm64-debug.pdb": "8584d52d6abf317ef7256a83c1d94ee0d9403c7951a1a9e9d49b51446215c3d3"
+      }
+    },
+    {
+      "target": "windows-arm64",
+      "mode": "release",
+      "artifacts": {
+        "ScalarFloatResidence-windows-arm64-release.pdb": "d3025432dada0bc1aac6fe5b8bf3b7c627815c10d874646156f086d07cce0dc1",
+        "ScalarFloatResidence-windows-arm64-release": "ddb4d1a68f18719d5e5024f61f173a935fd69f51729055e66c7585c17368a720"
+      }
+    }
+  ]
+}

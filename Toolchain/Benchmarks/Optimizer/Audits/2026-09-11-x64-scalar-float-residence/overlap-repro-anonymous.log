@@ -1,0 +1,3 @@
+ok - anonymous scopes execute once and release bound receiver borrows
+ok - successive anonymous scopes can reuse local names
+2 passed; 0 failed

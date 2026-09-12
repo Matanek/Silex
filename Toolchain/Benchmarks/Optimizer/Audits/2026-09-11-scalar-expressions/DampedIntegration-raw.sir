@@ -1,0 +1,538 @@
+struct @Body {
+    var .vx:float
+    var .vy:float
+    var .w:float
+    var .px:float
+    var .py:float
+}
+
+struct @Forces {
+    var .x:float
+    var .y:float
+    var .torque:float
+    var .inverse_mass:float
+    var .inverse_inertia:float
+    var .gravity_scale:float
+    var .damping:float
+    var .angular_damping:float
+}
+
+struct @Body[..] {
+}
+
+struct @Forces[..] {
+}
+
+struct @Body[] {
+}
+
+struct @Forces[] {
+}
+
+func @velocity(%0:internal address, %1:@Forces, %2:float) -> void {
+entry:
+    %3:float = const 1
+    %4:float = const 1
+    %5:float = field %1, .damping
+    %6:float = mul %2, %5
+    %7:float = add %4, %6
+    %8:float = div %3, %7
+    %9:float = const 1
+    %10:float = const 1
+    %11:float = field %1, .angular_damping
+    %12:float = mul %2, %11
+    %13:float = add %10, %12
+    %14:float = div %9, %13
+    %15:float = const 0
+    store $0:float, %15
+    %16:float = field %1, .inverse_mass
+    %17:float = const 0
+    %18:bool = gt %16, %17
+    branch %18, bb1, bb2
+bb1:
+    %19:float = field %1, .gravity_scale
+    store $0:float, %19
+    jump bb3
+bb2:
+    jump bb3
+bb3:
+    %20:@Body = reference.load %0
+    %21:float = field %20, .vx
+    %22:float = field %1, .inverse_mass
+    %23:float = mul %2, %22
+    %24:float = field %1, .x
+    %25:float = mul %23, %24
+    %26:@Body = reference.load %0
+    %27:float = field %26, .vx
+    %28:internal address = reference.field %0, vx
+    %29:float = mul %8, %27
+    %30:float = add %25, %29
+    %31:@Body = reference.load %0
+    %32:float = field %31, .vx
+    %33:float = field %31, .vy
+    %34:float = field %31, .w
+    %35:float = field %31, .px
+    %36:float = field %31, .py
+    %37:@Body = struct.init @Body(.vx=%30, .vy=%33, .w=%34, .px=%35, .py=%36)
+    reference.store %0, %37
+    %38:@Body = reference.load %0
+    %39:float = field %38, .vy
+    %40:float = field %1, .inverse_mass
+    %41:float = mul %2, %40
+    %42:float = field %1, .y
+    %43:float = mul %41, %42
+    %44:float = load $0:float
+    %45:float = mul %2, %44
+    %46:float = const 10
+    %47:float = neg %46
+    %48:float = mul %45, %47
+    %49:float = add %43, %48
+    %50:@Body = reference.load %0
+    %51:float = field %50, .vy
+    %52:internal address = reference.field %0, vy
+    %53:float = mul %8, %51
+    %54:float = add %49, %53
+    %55:@Body = reference.load %0
+    %56:float = field %55, .vy
+    %57:float = field %55, .vx
+    %58:float = field %55, .w
+    %59:float = field %55, .px
+    %60:float = field %55, .py
+    %61:@Body = struct.init @Body(.vx=%57, .vy=%54, .w=%58, .px=%59, .py=%60)
+    reference.store %0, %61
+    %62:@Body = reference.load %0
+    %63:float = field %62, .w
+    %64:float = field %1, .inverse_inertia
+    %65:float = mul %2, %64
+    %66:float = field %1, .torque
+    %67:float = mul %65, %66
+    %68:@Body = reference.load %0
+    %69:float = field %68, .w
+    %70:internal address = reference.field %0, w
+    %71:float = mul %14, %69
+    %72:float = add %67, %71
+    %73:@Body = reference.load %0
+    %74:float = field %73, .w
+    %75:float = field %73, .vx
+    %76:float = field %73, .vy
+    %77:float = field %73, .px
+    %78:float = field %73, .py
+    %79:@Body = struct.init @Body(.vx=%75, .vy=%76, .w=%72, .px=%77, .py=%78)
+    reference.store %0, %79
+    return
+}
+
+func @position(%0:internal address, %1:float) -> void {
+entry:
+    %2:@Body = reference.load %0
+    %3:float = field %2, .px
+    %4:@Body = reference.load %0
+    %5:float = field %4, .vx
+    %6:internal address = reference.field %0, vx
+    %7:float = mul %1, %5
+    %8:float = add %3, %7
+    %9:@Body = reference.load %0
+    %10:float = field %9, .px
+    %11:float = field %9, .vx
+    %12:float = field %9, .vy
+    %13:float = field %9, .w
+    %14:float = field %9, .py
+    %15:@Body = struct.init @Body(.vx=%11, .vy=%12, .w=%13, .px=%8, .py=%14)
+    reference.store %0, %15
+    %16:@Body = reference.load %0
+    %17:float = field %16, .py
+    %18:@Body = reference.load %0
+    %19:float = field %18, .vy
+    %20:internal address = reference.field %0, vy
+    %21:float = mul %1, %19
+    %22:float = add %17, %21
+    %23:@Body = reference.load %0
+    %24:float = field %23, .py
+    %25:float = field %23, .vx
+    %26:float = field %23, .vy
+    %27:float = field %23, .w
+    %28:float = field %23, .px
+    %29:@Body = struct.init @Body(.vx=%25, .vy=%26, .w=%27, .px=%28, .py=%22)
+    reference.store %0, %29
+    return
+}
+
+func @integrate(%0:@Body[..], %1:@Forces[..], %2:float) -> void {
+entry:
+    store $0:structure, %0
+    %3:int = const 0
+    store $1:int, %3
+    jump bb1
+bb1:
+    %4:int = load $1:int
+    %5:@Body[..] = load $0:structure
+    %6:int = collection.count %5
+    %7:bool = lt %4, %6
+    branch %7, bb2, bb3
+bb2:
+    %8:@Body[..] = load $0:structure
+    %9:int = load $1:int
+    %10:@Body = collection.load %8, %9
+    %11:int = load $1:int
+    %12:@Forces = collection.load %1, %11
+    %13:internal address = address $0:structure
+    %14:@Body[..] = load $0:structure
+    %15:int = load $1:int
+    %16:internal address = collection.reference %14, %15, through %13
+    call @velocity(%16, %12, %2)
+    %17:int = load $1:int
+    %18:int = const 1
+    %19:int = add %17, %18
+    store $1:int, %19
+    jump bb1
+bb3:
+    %20:int = const 0
+    store $1:int, %20
+    jump bb4
+bb4:
+    %21:int = load $1:int
+    %22:@Body[..] = load $0:structure
+    %23:int = collection.count %22
+    %24:bool = lt %21, %23
+    branch %24, bb5, bb6
+bb5:
+    %25:@Body[..] = load $0:structure
+    %26:int = load $1:int
+    %27:@Body = collection.load %25, %26
+    %28:internal address = address $0:structure
+    %29:@Body[..] = load $0:structure
+    %30:int = load $1:int
+    %31:internal address = collection.reference %29, %30, through %28
+    call @position(%31, %2)
+    %32:int = load $1:int
+    %33:int = const 1
+    %34:int = add %32, %33
+    store $1:int, %34
+    jump bb4
+bb6:
+    return
+}
+
+func @main() -> void {
+entry:
+    %0:float = const 4
+    %1:float = const 2
+    %2:float = const 1
+    %3:float = const 0
+    %4:float = const 0
+    %5:@Body = struct.init @Body(.vx=%0, .vy=%1, .w=%2, .px=%3, .py=%4)
+    %6:float = const 1
+    %7:float = const 2
+    %8:float = neg %7
+    %9:float = const 0.5
+    %10:float = const 8
+    %11:float = const 8
+    %12:float = neg %11
+    %13:@Body = struct.init @Body(.vx=%6, .vy=%8, .w=%9, .px=%10, .py=%12)
+    %14:@Body[] = list.init [%5, %13]
+    store $0:structure, %14
+    %15:float = const 2
+    %16:float = const 4
+    %17:float = neg %16
+    %18:float = const 8
+    %19:float = const 0.5
+    %20:float = const 0.25
+    %21:float = const 1
+    %22:float = const 8
+    %23:float = const 8
+    %24:@Forces = struct.init @Forces(.x=%15, .y=%17, .torque=%18, .inverse_mass=%19, .inverse_inertia=%20, .gravity_scale=%21, .damping=%22, .angular_damping=%23)
+    %25:float = const 0
+    %26:float = const 0
+    %27:float = const 0
+    %28:float = const 0
+    %29:float = const 0
+    %30:float = const 1
+    %31:float = const 0
+    %32:float = const 0
+    %33:@Forces = struct.init @Forces(.x=%25, .y=%26, .torque=%27, .inverse_mass=%28, .inverse_inertia=%29, .gravity_scale=%30, .damping=%31, .angular_damping=%32)
+    %34:@Forces[] = list.init [%24, %33]
+    %35:@Body[] = load $0:structure
+    %36:internal address = address $0:structure
+    %37:@Body[] = load $0:structure
+    %38:int = const 0
+    %39:int = const 2
+    %40:@Body[..] = collection.view %35, %38, %39, through %36
+    store $1:structure, %40
+    %41:int = const 0
+    %42:int = const 2
+    %43:@Forces[..] = collection.view %34, %41, %42
+    %44:@Body[..] = load $1:structure
+    %45:float = const 0.125
+    call @integrate(%44, %43, %45)
+    %46:@Body[..] = load $1:structure
+    %47:int = const 0
+    %48:@Body = collection.load %46, %47
+    %49:float = field %48, .vx
+    %50:float = const 2.125
+    %51:bool = eq %49, %50
+    branch %51, bb1, bb2
+bb1:
+    %53:@Body[..] = load $1:structure
+    %54:int = const 0
+    %55:@Body = collection.load %53, %54
+    %56:float = field %55, .vy
+    %57:float = const 0.5
+    %58:float = neg %57
+    %59:bool = eq %56, %58
+    %52:bool = copy %59
+    jump bb3
+bb2:
+    %52:bool = const false
+    jump bb3
+bb3:
+    branch %52, bb4, bb5
+bb4:
+    %61:@Body[..] = load $1:structure
+    %62:int = const 0
+    %63:@Body = collection.load %61, %62
+    %64:float = field %63, .w
+    %65:float = const 0.75
+    %66:bool = eq %64, %65
+    %60:bool = copy %66
+    jump bb6
+bb5:
+    %60:bool = const false
+    jump bb6
+bb6:
+    print %60
+    %67:@Body[..] = load $1:structure
+    %68:int = const 0
+    %69:@Body = collection.load %67, %68
+    %70:float = field %69, .px
+    %71:float = const 0.265625
+    %72:bool = eq %70, %71
+    branch %72, bb7, bb8
+bb7:
+    %74:@Body[..] = load $1:structure
+    %75:int = const 0
+    %76:@Body = collection.load %74, %75
+    %77:float = field %76, .py
+    %78:float = const 0.0625
+    %79:float = neg %78
+    %80:bool = eq %77, %79
+    %73:bool = copy %80
+    jump bb9
+bb8:
+    %73:bool = const false
+    jump bb9
+bb9:
+    print %73
+    %81:@Body[..] = load $1:structure
+    %82:int = const 1
+    %83:@Body = collection.load %81, %82
+    %84:float = field %83, .vx
+    %85:float = const 1
+    %86:bool = eq %84, %85
+    branch %86, bb10, bb11
+bb10:
+    %88:@Body[..] = load $1:structure
+    %89:int = const 1
+    %90:@Body = collection.load %88, %89
+    %91:float = field %90, .vy
+    %92:float = const 2
+    %93:float = neg %92
+    %94:bool = eq %91, %93
+    %87:bool = copy %94
+    jump bb12
+bb11:
+    %87:bool = const false
+    jump bb12
+bb12:
+    branch %87, bb13, bb14
+bb13:
+    %96:@Body[..] = load $1:structure
+    %97:int = const 1
+    %98:@Body = collection.load %96, %97
+    %99:float = field %98, .w
+    %100:float = const 0.5
+    %101:bool = eq %99, %100
+    %95:bool = copy %101
+    jump bb15
+bb14:
+    %95:bool = const false
+    jump bb15
+bb15:
+    print %95
+    %102:@Body[..] = load $1:structure
+    %103:int = const 1
+    %104:@Body = collection.load %102, %103
+    %105:float = field %104, .px
+    %106:float = const 8.125
+    %107:bool = eq %105, %106
+    branch %107, bb16, bb17
+bb16:
+    %109:@Body[..] = load $1:structure
+    %110:int = const 1
+    %111:@Body = collection.load %109, %110
+    %112:float = field %111, .py
+    %113:float = const 8.25
+    %114:float = neg %113
+    %115:bool = eq %112, %114
+    %108:bool = copy %115
+    jump bb18
+bb17:
+    %108:bool = const false
+    jump bb18
+bb18:
+    print %108
+    %116:@Body[..] = load $1:structure
+    %117:float = const 0.125
+    call @integrate(%116, %43, %117)
+    %118:@Body[..] = load $1:structure
+    %119:int = const 0
+    %120:@Body = collection.load %118, %119
+    %121:float = field %120, .vx
+    %122:float = const 1.1875
+    %123:bool = eq %121, %122
+    branch %123, bb19, bb20
+bb19:
+    %125:@Body[..] = load $1:structure
+    %126:int = const 0
+    %127:@Body = collection.load %125, %126
+    %128:float = field %127, .vy
+    %129:float = const 1.75
+    %130:float = neg %129
+    %131:bool = eq %128, %130
+    %124:bool = copy %131
+    jump bb21
+bb20:
+    %124:bool = const false
+    jump bb21
+bb21:
+    branch %124, bb22, bb23
+bb22:
+    %133:@Body[..] = load $1:structure
+    %134:int = const 0
+    %135:@Body = collection.load %133, %134
+    %136:float = field %135, .w
+    %137:float = const 0.625
+    %138:bool = eq %136, %137
+    %132:bool = copy %138
+    jump bb24
+bb23:
+    %132:bool = const false
+    jump bb24
+bb24:
+    print %132
+    %139:@Body[..] = load $1:structure
+    %140:int = const 0
+    %141:@Body = collection.load %139, %140
+    %142:float = field %141, .px
+    %143:float = const 0.4140625
+    %144:bool = eq %142, %143
+    branch %144, bb25, bb26
+bb25:
+    %146:@Body[..] = load $1:structure
+    %147:int = const 0
+    %148:@Body = collection.load %146, %147
+    %149:float = field %148, .py
+    %150:float = const 0.28125
+    %151:float = neg %150
+    %152:bool = eq %149, %151
+    %145:bool = copy %152
+    jump bb27
+bb26:
+    %145:bool = const false
+    jump bb27
+bb27:
+    print %145
+    %153:@Body[..] = load $1:structure
+    %154:int = const 1
+    %155:@Body = collection.load %153, %154
+    %156:float = field %155, .vx
+    %157:float = const 1
+    %158:bool = eq %156, %157
+    branch %158, bb28, bb29
+bb28:
+    %160:@Body[..] = load $1:structure
+    %161:int = const 1
+    %162:@Body = collection.load %160, %161
+    %163:float = field %162, .vy
+    %164:float = const 2
+    %165:float = neg %164
+    %166:bool = eq %163, %165
+    %159:bool = copy %166
+    jump bb30
+bb29:
+    %159:bool = const false
+    jump bb30
+bb30:
+    branch %159, bb31, bb32
+bb31:
+    %168:@Body[..] = load $1:structure
+    %169:int = const 1
+    %170:@Body = collection.load %168, %169
+    %171:float = field %170, .w
+    %172:float = const 0.5
+    %173:bool = eq %171, %172
+    %167:bool = copy %173
+    jump bb33
+bb32:
+    %167:bool = const false
+    jump bb33
+bb33:
+    print %167
+    %174:@Body[..] = load $1:structure
+    %175:int = const 1
+    %176:@Body = collection.load %174, %175
+    %177:float = field %176, .px
+    %178:float = const 8.25
+    %179:bool = eq %177, %178
+    branch %179, bb34, bb35
+bb34:
+    %181:@Body[..] = load $1:structure
+    %182:int = const 1
+    %183:@Body = collection.load %181, %182
+    %184:float = field %183, .py
+    %185:float = const 8.5
+    %186:float = neg %185
+    %187:bool = eq %184, %186
+    %180:bool = copy %187
+    jump bb36
+bb35:
+    %180:bool = const false
+    jump bb36
+bb36:
+    print %180
+    %188:int = const 0
+    %189:@Forces = collection.load %34, %188
+    %190:float = field %189, .x
+    %191:float = const 2
+    %192:bool = eq %190, %191
+    branch %192, bb37, bb38
+bb37:
+    %194:int = const 0
+    %195:@Forces = collection.load %34, %194
+    %196:float = field %195, .damping
+    %197:float = const 8
+    %198:bool = eq %196, %197
+    %193:bool = copy %198
+    jump bb39
+bb38:
+    %193:bool = const false
+    jump bb39
+bb39:
+    branch %193, bb40, bb41
+bb40:
+    %200:int = const 1
+    %201:@Forces = collection.load %34, %200
+    %202:float = field %201, .inverse_mass
+    %203:float = const 0
+    %204:bool = eq %202, %203
+    %199:bool = copy %204
+    jump bb42
+bb41:
+    %199:bool = const false
+    jump bb42
+bb42:
+    print %199
+    list.drop %34
+    %205:@Body[] = load $0:structure
+    list.drop %205
+    return
+}

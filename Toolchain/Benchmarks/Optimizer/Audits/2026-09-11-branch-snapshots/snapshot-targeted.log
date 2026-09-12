@@ -1,0 +1,7 @@
+1/6 BranchSnapshotsProbe.test_0...OK
+2/6 Optimize.BranchSnapshotsTests.test.branch snapshots keep alias observations before either arm writes...OK
+3/6 Optimize.BranchSnapshotsTests.test.branch snapshots refuse conditions, joined uses, shared entries and redefinitions...OK
+4/6 Optimize.BranchSnapshotsTests.test.branch snapshots never cross an effect after the read...OK
+5/6 Optimize.Release.test_0...OK
+6/6 Optimize.ReleaseTests.test.release drops overwritten aggregate stores but retains branch snapshots...OK
+All 6 tests passed.

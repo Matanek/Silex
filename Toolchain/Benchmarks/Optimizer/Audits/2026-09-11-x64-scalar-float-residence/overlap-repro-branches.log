@@ -1,0 +1,4 @@
+ok - conditional branches select one path
+ok - while break and continue control the nearest loop
+ok - range and indexed collection iteration are complete
+3 passed; 0 failed

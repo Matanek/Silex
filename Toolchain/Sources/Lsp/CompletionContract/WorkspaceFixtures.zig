@@ -1,5 +1,8 @@
 const std = @import("std");
 const Project = @import("../../Project.zig");
+const TargetModule = @import("../../Target.zig");
+const Target = TargetModule.Target;
+const host_target = Target.host() orelse .macos_arm64;
 
 pub const Id = enum {
     std_math,
@@ -26,16 +29,22 @@ const Definition = struct {
 };
 
 pub fn validate(identifier: Id, canonical_source: []const u8) !void {
+    if (identifier == .platform_fragment) {
+        inline for (Target.recognized) |target| {
+            try validateDefinition(comptime definition(.platform_fragment, target.platform), canonical_source, target);
+        }
+        return;
+    }
     inline for (std.meta.fields(Id)) |field| {
         const known: Id = @enumFromInt(field.value);
-        if (identifier == known) return validateDefinition(comptime definition(known), canonical_source);
+        if (identifier == known) return validateDefinition(comptime definition(known, host_target.platform), canonical_source, host_target);
     }
     unreachable;
 }
 
 pub fn install(identifier: Id, temporary: *std.testing.TmpDir) ![]const u8 {
     return switch (identifier) {
-        inline else => |known| installDefinition(comptime definition(known), temporary),
+        inline else => |known| installDefinition(comptime definition(known, host_target.platform), temporary),
     };
 }
 
@@ -44,7 +53,7 @@ fn installDefinition(comptime fixture: Definition, temporary: *std.testing.TmpDi
     return fixture.entry_path;
 }
 
-fn validateDefinition(fixture: Definition, canonical_source: []const u8) !void {
+fn validateDefinition(fixture: Definition, canonical_source: []const u8, target: Target) !void {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
 
@@ -60,6 +69,7 @@ fn validateDefinition(fixture: Definition, canonical_source: []const u8) !void {
         fixture.entry_path,
     });
     var compiler = Project.Compiler.init(arena.allocator(), std.testing.io);
+    compiler.target = target;
     _ = compiler.compile(input) catch |err| {
         std.debug.print(
             "workspace completion fixture is not semantically valid: {s}\n",
@@ -74,7 +84,7 @@ fn writeFile(temporary: *std.testing.TmpDir, path: []const u8, source: []const u
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = path, .data = source });
 }
 
-fn definition(comptime identifier: Id) Definition {
+fn definition(comptime identifier: Id, comptime platform: TargetModule.Platform) Definition {
     return switch (identifier) {
         .std_math => .{ .files = &.{
             .{ .path = "Package.json", .source = rootManifest("STD") },
@@ -201,13 +211,16 @@ fn definition(comptime identifier: Id) Definition {
             .{ .path = "Package.json", .source = rootManifest("Bridge") },
             .{ .path = "Bridge/Package.json", .source = packageManifest("Bridge") },
             .{ .path = "Bridge/Module/@Module.sx", .source = "" },
-            .{ .path = "Bridge/Platform/MacOS/Module/Window.sx", .source =
+            .{ .path = "Bridge/Platform/" ++ platform.directoryName() ++ "/Module/Window.sx", .source =
             \\public class Window {
             \\    static func current() Window { return Window() }
             \\    func show() {}
             \\}
             },
-            .{ .path = "Bridge/Platform/Linux/Module/Window.sx", .source = "inactive invalid Linux source" },
+            .{
+                .path = "Bridge/Platform/" ++ (if (platform == .linux) "MacOS" else "Linux") ++ "/Module/Window.sx",
+                .source = "inactive invalid platform source",
+            },
         } },
     };
 }

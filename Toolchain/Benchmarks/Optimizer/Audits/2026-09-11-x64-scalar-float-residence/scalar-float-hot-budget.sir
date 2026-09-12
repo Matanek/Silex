@@ -1,0 +1,325 @@
+func @Regressions.ScalarFloatResidence.barrier(%0:int) -> int {
+entry:
+    %1:int = const 32
+    %2:bool = eq %0, %1
+    print %2
+    return %0
+}
+
+func @Regressions.ScalarFloatResidence.change(%0:internal address) -> void {
+entry:
+    %2:float64 = const -7
+    reference.store %0, %2
+    return
+}
+
+func @Regressions.ScalarFloatResidence.regions(%0:int) -> float64 {
+entry:
+    %1:float64 = const 1
+    %2:float64 = const 2
+    %3:float64 = const 3
+    %4:float64 = const 4
+    %5:float64 = const 5
+    %6:float64 = const 6
+    %7:float64 = const 7
+    %8:float64 = const 8
+    %9:int = const 0
+    %54:int = copy %0
+    %55:float64 = copy %1
+    %62:float64 = copy %8
+    %61:float64 = copy %7
+    %60:float64 = copy %6
+    %59:float64 = copy %5
+    %58:float64 = copy %4
+    %57:float64 = copy %3
+    %56:float64 = copy %2
+    jump bb1
+bb1:
+    %11:bool = gt %54, %9
+    branch %11, bb2, bb3
+bb2:
+    %12:float64 = copy %55
+    %13:float64 = const 1
+    %14:float64 = add %12, %13
+    %15:float64 = copy %56
+    %16:float64 = const 2
+    %17:float64 = add %15, %16
+    %18:float64 = copy %57
+    %19:float64 = const 3
+    %20:float64 = add %18, %19
+    %21:float64 = copy %58
+    %22:float64 = const 4
+    %23:float64 = add %21, %22
+    %24:float64 = copy %59
+    %25:float64 = const 5
+    %26:float64 = add %24, %25
+    %27:float64 = copy %60
+    %28:float64 = const 6
+    %29:float64 = add %27, %28
+    %30:float64 = copy %61
+    %31:float64 = const 7
+    %32:float64 = add %30, %31
+    %33:float64 = copy %62
+    %34:float64 = const 8
+    %35:float64 = add %33, %34
+    %37:int = const 1
+    %38:int = sub %54, %37
+    %54:int = copy %38
+    %55:float64 = copy %14
+    %62:float64 = copy %35
+    %61:float64 = copy %32
+    %60:float64 = copy %29
+    %59:float64 = copy %26
+    %58:float64 = copy %23
+    %57:float64 = copy %20
+    %56:float64 = copy %17
+    jump bb1
+bb3:
+    %39:float64 = copy %55
+    %40:float64 = copy %56
+    %41:float64 = add %39, %40
+    %42:float64 = copy %57
+    %43:float64 = add %41, %42
+    %44:float64 = copy %58
+    %45:float64 = add %43, %44
+    %46:float64 = copy %59
+    %47:float64 = add %45, %46
+    %48:float64 = copy %60
+    %49:float64 = add %47, %48
+    %50:float64 = copy %61
+    %51:float64 = add %49, %50
+    %52:float64 = copy %62
+    %53:float64 = add %51, %52
+    return %53
+}
+
+func @Regressions.ScalarFloatResidence.across_call(%0:float64, %1:int) -> float64 {
+entry:
+    store $0:float64, %0
+    %2:float64 = const 2
+    %3:float64 = add %0, %2
+    %4:int = const 0
+    %20:int = copy %4
+    %22:float64 = copy %3
+    jump bb1
+bb1:
+    %6:bool = lt %20, %1
+    branch %6, bb2, bb3
+bb2:
+    %7:float64 = copy %22
+    %8:float64 = load $0:float64
+    %9:float64 = add %7, %8
+    %11:int = const 1
+    %12:bool = eq %20, %11
+    branch %12, bb4, bb5
+bb3:
+    %19:float64 = copy %22
+    return %19
+bb4:
+    %14:internal address = address $0:float64
+    %21:float64 = const -7
+    reference.store %14, %21
+    jump bb5
+bb5:
+    %17:int = const 1
+    %18:int = add %20, %17
+    %20:int = copy %18
+    %22:float64 = copy %9
+    jump bb1
+}
+
+func @Regressions.ScalarFloatResidence.edges(%0:float64, %1:float64, %2:bool) -> void {
+entry:
+    %21:float64 = copy %0
+    branch %2, bb1, bb2
+bb1:
+    %3:float64 = neg %0
+    %21:float64 = copy %3
+    jump bb2
+bb2:
+    %4:float = const 1
+    %5:float64 = copy %21
+    %6:float64 = convert %4 to float64
+    %7:float64 = div %6, %5
+    %8:float64 = const 0
+    %9:bool = gt %7, %8
+    print %9
+    %10:float64 = const 1
+    %11:float64 = add %1, %10
+    %12:bool = ne %11, %11
+    print %12
+    %13:float = const 1024
+    %14:float64 = convert %13 to float64
+    %15:float64 = const 1024
+    %16:bool = eq %14, %15
+    print %16
+    %17:int = convert %14 to int
+    %18:int = neg %17
+    %19:int = const -1024
+    %20:bool = eq %18, %19
+    print %20
+    return
+}
+
+func @main() -> void {
+entry:
+    %0:int = const 32
+    %1:int = call @Regressions.ScalarFloatResidence.barrier(%0)
+    %42:float64 = const 1
+    %43:float64 = const 2
+    %44:float64 = const 3
+    %45:float64 = const 4
+    %46:float64 = const 5
+    %47:float64 = const 6
+    %48:float64 = const 7
+    %49:float64 = const 8
+    %50:int = const 0
+    %95:int = copy %1
+    %118:float64 = copy %42
+    %125:float64 = copy %49
+    %124:float64 = copy %48
+    %123:float64 = copy %47
+    %122:float64 = copy %46
+    %121:float64 = copy %45
+    %120:float64 = copy %44
+    %119:float64 = copy %43
+    jump bb4
+bb1:
+    %21:bool = gt %41, %19
+    branch %21, bb2, bb3
+bb2:
+    %22:float = copy %116
+    %23:float = const 0.5
+    %24:float = mul %22, %23
+    %25:float = const 0.25
+    %26:float = add %24, %25
+    %27:float = copy %117
+    %28:float = const 0.5
+    %29:float = mul %27, %28
+    %30:float = const 0.5
+    %31:float = add %29, %30
+    %33:int = const 1
+    %34:int = sub %41, %33
+    %41:int = copy %34
+    %116:float = copy %26
+    %117:float = copy %31
+    jump bb1
+bb3:
+    %35:float = copy %116
+    %36:float = const 0.5
+    %37:bool = eq %35, %36
+    print %37
+    %38:float = copy %117
+    %39:float = const 1
+    %40:bool = eq %38, %39
+    print %40
+    return
+bb4:
+    %52:bool = gt %95, %50
+    branch %52, bb5, bb6
+bb5:
+    %53:float64 = copy %118
+    %54:float64 = const 1
+    %55:float64 = add %53, %54
+    %56:float64 = copy %119
+    %57:float64 = const 2
+    %58:float64 = add %56, %57
+    %59:float64 = copy %120
+    %60:float64 = const 3
+    %61:float64 = add %59, %60
+    %62:float64 = copy %121
+    %63:float64 = const 4
+    %64:float64 = add %62, %63
+    %65:float64 = copy %122
+    %66:float64 = const 5
+    %67:float64 = add %65, %66
+    %68:float64 = copy %123
+    %69:float64 = const 6
+    %70:float64 = add %68, %69
+    %71:float64 = copy %124
+    %72:float64 = const 7
+    %73:float64 = add %71, %72
+    %74:float64 = copy %125
+    %75:float64 = const 8
+    %76:float64 = add %74, %75
+    %78:int = const 1
+    %79:int = sub %95, %78
+    %95:int = copy %79
+    %118:float64 = copy %55
+    %125:float64 = copy %76
+    %124:float64 = copy %73
+    %123:float64 = copy %70
+    %122:float64 = copy %67
+    %121:float64 = copy %64
+    %120:float64 = copy %61
+    %119:float64 = copy %58
+    jump bb4
+bb6:
+    %80:float64 = copy %118
+    %81:float64 = copy %119
+    %82:float64 = add %80, %81
+    %83:float64 = copy %120
+    %84:float64 = add %82, %83
+    %85:float64 = copy %121
+    %86:float64 = add %84, %85
+    %87:float64 = copy %122
+    %88:float64 = add %86, %87
+    %89:float64 = copy %123
+    %90:float64 = add %88, %89
+    %91:float64 = copy %124
+    %92:float64 = add %90, %91
+    %93:float64 = copy %125
+    %94:float64 = add %92, %93
+    %2:float64 = copy %94
+    %3:float64 = const 1188
+    %4:bool = eq %2, %3
+    print %4
+    %5:float64 = const 3
+    %6:int = const 4
+    store $0:float64, %5
+    %97:float64 = const 5
+    %98:int = const 0
+    %114:int = copy %98
+    %126:float64 = copy %97
+    jump bb7
+bb7:
+    %100:bool = lt %114, %6
+    branch %100, bb8, bb9
+bb8:
+    %101:float64 = copy %126
+    %102:float64 = load $0:float64
+    %103:float64 = add %101, %102
+    %105:int = const 1
+    %106:bool = eq %114, %105
+    branch %106, bb10, bb11
+bb9:
+    %113:float64 = copy %126
+    %7:float64 = copy %113
+    %9:float64 = const -3
+    %10:bool = eq %7, %9
+    print %10
+    %12:float64 = const -0
+    %13:float64 = const 0
+    %14:float64 = const 0
+    %15:float64 = div %13, %14
+    %16:bool = const true
+    call @Regressions.ScalarFloatResidence.edges(%12, %15, %16)
+    %17:float = const 0.5
+    %18:float = const 1
+    %19:int = const 0
+    %41:int = copy %1
+    %116:float = copy %17
+    %117:float = copy %18
+    jump bb1
+bb10:
+    %108:internal address = address $0:float64
+    %115:float64 = const -7
+    reference.store %108, %115
+    jump bb11
+bb11:
+    %111:int = const 1
+    %112:int = add %114, %111
+    %114:int = copy %112
+    %126:float64 = copy %103
+    jump bb7
+}

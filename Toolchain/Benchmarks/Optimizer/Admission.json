@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "relevant_roots": ["Toolchain/", "Docs/", ".github/workflows/"],
-  "protected_contracts": ["Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json"],
+  "protected_contracts": ["Toolchain/Benchmarks/Optimizer/PerformanceBaselines.json", "Toolchain/Benchmarks/Optimizer/Assurance.json"],
   "checks": [
     {"id": "optimizer-admission-quick", "kind": "local", "command": "cd Toolchain && zig build check", "status_context": "optimizer admission / quick"},
     {"id": "optimizer-qualified-internal", "kind": "qualified", "command": "cd Toolchain && zig build optimizer-gate", "status_context": "optimizer admission / qualified internal"},
@@ -12,6 +12,8 @@
   "rules": [
     {"id": "compiler-semantics-ir-runtime", "prefixes": ["Toolchain/Sources/", "Toolchain/Runtime/"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "optimizer-robustness-qualified", "native-portability-matrix", "external-qualification-selected"], "implementation_change": true},
     {"id": "optimizer-oracle-and-corpus", "prefixes": ["Toolchain/Tools/OptimizerOracle/", "Toolchain/Benchmarks/Optimizer/"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "optimizer-robustness-qualified", "native-portability-matrix", "external-qualification-selected"], "implementation_change": false},
+    {"id": "native-benchmark-campaign", "prefixes": ["Toolchain/Benchmarks/Native/"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "optimizer-robustness-qualified", "native-portability-matrix", "external-qualification-selected"], "implementation_change": false},
+    {"id": "lsp-benchmarks-and-audits", "prefixes": ["Toolchain/Benchmarks/LspCompletion/", "Toolchain/Tools/LspCompletionAudit/", "Toolchain/Tools/LspCompletionBenchmark/"], "required_checks": ["optimizer-admission-quick"], "implementation_change": false},
     {"id": "toolchain-build-and-manifest", "prefixes": ["Toolchain/build.zig", "Toolchain/build.zig.zon"], "required_checks": ["optimizer-admission-quick", "optimizer-qualified-internal", "native-portability-matrix"], "implementation_change": true},
     {"id": "optimizer-documentation", "prefixes": ["Docs/"], "required_checks": ["optimizer-admission-quick"], "implementation_change": false},
     {"id": "admission-workflows", "prefixes": [".github/workflows/"], "required_checks": ["optimizer-admission-quick", "native-portability-matrix"], "implementation_change": false}

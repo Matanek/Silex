@@ -1,0 +1,2 @@
+[('Arithmetic', 'macos-arm64', True), ('Objects', 'macos-arm64', False), ('Flocking', 'macos-arm64', True), ('Arithmetic', 'macos-x64', False), ('Objects', 'macos-x64', False), ('Flocking', 'macos-x64', True)]
+16 emissions, 8 native Debug/Release runs passed

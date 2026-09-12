@@ -1,0 +1,104 @@
+{
+  "jobs": [
+    {
+      "id": 103459098981,
+      "name": "macos-x64",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 34659581895,
+      "logs_url": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Check out Silex",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Install Zig 0.16.0",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Build and validate Silex on macOS X64",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4
+        },
+        {
+          "name": "Post Check out Silex",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9
+        }
+      ]
+    },
+    {
+      "id": 103459099746,
+      "name": "windows-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34659581895,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103459099837,
+      "name": "windows-arm64-build",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34659581895,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103459099960,
+      "name": "linux-arm64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34659581895,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103459100021,
+      "name": "linux-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34659581895,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103459100587,
+      "name": "windows-arm64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34659581895,
+      "logs_url": null,
+      "steps": null
+    },
+    {
+      "id": 103459127650,
+      "name": "optimizer-x64",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_id": 34659581895,
+      "logs_url": null,
+      "steps": null
+    }
+  ]
+}

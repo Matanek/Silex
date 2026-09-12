@@ -1,0 +1,7 @@
+1/1 MetamorphicProfileProbe.test.profile reachable metamorphic pairs...direct-or-helper: instructions 2/2, blocks 1/1, calls 0/0
+declaration-order: instructions 2/2, blocks 1/1, calls 0/0
+inline-or-nested-helper: instructions 15/15, blocks 4/4, calls 0/0
+scalar-or-aggregate-branch: instructions 2/2, blocks 1/1, calls 0/0
+while-or-for-collection: instructions 23/26, blocks 5/5, calls 1/1
+OK
+All 1 tests passed.

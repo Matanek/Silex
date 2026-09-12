@@ -1,0 +1,12 @@
+{
+  "before": {
+    "instructions": 130,
+    "loads": 32,
+    "stores": 32
+  },
+  "after": {
+    "instructions": 66,
+    "loads": 0,
+    "stores": 0
+  }
+}

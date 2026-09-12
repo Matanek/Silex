@@ -1,0 +1,589 @@
+﻿2026-09-11T22:12:26.7345071Z Current runner version: '2.337.0'
+2026-09-11T22:12:26.7375315Z ##[group]Runner Image Provisioner
+2026-09-11T22:12:26.7376198Z Hosted Compute Agent
+2026-09-11T22:12:26.7376755Z Version: 20260828.587
+2026-09-11T22:12:26.7377421Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-11T22:12:26.7378085Z Build Date: 2026-08-28T16:44:25Z
+2026-09-11T22:12:26.7378715Z Worker ID: {515ceb61-900e-41d0-8799-1fc7f436147b}
+2026-09-11T22:12:26.7379655Z Azure Region: northcentralus
+2026-09-11T22:12:26.7380281Z ##[endgroup]
+2026-09-11T22:12:26.7382136Z ##[group]Operating System
+2026-09-11T22:12:26.7382735Z Microsoft Windows 11
+2026-09-11T22:12:26.7383257Z 10.0.26200
+2026-09-11T22:12:26.7383782Z Enterprise
+2026-09-11T22:12:26.7384258Z ##[endgroup]
+2026-09-11T22:12:26.7384823Z ##[group]Runner Image
+2026-09-11T22:12:26.7385359Z Image: windows-11-arm64
+2026-09-11T22:12:26.7385901Z Version: 20260906.161.1
+2026-09-11T22:12:26.7387438Z Included Software: https://github.com/actions/runner-images/blob/win11-arm64/20260906.161/images/windows/Windows11-Arm64-Readme.md
+2026-09-11T22:12:26.7388944Z Image Release: https://github.com/actions/runner-images/releases/tag/win11-arm64%2F20260906.161
+2026-09-11T22:12:26.7389834Z ##[endgroup]
+2026-09-11T22:12:26.7390858Z ##[group]GITHUB_TOKEN Permissions
+2026-09-11T22:12:26.7393222Z Contents: read
+2026-09-11T22:12:26.7393812Z Metadata: read
+2026-09-11T22:12:26.7394499Z ##[endgroup]
+2026-09-11T22:12:26.7396987Z Secret source: Actions
+2026-09-11T22:12:26.7397964Z Cache mode: write
+2026-09-11T22:12:26.7398767Z Prepare workflow directory
+2026-09-11T22:12:26.7803657Z Prepare all required actions
+2026-09-11T22:12:26.7855043Z Getting action download info
+2026-09-11T22:12:26.9759752Z Download action repository 'actions/checkout@v6' (SHA:d23441a48e516b6c34aea4fa41551a30e30af803)
+2026-09-11T22:12:27.3235013Z Download action repository 'actions/download-artifact@v5' (SHA:634f93cb2916e3fdff6788551b99b062d0335ce0)
+2026-09-11T22:12:28.2481616Z Complete job name: windows-arm64
+2026-09-11T22:12:28.6839535Z ##[group]Run actions/checkout@v6
+2026-09-11T22:12:28.6841422Z with:
+2026-09-11T22:12:28.6842239Z   repository: Matanek/Silex
+2026-09-11T22:12:28.6849279Z   token: ***
+2026-09-11T22:12:28.6850064Z   ssh-strict: true
+2026-09-11T22:12:28.6850854Z   ssh-user: git
+2026-09-11T22:12:28.6851645Z   persist-credentials: true
+2026-09-11T22:12:28.6852506Z   clean: true
+2026-09-11T22:12:28.6853314Z   sparse-checkout-cone-mode: true
+2026-09-11T22:12:28.6854251Z   fetch-depth: 1
+2026-09-11T22:12:28.6855023Z   fetch-tags: false
+2026-09-11T22:12:28.6856077Z   show-progress: true
+2026-09-11T22:12:28.6856886Z   lfs: false
+2026-09-11T22:12:28.6857638Z   submodules: false
+2026-09-11T22:12:28.6858466Z   set-safe-directory: true
+2026-09-11T22:12:28.6859427Z   allow-unsafe-pr-checkout: false
+2026-09-11T22:12:28.6860838Z ##[endgroup]
+2026-09-11T22:12:28.9260998Z Syncing repository: Matanek/Silex
+2026-09-11T22:12:28.9263598Z ##[group]Getting Git version info
+2026-09-11T22:12:28.9264844Z Working directory is 'C:\a\Silex\Silex'
+2026-09-11T22:12:29.0167169Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-11T22:12:29.4144905Z git version 2.55.0.windows.5
+2026-09-11T22:12:29.4196066Z ##[endgroup]
+2026-09-11T22:12:29.4252470Z Temporarily overriding HOME='C:\a\_temp\1b48ac24-a2d5-4853-9153-045df1ff2fee' before making global git config changes
+2026-09-11T22:12:29.4254511Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-11T22:12:29.4261825Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory C:\a\Silex\Silex
+2026-09-11T22:12:29.5047626Z Deleting the contents of 'C:\a\Silex\Silex'
+2026-09-11T22:12:29.5055959Z ##[group]Determining repository object format
+2026-09-11T22:12:29.5059032Z ##[endgroup]
+2026-09-11T22:12:29.5060768Z ##[group]Initializing the repository
+2026-09-11T22:12:29.5067834Z [command]"C:\Program Files\Git\bin\git.exe" init C:\a\Silex\Silex
+2026-09-11T22:12:29.6410422Z Initialized empty Git repository in C:/a/Silex/Silex/.git/
+2026-09-11T22:12:29.6464317Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/Matanek/Silex
+2026-09-11T22:12:29.7138747Z ##[endgroup]
+2026-09-11T22:12:29.7139968Z ##[group]Disabling automatic garbage collection
+2026-09-11T22:12:29.7146943Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-09-11T22:12:29.7633523Z ##[endgroup]
+2026-09-11T22:12:29.7634751Z ##[group]Setting up auth
+2026-09-11T22:12:29.7635676Z Removing SSH command configuration
+2026-09-11T22:12:29.7647116Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-11T22:12:29.8124091Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-11T22:12:32.0097547Z Removing HTTP extra header
+2026-09-11T22:12:32.0121848Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-11T22:12:32.0661756Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-11T22:12:33.1671827Z Removing includeIf entries pointing to credentials config files
+2026-09-11T22:12:33.1672592Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-11T22:12:33.2158044Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-11T22:12:34.3210772Z [command]"C:\Program Files\Git\bin\git.exe" config --file C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-09-11T22:12:34.3714079Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:C:/a/Silex/Silex/.git.path C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:12:34.4188317Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:C:/a/Silex/Silex/.git/worktrees/*.path C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:12:34.4665406Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:12:34.5196634Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:12:34.5682126Z ##[endgroup]
+2026-09-11T22:12:34.5682578Z ##[group]Fetching the repository
+2026-09-11T22:12:34.5695509Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +7bd153ce94975ccc2143679a85ef99fd1fa0db4f:refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-11T22:12:36.3611741Z From https://github.com/Matanek/Silex
+2026-09-11T22:12:36.3612704Z  * [new ref]         7bd153ce94975ccc2143679a85ef99fd1fa0db4f -> origin/spec-silex-optimization-parity-completion
+2026-09-11T22:12:36.3669933Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/spec-silex-optimization-parity-completion
+2026-09-11T22:12:36.4271602Z   origin/spec-silex-optimization-parity-completion
+2026-09-11T22:12:36.4320928Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-11T22:12:36.4800188Z 7bd153ce94975ccc2143679a85ef99fd1fa0db4f
+2026-09-11T22:12:36.4838713Z ##[endgroup]
+2026-09-11T22:12:36.4839158Z ##[group]Determining the checkout info
+2026-09-11T22:12:36.4840277Z ##[endgroup]
+2026-09-11T22:12:36.4849743Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-09-11T22:12:36.5485309Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-09-11T22:12:36.5964706Z ##[group]Checking out the ref
+2026-09-11T22:12:36.5973551Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B spec-silex-optimization-parity-completion refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-11T22:12:37.6569807Z Updating files:  42% (730/1725)
+2026-09-11T22:12:37.6720731Z Updating files:  43% (742/1725)
+2026-09-11T22:12:37.6838814Z Updating files:  44% (759/1725)
+2026-09-11T22:12:37.7005469Z Updating files:  45% (777/1725)
+2026-09-11T22:12:37.7214802Z Updating files:  46% (794/1725)
+2026-09-11T22:12:38.1885051Z Updating files:  47% (811/1725)
+2026-09-11T22:12:38.4261595Z Updating files:  48% (828/1725)
+2026-09-11T22:12:38.4507118Z Updating files:  49% (846/1725)
+2026-09-11T22:12:38.5582493Z Updating files:  50% (863/1725)
+2026-09-11T22:12:38.5719008Z Updating files:  51% (880/1725)
+2026-09-11T22:12:38.5891324Z Updating files:  52% (897/1725)
+2026-09-11T22:12:38.7483804Z Updating files:  53% (915/1725)
+2026-09-11T22:12:38.7490906Z Updating files:  53% (930/1725)
+2026-09-11T22:12:38.8112518Z Updating files:  54% (932/1725)
+2026-09-11T22:12:38.9410165Z Updating files:  55% (949/1725)
+2026-09-11T22:12:38.9708451Z Updating files:  56% (966/1725)
+2026-09-11T22:12:38.9930945Z Updating files:  57% (984/1725)
+2026-09-11T22:12:39.1228602Z Updating files:  58% (1001/1725)
+2026-09-11T22:12:39.1380530Z Updating files:  59% (1018/1725)
+2026-09-11T22:12:39.1629295Z Updating files:  60% (1035/1725)
+2026-09-11T22:12:39.1798443Z Updating files:  61% (1053/1725)
+2026-09-11T22:12:39.1965123Z Updating files:  62% (1070/1725)
+2026-09-11T22:12:39.2095502Z Updating files:  63% (1087/1725)
+2026-09-11T22:12:39.2374541Z Updating files:  64% (1104/1725)
+2026-09-11T22:12:39.2480775Z Updating files:  65% (1122/1725)
+2026-09-11T22:12:39.2628560Z Updating files:  66% (1139/1725)
+2026-09-11T22:12:39.5785730Z Updating files:  67% (1156/1725)
+2026-09-11T22:12:39.5967936Z Updating files:  68% (1173/1725)
+2026-09-11T22:12:39.6094782Z Updating files:  69% (1191/1725)
+2026-09-11T22:12:39.7433584Z Updating files:  70% (1208/1725)
+2026-09-11T22:12:39.7525363Z Updating files:  70% (1212/1725)
+2026-09-11T22:12:39.7748790Z Updating files:  71% (1225/1725)
+2026-09-11T22:12:39.7970328Z Updating files:  72% (1242/1725)
+2026-09-11T22:12:39.8117562Z Updating files:  73% (1260/1725)
+2026-09-11T22:12:39.8262352Z Updating files:  74% (1277/1725)
+2026-09-11T22:12:39.8412769Z Updating files:  75% (1294/1725)
+2026-09-11T22:12:39.8551553Z Updating files:  76% (1311/1725)
+2026-09-11T22:12:39.9062604Z Updating files:  77% (1329/1725)
+2026-09-11T22:12:39.9235326Z Updating files:  78% (1346/1725)
+2026-09-11T22:12:39.9415310Z Updating files:  79% (1363/1725)
+2026-09-11T22:12:39.9680734Z Updating files:  80% (1380/1725)
+2026-09-11T22:12:40.0058120Z Updating files:  81% (1398/1725)
+2026-09-11T22:12:40.0281803Z Updating files:  82% (1415/1725)
+2026-09-11T22:12:40.0623292Z Updating files:  83% (1432/1725)
+2026-09-11T22:12:40.0764608Z Updating files:  84% (1449/1725)
+2026-09-11T22:12:40.0977520Z Updating files:  85% (1467/1725)
+2026-09-11T22:12:40.1135278Z Updating files:  86% (1484/1725)
+2026-09-11T22:12:40.1288205Z Updating files:  87% (1501/1725)
+2026-09-11T22:12:40.1608062Z Updating files:  88% (1518/1725)
+2026-09-11T22:12:40.1769986Z Updating files:  89% (1536/1725)
+2026-09-11T22:12:40.1902883Z Updating files:  90% (1553/1725)
+2026-09-11T22:12:40.2009997Z Updating files:  91% (1570/1725)
+2026-09-11T22:12:40.2180169Z Updating files:  92% (1587/1725)
+2026-09-11T22:12:40.2441465Z Updating files:  93% (1605/1725)
+2026-09-11T22:12:40.2530397Z Updating files:  94% (1622/1725)
+2026-09-11T22:12:40.2682230Z Updating files:  95% (1639/1725)
+2026-09-11T22:12:40.2810890Z Updating files:  96% (1656/1725)
+2026-09-11T22:12:40.2964135Z Updating files:  97% (1674/1725)
+2026-09-11T22:12:40.3391939Z Updating files:  98% (1691/1725)
+2026-09-11T22:12:40.3544251Z Updating files:  99% (1708/1725)
+2026-09-11T22:12:40.3544718Z Updating files: 100% (1725/1725)
+2026-09-11T22:12:40.3545039Z Updating files: 100% (1725/1725), done.
+2026-09-11T22:12:40.3736377Z Switched to a new branch 'spec-silex-optimization-parity-completion'
+2026-09-11T22:12:40.4072141Z branch 'spec-silex-optimization-parity-completion' set up to track 'origin/spec-silex-optimization-parity-completion'.
+2026-09-11T22:12:40.4140234Z ##[endgroup]
+2026-09-11T22:12:40.5418764Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-09-11T22:12:40.5887770Z 7bd153ce94975ccc2143679a85ef99fd1fa0db4f
+2026-09-11T22:12:40.7309551Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-11T22:12:40.7311916Z ##[group]Run actions/download-artifact@v5
+2026-09-11T22:12:40.7312242Z with:
+2026-09-11T22:12:40.7312508Z   name: windows-arm64-bootstrap
+2026-09-11T22:12:40.7312800Z   path: C:\a\_temp/windows-arm64-bootstrap
+2026-09-11T22:12:40.7313104Z   merge-multiple: false
+2026-09-11T22:12:40.7313384Z   repository: Matanek/Silex
+2026-09-11T22:12:40.7313638Z   run-id: 34652524590
+2026-09-11T22:12:40.7313884Z ##[endgroup]
+2026-09-11T22:12:40.9937721Z Downloading single artifact
+2026-09-11T22:12:41.0157142Z (node:6220) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-11T22:12:41.0219057Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-11T22:12:41.1301945Z Preparing to download the following artifacts:
+2026-09-11T22:12:41.1302882Z - windows-arm64-bootstrap (ID: 10285005403, Size: 8761493, Expected Digest: sha256:adc7c3e71d56eeeeedbcc1bde518742357bf96a1175355b3c6a22ecd2c7c41f1)
+2026-09-11T22:12:41.2657435Z Redirecting to blob download url: https://productionresultssa10.blob.core.windows.net/actions-results/e522e018-3a12-4235-a7e4-1156f24972df/workflow-job-run-0f16bb5c-969c-544b-9de0-e3837f3e4b3c/artifacts/6025fa0f33cc196a1d0d5143db1af8535cef3a92f46066794d8aab3bae73955c.zip
+2026-09-11T22:12:41.2658753Z Starting download of artifact to: C:\a\_temp\windows-arm64-bootstrap
+2026-09-11T22:12:41.4009942Z (node:6220) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-09-11T22:12:41.8546768Z SHA256 digest of downloaded artifact is adc7c3e71d56eeeeedbcc1bde518742357bf96a1175355b3c6a22ecd2c7c41f1
+2026-09-11T22:12:41.8547548Z Artifact download completed successfully.
+2026-09-11T22:12:41.8547873Z Total of 1 artifact(s) downloaded
+2026-09-11T22:12:41.8558743Z Download artifact has finished successfully
+2026-09-11T22:12:41.9207917Z ##[group]Run $ErrorActionPreference = "Stop"
+2026-09-11T22:12:41.9209264Z [36;1m$ErrorActionPreference = "Stop"[0m
+2026-09-11T22:12:41.9209754Z [36;1m$PSNativeCommandUseErrorActionPreference = $true[0m
+2026-09-11T22:12:41.9210118Z [36;1m[0m
+2026-09-11T22:12:41.9210367Z [36;1mfunction Get-PeMachine([string] $Path) {[0m
+2026-09-11T22:12:41.9210789Z [36;1m  $bytes = [System.IO.File]::ReadAllBytes($Path)[0m
+2026-09-11T22:12:41.9211231Z [36;1m  if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {[0m
+2026-09-11T22:12:41.9211677Z [36;1m    throw "not a PE executable: $Path"[0m
+2026-09-11T22:12:41.9211994Z [36;1m  }[0m
+2026-09-11T22:12:41.9212273Z [36;1m  $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)[0m
+2026-09-11T22:12:41.9212701Z [36;1m  if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length -or[0m
+2026-09-11T22:12:41.9213172Z [36;1m      $bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45) {[0m
+2026-09-11T22:12:41.9214087Z [36;1m    throw "invalid PE header: $Path"[0m
+2026-09-11T22:12:41.9214434Z [36;1m  }[0m
+2026-09-11T22:12:41.9214759Z [36;1m  return [BitConverter]::ToUInt16($bytes, $peOffset + 4)[0m
+2026-09-11T22:12:41.9215121Z [36;1m}[0m
+2026-09-11T22:12:41.9215374Z [36;1m[0m
+2026-09-11T22:12:41.9215636Z [36;1mfunction Assert-Arm64Pe([string] $Path) {[0m
+2026-09-11T22:12:41.9215978Z [36;1m  $machine = Get-PeMachine $Path[0m
+2026-09-11T22:12:41.9216308Z [36;1m  if ($machine -ne 0xaa64) {[0m
+2026-09-11T22:12:41.9216792Z [36;1m    throw "expected ARM64 PE machine 0xaa64 for $Path, got 0x$($machine.ToString('x4'))"[0m
+2026-09-11T22:12:41.9217261Z [36;1m  }[0m
+2026-09-11T22:12:41.9217482Z [36;1m}[0m
+2026-09-11T22:12:41.9217686Z [36;1m[0m
+2026-09-11T22:12:41.9218016Z [36;1mfunction Assert-Arm64CoffArchive([string] $Path) {[0m
+2026-09-11T22:12:41.9218419Z [36;1m  $bytes = [System.IO.File]::ReadAllBytes($Path)[0m
+2026-09-11T22:12:41.9218885Z [36;1m  $signature = [System.Text.Encoding]::ASCII.GetString($bytes, 0, 8)[0m
+2026-09-11T22:12:41.9219329Z [36;1m  if ($signature -ne "!<arch>`n") {[0m
+2026-09-11T22:12:41.9219679Z [36;1m    throw "not an archive: $Path"[0m
+2026-09-11T22:12:41.9220079Z [36;1m  }[0m
+2026-09-11T22:12:41.9220347Z [36;1m  $offset = 8[0m
+2026-09-11T22:12:41.9220676Z [36;1m  while ($offset + 60 -le $bytes.Length) {[0m
+2026-09-11T22:12:41.9221166Z [36;1m    $sizeText = [System.Text.Encoding]::ASCII.GetString($bytes, $offset + 48, 10).Trim()[0m
+2026-09-11T22:12:41.9221628Z [36;1m    $size = 0L[0m
+2026-09-11T22:12:41.9221951Z [36;1m    if (-not [long]::TryParse($sizeText, [ref] $size)) {[0m
+2026-09-11T22:12:41.9222373Z [36;1m      throw "invalid archive member size in $Path"[0m
+2026-09-11T22:12:41.9222724Z [36;1m    }[0m
+2026-09-11T22:12:41.9222965Z [36;1m    $dataOffset = $offset + 60[0m
+2026-09-11T22:12:41.9223377Z [36;1m    if ($size -ge 2 -and $dataOffset + $size -le $bytes.Length -and[0m
+2026-09-11T22:12:41.9223881Z [36;1m        $bytes[$dataOffset] -eq 0x64 -and $bytes[$dataOffset + 1] -eq 0xaa) {[0m
+2026-09-11T22:12:41.9224545Z [36;1m      return[0m
+2026-09-11T22:12:41.9224824Z [36;1m    }[0m
+2026-09-11T22:12:41.9225094Z [36;1m    $offset = $dataOffset + $size[0m
+2026-09-11T22:12:41.9225416Z [36;1m    if (($offset % 2) -ne 0) {[0m
+2026-09-11T22:12:41.9225721Z [36;1m      $offset++[0m
+2026-09-11T22:12:41.9225960Z [36;1m    }[0m
+2026-09-11T22:12:41.9226223Z [36;1m  }[0m
+2026-09-11T22:12:41.9226537Z [36;1m  throw "archive contains no Windows ARM64 COFF member: $Path"[0m
+2026-09-11T22:12:41.9226922Z [36;1m}[0m
+2026-09-11T22:12:41.9227132Z [36;1m[0m
+2026-09-11T22:12:41.9227510Z [36;1mfunction Assert-PortabilityOutput([string[]] $Output, [string] $Mode) {[0m
+2026-09-11T22:12:41.9228081Z [36;1m  $cycleDrops = @($Output | Where-Object { $_ -eq "native cycle drop" }).Count[0m
+2026-09-11T22:12:41.9228613Z [36;1m  $copyDrops = @($Output | Where-Object { $_ -eq "copy state drop" }).Count[0m
+2026-09-11T22:12:41.9230982Z [36;1m  if ($cycleDrops -ne 6 -or $copyDrops -ne 2) {[0m
+2026-09-11T22:12:41.9231698Z [36;1m    throw "$Mode portability output has $cycleDrops cycle drops and $copyDrops copy drops"[0m
+2026-09-11T22:12:41.9232191Z [36;1m  }[0m
+2026-09-11T22:12:41.9232421Z [36;1m}[0m
+2026-09-11T22:12:41.9232648Z [36;1m[0m
+2026-09-11T22:12:41.9233031Z [36;1mfunction Invoke-NativeCapture([string] $Path, [string[]] $Arguments = @()) {[0m
+2026-09-11T22:12:41.9233574Z [36;1m  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()[0m
+2026-09-11T22:12:41.9233976Z [36;1m  $startInfo.FileName = $Path[0m
+2026-09-11T22:12:41.9234340Z [36;1m  $startInfo.UseShellExecute = $false[0m
+2026-09-11T22:12:41.9234698Z [36;1m  $startInfo.RedirectStandardOutput = $true[0m
+2026-09-11T22:12:41.9235116Z [36;1m  $startInfo.RedirectStandardError = $true[0m
+2026-09-11T22:12:41.9235500Z [36;1m  foreach ($argument in $Arguments) {[0m
+2026-09-11T22:12:41.9235872Z [36;1m    $startInfo.ArgumentList.Add($argument)[0m
+2026-09-11T22:12:41.9237112Z [36;1m  }[0m
+2026-09-11T22:12:41.9237391Z [36;1m  $process = [System.Diagnostics.Process]::new()[0m
+2026-09-11T22:12:41.9237837Z [36;1m  $process.StartInfo = $startInfo[0m
+2026-09-11T22:12:41.9238166Z [36;1m  if (-not $process.Start()) {[0m
+2026-09-11T22:12:41.9238537Z [36;1m    throw "failed to start native command: $Path"[0m
+2026-09-11T22:12:41.9238865Z [36;1m  }[0m
+2026-09-11T22:12:41.9239491Z [36;1m  $stdout = $process.StandardOutput.ReadToEnd()[0m
+2026-09-11T22:12:41.9239916Z [36;1m  $stderr = $process.StandardError.ReadToEnd()[0m
+2026-09-11T22:12:41.9240268Z [36;1m  $process.WaitForExit()[0m
+2026-09-11T22:12:41.9240587Z [36;1m  if ($process.ExitCode -ne 0) {[0m
+2026-09-11T22:12:41.9241070Z [36;1m    throw "native command failed with exit code $($process.ExitCode): $Path`n$stderr"[0m
+2026-09-11T22:12:41.9241514Z [36;1m  }[0m
+2026-09-11T22:12:41.9241863Z [36;1m  return @($stdout -split "`r?`n" | Where-Object { $_.Length -ne 0 })[0m
+2026-09-11T22:12:41.9242268Z [36;1m}[0m
+2026-09-11T22:12:41.9242499Z [36;1m[0m
+2026-09-11T22:12:41.9242947Z [36;1m$architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()[0m
+2026-09-11T22:12:41.9243605Z [36;1mif ($env:PROCESSOR_ARCHITECTURE -ne "ARM64" -or $architecture -ne "Arm64") {[0m
+2026-09-11T22:12:41.9244626Z [36;1m  throw "expected a native Windows ARM64 runner, got PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE OSArchitecture=$architecture"[0m
+2026-09-11T22:12:41.9245248Z [36;1m}[0m
+2026-09-11T22:12:41.9245488Z [36;1m[0m
+2026-09-11T22:12:41.9245853Z [36;1m$bootstrapRoot = Join-Path $env:RUNNER_TEMP "windows-arm64-bootstrap"[0m
+2026-09-11T22:12:41.9246337Z [36;1m$buildPrefix = Join-Path $bootstrapRoot "silex"[0m
+2026-09-11T22:12:41.9246747Z [36;1m$builtSilex = Join-Path $buildPrefix "bin/silex.exe"[0m
+2026-09-11T22:12:41.9247107Z [36;1mAssert-Arm64Pe $builtSilex[0m
+2026-09-11T22:12:41.9247423Z [36;1m[0m
+2026-09-11T22:12:41.9247871Z [36;1m$probeRoot = Join-Path $env:GITHUB_WORKSPACE "Tests/Target/windows-arm64/WindowsArm64BoundaryProbe"[0m
+2026-09-11T22:12:41.9248520Z [36;1m$boundaryDirectory = Join-Path $probeRoot "Boundary/windows-arm64"[0m
+2026-09-11T22:12:41.9249083Z [36;1m$boundaryArchive = Join-Path $boundaryDirectory "BoundaryProbe.lib"[0m
+2026-09-11T22:12:41.9249607Z [36;1mNew-Item -ItemType Directory -Force $boundaryDirectory | Out-Null[0m
+2026-09-11T22:12:41.9250192Z [36;1mCopy-Item (Join-Path $bootstrapRoot "boundary/BoundaryProbe.lib") $boundaryArchive[0m
+2026-09-11T22:12:41.9250714Z [36;1mAssert-Arm64CoffArchive $boundaryArchive[0m
+2026-09-11T22:12:41.9251058Z [36;1m[0m
+2026-09-11T22:12:41.9251417Z [36;1m$distributionArchive = Join-Path $env:RUNNER_TEMP "silex-windows-arm64.zip"[0m
+2026-09-11T22:12:41.9252083Z [36;1mCompress-Archive -Path (Join-Path $buildPrefix "*") -DestinationPath $distributionArchive[0m
+2026-09-11T22:12:41.9253642Z [36;1mWrite-Output "distribution sha256=$((Get-FileHash $distributionArchive -Algorithm SHA256).Hash.ToLowerInvariant())"[0m
+2026-09-11T22:12:41.9254376Z [36;1mRemove-Item -Recurse -Force $buildPrefix[0m
+2026-09-11T22:12:41.9254837Z [36;1m$installRoot = Join-Path $env:RUNNER_TEMP "silex-install"[0m
+2026-09-11T22:12:41.9255362Z [36;1mExpand-Archive $distributionArchive -DestinationPath $installRoot[0m
+2026-09-11T22:12:41.9255836Z [36;1m$silex = Join-Path $installRoot "bin/silex.exe"[0m
+2026-09-11T22:12:41.9256187Z [36;1mAssert-Arm64Pe $silex[0m
+2026-09-11T22:12:41.9256478Z [36;1m[0m
+2026-09-11T22:12:41.9256766Z [36;1m$env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"[0m
+2026-09-11T22:12:41.9257132Z [36;1m$env:HOME = $env:USERPROFILE[0m
+2026-09-11T22:12:41.9257538Z [36;1mNew-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null[0m
+2026-09-11T22:12:41.9257966Z [36;1m& $silex --version[0m
+2026-09-11T22:12:41.9258251Z [36;1m$targets = @(& $silex targets)[0m
+2026-09-11T22:12:41.9258627Z [36;1mif ($targets -notcontains "windows-arm64 (host)") {[0m
+2026-09-11T22:12:41.9259320Z [36;1m  throw "windows-arm64 is not reported as the native host"[0m
+2026-09-11T22:12:41.9259727Z [36;1m}[0m
+2026-09-11T22:12:41.9259950Z [36;1m& $silex setup[0m
+2026-09-11T22:12:41.9260193Z [36;1m[0m
+2026-09-11T22:12:41.9260686Z [36;1m$managedZig = Join-Path $env:USERPROFILE ".silex/toolchain/zig/0.16.0/windows-x64/zig-x86_64-windows-0.16.0/zig.exe"[0m
+2026-09-11T22:12:41.9261640Z [36;1m$shadercross = Join-Path $env:USERPROFILE ".silex/toolchain/shadercross/3.0.0/windows-arm64/SDL3_shadercross-3.0.0-windows-VC-x64/bin/shadercross.exe"[0m
+2026-09-11T22:12:41.9262399Z [36;1m$managedZigMachine = Get-PeMachine $managedZig[0m
+2026-09-11T22:12:41.9262769Z [36;1mif ($managedZigMachine -ne 0x8664) {[0m
+2026-09-11T22:12:41.9263321Z [36;1m  throw "expected the declared X64 managed linker, got machine 0x$($managedZigMachine.ToString('x4'))"[0m
+2026-09-11T22:12:41.9263821Z [36;1m}[0m
+2026-09-11T22:12:41.9264095Z [36;1m$shaderMachine = Get-PeMachine $shadercross[0m
+2026-09-11T22:12:41.9264500Z [36;1mif ($shaderMachine -ne 0x8664) {[0m
+2026-09-11T22:12:41.9265289Z [36;1m  throw "expected the declared x64 Shadercross compatibility tool, got machine 0x$($shaderMachine.ToString('x4'))"[0m
+2026-09-11T22:12:41.9265852Z [36;1m}[0m
+2026-09-11T22:12:41.9266078Z [36;1m& $managedZig version[0m
+2026-09-11T22:12:41.9266435Z [36;1m& $shadercross --help | Select-Object -First 1[0m
+2026-09-11T22:12:41.9266777Z [36;1m[0m
+2026-09-11T22:12:41.9267150Z [36;1m$env:PATH = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"[0m
+2026-09-11T22:12:41.9267601Z [36;1m[0m
+2026-09-11T22:12:41.9268028Z [36;1m$portabilitySource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx"[0m
+2026-09-11T22:12:41.9268639Z [36;1m# Preserve and inspect independently linked tests if native execution[0m
+2026-09-11T22:12:41.9269141Z [36;1m# fails before PowerShell can report the full NTSTATUS.[0m
+2026-09-11T22:12:41.9269603Z [36;1m$PSNativeCommandUseErrorActionPreference = $false[0m
+2026-09-11T22:12:41.9270034Z [36;1m& $silex test $portabilitySource --nocache[0m
+2026-09-11T22:12:41.9270396Z [36;1m$testExitCode = $LASTEXITCODE[0m
+2026-09-11T22:12:41.9270710Z [36;1mif ($testExitCode -ne 0) {[0m
+2026-09-11T22:12:41.9271178Z [36;1m  $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"[0m
+2026-09-11T22:12:41.9271828Z [36;1m  $cdb = Get-ChildItem $debuggersRoot -Filter cdb.exe -Recurse -ErrorAction SilentlyContinue |[0m
+2026-09-11T22:12:41.9272420Z [36;1m    Where-Object { $_.FullName -match '[\\/]arm64[\\/]' } |[0m
+2026-09-11T22:12:41.9272817Z [36;1m    Select-Object -First 1[0m
+2026-09-11T22:12:41.9273270Z [36;1m  $failedTests = @(Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE ".silex/test") `[0m
+2026-09-11T22:12:41.9273768Z [36;1m    -Filter "NativePortability-*.exe" -File)[0m
+2026-09-11T22:12:41.9274093Z [36;1m  if ($null -ne $cdb) {[0m
+2026-09-11T22:12:41.9274724Z [36;1m    foreach ($failedTest in $failedTests) {[0m
+2026-09-11T22:12:41.9275158Z [36;1m      Assert-Arm64Pe $failedTest.FullName[0m
+2026-09-11T22:12:41.9275704Z [36;1m      Write-Output "debugging retained ARM64 test $($failedTest.Name) with $($cdb.FullName)"[0m
+2026-09-11T22:12:41.9276405Z [36;1m      & $cdb.FullName -lines -c "g; .ecxr; !analyze -v; r; kv; ub @pc L10; u @pc L40; q" $failedTest.FullName[0m
+2026-09-11T22:12:41.9276900Z [36;1m    }[0m
+2026-09-11T22:12:41.9277130Z [36;1m  }[0m
+2026-09-11T22:12:41.9277487Z [36;1m  throw "Windows ARM64 native test slice failed with exit code $testExitCode"[0m
+2026-09-11T22:12:41.9277937Z [36;1m}[0m
+2026-09-11T22:12:41.9278240Z [36;1m$PSNativeCommandUseErrorActionPreference = $true[0m
+2026-09-11T22:12:41.9278595Z [36;1m[0m
+2026-09-11T22:12:41.9278972Z [36;1m$portabilityDebug = Join-Path $env:RUNNER_TEMP "native-portability-debug.exe"[0m
+2026-09-11T22:12:41.9279598Z [36;1m$portabilityRelease = Join-Path $env:RUNNER_TEMP "native-portability-release.exe"[0m
+2026-09-11T22:12:41.9280505Z [36;1m& $silex compile $portabilitySource --debug --nocache -o $portabilityDebug[0m
+2026-09-11T22:12:41.9281102Z [36;1m& $silex compile $portabilitySource --release --nocache -o $portabilityRelease[0m
+2026-09-11T22:12:41.9281611Z [36;1mAssert-Arm64Pe $portabilityDebug[0m
+2026-09-11T22:12:41.9281952Z [36;1mAssert-Arm64Pe $portabilityRelease[0m
+2026-09-11T22:12:41.9282452Z [36;1m$debugOutput = @(Invoke-NativeCapture $portabilityDebug)[0m
+2026-09-11T22:12:41.9282967Z [36;1m$releaseOutput = @(Invoke-NativeCapture $portabilityRelease)[0m
+2026-09-11T22:12:41.9283419Z [36;1mAssert-PortabilityOutput $debugOutput "Debug"[0m
+2026-09-11T22:12:41.9283841Z [36;1mAssert-PortabilityOutput $releaseOutput "Release"[0m
+2026-09-11T22:12:41.9285134Z [36;1mif (@(Compare-Object $debugOutput $releaseOutput -SyncWindow 0).Count -ne 0) {[0m
+2026-09-11T22:12:41.9285744Z [36;1m  throw "Debug and Release portability outputs differ"[0m
+2026-09-11T22:12:41.9286121Z [36;1m}[0m
+2026-09-11T22:12:41.9286345Z [36;1m[0m
+2026-09-11T22:12:41.9286605Z [36;1m& $silex test $portabilitySource --nocache[0m
+2026-09-11T22:12:41.9287005Z [36;1m[0m
+2026-09-11T22:12:41.9287440Z [36;1m$smokeSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx"[0m
+2026-09-11T22:12:41.9288214Z [36;1m$debugSmoke = @(Invoke-NativeCapture -Path $silex -Arguments @("run", $smokeSource, "--debug", "--nocache"))[0m
+2026-09-11T22:12:41.9289487Z [36;1m$releaseSmoke = @(Invoke-NativeCapture -Path $silex -Arguments @("run", $smokeSource, "--release", "--nocache"))[0m
+2026-09-11T22:12:41.9290500Z [36;1mif ($debugSmoke.Count -ne 1 -or $debugSmoke[0] -ne "silex distribution ready" -or[0m
+2026-09-11T22:12:41.9291170Z [36;1m    $releaseSmoke.Count -ne 1 -or $releaseSmoke[0] -ne "silex distribution ready") {[0m
+2026-09-11T22:12:41.9292184Z [36;1m  throw "distribution run smoke failed"[0m
+2026-09-11T22:12:41.9292752Z [36;1m}[0m
+2026-09-11T22:12:41.9293153Z [36;1m$standaloneSmoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"[0m
+2026-09-11T22:12:41.9293695Z [36;1m& $silex compile $smokeSource --release --nocache -o $standaloneSmoke[0m
+2026-09-11T22:12:41.9294153Z [36;1mAssert-Arm64Pe $standaloneSmoke[0m
+2026-09-11T22:12:41.9294566Z [36;1m$standaloneOutput = @(Invoke-NativeCapture $standaloneSmoke)[0m
+2026-09-11T22:12:41.9295153Z [36;1mif ($standaloneOutput.Count -ne 1 -or $standaloneOutput[0] -ne "silex distribution ready") {[0m
+2026-09-11T22:12:41.9295721Z [36;1m  throw "standalone distribution smoke failed"[0m
+2026-09-11T22:12:41.9296047Z [36;1m}[0m
+2026-09-11T22:12:41.9296262Z [36;1m[0m
+2026-09-11T22:12:41.9296567Z [36;1m$boundaryTest = Join-Path $probeRoot "Tests/Boundary.sx"[0m
+2026-09-11T22:12:41.9297049Z [36;1m$boundaryMain = Join-Path $probeRoot "Tests/BoundaryMain.sx"[0m
+2026-09-11T22:12:41.9297488Z [36;1m& $silex test $boundaryTest --nocache[0m
+2026-09-11T22:12:41.9298205Z [36;1m$boundaryDebug = Join-Path $env:RUNNER_TEMP "boundary-debug.exe"[0m
+2026-09-11T22:12:41.9298867Z [36;1m$boundaryRelease = Join-Path $env:RUNNER_TEMP "boundary-release.exe"[0m
+2026-09-11T22:12:41.9299392Z [36;1m& $silex compile $boundaryMain --debug --nocache -o $boundaryDebug[0m
+2026-09-11T22:12:41.9299900Z [36;1m& $silex compile $boundaryMain --release --nocache -o $boundaryRelease[0m
+2026-09-11T22:12:41.9300352Z [36;1mAssert-Arm64Pe $boundaryDebug[0m
+2026-09-11T22:12:41.9300696Z [36;1mAssert-Arm64Pe $boundaryRelease[0m
+2026-09-11T22:12:41.9301109Z [36;1m$boundaryDebugOutput = @(Invoke-NativeCapture $boundaryDebug)[0m
+2026-09-11T22:12:41.9301619Z [36;1m$boundaryReleaseOutput = @(Invoke-NativeCapture $boundaryRelease)[0m
+2026-09-11T22:12:41.9302338Z [36;1mif ($boundaryDebugOutput.Count -ne 1 -or $boundaryDebugOutput[0] -ne "windows arm64 boundary ready" -or[0m
+2026-09-11T22:12:41.9303118Z [36;1m    $boundaryReleaseOutput.Count -ne 1 -or $boundaryReleaseOutput[0] -ne "windows arm64 boundary ready") {[0m
+2026-09-11T22:12:41.9303927Z [36;1m  throw "Windows ARM64 Boundary smoke failed"[0m
+2026-09-11T22:12:41.9304266Z [36;1m}[0m
+2026-09-11T22:12:41.9304500Z [36;1m[0m
+2026-09-11T22:12:41.9305101Z [36;1m# Copy bytes unchanged into a standalone fixture, without the optimizer's STD graph.[0m
+2026-09-11T22:12:41.9305682Z [36;1m$scalarRoot = Join-Path $env:RUNNER_TEMP "scalar-float-fixture"[0m
+2026-09-11T22:12:41.9306199Z [36;1mNew-Item -ItemType Directory -Force -Path $scalarRoot | Out-Null[0m
+2026-09-11T22:12:41.9306777Z [36;1mSet-Content -Path (Join-Path $scalarRoot "Package.json") -Value '{"sources":"."}'[0m
+2026-09-11T22:12:41.9307341Z [36;1m$scalarFixture = Join-Path $scalarRoot "ScalarFloatResidence.sx"[0m
+2026-09-11T22:12:41.9308068Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx") $scalarFixture[0m
+2026-09-11T22:12:41.9308756Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T22:12:41.9309218Z [36;1m  $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"[0m
+2026-09-11T22:12:41.9309804Z [36;1m  & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary[0m
+2026-09-11T22:12:41.9310246Z [36;1m  Assert-Arm64Pe $scalarBinary[0m
+2026-09-11T22:12:41.9310633Z [36;1m  $scalarOutput = @(Invoke-NativeCapture $scalarBinary)[0m
+2026-09-11T22:12:41.9311262Z [36;1m  if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {[0m
+2026-09-11T22:12:41.9311922Z [36;1m    throw "scalar float residence $mode regression failed"[0m
+2026-09-11T22:12:41.9312310Z [36;1m  }[0m
+2026-09-11T22:12:41.9312525Z [36;1m}[0m
+2026-09-11T22:12:41.9312875Z [36;1m$branchFixture = Join-Path $scalarRoot "BranchComparisons.sx"[0m
+2026-09-11T22:12:41.9313605Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx") $branchFixture[0m
+2026-09-11T22:12:41.9314972Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T22:12:41.9315863Z [36;1m  $branchBinary = Join-Path $env:RUNNER_TEMP "branch-comparisons-$mode.exe"[0m
+2026-09-11T22:12:41.9316443Z [36;1m  & $silex compile $branchFixture "--$mode" --nocache -o $branchBinary[0m
+2026-09-11T22:12:41.9317125Z [36;1m  if ($LASTEXITCODE -ne 0) { throw "branch comparison compilation failed" }[0m
+2026-09-11T22:12:41.9317582Z [36;1m  $branchOutput = @(& $branchBinary)[0m
+2026-09-11T22:12:41.9318112Z [36;1m  if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {[0m
+2026-09-11T22:12:41.9318651Z [36;1m    throw "branch comparison $mode regression failed"[0m
+2026-09-11T22:12:41.9318994Z [36;1m  }[0m
+2026-09-11T22:12:41.9319236Z [36;1m}[0m
+2026-09-11T22:12:41.9319589Z [36;1m$snapshotFixture = Join-Path $scalarRoot "BranchSnapshots.sx"[0m
+2026-09-11T22:12:41.9321239Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx") $snapshotFixture[0m
+2026-09-11T22:12:41.9322081Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T22:12:41.9322542Z [36;1m  $snapshotBinary = Join-Path $env:RUNNER_TEMP "branch-snapshots-$mode.exe"[0m
+2026-09-11T22:12:41.9323168Z [36;1m  & $silex compile $snapshotFixture "--$mode" --nocache -o $snapshotBinary[0m
+2026-09-11T22:12:41.9323715Z [36;1m  if ($LASTEXITCODE -ne 0) { throw "branch snapshot compilation failed" }[0m
+2026-09-11T22:12:41.9324185Z [36;1m  $snapshotOutput = @(& $snapshotBinary)[0m
+2026-09-11T22:12:41.9324819Z [36;1m  if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {[0m
+2026-09-11T22:12:41.9325458Z [36;1m    throw "branch snapshot $mode regression failed"[0m
+2026-09-11T22:12:41.9325818Z [36;1m  }[0m
+2026-09-11T22:12:41.9326039Z [36;1m}[0m
+2026-09-11T22:12:41.9326402Z [36;1m$loopExitFixture = Join-Path $scalarRoot "LoopExitResidence.sx"[0m
+2026-09-11T22:12:41.9327982Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx") $loopExitFixture[0m
+2026-09-11T22:12:41.9328671Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T22:12:41.9329177Z [36;1m  $loopExitBinary = Join-Path $env:RUNNER_TEMP "loop-exit-residence-$mode.exe"[0m
+2026-09-11T22:12:41.9329741Z [36;1m  & $silex compile $loopExitFixture "--$mode" --nocache -o $loopExitBinary[0m
+2026-09-11T22:12:41.9330313Z [36;1m  if ($LASTEXITCODE -ne 0) { throw "loop exit residence compilation failed" }[0m
+2026-09-11T22:12:41.9330793Z [36;1m  $loopExitOutput = @(& $loopExitBinary)[0m
+2026-09-11T22:12:41.9331415Z [36;1m  if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {[0m
+2026-09-11T22:12:41.9332360Z [36;1m    throw "loop exit residence $mode regression failed"[0m
+2026-09-11T22:12:41.9332750Z [36;1m  }[0m
+2026-09-11T22:12:41.9332993Z [36;1m}[0m
+2026-09-11T22:12:41.9333361Z [36;1m$floatMemoryFixture = Join-Path $scalarRoot "FloatMemoryResidence.sx"[0m
+2026-09-11T22:12:41.9334170Z [36;1mCopy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx") $floatMemoryFixture[0m
+2026-09-11T22:12:41.9334876Z [36;1mforeach ($mode in @("debug", "release")) {[0m
+2026-09-11T22:12:41.9335374Z [36;1m  $floatMemoryBinary = Join-Path $env:RUNNER_TEMP "float-memory-residence-$mode.exe"[0m
+2026-09-11T22:12:41.9336030Z [36;1m  & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary[0m
+2026-09-11T22:12:41.9336628Z [36;1m  if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }[0m
+2026-09-11T22:12:41.9337129Z [36;1m  $floatMemoryOutput = @(& $floatMemoryBinary)[0m
+2026-09-11T22:12:41.9337792Z [36;1m  if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 10 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {[0m
+2026-09-11T22:12:41.9338517Z [36;1m    throw "float memory residence $mode regression failed"[0m
+2026-09-11T22:12:41.9338884Z [36;1m  }[0m
+2026-09-11T22:12:41.9339097Z [36;1m}[0m
+2026-09-11T22:12:41.9398246Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-09-11T22:12:41.9398753Z ##[endgroup]
+2026-09-11T22:12:43.6651985Z distribution sha256=f8f51161a03b6d34ed1015859341b8b6020165e2bbb10455a5c83054800cc221
+2026-09-11T22:12:44.2650078Z silex 0.44.1
+2026-09-11T22:12:45.9825699Z silex: installed Shadercross for windows-arm64
+2026-09-11T22:13:12.8671172Z silex: installed Native linker for windows-arm64
+2026-09-11T22:13:16.3963035Z 0.16.0
+2026-09-11T22:13:16.8629541Z Usage: shadercross <input> [options]
+2026-09-11T22:13:16.8630014Z Required options:
+2026-09-11T22:13:16.8630686Z   -s | --source <value>            Source language format. May be inferred from the filename. Values: [SPIRV, HLSL]
+2026-09-11T22:13:16.8632893Z   -d | --dest <value>              Destination format. May be inferred from the filename. Values: [DXBC, DXIL, MSL, SPIRV, HLSL, JSON]
+2026-09-11T22:13:16.8633968Z   -t | --stage <value>             Shader stage. May be inferred from the filename. Values: [vertex, fragment, compute]
+2026-09-11T22:13:16.8634573Z   -e | --entrypoint <value>        Entrypoint function name. Default: "main".
+2026-09-11T22:13:16.8635087Z   -o | --output <value>            Output file.
+2026-09-11T22:13:16.8635301Z 
+2026-09-11T22:13:16.8635416Z Optional options:
+2026-09-11T22:13:16.8636094Z   -I | --include <value>           HLSL include directory. Only used with HLSL source.
+2026-09-11T22:13:16.8637063Z   -D<name>[=<value>]               HLSL define. Only used with HLSL source. Can be repeated.
+2026-09-11T22:13:16.8637627Z                                    If =<value> is omitted the define will be treated as equal to 1.
+2026-09-11T22:13:16.8638839Z   --msl-version <value>            Target MSL version. Only used when transpiling to MSL. The default is 1.2.0.
+2026-09-11T22:13:16.8639811Z   -c | --cull                      Allow the compiler to cull unused resource bindings. This may lead to surprising binding behavior so be careful when enabling this!
+2026-09-11T22:13:16.8641174Z   -g | --debug                     Generate debug information when possible. Shaders are valid only when graphics debuggers are attached.
+2026-09-11T22:13:16.8641918Z   -p | --pssl                      Generate PSSL-compatible shader. Destination format should be HLSL.
+2026-09-11T22:18:25.4904534Z ok - execute direct indirect and dynamic calls beyond native registers
+2026-09-11T22:18:25.8956158Z ok - preserve paired float32 arithmetic on native
+2026-09-11T22:18:26.9858673Z ok - mutate a class-owned native list without changing its snapshot
+2026-09-11T22:18:27.8273663Z ok - replace class elements in a class-owned native list
+2026-09-11T22:18:28.6498526Z ok - preserve embedded byte contents on native
+2026-09-11T22:18:29.4757025Z ok - format native floats through the standalone runtime
+2026-09-11T22:18:30.1089869Z ok - convert native float precision in both directions
+2026-09-11T22:18:30.4269810Z ok - replace and preserve an aliased native list
+2026-09-11T22:18:30.7483852Z ok - swap and reverse a native list
+2026-09-11T22:18:31.0690534Z ok - grow a native list at every position
+2026-09-11T22:18:31.3812893Z ok - remove native list elements from every position
+2026-09-11T22:18:31.7167025Z ok - slice view mutate and clear native lists
+2026-09-11T22:18:32.0288898Z ok - mutable aggregate view detaches shared native list
+2026-09-11T22:18:32.3432544Z copy state drop
+2026-09-11T22:18:32.3432992Z copy state drop
+2026-09-11T22:18:32.3433359Z ok - deep-copy repeated native class roots without collections
+2026-09-11T22:18:32.6712259Z native cycle drop
+2026-09-11T22:18:32.6712645Z native cycle drop
+2026-09-11T22:18:32.6712979Z ok - finalize a direct native class cycle
+2026-09-11T22:18:32.9852034Z native cycle drop
+2026-09-11T22:18:32.9852480Z native cycle drop
+2026-09-11T22:18:32.9852817Z ok - finalize a native class cycle through lists
+2026-09-11T22:18:33.3186732Z native cycle drop
+2026-09-11T22:18:33.3187067Z native cycle drop
+2026-09-11T22:18:33.3187367Z ok - finalize a native class cycle through protocols
+2026-09-11T22:18:33.6356706Z ok - execute the complete native collection mutation slice
+2026-09-11T22:18:33.9587626Z copy state drop
+2026-09-11T22:18:33.9587956Z copy state drop
+2026-09-11T22:18:33.9588242Z ok - execute native ownership and deep-copy runtime
+2026-09-11T22:18:34.2806730Z ok - preserve resource aggregates across native list growth
+2026-09-11T22:18:34.5998758Z ok - serialize native mutations with mutex
+2026-09-11T22:18:34.9280042Z native cycle drop
+2026-09-11T22:18:34.9280563Z native cycle drop
+2026-09-11T22:18:34.9280837Z native cycle drop
+2026-09-11T22:18:34.9281231Z native cycle drop
+2026-09-11T22:18:34.9281579Z native cycle drop
+2026-09-11T22:18:34.9281914Z native cycle drop
+2026-09-11T22:18:34.9282400Z ok - finalize native cycles across direct collection and protocol edges
+2026-09-11T22:18:34.9310180Z 22 passed; 0 failed
+2026-09-11T22:18:36.0258447Z ok - execute direct indirect and dynamic calls beyond native registers
+2026-09-11T22:18:36.3492407Z ok - preserve paired float32 arithmetic on native
+2026-09-11T22:18:36.6687855Z ok - mutate a class-owned native list without changing its snapshot
+2026-09-11T22:18:36.9803616Z ok - replace class elements in a class-owned native list
+2026-09-11T22:18:37.3180721Z ok - preserve embedded byte contents on native
+2026-09-11T22:18:37.6481803Z ok - format native floats through the standalone runtime
+2026-09-11T22:18:37.9635898Z ok - convert native float precision in both directions
+2026-09-11T22:18:38.2844104Z ok - replace and preserve an aliased native list
+2026-09-11T22:18:38.6016089Z ok - swap and reverse a native list
+2026-09-11T22:18:38.9112548Z ok - grow a native list at every position
+2026-09-11T22:18:39.2371822Z ok - remove native list elements from every position
+2026-09-11T22:18:39.5575091Z ok - slice view mutate and clear native lists
+2026-09-11T22:18:39.8710195Z ok - mutable aggregate view detaches shared native list
+2026-09-11T22:18:40.1866650Z copy state drop
+2026-09-11T22:18:40.1867049Z copy state drop
+2026-09-11T22:18:40.1867405Z ok - deep-copy repeated native class roots without collections
+2026-09-11T22:18:40.5099304Z native cycle drop
+2026-09-11T22:18:40.5099737Z native cycle drop
+2026-09-11T22:18:40.5100131Z ok - finalize a direct native class cycle
+2026-09-11T22:18:40.8550850Z native cycle drop
+2026-09-11T22:18:40.8551239Z native cycle drop
+2026-09-11T22:18:40.8551559Z ok - finalize a native class cycle through lists
+2026-09-11T22:18:41.1715647Z native cycle drop
+2026-09-11T22:18:41.1716019Z native cycle drop
+2026-09-11T22:18:41.1716446Z ok - finalize a native class cycle through protocols
+2026-09-11T22:18:41.5005488Z ok - execute the complete native collection mutation slice
+2026-09-11T22:18:41.8213336Z copy state drop
+2026-09-11T22:18:41.8213658Z copy state drop
+2026-09-11T22:18:41.8214042Z ok - execute native ownership and deep-copy runtime
+2026-09-11T22:18:42.1392944Z ok - preserve resource aggregates across native list growth
+2026-09-11T22:18:42.4587284Z ok - serialize native mutations with mutex
+2026-09-11T22:18:42.7935895Z native cycle drop
+2026-09-11T22:18:42.7936298Z native cycle drop
+2026-09-11T22:18:42.7936569Z native cycle drop
+2026-09-11T22:18:42.7936858Z native cycle drop
+2026-09-11T22:18:42.7937157Z native cycle drop
+2026-09-11T22:18:42.7937399Z native cycle drop
+2026-09-11T22:18:42.7937891Z ok - finalize native cycles across direct collection and protocol edges
+2026-09-11T22:18:42.7962786Z 22 passed; 0 failed
+2026-09-11T22:18:44.0980342Z ok - call an ARM64 package Boundary
+2026-09-11T22:18:44.4157317Z ok - round-trip a callback through the Windows ARM64 ABI
+2026-09-11T22:18:44.4157798Z 2 passed; 0 failed
+2026-09-11T22:18:49.2534648Z Post job cleanup.
+2026-09-11T22:18:49.5534591Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-09-11T22:18:49.6035215Z git version 2.55.0.windows.5
+2026-09-11T22:18:49.6123404Z Temporarily overriding HOME='C:\a\_temp\fcc2b284-7d56-42da-97c0-94f43a6e8937' before making global git config changes
+2026-09-11T22:18:49.6124908Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-11T22:18:49.6133316Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory C:\a\Silex\Silex
+2026-09-11T22:18:49.6690955Z Removing SSH command configuration
+2026-09-11T22:18:49.6703947Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-09-11T22:18:49.7242254Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-09-11T22:18:50.9709842Z Removing HTTP extra header
+2026-09-11T22:18:50.9719642Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-11T22:18:51.0266125Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-09-11T22:18:52.3172387Z Removing includeIf entries pointing to credentials config files
+2026-09-11T22:18:52.3185416Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-11T22:18:52.3678822Z includeif.gitdir:C:/a/Silex/Silex/.git.path
+2026-09-11T22:18:52.3679615Z includeif.gitdir:C:/a/Silex/Silex/.git/worktrees/*.path
+2026-09-11T22:18:52.3680621Z includeif.gitdir:/github/workspace/.git.path
+2026-09-11T22:18:52.3681163Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-11T22:18:52.3742823Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:C:/a/Silex/Silex/.git.path
+2026-09-11T22:18:52.4224260Z C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.4289111Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:C:/a/Silex/Silex/.git.path C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.4851685Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:C:/a/Silex/Silex/.git/worktrees/*.path
+2026-09-11T22:18:52.5338432Z C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.5402206Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:C:/a/Silex/Silex/.git/worktrees/*.path C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.5949120Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-11T22:18:52.6434199Z /github/runner_temp/git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.6497790Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.7086972Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-11T22:18:52.7559273Z /github/runner_temp/git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.7620938Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config
+2026-09-11T22:18:52.8367520Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-09-11T22:18:54.1529926Z Removing credentials config 'C:\a\_temp\git-credentials-aa7f894b-a003-4b5a-9f35-a0a25911383f.config'
+2026-09-11T22:18:54.1770268Z Cleaning up orphan processes
+2026-09-11T22:18:54.2629295Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/download-artifact@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+

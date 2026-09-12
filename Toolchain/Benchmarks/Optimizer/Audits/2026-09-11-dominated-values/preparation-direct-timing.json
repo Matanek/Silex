@@ -1,0 +1,189 @@
+{
+  "mode": "diagnostic",
+  "scope": "process wall time for 1000000 complete preparations and 26-field observations; repeated versus direct body control; same compiler; no LLVM comparator or physical X64 claim",
+  "warmup_pairs": 6,
+  "pairs": 21,
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "Apple M3 Pro",
+  "binary_sha256": {
+    "before": "95c7cb25f1774e6a496db9f9e132df8198431c3407e4d252fce866828e0318b3",
+    "after": "ee40c918a3106d13679a0a8cb1c9484a1cf6816cb83d0b9385ce4130dd88d21c"
+  },
+  "source_sha256": {
+    "before": "bc39b6dc1109b5ed3818517bf3a31388580e834d1cfced71e2c5dabc673bf14d",
+    "after": "1bdf06d68786d2e92641c8c324e1f8a4fc2d57240ab1f7bafc22c5da9f9e3117"
+  },
+  "observations": [
+    {
+      "index": 0,
+      "first": "before",
+      "before_ns": 89190208,
+      "after_ns": 92788083,
+      "after_before": 1.0403393498084454
+    },
+    {
+      "index": 1,
+      "first": "after",
+      "after_ns": 92719792,
+      "before_ns": 88283792,
+      "after_before": 1.0502470487448023
+    },
+    {
+      "index": 2,
+      "first": "before",
+      "before_ns": 88210167,
+      "after_ns": 92620417,
+      "after_before": 1.049997071199287
+    },
+    {
+      "index": 3,
+      "first": "after",
+      "after_ns": 92481208,
+      "before_ns": 88588084,
+      "after_before": 1.043946361905739
+    },
+    {
+      "index": 4,
+      "first": "before",
+      "before_ns": 89446750,
+      "after_ns": 92944000,
+      "after_before": 1.039098681617834
+    },
+    {
+      "index": 5,
+      "first": "after",
+      "after_ns": 92697292,
+      "before_ns": 88062083,
+      "after_before": 1.0526356956602991
+    },
+    {
+      "index": 6,
+      "first": "before",
+      "before_ns": 89584833,
+      "after_ns": 92658333,
+      "after_before": 1.0343082628730245
+    },
+    {
+      "index": 7,
+      "first": "after",
+      "after_ns": 92714166,
+      "before_ns": 88536000,
+      "after_before": 1.0471917186229331
+    },
+    {
+      "index": 8,
+      "first": "before",
+      "before_ns": 89331542,
+      "after_ns": 93050125,
+      "after_before": 1.0416267638142864
+    },
+    {
+      "index": 9,
+      "first": "after",
+      "after_ns": 93195083,
+      "before_ns": 88393083,
+      "after_before": 1.0543255177557276
+    },
+    {
+      "index": 10,
+      "first": "before",
+      "before_ns": 88275209,
+      "after_ns": 92768500,
+      "after_before": 1.0509009386769053
+    },
+    {
+      "index": 11,
+      "first": "after",
+      "after_ns": 92655667,
+      "before_ns": 88495292,
+      "after_before": 1.0470123879584465
+    },
+    {
+      "index": 12,
+      "first": "before",
+      "before_ns": 89139917,
+      "after_ns": 92861958,
+      "after_before": 1.0417550422444302
+    },
+    {
+      "index": 13,
+      "first": "after",
+      "after_ns": 92409250,
+      "before_ns": 88337583,
+      "after_before": 1.046092125930138
+    },
+    {
+      "index": 14,
+      "first": "before",
+      "before_ns": 88046917,
+      "after_ns": 92492667,
+      "after_before": 1.0504929661534883
+    },
+    {
+      "index": 15,
+      "first": "after",
+      "after_ns": 92999167,
+      "before_ns": 88806750,
+      "after_before": 1.0472083146832871
+    },
+    {
+      "index": 16,
+      "first": "before",
+      "before_ns": 87780417,
+      "after_ns": 92657792,
+      "after_before": 1.0555633610170705
+    },
+    {
+      "index": 17,
+      "first": "after",
+      "after_ns": 92995416,
+      "before_ns": 89367458,
+      "after_before": 1.0405959627944212
+    },
+    {
+      "index": 18,
+      "first": "before",
+      "before_ns": 88317667,
+      "after_ns": 92673459,
+      "after_before": 1.0493195998938696
+    },
+    {
+      "index": 19,
+      "first": "after",
+      "after_ns": 93107209,
+      "before_ns": 89379542,
+      "after_before": 1.0417060427541684
+    },
+    {
+      "index": 20,
+      "first": "before",
+      "before_ns": 88406333,
+      "after_ns": 92796667,
+      "after_before": 1.0496608540476393
+    }
+  ],
+  "summary": {
+    "before_ns": {
+      "median": 88495292,
+      "minimum": 87780417,
+      "maximum": 89584833,
+      "mad": 311458,
+      "half_shift": -0.0012559500378277466
+    },
+    "after_ns": {
+      "median": 92719792,
+      "minimum": 92409250,
+      "maximum": 93195083,
+      "mad": 99375,
+      "half_shift": 0.00019504518153024009
+    },
+    "after_before": {
+      "median": 1.0471917186229331,
+      "minimum": 1.0343082628730245,
+      "maximum": 1.0555633610170705,
+      "mad": 0.0037092200539721176,
+      "half_shift": 0.0014741360897039257
+    }
+  }
+}

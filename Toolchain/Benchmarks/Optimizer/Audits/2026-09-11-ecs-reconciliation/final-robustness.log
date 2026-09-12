@@ -1,0 +1,6 @@
+optimizer oracle: qualified adversarial interaction campaign
+robustness report: .zig-cache/optimizer-oracle/robustness/interactions-v1-qualified-7640891576956012809-13503953896175478587.tsv
+campaign record: .zig-cache/optimizer-oracle/robustness/run-qualified-1789107609510704000.tsv (48288958459 ns)
+qualified: 144 pairwise cases, 5 risk triplets, 41 native cases, 4 negative cases
+optimizer oracle: cache invalidation and concurrency stress passed
+optimizer oracle: large package graph and function stress passed

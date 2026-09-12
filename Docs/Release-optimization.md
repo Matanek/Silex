@@ -103,6 +103,28 @@ inputs remain unknown. The resulting facts fold safe arithmetic, replace
 constant branches, prune unreachable blocks, and remove newly dead copies to a
 fixed point. Representable constant integer conversions contribute a constant
 of the target width, exposing dependent arithmetic to the same fixed point.
+Within a block, identical numeric and boolean binary expressions can also share
+the result of an earlier evaluation. The operands and result must have stable,
+single-definition identities; operand order, type and arithmetic flags must
+match exactly. Copies can identify the same scalar snapshot without removing
+floating lane provenance. Stores do not change those snapshots, while calls
+and resource-release barriers end expression availability. This rule neither
+reorders floating arithmetic nor forwards a fresh memory read, and the first
+checked evaluation remains observable on every path reaching the duplicate.
+A final bounded revisit applies the existing value-inlining cost rules to
+single-block scalar leaves exposed by memory and SSA cleanup. It excludes
+aggregate/reference values, calls and effects, and runs only once; range and
+SSA facts are recomputed after cloning. Disabling value inlining disables this
+revisit too. Unused initializers that can fail remain observable after inlining.
+For a function with only scalar operations, local values and value aggregates,
+a dominance analysis also reuses identical binary evaluations and numeric
+fields of stable aggregate parameters across blocks. It rejects functions
+containing calls, writes to addressable values, address formation or resource
+operations; ordered scalar output does not mutate the analyzed values.
+Classes, collections and local aggregate homes are not field candidates.
+Every replacement has an already executed dominating definition, including
+under shuffled block order and loop backedges. A value available on only one
+incoming branch is retained, and no potentially failing computation is hoisted.
 Constant shifts fold only when their signed or unsigned count is inside the
 left operand width. Range analysis also marks dynamic shifts unchecked when
 the complete count interval proves that condition; ARM64 then omits the width
@@ -149,6 +171,28 @@ calls, unknown memory effects, and block boundaries invalidate both proofs.
 The pass never removes the final observable mutation or an unproved bounds
 failure.
 
+The same pass can cache scalar fields of a private class instance created in
+the entry block. It follows copies, local homes and class-store results to
+prove that every alias still identifies that instance. Each tracked home must
+be initialized in entry, every value identity must have one definition, and
+address-taking, calls receiving the object, mixed-instance homes, inherited
+classes and resource fields reject the proof. Drops remain on returning paths;
+no cached read may follow a drop. Unrelated effects cannot reach a proven
+private instance.
+
+Eligible field reads become scalar local reads. Initialization seeds those
+locals and every field store updates both the original object and its cached
+value. Allocation, allocation failures, field writes, reference counts and
+destruction remain explicit and ordered. The existing SSA pass transports
+the scalar state across branches and loops. This is a write-through cache of
+private state, not allocation elimination or a change to shared class identity.
+
+Native compilation currently enables this cache for ARM64 targets. X64 keeps
+the previous field-read representation: paired measurements on physical Intel
+showed a slowdown with the current X64 lowering. The requested target selects
+this cost policy, including cross-compilation; the portable oracle can still
+exercise the transformation independently of native profitability.
+
 For flat numeric or boolean value structures, a reconstructed reference or
 mutable-view store writes only the changed fields when the other fields come
 from a still-current snapshot of that exact destination. Calls, unknown
@@ -163,6 +207,38 @@ later load may still resolve to a scalar list-literal element or to the exact
 replacement value when the collection lineage and both normalized constant
 indices are known. This forwards values across the functional update without
 treating the input and result storage as aliases or removing the update itself.
+The same block-local analysis follows known numeric and boolean elements through
+collection copies, slices and nested views. It normalizes negative indices and
+clamps both slice bounds, including reversed and empty slices. Known counts and
+in-range element reads become scalar values; out-of-range reads and unknown
+index arithmetic retain their original checks. Floating elements are forwarded
+without arithmetic, preserving their exact bits.
+
+Readonly access does not imply globally immutable storage. Calls, writes through
+views or references, resource releases, unknown effects and control boundaries
+discard available collection snapshots. Snapshot elements require single-definition
+value identities, and edge-transfer redefinitions invalidate local facts. Owning
+scalar replacement remains a copy-on-write value operation and preserves the
+input snapshot; it is never treated as a store through a view. Owning updates
+remain explicit. This is a bounded local forwarding analysis, not inter-block
+alias analysis.
+
+A scalar list literal with exactly one definition also has a known length
+across blocks when every use is a direct count, element read or reference-count
+operation. Copies, views, stores, edits, addresses and calls receiving the list
+reject this proof. A drop is admitted only as the final use in a returning
+block. Unrelated calls therefore cannot invalidate a proven private length,
+while possible escapes and accesses after a drop retain their original count
+operation. This proof propagates lengths only; element snapshots remain local.
+
+Dead-value cleanup removes an unused view descriptor, whose construction clamps
+its bounds without failing. When all data uses of a single-definition list
+literal disappear, cleanup also removes its storage and retains/drops if every
+element is numeric or boolean. Initializer computations remain separate effects,
+including checked arithmetic. Escaping lists, lists with resources or aggregates,
+and multiply defined collection values retain their storage. This deliberately
+narrow rule does not infer the lifetime or alias behavior of an observed list.
+
 Unaddressed mutable locals of the same flat scalar form are represented as
 independent field locals before aggregate propagation. A load reconstructs the
 value at its original observation point, while a reconstruction stored in the
@@ -180,6 +256,17 @@ signed zeros and NaN payloads are unchanged. Large scalar projections also
 apply to loads already proven bounded; their generated element reference
 remains bounded and therefore does not reintroduce a runtime check. Small
 bounded aggregates retain their compact native copy so it can seed SIMD lanes.
+
+The final `branch_snapshot_sinking` pass can place an immediately preceding
+scalar snapshot at the entry of both exclusive branch arms. Every read keeps
+its original order and occurs before the first original arm instruction; the
+checked element address stays before the branch. Each arm receives fresh value
+identifiers, so calls in a cold output arm do not force the other arm's values
+to remain on the stack. This is limited to numeric or boolean reference reads
+and field addresses, with a maximum of 128 copied instructions. The condition
+must be independent of those values. Shared arm entries, multiple definitions,
+uses beyond the two immediate arms, and intervening effects prevent the move.
+No read is deferred past an alias write, and floating-point bits are unchanged.
 
 A direct call may borrow a collection element for a flat scalar aggregate
 parameter when the callee only projects fields from that parameter. Every
@@ -208,7 +295,12 @@ semantic change for already-qualified callers.
 
 Release inlines eligible direct callees across branches, loops, and multiple
 returns, in addition to constant-result and small straight-line
-specialization. Before this inlining, exact scalar `STD.Math.min` and
+specialization. A straight-line class leaf may return a parameter-derived class
+identity while reading or updating numeric and boolean fields. All class values
+must have the returned class type; allocations, resource field accesses, retains/drops,
+address derivation, other calls and observable output reject this extension.
+The ordinary effect and pressure budget still applies. Before this inlining,
+exact scalar `STD.Math.min` and
 `STD.Math.max` calls become portable float32 or float64 operations. Native
 lowering emits them directly on ARM64 and X64 while preserving the library
 contract for NaN operands, signed zeros, infinities, and ordinary values.
@@ -306,6 +398,55 @@ rejects pointer termination. Fully
 resident leaf functions allocate no value frame. Debug retains the direct
 stack-resident lowering.
 
+X64 integer regions recognize only paths that reach a loop's back edge when
+estimating repeated arithmetic. A cold call block laid out between the header
+and body does not reject that region. Fixed stack memory transfers, class
+field accesses and collection reads preserve r8...r11; their actual stack
+inputs and outputs stay pinned while independent integer state can remain
+resident. Address-taken spans remain pinned. Allocation, ownership operations
+and actual calls remain volatile barriers, with values live across them kept
+in memory according to CFG liveness. Floating arithmetic and numeric conversions
+preserve independent integer residences in mixed loops. Their operands and
+results remain excluded from the integer bank; FP allocation keeps its own
+policy. Aggregate parameters, hidden result pointers and aggregate or floating
+return values retain their complete stack homes. Newly admitted aggregate/FP
+signatures keep incoming parameters in stack homes so a resident scalar cannot
+overwrite an aggregate argument pointer during the prologue. Captures, reused
+slots and unsupported instructions retain their fallback. Copies between
+integer residences use a direct register move and emit nothing when both
+values already share their color. Mixed integer/FP transfers retain the full
+scalar-bit bridge.
+For 64-bit integer addition, subtraction, multiplication and bit operations,
+allocated operands feed the two-address instruction directly. A result that
+reuses the right input goes through scratch until both inputs are consumed.
+Signed and unsigned overflow branches keep the existing status and epilogue
+protocol. Checked unsigned multiplication and narrower integer arithmetic retain
+their normalization path. Fused 64-bit comparisons read colors without copying;
+narrow comparisons normalize scratch copies so live inputs remain unchanged.
+
+X64 scalar FP allocation distinguishes instructions that consume registered
+values from stack-only emitters that preserve the FP bank. Aggregate copies,
+aggregate initialization and collection counts keep all their input and output
+spans in stack homes. Fixed, dynamic and view collection loads retain their
+input homes but transfer live scalar FP results directly to their allocated
+colors, preserving every payload bit. Dead result leaves stay pinned so their
+stores cannot overwrite a live sibling sharing the same graph color. Loaded
+results use only colors left available by the established scalar allocation;
+they cannot evict a recurrence or change its existing color. Independent floating values
+may remain in XMM6...XMM15 across these instructions. Bounds failures retain
+their epilogue exit, addressed spans remain pinned, and actual calls retain
+the full interval barrier. This does not change the packed SSE register bank
+or the integer allocation policy.
+Terminal returns likewise pin only their returned spans: their epilogue
+cannot invalidate values used exclusively by another CFG successor.
+
+Scalar X64 arithmetic and comparisons consume allocated FP colors directly.
+Stack operands still load into the existing scratch registers. Destructive
+SSE arithmetic uses the result color when safe; a result that aliases the
+right operand is computed in scratch before the final move. Operand order,
+precision, signed zero and unordered comparison behavior remain unchanged.
+Packed arithmetic and the minimum/maximum sequence retain their own lowering.
+
 ARM64 also admits a restricted set of memory operations. Checked dynamic
 loads, view replacement, and explicit address/reference accesses retain their
 bounds and failure behavior. Addressed local spans stay pinned. Scalar
@@ -338,9 +479,12 @@ and every interval live across it, remain stack-resident. Mixed aggregate
 loads and aggregate calls inside loops retain the whole-function spill path.
 On ARM64, the same barrier model admits a repeated scalar loop with at least
 four compatible arithmetic operations even when an output or another stack
-effect follows the loop. Values confined to the loop can then remain in
-registers; values live across the effect retain their deterministic stack
-homes.
+effect follows the loop. Admission follows paths reaching the back-edge latch,
+so an exit block laid out between the header and body does not count as part
+of the repeated region. Unsupported emitters pin their inputs, outputs and
+values live on their actual CFG paths; numeric interval overlap alone does
+not pin values confined to another path. Values live across the effect retain
+their deterministic stack homes, and addressed spans remain pinned.
 The regional path does not use paired SIMD residences or memory scheduling.
 Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.
@@ -394,6 +538,12 @@ not at a later projection that could follow an aliasing write.
 Aggregate copies omit unused register destinations in both integer and
 floating-point registers: an unused leaf may share a register with a live
 sibling defined by the same transfer and must not overwrite it.
+Collection replacement through a mutable view is also a leaf operation. Its
+paired and trailing scalar transfers use only reserved scratch registers
+`x9`/`x11`, after the element address has consumed the index and stride. They
+must preserve volatile value residences such as `x5`/`x6`, which can hold an
+independent view used later in the same loop. The copy keeps its paired transfer
+shape and does not force those live values back to the stack.
 Reference transfers to resident floating-point registers use direct 64-bit
 loads and stores. Floating-point 64-bit stack transfers use the same direct
 instructions in both stack-address windows, in Debug and Release. These are
@@ -405,6 +555,17 @@ removes the otherwise redundant move through the floating-point scratch
 register while retaining the same 64-bit payload transfer.
 Floating-point negation similarly reads its allocated operand and writes its
 allocated result directly; spilled endpoints retain the ordinary stack path.
+ARM64 encoding fusions have exclusive ownership of their producer. A multiply
+consumed by negated-multiply or packed-lane encoding cannot also feed the
+following arithmetic fusion: its original inputs may no longer have materialized
+homes. The following add/subtract reads the produced value normally. This
+invariant also applies in Debug; it is not a portable Release-pass assumption.
+A fused multiply also resolves cached loop literals through the same operand
+lookup as ordinary arithmetic, since their former homes are intentionally elided.
+The native test entry preserves the C ABI low halves of `v8` through `v15`
+across Silex calls, including internal scratch registers. Its callers can retain
+floating-point expectations across JIT execution without those values being
+corrupted by the test itself.
 X64 applies a corresponding regional policy to scalar integer and boolean
 loops containing at least four compatible arithmetic operations. Integer and
 boolean output, direct and indirect calls, function addresses, and pure
@@ -418,6 +579,10 @@ straight from their residences instead of being reloaded from stale stack
 homes. Calls or aggregate operations inside the loop, strings, floating-point
 values, unsupported operations and short loops retain the whole-function
 spill path.
+The interference graph includes the prologue's implicit parameter definitions.
+An unused incoming argument therefore cannot overwrite a register holding a
+different value that is live at entry, even when the body never reads that
+unused parameter.
 When these X64 residences cover a contiguous prefix of virtual slots, Release
 omits that prefix from the physical value frame. A shifted frame base preserves
 the existing virtual offsets for every remaining stack home, the cycle context,

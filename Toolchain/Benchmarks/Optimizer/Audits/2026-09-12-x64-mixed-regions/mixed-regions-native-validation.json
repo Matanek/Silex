@@ -1,0 +1,542 @@
+[
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-macos-arm64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "da7da649bab5e5dc63b78854883e383b525579cb860d2dd697263c9dec7b60e1",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-macos-arm64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "d96eb491fedcacb26cf7340ea4f756179f13fea2705bd56d4674cc532888c030",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-macos-x64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "5f30ebfd6e3263a9a25ccf6e2b7a9669ee3b16536a1792774727ca8fc49575f4",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-macos-x64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "ae3ebb886f1e6b0f064abe7912a77b3df3ccc14856332960adeae1a70ebcea05",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-linux-arm64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-arm64",
+    "mode": "debug",
+    "sha256": "80cc11e179d91ff71478ad703178365793f13a2158592ccb962ccd0144a649ab",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-linux-arm64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-arm64",
+    "mode": "release",
+    "sha256": "cfd0d1e3f7d3ce7c7fd9f03189f578c6b56e4bb038d719dc8967e94b9d9daa2c",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-linux-x64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-x64",
+    "mode": "debug",
+    "sha256": "2106507266dadc30d1a7ab6df8069ce498f29d8555fdc6495d2d49423ef8178c",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-linux-x64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "linux-x64",
+    "mode": "release",
+    "sha256": "7b7d90257f1b467fe7558a505fa7b41f28f0ba5b4e1fd44f0b42c85598535a26",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-windows-arm64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-arm64",
+    "mode": "debug",
+    "sha256": "103b180dbf5f4dd0e6fe390a62bde19a5063ec88f8328cdfd29a66acac485f1c",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-windows-arm64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-arm64",
+    "mode": "release",
+    "sha256": "fcf0c4ec747edec206284a232ef192479dcf45fa600988323120ca6fc845eeca",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-windows-x64-debug"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-x64",
+    "mode": "debug",
+    "sha256": "042f1938234bce596e6763f4d195716aaf3df4ec4b8f29b5dd7a30810dc512e4",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-float/FloatMemoryResidence.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-float-windows-x64-release"
+    ],
+    "fixture_sha256": "51661dcc5ad042447d8e9c1603ae3e5cd6f726c91f6e8e26446e8a5478cca1a7",
+    "target": "windows-x64",
+    "mode": "release",
+    "sha256": "7347c88157e1f5196b2710d156426bd164fd50ed1a65586c93e78ff37dfc532d",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-macos-arm64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "0cb9b4a11cf2f0af5ae30adbac97584a81c828c0a5bc4e518aceb62a9c367edd",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-macos-arm64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "4e4af01be35bfe8485c63128ce711f9f3470b062ee3590efb23399c864fd16b6",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-macos-x64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "8629e39648b1fffc1ad681b6d5470b7b886112e8248871d276a104e5f881ec56",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-macos-x64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "106190d4528a65bc7920ce3ef5264a61fb3562fe01cd05faff2417dc4aa8ed94",
+    "executed": true,
+    "stdout": "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-linux-arm64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-arm64",
+    "mode": "debug",
+    "sha256": "bd559cab611646750bcdbdaa4cb9bdeb19819ee54abf02c5143b4f18259c86ff",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-linux-arm64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-arm64",
+    "mode": "release",
+    "sha256": "575eb3e30579b56b6efc0168cf917ece570cffe6c47e62e4efd7a3737f33ec8b",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-linux-x64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-x64",
+    "mode": "debug",
+    "sha256": "7beb17ff4006671cfdbd9d971b96048e67a5577d76c2dd1d7dc481e0af229055",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "linux-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-linux-x64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "linux-x64",
+    "mode": "release",
+    "sha256": "4848fc290748e218282dcb65384fce4d038cfdc214f5ccd556f79de7659da70d",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-windows-arm64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-arm64",
+    "mode": "debug",
+    "sha256": "f374b8ce1c28703fc3afb9c257b6e2c04515347361fe3af4fabe28811c318b9d",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-windows-arm64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-arm64",
+    "mode": "release",
+    "sha256": "36beb3b5d08f2ed76f426c0702d661260ac89a7e1a6b1b9b1123fb2eccbd4c8e",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-windows-x64-debug"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-x64",
+    "mode": "debug",
+    "sha256": "1010a604d3af3cfbd81d7f2f84ca76f3909a6e23bfbc613244c41eadaf319fbf",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-integer/IntegerMemoryRegions.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "windows-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-integer-windows-x64-release"
+    ],
+    "fixture_sha256": "9b2bcc205360368668872dd4c289088beb6c6e518fdef8924b93fdcc6c61eb49",
+    "target": "windows-x64",
+    "mode": "release",
+    "sha256": "2377453dc3f853f8a2b3b8854bcb48bd3c7cc2bfe98c5f112068559377df465d",
+    "executed": false
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-protocol/NativePortability.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-protocol-macos-arm64-debug"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-arm64",
+    "mode": "debug",
+    "sha256": "a5a3694869d75a0182e2eb62e37e4bf61d6d79de3e306384ee766f6f76a0a97f",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-protocol/NativePortability.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-arm64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-protocol-macos-arm64-release"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-arm64",
+    "mode": "release",
+    "sha256": "b37f64a1a8f30cd462e002d9002f9b32482c83f81d8f4b921f94afa028097e50",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-protocol/NativePortability.sx",
+      "--debug",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-protocol-macos-x64-debug"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-x64",
+    "mode": "debug",
+    "sha256": "539fda00f78ca90fb5fb29b48bae94fed5aa6ad3544c3e841c403681ca1551d8",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  },
+  {
+    "command": [
+      "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+      "compile",
+      "/private/tmp/silex-part03-evidence/MixedRegions-protocol/NativePortability.sx",
+      "--release",
+      "--nocache",
+      "--target",
+      "macos-x64",
+      "-o",
+      "/private/tmp/silex-part03-evidence/mixed-regions-protocol-macos-x64-release"
+    ],
+    "fixture_sha256": "31bea1d9a785ce2080deb8e47fad1e756318104716be4ba372d2d6d3b33fef99",
+    "target": "macos-x64",
+    "mode": "release",
+    "sha256": "4003e53c87b6b5e2f3c85a9731ddfdfa4b63dd15588fab3ecdf6ec3b5cdde820",
+    "executed": true,
+    "stdout": "copy state drop\ncopy state drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\n",
+    "stderr": "",
+    "exit": 0
+  }
+]

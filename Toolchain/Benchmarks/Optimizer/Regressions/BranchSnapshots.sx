@@ -1,0 +1,40 @@
+struct State {
+    var a:float64; var b:float64; var c:float64
+    var d:float64; var e:float64; var f:float64
+    var g:float64; var h:float64; var i:float64
+}
+func observe(values:&State[..], flag:bool) float64 {
+    let value = copy values[-1]
+    if flag {
+        values[-1].a = 100.0
+        print(value.a == 1.0)
+        return value.a + value.b + value.c + value.d + value.e + value.f + value.g + value.h + value.i
+    } else {
+        values[-1].b = 200.0
+        return value.a - value.b - value.c - value.d - value.e - value.f - value.g - value.h - value.i
+    }
+}
+func joined(values:&State[..], flag:bool) float64 {
+    let value = copy values[0]
+    if flag { values[0].a = 300.0 } else { values[0].b = 400.0 }
+    return value.a + value.b
+}
+func choose(values:&State[..], flag:bool) float64 {
+    let value = copy values[0]
+    if flag { values[0].a = 1.0; return value.a }
+    else { values[0].a = 2.0; return value.a }
+}
+func main() {
+    var values:State[] = [State(a:1.0, b:2.0, c:3.0, d:4.0, e:5.0, f:6.0, g:7.0, h:8.0, i:9.0)]
+    var view = &values[0:1]
+    print(observe(view, true) == 45.0)
+    print(observe(view, false) == 56.0)
+    print(joined(view, true) == 300.0)
+    print(joined(view, false) == 500.0)
+    view[0].a = -0.0
+    print(1.0 / choose(view, true) < 0.0)
+    view[0].a = 0.0 / 0.0
+    let nan = choose(view, false)
+    print(nan != nan)
+    print(view[0].a == 2.0)
+}

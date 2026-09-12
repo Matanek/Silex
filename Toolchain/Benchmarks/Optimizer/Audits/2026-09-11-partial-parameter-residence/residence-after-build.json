@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/zig-out/bin/silex",
+    "compile",
+    "/private/tmp/silex-part03-evidence/Preparation.sx",
+    "--release",
+    "--nocache",
+    "-o",
+    "/private/tmp/silex-part03-evidence/preparation-partial-residence"
+  ],
+  "compiler_sha256": "2386dac56dc31898e342317c485926ea9021b88b69e425a6845b160787ea4437",
+  "binary_sha256": "32e7abf03b76f36cfcd73b3cc165a400600e08ae44a6b9e48450cd70ee80d659",
+  "stdout": "28580565.3615036\n"
+}

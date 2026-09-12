@@ -1,0 +1,23 @@
+optimizer-x64	Qualify native optimizer regressions	﻿2026-09-12T09:46:14.5107330Z ##[group]Run set -euo pipefail
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:46:14.5108100Z ^[[36;1mset -euo pipefail^[[0m
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:46:14.5109190Z ^[[36;1mset -o pipefail^[[0m
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:46:14.5110480Z ^[[36;1mzig build optimizer-oracle -Doptimize=ReleaseFast -Dcpu=baseline -- qualify 8 1 2>&1 | tee .zig-cache/optimizer-x64/qualification.log^[[0m
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:46:14.5225580Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:46:14.5226270Z ##[endgroup]
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:03.7814980Z optimizer oracle: native optimizer regression qualification
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4968230Z native Debug mismatch for /Users/runner/work/Silex/Silex/Toolchain/Benchmarks/Optimizer/Regressions/ScalarClassLeaves.sx
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4971440Z   expected exit=0 stdout={ 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10 } stderr={  }
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4977010Z   actual term=.{ .exited = 0 } stdout={ 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 102, 97, 108, 115, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10, 116, 114, 117, 101, 10 } stderr={  }
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4979720Z optimizer oracle: NativeDebugMismatch
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4990710Z optimizer-oracle
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4991490Z +- run exe silex-optimizer-oracle failure
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4993080Z error: process exited with error code 1
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4994960Z failed command: ./.zig-cache/o/4d3de3594e24723315ff9a378b2372a1/silex-optimizer-oracle ./.zig-cache/o/e0dea841da098886e8dcb9d2fedb9a9c/silex /Users/runner/work/Silex/Silex/Toolchain/Benchmarks/Optimizer qualify 8 1
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4996660Z
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4996910Z Build Summary: 27/29 steps succeeded (1 failed)
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4997520Z optimizer-oracle transitive failure
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4998080Z +- run exe silex-optimizer-oracle failure
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4998470Z
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.4998820Z error: the following build command failed with exit code 1:
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.5001640Z .zig-cache/o/db1bef5e1547f4a71cec5779832f149d/build /Users/runner/work/_temp/zig-x86_64-macos-0.16.0/zig /Users/runner/work/_temp/zig-x86_64-macos-0.16.0/lib /Users/runner/work/Silex/Silex/Toolchain .zig-cache /Users/runner/.cache/zig --seed 0x3f003755 -Za7f5194a36d5b7fb optimizer-oracle -Doptimize=ReleaseFast -Dcpu=baseline -- qualify 8 1
+optimizer-x64	Qualify native optimizer regressions	2026-09-12T09:49:15.5051280Z ##[error]Process completed with exit code 1.

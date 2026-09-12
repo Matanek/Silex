@@ -1,0 +1,16 @@
+[
+  {
+    "label": "before",
+    "instructions": 183,
+    "loads": 40,
+    "stores": 42,
+    "calls": 0
+  },
+  {
+    "label": "after",
+    "instructions": 219,
+    "loads": 37,
+    "stores": 39,
+    "calls": 0
+  }
+]

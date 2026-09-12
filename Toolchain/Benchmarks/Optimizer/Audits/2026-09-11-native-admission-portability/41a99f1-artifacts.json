@@ -1,0 +1,23 @@
+{
+  "artifacts": [
+    {
+      "id": 10272690606,
+      "name": "windows-arm64-bootstrap",
+      "size_in_bytes": 8744158,
+      "url": "https://api.github.com/repos/Matanek/Silex/actions/artifacts/10272690606",
+      "archive_download_url": "https://api.github.com/repos/Matanek/Silex/actions/artifacts/10272690606/zip",
+      "expired": false,
+      "created_at": "2026-09-11T16:11:51Z",
+      "expires_at": "2026-09-12T16:11:49Z",
+      "updated_at": "2026-09-11T16:11:51Z",
+      "digest": "sha256:d02dd4a6b17b58aede9df5a9639c7509c6194c98fe759175a798a0a58e2b7ad0",
+      "workflow_run": {
+        "id": 34620188559,
+        "repository_id": 1312214609,
+        "head_repository_id": 1312214609,
+        "head_branch": "spec-silex-optimization-parity-completion",
+        "head_sha": "41a99f13a6b0558e7c897cddeeb2ec1a94074661"
+      }
+    }
+  ]
+}

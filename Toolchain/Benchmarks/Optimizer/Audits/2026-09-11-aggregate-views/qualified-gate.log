@@ -1,0 +1,2 @@
+optimizer registry command failed (.{ .exited = 1 }): git -C /Users/nekmata/Projects/SilexProject/.specs/Silex-Optimization-Parity-Completion/Worktree/Silex/Toolchain/Benchmarks/Optimizer/../../../../Packages/GFX.ECS merge-base --is-ancestor 0fb019cf2f5bf0fc56078ba0a01618fca868fd87 HEAD
+optimizer oracle: CommandFailed

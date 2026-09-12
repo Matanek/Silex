@@ -33,6 +33,27 @@ pub const Pair = struct {
     left: Summary,
     right: Summary,
     relative: RelativeSummary,
+    observations: []const Observation,
+};
+
+pub const FirstBackend = enum { left, right };
+
+pub const Observation = struct {
+    index: usize,
+    first: FirstBackend,
+    left_ns: u64,
+    right_ns: u64,
+
+    pub fn ratioPpm(self: Observation) !u64 {
+        if (self.right_ns == 0) return error.InvalidTimingReference;
+        return @intCast((@as(u128, self.left_ns) * 1_000_000) / self.right_ns);
+    }
+};
+
+pub const Stationarity = struct {
+    left_half_shift_ppm: u64,
+    right_half_shift_ppm: u64,
+    ratio_half_shift_ppm: u64,
 };
 
 pub const RelativeSummary = struct {
@@ -71,6 +92,7 @@ pub fn measurePair(
 
     const left_samples = try allocator.alloc(u64, config.samples);
     const right_samples = try allocator.alloc(u64, config.samples);
+    const observations = try allocator.alloc(Observation, config.samples);
     for (0..config.samples) |index| {
         if (index % 2 == 0) {
             left_samples[index] = try normalizedBatch(allocator, io, left_executable, batch);
@@ -79,12 +101,67 @@ pub fn measurePair(
             right_samples[index] = try normalizedBatch(allocator, io, right_executable, batch);
             left_samples[index] = try normalizedBatch(allocator, io, left_executable, batch);
         }
+        observations[index] = .{
+            .index = index,
+            .first = if (index % 2 == 0) .left else .right,
+            .left_ns = left_samples[index],
+            .right_ns = right_samples[index],
+        };
     }
     return .{
         .left = try summarize(allocator, left_samples, batch),
         .right = try summarize(allocator, right_samples, batch),
         .relative = try summarizeRelative(allocator, left_samples, right_samples),
+        .observations = observations,
     };
+}
+
+pub fn stationarity(pair: Pair) !Stationarity {
+    const observations = pair.observations;
+    if (observations.len < 5 or observations.len > 63 or observations.len % 2 == 0)
+        return error.InvalidBenchmarkConfiguration;
+    const half = observations.len / 2;
+    var first_left: [31]u64 = undefined;
+    var second_left: [31]u64 = undefined;
+    var first_right: [31]u64 = undefined;
+    var second_right: [31]u64 = undefined;
+    var first_ratio: [31]u64 = undefined;
+    var second_ratio: [31]u64 = undefined;
+    for (observations, 0..) |observation, index| {
+        const expected_first: FirstBackend = if (index % 2 == 0) .left else .right;
+        if (observation.index != index or
+            observation.first != expected_first)
+            return error.InvalidObservationOrder;
+        if (index == half) continue;
+        const destination = if (index < half) index else index - half - 1;
+        if (index < half) {
+            first_left[destination] = observation.left_ns;
+            first_right[destination] = observation.right_ns;
+            first_ratio[destination] = try observation.ratioPpm();
+        } else {
+            second_left[destination] = observation.left_ns;
+            second_right[destination] = observation.right_ns;
+            second_ratio[destination] = try observation.ratioPpm();
+        }
+    }
+    return .{
+        .left_half_shift_ppm = halfWindowShiftPpm(first_left[0..half], second_left[0..half]),
+        .right_half_shift_ppm = halfWindowShiftPpm(first_right[0..half], second_right[0..half]),
+        .ratio_half_shift_ppm = halfWindowShiftPpm(first_ratio[0..half], second_ratio[0..half]),
+    };
+}
+
+fn halfWindowShiftPpm(first: []u64, second: []u64) u64 {
+    std.mem.sort(u64, first, {}, std.sort.asc(u64));
+    std.mem.sort(u64, second, {}, std.sort.asc(u64));
+    const first_median = percentile(first, 50);
+    const second_median = percentile(second, 50);
+    if (first_median == 0) return std.math.maxInt(u64);
+    const difference = if (first_median >= second_median)
+        first_median - second_median
+    else
+        second_median - first_median;
+    return @intCast((@as(u128, difference) * 1_000_000) / first_median);
 }
 
 fn summarizeRelative(
@@ -207,4 +284,39 @@ test "paired ratios expose an exact one-sided median bound" {
     try std.testing.expectEqual(@as(u64, 900_000), relative.median_ppm);
     try std.testing.expectEqual(@as(u64, 960_000), relative.upper_bound_ppm);
     try std.testing.expectEqual(@as(u64, 967_285), relative.confidence_ppm);
+}
+
+test "stationarity retains pair order and measures half-window shifts" {
+    const observations = [_]Observation{
+        .{ .index = 0, .first = .left, .left_ns = 80, .right_ns = 100 },
+        .{ .index = 1, .first = .right, .left_ns = 82, .right_ns = 100 },
+        .{ .index = 2, .first = .left, .left_ns = 84, .right_ns = 100 },
+        .{ .index = 3, .first = .right, .left_ns = 88, .right_ns = 100 },
+        .{ .index = 4, .first = .left, .left_ns = 90, .right_ns = 100 },
+    };
+    const result = try stationarity(.{
+        .left = undefined,
+        .right = undefined,
+        .relative = undefined,
+        .observations = &observations,
+    });
+    try std.testing.expectEqual(@as(u64, 97_560), result.left_half_shift_ppm);
+    try std.testing.expectEqual(@as(u64, 0), result.right_half_shift_ppm);
+    try std.testing.expectEqual(@as(u64, 97_560), result.ratio_half_shift_ppm);
+}
+
+test "stationarity rejects reordered observations" {
+    const observations = [_]Observation{
+        .{ .index = 0, .first = .left, .left_ns = 80, .right_ns = 100 },
+        .{ .index = 1, .first = .left, .left_ns = 82, .right_ns = 100 },
+        .{ .index = 2, .first = .left, .left_ns = 84, .right_ns = 100 },
+        .{ .index = 3, .first = .right, .left_ns = 86, .right_ns = 100 },
+        .{ .index = 4, .first = .left, .left_ns = 88, .right_ns = 100 },
+    };
+    try std.testing.expectError(error.InvalidObservationOrder, stationarity(.{
+        .left = undefined,
+        .right = undefined,
+        .relative = undefined,
+        .observations = &observations,
+    }));
 }

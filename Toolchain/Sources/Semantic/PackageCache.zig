@@ -572,7 +572,7 @@ test "generated package keys are stable and reject project files" {
     const position: Source.Position = .{ .file = 1, .offset = 42, .line = 3, .column = 5 };
     const key = generatedKey(std.testing.allocator, graph, &files, 1, position, "method", "Math.Vector") orelse return error.TestUnexpectedResult;
     defer std.testing.allocator.free(key);
-    try std.testing.expectEqualStrings("Math:method:Module/Vector.sx:42:Math.Vector", key);
+    try std.testing.expectEqualStrings("Math:method:Module" ++ std.fs.path.sep_str ++ "Vector.sx:42:Math.Vector", key);
     try std.testing.expect(generatedKey(std.testing.allocator, graph, &files, 0, position, "method", "App") == null);
     try std.testing.expect(generatedKey(std.testing.allocator, graph, &files, 1, .{ .file = 0, .offset = 1, .line = 1, .column = 1 }, "method", "App") == null);
 }

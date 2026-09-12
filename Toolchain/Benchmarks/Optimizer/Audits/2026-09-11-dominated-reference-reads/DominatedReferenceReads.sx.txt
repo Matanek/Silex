@@ -1,0 +1,40 @@
+struct Input { var x:float64; var y:float64; var tag:int }
+struct Snapshot { var first:float64; var second:float64; var total:float64; var tag:int }
+func evaluate(input:@Input, flag:bool) Snapshot {
+    let first = copy input.x
+    var total = first
+    if flag { total += input.y }
+    return Snapshot(first:first, second:input.x, total:total, tag:input.tag)
+}
+func changed(input:&Input, alias:&Input, flag:bool) float64 {
+    let before = copy input.x
+    if flag { alias.x = 9.0 }
+    return before + input.x
+}
+func conditional(input:@Input, flag:bool) float64 {
+    if flag { if input.x < 0.0 { return -1.0 } }
+    return input.x
+}
+func main() {
+    var inputs:Input[] = [Input(x:2.0, y:3.0, tag:47), Input(x:-0.0, y:0.0, tag:-3), Input(x:0.0 / 0.0, y:1.0, tag:8)]
+    let view = @inputs[0:inputs.count()]
+    var index = 0
+    while index < 4 {
+        let value = evaluate(view[0], index % 2 == 0)
+        print(value.first == 2.0); print(value.second == 2.0)
+        if index % 2 == 0 { print(value.total == 5.0) } else { print(value.total == 2.0) }
+        print(value.tag == 47)
+        index++
+    }
+    let zero = evaluate(view[1], false)
+    print(1.0 / zero.first < 0.0); print(1.0 / zero.second < 0.0)
+    print(1.0 / zero.total < 0.0); print(zero.tag == -3)
+    let nan = evaluate(view[2], true)
+    print(nan.first != nan.first); print(nan.second != nan.second)
+    print(nan.total != nan.total); print(nan.tag == 8)
+    var value = Input(x:2.0, y:3.0, tag:1)
+    print(changed(value, value, false) == 4.0)
+    print(changed(value, value, true) == 11.0)
+    print(conditional(value, true) == 9.0)
+    print(conditional(value, false) == 9.0)
+}
