@@ -312,7 +312,7 @@ fn floatBits(value: f64, double: bool) i64 {
     return if (double) @bitCast(value) else @intCast(@as(u32, @bitCast(@as(f32, @floatCast(value)))));
 }
 
-test "FMA reads cached loop literals from their materialized register" {
+test "adjacent float arithmetic preserves product rounding with cached loop literals" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -323,11 +323,11 @@ test "FMA reads cached loop literals from their materialized register" {
                     for ([_]Machine.BinaryOperator{ .add, .subtract }) |operator| {
                         const type_value = if (double) @import("../Ir.zig").Type.float64 else .float32;
                         const literal: Machine.Instruction = if (double)
-                            .{ .constant_float64 = .{ .result = 2, .bits = @bitCast(@as(f64, -10.0)) } }
+                            .{ .constant_float64 = .{ .result = 2, .bits = @bitCast(@as(f64, 1.0 - 0x1p-52)) } }
                         else
-                            .{ .constant_float32 = .{ .result = 2, .bits = @bitCast(@as(f32, -10.0)) } };
+                            .{ .constant_float32 = .{ .result = 2, .bits = @bitCast(@as(f32, 1.0 - 0x1p-23)) } };
                         const function: Machine.Function = .{
-                            .name = "cached_literal_fma",
+                            .name = "cached_literal_rounded_product",
                             .parameter_count = 3,
                             .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 5, .width = 1 } },
                             .return_type = type_value,
@@ -348,19 +348,21 @@ test "FMA reads cached loop literals from their materialized register" {
                             const code = image.code[image.function_offsets[0]..image.function_offsets[1]];
                             const left: A64.Register = if (literal_left) .x5 else if (resident) .x16 else .x9;
                             const right: A64.Register = if (!literal_left) .x5 else if (resident) .x16 else .x10;
-                            const destination: A64.Register = if (resident) .x20 else .x12;
-                            const accumulator: A64.Register = if (resident) .x17 else .x11;
-                            const expected_word = if (operator == .add)
-                                A64.floatMultiplyAdd(destination, left, right, accumulator, double)
-                            else if (product_first)
-                                A64.floatNegatedMultiplySubtract(destination, left, right, accumulator, double)
-                            else
-                                A64.floatMultiplySubtract(destination, left, right, accumulator, double);
-                            try std.testing.expect(containsWord(code, expected_word));
+                            const product: A64.Register = if (resident) .x19 else .x11;
+                            try std.testing.expect(containsWord(code, A64.floatArithmetic(product, left, right, .multiply, double)));
+                            // No scalar fused multiply/add/subtract encoding may remove
+                            // the rounding point represented by the first binary operation.
+                            var offset: usize = 0;
+                            while (offset + 4 <= code.len) : (offset += 4) {
+                                const word = std.mem.readInt(u32, code[offset..][0..4], .little);
+                                try std.testing.expect(word & 0x5f000000 != 0x1f000000);
+                            }
                         }
                         if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) continue;
-                        const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{ floatBits(1.5, double), floatBits(0.5, double), 0 });
-                        const expected: f64 = if (operator == .add) -14.5 else if (product_first) -15.5 else 15.5;
+                        const input: f64 = if (double) 1.0 + 0x1p-52 else 1.0 + 0x1p-23;
+                        const accumulator: f64 = if (operator == .add) -1.0 else 1.0;
+                        const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{ floatBits(input, double), floatBits(accumulator, double), 0 });
+                        const expected: f64 = 0.0;
                         try std.testing.expectEqual(Machine.Status.success, result.status);
                         try std.testing.expectEqual(floatBits(expected, double), result.value);
                     }

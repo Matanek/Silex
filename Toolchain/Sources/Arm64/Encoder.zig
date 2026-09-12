@@ -59,7 +59,6 @@ const floatNegate = A64.floatNegate;
 const floatZero = A64.floatZero;
 const floatArithmetic = A64.floatArithmetic;
 const floatArithmetic2 = A64.floatArithmetic2;
-const floatMultiplyAdd = A64.floatMultiplyAdd;
 const floatMaxNumber = A64.floatMaxNumber;
 const floatCompare = A64.floatCompare;
 const floatCompareZero = A64.floatCompareZero;
@@ -1784,7 +1783,6 @@ fn encodeFunction(
                     try finishValueResult(allocator, words, function, &scalar_cache, destination, binary.result);
                     continue;
                 }
-                if (multiplyFeedsNextFusedArithmetic(function, instruction_index, binary)) continue;
                 if (immediateArithmeticConstant(function, instruction_index, binary)) |constant| {
                     try encodeImmediateArithmetic(
                         allocator,
@@ -1802,8 +1800,6 @@ fn encodeFunction(
                     try encodeConstantDivision(allocator, words, function, &scalar_cache, instruction_index, binary, constant, hoisted_division);
                 } else if (comparisonBranchIndex(function, instruction_index, binary) != null) {
                     try encodeComparisonFlags(allocator, words, function, instruction_index, binary);
-                } else if (fusedMultiplyForArithmetic(function, instruction_index)) |multiply_value| {
-                    try encodeFloatFusedArithmetic(allocator, words, function, binary, multiply_value);
                 } else try encodeBinary(allocator, words, &fixups, function, &scalar_cache, binary);
             },
             .function_address => |address| {
@@ -4663,64 +4659,6 @@ fn definingTransferOperandAfter(
         else => {},
     };
     return null;
-}
-
-fn encodeFloatFusedArithmetic(
-    allocator: Allocator,
-    words: *std.ArrayList(u32),
-    function: Machine.Function,
-    arithmetic: Machine.Instruction.Binary,
-    multiply_value: Machine.Instruction.Binary,
-) Error!void {
-    const double = arithmetic.type == .float64;
-    const left = cachedFloatBinaryOperand(function, multiply_value, multiply_value.left) orelse
-        try prepareFloatOperand(allocator, words, function, .x9, multiply_value.left, double);
-    const right = cachedFloatBinaryOperand(function, multiply_value, multiply_value.right) orelse
-        try prepareFloatOperand(allocator, words, function, .x10, multiply_value.right, double);
-    const accumulator_slot = if (arithmetic.left == multiply_value.result) arithmetic.right else arithmetic.left;
-    const accumulator = try prepareFloatOperand(allocator, words, function, .x11, accumulator_slot, double);
-    const destination = floatResultRegister(function, arithmetic.result) orelse .x12;
-    try words.append(allocator, switch (arithmetic.operator) {
-        .add => floatMultiplyAdd(destination, left, right, accumulator, double),
-        .subtract => if (arithmetic.right == multiply_value.result)
-            A64.floatMultiplySubtract(destination, left, right, accumulator, double)
-        else
-            A64.floatNegatedMultiplySubtract(destination, left, right, accumulator, double),
-        else => unreachable,
-    });
-    if (floatResultRegister(function, arithmetic.result) == null) {
-        try storeFloatValue(allocator, words, function, destination, arithmetic.result, double);
-    }
-}
-
-fn multiplyFeedsNextFusedArithmetic(
-    function: Machine.Function,
-    index: usize,
-    binary: Machine.Instruction.Binary,
-) bool {
-    if (!binary.type.isFloat() or binary.operator != .multiply or index + 1 >= function.instructions.len) return false;
-    // The producer is already consumed by an earlier encoding rule. A later
-    // FMA cannot reread its inputs: negation or packed lanes may be elided.
-    if (negatedOperandForMultiply(function, index, binary) != null or
-        floatLaneResidence(function, binary.result) != null) return false;
-    const arithmetic = switch (function.instructions[index + 1]) {
-        .binary => |value| value,
-        else => return false,
-    };
-    if (arithmetic.type != binary.type or
-        (arithmetic.operator != .add and arithmetic.operator != .subtract) or
-        (arithmetic.left != binary.result and arithmetic.right != binary.result)) return false;
-    if (!slotUsedOnlyAt(function.instructions, binary.result, index + 1)) return false;
-    return !controlTargetsInstruction(function.instructions, index + 1);
-}
-
-fn fusedMultiplyForArithmetic(function: Machine.Function, index: usize) ?Machine.Instruction.Binary {
-    if (index == 0) return null;
-    const multiply_value = switch (function.instructions[index - 1]) {
-        .binary => |value| value,
-        else => return null,
-    };
-    return if (multiplyFeedsNextFusedArithmetic(function, index - 1, multiply_value)) multiply_value else null;
 }
 
 fn controlTargetsInstruction(instructions: []const Machine.Instruction, target: usize) bool {

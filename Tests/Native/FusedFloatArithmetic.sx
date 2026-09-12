@@ -14,7 +14,7 @@ func negative_right(x:float64, y:float64, accumulator:float64) float64 {
     return accumulator - y * (-x)
 }
 
-test "negated products preserve their values when adjacent arithmetic can fuse" {
+test "negated products preserve their values through adjacent arithmetic" {
     assert(combined(0.125, 1.0, -2.0, 0.5, 2.0) == -0.5)
     assert(combined(0.125, 0.0, 0.0, 1.0, -2.0) == -2.0)
     assert(combined64(0.125, 1.0, -2.0, 0.5, 2.0) == -0.5)
@@ -37,9 +37,24 @@ func cached_loop64(value:float64, count:int) float64 {
     return result
 }
 
-test "fused arithmetic uses hoisted loop constants" {
+test "adjacent arithmetic uses hoisted loop constants" {
     assert(cached_loop32(1.5, 2) == -29.5)
     assert(cached_loop32(0.0, 2) == 0.5)
     assert(cached_loop64(1.5, 2) == -29.5)
     assert(cached_loop64(0.0, 2) == 0.5)
+}
+
+func rounded_product32(a:float, b:float, accumulator:float) float {
+    return a * b + accumulator
+}
+
+func rounded_product64(a:float64, b:float64, accumulator:float64) float64 {
+    return accumulator - a * b
+}
+
+test "adjacent floating operations retain intermediate rounding" {
+    // (1 + epsilon) * (1 - epsilon) rounds to one before the next operation.
+    // Contracting the operations would instead expose the nonzero -epsilon².
+    assert(rounded_product32(1.00000011920928955078125, 0.99999988079071044921875, -1.0) == 0.0)
+    assert(rounded_product64(1.0000000000000002220446049250313, 0.9999999999999997779553950749687, 1.0) == 0.0)
 }

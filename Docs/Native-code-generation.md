@@ -30,6 +30,16 @@ negative indices, even when source-level `count()` calls already folded to
 constants. Dynamic lists and views retain their runtime count access; a fixed
 array's inline elements must never be interpreted as a list header.
 
+## Preserve floating-point rounding
+
+Separate floating-point operations in typed and machine IR retain their
+intermediate rounding in native code. ARM64 emits a multiplication followed by
+addition or subtraction as separate instructions, even when the product has a
+single use. An implicit fused multiply-add changes exact comparisons and is not
+a valid peephole transformation without a distinct semantic permission in the IR.
+The native regression corpus covers cancellation-sensitive float32/float64
+expressions; encoder tests cover stack and register operands on all ARM64 formats.
+
 ## Recognize targets
 
 Package composition recognizes `macos-arm64`, `macos-x64`, `linux-arm64`,
