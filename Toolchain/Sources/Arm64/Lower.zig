@@ -442,6 +442,7 @@ fn lowerFunction(
         .parameter_count = parameter_count,
         .parameters = layout.parameters,
         .capture_parameters = layout.capture_parameters,
+        .owns_receiver = ownsReceiver(program, function),
         .return_type = function.return_type,
         .return_width = layout.return_width,
         .return_aggregate = layout.return_aggregate,
@@ -500,11 +501,14 @@ fn lowerInstruction(
     instruction: Ir.Instruction,
 ) Machine.Error!Machine.Instruction {
     return switch (instruction) {
-        .constant_int => |constant| .{ .constant_int = .{
-            .result = layout.values[constant.result].start,
-            .bits = constant.bits,
-            .type = function.value_types[constant.result],
-        } },
+        .constant_int => |constant| if (function.value_types[constant.result].functionIndex() != null)
+            .{ .storage_init = layout.values[constant.result] }
+        else
+            .{ .constant_int = .{
+                .result = layout.values[constant.result].start,
+                .bits = constant.bits,
+                .type = function.value_types[constant.result],
+            } },
         .constant_bool => |constant| .{ .constant_bool = .{
             .result = layout.values[constant.result].start,
             .value = constant.value,
@@ -533,6 +537,7 @@ fn lowerInstruction(
                 .function = reference.function,
                 .captures = captures,
                 .environment = layout.environments[reference.result],
+                .owns_receiver = ownsReceiver(program, program.functions[reference.function]),
             } };
         },
         .optional_null => |optional| .{ .optional_null = .{ .result = layout.values[optional.result] } },
@@ -565,7 +570,7 @@ fn lowerInstruction(
             .operand = layout.values[test_value.operand].start,
             .structure = test_value.structure,
         } },
-        .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
+        .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start + @as(Machine.Slot, if (function.value_types[retain.operand].functionIndex() != null) 2 else 0), .ownership = retain.ownership, .nullable = function.value_types[retain.operand].functionIndex() != null } },
         .list_retain => |retain| .{ .list_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
         .string_retain => |retain| .{ .string_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
         .string_drop => |drop| .{ .string_drop = .{ .operand = layout.values[drop.operand].start, .ownership = drop.ownership } },
@@ -586,7 +591,8 @@ fn lowerInstruction(
                 };
             }
             break :finalize .{ .class_drop = .{
-                .operand = layout.values[drop.operand].start,
+                .operand = layout.values[drop.operand].start + @as(Machine.Slot, if (function.value_types[drop.operand].functionIndex() != null) 2 else 0),
+                .nullable = function.value_types[drop.operand].functionIndex() != null,
                 .ownership = drop.ownership,
                 .skip_cycle = drop.skip_cycle,
                 .static_type = drop.static_type,
@@ -1096,7 +1102,7 @@ fn lowerCopy(result: Machine.Span, operand: Machine.Span) Machine.Instruction {
 }
 
 fn requiresDeepCopy(program: Ir.Program, type_value: Ir.Type) Machine.Error!bool {
-    if (type_value.functionIndex() != null) return false;
+    if (type_value.functionIndex() != null) return true;
     if (type_value.optionalChild()) |child| return requiresDeepCopy(program, child);
     if (enumByType(program, type_value)) |enumeration| {
         for (enumeration.variants) |variant| {
@@ -1199,6 +1205,9 @@ fn buildCopyModel(allocator: Allocator, program: Ir.Program) Machine.Error![]con
         model.items[entry + 1] = try leafCount(program, .structure(structure_index));
         model.items[entry + 2] = data_offset;
         model.items[entry + 3] = model.items.len - data_offset;
+        // Class traversal uses its case table, so the high bit of this length
+        // can carry the dynamic prohibition on cloning a nocopy receiver.
+        if (structure.is_class and !structure.is_copyable) model.items[entry + 3] |= @as(u64, 1) << 63;
     }
     return model.toOwnedSlice(allocator);
 }
@@ -1242,7 +1251,7 @@ fn appendEqualityLeaves(
     result: *std.ArrayList(Machine.Instruction.EqualityLeaf),
 ) Machine.Error!void {
     if (type_value.functionIndex() != null) {
-        for (0..2) |_| {
+        for (0..3) |_| {
             try result.append(allocator, .{
                 .offset = try checkedEqualityOffset(offset.*),
                 .type = .uint,
@@ -1365,8 +1374,7 @@ fn appendFlattenedTypes(
     result: *std.ArrayList(Ir.Type),
 ) Machine.Error!void {
     if (type_value.functionIndex() != null) {
-        try result.append(allocator, .uint);
-        try result.append(allocator, .uint);
+        try result.appendNTimes(allocator, .uint, 3);
         return;
     }
     if (type_value.optionalChild()) |child| {
@@ -1502,4 +1510,10 @@ fn runtimeConversionHeader(
 test {
     _ = @import("LowerTests.zig");
     _ = MemorySchedule;
+}
+
+fn ownsReceiver(program: Ir.Program, function: Ir.Function) bool {
+    if (function.capture_types.len != 1) return false;
+    const index = function.capture_types[0].structureIndex() orelse return false;
+    return index < program.structures.len and program.structures[index].is_class;
 }

@@ -2155,3 +2155,44 @@ test "package effects keep their real source path in both execution paths" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
     try std.testing.expect(std.mem.indexOf(u8, native.stderr, "Fault/Module/Failure.sx:1:22") != null);
 }
+
+test "native owned callbacks match interpreter lifetime and deep copy" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Receiver {
+        \\    var value:int = 0
+        \\    var callback:func(int)? = null
+        \\    func add(value:int) { self.value += value; print(self.value) }
+        \\    drop { print("drop") }
+        \\}
+        \\func make() func(int) { var receiver = Receiver(); return receiver.add }
+        \\func main() {
+        \\    { let callback = make(); callback(2); let detached = copy callback; detached(3); callback(1) }
+        \\    { var receiver = Receiver(); receiver.callback = receiver.add }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualStrings("2\n5\n3\ndrop\ndrop\ndrop\n", reference.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+}
+
+test "owned callbacks cannot deep copy a nocopy receiver" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\nocopy class Receiver { func call() {} }
+        \\func main() { var receiver = Receiver(); let callback = receiver.call; let detached = copy callback }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    try std.testing.expectError(error.InvalidProgram, Interpreter.runCapture(allocator, (try frontend.compile(source)).ir));
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expect(exitCode(native) != 0);
+}

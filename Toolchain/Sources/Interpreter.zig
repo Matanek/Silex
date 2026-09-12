@@ -354,6 +354,10 @@ fn executeInstruction(
         .class_retain => |retain| {
             const class = switch (try load(values, retain.operand)) {
                 .class => |value| value,
+                .function => |callback| if (callback.captures.len == 1 and callback.captures[0] == .class)
+                    callback.captures[0].class
+                else
+                    return null,
                 else => return error.InvalidProgram,
             };
             const guard = session.snapshot_gate.mutation();
@@ -363,6 +367,10 @@ fn executeInstruction(
         .class_drop => |drop| {
             const class = switch (try load(values, drop.operand)) {
                 .class => |value| value,
+                .function => |callback| if (callback.captures.len == 1 and callback.captures[0] == .class)
+                    callback.captures[0].class
+                else
+                    return null,
                 else => return error.InvalidProgram,
             };
             const should_finalize = finalize: {
@@ -789,7 +797,8 @@ fn deepCloneValue(
         },
         .class => |class| cloned: {
             const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
-            if (dynamic_type >= program.structures.len or !program.structures[dynamic_type].is_class) return error.InvalidProgram;
+            if (dynamic_type >= program.structures.len or !program.structures[dynamic_type].is_class or
+                !program.structures[dynamic_type].is_copyable) return error.InvalidProgram;
             if (classes.get(class.instance)) |existing| break :cloned .{ .class = .{ .static_type = class.static_type, .instance = existing } };
             const instance = try allocator.create(Value.Structure);
             instance.* = .{ .type = class.instance.type, .fields = &.{} };
@@ -824,6 +833,11 @@ fn deepCloneValue(
                 break :payload copy;
             } else null;
             break :cloned .{ .optional = .{ .type = optional.type, .value = payload } };
+        },
+        .function => |callback| cloned: {
+            const captures = try allocator.alloc(Value, callback.captures.len);
+            for (callback.captures, 0..) |capture, index| captures[index] = try deepCloneValue(allocator, program, capture, session, classes);
+            break :cloned .{ .function = .{ .type = callback.type, .id = callback.id, .captures = captures } };
         },
         .view => error.InvalidProgram,
         else => value,

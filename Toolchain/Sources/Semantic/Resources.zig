@@ -33,6 +33,7 @@ pub fn ownsValue(self: anytype, type_value: Ast.Type) bool {
 }
 
 fn requiresRetainInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (type_value.functionIndex() != null) return true;
     if (depth > self.structures.len + self.enums.len + 1) return false;
     if (type_value.optionalChild()) |child| return requiresRetainInner(self, child, depth + 1);
     if (type_value == .str) return true;
@@ -103,6 +104,7 @@ fn containsNocopyClassInner(self: anytype, type_value: Ast.Type, depth: usize) b
 }
 
 fn needsDropInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (type_value.functionIndex() != null) return true;
     if (depth > self.structures.len + self.enums.len + 1) return false;
     if (type_value.optionalChild()) |child| return needsDropInner(self, child, depth + 1);
     if (type_value == .str) return true;
@@ -300,6 +302,16 @@ pub fn releaseConstructedBase(self: anytype, builder: anytype, type_value: Ast.T
 }
 
 fn emitDropOwnedInner(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {
+    if (type_value.functionIndex() != null) {
+        try self.emit(builder, .{ .class_drop = .{
+            .operand = value,
+            .ownership = ownership,
+            .skip_cycle = ownership == .root and !invoke_value_drop,
+            .static_type = 0,
+            .plans = try classDropPlans(self, null),
+        } });
+        return;
+    }
     if (type_value.optionalChild()) |child| {
         if (!needsDrop(self, child) and !containsClass(self, child)) return;
         const absent = try self.newValue(builder, type_value);
@@ -388,6 +400,10 @@ pub fn retainValue(self: anytype, builder: anytype, type_value: Ast.Type, value:
 }
 
 pub fn retainValueOwned(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
+    if (type_value.functionIndex() != null) {
+        try self.emit(builder, .{ .class_retain = .{ .operand = value, .ownership = ownership } });
+        return;
+    }
     if (type_value.optionalChild()) |child| {
         if (!requiresRetain(self, child)) return;
         const absent = try self.newValue(builder, type_value);
@@ -455,11 +471,11 @@ fn emitProtocolResource(self: anytype, builder: anytype, protocol_index: usize, 
     builder.current_block = merge_block;
 }
 
-fn classDropPlans(self: anytype, static_type: usize) ![]const Ir.Instruction.ClassDrop.Plan {
+fn classDropPlans(self: anytype, static_type: ?usize) ![]const Ir.Instruction.ClassDrop.Plan {
     var plans: std.ArrayList(Ir.Instruction.ClassDrop.Plan) = .empty;
     for (self.structures, 0..) |structure, candidate| {
         if (!structure.is_class or structure.is_static or
-            (candidate != static_type and !@import("Inheritance.zig").isDescendant(self, candidate, static_type))) continue;
+            (static_type != null and candidate != static_type.? and !@import("Inheritance.zig").isDescendant(self, candidate, static_type.?))) continue;
         try plans.append(self.allocator, .{
             .structure = candidate,
             .functions = try classDropFunctions(self, candidate),

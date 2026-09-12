@@ -2,7 +2,7 @@ const Ir = @import("../Ir.zig");
 const Machine = @import("Machine.zig");
 
 pub fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
-    if (type_value.functionIndex() != null) return 2;
+    if (type_value.functionIndex() != null) return 3;
     if (type_value.optionalChild()) |child| return 1 + try leafCount(program, child);
     if (enumByType(program, type_value)) |enumeration| {
         if (enumeration.raw_type != null) return 2;

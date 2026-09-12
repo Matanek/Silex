@@ -48,7 +48,7 @@ const Context = struct {
     fn width(self: *const Context, type_value: u64) usize {
         if (optionalChild(type_value)) |child| return 1 + self.width(child);
         if (type_value <= scalar_limit) return if (type_value == 0) 0 else 1;
-        if (type_value >= function_base and type_value < function_end) return 2;
+        if (type_value >= function_base and type_value < function_end) return 3;
         return @intCast(self.entry(type_value)[1]);
     }
 
@@ -243,7 +243,7 @@ fn typeGraphKind(context: *const Context, type_value: u64, target_structure: u64
     if (depth > path.values.len) return .unsupported;
     if (optionalChild(type_value)) |child| return typeGraphKind(context, child, target_structure, path, depth + 1);
     if (type_value <= scalar_limit) return .none;
-    if (type_value >= function_base and type_value < function_end) return .none;
+    if (type_value >= function_base and type_value < function_end) return .class_graph;
     if (type_value < structure_base or type_value >= function_base) return .unsupported;
     if (path.contains(type_value)) return .none;
     if (path.count == path.values.len) return .unsupported;
@@ -404,7 +404,11 @@ fn traceValue(context: *Context, value: [*]u64, type_value: u64) bool {
         return traceValue(context, value + 1, child);
     }
     if (type_value <= scalar_limit) return true;
-    if (type_value >= function_base and type_value < function_end) return true;
+    if (type_value >= function_base and type_value < function_end) {
+        if (value[2] == 0) return true;
+        const receiver: [*]u64 = @ptrFromInt(value[2]);
+        return traceClassEdge(context, receiver, structure_base + receiver[0]);
+    }
     if (type_value < structure_base or type_value >= function_base) return false;
     const entry_value = context.entry(type_value);
     const data = context.data(entry_value);

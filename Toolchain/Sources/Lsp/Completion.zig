@@ -100,6 +100,7 @@ const ExpectedType = struct {
     name: []const u8,
     strict: bool = false,
     function_type: ?Ast.Type = null,
+    function_signature: ?Ast.FunctionType = null,
     constraint: enum { exact, iterable } = .exact,
 };
 
@@ -942,11 +943,11 @@ pub fn filterCallableItemsAt(
 ) ![]const CompletionItem {
     const program = decision.program orelse return items;
     const expected = expectedTypeAt(allocator, source, program, decision.cursor, decision) orelse return items;
-    const function_type = expected.function_type orelse return items;
+    const signature = expectedCallbackSignature(program, expected) orelse return items;
     var result: std.ArrayList(CompletionItem) = .empty;
     for (items) |item| {
         if (item.kind == CompletionKind.function or item.kind == CompletionKind.method) {
-            if (!completionItemMatchesFunctionType(program, item, function_type) and
+            if (!completionItemMatchesFunctionSignature(program, item, signature) and
                 !std.mem.endsWith(u8, item.detail, ") function")) continue;
         }
         try result.append(allocator, item);
@@ -961,13 +962,10 @@ pub fn expectsFunctionValueAt(
 ) bool {
     const program = decision.program orelse return false;
     const expected = expectedTypeAt(allocator, source, program, decision.cursor, decision) orelse return false;
-    return expected.function_type != null;
+    return expectedCallbackSignature(program, expected) != null;
 }
 
-fn completionItemMatchesFunctionType(program: Ast.Program, item: CompletionItem, type_value: Ast.Type) bool {
-    const function_index = type_value.functionIndex() orelse return false;
-    if (function_index >= program.function_types.len) return false;
-    const expected = program.function_types[function_index];
+fn completionItemMatchesFunctionSignature(program: Ast.Program, item: CompletionItem, expected: Ast.FunctionType) bool {
     const name = item.filterText orelse item.label;
     const parameters = signatureParameters(item.detail, name) orelse return false;
     var start: usize = 0;
@@ -2149,23 +2147,37 @@ fn appendInstanceMembers(
     }
 }
 
+fn expectedCallbackSignature(program: Ast.Program, expected: ExpectedType) ?Ast.FunctionType {
+    if (expected.function_signature) |signature| return signature;
+    const index = (expected.function_type orelse return null).functionIndex() orelse return null;
+    return if (index < program.function_types.len) program.function_types[index] else null;
+}
+
+fn sameCallbackSignature(left: Ast.FunctionType, right: Ast.FunctionType) bool {
+    if (left.return_type != right.return_type or left.return_mode != right.return_mode or left.parameters.len != right.parameters.len) return false;
+    for (left.parameters, right.parameters) |a, b| if (a.type != b.type or a.mode != b.mode) return false;
+    return true;
+}
+
+fn callbackTypeMatchesSignature(program: Ast.Program, actual: Ast.Type, signature: Ast.FunctionType) bool {
+    const index = actual.functionIndex() orelse return false;
+    if (index >= program.function_types.len) return false;
+    return sameCallbackSignature(program.function_types[index], signature);
+}
+
 fn memberValueMatchesExpectedCallback(program: Ast.Program, actual: Ast.Type, expected: ?ExpectedType) bool {
-    const wanted = expected orelse return true;
-    const function_type = wanted.function_type orelse return true;
-    return functionTypesMatch(program, actual, function_type);
+    const wanted = expectedCallbackSignature(program, expected orelse return true) orelse return true;
+    return callbackTypeMatchesSignature(program, actual, wanted);
 }
 
 fn functionMatchesExpectedCallback(program: Ast.Program, function: Ast.Function, expected: ?ExpectedType) bool {
-    const wanted = expected orelse return true;
-    const function_type = wanted.function_type orelse return true;
-    return functionMatchesType(program, function, function_type) or
-        functionTypesMatch(program, function.return_type, function_type);
+    const wanted = expectedCallbackSignature(program, expected orelse return true) orelse return true;
+    return functionMatchesSignature(function, wanted) or callbackTypeMatchesSignature(program, function.return_type, wanted);
 }
 
 fn functionIsExpectedReference(program: Ast.Program, function: Ast.Function, expected: ?ExpectedType) bool {
-    const wanted = expected orelse return false;
-    const function_type = wanted.function_type orelse return false;
-    return functionMatchesType(program, function, function_type);
+    const wanted = expectedCallbackSignature(program, expected orelse return false) orelse return false;
+    return functionMatchesSignature(function, wanted);
 }
 
 pub fn localMemberVisible(
@@ -2423,6 +2435,7 @@ fn appendExpressionSymbols(
         if (expected_type) |expected| .{
             .name = expected.name,
             .function_type = expected.function_type,
+            .function_signature = expected.function_signature,
             .constraint = expected.constraint,
         } else null
     else
@@ -2450,9 +2463,9 @@ fn appendExpressionSymbols(
         while (index != 0) {
             index -= 1;
             const local = locals[index];
-            const function_expected = if (selection_type) |expected| expected.function_type else null;
+            const function_expected = if (selection_type) |expected| expectedCallbackSignature(program, expected) else null;
             if (function_expected) |expected_function| {
-                if (!functionTypesMatch(program, local.type_value orelse continue, expected_function)) continue;
+                if (!callbackTypeMatchesSignature(program, local.type_value orelse continue, expected_function)) continue;
             } else if (!matchesExpectedType(program, selection_type, local.type_name)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = local.name,
@@ -2470,9 +2483,9 @@ fn appendExpressionSymbols(
         }
         for (lexical_callables) |scope| for (scope.parameters) |parameter| {
             const parameter_type = typeName(program, parameter.type);
-            const function_expected = if (selection_type) |expected| expected.function_type else null;
+            const function_expected = if (selection_type) |expected| expectedCallbackSignature(program, expected) else null;
             if (function_expected) |expected_function| {
-                if (!functionTypesMatch(program, parameter.type, expected_function)) continue;
+                if (!callbackTypeMatchesSignature(program, parameter.type, expected_function)) continue;
             } else if (!matchesExpectedType(program, selection_type, parameter_type)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = parameter.name,
@@ -2508,20 +2521,20 @@ fn appendExpressionSymbols(
         if (!callAcceptsParameters(source, cursor, program, function.parameters)) continue;
         const return_type = typeName(program, function.return_type);
         const passed_as_value = if (selection_type) |expected|
-            if (expected.function_type) |function_type|
-                functionMatchesType(program, function, function_type)
+            if (expectedCallbackSignature(program, expected)) |signature|
+                functionMatchesSignature(function, signature)
             else
                 false
         else
             false;
         const returns_expected_callback = if (selection_type) |expected|
-            if (expected.function_type) |function_type|
-                functionTypesMatch(program, function.return_type, function_type)
+            if (expectedCallbackSignature(program, expected)) |signature|
+                callbackTypeMatchesSignature(program, function.return_type, signature)
             else
                 false
         else
             false;
-        const expects_callback = if (selection_type) |expected| expected.function_type != null else false;
+        const expects_callback = if (selection_type) |expected| expectedCallbackSignature(program, expected) != null else false;
         if (expects_callback) {
             if (!passed_as_value and !returns_expected_callback) continue;
         } else if (!matchesExpectedType(program, selection_type, return_type)) continue;
@@ -2658,7 +2671,7 @@ fn appendExpressionIntroducers(
     }, 50);
 
     const accepts_function = if (expected_type) |expected|
-        !expected.strict or expected.function_type != null
+        !expected.strict or expected.function_type != null or expected.function_signature != null
     else
         true;
     if (accepts_function) try appendKeywords(allocator, candidates, context, &.{
@@ -3988,6 +4001,7 @@ fn expectedActiveArgumentType(
     argument: ActiveArgument,
 ) ?ExpectedType {
     var selected: ?Ast.Type = null;
+    var generic_expected: ?ExpectedType = null;
     if (expressionTypeAt(allocator, source, program, cursor, argument.callee_expression)) |callee_type| {
         const function_index = callee_type.functionIndex() orelse return null;
         if (function_index >= program.function_types.len or argument.parameter_name != null) return null;
@@ -4018,15 +4032,30 @@ fn expectedActiveArgumentType(
             receiver orelse return null,
             false,
         ) orelse return null;
-        const owner = findStructure(program, nominalReceiverName(receiver_type)) orelse return null;
+        var owner = findStructure(program, nominalReceiverName(receiver_type)) orelse return null;
         const static_access = findStructure(program, std.mem.trim(u8, receiver orelse return null, " \t\r\n")) != null;
-        for (owner.methods) |method| {
-            if (method.is_static != static_access or !std.mem.eql(u8, method.name, argument.callee_name)) continue;
-            const candidate = selectedParameterType(method.parameters, argument) orelse continue;
-            if (selected != null and selected.? != candidate) return null;
-            selected = candidate;
+        while (true) {
+            for (owner.methods) |method| {
+                if (method.is_static != static_access or !std.mem.eql(u8, method.name, argument.callee_name)) continue;
+                const candidate = selectedParameterType(method.parameters, argument) orelse continue;
+                if (method.type_parameters.len != 0) {
+                    if (genericCallbackArgument(allocator, source, program, cursor, argument, method, candidate)) |expected| {
+                        if (generic_expected) |previous| {
+                            if (!sameCallbackSignature(previous.function_signature.?, expected.function_signature.?)) return null;
+                        }
+                        generic_expected = expected;
+                    }
+                    continue;
+                }
+                if (selected != null and selected.? != candidate) return null;
+                selected = candidate;
+            }
+            if (selected != null or generic_expected != null) break;
+            owner = findStructure(program, typeName(program, owner.base orelse break)) orelse break;
         }
     }
+
+    if (selected == null) if (generic_expected) |expected| return expected;
 
     if (selected == null and direct_callee) if (findStructure(program, argument.callee_name)) |structure| {
         if (structure.constructors.len == 0) {
@@ -4053,6 +4082,92 @@ fn expectedActiveArgumentType(
         .strict = true,
         .function_type = if (type_value.functionIndex() != null) type_value else null,
     };
+}
+
+fn genericCallbackArgument(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    argument: ActiveArgument,
+    method: Ast.Function,
+    candidate: Ast.Type,
+) ?ExpectedType {
+    const callback_index = candidate.functionIndex() orelse return null;
+    if (callback_index >= program.function_types.len) return null;
+    const bindings = allocator.alloc(?Ast.Type, method.type_parameters.len) catch return null;
+    @memset(bindings, null);
+    const tokens = tokensUntil(allocator, source, argument.value_start) catch return null;
+    var depth: usize = 0;
+    var start: ?usize = null;
+    var positional: usize = 0;
+    for (tokens, 0..) |token, index| {
+        if (token.start < argument.callee_end) continue;
+        switch (token.tag) {
+            .left_parenthesis, .left_bracket, .left_brace => {
+                depth += 1;
+                if (depth == 1 and start == null) start = index + 1;
+            },
+            .right_parenthesis, .right_bracket, .right_brace => depth -|= 1,
+            .comma => if (depth == 1 and start != null and index > start.?) {
+                const segment = tokens[start.?..index];
+                var parameter_index = positional;
+                var value_start = segment[0].start;
+                if (segment.len >= 2 and segment[0].tag == .identifier and segment[1].tag == .colon) {
+                    parameter_index = for (method.parameters, 0..) |parameter, parameter_at| {
+                        if (std.mem.eql(u8, parameter.name, segment[0].lexeme)) break parameter_at;
+                    } else return null;
+                    value_start = segment[1].end;
+                } else positional += 1;
+                if (parameter_index >= method.parameters.len) return null;
+                const actual = expressionTypeAt(allocator, source, program, cursor, source[value_start..token.start]) orelse return null;
+                if (!inferCallbackBinding(program, method.parameters[parameter_index].type, actual, bindings)) return null;
+                start = index + 1;
+            },
+            else => {},
+        }
+    }
+    const template = program.function_types[callback_index];
+    const parameters = allocator.dupe(Ast.FunctionType.ParameterType, template.parameters) catch return null;
+    for (parameters) |*parameter| parameter.type = callbackBoundType(parameter.type, bindings) orelse return null;
+    return .{
+        .name = "function",
+        .strict = true,
+        .function_signature = .{
+            .parameters = parameters,
+            .return_type = callbackBoundType(template.return_type, bindings) orelse return null,
+            .return_mode = template.return_mode,
+        },
+    };
+}
+
+fn inferCallbackBinding(program: Ast.Program, pattern: Ast.Type, actual: Ast.Type, bindings: []?Ast.Type) bool {
+    if (pattern.genericParameterIndex()) |index| {
+        if (index >= bindings.len) return false;
+        if (bindings[index]) |previous| return previous == actual;
+        bindings[index] = actual;
+        return true;
+    }
+    if (pattern.optionalChild()) |child| return inferCallbackBinding(program, child, actual.optionalChild() orelse actual, bindings);
+    if (pattern.genericInstantiationIndex()) |index| {
+        const actual_index = actual.genericInstantiationIndex() orelse return false;
+        if (index >= program.generic_types.len or actual_index >= program.generic_types.len) return false;
+        const left = program.generic_types[index];
+        const right = program.generic_types[actual_index];
+        if (left.base != right.base or left.arguments.len != right.arguments.len) return false;
+        for (left.arguments, right.arguments) |nested, concrete| if (!inferCallbackBinding(program, nested, concrete, bindings)) return false;
+        return true;
+    }
+    return pattern == actual;
+}
+
+fn callbackBoundType(type_value: Ast.Type, bindings: []const ?Ast.Type) ?Ast.Type {
+    if (type_value.genericParameterIndex()) |index| return if (index < bindings.len) bindings[index] else null;
+    if (type_value.optionalChild()) |child| return .optional(callbackBoundType(child, bindings) orelse return null);
+    // Nested generic containers require a concrete type already present in the
+    // parsed program; leave that context open when it cannot be established.
+    if (type_value.genericInstantiationIndex() != null) return null;
+    return type_value;
 }
 
 fn isIdentifierExpression(expression: []const u8) bool {
@@ -4113,12 +4228,15 @@ fn expressionTypeAt(
     }
     if (topLevelMemberAccess(trimmed)) |access| {
         const receiver_type = resolveReceiverTypeForAccess(allocator, source, program, cursor, access.base, access.safe) orelse return null;
-        const owner = findStructure(program, nominalReceiverName(receiver_type)) orelse return null;
+        var owner = findStructure(program, nominalReceiverName(receiver_type)) orelse return null;
         const static_access = findStructure(program, std.mem.trim(u8, access.base, " \t\r\n")) != null;
-        const fields = if (static_access) owner.static_fields else owner.fields;
-        for (fields) |field| if (std.mem.eql(u8, field.name, access.member)) {
-            return if (field.property) |property| property.value_type else field.type;
-        };
+        while (true) {
+            const fields = if (static_access) owner.static_fields else owner.fields;
+            for (fields) |field| if (std.mem.eql(u8, field.name, access.member)) {
+                return if (field.property) |property| property.value_type else field.type;
+            };
+            owner = findStructure(program, typeName(program, owner.base orelse break)) orelse break;
+        }
         return null;
     }
     if (isIdentifierExpression(trimmed)) return lexicalValueTypeAt(allocator, source, program, cursor, trimmed);
@@ -4331,7 +4449,10 @@ fn cascadeAssignmentType(
 fn functionMatchesType(program: Ast.Program, function: Ast.Function, type_value: Ast.Type) bool {
     const index = type_value.functionIndex() orelse return false;
     if (index >= program.function_types.len) return false;
-    const expected = program.function_types[index];
+    return functionMatchesSignature(function, program.function_types[index]);
+}
+
+fn functionMatchesSignature(function: Ast.Function, expected: Ast.FunctionType) bool {
     if (expected.return_type != function.return_type or expected.return_mode != function.return_mode or
         expected.parameters.len != function.parameters.len) return false;
     for (expected.parameters, function.parameters) |expected_parameter, parameter| {

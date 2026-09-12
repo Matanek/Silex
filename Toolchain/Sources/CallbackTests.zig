@@ -311,3 +311,25 @@ test "anonymous callbacks survive generic handle specialization" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("callback-ran\n", output);
 }
+
+test "class method callbacks survive their creating call and preserve identity" {
+    const output = try run(
+        \\class Receiver {
+        \\    var count:int = 0
+        \\    func add(value:int) int { self.count += value; return self.count }
+        \\    drop { print("drop") }
+        \\}
+        \\func make() func(int) int { var receiver = Receiver(); return receiver.add }
+        \\func main() { let callback = make(); print(callback(3)); print(callback(4)) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("3\n7\ndrop\n", output);
+}
+
+test "bound methods through borrowed classes retain lexical restrictions" {
+    try expectCompileError(
+        \\class Receiver { func read() int { return 42 } }
+        \\func invalid(receiver:@Receiver) func() int { return receiver.read }
+        \\func main() {}
+    , "capturing function value cannot be returned from its lexical scope");
+}

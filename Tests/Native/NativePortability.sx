@@ -547,7 +547,58 @@ test "finalize native cycles across direct collection and protocol edges" {
     verify_cycles()
 }
 
+class NativeCallbackReceiver {
+    static var drops:int = 0
+    var value:int = 0
+    var callback:func(int) = func(value:int) {}
+    func add(value:int) { self.value += value }
+    drop { NativeCallbackReceiver.drops++ }
+}
+
+func make_native_callback() func(int) {
+    var receiver = NativeCallbackReceiver()
+    return receiver.add
+}
+
+func verify_owned_callbacks() {
+    NativeCallbackReceiver.drops = 0
+    {
+        let callback = make_native_callback()
+        callback(5)
+        assert(NativeCallbackReceiver.drops == 0)
+    }
+    assert(NativeCallbackReceiver.drops == 1)
+    {
+        var receiver = NativeCallbackReceiver()
+        receiver.callback = receiver.add
+        receiver.callback(3)
+        assert(receiver.value == 3)
+    }
+    assert(NativeCallbackReceiver.drops == 2)
+    {
+        let original = make_native_callback()
+        let detached = copy original
+        detached(8)
+        original(2)
+    }
+    assert(NativeCallbackReceiver.drops == 4)
+    {
+        var receiver = NativeCallbackReceiver()
+        var callbacks:func(int)[] = []
+        callbacks.append(receiver.add)
+        let callback = callbacks[0]
+        callback(9)
+        assert(receiver.value == 9)
+    }
+    assert(NativeCallbackReceiver.drops == 5)
+}
+
+test "native bound callbacks own and release their receiver graph" {
+    verify_owned_callbacks()
+}
+
 func main() {
+    verify_owned_callbacks()
     assert(total(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
     assert(callback_total() == 55)
     assert(dynamic_total() == 42)

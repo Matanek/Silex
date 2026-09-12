@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Callbacks = @import("Callbacks.zig");
 const Model = @import("Model.zig");
+const Inheritance = @import("Inheritance.zig");
 
 pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
     const method = self.program.structures[bound.owner].methods[bound.method_index];
@@ -15,16 +16,17 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
 
     var builder: Model.FunctionBuilder = .{ .return_type = method.return_type };
     try builder.blocks.append(self.allocator, .{});
-    try builder.value_types.append(self.allocator, .address);
+    const receiver_type = Ast.Type.structure(bound.owner);
+    const capture_type: Ast.Type = if (bound.owns_receiver) receiver_type else .address;
+    try builder.value_types.append(self.allocator, capture_type);
     const parameter_types = try self.allocator.alloc(Ast.Type, signature.parameters.len);
     for (signature.parameters, 0..) |parameter, index| {
         parameter_types[index] = if (parameter.mode == .mutable) .address else parameter.type;
         try builder.value_types.append(self.allocator, parameter_types[index]);
     }
 
-    const receiver_type = Ast.Type.structure(bound.owner);
-    const receiver = try self.newValue(&builder, receiver_type);
-    try self.emit(&builder, .{ .reference_load = .{ .result = receiver, .reference = 0 } });
+    const receiver = if (bound.owns_receiver) 0 else try self.newValue(&builder, receiver_type);
+    if (!bound.owns_receiver) try self.emit(&builder, .{ .reference_load = .{ .result = receiver, .reference = 0 } });
     var arguments: std.ArrayList(Ir.ValueId) = .empty;
     try arguments.append(self.allocator, receiver);
     for (parameter_types, 0..) |_, index| try arguments.append(self.allocator, index + 1);
@@ -35,20 +37,32 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
 
     const lowered_result = methodIrReturnType(self, bound.owner, flat, method);
     const call_result: ?Ir.ValueId = if (lowered_result == .void) null else try self.newValue(&builder, lowered_result);
-    try self.emit(&builder, .{ .call = .{
+    const call_arguments = try arguments.toOwnedSlice(self.allocator);
+    const dispatchable = self.structures[bound.owner].is_class and !method.is_private and method.extension == null;
+    if (dispatchable) {
+        try self.emit(&builder, .{ .dynamic_call = .{
+            .result = call_result,
+            .function = methodFunctionId(self.program, bound.owner, bound.method_index),
+            .receiver = receiver,
+            .arguments = call_arguments,
+            .implementations = try Inheritance.implementations(self, self.allocator, bound.owner, bound.method_index),
+        } });
+    } else try self.emit(&builder, .{ .call = .{
         .result = call_result,
         .function = methodFunctionId(self.program, bound.owner, bound.method_index),
-        .arguments = try arguments.toOwnedSlice(self.allocator),
+        .arguments = call_arguments,
     } });
     if (!mutating) {
         if (call_result) |result| self.terminate(&builder, .{ .return_value = result }) else self.terminate(&builder, .return_void);
     } else if (method.return_type == .void) {
-        try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = call_result.? } });
+        if (!bound.owns_receiver) try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = call_result.? } });
         self.terminate(&builder, .return_void);
     } else {
-        const updated = try self.newValue(&builder, receiver_type);
-        try self.emit(&builder, .{ .field_load = .{ .result = updated, .base = call_result.?, .field = 0 } });
-        try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = updated } });
+        if (!bound.owns_receiver) {
+            const updated = try self.newValue(&builder, receiver_type);
+            try self.emit(&builder, .{ .field_load = .{ .result = updated, .base = call_result.?, .field = 0 } });
+            try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = updated } });
+        }
         const value = try self.newValue(&builder, method.return_type);
         try self.emit(&builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
         self.terminate(&builder, .{ .return_value = value });
@@ -61,7 +75,7 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
     };
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#bound{d}", .{ self.program.structures[bound.owner].name, method.name, self.bound_methods.items.len }),
-        .capture_types = try self.allocator.dupe(Ast.Type, &.{Ast.Type.address}),
+        .capture_types = try self.allocator.dupe(Ast.Type, &.{capture_type}),
         .parameter_types = parameter_types,
         .return_type = method.return_type,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),

@@ -890,7 +890,9 @@ fn encodeFunction(
     }
     for (function.capture_parameters, 0..) |capture, index| {
         if (capture.aggregate or capture.width != 1) return error.InvalidMachineProgram;
-        try emitLoadAtOffset(allocator, words, .x9, .x14, index * Machine.slot_size);
+        if (function.owns_receiver) {
+            try words.append(allocator, moveRegister(.x9, .x14));
+        } else try emitLoadAtOffset(allocator, words, .x9, .x14, index * Machine.slot_size);
         try words.append(allocator, storeStack(.x9, capture.start));
     }
     for (cachedFloatLiterals(function)) |candidate| if (candidate) |literal| {
@@ -1350,13 +1352,18 @@ fn encodeFunction(
             .class_store => |store| try ClassRuntime.emitStore(allocator, words, store),
             .class_retain => |retain| {
                 try words.append(allocator, loadStack(.x10, retain.operand));
+                const skip_null = words.items.len;
+                if (retain.nullable) try words.append(allocator, compareBranchZero64(.x10));
                 try emitClassRetain(allocator, words, retain.ownership);
+                if (retain.nullable) try Fixups.patch19(words.items, skip_null, words.items.len);
             },
             .class_drop => |drop| {
                 if (enable_cycle_collector) {
                     try words.append(allocator, storeStack(.zero_or_sp, cycle_context_slot));
                 }
                 try words.append(allocator, loadStack(.x10, drop.operand));
+                const skip_null = words.items.len;
+                if (drop.nullable) try words.append(allocator, compareBranchZero64(.x10));
                 const skip_finalization = try emitClassDrop(allocator, words, drop.ownership);
                 const finalize_without_cycle = words.items.len;
                 try words.append(allocator, branch());
@@ -1373,7 +1380,11 @@ fn encodeFunction(
                     try words.append(allocator, loadStack(.x1, drop.operand));
                     const data_at = words.items.len;
                     try appendRelocatableAddress(allocator, words, .x2);
-                    try emitImmediate64(allocator, words, .x3, 0x100 + drop.static_type);
+                    if (drop.nullable) {
+                        try words.append(allocator, load64(.x3, .x1, 0));
+                        try emitImmediate64(allocator, words, .x9, 0x100);
+                        try words.append(allocator, addRegisters(.x3, .x3, .x9));
+                    } else try emitImmediate64(allocator, words, .x3, 0x100 + drop.static_type);
                     const allocate_at = words.items.len;
                     try appendRelocatableAddress(allocator, words, .x4);
                     const release_at = words.items.len;
@@ -1436,6 +1447,7 @@ fn encodeFunction(
                     try Fixups.patch19(words.items, no_context, words.items.len);
                 }
                 const done = words.items.len;
+                if (drop.nullable) try Fixups.patch19(words.items, skip_null, done);
                 try Fixups.patch19(
                     words.items,
                     skip_finalization.cycle_candidate,
@@ -1783,7 +1795,9 @@ fn encodeFunction(
                 try function_addresses.append(allocator, .{ .at = words.items.len, .function = address.function });
                 try appendRelocatableAddress(allocator, words, .x9);
                 try words.append(allocator, storeStack(.x9, address.result.start));
-                if (address.environment) |environment| {
+                if (address.owns_receiver) {
+                    try loadValue(allocator, words, function, .x9, address.captures[0]);
+                } else if (address.environment) |environment| {
                     for (address.captures, 0..) |capture, index| {
                         try loadValue(allocator, words, function, .x9, capture);
                         try words.append(allocator, storeStack(.x9, @intCast(@as(usize, environment.start) + index)));
@@ -1791,6 +1805,8 @@ fn encodeFunction(
                     try emitStackAddress(allocator, words, .x9, environment.start);
                 } else try words.append(allocator, moveWideZero64(.x9, 0, 0));
                 try words.append(allocator, storeStack(.x9, address.result.start + 1));
+                if (!address.owns_receiver) try words.append(allocator, moveWideZero64(.x9, 0, 0));
+                try words.append(allocator, storeStack(.x9, address.result.start + 2));
             },
             .call => |call| {
                 const argument_count = InternalAbi.registerArgumentCount(call.arguments);

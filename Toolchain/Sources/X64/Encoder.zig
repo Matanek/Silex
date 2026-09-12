@@ -411,7 +411,9 @@ fn encodeFunction(
     }
     for (function.capture_parameters, 0..) |capture, index| {
         if (capture.aggregate or capture.width != 1) return error.InvalidMachineProgram;
-        try emitLoadMemory(allocator, bytes, .rax, .r12, @intCast(index * Machine.slot_size));
+        if (function.owns_receiver) {
+            try emitMoveRegister(allocator, bytes, .rax, .r12);
+        } else try emitLoadMemory(allocator, bytes, .rax, .r12, @intCast(index * Machine.slot_size));
         try emitStoreStack(allocator, bytes, .rax, capture.start);
     }
 
@@ -804,7 +806,9 @@ fn encodeFunction(
                 try bytes.appendNTimes(allocator, 0, 4);
                 try function_addresses.append(allocator, .{ .displacement_at = displacement_at, .function = address.function });
                 try emitStoreStack(allocator, bytes, .rax, address.result.start);
-                if (address.environment) |environment| {
+                if (address.owns_receiver) {
+                    try emitLoadStack(allocator, bytes, .rax, address.captures[0]);
+                } else if (address.environment) |environment| {
                     for (address.captures, 0..) |capture, index| {
                         try emitLoadStack(allocator, bytes, .rax, capture);
                         try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, environment.start) + index));
@@ -812,6 +816,8 @@ fn encodeFunction(
                     try emitAddressStack(allocator, bytes, .rax, environment.start);
                 } else try emitImmediate(allocator, bytes, .rax, 0);
                 try emitStoreStack(allocator, bytes, .rax, address.result.start + 1);
+                if (!address.owns_receiver) try emitImmediate(allocator, bytes, .rax, 0);
+                try emitStoreStack(allocator, bytes, .rax, address.result.start + 2);
             },
             .call => |call| {
                 if (call.result) |result| if (result.aggregate) try emitAddressStack(allocator, bytes, .r15, result.start);
@@ -1476,11 +1482,21 @@ fn emitClassRetain(
     value: Machine.Instruction.ClassRetain,
 ) Error!void {
     try emitLoadStack(allocator, bytes, .r10, value.operand);
+    const skip_null = if (value.nullable) try emitNullReceiverBranch(allocator, bytes) else null;
     if (value.ownership == .edge) try emitMarkCycleDirty(allocator, bytes);
     try emitAtomicIncrement(allocator, bytes, .r10, switch (value.ownership) {
         .root => root_count_offset,
         .edge => edge_count_offset,
     });
+    if (skip_null) |at| try patchRelative(bytes.items, at, bytes.items.len);
+}
+
+fn emitNullReceiverBranch(allocator: Allocator, bytes: *std.ArrayList(u8)) Allocator.Error!usize {
+    try emitRegisterBinary(allocator, bytes, 0x85, .r10, .r10);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
+    const at = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    return at;
 }
 
 /// State 4 caches a negative cycle proof. Changing an incoming class edge
@@ -1520,6 +1536,7 @@ fn emitClassDrop(
         .edge => edge_count_offset,
     };
     try emitLoadStack(allocator, bytes, .r10, value.operand);
+    const skip_null = if (value.nullable) try emitNullReceiverBranch(allocator, bytes) else null;
     if (value.ownership == .edge) try emitMarkCycleDirty(allocator, bytes);
     const retry = bytes.items.len;
     try emitLoadMemory(allocator, bytes, .rax, .r10, count_offset);
@@ -1581,7 +1598,11 @@ fn emitClassDrop(
     try emitImmediate(allocator, bytes, .rdi, 0);
     try emitLoadStack(allocator, bytes, .rsi, value.operand);
     const model_at = try emitRipAddress(allocator, bytes, .rdx);
-    try emitImmediate(allocator, bytes, .rcx, 0x100 + value.static_type);
+    if (value.nullable) {
+        try emitLoadMemory(allocator, bytes, .rcx, .rsi, 0);
+        try emitImmediate(allocator, bytes, .rax, 0x100);
+        try emitRegisterBinary(allocator, bytes, 0x01, .rcx, .rax);
+    } else try emitImmediate(allocator, bytes, .rcx, 0x100 + value.static_type);
     const allocate_at = try emitRipAddress(allocator, bytes, .r8);
     const release_at = try emitRipAddress(allocator, bytes, .r9);
     try bytes.append(allocator, 0xe8);
@@ -1648,6 +1669,7 @@ fn emitClassDrop(
     try cycle_calls.append(allocator, .{ .call_at = finish_call });
     try emitImmediate(allocator, bytes, .rdx, 0);
     const done = bytes.items.len;
+    if (skip_null) |at| try patchRelative(bytes.items, at, done);
     for (finalized.items) |site| try patchRelative(bytes.items, site, finalization_complete);
     try patchRelative(bytes.items, already_released, done);
     try patchRelative(bytes.items, rooted, done);

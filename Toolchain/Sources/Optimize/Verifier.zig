@@ -134,6 +134,7 @@ pub fn verifyInstructionType(program: Ir.Program, function: Ir.Function, instruc
         .copy => {},
         .deep_copy => |value| if (types[value.result] == types[value.operand]) {} else return error.InvalidProgram,
         inline .class_retain, .class_drop => |value| {
+            if (types[value.operand].functionIndex() != null) return;
             const structure = types[value.operand].structureIndex() orelse return error.InvalidProgram;
             if (structure >= program.structures.len or !program.structures[structure].is_class)
                 return error.InvalidProgram;

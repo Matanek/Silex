@@ -381,6 +381,10 @@ pub const Specializer = struct {
         const initial_method_count = structure.methods.len;
         for (0..initial_method_count) |method_index| {
             var method = self.structures.items[structure_index].methods[method_index];
+            // A previously visited subclass can already have instantiated an
+            // inherited generic method on this class. Its signature and body
+            // are concrete and must not be rewritten as source types again.
+            if (method.specialization_file != null) continue;
             method.specialization_file = specialization_file;
             var locals: std.ArrayList(Binding) = .empty;
             try locals.append(self.allocator, .{ .name = "self", .type = self_type });
@@ -1029,9 +1033,20 @@ pub const Specializer = struct {
             self.typeForName(call.receiver.?.value.identifier) orelse self.inferExpressionType(call.receiver.?, locals) orelse return null
         else
             self.inferExpressionType(call.receiver.?, locals) orelse return null;
-        const concrete_receiver = receiver_type.optionalChild() orelse receiver_type;
-        const structure = self.structureForType(concrete_receiver) orelse return null;
-        const source_structure = self.sourceStructureForType(concrete_receiver) orelse return null;
+        var concrete_receiver = receiver_type.optionalChild() orelse receiver_type;
+        var structure = self.structureForType(concrete_receiver) orelse return null;
+        var source_structure = self.sourceStructureForType(concrete_receiver) orelse return null;
+        // Generic instance methods belong to their declaring class. Instantiate
+        // an inherited method there so all subclasses share its implementation.
+        while (true) {
+            const declares_name = for (source_structure.methods) |method| {
+                if (std.mem.eql(u8, method.name, call.name)) break true;
+            } else false;
+            if (declares_name) break;
+            concrete_receiver = structure.base orelse break;
+            structure = self.structureForType(concrete_receiver) orelse break;
+            source_structure = self.sourceStructureForType(concrete_receiver) orelse break;
+        }
         const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len + call.named_arguments.len);
         for (call.arguments, 0..) |argument, index| {
             actual_types[index] = self.inferExpressionType(argument, locals) orelse {
@@ -1852,10 +1867,31 @@ pub const Specializer = struct {
             .field_access => |access| field_type: {
                 const base = self.inferExpressionType(access.base, locals) orelse break :field_type null;
                 const child = base.optionalChild() orelse base;
-                const structure = self.structureForType(child) orelse break :field_type null;
-                for (structure.fields) |field| if (std.mem.eql(u8, field.name, access.name)) {
-                    break :field_type if (access.safe and field.type.optionalChild() == null) .optional(field.type) else field.type;
-                };
+                var structure = self.structureForType(child) orelse break :field_type null;
+                while (true) {
+                    for (structure.fields) |field| if (std.mem.eql(u8, field.name, access.name)) {
+                        var visible_type = if (field.property) |property| property.value_type else field.type;
+                        // A base class declared later may still expose a source
+                        // generic instance. Materialize it before inferring T.
+                        var payload = visible_type;
+                        while (payload.optionalChild()) |nested| payload = nested;
+                        if (payload.genericInstantiationIndex() != null) {
+                            visible_type = self.rewriteType(visible_type, &.{}, field.name_position) catch break :field_type null;
+                        }
+                        break :field_type if (access.safe and visible_type.optionalChild() == null) .optional(visible_type) else visible_type;
+                    };
+                    var selected: ?Ast.Function = null;
+                    for (structure.methods) |method| {
+                        if (!std.mem.eql(u8, method.name, access.name) or method.type_parameters.len != 0) continue;
+                        if (selected != null) break :field_type null;
+                        selected = method;
+                    }
+                    if (selected) |method| {
+                        if (access.safe) break :field_type null;
+                        break :field_type self.internFunctionType(method) catch null;
+                    }
+                    structure = self.structureForType(structure.base orelse break) orelse break;
+                }
                 break :field_type null;
             },
             .unary => |unary| if (unary.operator == .logical_not)

@@ -103,3 +103,20 @@ Choose the subsystem that matches the question you are investigating:
   inventories, independent oracles, recovery invariants, and admission gates.
 - [Implementation status](Implementation-status.md): portable coverage and the
   runtime, native, serialization, and editor limits that remain.
+
+## Bound callback ownership
+
+Native function values contain three words: code, environment and an optional
+owned class receiver. Free functions and lexical closures have a zero owner.
+A bound class method uses its retained object as both environment and owner;
+its generated thunk receives that class value directly. Methods bound through
+borrowed references, and methods of structures, keep the lexical address
+capture convention.
+
+`class_retain` and `class_drop` also accept function values in typed IR. Native
+lowering selects their owner word, guards zero and dispatches destruction by
+the receiver's dynamic class. The cycle collector traces that edge and deep
+copy follows it through the same class graph mapping as visible fields. The
+reference interpreter models the owned receiver as a class capture. Callback
+layout changes must update optional and aggregate equality, both encoders,
+deep copy and cycle tracing together.

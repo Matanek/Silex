@@ -101,7 +101,9 @@ pub fn instructionUses(instruction: Machine.Instruction, slot: usize) bool {
         .call => |call| for (call.arguments) |argument| {
             if (spanContains(argument, slot)) break true;
         } else false,
-        .indirect_call => |call| call.callee == slot or for (call.arguments) |argument| {
+        // An indirect language call reads both code and environment. The owner
+        // word is consumed separately by retain/drop operations.
+        .indirect_call => |call| call.callee == slot or call.callee + 1 == slot or for (call.arguments) |argument| {
             if (spanContains(argument, slot)) break true;
         } else false,
         .external_call => |call| for (call.arguments) |argument| {

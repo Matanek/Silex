@@ -48,7 +48,7 @@ const Context = struct {
     fn width(self: Context, type_value: u64) usize {
         if (optionalChild(type_value)) |child| return 1 + self.width(child);
         if (type_value <= scalar_limit) return if (type_value == 0) 0 else 1;
-        if (type_value >= function_base and type_value < function_end) return 2;
+        if (type_value >= function_base and type_value < function_end) return 3;
         return @intCast(self.entry(type_value)[1]);
     }
 
@@ -149,6 +149,12 @@ fn cloneValue(context: Context, source: [*]const u64, destination: [*]u64, type_
     if (type_value >= function_base and type_value < function_end) {
         destination[0] = source[0];
         destination[1] = source[1];
+        destination[2] = 0;
+        if (source[2] != 0) {
+            const receiver: [*]const u64 = @ptrFromInt(source[2]);
+            if (!cloneValue(context, source + 2, destination + 2, structure_base + receiver[0], edge)) return false;
+            destination[1] = destination[2];
+        }
         return true;
     }
     if (type_value < structure_base or type_value >= function_base) return false;
@@ -190,6 +196,7 @@ fn cloneFields(context: Context, source: [*]const u64, destination: [*]u64, fiel
 
 fn cloneClass(context: Context, source: [*]const u64, destination: [*]u64, data: [*]const u64, edge: bool) bool {
     const original: [*]u64 = @ptrFromInt(source[0]);
+    if (context.entry(structure_base + original[0])[3] & (@as(u64, 1) << 63) != 0) return false;
     if (original[3] != 0) {
         destination[0] = original[3];
         const clone: [*]u64 = @ptrFromInt(destination[0]);
@@ -278,7 +285,13 @@ fn cleanupValue(context: Context, value: [*]u64, type_value: u64) void {
         return;
     }
     if (type_value <= scalar_limit) return;
-    if (type_value >= function_base and type_value < function_end) return;
+    if (type_value >= function_base and type_value < function_end) {
+        if (value[2] != 0) {
+            const receiver: [*]const u64 = @ptrFromInt(value[2]);
+            cleanupValue(context, value + 2, structure_base + receiver[0]);
+        }
+        return;
+    }
     if (type_value < structure_base or type_value >= function_base) return;
     const entry_value = context.entry(type_value);
     const data = context.data(entry_value);
@@ -369,7 +382,13 @@ fn rollbackValue(context: Context, source: [*]const u64, destination: [*]u64, ty
         if (type_value == string_type and destination[0] != 0) releaseString(context, destination[0]);
         return;
     }
-    if (type_value >= function_base and type_value < function_end) return;
+    if (type_value >= function_base and type_value < function_end) {
+        if (source[2] != 0 and destination[2] != 0) {
+            const receiver: [*]const u64 = @ptrFromInt(source[2]);
+            rollbackValue(context, source + 2, destination + 2, structure_base + receiver[0]);
+        }
+        return;
+    }
     if (type_value < structure_base or type_value >= function_base) return;
     const entry_value = context.entry(type_value);
     const data = context.data(entry_value);

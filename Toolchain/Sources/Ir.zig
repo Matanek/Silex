@@ -1146,7 +1146,7 @@ fn writeInstruction(
                 for (reference.captures, 0..) |capture, index| {
                     if (index != 0) try output.appendSlice(allocator, ", ");
                     try appendValueChecked(output, allocator, function, capture);
-                    if (function.value_types[capture] != .address) return error.InvalidProgram;
+                    if (function.value_types[capture] != program.functions[reference.function].capture_types[index]) return error.InvalidProgram;
                 }
                 try output.append(allocator, ')');
             }

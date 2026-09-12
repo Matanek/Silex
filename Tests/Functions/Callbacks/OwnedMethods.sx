@@ -1,0 +1,154 @@
+class Receiver {
+    static var drops:int = 0
+    var total:int = 0
+    var callback:func(int) int = func(value:int) int { return value }
+
+    func receive(value:int) int { self.total += value; return self.total }
+    drop { Receiver.drops++ }
+}
+
+class CallbackSlot {
+    var callback:func(int) int
+}
+
+func make_callback() func(int) int {
+    var receiver = Receiver()
+    return receiver.receive
+}
+
+func install(slot:CallbackSlot, receiver:Receiver) { slot.callback = receiver.receive }
+
+test "returned class methods retain their receiver until the last callback is released" {
+    Receiver.drops = 0
+    {
+        let callback = make_callback()
+        if callback(3) != 3 || callback(4) != 7 { panic("returned receiver identity") }
+        if Receiver.drops != 0 { panic("receiver released too early") }
+    }
+    if Receiver.drops != 1 { panic("receiver was not released") }
+}
+
+test "stored methods retain the original object after its variable is reassigned" {
+    Receiver.drops = 0
+    {
+        var receiver = Receiver()
+        var slot = CallbackSlot(callback:receiver.receive)
+        receiver = Receiver()
+        if slot.callback(3) != 3 || receiver.total != 0 { panic("receiver follows variable") }
+        install(slot, receiver)
+        if Receiver.drops != 1 { panic("replaced callback retains receiver") }
+        if slot.callback(7) != 7 || receiver.total != 7 { panic("stored mutation") }
+    }
+    if Receiver.drops != 2 { panic("stored callback leak") }
+}
+
+test "a class callback cycle is collected" {
+    Receiver.drops = 0
+    {
+        var receiver = Receiver()
+        receiver.callback = receiver.receive
+    }
+    if Receiver.drops != 1 { panic("callback cycle leak") }
+}
+
+class DerivedReceiver:Receiver {
+    override func receive(value:int) int { self.total += value * 2; return self.total }
+}
+
+func make_virtual_callback() func(int) int {
+    var derived = DerivedReceiver()
+    var base:Receiver = derived
+    return base.receive
+}
+
+test "bound class methods preserve virtual dispatch and inherited receivers" {
+    let callback = make_virtual_callback()
+    if callback(3) != 6 { panic("bound virtual dispatch") }
+    var derived = DerivedReceiver()
+    let inherited:func(int) int = derived.receive
+    if inherited(4) != 8 { panic("derived bound method") }
+}
+
+test "deep copies of bound methods copy their receiver graph" {
+    let callback = make_callback()
+    if callback(2) != 2 { panic("original receiver") }
+    let detached = copy callback
+    if detached(3) != 5 || callback(1) != 3 { panic("deep copied callback identity") }
+}
+
+class TypedEvent<T> {
+    var value:T
+}
+
+class ConcreteSubscriber:Subscriber {
+    var total:int = 0
+    func receive(value:int) { self.total += value }
+    private var source:TypedEvent<int> = TypedEvent<int>(value:7)
+    var event:TypedEvent<int> { get { return self.source } }
+    func start() { self.subscribe(self.event, self.receive) }
+}
+
+class Subscriber {
+    func subscribe<T>(event:TypedEvent<T>, callback:func(T)) { callback(event.value) }
+}
+
+test "inherited generic methods infer a bound callback signature" {
+    var subscriber = ConcreteSubscriber()
+    subscriber.start()
+    assert(subscriber.total == 7)
+}
+
+func default_callback(value:int) int { return value }
+
+class DefaultCallbackOwner {
+    var callback:func(int) int
+    var text:str
+    var receiver:Receiver
+
+    init() {
+        self.callback = default_callback
+        self.text = "ready"
+        self.receiver = Receiver()
+    }
+}
+
+test "default callback storage initializes every word before replacement" {
+    for index in 0...100 {
+        var owner = DefaultCallbackOwner()
+        assert(owner.callback(index) == index)
+        assert(owner.text == "ready")
+        owner.callback = owner.receiver.receive
+        assert(owner.callback(3) == 3)
+    }
+}
+
+class ListReceiver {
+    var total:int = 0
+    func add(value:int) { self.total += value }
+}
+
+test "callbacks loaded from lists preserve their receiver environment" {
+    var receiver = ListReceiver()
+    var callbacks:func(int)[] = []
+    callbacks.append(receiver.add)
+    let callback = callbacks[0]
+    callback(7)
+    assert(receiver.total == 7)
+}
+
+class InheritedEventSubscriber:EventSubscriber {
+    var total:int = 0
+    func receive(value:int) { self.total += value }
+    func start() { self.subscribe(self.inherited_event, self.receive) }
+}
+
+class EventSubscriber:Subscriber {
+    private var source:TypedEvent<int> = TypedEvent<int>(value:9)
+    var inherited_event:TypedEvent<int> { get { return self.source } }
+}
+
+test "listener inference resolves a generic property inherited from a later base class" {
+    var subscriber = InheritedEventSubscriber()
+    subscriber.start()
+    assert(subscriber.total == 9)
+}

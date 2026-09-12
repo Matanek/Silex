@@ -16,6 +16,7 @@ pub const BoundMethod = struct {
     owner: usize,
     method_index: usize,
     function_type: Ast.Type,
+    owns_receiver: bool = false,
 };
 
 pub fn memberReference(
@@ -68,11 +69,17 @@ pub fn memberReference(
     const method = selected.?.method;
     const flat = flatMethodIndex(self.program, selected.?.owner, selected.?.index);
     const mutating = self.method_mutability[flat];
-    if (mutating) switch (access.base.value) {
+    const owns_receiver = self.structures[structure_index].is_class and base.borrowed_mode == .value;
+    if (mutating and !owns_receiver) switch (access.base.value) {
         .identifier, .field_access, .index_access => {},
         else => return self.fail(access.name_position, "a bound mutating method requires a stable mutable receiver place"),
     };
-    const receiver_reference = if (mutating) mutable: {
+    const receiver_reference = if (owns_receiver) owned: {
+        if (structure_index == selected.?.owner) break :owned base.value;
+        const converted = try self.newValue(builder, .structure(selected.?.owner));
+        try self.emit(builder, .{ .class_cast = .{ .result = converted, .operand = base.value } });
+        break :owned converted;
+    } else if (mutating) mutable: {
         const prepared = try MutableReferences.prepare(self, builder, access.base, base.type);
         if (prepared.temporary != null) return self.fail(access.name_position, "a bound mutating method requires a stable mutable receiver place");
         break :mutable prepared.reference;
@@ -83,8 +90,10 @@ pub fn memberReference(
         .owner = selected.?.owner,
         .method_index = selected.?.index,
         .function_type = selected_type.?,
+        .owns_receiver = owns_receiver,
     });
     const wrapper = boundWrapperBase(self.program) + wrapper_index;
+    if (owns_receiver and !base.transferred) try Resources.retainValue(self, builder, base.type, base.value);
     const result = try self.newValue(builder, selected_type.?);
     try self.emit(builder, .{ .function_reference = .{
         .result = result,
@@ -92,14 +101,15 @@ pub fn memberReference(
         .captures = try self.allocator.dupe(Ir.ValueId, &.{receiver_reference}),
     } });
     _ = method;
-    const lexical_borrows = if (Borrowing.rootName(access.base)) |root|
+    const lexical_borrows = if (!owns_receiver) if (Borrowing.rootName(access.base)) |root|
         try self.allocator.dupe(Model.LexicalBorrow, &.{.{ .root = root, .mode = if (mutating) .mutable else .read }})
     else
-        &.{};
+        &.{} else &.{};
     return .{
         .type = selected_type.?,
         .value = result,
-        .lexical_captures = true,
+        .transferred = owns_receiver,
+        .lexical_captures = !owns_receiver,
         .lexical_borrows = lexical_borrows,
     };
 }
@@ -131,15 +141,17 @@ fn rootBinding(bindings: []const Model.Binding, expression: *const Ast.Expressio
 }
 
 fn functionTypeForMethod(program: Ast.Program, method: Ast.Function, expected: ?Ast.Type) ?Ast.Type {
-    if (expected) |target| {
+    if (expected) |expected_type| {
+        var target = expected_type;
+        while (target.optionalChild()) |child| target = child;
         const index = target.functionIndex() orelse return null;
         if (index >= program.function_types.len or !callableMatches(program.function_types[index], method)) return null;
         return target;
     }
     var found: ?Ast.Type = null;
     for (program.function_types, 0..) |signature, index| if (matches(signature, method)) {
-        if (found != null) return null;
         found = .function(index);
+        break;
     };
     return found;
 }

@@ -295,6 +295,7 @@ pub const Instruction = union(enum) {
 
     pub const ClassRetain = struct {
         operand: Slot,
+        nullable: bool = false,
         ownership: Ir.Ownership = .root,
     };
     pub const ListResource = struct {
@@ -305,6 +306,7 @@ pub const Instruction = union(enum) {
 
     pub const ClassDrop = struct {
         operand: Slot,
+        nullable: bool = false,
         ownership: Ir.Ownership = .root,
         skip_cycle: bool = false,
         static_type: usize,
@@ -518,6 +520,7 @@ pub const Instruction = union(enum) {
         function: FunctionId,
         captures: []const Slot = &.{},
         environment: ?Span = null,
+        owns_receiver: bool = false,
     };
 
     pub const IndirectCall = struct {
@@ -583,6 +586,7 @@ pub const Function = struct {
     parameter_count: u12,
     parameters: []const Span = &.{},
     capture_parameters: []const Span = &.{},
+    owns_receiver: bool = false,
     return_type: Types.Type,
     return_width: u12 = 0,
     return_aggregate: bool = false,
@@ -1065,7 +1069,7 @@ pub fn validate(program: Program) Error!void {
                 },
                 .function_address => |value| {
                     try requireSpan(function, value.result);
-                    if (!value.result.aggregate or value.result.width != 2) return error.InvalidMachineProgram;
+                    if (!value.result.aggregate or value.result.width != 3) return error.InvalidMachineProgram;
                     if (value.function >= program.functions.len) return error.InvalidMachineProgram;
                     for (value.captures) |capture| try requireSlot(function, capture);
                     if (value.environment) |environment| {
