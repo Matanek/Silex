@@ -254,7 +254,7 @@ pub const regressions = [_]RegressionEntry{
     },
     .{
         .name = "Regressions/ConstantDivision.sx",
-        .concern = "signed and unsigned constant division preserves all Silex integer widths and range-proven parity branches on native backends",
+        .concern = "signed and unsigned constant division, including powers of two, preserves all Silex integer widths on native backends",
     },
     .{
         .name = "Regressions/X64RegionalBarriers.sx",
