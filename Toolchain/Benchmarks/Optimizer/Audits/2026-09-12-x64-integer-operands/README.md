@@ -31,8 +31,28 @@ ne démontrent aucun gain physique.
 Les trois jobs natifs du SHA exact sont verts : macOS X64 `34664716155`
 (job `103474213127`), Linux X64 `34664717182` (job `103474215712`) et Windows
 X64 `34664718405` (job `103474218530`). Journaux et métadonnées sont scellés.
-La campagne Intel `34664959587` est lancée contre `901c6f5` après la fin de
-la campagne précédente. Aucun gain ni parité n'est revendiqué avant son résultat.
+La campagne Intel `34664959587` contre `901c6f5` est terminée. Ses régressions
+passent ; l'admission échoue aux mesures. Sur Intel i7-8700B physique, Darwin
+24.6.0, Apple Clang 17, 21 paires et six échauffements donnent :
+
+- Flocking : 1513.579704 → 1275.196745 ms, ratio apparié 0.854412,
+  intervalle 0.835205..0.889002, stabilité verte : gain qualifié de 14.56 %.
+- Arithmetic : 6.272102 → 5.705994 ms, ratio 0.906559,
+  intervalle 0.894665..0.931504. Aucun gain qualifié : la dérive de la
+  référence atteint 112087 ppm, au-delà des 100000 ppm admis.
+- Objects : 11.304118 → 11.643304 ms, ratio 1.042010,
+  intervalle 1.025847..1.049438, stabilité verte. Le ralentissement mesuré
+  de 4.20 % doit être attribué avant admission : la campagne précédente
+  donnait déjà +4.46 % entre deux exécutables strictement identiques.
+  Le contrôle séparé `34666742724` recompare les exécutables archivés dans
+  les deux sens, puis compare des copies identiques et un même fichier.
+
+La parité face à Clang -O3 à slots de huit octets reste rouge : ratios
+1.076609 / 2.407725 / 2.642036 pour Arithmetic / Objects / Flocking.
+Les seuils sont inchangés. L'artefact `10289735715` a pour SHA-256
+`432eae5ec4f0b0fa482e4b309cfdb5318a8fef651e4d98ba92e5d320dabd8df1` ;
+les quinze exécutables sont vérifiés. Les données et journaux bruts sont
+conservés dans cet audit ; le contrôle diagnostique sera scellé séparément.
 
 Le corps répété d'Arithmetic contient 38 → 28 instructions, dont 17 → 7
 copies de registres ; le chemin de dépassement est conservé. Les dix suppressions
