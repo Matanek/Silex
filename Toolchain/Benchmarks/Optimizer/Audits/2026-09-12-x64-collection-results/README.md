@@ -48,3 +48,21 @@ Les exécutions distantes X64 sont vertes sur le SHA exact 3e58401 : macOS
 34659584418 (103459106064). Elles comprennent la fixture à treize assertions
 en Debug/Release. Les journaux sont le texte décodé du connecteur, avec
 fins de ligne LF. Le run de mesure Intel 34659585652 reste en cours.
+
+## Qualification Intel achevée
+
+Run `34659585652`, Intel i7-8700B physique, macOS 15.7.9, Clang 17,
+21 rotations après six échauffements. Les 56 régressions fixes, huit scénarios,
+64 erreurs entières et 43 conversions passent. Les quinze exécutables sont
+vérifiés par SHA-256 ; l'archive GitHub `10287013877` porte l'empreinte
+`6bdc4e52db0bbb4ab934c9886b8e7516c6cec4b264497bd847f02bf16574c398`.
+
+Toutes les paires candidat/baseline sont stables. Arithmetic est neutre :
+8.664615 → 8.731499 ms, ratio apparié 1.032835 (0.996886..1.049795).
+Objects gagne 15,70 % : 21.663621 → 18.119257 ms, ratio 0.842993
+(0.814624..0.849505). Son code est identique à 6b3f302 : cette campagne
+qualifie donc l'inlining des feuilles de classe auparavant non concluant.
+Flocking gagne 2,46 % : 1780.282131 → 1733.043817 ms, ratio 0.975430
+(0.948946..0.994844), attribuable aux résultats chargés en registres.
+Les ratios contre Clang -O3 à layout équivalent restent respectivement
+1.297466, 3.160441 et 3.008673 ; la parité demeure rouge.

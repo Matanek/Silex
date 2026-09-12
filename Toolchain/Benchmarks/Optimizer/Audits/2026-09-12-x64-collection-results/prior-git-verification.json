@@ -1,0 +1,10 @@
+[
+  {
+    "audit": "2026-09-12-scalar-class-leaves",
+    "files_verified_from_git": 118
+  },
+  {
+    "audit": "2026-09-12-x64-collection-results",
+    "files_verified_from_git": 59
+  }
+]
