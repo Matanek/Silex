@@ -48,10 +48,12 @@ existing executable.
 selects the cumulative prefix ending at that pass. This is an attribution control
 for determining which Silex canonicalizations remain necessary before LLVM; it is
 not a public optimizer switch or permission to enable the full Release pipeline.
-The adapter also accepts the analysis-only option `--boundary-report REPORT.json`
-after `--silex-prefix`. Once the closed program verifies, it records only direct
-package boundaries reachable from `main`, their typed signatures and call-site
-counts. Producing this report does not imply that the emitter supports them.
+The adapter also accepts the analysis-only option `--closure-report REPORT.json`
+after `--silex-prefix` (`--boundary-report` remains a compatibility alias). Once
+the closed program verifies, it records direct package boundaries and global
+values referenced by functions reachable from `main`, with typed signatures,
+initialization modes and use-site counts. Producing this report does not imply
+that the emitter supports every inventoried value.
 
 Direct boundary calls are emitted only when every parameter and result already
 has an explicit scalar or address LLVM representation. Void calls carry no

@@ -120,7 +120,7 @@ def main():
     target.write_bytes(b"existing output must survive later refusal")
     canonicalized = call("CommandsDominance-ssa_promotion_pre", [
         args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
-        "--silex-prefix", "ssa_promotion_pre", "--boundary-report", boundary_report,
+        "--silex-prefix", "ssa_promotion_pre", "--closure-report", boundary_report,
         dominance, target,
     ])
     assert canonicalized["returncode"] != 0, canonicalized
@@ -137,7 +137,7 @@ def main():
     raw_llvm = output/"PureMathReferenceInlining-raw.ll"
     reported = call("PureMathReferenceInlining-boundary-report", [
         args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
-        "--silex-prefix", "none", "--boundary-report", boundary_report,
+        "--silex-prefix", "none", "--closure-report", boundary_report,
         pure_math, raw_llvm,
     ])
     assert reported["returncode"] == 0, reported
@@ -148,6 +148,38 @@ def main():
     function = inventory["functions"][0]
     assert function["source_name"] == "sqrtf" and function["supported_by_prototype"], inventory
     print("REACHABLE BOUNDARY INVENTORY PASS", flush=True)
+
+    global_source = (corpus/"LlvmEvaluation/GlobalInventory.sx").resolve()
+    native_observable = None
+    for mode in ["debug", "release"]:
+        binary = output/("GlobalInventory-"+mode)
+        built = call("GlobalInventory-compile-"+mode,
+                     [args.native, "compile", global_source, "--"+mode, "--nocache", "--output", binary])
+        assert built["returncode"] == 0, built
+        run = call("GlobalInventory-run-"+mode, [binary])
+        observable = {key: run[key] for key in ["returncode", "stdout", "stderr"]}
+        assert observable == {"returncode": 0, "stdout": "2\n", "stderr": ""}, run
+        if native_observable is None:
+            native_observable = observable
+        else:
+            assert observable == native_observable, (native_observable, observable)
+    target = output/"GlobalInventory-refused.ll"
+    closure_report = output/"GlobalInventory-closure.json"
+    target.write_bytes(b"existing output must survive global refusal")
+    rejected = call("GlobalInventory-closure-report", [
+        args.adapter, "--backend", "llvm", "--shadercross", args.shadercross,
+        "--silex-prefix", "none", "--closure-report", closure_report,
+        global_source, target,
+    ])
+    assert rejected["returncode"] != 0 and "reachable global values" in rejected["stderr"], rejected
+    assert target.read_bytes() == b"existing output must survive global refusal"
+    inventory = json.loads(closure_report.read_text())
+    assert inventory["reachable_global_values"] == 1, inventory
+    assert inventory["global_load_sites"] == 2 and inventory["global_store_sites"] == 1, inventory
+    global_value = inventory["globals"][0]
+    assert global_value["name"] == "LlvmEvaluation.GlobalInventory.State.counter", inventory
+    assert global_value["type_name"] == "int" and global_value["bits"] == 1, inventory
+    print("REACHABLE GLOBAL INVENTORY PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseString", "RefuseCallback"]:

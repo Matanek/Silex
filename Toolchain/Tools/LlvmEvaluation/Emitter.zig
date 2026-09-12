@@ -39,10 +39,13 @@ pub fn emitWithBoundaries(
         std.debug.print("\n", .{});
         return error.UnsupportedInstruction;
     }
-    if (program.globals.len != 0) {
+    const global_use = try inspectGlobalUse(allocator, program, reachable);
+    defer allocator.free(global_use.loads);
+    defer allocator.free(global_use.stores);
+    if (global_use.used != 0) {
         std.debug.print(
-            "silex LLVM evaluation: emitter rejected {d} global values\n",
-            .{program.globals.len},
+            "silex LLVM evaluation: emitter rejected {d} reachable global values across {d} loads and {d} stores\n",
+            .{ global_use.used, global_use.load_sites, global_use.store_sites },
         );
         return error.UnsupportedInstruction;
     }
@@ -155,7 +158,7 @@ pub fn emitWithBoundaries(
     return output.toOwnedSlice(allocator);
 }
 
-pub fn boundaryReport(
+pub fn closureReport(
     allocator: Allocator,
     program: Ir.Program,
     boundaries: []const Silex.Boundary.Function,
@@ -164,6 +167,9 @@ pub fn boundaryReport(
     defer allocator.free(reachable);
     const boundary_use = try inspectBoundaryUse(allocator, program, boundaries, reachable);
     defer allocator.free(boundary_use.direct_sites_by_function);
+    const global_use = try inspectGlobalUse(allocator, program, reachable);
+    defer allocator.free(global_use.loads);
+    defer allocator.free(global_use.stores);
 
     var reachable_function_count: usize = 0;
     for (reachable) |is_reachable| if (is_reachable) {
@@ -191,6 +197,24 @@ pub fn boundaryReport(
         };
         entry_index += 1;
     }
+    const globals = try allocator.alloc(GlobalInventoryEntry, global_use.used);
+    var global_entry_index: usize = 0;
+    for (program.globals, 0..) |global, index| {
+        if (global_use.loads[index] == 0 and global_use.stores[index] == 0) continue;
+        globals[global_entry_index] = .{
+            .index = index,
+            .name = global.name,
+            .type = global.type,
+            .type_name = try reportTypeName(allocator, program, global.type),
+            .mutable = global.mutable,
+            .runtime_initialized = global.runtime_initialized,
+            .bits = global.bits,
+            .extra_bits = global.extra_bits,
+            .loads = global_use.loads[index],
+            .stores = global_use.stores[index],
+        };
+        global_entry_index += 1;
+    }
     return std.json.Stringify.valueAlloc(allocator, .{
         .boundary_table_size = boundaries.len,
         .reachable_functions = reachable_function_count,
@@ -198,6 +222,11 @@ pub fn boundaryReport(
         .direct_call_sites = boundary_use.direct_sites,
         .indirect_call_sites = boundary_use.indirect_sites,
         .functions = entries,
+        .global_table_size = program.globals.len,
+        .reachable_global_values = global_use.used,
+        .global_load_sites = global_use.load_sites,
+        .global_store_sites = global_use.store_sites,
+        .globals = globals,
     }, .{ .whitespace = .indent_2 });
 }
 
@@ -212,6 +241,51 @@ const BoundaryInventoryEntry = struct {
     direct_sites: usize,
     supported_by_prototype: bool,
 };
+
+const GlobalInventoryEntry = struct {
+    index: usize,
+    name: []const u8,
+    type: Ir.Type,
+    type_name: []const u8,
+    mutable: bool,
+    runtime_initialized: bool,
+    bits: u64,
+    extra_bits: []const u64,
+    loads: usize,
+    stores: usize,
+};
+
+fn reportTypeName(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
+    if (type_value.optionalChild()) |child| {
+        return std.fmt.allocPrint(allocator, "{s}?", .{try reportTypeName(allocator, program, child)});
+    }
+    if (type_value.structureIndex()) |index| {
+        if (index >= program.structures.len) return error.InvalidProgram;
+        return std.fmt.allocPrint(allocator, "@{s}", .{program.structures[index].name});
+    }
+    if (type_value.functionIndex()) |index| {
+        if (index >= program.function_types.len) return error.InvalidProgram;
+        return std.fmt.allocPrint(allocator, "func#{d}", .{index});
+    }
+    return switch (type_value) {
+        .void,
+        .bool,
+        .int8,
+        .uint8,
+        .int16,
+        .uint16,
+        .int32,
+        .uint32,
+        .int,
+        .uint,
+        .float32,
+        .float64,
+        .str,
+        .address,
+        => @tagName(type_value),
+        else => std.fmt.allocPrint(allocator, "type#{d}", .{@intFromEnum(type_value)}),
+    };
+}
 
 const BoundaryUse = struct {
     direct_sites_by_function: []usize,
@@ -248,6 +322,52 @@ fn inspectBoundaryUse(
         result.unsupported += 1;
         if (result.first_unsupported == null) result.first_unsupported = index;
     }
+    return result;
+}
+
+const GlobalUse = struct {
+    loads: []usize,
+    stores: []usize,
+    used: usize = 0,
+    load_sites: usize = 0,
+    store_sites: usize = 0,
+};
+
+fn inspectGlobalUse(
+    allocator: Allocator,
+    program: Ir.Program,
+    reachable: []const bool,
+) Error!GlobalUse {
+    if (reachable.len != program.functions.len) return error.InvalidProgram;
+    const loads = try allocator.alloc(usize, program.globals.len);
+    errdefer allocator.free(loads);
+    const stores = try allocator.alloc(usize, program.globals.len);
+    errdefer allocator.free(stores);
+    var result: GlobalUse = .{
+        .loads = loads,
+        .stores = stores,
+    };
+    @memset(result.loads, 0);
+    @memset(result.stores, 0);
+    for (program.functions, 0..) |function, function_index| {
+        if (!reachable[function_index]) continue;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .global_load => |load| {
+                if (load.global >= program.globals.len) return error.InvalidProgram;
+                result.loads[load.global] += 1;
+                result.load_sites += 1;
+            },
+            .global_store => |store| {
+                if (store.global >= program.globals.len) return error.InvalidProgram;
+                result.stores[store.global] += 1;
+                result.store_sites += 1;
+            },
+            else => {},
+        };
+    }
+    for (result.loads, result.stores) |load_count, store_count| if (load_count != 0 or store_count != 0) {
+        result.used += 1;
+    };
     return result;
 }
 

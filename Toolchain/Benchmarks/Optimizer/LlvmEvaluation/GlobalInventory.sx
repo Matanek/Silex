@@ -1,0 +1,10 @@
+struct State {
+    static var counter:int = 1
+
+    static func update() {
+        State.counter++
+        print(State.counter)
+    }
+}
+
+func main() { State.update() }

@@ -17,10 +17,12 @@ fn run(init: std.process.Init) !u8 {
         !std.mem.eql(u8, args[2], "llvm") or
         !std.mem.eql(u8, args[3], "--shadercross") or
         !std.mem.eql(u8, args[5], "--silex-prefix") or
-        (args.len == 11 and !std.mem.eql(u8, args[7], "--boundary-report")))
+        (args.len == 11 and
+            !std.mem.eql(u8, args[7], "--closure-report") and
+            !std.mem.eql(u8, args[7], "--boundary-report")))
     {
         std.debug.print(
-            "usage: silex-llvm-evaluation --backend llvm --shadercross PATH --silex-prefix none|PASS [--boundary-report REPORT.json] SOURCE OUTPUT.ll\n",
+            "usage: silex-llvm-evaluation --backend llvm --shadercross PATH --silex-prefix none|PASS [--closure-report REPORT.json] SOURCE OUTPUT.ll\n",
             .{},
         );
         return 1;
@@ -66,7 +68,7 @@ fn run(init: std.process.Init) !u8 {
     };
     const verified_at = std.Io.Clock.awake.now(init.io);
     if (args.len == 11) {
-        const report = try Emitter.boundaryReport(allocator, program, compiled.boundaries);
+        const report = try Emitter.closureReport(allocator, program, compiled.boundaries);
         const report_file = try std.Io.Dir.cwd().createFile(init.io, args[8], .{});
         defer report_file.close(init.io);
         try report_file.writeStreamingAll(init.io, report);
