@@ -1,0 +1,15 @@
+test_archived_identity_and_checksums_are_required (test_calibrate.CalibrationTests.test_archived_identity_and_checksums_are_required) ... ok
+test_artifact_path_cannot_escape_the_download (test_calibrate.CalibrationTests.test_artifact_path_cannot_escape_the_download) ... ok
+test_controls_swap_content_and_distinguish_one_file_from_two (test_calibrate.CalibrationTests.test_controls_swap_content_and_distinguish_one_file_from_two) ... ok
+test_baseline_is_paired_and_its_output_checked (test_campaign.CampaignTests.test_baseline_is_paired_and_its_output_checked) ... ok
+test_equivalent_reference_failure_cannot_be_hidden_by_historical_parity (test_campaign.CampaignTests.test_equivalent_reference_failure_cannot_be_hidden_by_historical_parity) ... ok
+test_equivalent_reference_output_is_checked (test_campaign.CampaignTests.test_equivalent_reference_output_is_checked) ... ok
+test_exact_one_sided_bound_matches_optimizer_oracle (test_campaign.CampaignTests.test_exact_one_sided_bound_matches_optimizer_oracle) ... ok
+test_native_x64_rejects_arm_and_translation (test_campaign.CampaignTests.test_native_x64_rejects_arm_and_translation) ... ok
+test_qualification_rejects_drift_and_slow_upper_bound (test_campaign.CampaignTests.test_qualification_rejects_drift_and_slow_upper_bound) ... ok
+test_zero_warmups_establishes_output_from_first_measurement (test_campaign.CampaignTests.test_zero_warmups_establishes_output_from_first_measurement) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.019s
+
+OK

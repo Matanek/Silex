@@ -1,0 +1,296 @@
+﻿2026-09-12T02:06:09.6473870Z Current runner version: '2.337.0'
+2026-09-12T02:06:09.6538220Z ##[group]Runner Image Provisioner
+2026-09-12T02:06:09.6540260Z Hosted Compute Agent
+2026-09-12T02:06:09.6541640Z Version: 20260819.586
+2026-09-12T02:06:09.6543220Z Commit: 3cc4a88dfa507ef76119ad1bb3eccc6378bb2b76
+2026-09-12T02:06:09.6545120Z Build Date: 2026-08-18T23:20:18Z
+2026-09-12T02:06:09.6546810Z Worker ID: {bb3dd376-065d-4e83-a278-23912a6361c8}
+2026-09-12T02:06:09.6548500Z Azure Region: westus
+2026-09-12T02:06:09.6549850Z ##[endgroup]
+2026-09-12T02:06:09.6556250Z ##[group]Operating System
+2026-09-12T02:06:09.6557790Z macOS
+2026-09-12T02:06:09.6559010Z 15.7.9
+2026-09-12T02:06:09.6560190Z 24G830
+2026-09-12T02:06:09.6561380Z ##[endgroup]
+2026-09-12T02:06:09.6562630Z ##[group]Runner Image
+2026-09-12T02:06:09.6564060Z Image: macos-15
+2026-09-12T02:06:09.6565380Z Version: 20260824.0482.1
+2026-09-12T02:06:09.6568630Z Included Software: https://github.com/actions/runner-images/blob/macos-15/20260824.0482/images/macos/macos-15-Readme.md
+2026-09-12T02:06:09.6573050Z Image Release: https://github.com/actions/runner-images/releases/tag/macos-15%2F20260824.0482
+2026-09-12T02:06:09.6575810Z ##[endgroup]
+2026-09-12T02:06:09.6578990Z ##[group]GITHUB_TOKEN Permissions
+2026-09-12T02:06:09.6585400Z Actions: read
+2026-09-12T02:06:09.6586840Z Contents: read
+2026-09-12T02:06:09.6588180Z Metadata: read
+2026-09-12T02:06:09.6591210Z ##[endgroup]
+2026-09-12T02:06:09.6596650Z Secret source: Actions
+2026-09-12T02:06:09.6598900Z Cache mode: write
+2026-09-12T02:06:09.6600820Z Prepare workflow directory
+2026-09-12T02:06:09.7516210Z Prepare all required actions
+2026-09-12T02:06:09.7657390Z Getting action download info
+2026-09-12T02:06:10.0324780Z Download action repository 'actions/checkout@v6' (SHA:d23441a48e516b6c34aea4fa41551a30e30af803)
+2026-09-12T02:06:11.0884010Z Download action repository 'actions/download-artifact@v8' (SHA:3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c)
+2026-09-12T02:06:12.9061110Z Download action repository 'actions/upload-artifact@v7' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+2026-09-12T02:06:14.0791980Z Complete job name: optimizer-x64-calibration
+2026-09-12T02:06:14.4684470Z ##[group]Run actions/checkout@v6
+2026-09-12T02:06:14.4694220Z with:
+2026-09-12T02:06:14.4800040Z   repository: Matanek/Silex
+2026-09-12T02:06:14.4854120Z   token: ***
+2026-09-12T02:06:14.4908930Z   ssh-strict: true
+2026-09-12T02:06:14.4910360Z   ssh-user: git
+2026-09-12T02:06:14.4911730Z   persist-credentials: true
+2026-09-12T02:06:14.4913290Z   clean: true
+2026-09-12T02:06:14.4914670Z   sparse-checkout-cone-mode: true
+2026-09-12T02:06:14.4916280Z   fetch-depth: 1
+2026-09-12T02:06:14.4917600Z   fetch-tags: false
+2026-09-12T02:06:14.4919160Z   show-progress: true
+2026-09-12T02:06:14.4920610Z   lfs: false
+2026-09-12T02:06:14.4921890Z   submodules: false
+2026-09-12T02:06:14.4923260Z   set-safe-directory: true
+2026-09-12T02:06:14.4924830Z   allow-unsafe-pr-checkout: false
+2026-09-12T02:06:14.4929650Z ##[endgroup]
+2026-09-12T02:06:15.9102220Z Syncing repository: Matanek/Silex
+2026-09-12T02:06:15.9108240Z ##[group]Getting Git version info
+2026-09-12T02:06:15.9110960Z Working directory is '/Users/runner/work/Silex/Silex'
+2026-09-12T02:06:15.9114530Z [command]/usr/local/bin/git version
+2026-09-12T02:06:15.9732340Z git version 2.55.0
+2026-09-12T02:06:15.9786490Z ##[endgroup]
+2026-09-12T02:06:15.9813570Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/6bfb7b20-4823-4b28-bd41-7f9819d0fa13/.gitconfig'
+2026-09-12T02:06:15.9845510Z Temporarily overriding HOME='/Users/runner/work/_temp/6bfb7b20-4823-4b28-bd41-7f9819d0fa13' before making global git config changes
+2026-09-12T02:06:15.9850240Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T02:06:15.9859890Z [command]/usr/local/bin/git config --global --add safe.directory /Users/runner/work/Silex/Silex
+2026-09-12T02:06:16.0321480Z Deleting the contents of '/Users/runner/work/Silex/Silex'
+2026-09-12T02:06:16.0368060Z ##[group]Determining repository object format
+2026-09-12T02:06:16.0425140Z ##[endgroup]
+2026-09-12T02:06:16.0455210Z ##[group]Initializing the repository
+2026-09-12T02:06:16.0463410Z [command]/usr/local/bin/git init /Users/runner/work/Silex/Silex
+2026-09-12T02:06:16.0981560Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-12T02:06:16.0989710Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-12T02:06:16.0994890Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-12T02:06:16.0997600Z hint: call:
+2026-09-12T02:06:16.0999220Z hint:
+2026-09-12T02:06:16.1000960Z hint: 	git config --global init.defaultBranch <name>
+2026-09-12T02:06:16.1003070Z hint:
+2026-09-12T02:06:16.1004970Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-12T02:06:16.1008040Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-12T02:06:16.1010600Z hint:
+2026-09-12T02:06:16.1012110Z hint: 	git branch -m <name>
+2026-09-12T02:06:16.1013760Z hint:
+2026-09-12T02:06:16.1015950Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-12T02:06:16.1019210Z Initialized empty Git repository in /Users/runner/work/Silex/Silex/.git/
+2026-09-12T02:06:16.1025070Z [command]/usr/local/bin/git remote add origin https://github.com/Matanek/Silex
+2026-09-12T02:06:16.1272030Z ##[endgroup]
+2026-09-12T02:06:16.1274530Z ##[group]Disabling automatic garbage collection
+2026-09-12T02:06:16.1280150Z [command]/usr/local/bin/git config --local gc.auto 0
+2026-09-12T02:06:16.1544120Z ##[endgroup]
+2026-09-12T02:06:16.1547430Z ##[group]Setting up auth
+2026-09-12T02:06:16.1548820Z Removing SSH command configuration
+2026-09-12T02:06:16.1561750Z [command]/usr/local/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T02:06:16.1802180Z [command]/usr/local/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T02:06:17.2541060Z Removing HTTP extra header
+2026-09-12T02:06:17.2549150Z [command]/usr/local/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T02:06:17.2744920Z [command]/usr/local/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T02:06:18.0622340Z Removing includeIf entries pointing to credentials config files
+2026-09-12T02:06:18.0627380Z [command]/usr/local/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T02:06:18.0935880Z [command]/usr/local/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T02:06:18.8586430Z [command]/usr/local/bin/git config --file /Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-12T02:06:18.8666880Z [command]/usr/local/bin/git config --local includeIf.gitdir:/Users/runner/work/Silex/Silex/.git.path /Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:18.8832070Z [command]/usr/local/bin/git config --local includeIf.gitdir:/Users/runner/work/Silex/Silex/.git/worktrees/*.path /Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:18.9197270Z [command]/usr/local/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:18.9462920Z [command]/usr/local/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:18.9741960Z ##[endgroup]
+2026-09-12T02:06:18.9746160Z ##[group]Fetching the repository
+2026-09-12T02:06:18.9768490Z [command]/usr/local/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +37999a44323d6444053e29037e93376f9bd96171:refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T02:06:22.2881790Z From https://github.com/Matanek/Silex
+2026-09-12T02:06:22.2888370Z  * [new ref]         37999a44323d6444053e29037e93376f9bd96171 -> origin/spec-silex-optimization-parity-completion
+2026-09-12T02:06:22.2913420Z [command]/usr/local/bin/git branch --list --remote origin/spec-silex-optimization-parity-completion
+2026-09-12T02:06:22.3120250Z   origin/spec-silex-optimization-parity-completion
+2026-09-12T02:06:22.3141150Z [command]/usr/local/bin/git rev-parse refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T02:06:22.3309990Z 37999a44323d6444053e29037e93376f9bd96171
+2026-09-12T02:06:22.3320610Z ##[endgroup]
+2026-09-12T02:06:22.3322500Z ##[group]Determining the checkout info
+2026-09-12T02:06:22.3324510Z ##[endgroup]
+2026-09-12T02:06:22.3333620Z [command]/usr/local/bin/git sparse-checkout disable
+2026-09-12T02:06:22.3602440Z [command]/usr/local/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-12T02:06:22.3801570Z ##[group]Checking out the ref
+2026-09-12T02:06:22.3814560Z [command]/usr/local/bin/git checkout --progress --force -B spec-silex-optimization-parity-completion refs/remotes/origin/spec-silex-optimization-parity-completion
+2026-09-12T02:06:23.8624860Z Updating files:  36% (943/2606)
+2026-09-12T02:06:23.8700020Z Updating files:  37% (965/2606)
+2026-09-12T02:06:23.9272720Z Updating files:  38% (991/2606)
+2026-09-12T02:06:23.9533410Z Updating files:  39% (1017/2606)
+2026-09-12T02:06:23.9703470Z Updating files:  40% (1043/2606)
+2026-09-12T02:06:23.9887370Z Updating files:  41% (1069/2606)
+2026-09-12T02:06:24.0542090Z Updating files:  42% (1095/2606)
+2026-09-12T02:06:24.1798880Z Updating files:  43% (1121/2606)
+2026-09-12T02:06:24.1873710Z Updating files:  44% (1147/2606)
+2026-09-12T02:06:24.1917720Z Updating files:  45% (1173/2606)
+2026-09-12T02:06:24.2068800Z Updating files:  46% (1199/2606)
+2026-09-12T02:06:24.2424000Z Updating files:  47% (1225/2606)
+2026-09-12T02:06:24.2651340Z Updating files:  48% (1251/2606)
+2026-09-12T02:06:24.3732900Z Updating files:  49% (1277/2606)
+2026-09-12T02:06:24.4335100Z Updating files:  50% (1303/2606)
+2026-09-12T02:06:24.4343440Z Updating files:  51% (1330/2606)
+2026-09-12T02:06:24.6254440Z Updating files:  51% (1341/2606)
+2026-09-12T02:06:24.6428380Z Updating files:  52% (1356/2606)
+2026-09-12T02:06:24.7891960Z Updating files:  53% (1382/2606)
+2026-09-12T02:06:24.8015190Z Updating files:  54% (1408/2606)
+2026-09-12T02:06:24.8624770Z Updating files:  55% (1434/2606)
+2026-09-12T02:06:24.8813690Z Updating files:  56% (1460/2606)
+2026-09-12T02:06:24.9138130Z Updating files:  57% (1486/2606)
+2026-09-12T02:06:24.9487980Z Updating files:  58% (1512/2606)
+2026-09-12T02:06:24.9992440Z Updating files:  59% (1538/2606)
+2026-09-12T02:06:25.0160420Z Updating files:  60% (1564/2606)
+2026-09-12T02:06:25.0523880Z Updating files:  61% (1590/2606)
+2026-09-12T02:06:25.0800520Z Updating files:  62% (1616/2606)
+2026-09-12T02:06:25.1031710Z Updating files:  63% (1642/2606)
+2026-09-12T02:06:25.2352180Z Updating files:  64% (1668/2606)
+2026-09-12T02:06:25.2943260Z Updating files:  65% (1694/2606)
+2026-09-12T02:06:25.2954220Z Updating files:  66% (1720/2606)
+2026-09-12T02:06:25.3096090Z Updating files:  67% (1747/2606)
+2026-09-12T02:06:25.3643370Z Updating files:  68% (1773/2606)
+2026-09-12T02:06:25.3907880Z Updating files:  69% (1799/2606)
+2026-09-12T02:06:25.4122850Z Updating files:  70% (1825/2606)
+2026-09-12T02:06:25.4184820Z Updating files:  70% (1847/2606)
+2026-09-12T02:06:25.4618920Z Updating files:  71% (1851/2606)
+2026-09-12T02:06:25.4970450Z Updating files:  72% (1877/2606)
+2026-09-12T02:06:25.6025220Z Updating files:  73% (1903/2606)
+2026-09-12T02:06:25.6647810Z Updating files:  74% (1929/2606)
+2026-09-12T02:06:25.7663030Z Updating files:  75% (1955/2606)
+2026-09-12T02:06:25.8666060Z Updating files:  76% (1981/2606)
+2026-09-12T02:06:25.9214800Z Updating files:  77% (2007/2606)
+2026-09-12T02:06:25.9494820Z Updating files:  78% (2033/2606)
+2026-09-12T02:06:25.9543710Z Updating files:  79% (2059/2606)
+2026-09-12T02:06:25.9551150Z Updating files:  80% (2085/2606)
+2026-09-12T02:06:26.0554690Z Updating files:  81% (2111/2606)
+2026-09-12T02:06:26.1557940Z Updating files:  82% (2137/2606)
+2026-09-12T02:06:26.1918020Z Updating files:  83% (2163/2606)
+2026-09-12T02:06:26.1934620Z Updating files:  84% (2190/2606)
+2026-09-12T02:06:26.2039050Z Updating files:  85% (2216/2606)
+2026-09-12T02:06:26.2145200Z Updating files:  86% (2242/2606)
+2026-09-12T02:06:26.2212410Z Updating files:  87% (2268/2606)
+2026-09-12T02:06:26.2371540Z Updating files:  88% (2294/2606)
+2026-09-12T02:06:26.2473330Z Updating files:  89% (2320/2606)
+2026-09-12T02:06:26.2475300Z Updating files:  90% (2346/2606)
+2026-09-12T02:06:26.3478590Z Updating files:  91% (2372/2606)
+2026-09-12T02:06:26.4544690Z Updating files:  92% (2398/2606)
+2026-09-12T02:06:26.4945950Z Updating files:  93% (2424/2606)
+2026-09-12T02:06:26.5000040Z Updating files:  94% (2450/2606)
+2026-09-12T02:06:26.5058980Z Updating files:  95% (2476/2606)
+2026-09-12T02:06:26.6394090Z Updating files:  95% (2480/2606)
+2026-09-12T02:06:26.7155600Z Updating files:  96% (2502/2606)
+2026-09-12T02:06:26.7260520Z Updating files:  97% (2528/2606)
+2026-09-12T02:06:26.7336740Z Updating files:  98% (2554/2606)
+2026-09-12T02:06:26.7592960Z Updating files:  99% (2580/2606)
+2026-09-12T02:06:26.8619350Z Updating files: 100% (2606/2606)
+2026-09-12T02:06:26.9884620Z Updating files: 100% (2606/2606), done.
+2026-09-12T02:06:27.0939340Z Switched to a new branch 'spec-silex-optimization-parity-completion'
+2026-09-12T02:06:27.0950330Z branch 'spec-silex-optimization-parity-completion' set up to track 'origin/spec-silex-optimization-parity-completion'.
+2026-09-12T02:06:27.2013710Z ##[endgroup]
+2026-09-12T02:06:27.2238850Z [command]/usr/local/bin/git log -1 --format=%H
+2026-09-12T02:06:27.2344350Z 37999a44323d6444053e29037e93376f9bd96171
+2026-09-12T02:06:27.2906590Z ##[group]Run set -euo pipefail
+2026-09-12T02:06:27.2907820Z [36;1mset -euo pipefail[0m
+2026-09-12T02:06:27.2908670Z [36;1m[[ "$SOURCE_RUN" =~ ^[0-9]+$ ]][0m
+2026-09-12T02:06:27.2911420Z [36;1m[[ "$EXPECTED_CANDIDATE" =~ ^[0-9a-f]{40}$ ]][0m
+2026-09-12T02:06:27.2913340Z [36;1msource_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq '.head_sha')[0m
+2026-09-12T02:06:27.2915110Z [36;1mtest "$source_sha" = "$EXPECTED_CANDIDATE"[0m
+2026-09-12T02:06:27.3107170Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-12T02:06:27.3108270Z env:
+2026-09-12T02:06:27.3108900Z   SOURCE_RUN: 34664959587
+2026-09-12T02:06:27.3109930Z   EXPECTED_CANDIDATE: b8d01d73233a88a080170b53096f2a72bbd8d98e
+2026-09-12T02:06:27.3122300Z   GH_TOKEN: ***
+2026-09-12T02:06:27.3123060Z ##[endgroup]
+2026-09-12T02:06:28.6684750Z ##[group]Run actions/download-artifact@v8
+2026-09-12T02:06:28.6686160Z with:
+2026-09-12T02:06:28.6697290Z   github-token: ***
+2026-09-12T02:06:28.6698190Z   repository: Matanek/Silex
+2026-09-12T02:06:28.6699220Z   run-id: 34664959587
+2026-09-12T02:06:28.6700330Z   name: optimizer-x64-b8d01d73233a88a080170b53096f2a72bbd8d98e
+2026-09-12T02:06:28.6701660Z   path: calibration-input
+2026-09-12T02:06:28.6702590Z   merge-multiple: false
+2026-09-12T02:06:28.6703490Z   skip-decompress: false
+2026-09-12T02:06:28.6704420Z   digest-mismatch: error
+2026-09-12T02:06:28.6705390Z ##[endgroup]
+2026-09-12T02:06:29.6187540Z Downloading single artifact
+2026-09-12T02:06:30.3089570Z Preparing to download the following artifacts:
+2026-09-12T02:06:30.3136770Z - optimizer-x64-b8d01d73233a88a080170b53096f2a72bbd8d98e (ID: 10289735715, Size: 69669, Expected Digest: sha256:432eae5ec4f0b0fa482e4b309cfdb5318a8fef651e4d98ba92e5d320dabd8df1)
+2026-09-12T02:06:30.3306390Z Downloading artifact '10289735715' from 'Matanek/Silex'
+2026-09-12T02:06:30.4931690Z Redirecting to blob download url: https://productionresultssa9.blob.core.windows.net/actions-results/d8a9ceb7-af99-412d-8138-602939056c21/workflow-job-run-0f8d1f56-20cb-5a28-b36c-6d05c7000cd1/artifacts/a8f2114253b414a3dd7535392ac201d1db13361af7688eae6f4ec0eac6ba2d9b.zip
+2026-09-12T02:06:30.4984990Z Starting download of artifact to: /Users/runner/work/Silex/Silex/calibration-input
+2026-09-12T02:06:30.6443890Z (node:10132) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-09-12T02:06:30.6751530Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-12T02:06:30.7002610Z SHA256 digest of downloaded artifact is 432eae5ec4f0b0fa482e4b309cfdb5318a8fef651e4d98ba92e5d320dabd8df1
+2026-09-12T02:06:30.7995340Z Artifact download completed successfully.
+2026-09-12T02:06:30.8088780Z Total of 1 artifact(s) downloaded
+2026-09-12T02:06:30.8091930Z Download artifact has finished successfully
+2026-09-12T02:06:30.8251860Z ##[group]Run set -euo pipefail
+2026-09-12T02:06:30.8253180Z [36;1mset -euo pipefail[0m
+2026-09-12T02:06:30.8255170Z [36;1mpython3 Toolchain/Benchmarks/Native/calibrate.py calibration-input calibration-output \[0m
+2026-09-12T02:06:30.8257800Z [36;1m  --expected-candidate "$EXPECTED_CANDIDATE" --source-run-id "$SOURCE_RUN"[0m
+2026-09-12T02:06:30.8403800Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-12T02:06:30.8405110Z env:
+2026-09-12T02:06:30.8405940Z   SOURCE_RUN: 34664959587
+2026-09-12T02:06:30.8407140Z   EXPECTED_CANDIDATE: b8d01d73233a88a080170b53096f2a72bbd8d98e
+2026-09-12T02:06:30.8408550Z ##[endgroup]
+2026-09-12T02:06:36.1743750Z forward {'samples': 21, 'lower_bound_ppm': 895647, 'median_ppm': 918389, 'upper_bound_ppm': 958685, 'confidence_ppm': 960823, 'release_half_shift_ppm': 8844, 'clang_half_shift_ppm': 135642, 'ratio_half_shift_ppm': 56241, 'ratios_ppm': [958011, 525922, 1003952, 875780, 928845, 852724, 1072207, 950701, 1105903, 978621, 895647, 963412, 958685, 1020642, 895850, 918389, 904131, 870500, 553678, 891893, 897957]} ['baseline spread exceeds 200000 ppm', 'clang_half_shift_ppm exceeds 100000 ppm']
+2026-09-12T02:06:40.9056090Z reverse {'samples': 21, 'lower_bound_ppm': 996125, 'median_ppm': 1153919, 'upper_bound_ppm': 1182842, 'confidence_ppm': 960823, 'release_half_shift_ppm': 2754, 'clang_half_shift_ppm': 33189, 'ratio_half_shift_ppm': 15275, 'ratios_ppm': [1230076, 1106650, 1236030, 1264323, 1153919, 883251, 1161793, 859875, 948004, 996125, 875201, 1135599, 1677733, 1401079, 1228711, 1171546, 740641, 1155084, 1035364, 1182842, 968221]} ['release spread exceeds 200000 ppm', 'baseline spread exceeds 200000 ppm']
+2026-09-12T02:06:45.5627640Z same_bytes {'samples': 21, 'lower_bound_ppm': 932819, 'median_ppm': 1010319, 'upper_bound_ppm': 1039510, 'confidence_ppm': 960823, 'release_half_shift_ppm': 84182, 'clang_half_shift_ppm': 91028, 'ratio_half_shift_ppm': 209, 'ratios_ppm': [898453, 1023031, 985745, 1010531, 1545451, 841811, 705218, 999686, 1107822, 1073942, 1042101, 1035545, 1039510, 929827, 1010319, 869829, 856485, 934045, 932819, 1206717, 1312119]} ['baseline spread exceeds 200000 ppm']
+2026-09-12T02:06:49.7576510Z same_file {'samples': 21, 'lower_bound_ppm': 984479, 'median_ppm': 1026076, 'upper_bound_ppm': 1073731, 'confidence_ppm': 960823, 'release_half_shift_ppm': 37626, 'clang_half_shift_ppm': 73243, 'ratio_half_shift_ppm': 13172, 'ratios_ppm': [1077542, 977895, 1024129, 1098190, 966154, 1145082, 1073731, 1035015, 1026076, 978780, 1303358, 1090779, 770557, 964838, 984479, 838673, 1348130, 1031157, 1021381, 1004479, 1073517]} ['release spread exceeds 200000 ppm', 'baseline spread exceeds 200000 ppm']
+2026-09-12T02:06:49.8085700Z ##[group]Run actions/upload-artifact@v7
+2026-09-12T02:06:49.8086850Z with:
+2026-09-12T02:06:49.8088080Z   name: optimizer-x64-calibration-37999a44323d6444053e29037e93376f9bd96171
+2026-09-12T02:06:49.8089650Z   path: calibration-output
+2026-09-12T02:06:49.8090590Z   if-no-files-found: error
+2026-09-12T02:06:49.8091520Z   retention-days: 14
+2026-09-12T02:06:49.8094120Z   compression-level: 6
+2026-09-12T02:06:49.8095020Z   overwrite: false
+2026-09-12T02:06:49.8097200Z   include-hidden-files: false
+2026-09-12T02:06:49.8097950Z   archive: true
+2026-09-12T02:06:49.8100510Z ##[endgroup]
+2026-09-12T02:06:50.8350750Z With the provided path, there will be 20 files uploaded
+2026-09-12T02:06:50.8411530Z Artifact name is valid!
+2026-09-12T02:06:50.8440500Z Root directory input is valid!
+2026-09-12T02:06:50.8653840Z Uploading artifact: optimizer-x64-calibration-37999a44323d6444053e29037e93376f9bd96171.zip
+2026-09-12T02:06:50.8659030Z Beginning upload of artifact content to blob storage
+2026-09-12T02:06:50.8666760Z Uploaded bytes 65241
+2026-09-12T02:06:50.8754520Z Finished uploading artifact content to blob storage!
+2026-09-12T02:06:50.8763580Z SHA256 digest of uploaded artifact is 21d547c378cda49d7cb63e3f0e0c2f061f8ac670792b73e6696b61f18662c910
+2026-09-12T02:06:50.8777690Z Finalizing artifact upload
+2026-09-12T02:06:51.1291550Z Artifact optimizer-x64-calibration-37999a44323d6444053e29037e93376f9bd96171 successfully finalized. Artifact ID 10289537337
+2026-09-12T02:06:51.1295890Z Artifact optimizer-x64-calibration-37999a44323d6444053e29037e93376f9bd96171 has been successfully uploaded! Final size is 65241 bytes. Artifact ID is 10289537337
+2026-09-12T02:06:51.1299870Z Artifact download URL: https://github.com/Matanek/Silex/actions/runs/34666742724/artifacts/10289537337
+2026-09-12T02:06:51.1722560Z Post job cleanup.
+2026-09-12T02:06:51.5525590Z [command]/usr/local/bin/git version
+2026-09-12T02:06:51.6539050Z git version 2.55.0
+2026-09-12T02:06:51.7885050Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/fb62bcb5-ae03-4b38-9f6b-5127e7ddf31f/.gitconfig'
+2026-09-12T02:06:51.7914240Z Temporarily overriding HOME='/Users/runner/work/_temp/fb62bcb5-ae03-4b38-9f6b-5127e7ddf31f' before making global git config changes
+2026-09-12T02:06:51.7960100Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-12T02:06:51.8042100Z [command]/usr/local/bin/git config --global --add safe.directory /Users/runner/work/Silex/Silex
+2026-09-12T02:06:51.8280740Z Removing SSH command configuration
+2026-09-12T02:06:51.8477430Z [command]/usr/local/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-12T02:06:51.8723250Z [command]/usr/local/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-12T02:06:51.9573720Z Removing HTTP extra header
+2026-09-12T02:06:51.9597070Z [command]/usr/local/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-12T02:06:51.9751810Z [command]/usr/local/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-12T02:06:52.3131640Z Removing includeIf entries pointing to credentials config files
+2026-09-12T02:06:52.3383760Z [command]/usr/local/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-12T02:06:52.4387620Z includeif.gitdir:/Users/runner/work/Silex/Silex/.git.path
+2026-09-12T02:06:52.5399320Z includeif.gitdir:/Users/runner/work/Silex/Silex/.git/worktrees/*.path
+2026-09-12T02:06:52.6150440Z includeif.gitdir:/github/workspace/.git.path
+2026-09-12T02:06:52.6258100Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-12T02:06:52.6575170Z [command]/usr/local/bin/git config --local --get-all includeif.gitdir:/Users/runner/work/Silex/Silex/.git.path
+2026-09-12T02:06:52.6629650Z /Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.7830750Z [command]/usr/local/bin/git config --local --unset includeif.gitdir:/Users/runner/work/Silex/Silex/.git.path /Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.7946010Z [command]/usr/local/bin/git config --local --get-all includeif.gitdir:/Users/runner/work/Silex/Silex/.git/worktrees/*.path
+2026-09-12T02:06:52.7949200Z /Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.8058020Z [command]/usr/local/bin/git config --local --unset includeif.gitdir:/Users/runner/work/Silex/Silex/.git/worktrees/*.path /Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.8257710Z [command]/usr/local/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-12T02:06:52.8341350Z /github/runner_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.8369200Z [command]/usr/local/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.8380890Z [command]/usr/local/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-12T02:06:52.8386230Z /github/runner_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.8398410Z [command]/usr/local/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config
+2026-09-12T02:06:52.8411540Z [command]/usr/local/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-12T02:06:52.8433590Z Removing credentials config '/Users/runner/work/_temp/git-credentials-3de38336-e3c8-4973-b9e8-731e6d6e4b3d.config'
+2026-09-12T02:06:52.8693980Z Cleaning up orphan processes
+
