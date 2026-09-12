@@ -1,0 +1,14 @@
+func make(seed:int) int[] { return [seed, seed + 1, seed + 2] }
+func sum(values:int[]) int { return values[0] + values[1] + values[2] }
+func main() {
+    var total = 0
+    var index = 0
+    while index < 10000 {
+        let original = make(index)
+        let copied = original
+        total += sum(copied)
+        index++
+    }
+    print(total)
+    print(total == 150015000)
+}

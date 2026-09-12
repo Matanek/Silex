@@ -330,6 +330,20 @@ pub fn build(b: *std.Build) void {
     });
     optimizer_api_module.addOptions("build_options", build_options);
     optimizer_oracle_module.addImport("silex_optimizer_api", optimizer_api_module);
+    const llvm_evaluation_module = b.createModule(.{
+        .root_source_file = b.path("Tools/LlvmEvaluationMain.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    llvm_evaluation_module.addImport("silex_optimizer_api", optimizer_api_module);
+    const llvm_evaluation = b.addExecutable(.{
+        .name = "silex-llvm-evaluation",
+        .root_module = llvm_evaluation_module,
+    });
+    const llvm_evaluation_install = b.addInstallArtifact(llvm_evaluation, .{});
+    const llvm_evaluation_step = b.step("llvm-evaluation", "Build the explicitly selected experimental LLVM evaluation adapter");
+    llvm_evaluation_step.dependOn(&llvm_evaluation_install.step);
+
     const optimizer_oracle = b.addExecutable(.{
         .name = "silex-optimizer-oracle",
         .root_module = optimizer_oracle_module,

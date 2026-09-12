@@ -1,0 +1,4 @@
+func calculate(center:float, position:float, heading:float, velocity:float) float {
+    return (center - position) * 0.35 + (heading - velocity) * 0.8
+}
+func main() { print(calculate(15.0, -26.0, -20.0, 0.0) == -1.6500005722045898) }

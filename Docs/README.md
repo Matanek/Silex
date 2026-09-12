@@ -95,6 +95,7 @@ Choose the subsystem that matches the question you are investigating:
 - [Optimizer oracle and coverage registry](Optimizer-oracle.md): pinned LLVM
   comparison, exhaustive inventories, pass bisection, reproducibility, and
   machine reports.
+- [Experimental LLVM evaluation](Llvm-evaluation.md): explicit adapter, semantic limits, validation, and isolated artifacts.
 - [Scope of optimizer evidence](Optimizer-coverage.md): bounded coverage, LLVM
   bridge limitations, historical proofs and reproducible coverage audits.
 - [Optimizer admission](Optimizer-admission.md): mandatory quick checks, impact

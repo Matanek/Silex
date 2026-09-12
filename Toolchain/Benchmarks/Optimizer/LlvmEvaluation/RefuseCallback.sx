@@ -1,0 +1,2 @@
+func apply(callback:func() int) int { return callback() }
+func main() { print(apply(func() int { return 3 })) }

@@ -1,0 +1,2 @@
+func read(values:@int[..], index:int) int { return values[index] }
+func main() { let values = [3, 5, 8]; print(7); print(read(@values[0:values.count()], 4)); print(8) }
