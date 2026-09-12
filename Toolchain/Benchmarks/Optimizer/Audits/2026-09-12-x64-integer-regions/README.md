@@ -42,3 +42,12 @@ dans ProtocolPanicCandidate sous le répertoire temporaire de preuves. Ses blocs
 froids empêchaient l'allocation entière. Elle n'est ni committée ni publiée.
 Les campagnes GitHub du candidat final sont en cours ; aucun gain Intel de cette
 tranche ni aucune clôture de la Part n'est revendiqué avant leurs résultats.
+
+## Matrice native du candidat
+
+Le run `34662126348` est entièrement vert : macOS X64, Linux ARM64/X64,
+Windows X64, bootstrap Windows ARM64 puis exécution Windows ARM64 native.
+Les six journaux et le statut des jobs sont conservés. Ils portent exactement
+`40dc12052f4d03b646ba2210ec5b15013f338f77` ; les modifications suivantes
+ne réutilisent pas ces résultats comme preuve de leur propre code.
+La campagne Intel appariée `34662127944` reste en cours.
