@@ -66,11 +66,13 @@ synthetic result. Duplicate declarations must keep the same provider and exact
 signature; indirect calls and conflicts remain explicit refusals. Archive and
 framework linking is a separate stage and is not inferred by the emitter.
 
-Reachable global values are emitted only for statically initialized integers
-whose serialized value fits the single typed-IR word. Loads and stores
-refer to an internal LLVM global by stable IR index; stores additionally require
-a mutable declaration. Runtime initialization, aggregate payloads and object or
-optional representations remain explicit refusals.
+Reachable global values are emitted for statically initialized integers and for
+statically absent optionals whose payload already has an explicit LLVM value
+representation. An optional is always `{ i1, payload }`; an absent value uses a
+false presence tag and a zeroed payload. Class payloads are opaque `ptr` values,
+never an exposed field layout. Loads and stores refer to an internal LLVM global
+by stable IR index; stores additionally require a mutable declaration. Runtime
+initialization and non-optional aggregate initializers remain explicit refusals.
 
 `verify.py` accepts `--native`, `--adapter`, `--shadercross`, `--llvm-dir`, `--sdk`,
 `--output-dir`, and `--report`. It compares exact stdout, stderr, and exit status in native Debug,
@@ -80,16 +82,19 @@ cases, unsupported source forms, cache reuse/repair, and native/LLVM/native runs
 ## Current semantic boundary
 
 Numeric operations, branches, calls, plain aggregates, scalar/aggregate references,
-and plain-value collections cover the selected corpus. Floating operations have
-no fast-math permissions, and machine contraction is disabled. Overflow and division
-errors preserve standalone failure status; collection bounds and checked conversions
-preserve source-position diagnostics and output emitted before failure.
+plain-value collections, and resource-free optionals cover the selected corpus.
+Optional construction, extraction, copies, parameters, results, local storage and
+equality use the explicit presence tag; equality ignores the payload when both
+values are absent. Floating operations have no fast-math permissions, and machine
+contraction is disabled. Overflow and division errors preserve standalone failure
+status; collection bounds and checked conversions preserve source-position
+diagnostics and output emitted before failure.
 
 Plain owning collections use heap storage with a reference-count header. Retains
 and drops are emitted from composed IR, and `collection_replace` consumes the old
 owning root when it creates replacement storage. Nested resources, edge ownership,
-classes, callbacks, non-integer globals, package providers, and mutable views
-requiring owning storage detachment are currently rejected. A returned literal
+class allocation/ownership, callbacks, other non-integer globals, package providers,
+and mutable views requiring owning storage detachment are currently rejected. A returned literal
 remains allocated until its final owning root is dropped. A live-allocation
 counter checked after normal return makes leaks fail validation, including the
 copy/replace regression. This counter is part of the prototype cost; it is not a

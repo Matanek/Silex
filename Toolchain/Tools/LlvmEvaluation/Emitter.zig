@@ -47,7 +47,7 @@ pub fn emitWithBoundaries(
     for (program.globals, 0..) |global, index| {
         if (global_use.loads[index] == 0 and global_use.stores[index] == 0) continue;
         if (global_use.stores[index] != 0 and !global.mutable) return error.InvalidProgram;
-        if (supportsStaticGlobal(global)) continue;
+        if (supportsStaticGlobal(program, global)) continue;
         unsupported_globals += 1;
         if (first_unsupported_global == null) first_unsupported_global = index;
     }
@@ -120,12 +120,31 @@ pub fn emitWithBoundaries(
         boundary_use.direct_sites_by_function,
     );
     try emitGlobalDeclarations(&output, allocator, program, global_use);
+    var main_function: ?usize = null;
+    const lowered_functions = try allocator.alloc(?Ir.Function, program.functions.len);
+    defer allocator.free(lowered_functions);
+    @memset(lowered_functions, null);
+    for (program.functions, 0..) |function, function_id| {
+        if (std.mem.eql(u8, function.name, "main")) {
+            if (main_function != null) return error.InvalidProgram;
+            main_function = function_id;
+        }
+        if (!reachable[function_id]) continue;
+        lowered_functions[function_id] = try @import("../OptimizerOracle/LlvmValues.zig").lower(allocator, function);
+    }
+    // Normalize the whole reachable value graph before declaring aggregate
+    // layouts. Unsupported instructions therefore keep their precise
+    // attribution even when the composed program also contains types outside
+    // the prototype.
     for (program.structures, 0..) |structure, structure_index| {
         if (structure.collection != null) {
             try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
             continue;
         }
-        if (structure.is_class or structure.is_static or structure.is_protocol)
+        // Classes are opaque references in LLVM. Their storage and ownership
+        // operations remain explicit instruction refusals until implemented.
+        if (structure.is_class) continue;
+        if (structure.is_static or structure.is_protocol)
             return error.UnsupportedType;
         try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ", .{structure_index});
         for (structure.fields, 0..) |field, field_index| {
@@ -136,19 +155,14 @@ pub fn emitWithBoundaries(
     }
     if (program.structures.len != 0) try output.append(allocator, '\n');
 
-    var main_function: ?usize = null;
     for (program.functions, 0..) |function, function_id| {
-        if (std.mem.eql(u8, function.name, "main")) {
-            if (main_function != null) return error.InvalidProgram;
-            main_function = function_id;
-        }
         if (!reachable[function_id]) continue;
         var emitter: FunctionEmitter = .{
             .allocator = allocator,
             .output = &output,
             .program = program,
             .boundaries = boundaries,
-            .function = try @import("../OptimizerOracle/LlvmValues.zig").lower(allocator, function),
+            .function = lowered_functions[function_id].?,
             .function_id = function_id,
         };
         emitter.emit() catch |err| {
@@ -474,9 +488,11 @@ fn inspectGlobalUse(
     return result;
 }
 
-fn supportsStaticGlobal(global: Ir.Global) bool {
+fn supportsStaticGlobal(program: Ir.Program, global: Ir.Global) bool {
     if (global.runtime_initialized or global.extra_bits.len != 0) return false;
-    return global.type.isInteger();
+    if (global.type.isInteger()) return true;
+    const child = global.type.optionalChild() orelse return false;
+    return global.bits == 0 and optionalPayloadType(program, child, 0);
 }
 
 fn emitGlobalDeclarations(
@@ -488,12 +504,16 @@ fn emitGlobalDeclarations(
     var emitted = false;
     for (program.globals, 0..) |global, index| {
         if (use.loads[index] == 0 and use.stores[index] == 0) continue;
-        if (!supportsStaticGlobal(global)) return error.UnsupportedType;
-        try appendFmt(output, allocator, "@sx.global.{d} = internal {s} {s} {d}\n", .{
+        if (!supportsStaticGlobal(program, global)) return error.UnsupportedType;
+        const initializer = if (global.type.isInteger())
+            try std.fmt.allocPrint(allocator, "{d}", .{normalize(global.bits, global.type)})
+        else
+            "zeroinitializer";
+        try appendFmt(output, allocator, "@sx.global.{d} = internal {s} {s} {s}\n", .{
             index,
             if (global.mutable) "global" else "constant",
             try llvmType(allocator, program, global.type),
-            normalize(global.bits, global.type),
+            initializer,
         });
         emitted = true;
     }
@@ -565,6 +585,9 @@ const FunctionEmitter = struct {
                 "  %v{d} = bitcast i64 {d} to double\n",
                 .{ value.result, value.bits },
             ),
+            .optional_null => |value| try self.emitOptionalNull(value),
+            .optional_some => |value| try self.emitOptionalSome(value),
+            .optional_unwrap => |value| try self.emitOptionalUnwrap(value),
             .copy => |value| try self.copyValue(value.result, value.operand),
             .deep_copy => |value| try self.emitDeepCopy(value.result, value.operand),
             .structure_init => |value| try self.emitStructureInit(value),
@@ -604,7 +627,7 @@ const FunctionEmitter = struct {
     fn emitGlobalLoad(self: *FunctionEmitter, value: Ir.Instruction.GlobalLoad) Error!void {
         if (value.global >= self.program.globals.len) return error.InvalidProgram;
         const global = self.program.globals[value.global];
-        if (!supportsStaticGlobal(global) or try self.valueType(value.result) != global.type)
+        if (!supportsStaticGlobal(self.program, global) or try self.valueType(value.result) != global.type)
             return error.InvalidProgram;
         try self.write("  %v{d} = load {s}, ptr @sx.global.{d}\n", .{
             value.result,
@@ -616,7 +639,7 @@ const FunctionEmitter = struct {
     fn emitGlobalStore(self: *FunctionEmitter, value: Ir.Instruction.GlobalStore) Error!void {
         if (value.global >= self.program.globals.len) return error.InvalidProgram;
         const global = self.program.globals[value.global];
-        if (!global.mutable or !supportsStaticGlobal(global) or try self.valueType(value.operand) != global.type)
+        if (!global.mutable or !supportsStaticGlobal(self.program, global) or try self.valueType(value.operand) != global.type)
             return error.InvalidProgram;
         try self.write("  store {s} %v{d}, ptr @sx.global.{d}\n", .{
             try llvmType(self.allocator, self.program, global.type),
@@ -666,6 +689,45 @@ const FunctionEmitter = struct {
         });
     }
 
+    fn emitOptionalNull(self: *FunctionEmitter, value: Ir.Instruction.OptionalNull) Error!void {
+        const type_value = try self.valueType(value.result);
+        if (type_value.optionalChild() == null) return error.InvalidProgram;
+        try self.write("  %v{d} = insertvalue {s} zeroinitializer, i1 false, 0\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, type_value),
+        });
+    }
+
+    fn emitOptionalSome(self: *FunctionEmitter, value: Ir.Instruction.OptionalSome) Error!void {
+        const type_value = try self.valueType(value.result);
+        const child = type_value.optionalChild() orelse return error.InvalidProgram;
+        if (try self.valueType(value.operand) != child) return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, type_value);
+        try self.write("  %t{d}.optional = insertvalue {s} zeroinitializer, i1 true, 0\n", .{
+            serial,
+            type_name,
+        });
+        try self.write("  %v{d} = insertvalue {s} %t{d}.optional, {s} %v{d}, 1\n", .{
+            value.result,
+            type_name,
+            serial,
+            try llvmType(self.allocator, self.program, child),
+            value.operand,
+        });
+    }
+
+    fn emitOptionalUnwrap(self: *FunctionEmitter, value: Ir.Instruction.OptionalUnwrap) Error!void {
+        const optional_type = try self.valueType(value.operand);
+        const child = optional_type.optionalChild() orelse return error.InvalidProgram;
+        if (try self.valueType(value.result) != child) return error.InvalidProgram;
+        try self.write("  %v{d} = extractvalue {s} %v{d}, 1\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, optional_type),
+            value.operand,
+        });
+    }
+
     fn emitDeepCopy(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
         const type_value = try self.valueType(result);
         if (type_value != try self.valueType(operand)) return error.InvalidProgram;
@@ -699,6 +761,8 @@ const FunctionEmitter = struct {
     fn emitStructureInit(self: *FunctionEmitter, value: Ir.Instruction.StructureInit) Error!void {
         if (value.structure >= self.program.structures.len) return error.InvalidProgram;
         const structure = self.program.structures[value.structure];
+        if (structure.is_class or structure.is_static or structure.is_protocol)
+            return error.UnsupportedInstruction;
         if (value.fields.len != structure.fields.len or try self.valueType(value.result) != Ir.Type.structure(value.structure))
             return error.InvalidProgram;
         const type_name = try llvmType(self.allocator, self.program, Ir.Type.structure(value.structure));
@@ -736,6 +800,8 @@ const FunctionEmitter = struct {
         const structure_index = base_type.structureIndex() orelse return error.InvalidProgram;
         if (structure_index >= self.program.structures.len or value.field >= self.program.structures[structure_index].fields.len)
             return error.InvalidProgram;
+        if (self.program.structures[structure_index].is_class)
+            return error.UnsupportedInstruction;
         if (try self.valueType(value.result) != self.program.structures[structure_index].fields[value.field].type)
             return error.InvalidProgram;
         try self.write("  %v{d} = extractvalue {s} %v{d}, {d}\n", .{
@@ -1023,6 +1089,8 @@ const FunctionEmitter = struct {
         {
             return error.InvalidProgram;
         }
+        if (self.program.structures[value.structure].is_class)
+            return error.UnsupportedInstruction;
         try self.write("  %v{d} = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
             value.result,
             try llvmType(self.allocator, self.program, Ir.Type.structure(value.structure)),
@@ -1053,6 +1121,11 @@ const FunctionEmitter = struct {
 
     fn emitBinary(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Binary) Error!void {
         const left_type = try self.valueType(value.left);
+        if (left_type != try self.valueType(value.right)) return error.InvalidProgram;
+        if ((value.operator == .equal or value.operator == .not_equal) and
+            try self.valueType(value.result) != .bool)
+            return error.InvalidProgram;
+        if (left_type.optionalChild() != null) return self.emitOptionalEquality(value, left_type);
         const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
             .add, .subtract, .multiply => {
@@ -1141,6 +1214,39 @@ const FunctionEmitter = struct {
                     value.right,
                 });
             },
+        }
+    }
+
+    fn emitOptionalEquality(
+        self: *FunctionEmitter,
+        value: Ir.Instruction.Binary,
+        optional_type: Ir.Type,
+    ) Error!void {
+        if (value.operator != .equal and value.operator != .not_equal)
+            return error.UnsupportedInstruction;
+        const child = optional_type.optionalChild() orelse return error.InvalidProgram;
+        if (child.optionalChild() != null) return error.UnsupportedType;
+        const serial = self.nextTemporary();
+        const optional_name = try llvmType(self.allocator, self.program, optional_type);
+        const child_name = try llvmType(self.allocator, self.program, child);
+        try self.write("  %t{d}.left_present = extractvalue {s} %v{d}, 0\n", .{ serial, optional_name, value.left });
+        try self.write("  %t{d}.right_present = extractvalue {s} %v{d}, 0\n", .{ serial, optional_name, value.right });
+        try self.write("  %t{d}.same_presence = icmp eq i1 %t{d}.left_present, %t{d}.right_present\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.both_present = and i1 %t{d}.left_present, %t{d}.right_present\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.left_payload = extractvalue {s} %v{d}, 1\n", .{ serial, optional_name, value.left });
+        try self.write("  %t{d}.right_payload = extractvalue {s} %v{d}, 1\n", .{ serial, optional_name, value.right });
+        if (child.isFloat()) {
+            try self.write("  %t{d}.same_payload = fcmp oeq {s} %t{d}.left_payload, %t{d}.right_payload\n", .{ serial, child_name, serial, serial });
+        } else if (child.isInteger() or child == .bool or child == .address or classType(self.program, child)) {
+            try self.write("  %t{d}.same_payload = icmp eq {s} %t{d}.left_payload, %t{d}.right_payload\n", .{ serial, child_name, serial, serial });
+        } else {
+            return error.UnsupportedType;
+        }
+        if (value.operator == .equal) {
+            try self.write("  %v{d} = select i1 %t{d}.both_present, i1 %t{d}.same_payload, i1 %t{d}.same_presence\n", .{ value.result, serial, serial, serial });
+        } else {
+            try self.write("  %t{d}.equal = select i1 %t{d}.both_present, i1 %t{d}.same_payload, i1 %t{d}.same_presence\n", .{ serial, serial, serial, serial });
+            try self.write("  %v{d} = xor i1 %t{d}.equal, true\n", .{ value.result, serial });
         }
     }
 
@@ -1587,9 +1693,29 @@ fn plainValue(program: Ir.Program, type_value: Ir.Type, depth: usize) bool {
     return true;
 }
 
+fn classType(program: Ir.Program, type_value: Ir.Type) bool {
+    const index = type_value.structureIndex() orelse return false;
+    return index < program.structures.len and program.structures[index].is_class;
+}
+
+fn optionalPayloadType(program: Ir.Program, type_value: Ir.Type, depth: usize) bool {
+    if (depth >= program.structures.len + 8) return false;
+    if (type_value.optionalChild()) |child|
+        return optionalPayloadType(program, child, depth + 1);
+    if (type_value.isNumeric() or type_value == .bool or type_value == .address) return true;
+    return classType(program, type_value);
+}
+
 fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
+    if (type_value.optionalChild()) |child| {
+        if (!optionalPayloadType(program, child, 0)) return error.UnsupportedType;
+        return std.fmt.allocPrint(allocator, "{{ i1, {s} }}", .{try llvmType(allocator, program, child)});
+    }
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;
+        if (program.structures[structure_index].is_class) return "ptr";
+        if (program.structures[structure_index].is_static or program.structures[structure_index].is_protocol)
+            return error.UnsupportedType;
         return std.fmt.allocPrint(allocator, "%sx.type.{d}", .{structure_index});
     }
     return switch (type_value) {
@@ -1639,4 +1765,44 @@ fn emitSourceFiles(output: *std.ArrayList(u8), allocator: Allocator, program: Ir
         for (path) |byte| try appendFmt(output, allocator, "\\{X:0>2}", .{byte});
         try output.appendSlice(allocator, "\\00\"\n");
     }
+}
+
+test "statically null optional class global keeps tag and opaque reference" {
+    const class_type = Ir.Type.structure(0);
+    const optional_type = Ir.Type.optional(class_type);
+    const program: Ir.Program = .{
+        .globals = &.{.{
+            .name = "Font.default",
+            .type = optional_type,
+            .mutable = true,
+        }},
+        .structures = &.{.{
+            .name = "Font",
+            .fields = &.{.{ .name = "size", .type = .int, .mutable = false }},
+            .is_class = true,
+            .is_copyable = false,
+        }},
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{optional_type},
+            .blocks = &.{.{
+                .instructions = &.{
+                    .{ .global_load = .{ .result = 0, .global = 0 } },
+                    .{ .global_store = .{ .global = 0, .operand = 0 } },
+                },
+                .terminator = .return_void,
+            }},
+        }},
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        llvm,
+        "@sx.global.0 = internal global { i1, ptr } zeroinitializer",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "load { i1, ptr }, ptr @sx.global.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "store { i1, ptr } %v0, ptr @sx.global.0") != null);
 }

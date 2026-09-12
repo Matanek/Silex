@@ -11,9 +11,14 @@ pub fn lower(allocator: Allocator, original: Ir.Function) Error!Ir.Function {
     const definitions = try allocator.alloc(usize, original.value_types.len);
     @memset(definitions, 0);
     for (0..original.parameter_types.len) |index| definitions[index] = 1;
-    for (original.blocks) |block| for (block.instructions) |instruction| {
-        if (Coverage.classify(std.meta.activeTag(instruction)) == .unsupported)
+    for (original.blocks, 0..) |block, block_index| for (block.instructions, 0..) |instruction, instruction_index| {
+        if (Coverage.classify(std.meta.activeTag(instruction)) == .unsupported) {
+            std.debug.print(
+                "silex LLVM evaluation: value normalization rejected function '{s}', block {d}, instruction {d} ({s})\n",
+                .{ original.name, block_index, instruction_index, @tagName(instruction) },
+            );
             return error.UnsupportedInstruction;
+        }
         if (resultOf(instruction)) |result| {
             if (result >= definitions.len) return error.InvalidProgram;
             definitions[result] += 1;

@@ -1,0 +1,13 @@
+func unwrap_or(value:int?, fallback:int) int {
+    if let present = value { return present }
+    return fallback
+}
+
+func main() {
+    var current:int? = null
+    print(unwrap_or(current, -1))
+    current = 41
+    print(unwrap_or(current, -1))
+    current = null
+    print(unwrap_or(current, -1))
+}

@@ -58,6 +58,7 @@ def main():
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
+        "LlvmEvaluation/OptionalValues.sx": "-1\n41\n-1\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -89,7 +90,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -127,7 +128,7 @@ def main():
     ])
     assert canonicalized["returncode"] != 0, canonicalized
     assert "DefinitionDoesNotDominateUse" not in canonicalized["stderr"], canonicalized
-    assert "UnsupportedType" in canonicalized["stderr"], canonicalized
+    assert "class_retain" in canonicalized["stderr"], canonicalized
     assert target.read_bytes() == b"existing output must survive later refusal"
     inventory = json.loads(boundary_report.read_text())
     assert inventory["reachable_direct_boundary_functions"] == 0, inventory
@@ -182,8 +183,21 @@ def main():
     assert re.search(r"store i64 %v\d+, ptr @sx\.global\.0", raw_llvm), raw_llvm
     print("REACHABLE SCALAR GLOBAL EMISSION PASS", flush=True)
 
+    optional_metadata = json.loads(Path(str(output/"OptionalValues-O0")+".json").read_text())
+    optional_llvm = (Path(optional_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "{ i1, i64 }",
+        "insertvalue { i1, i64 } zeroinitializer, i1 false, 0",
+        "insertvalue { i1, i64 } zeroinitializer, i1 true, 0",
+        "extractvalue { i1, i64 }",
+        ".same_presence = icmp eq i1",
+        ".same_payload = icmp eq i64",
+    ]:
+        assert fragment in optional_llvm, fragment
+    print("STRUCTURED OPTIONAL VALUE EMISSION PASS", flush=True)
+
     # The ordinary compiler must accept each refusal witness first.
-    for name in ["RefuseString", "RefuseCallback"]:
+    for name in ["RefuseString", "RefuseCallback", "RefuseClassOwnership"]:
         source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
         native = output/(name+"-native")
         assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
@@ -191,6 +205,8 @@ def main():
         target.write_bytes(b"existing output must survive refusal")
         rejected = call(name+"-llvm", llvm_command(source, "O3", target))
         assert rejected["returncode"] != 0 and "Unsupported" in rejected["stderr"], rejected
+        if name == "RefuseClassOwnership":
+            assert "class_retain" in rejected["stderr"] or "structure_init" in rejected["stderr"], rejected
         assert target.read_bytes() == b"existing output must survive refusal"
         print(name, "REFUSED before output", flush=True)
 
