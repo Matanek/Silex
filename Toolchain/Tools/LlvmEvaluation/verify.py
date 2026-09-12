@@ -166,6 +166,13 @@ def main():
     global_value = inventory["globals"][0]
     assert global_value["name"] == "LlvmEvaluation.GlobalInventory.State.counter", inventory
     assert global_value["type_name"] == "int" and global_value["bits"] == 1, inventory
+    instruction_coverage = {
+        entry["name"]: entry for entry in inventory["instruction_coverage"]
+    }
+    assert inventory["instruction_sites"] > 0, inventory
+    assert instruction_coverage["global_load"]["sites"] == 2, inventory
+    assert instruction_coverage["global_store"]["sites"] == 1, inventory
+    assert instruction_coverage["global_load"]["support"] == "conditional", inventory
     raw_llvm = target.read_text()
     for fragment in [
         "@sx.global.0 = internal global i64 1",

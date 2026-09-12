@@ -186,6 +186,9 @@ pub fn closureReport(
     const global_use = try inspectGlobalUse(allocator, program, reachable);
     defer allocator.free(global_use.loads);
     defer allocator.free(global_use.stores);
+    const instruction_use = inspectInstructionUse(program, reachable);
+    const instruction_coverage = try instructionCoverageEntries(allocator, instruction_use);
+    defer allocator.free(instruction_coverage);
 
     var reachable_function_count: usize = 0;
     for (reachable) |is_reachable| if (is_reachable) {
@@ -243,6 +246,13 @@ pub fn closureReport(
         .global_load_sites = global_use.load_sites,
         .global_store_sites = global_use.store_sites,
         .globals = globals,
+        .instruction_sites = instruction_use.sites_total,
+        .conditionally_supported_instruction_sites = instruction_use.conditional_sites,
+        .abstract_lifetime_instruction_sites = instruction_use.abstract_lifetime_sites,
+        .unsupported_instruction_sites = instruction_use.unsupported_sites,
+        .unsupported_instruction_kinds = instruction_use.unsupported_kinds,
+        .functions_with_unsupported_instructions = instruction_use.functions_with_unsupported,
+        .instruction_coverage = instruction_coverage,
     }, .{ .whitespace = .indent_2 });
 }
 
@@ -270,6 +280,83 @@ const GlobalInventoryEntry = struct {
     loads: usize,
     stores: usize,
 };
+
+const InstructionTag = std.meta.Tag(Ir.Instruction);
+const instruction_tag_count = @typeInfo(InstructionTag).@"enum".fields.len;
+
+const InstructionUse = struct {
+    sites: [instruction_tag_count]usize = [_]usize{0} ** instruction_tag_count,
+    functions: [instruction_tag_count]usize = [_]usize{0} ** instruction_tag_count,
+    sites_total: usize = 0,
+    conditional_sites: usize = 0,
+    abstract_lifetime_sites: usize = 0,
+    unsupported_sites: usize = 0,
+    unsupported_kinds: usize = 0,
+    functions_with_unsupported: usize = 0,
+};
+
+const InstructionCoverageEntry = struct {
+    name: []const u8,
+    support: []const u8,
+    sites: usize,
+    functions: usize,
+};
+
+fn inspectInstructionUse(program: Ir.Program, reachable: []const bool) InstructionUse {
+    var result: InstructionUse = .{};
+    for (program.functions, 0..) |function, function_index| {
+        if (!reachable[function_index]) continue;
+        var seen = [_]bool{false} ** instruction_tag_count;
+        var function_has_unsupported = false;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            const tag = std.meta.activeTag(instruction);
+            const index: usize = @intFromEnum(tag);
+            result.sites[index] += 1;
+            result.sites_total += 1;
+            if (!seen[index]) {
+                seen[index] = true;
+                result.functions[index] += 1;
+            }
+            switch (Coverage.classify(tag)) {
+                .conditional => result.conditional_sites += 1,
+                .abstract_lifetime => result.abstract_lifetime_sites += 1,
+                .unsupported => {
+                    result.unsupported_sites += 1;
+                    function_has_unsupported = true;
+                },
+            }
+        };
+        if (function_has_unsupported) result.functions_with_unsupported += 1;
+    }
+    inline for (@typeInfo(InstructionTag).@"enum".fields) |field| {
+        const tag: InstructionTag = @enumFromInt(field.value);
+        if (result.sites[field.value] != 0 and Coverage.classify(tag) == .unsupported)
+            result.unsupported_kinds += 1;
+    }
+    return result;
+}
+
+fn instructionCoverageEntries(allocator: Allocator, use: InstructionUse) Allocator.Error![]InstructionCoverageEntry {
+    var used_kinds: usize = 0;
+    inline for (@typeInfo(InstructionTag).@"enum".fields) |field| {
+        if (use.sites[field.value] != 0) used_kinds += 1;
+    }
+    const entries = try allocator.alloc(InstructionCoverageEntry, used_kinds);
+    var entry_index: usize = 0;
+    inline for (@typeInfo(InstructionTag).@"enum".fields) |field| {
+        if (use.sites[field.value] != 0) {
+            const tag: InstructionTag = @enumFromInt(field.value);
+            entries[entry_index] = .{
+                .name = field.name,
+                .support = @tagName(Coverage.classify(tag)),
+                .sites = use.sites[field.value],
+                .functions = use.functions[field.value],
+            };
+            entry_index += 1;
+        }
+    }
+    return entries;
+}
 
 fn reportTypeName(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
     if (type_value.optionalChild()) |child| {

@@ -53,7 +53,12 @@ after `--silex-prefix` (`--boundary-report` remains a compatibility alias). Once
 the closed program verifies, it records direct package boundaries and global
 values referenced by functions reachable from `main`, with typed signatures,
 initialization modes and use-site counts. Producing this report does not imply
-that the emitter supports every inventoried value.
+that the emitter supports every inventoried value. The report also inventories
+every reachable instruction kind, its site and function counts, and its current
+coverage class (`conditional`, `abstract_lifetime`, or `unsupported`).
+`conditional` means that the opcode has an emitter path; its concrete types and
+effects can still be rejected later, so these counts are a lower-bound gap
+analysis rather than a promise of whole-program emission.
 
 Direct boundary calls are emitted only when every parameter and result already
 has an explicit scalar or address LLVM representation. Void calls carry no
@@ -83,11 +88,12 @@ preserve source-position diagnostics and output emitted before failure.
 Plain owning collections use heap storage with a reference-count header. Retains
 and drops are emitted from composed IR, and `collection_replace` consumes the old
 owning root when it creates replacement storage. Nested resources, edge ownership,
-classes, callbacks, globals, package providers, and mutable views requiring owning
-storage detachment are currently rejected. A returned literal remains allocated
-until its final owning root is dropped. A live-allocation counter checked after
-normal return makes leaks fail validation, including the copy/replace regression.
-This counter is part of the prototype cost; it is not a production GC design.
+classes, callbacks, non-integer globals, package providers, and mutable views
+requiring owning storage detachment are currently rejected. A returned literal
+remains allocated until its final owning root is dropped. A live-allocation
+counter checked after normal return makes leaks fail validation, including the
+copy/replace regression. This counter is part of the prototype cost; it is not a
+production GC design.
 
 The cache lives under the group's single `.silex/llvm-evaluation/v1` root. Keys
 include emitted IR, source identity, adapter and driver hashes, LLVM and linker
