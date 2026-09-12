@@ -3,6 +3,46 @@ const Frontend = @import("../../Frontend.zig").Frontend;
 const Server = @import("../Server.zig").Server;
 const Support = @import("Support.zig");
 
+test "enum reexport from a sibling atom remains discoverable at a member value site" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Nodes");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Physics.sx", .data = "public enum Response { slide; stop }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Nodes/@Actor.sx", .data = "public class Actor {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Nodes/@Module.sx", .data = "public use Physics.Response" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "{s}/Main.sx", .{root_uri});
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const items = try Support.serverCompletion(&server, allocator, uri, "use Nodes\nfunc main() { let response = Nodes.Response.<|> }");
+    try Support.expectExactLabels(&.{ "slide", "stop" }, items);
+}
+
+test "contextual move method completion preserves member and cascade insertion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_][]const u8{ "actor.<|>", "actor.mo<|>", "actor.move<|>", "Actor()..<|>", "Actor()..mo<|>", "Actor()..move<|>" }) |access| {
+        const source = try std.fmt.allocPrint(allocator, "class Actor {{ func move(amount:int) int {{ return amount }} private func hidden() {{}} }}\nfunc main() {{ var actor = Actor(); {s} }}", .{access});
+        const items = try Support.complete(allocator, source);
+        Support.expectPresent("move", items) catch |err| {
+            std.debug.print("contextual access: {s}\n", .{access});
+            return err;
+        };
+        try Support.expectAbsent("hidden", items);
+        try Support.expectNoDuplicates(items);
+        try Support.expectItem(.{ .label = "move", .kind = 2, .detail = "move(amount:int) int", .insert_text = "move(${1:amount})$0", .insert_text_format = 2 }, items);
+    }
+    const optional = try Support.complete(allocator, "class Actor { func move() int { return 1 } }\nfunc main() { var actor:Actor? = Actor(); actor?.<|> }");
+    try Support.expectPresent("move", optional);
+}
+
 const node =
     \\public class Node<T> {
     \\    var name:str = ""

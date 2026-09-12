@@ -1277,6 +1277,7 @@ fn isMemberName(tag: TokenTag) bool {
     return switch (tag) {
         .identifier,
         .keyword_copy,
+        .keyword_move,
         .keyword_in,
         .keyword_match,
         .keyword_int,
