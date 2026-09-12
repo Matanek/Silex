@@ -2,7 +2,7 @@
   "diagnostic_only": true,
   "compiler_candidate": "b8d01d73233a88a080170b53096f2a72bbd8d98e",
   "files": {
-    "README.md": "457f65ffa3872be1117f096dade27ec4c630ff9fe5e6a159f0ad5d6f945e16c7",
+    "README.md": "45ddbf61fef2a7dce50701eb58e6d5c313ea71d5418a2c8b81b6548125de4699",
     "baseline/objects-release": "9960f656e75a02c8773945dec6e628120682b6cabf79f842114f60e7b4dfe891",
     "isolated-state/objects-clang": "c83ec85307890a7990ea60d9921c8df932e3d5e546eca199325a69bbda0b9a45",
     "isolated-state/objects-clang-o3-slot8": "a5d4b9f66ebe375c580ab0f8a1bcfeaf5a5ef1c254857fa7c736678707a617d2",
@@ -12,8 +12,8 @@
     "measure_private_class_state.py": "fdc516ecd5f8d4b992c655c5c946704e6982a0f1a2d56a55940948423a3a0f1a",
     "objects-scalar-state-diagnostic.json": "32ce45c9095fb831f86bc07476ce06a1cbcc23c50a0e72206cb44e67720843c5",
     "objects-scalar-state-diagnostic.log": "a107dd5667b16571ea2c07642cbaeca923b1f5c029c53fd899985e794d0e0e8b",
-    "reference/Objects.sx": "a3f039f72c94b7349aa64c27ad631c303102dc6b647f417682514286418522da",
-    "source/Objects.sx": "68d4645d67252399584ebe9208c3136148cbbebb65589b3ced8fad821f2efbf9",
-    "source/Package.json": "7cd7cc2a8d08ece25d26b816d5b37f26aa5c314f331f9a43c719607788f1da95"
+    "source/Package.json": "7cd7cc2a8d08ece25d26b816d5b37f26aa5c314f331f9a43c719607788f1da95",
+    "reference/Objects.sx.txt": "a3f039f72c94b7349aa64c27ad631c303102dc6b647f417682514286418522da",
+    "source/Objects.sx.txt": "68d4645d67252399584ebe9208c3136148cbbebb65589b3ced8fad821f2efbf9"
   }
 }

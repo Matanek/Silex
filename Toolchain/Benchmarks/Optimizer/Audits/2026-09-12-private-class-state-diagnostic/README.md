@@ -19,3 +19,7 @@ doit prouver les alias et les échappements, garder les allocations et leurs
 erreurs, les écritures observables, les durées de vie et les destructions.
 Les sources, binaires, commandes et mesures brutes restent séparés des preuves
 d'admission du candidat. Les seuils et références officiels n'ont pas changé.
+
+Les copies de sources sont conservées avec le suffixe `.sx.txt` pour ne pas
+être découvertes comme modules du corpus. Pour les rejouer, les copier dans
+un répertoire temporaire isolé en rétablissant le nom `Objects.sx`.
