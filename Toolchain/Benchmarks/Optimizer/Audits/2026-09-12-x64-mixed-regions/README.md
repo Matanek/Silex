@@ -41,3 +41,23 @@ Windows X64 `34663806275` (job `103471559207`). Chaque cible exécute les
 témoins Debug/Release, dont les 22 sorties de FloatMemoryResidence.
 Les journaux et métadonnées sont scellés ici. La mesure Intel
 `34663807514` reste distincte de ces preuves de correction.
+
+## Mesure Intel : aucun gain démontré
+
+Le run [34663807514](https://github.com/Matanek/Silex/actions/runs/34663807514)
+passe les régressions puis échoue à la parité. Intel Core i7-8700B 3.20 GHz
+physique, Darwin 24.6.0, Clang 17 ; 21 paires, six échauffements, seuils inchangés.
+Les critères de dispersion et de dérive passent pour les trois paires.
+Flocking reste neutre : ratio 1.010630, intervalle 0.985352..1.033477.
+Arithmetic reste neutre : ratio 1.031777, intervalle 0.993995..1.076579.
+Objects présente 1.044659 (1.029623..1.048213), mais les exécutables avant et
+après sont strictement identiques ; Arithmetic est également identique.
+Ce contrôle invalide l'attribution de l'écart Objects au compilateur. Le
+passage des seuls critères statistiques ne transforme pas cet écart en
+régression du code. Aucun gain n'est revendiqué et la parité reste rouge.
+
+L'artefact 10288229621 et les quinze empreintes de binaires sont vérifiés.
+SHA-256 du ZIP :
+`011eb9b22b908bbaa00518b23aa21d8d807566ed7365b1be4b49b7363996c5ea`.
+Les rapports, journaux, échantillons et exécutables sont conservés ici, ainsi
+que la comparaison binaire et les désassemblages du contrôle identique.

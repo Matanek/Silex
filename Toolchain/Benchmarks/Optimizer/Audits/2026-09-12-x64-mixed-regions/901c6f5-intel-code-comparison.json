@@ -1,0 +1,20 @@
+[
+  {
+    "workload": "arithmetic",
+    "binary_identical": true,
+    "after_sha256": "6067de218535a3ee296eed15c44992252b5e8d2d254f2e2d7ebf8efde20a6399",
+    "before_sha256": "6067de218535a3ee296eed15c44992252b5e8d2d254f2e2d7ebf8efde20a6399"
+  },
+  {
+    "workload": "objects",
+    "binary_identical": true,
+    "after_sha256": "92079185becf51cad9af08ae0defac1e88f974849b7a820b37e55dbbcd06782b",
+    "before_sha256": "92079185becf51cad9af08ae0defac1e88f974849b7a820b37e55dbbcd06782b"
+  },
+  {
+    "workload": "flocking",
+    "binary_identical": false,
+    "after_sha256": "9eab310e1efeac0dbbeccea3af77c3406ed6e57d4ecabe292c299f76492b27e9",
+    "before_sha256": "438f464fa601d4289e1aa619421677da83a6c89c0ff8dfe06d3d2ee7735cfdb9"
+  }
+]
