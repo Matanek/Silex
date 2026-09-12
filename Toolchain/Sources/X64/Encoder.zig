@@ -442,7 +442,8 @@ fn encodeFunction(
         instruction_offsets[instruction_index] = bytes.items.len;
         switch (instruction) {
             .constant_int => |value| {
-                if (integerConstantFeedsNextDivision(function, instruction_index, value)) continue;
+                if (integerConstantFeedsNextDivision(function, instruction_index, value) or
+                    zeroConstantFeedsParityComparison(function, instruction_index, value)) continue;
                 const bits = if (value.type.isSignedInteger())
                     Numeric.signExtend(value.bits, value.type.bitWidth())
                 else
@@ -779,6 +780,7 @@ fn encodeFunction(
             },
             .binary => |binary| {
                 if (BranchSelection.comparison(function, instruction_index) != null) continue;
+                if (remainderFeedsParityComparison(function, instruction_index, binary)) continue;
                 if (try FloatPairs.emit(allocator, bytes, function, binary)) continue;
                 if (binary.type.isFloat()) {
                     try emitFloatBinary(allocator, bytes, function.float_register_slots, binary);
@@ -911,14 +913,23 @@ fn encodeFunction(
                 var condition: u8 = 0x85;
                 const comparison = if (instruction_index > 0) BranchSelection.comparison(function, instruction_index - 1) else null;
                 if (comparison) |binary| {
+                    const parity = if (!binary.type.isFloat())
+                        parityComparison(function, instruction_index - 1, binary)
+                    else
+                        null;
                     if (binary.type.isFloat()) {
                         const double = binary.type == .float64;
                         const operands = try floatOperands(allocator, bytes, function.float_register_slots, binary);
                         try emitScalarFloatOpcode(allocator, bytes, if (double) @as(?u8, 0x66) else null, 0x2e, operands.left, operands.right);
+                    } else if (parity) |selected| {
+                        try emitParityTestValue(allocator, bytes, function.register_slots, selected.source);
                     } else {
                         try emitIntegerComparison(allocator, bytes, function.register_slots, binary);
                     }
-                    condition = BranchSelection.condition(binary).?;
+                    condition = if (parity) |selected|
+                        if (selected.equal) 0x84 else 0x85
+                    else
+                        BranchSelection.condition(binary).?;
                     if (BranchSelection.unorderedResult(binary)) |unordered| {
                         try appendConditionalBranch(allocator, bytes, &branches, 0x8a, if (unordered) branch.then_instruction else branch.else_instruction);
                     }
@@ -1027,6 +1038,78 @@ fn constantDivisionConstant(
     };
     return if (integerConstantFeedsNextDivision(function, index - 1, constant) and
         binary.right == constant.result) constant else null;
+}
+
+const ParityComparison = struct {
+    source: Machine.Slot,
+    equal: bool,
+};
+
+fn parityComparison(
+    function: Machine.Function,
+    index: usize,
+    comparison: Machine.Instruction.Binary,
+) ?ParityComparison {
+    if ((comparison.operator != .equal and comparison.operator != .not_equal) or index < 2) return null;
+    if (controlTargetsInstruction(function.instructions, index - 2) or
+        controlTargetsInstruction(function.instructions, index - 1) or
+        controlTargetsInstruction(function.instructions, index)) return null;
+    const zero = switch (function.instructions[index - 1]) {
+        .constant_int => |value| value,
+        else => return null,
+    };
+    if (zero.bits != 0 or zero.type != comparison.type) return null;
+    const remainder = switch (function.instructions[index - 2]) {
+        .binary => |value| value,
+        else => return null,
+    };
+    if (remainder.operator != .remainder or remainder.type != comparison.type or
+        !slotUsedOnlyAt(function.instructions, remainder.result, index) or
+        !slotUsedOnlyAt(function.instructions, zero.result, index)) return null;
+    const compares_remainder_to_zero =
+        (comparison.left == remainder.result and comparison.right == zero.result) or
+        (comparison.right == remainder.result and comparison.left == zero.result);
+    if (!compares_remainder_to_zero) return null;
+    const divisor = definingConstantInt(function.instructions, remainder.right) orelse return null;
+    if (divisor.bits != 2 or divisor.type != remainder.type) return null;
+    return .{ .source = remainder.left, .equal = comparison.operator == .equal };
+}
+
+fn zeroConstantFeedsParityComparison(
+    function: Machine.Function,
+    index: usize,
+    constant: Machine.Instruction.ConstantInt,
+) bool {
+    if (constant.bits != 0 or index + 1 >= function.instructions.len) return false;
+    const comparison = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return parityComparison(function, index + 1, comparison) != null;
+}
+
+fn remainderFeedsParityComparison(
+    function: Machine.Function,
+    index: usize,
+    remainder: Machine.Instruction.Binary,
+) bool {
+    if (remainder.operator != .remainder or index + 2 >= function.instructions.len) return false;
+    const comparison = switch (function.instructions[index + 2]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return parityComparison(function, index + 2, comparison) != null;
+}
+
+fn definingConstantInt(
+    instructions: []const Machine.Instruction,
+    slot: Machine.Slot,
+) ?Machine.Instruction.ConstantInt {
+    for (instructions) |instruction| switch (instruction) {
+        .constant_int => |constant| if (constant.result == slot) return constant,
+        else => {},
+    };
+    return null;
 }
 
 fn slotUsedOnlyAt(instructions: []const Machine.Instruction, slot: Machine.Slot, allowed: usize) bool {
@@ -3922,6 +4005,25 @@ fn emitAndRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination:
     try emitRegisterBinary(allocator, bytes, 0x21, destination, source);
 }
 
+fn emitParityTestValue(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    residences: []const ?u5,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (residences.len != 0) if (residences[slot]) |residence| {
+        const register: Register = @enumFromInt(residence);
+        if (@intFromEnum(register) >= 4) {
+            try bytes.append(allocator, 0x40 | @as(u8, @intFromBool(@intFromEnum(register) >= 8)));
+        }
+        try bytes.appendSlice(allocator, &.{ 0xf6, 0xc0 | (@as(u8, @intFromEnum(register)) & 7), 0x01 });
+        return;
+    };
+    try bytes.appendSlice(allocator, &.{ 0xf6, 0x85 });
+    try appendInt(allocator, bytes, i32, slotDisplacement(slot));
+    try bytes.append(allocator, 0x01);
+}
+
 fn emitIntegerWidthMask(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
@@ -4553,6 +4655,64 @@ test "select X64 signed power-of-two division with truncation correction" {
         0,
         minus_one_instructions[0].constant_int,
     ));
+}
+
+test "fuse X64 parity branches without materializing a signed remainder" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 1, .bits = 2, .type = .int } },
+        .{ .binary = .{
+            .result = 2,
+            .operator = .remainder,
+            .left = 0,
+            .right = 1,
+            .type = .int,
+            .checked = false,
+        } },
+        .{ .constant_int = .{ .result = 3, .bits = 0, .type = .int } },
+        .{ .binary = .{
+            .result = 4,
+            .operator = .equal,
+            .left = 2,
+            .right = 3,
+            .type = .int,
+            .checked = true,
+        } },
+        .{ .branch = .{ .condition = 4, .then_instruction = 5, .else_instruction = 6 } },
+        .return_void,
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "main",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .void,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &instructions,
+        .register_slots = &.{ 8, null, null, null, null },
+    };
+    try std.testing.expect(parityComparison(function, 3, instructions[3].binary) != null);
+    try std.testing.expect(remainderFeedsParityComparison(function, 1, instructions[1].binary));
+    try std.testing.expect(zeroConstantFeedsParityComparison(function, 2, instructions[2].constant_int));
+
+    const image = try encodeLinux(allocator, .{ .functions = &.{function} });
+    defer image.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x41, 0xf6, 0xc0, 0x01 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x48, 0x0f, 0xaf }) == null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x48, 0xf7, 0xf9 }) == null);
+
+    instructions[3].binary.operator = .not_equal;
+    const inequality = parityComparison(function, 3, instructions[3].binary).?;
+    try std.testing.expect(!inequality.equal);
+    instructions[0].constant_int.bits = 3;
+    try std.testing.expect(parityComparison(function, 3, instructions[3].binary) == null);
+
+    instructions[0].constant_int.bits = 2;
+    instructions[6] = .{ .jump = 1 };
+    try std.testing.expect(parityComparison(function, 3, instructions[3].binary) == null);
 }
 
 test "encode IEEE unordered float comparison results on X64" {

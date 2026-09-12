@@ -46,6 +46,13 @@ func unsigned64PowerQuotient(value:uint) uint {
     return value / (1024 as uint)
 }
 
+func parity(value:int) int {
+    if value % 2 == 0 {
+        return 1
+    }
+    return 0
+}
+
 func main() {
     let signed8:func(int8) int8 = signed8Quotient
     let signed16:func(int16) int16 = signed16Remainder
@@ -72,5 +79,9 @@ func main() {
     assert(signed64Power(-9000000000000000000) == 8789062500000000)
     assert(unsigned32Power(4294967295 as uint32) == (65535 as uint32))
     assert(unsigned64Power(9000000000000000000 as uint) == (8789062500000000 as uint))
+    assert(parity(-7) == 0)
+    assert(parity(-6) == 1)
+    assert(parity(7) == 0)
+    assert(parity(8) == 1)
     print("constant division preserved")
 }
