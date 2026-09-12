@@ -4011,17 +4011,8 @@ fn emitParityTestValue(
     residences: []const ?u5,
     slot: Machine.Slot,
 ) Allocator.Error!void {
-    if (residences.len != 0) if (residences[slot]) |residence| {
-        const register: Register = @enumFromInt(residence);
-        if (@intFromEnum(register) >= 4) {
-            try bytes.append(allocator, 0x40 | @as(u8, @intFromBool(@intFromEnum(register) >= 8)));
-        }
-        try bytes.appendSlice(allocator, &.{ 0xf6, 0xc0 | (@as(u8, @intFromEnum(register)) & 7), 0x01 });
-        return;
-    };
-    try bytes.appendSlice(allocator, &.{ 0xf6, 0x85 });
-    try appendInt(allocator, bytes, i32, slotDisplacement(slot));
-    try bytes.append(allocator, 0x01);
+    try emitLoadValue(allocator, bytes, residences, .rax, slot);
+    try bytes.appendSlice(allocator, &.{ 0xa8, 0x01 });
 }
 
 fn emitIntegerWidthMask(
@@ -4692,7 +4683,6 @@ test "fuse X64 parity branches without materializing a signed remainder" {
         .slot_count = 5,
         .frame_size = try Machine.frameSize(5),
         .instructions = &instructions,
-        .register_slots = &.{ 8, null, null, null, null },
     };
     try std.testing.expect(parityComparison(function, 3, instructions[3].binary) != null);
     try std.testing.expect(remainderFeedsParityComparison(function, 1, instructions[1].binary));
@@ -4700,7 +4690,7 @@ test "fuse X64 parity branches without materializing a signed remainder" {
 
     const image = try encodeLinux(allocator, .{ .functions = &.{function} });
     defer image.deinit(allocator);
-    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x41, 0xf6, 0xc0, 0x01 }) != null);
+    try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0xa8, 0x01 }) != null);
     try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x48, 0x0f, 0xaf }) == null);
     try std.testing.expect(std.mem.indexOf(u8, image.code, &.{ 0x48, 0xf7, 0xf9 }) == null);
 
