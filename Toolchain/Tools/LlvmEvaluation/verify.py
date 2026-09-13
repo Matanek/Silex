@@ -39,9 +39,9 @@ def main():
         return record
 
     def llvm_command(path, mode, binary, silex_prefix="none"):
-        # Exercise merged address/offset values introduced by the full Silex
-        # prefix, as encountered in the optimized Boids package closure.
-        if path.stem == "MergedRawMemory":
+        # Exercise the full Silex prefix on merged raw operands and mutable
+        # collection views used by the Boids and Physics consumers.
+        if path.stem in ["MergedRawMemory", "MutableOwningView"]:
             silex_prefix = "branch_snapshot_sinking"
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
@@ -51,6 +51,8 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/PrintFloats.sx": "1.5|-0.0|1.2345678806304932\n0.0|-0.0|inf|-inf|nan\n",
+        "LlvmEvaluation/MutableOwningView.sx": "24.0\n11.0\n24.0\n1.0\n4.0\n21.0\n44.0\n0\n",
         "LlvmEvaluation/MergedRawMemory.sx": "1\n2\n3\n4\n9\n9\n9\n9\n",
         "LlvmEvaluation/Rounding.sx": "true\n",
         "Regressions/BoundedCollectionLoop.sx": "1056000000\n2\n",

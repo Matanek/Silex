@@ -1,0 +1,9 @@
+func main() {
+    let narrow:float32 = 1.5
+    let wide:float64 = 1.2345678901234567 as float64
+    print(narrow, "|", -0.0, "|", wide)
+    print(0.0 as float64, "|", -0.0 as float64,
+        "|", (1.0 / 0.0) as float64,
+        "|", (-1.0 / 0.0) as float64,
+        "|", (0.0 / 0.0) as float64)
+}

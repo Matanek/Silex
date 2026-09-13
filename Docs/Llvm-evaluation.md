@@ -193,3 +193,19 @@ Virtual-register lowering and textual LLVM serialization are currently one
 measured interval; they must not be reported as independently measured costs.
 Python process monitoring adds overhead to each stage and is included explicitly.
 No timing assertion belongs to the correctness tests.
+
+## Mutable views of owning plain collections
+
+A view borrowed from a dynamic owning collection detaches shared storage before
+exposing its elements. The same copy-on-write path serves element references and
+views, updates the original owner and leaves existing snapshots independent.
+Bounds remain clamped, including negative indices and empty slices. This path
+currently accepts plain elements; resource-bearing owning-view elements remain
+an explicit refusal. `MutableOwningView.sx` covers shared and unique owners,
+floating aggregate elements, nested views and empty storage in both native modes
+and LLVM O0/O3 with the full Silex prefix.
+
+Direct floating-point `print` uses the same native formatter as interpolation,
+including float32/float64, signed zero, infinities and NaN. It writes the scratch
+buffer directly, without allocating a temporary owning string. This preserves
+the ordinary Physics kernel's field-by-field diagnostic output.

@@ -1,0 +1,33 @@
+struct Point {
+    var x:float
+    var y:float
+}
+
+func shift(points:&Point[..]) {
+    points[0].x += 10.0
+    points[-1].y += 20.0
+}
+
+func main() {
+    var points:Point[] = [Point(x:1.0, y:2.0), Point(x:3.0, y:4.0)]
+    let snapshot = points
+    {
+        var view = &points[-99:99]
+        shift(view)
+        let middle = @view[1:2]
+        print(middle[0].y)
+    }
+    print(points[0].x)
+    print(points[1].y)
+    print(snapshot[0].x)
+    print(snapshot[1].y)
+    {
+        var unique = &points[0:points.count()]
+        shift(unique)
+    }
+    print(points[0].x)
+    print(points[1].y)
+    var empty:Point[] = []
+    let empty_view = &empty[0:0]
+    print(empty_view.count())
+}

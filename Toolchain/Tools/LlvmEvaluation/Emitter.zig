@@ -1038,38 +1038,7 @@ const FunctionEmitter = struct {
         if (!operand_type.isNumeric()) return error.UnsupportedInstruction;
 
         const serial = self.nextTemporary();
-        try self.write("  %t{d}.format.scratch = alloca [384 x i8]\n", .{serial});
-        try self.write(
-            "  %t{d}.format.output = getelementptr [384 x i8], ptr %t{d}.format.scratch, i32 0, i32 0\n",
-            .{ serial, serial },
-        );
-        if (operand_type.isInteger()) {
-            if (operand_type.bitWidth() == 64) {
-                try self.write("  %t{d}.format.bits = add i64 0, %v{d}\n", .{ serial, value.operand });
-            } else {
-                try self.write(
-                    "  %t{d}.format.bits = {s} i{d} %v{d} to i64\n",
-                    .{ serial, if (operand_type.isSignedInteger()) "sext" else "zext", operand_type.bitWidth(), value.operand },
-                );
-            }
-            try self.write(
-                "  %t{d}.format.length = call i64 @{s}(i64 %t{d}.format.bits, ptr %t{d}.format.output)\n",
-                .{ serial, if (operand_type.isSignedInteger()) "silex_format_signed" else "silex_format_unsigned", serial, serial },
-            );
-        } else if (operand_type == .float32) {
-            try self.write("  %t{d}.format.f32 = bitcast float %v{d} to i32\n", .{ serial, value.operand });
-            try self.write("  %t{d}.format.bits = zext i32 %t{d}.format.f32 to i64\n", .{ serial, serial });
-            try self.write(
-                "  %t{d}.format.length = call i64 @silex_format_float(i64 %t{d}.format.bits, ptr %t{d}.format.output, i64 0)\n",
-                .{ serial, serial, serial },
-            );
-        } else {
-            try self.write("  %t{d}.format.bits = bitcast double %v{d} to i64\n", .{ serial, value.operand });
-            try self.write(
-                "  %t{d}.format.length = call i64 @silex_format_float(i64 %t{d}.format.bits, ptr %t{d}.format.output, i64 1)\n",
-                .{ serial, serial, serial },
-            );
-        }
+        try @import("ScalarFormat.zig").emit(self, serial, operand_type, value.operand);
         try self.write("  %t{d}.format.allocation = add i64 %t{d}.format.length, 8\n", .{ serial, serial });
         try self.write("  %t{d}.format.descriptor = call fastcc ptr @sx_alloc(i64 %t{d}.format.allocation)\n", .{ serial, serial });
         try self.write("  %t{d}.format.tagged = or i64 %t{d}.format.length, -9223372036854775808\n", .{ serial, serial });
@@ -2011,12 +1980,12 @@ const FunctionEmitter = struct {
     fn emitCollectionReference(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionReference) Error!void {
         const collection_type = try self.valueType(value.collection);
         const collection = try self.collectionInfo(collection_type);
-        const element_name = try reportTypeName(self.allocator, self.program, collection.element);
+        const report_element_name = try reportTypeName(self.allocator, self.program, collection.element);
         errdefer std.debug.print(
             "silex LLVM evaluation: unsupported collection reference, view {}, ownership {s}, mutable source {}, element {s}\n",
-            .{ collection.view, @tagName(value.ownership), value.reference != null, element_name },
+            .{ collection.view, @tagName(value.ownership), value.reference != null, report_element_name },
         );
-        _ = try llvmType(self.allocator, self.program, collection.element);
+        const element_name = try llvmType(self.allocator, self.program, collection.element);
         if (try self.valueType(value.index) != .int or try self.valueType(value.result) != .address)
             return error.InvalidProgram;
         const serial = self.nextTemporary();
@@ -2046,41 +2015,7 @@ const FunctionEmitter = struct {
         if (!collection.view and value.reference != null) {
             const reference = value.reference.?;
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
-            try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });
-            try self.write("  %t{d}.old.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, type_name, serial });
-            try self.write("  %t{d}.count = extractvalue {s} %t{d}.source, 1\n", .{ serial, type_name, serial });
-            try self.write("  %t{d}.roots.address = getelementptr i8, ptr %t{d}.old.data, i64 -24\n", .{ serial, serial });
-            try self.write("  %t{d}.roots = load atomic i64, ptr %t{d}.roots.address acquire, align 8\n", .{ serial, serial });
-            try self.write("  %t{d}.edges.address = getelementptr i8, ptr %t{d}.old.data, i64 -16\n", .{ serial, serial });
-            try self.write("  %t{d}.edges = load atomic i64, ptr %t{d}.edges.address acquire, align 8\n", .{ serial, serial });
-            try self.write("  %t{d}.owners = add i64 %t{d}.roots, %t{d}.edges\n", .{ serial, serial, serial });
-            try self.write("  %t{d}.shared = icmp ne i64 %t{d}.owners, 1\n", .{ serial, serial });
-            try self.write("  br i1 %t{d}.shared, label %collection.detach{d}, label %collection.unique{d}\n", .{ serial, serial, serial });
-            try self.write("collection.detach{d}:\n", .{serial});
-            try self.emitCollectionBytes(serial, collection.element);
-            try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
-            if (value.ownership == .edge) {
-                try self.write("  call fastcc void @sx_retain(ptr %t{d}.storage, i64 -16)\n", .{serial});
-                try self.write("  call fastcc void @sx_drop(ptr %t{d}.storage, i64 -24)\n", .{serial});
-            }
-            try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.bytes, i1 false)\n", .{ serial, serial, serial });
-            try self.write("  %t{d}.detached.data = insertvalue {s} %t{d}.source, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial, serial });
-            try self.write("  store {s} %t{d}.detached.data, ptr %v{d}\n", .{ type_name, serial, reference });
-            try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 {d})\n", .{
-                serial,
-                if (value.ownership == .root) @as(i8, -24) else -16,
-            });
-            try self.write("  br label %collection.ready{d}\n", .{serial});
-            try self.write("collection.unique{d}:\n", .{serial});
-            try self.write("  br label %collection.ready{d}\n", .{serial});
-            try self.write("collection.ready{d}:\n", .{serial});
-            try self.write("  %t{d}.data = phi ptr [ %t{d}.storage, %collection.detach{d} ], [ %t{d}.old.data, %collection.unique{d} ]\n", .{
-                serial,
-                serial,
-                serial,
-                serial,
-                serial,
-            });
+            try @import("ListStorage.zig").detach(self, serial, type_name, element_name, reference, value.ownership);
         } else if (value.reference) |reference| {
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
             try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });
@@ -2211,7 +2146,8 @@ const FunctionEmitter = struct {
         const result_type = try self.valueType(value.result);
         const source = try self.collectionInfo(source_type);
         const result = try self.collectionInfo(result_type);
-        if (value.reference != null and !source.view and source.length == null) return error.UnsupportedInstruction;
+        if (value.reference != null and !source.view and source.length == null and
+            !plainValue(self.program, source.element, 0)) return error.UnsupportedInstruction;
         if (source.element != result.element or !result.view or
             try self.valueType(value.start) != .int or try self.valueType(value.end) != .int)
             return error.InvalidProgram;
@@ -2229,6 +2165,10 @@ const FunctionEmitter = struct {
                 try self.write("  %t{d}.data = getelementptr {s}, ptr %t{d}.source, i32 0, i32 0\n", .{ serial, source_name, serial });
             }
             try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
+        } else if (value.reference != null and !source.view) {
+            const reference = value.reference.?;
+            if (try self.valueType(reference) != .address) return error.InvalidProgram;
+            try @import("ListStorage.zig").detach(self, serial, source_name, element_name, reference, .root);
         } else if (value.reference) |reference| {
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
             try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, source_name, reference });
@@ -3166,6 +3106,12 @@ const FunctionEmitter = struct {
             });
             return;
         }
+        if (type_value.isFloat()) {
+            try @import("ScalarFormat.zig").emit(self, serial, type_value, value.value);
+            try self.write("  %t{d}.print = call i64 @write(i32 1, ptr %t{d}.format.output, i64 %t{d}.format.length)\n", .{ serial, serial, serial });
+            if (value.newline) try self.write("  %t{d}.newline = call i64 @write(i32 1, ptr @.newline, i64 1)\n", .{serial});
+            return;
+        }
         if (!type_value.isInteger()) return error.UnsupportedType;
         const type_name = try llvmType(self.allocator, self.program, type_value);
         if (type_value.bitWidth() < 64) {
@@ -3230,7 +3176,7 @@ const FunctionEmitter = struct {
         return temporary;
     }
 
-    fn write(self: *FunctionEmitter, comptime format: []const u8, arguments: anytype) Error!void {
+    pub fn write(self: *FunctionEmitter, comptime format: []const u8, arguments: anytype) Allocator.Error!void {
         return appendFmt(self.output, self.allocator, format, arguments);
     }
 };
