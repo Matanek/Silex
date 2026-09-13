@@ -69,6 +69,7 @@ def main():
         "LlvmEvaluation/StringBytes.sx": "4\n195\n169\n0\n65\n",
         "LlvmEvaluation/StringAddress.sx": "true\ntrue\n",
         "LlvmEvaluation/ListAppendClear.sx": "1\n2\n2\n5\ntrue\n0\n1\n",
+        "LlvmEvaluation/StringConcat.sx": "3\n4\ntrue\né\0A\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -100,7 +101,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -322,8 +323,19 @@ def main():
         assert fragment in list_edit_llvm, fragment
     print("PLAIN LIST APPEND AND CLEAR PASS", flush=True)
 
+    concat_metadata = json.loads(Path(str(output/"StringConcat-O0")+".json").read_text())
+    concat_llvm = (Path(concat_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".length.checked = call { i64, i1 } @llvm.uadd.with.overflow.i64",
+        ".tagged = or i64",
+        ".right.destination = getelementptr i8",
+        "call void @llvm.memcpy.p0.p0.i64",
+    ]:
+        assert fragment in concat_llvm, fragment
+    print("DYNAMIC STRING CONCATENATION PASS", flush=True)
+
     # The ordinary compiler must accept each refusal witness first.
-    for name in ["RefuseDynamicString", "RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:
+    for name in ["RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:
         source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
         native = output/(name+"-native")
         assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
@@ -333,8 +345,6 @@ def main():
         assert rejected["returncode"] != 0 and "Unsupported" in rejected["stderr"], rejected
         if name == "RefuseClassFinalizer":
             assert "class_drop" in rejected["stderr"], rejected
-        if name == "RefuseDynamicString":
-            assert "string_concat" in rejected["stderr"], rejected
         if name == "RefuseRawEnum":
             assert "enum_raw" in rejected["stderr"], rejected
         assert target.read_bytes() == b"existing output must survive refusal"

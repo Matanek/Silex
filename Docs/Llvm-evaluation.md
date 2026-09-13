@@ -127,7 +127,10 @@ without using a trailing zero as value data. Their descriptors are private and
 static, so string retain/drop recognize them without allocating or freeing.
 Content equality, Unicode scalar count, calls, returns and output preserve empty,
 UTF-8 and embedded-zero values. Dynamic string construction, interpolation and
-concatenation remain explicit refusals. Byte length masks the descriptor's dynamic
+formatting remain explicit refusals. Concatenation allocates a dynamic descriptor,
+checks both value and allocation-size overflow, and copies the exact bytes without
+adding a terminator; operand lifetime remains controlled by explicit IR drops.
+Byte length masks the descriptor's dynamic
 flag, byte access checks the index before reading, and the explicit interop pointer
 addresses the first byte after the descriptor header. These byte projections stay
 distinct from Unicode scalar count. Capture-free function references can expose

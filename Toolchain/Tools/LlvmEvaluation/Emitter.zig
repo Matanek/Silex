@@ -660,6 +660,7 @@ const FunctionEmitter = struct {
             .string_byte_count => |value| try self.emitStringByteCount(value),
             .string_byte_at => |value| try self.emitStringByteAt(block_id, value),
             .string_count => |value| try self.emitStringCount(value),
+            .string_concat => |value| try self.emitStringConcat(block_id, value),
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
             .convert => |value| try self.emitConvert(block_id, value),
@@ -724,6 +725,37 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.string.offset = add i64 %v{d}, 8\n", .{ serial, value.index });
         try self.write("  %t{d}.string.address = getelementptr i8, ptr %v{d}, i64 %t{d}.string.offset\n", .{ serial, value.operand, serial });
         try self.write("  %v{d} = load i8, ptr %t{d}.string.address\n", .{ value.result, serial });
+    }
+
+    fn emitStringConcat(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.StringConcat) Error!void {
+        if (try self.valueType(value.left) != .str or
+            try self.valueType(value.right) != .str or
+            try self.valueType(value.result) != .str)
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.left.tagged = load i64, ptr %v{d}\n", .{ serial, value.left });
+        try self.write("  %t{d}.left.length = and i64 %t{d}.left.tagged, 9223372036854775807\n", .{ serial, serial });
+        try self.write("  %t{d}.right.tagged = load i64, ptr %v{d}\n", .{ serial, value.right });
+        try self.write("  %t{d}.right.length = and i64 %t{d}.right.tagged, 9223372036854775807\n", .{ serial, serial });
+        try self.write("  %t{d}.length.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.left.length, i64 %t{d}.right.length)\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.length = extractvalue {{ i64, i1 }} %t{d}.length.checked, 0\n", .{ serial, serial });
+        try self.write("  %t{d}.length.overflow = extractvalue {{ i64, i1 }} %t{d}.length.checked, 1\n", .{ serial, serial });
+        try self.write("  %t{d}.allocation.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.length, i64 8)\n", .{ serial, serial });
+        try self.write("  %t{d}.allocation = extractvalue {{ i64, i1 }} %t{d}.allocation.checked, 0\n", .{ serial, serial });
+        try self.write("  %t{d}.allocation.overflow = extractvalue {{ i64, i1 }} %t{d}.allocation.checked, 1\n", .{ serial, serial });
+        try self.write("  %t{d}.overflow = or i1 %t{d}.length.overflow, %t{d}.allocation.overflow\n", .{ serial, serial, serial });
+        try self.write("  br i1 %t{d}.overflow, label %trap, label %b{d}.concat{d}\n", .{ serial, block_id, serial });
+        try self.write("b{d}.concat{d}:\n", .{ block_id, serial });
+        try self.write("  %t{d}.descriptor = call fastcc ptr @sx_alloc(i64 %t{d}.allocation)\n", .{ serial, serial });
+        try self.write("  %t{d}.tagged = or i64 %t{d}.length, -9223372036854775808\n", .{ serial, serial });
+        try self.write("  store i64 %t{d}.tagged, ptr %t{d}.descriptor\n", .{ serial, serial });
+        try self.write("  %t{d}.data = getelementptr i8, ptr %t{d}.descriptor, i64 8\n", .{ serial, serial });
+        try self.write("  %t{d}.left.data = getelementptr i8, ptr %v{d}, i64 8\n", .{ serial, value.left });
+        try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.data, ptr %t{d}.left.data, i64 %t{d}.left.length, i1 false)\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.right.destination = getelementptr i8, ptr %t{d}.data, i64 %t{d}.left.length\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.right.data = getelementptr i8, ptr %v{d}, i64 8\n", .{ serial, value.right });
+        try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.right.destination, ptr %t{d}.right.data, i64 %t{d}.right.length, i1 false)\n", .{ serial, serial, serial });
+        try self.write("  %v{d} = getelementptr i8, ptr %t{d}.descriptor, i64 0\n", .{ value.result, serial });
     }
 
     fn emitGlobalLoad(self: *FunctionEmitter, value: Ir.Instruction.GlobalLoad) Error!void {

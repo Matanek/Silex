@@ -1,0 +1,11 @@
+use Interop.C
+
+func main() {
+    let prefix = "é\0"
+    let combined = prefix + "A"
+    let snapshot = combined
+    print(combined.count())
+    print(C.byte_count(combined))
+    print(combined == "é\0A")
+    print(snapshot)
+}
