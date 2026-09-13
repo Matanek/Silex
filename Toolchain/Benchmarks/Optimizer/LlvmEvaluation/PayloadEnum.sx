@@ -1,0 +1,24 @@
+struct Pair {
+    var value:int
+    var ready:bool
+}
+
+enum Outcome {
+    success(Pair)
+    measured(int8, int)
+    failure
+}
+
+func score(outcome:Outcome) int {
+    return match outcome {
+        success(pair) => match pair.ready { true => pair.value; false => -1 }
+        measured(kind, value) => value + (kind as int)
+        failure => -2
+    }
+}
+
+func main() {
+    print(score(Outcome.success(Pair(value:41, ready:true))))
+    print(score(Outcome.measured(1, 6)))
+    print(score(Outcome.failure))
+}

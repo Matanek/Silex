@@ -1,0 +1,8 @@
+enum Direction:int {
+    north = 1
+    south = -2
+}
+
+func main() {
+    print(Direction.south.raw_value)
+}

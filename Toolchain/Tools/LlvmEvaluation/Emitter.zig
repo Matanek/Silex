@@ -140,7 +140,20 @@ pub fn emitWithBoundaries(
     // attribution even when the composed program also contains types outside
     // the prototype.
     for (program.structures, 0..) |structure, structure_index| {
-        if (enumIndexForStructure(program, structure_index) != null) continue;
+        if (enumIndexForStructure(program, structure_index)) |enumeration_index| {
+            if (plainTagEnum(program, enumeration_index)) continue;
+            const payload_slots = enumPayloadStorageSlots(program, enumeration_index, 0) catch |err| switch (err) {
+                error.UnsupportedType => continue,
+                else => return err,
+            };
+            try appendFmt(
+                &output,
+                allocator,
+                "%sx.enum.{d} = type {{ i64, [{d} x i64] }}\n",
+                .{ enumeration_index, payload_slots },
+            );
+            continue;
+        }
         if (structure.collection != null) {
             try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
             continue;
@@ -616,6 +629,7 @@ const FunctionEmitter = struct {
             .structure_init => |value| try self.emitStructureInit(value),
             .enum_init => |value| try self.emitEnumInit(value),
             .enum_test => |value| try self.emitEnumTest(value),
+            .enum_payload => |value| try self.emitEnumPayload(value),
             .list_init => |value| try self.emitListInit(value),
             .list_retain => |value| try self.emitListResource(value, "sx_retain"),
             .list_drop => |value| try self.emitListResource(value, "sx_drop"),
@@ -790,25 +804,84 @@ const FunctionEmitter = struct {
     }
 
     fn emitEnumInit(self: *FunctionEmitter, value: Ir.Instruction.EnumInit) Error!void {
-        if (!plainTagEnum(self.program, value.enumeration) or
-            value.variant >= self.program.enums[value.enumeration].variants.len or
-            value.values.len != 0 or
-            try self.valueType(value.result) != Ir.Type.structure(self.program.enums[value.enumeration].type_index))
-        {
-            return error.UnsupportedType;
+        if (value.enumeration >= self.program.enums.len) return error.InvalidProgram;
+        const enumeration = self.program.enums[value.enumeration];
+        if (value.variant >= enumeration.variants.len or
+            try self.valueType(value.result) != Ir.Type.structure(enumeration.type_index))
+            return error.InvalidProgram;
+        const variant = enumeration.variants[value.variant];
+        if (value.values.len != variant.associated_types.len) return error.InvalidProgram;
+        for (value.values, variant.associated_types) |operand, associated_type| {
+            if (try self.valueType(operand) != associated_type) return error.InvalidProgram;
         }
-        try self.write("  %v{d} = add i64 0, {d}\n", .{ value.result, value.variant });
+        if (plainTagEnum(self.program, value.enumeration)) {
+            if (value.values.len != 0) return error.InvalidProgram;
+            return self.write("  %v{d} = add i64 0, {d}\n", .{ value.result, value.variant });
+        }
+        _ = try enumPayloadStorageSlots(self.program, value.enumeration, 0);
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, try self.valueType(value.result));
+        try self.write("  %t{d}.enum = alloca {s}\n", .{ serial, type_name });
+        try self.write("  store {s} zeroinitializer, ptr %t{d}.enum\n", .{ type_name, serial });
+        try self.write("  store i64 {d}, ptr %t{d}.enum\n", .{ value.variant, serial });
+        var offset: usize = 8;
+        for (value.values, variant.associated_types, 0..) |operand, associated_type, index| {
+            try self.write("  %t{d}.enum.payload.{d} = getelementptr i8, ptr %t{d}.enum, i64 {d}\n", .{
+                serial,
+                index,
+                serial,
+                offset,
+            });
+            try self.write("  store {s} %v{d}, ptr %t{d}.enum.payload.{d}\n", .{
+                try llvmType(self.allocator, self.program, associated_type),
+                operand,
+                serial,
+                index,
+            });
+            offset += 8 * try llvmStorageSlots(self.program, associated_type, 0);
+        }
+        try self.write("  %v{d} = load {s}, ptr %t{d}.enum\n", .{ value.result, type_name, serial });
     }
 
     fn emitEnumTest(self: *FunctionEmitter, value: Ir.Instruction.EnumTest) Error!void {
-        if (!plainTagEnum(self.program, value.enumeration) or
-            value.variant >= self.program.enums[value.enumeration].variants.len or
+        if (value.enumeration >= self.program.enums.len) return error.InvalidProgram;
+        const enumeration = self.program.enums[value.enumeration];
+        if (value.variant >= enumeration.variants.len or
             try self.valueType(value.operand) != Ir.Type.structure(self.program.enums[value.enumeration].type_index) or
             try self.valueType(value.result) != .bool)
         {
-            return error.UnsupportedType;
+            return error.InvalidProgram;
         }
-        try self.write("  %v{d} = icmp eq i64 %v{d}, {d}\n", .{ value.result, value.operand, value.variant });
+        if (plainTagEnum(self.program, value.enumeration))
+            return self.write("  %v{d} = icmp eq i64 %v{d}, {d}\n", .{ value.result, value.operand, value.variant });
+        _ = try enumPayloadStorageSlots(self.program, value.enumeration, 0);
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
+        try self.write("  %t{d}.enum.tag = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.operand });
+        try self.write("  %v{d} = icmp eq i64 %t{d}.enum.tag, {d}\n", .{ value.result, serial, value.variant });
+    }
+
+    fn emitEnumPayload(self: *FunctionEmitter, value: Ir.Instruction.EnumPayload) Error!void {
+        if (value.enumeration >= self.program.enums.len) return error.InvalidProgram;
+        const enumeration = self.program.enums[value.enumeration];
+        if (value.variant >= enumeration.variants.len or
+            try self.valueType(value.operand) != Ir.Type.structure(enumeration.type_index))
+            return error.InvalidProgram;
+        const variant = enumeration.variants[value.variant];
+        if (value.index >= variant.associated_types.len or
+            try self.valueType(value.result) != variant.associated_types[value.index])
+            return error.InvalidProgram;
+        _ = try enumPayloadStorageSlots(self.program, value.enumeration, 0);
+        var offset: usize = 8;
+        for (variant.associated_types[0..value.index]) |associated_type|
+            offset += 8 * try llvmStorageSlots(self.program, associated_type, 0);
+        const serial = self.nextTemporary();
+        const enum_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
+        const payload_type = try llvmType(self.allocator, self.program, try self.valueType(value.result));
+        try self.write("  %t{d}.enum = alloca {s}\n", .{ serial, enum_type });
+        try self.write("  store {s} %v{d}, ptr %t{d}.enum\n", .{ enum_type, value.operand, serial });
+        try self.write("  %t{d}.enum.payload = getelementptr i8, ptr %t{d}.enum, i64 {d}\n", .{ serial, serial, offset });
+        try self.write("  %v{d} = load {s}, ptr %t{d}.enum.payload\n", .{ value.result, payload_type, serial });
     }
 
     fn emitOptionalNull(self: *FunctionEmitter, value: Ir.Instruction.OptionalNull) Error!void {
@@ -2001,6 +2074,64 @@ fn plainTagEnumType(program: Ir.Program, type_value: Ir.Type) bool {
     return plainTagEnum(program, enumeration_index);
 }
 
+fn enumPayloadStorageSlots(program: Ir.Program, enumeration_index: usize, depth: usize) Error!usize {
+    if (enumeration_index >= program.enums.len) return error.InvalidProgram;
+    if (depth >= program.structures.len + program.enums.len + 8) return error.UnsupportedType;
+    const enumeration = program.enums[enumeration_index];
+    if (enumeration.raw_type != null) return error.UnsupportedType;
+    var maximum: usize = 0;
+    for (enumeration.variants) |variant| {
+        if (variant.raw_value != null) return error.UnsupportedType;
+        var width: usize = 0;
+        for (variant.associated_types) |associated_type|
+            width += try llvmStorageSlots(program, associated_type, depth + 1);
+        maximum = @max(maximum, width);
+    }
+    if (maximum == 0) return error.UnsupportedType;
+    return maximum;
+}
+
+fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Error!usize {
+    if (depth >= program.structures.len + program.enums.len + 8) return error.UnsupportedType;
+    if (type_value.optionalChild()) |child|
+        return 1 + try llvmStorageSlots(program, child, depth + 1);
+    if (type_value.functionIndex()) |function_type| {
+        if (function_type >= program.function_types.len) return error.InvalidProgram;
+        return 1;
+    }
+    if (type_value.structureIndex()) |structure_index| {
+        if (structure_index >= program.structures.len) return error.InvalidProgram;
+        if (enumIndexForStructure(program, structure_index)) |enumeration_index|
+            return 1 + try enumPayloadStorageSlots(program, enumeration_index, depth + 1);
+        const structure = program.structures[structure_index];
+        if (structure.is_class) return 1;
+        if (structure.is_static or structure.is_protocol) return error.UnsupportedType;
+        if (structure.collection != null) return 2;
+        var result: usize = 0;
+        for (structure.fields) |field|
+            result += try llvmStorageSlots(program, field.type, depth + 1);
+        return result;
+    }
+    return switch (type_value) {
+        .void => 0,
+        .bool,
+        .int8,
+        .uint8,
+        .int16,
+        .uint16,
+        .int32,
+        .uint32,
+        .int,
+        .uint,
+        .float32,
+        .float64,
+        .str,
+        .address,
+        => 1,
+        else => error.UnsupportedType,
+    };
+}
+
 fn plainClassStorage(program: Ir.Program, structure_index: usize) bool {
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
@@ -2035,8 +2166,9 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;
         if (enumIndexForStructure(program, structure_index)) |enumeration_index| {
-            if (!plainTagEnum(program, enumeration_index)) return error.UnsupportedType;
-            return "i64";
+            if (plainTagEnum(program, enumeration_index)) return "i64";
+            _ = try enumPayloadStorageSlots(program, enumeration_index, 0);
+            return std.fmt.allocPrint(allocator, "%sx.enum.{d}", .{enumeration_index});
         }
         if (program.structures[structure_index].is_class) return "ptr";
         if (program.structures[structure_index].is_static or program.structures[structure_index].is_protocol)

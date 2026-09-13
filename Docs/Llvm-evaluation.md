@@ -88,8 +88,13 @@ cases, unsupported source forms, cache reuse/repair, and native/LLVM/native runs
 Numeric operations, branches, calls, plain aggregates, scalar/aggregate references,
 plain-value collections, resource-free optionals, and immutable string literals
 cover the selected corpus.
-Enumerations whose variants have neither payload nor raw value use an internal
-integer tag; construction, variant tests and equality are covered. Payload and raw
+Enumerations without raw values use a private tagged-union representation.
+Payload-free enums keep a direct integer tag. Enums with associated values use a
+tag followed by an aligned word reserve sized for the widest variant from the
+LLVM representation of its payloads. Construction zeroes the reserve before
+storing the selected values; variant tests read the tag and payload extraction
+loads the requested typed region. Copies remain value copies: ownership retains
+and drops stay explicit in the composed Silex IR. Payload enum equality and raw
 enumerations remain explicit refusals.
 Optional construction, extraction, copies, parameters, results, local storage and
 equality use the explicit presence tag; equality ignores the payload when both
