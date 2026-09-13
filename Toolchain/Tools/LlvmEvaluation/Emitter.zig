@@ -241,7 +241,7 @@ pub fn emitWithBoundaries(
     try appendFmt(&output, allocator,
         \\define i32 @main() {{
         \\entry:
-        \\  call fastcc void @sx_{d}()
+        \\  call fastcc void @sx_{d}(ptr null)
         \\  call fastcc void @sx_finish()
         \\  ret i32 0
         \\}}
@@ -592,16 +592,36 @@ const FunctionEmitter = struct {
     temporary: usize = 0,
 
     fn emit(self: *FunctionEmitter) Error!void {
-        if (self.function.capture_types.len != 0) return error.UnsupportedInstruction;
-        try self.write("define internal fastcc {s} @sx_{d}(", .{ try llvmType(self.allocator, self.program, self.function.return_type), self.function_id });
+        try self.write("define internal fastcc {s} @sx_{d}(ptr %sx.environment", .{ try llvmType(self.allocator, self.program, self.function.return_type), self.function_id });
         for (self.function.parameter_types, 0..) |type_value, index| {
-            if (index != 0) try self.output.appendSlice(self.allocator, ", ");
-            try self.write("{s} %v{d}", .{ try llvmType(self.allocator, self.program, type_value), index });
+            try self.write(", {s} %v{d}", .{
+                try llvmType(self.allocator, self.program, type_value),
+                self.function.capture_types.len + index,
+            });
         }
         try self.output.appendSlice(self.allocator, ") {\n");
         for (self.function.blocks, 0..) |block, block_id| {
             try self.write("b{d}:\n", .{block_id});
             if (block_id == 0) {
+                if (self.function.capture_types.len != 0) {
+                    const environment_type = try closureEnvironmentType(
+                        self.allocator,
+                        self.program,
+                        self.function.capture_types,
+                    );
+                    for (self.function.capture_types, 0..) |type_value, capture| {
+                        try self.write("  %capture{d}.address = getelementptr {s}, ptr %sx.environment, i32 0, i32 {d}\n", .{
+                            capture,
+                            environment_type,
+                            capture,
+                        });
+                        try self.write("  %v{d} = load {s}, ptr %capture{d}.address\n", .{
+                            capture,
+                            try llvmType(self.allocator, self.program, type_value),
+                            capture,
+                        });
+                    }
+                }
                 for (self.function.local_types, 0..) |type_value, local| {
                     try self.write("  %local{d} = alloca {s}\n", .{ local, try llvmType(self.allocator, self.program, type_value) });
                 }
@@ -1090,6 +1110,18 @@ const FunctionEmitter = struct {
     fn copyValue(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
         const result_type = try self.valueType(result);
         const operand_type = try self.valueType(operand);
+        if (result_type == .uint and operand_type.functionIndex() != null) {
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.function.code = extractvalue {{ ptr, ptr, ptr }} %v{d}, 0\n", .{ serial, operand });
+            return self.write("  %v{d} = ptrtoint ptr %t{d}.function.code to i64\n", .{ result, serial });
+        }
+        if (operand_type == .uint and result_type.functionIndex() != null) {
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.function.pointer = inttoptr i64 %v{d} to ptr\n", .{ serial, operand });
+            try self.write("  %t{d}.function.code = insertvalue {{ ptr, ptr, ptr }} zeroinitializer, ptr %t{d}.function.pointer, 0\n", .{ serial, serial });
+            try self.write("  %v{d} = insertvalue {{ ptr, ptr, ptr }} %t{d}.function.code, ptr null, 1\n", .{ result, serial });
+            return;
+        }
         if (result_type == .uint and pointerRepresentation(self.program, operand_type))
             return self.write("  %v{d} = ptrtoint ptr %v{d} to i64\n", .{ result, operand });
         if (operand_type == .uint and pointerRepresentation(self.program, result_type))
@@ -1118,11 +1150,41 @@ const FunctionEmitter = struct {
         {
             return error.InvalidProgram;
         }
-        if (value.captures.len != 0) return error.UnsupportedInstruction;
-        try self.write("  %v{d} = select i1 true, ptr @sx_{d}, ptr @sx_{d}\n", .{
+        for (value.captures, target.capture_types) |capture, capture_type| {
+            if (capture_type != .address or try self.valueType(capture) != capture_type)
+                return error.UnsupportedInstruction;
+        }
+        const serial = self.nextTemporary();
+        const environment = if (value.captures.len == 0)
+            "null"
+        else environment: {
+            const environment_type = try closureEnvironmentType(self.allocator, self.program, target.capture_types);
+            try self.write("  %t{d}.closure.environment = alloca {s}\n", .{ serial, environment_type });
+            for (value.captures, target.capture_types, 0..) |capture, capture_type, capture_index| {
+                try self.write("  %t{d}.closure.capture.{d} = getelementptr {s}, ptr %t{d}.closure.environment, i32 0, i32 {d}\n", .{
+                    serial,
+                    capture_index,
+                    environment_type,
+                    serial,
+                    capture_index,
+                });
+                try self.write("  store {s} %v{d}, ptr %t{d}.closure.capture.{d}\n", .{
+                    try llvmType(self.allocator, self.program, capture_type),
+                    capture,
+                    serial,
+                    capture_index,
+                });
+            }
+            break :environment try std.fmt.allocPrint(self.allocator, "%t{d}.closure.environment", .{serial});
+        };
+        try self.write("  %t{d}.closure.code = insertvalue {{ ptr, ptr, ptr }} zeroinitializer, ptr @sx_{d}, 0\n", .{
+            serial,
+            value.function,
+        });
+        try self.write("  %v{d} = insertvalue {{ ptr, ptr, ptr }} %t{d}.closure.code, ptr {s}, 1\n", .{
             value.result,
-            value.function,
-            value.function,
+            serial,
+            environment,
         });
     }
 
@@ -1500,7 +1562,7 @@ const FunctionEmitter = struct {
         for (value.plans, 0..) |plan, plan_index| {
             try self.write("class.plan{d}.{d}:\n", .{ serial, plan_index });
             for (plan.functions) |finalizer|
-                try self.write("  call fastcc void @sx_{d}(ptr %v{d})\n", .{ finalizer.function, value.operand });
+                try self.write("  call fastcc void @sx_{d}(ptr null, ptr %v{d})\n", .{ finalizer.function, value.operand });
             try self.write("  call fastcc void @sx_typed_class_free(ptr %v{d})\n", .{value.operand});
             try self.write("  br label %class.done{d}\n", .{serial});
         }
@@ -2527,13 +2589,13 @@ const FunctionEmitter = struct {
     fn emitCall(self: *FunctionEmitter, value: Ir.Instruction.Call) Error!void {
         if (value.function >= self.program.functions.len) return error.InvalidProgram;
         const callee = self.program.functions[value.function];
-        if (callee.parameter_types.len != value.arguments.len) return error.InvalidProgram;
+        if (callee.capture_types.len != 0 or callee.parameter_types.len != value.arguments.len)
+            return error.InvalidProgram;
         try self.output.appendSlice(self.allocator, "  ");
         if (value.result) |result| try self.write("%v{d} = ", .{result});
-        try self.write("call fastcc {s} @sx_{d}(", .{ try llvmType(self.allocator, self.program, callee.return_type), value.function });
+        try self.write("call fastcc {s} @sx_{d}(ptr null", .{ try llvmType(self.allocator, self.program, callee.return_type), value.function });
         for (value.arguments, 0..) |argument, index| {
-            if (index != 0) try self.output.appendSlice(self.allocator, ", ");
-            try self.write("{s} %v{d}", .{ try llvmType(self.allocator, self.program, callee.parameter_types[index]), argument });
+            try self.write(", {s} %v{d}", .{ try llvmType(self.allocator, self.program, callee.parameter_types[index]), argument });
         }
         try self.output.appendSlice(self.allocator, ")\n");
     }
@@ -2550,16 +2612,20 @@ const FunctionEmitter = struct {
             const result = value.result orelse return error.InvalidProgram;
             if (try self.valueType(result) != signature.return_type) return error.InvalidProgram;
         }
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.closure.code = extractvalue {{ ptr, ptr, ptr }} %v{d}, 0\n", .{ serial, value.callee });
+        try self.write("  %t{d}.closure.environment = extractvalue {{ ptr, ptr, ptr }} %v{d}, 1\n", .{ serial, value.callee });
         try self.output.appendSlice(self.allocator, "  ");
         if (value.result) |result| try self.write("%v{d} = ", .{result});
-        try self.write("call fastcc {s} %v{d}(", .{
+        try self.write("call fastcc {s} %t{d}.closure.code(ptr %t{d}.closure.environment", .{
             try llvmType(self.allocator, self.program, signature.return_type),
-            value.callee,
+            serial,
+            serial,
         });
         for (value.arguments, signature.parameter_types, 0..) |argument, parameter_type, index| {
             if (try self.valueType(argument) != parameter_type) return error.InvalidProgram;
-            if (index != 0) try self.output.appendSlice(self.allocator, ", ");
-            try self.write("{s} %v{d}", .{
+            _ = index;
+            try self.write(", {s} %v{d}", .{
                 try llvmType(self.allocator, self.program, parameter_type),
                 argument,
             });
@@ -2872,7 +2938,7 @@ fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Erro
         return 1 + try llvmStorageSlots(program, child, depth + 1);
     if (type_value.functionIndex()) |function_type| {
         if (function_type >= program.function_types.len) return error.InvalidProgram;
-        return 1;
+        return 3;
     }
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;
@@ -2958,6 +3024,22 @@ fn optionalPayloadType(program: Ir.Program, type_value: Ir.Type, depth: usize) b
     return classType(program, type_value);
 }
 
+fn closureEnvironmentType(
+    allocator: Allocator,
+    program: Ir.Program,
+    capture_types: []const Ir.Type,
+) Error![]const u8 {
+    if (capture_types.len == 0) return error.InvalidProgram;
+    var output: std.ArrayList(u8) = .empty;
+    try output.appendSlice(allocator, "{ ");
+    for (capture_types, 0..) |type_value, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        try output.appendSlice(allocator, try llvmType(allocator, program, type_value));
+    }
+    try output.appendSlice(allocator, " }");
+    return output.toOwnedSlice(allocator);
+}
+
 fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
     if (type_value.optionalChild()) |child| {
         if (child == .void) return error.UnsupportedType;
@@ -2965,7 +3047,7 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
     }
     if (type_value.functionIndex()) |function_type| {
         if (function_type >= program.function_types.len) return error.InvalidProgram;
-        return "ptr";
+        return "{ ptr, ptr, ptr }";
     }
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;

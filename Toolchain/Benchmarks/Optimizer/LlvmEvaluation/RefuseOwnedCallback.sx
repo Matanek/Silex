@@ -1,0 +1,21 @@
+class Counter {
+    let value:int
+
+    init(value:int) {
+        self.value = value
+    }
+
+    func read() int {
+        return self.value
+    }
+}
+
+func apply(callback:func() int) int {
+    return callback()
+}
+
+func main() {
+    var counter = Counter(value:3)
+    var callback:func() int = counter.read
+    print(apply(callback))
+}

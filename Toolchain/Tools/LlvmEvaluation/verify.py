@@ -72,6 +72,7 @@ def main():
         "LlvmEvaluation/ClassFinalizers.sx": "leaf\nowner\nleaf\n",
         "LlvmEvaluation/OwnedStringList.sx": "2\nalpha\nbeta\n",
         "LlvmEvaluation/PlainStructureEquality.sx": "true\nfalse\nfalse\ntrue\n",
+        "LlvmEvaluation/RefuseCallback.sx": "3\n",
         "LlvmEvaluation/PlainEnum.sx": "true\ntrue\n2\n3\n",
         "LlvmEvaluation/PayloadEnum.sx": "41\n7\n-2\n",
         "LlvmEvaluation/AssertSuccess.sx": "7\n",
@@ -127,7 +128,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/ClassFinalizers.sx", "LlvmEvaluation/OwnedStringList.sx", "LlvmEvaluation/PlainStructureEquality.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/ClassFinalizers.sx", "LlvmEvaluation/OwnedStringList.sx", "LlvmEvaluation/PlainStructureEquality.sx", "LlvmEvaluation/RefuseCallback.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -303,7 +304,7 @@ def main():
 
     function_metadata = json.loads(Path(str(output/"FunctionAddress-O0")+".json").read_text())
     function_llvm = (Path(function_metadata["artifact_directory"])/"raw.ll").read_text()
-    assert "select i1 true, ptr @sx_" in function_llvm, function_llvm
+    assert ".closure.code = insertvalue { ptr, ptr, ptr }" in function_llvm, function_llvm
     assert "ptrtoint ptr" in function_llvm, function_llvm
     print("CAPTURE-FREE FUNCTION ADDRESS EMISSION PASS", flush=True)
 
@@ -475,8 +476,8 @@ def main():
 
     indirect_metadata = json.loads(Path(str(output/"IndirectCalls-O0")+".json").read_text())
     indirect_llvm = (Path(indirect_metadata["artifact_directory"])/"raw.ll").read_text()
-    assert "call fastcc i64 %v" in indirect_llvm, indirect_llvm
-    assert "call fastcc void %v" in indirect_llvm, indirect_llvm
+    assert "call fastcc i64 %t" in indirect_llvm and ".closure.code(ptr %t" in indirect_llvm, indirect_llvm
+    assert "call fastcc void %t" in indirect_llvm, indirect_llvm
     print("CAPTURE-FREE INDIRECT CALLS PASS", flush=True)
 
     mutex_metadata = json.loads(Path(str(output/"Mutex-O0")+".json").read_text())
@@ -550,8 +551,21 @@ def main():
         assert fragment in structure_equality_llvm, fragment
     print("PLAIN STRUCTURE EQUALITY PASS", flush=True)
 
+    lexical_callback_metadata = json.loads(Path(str(output/"RefuseCallback-O0")+".json").read_text())
+    lexical_callback_llvm = (Path(lexical_callback_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "define internal fastcc i64 @sx_",
+        "(ptr %sx.environment",
+        ".closure.environment = alloca { ptr }",
+        ".closure.capture.0 = getelementptr { ptr }",
+        ".closure.code = extractvalue { ptr, ptr, ptr }",
+        ".closure.environment = extractvalue { ptr, ptr, ptr }",
+    ]:
+        assert fragment in lexical_callback_llvm, fragment
+    print("SYNCHRONOUS LEXICAL CLOSURE PASS", flush=True)
+
     # The ordinary compiler must accept the refusal witness first.
-    for name in ["RefuseCallback"]:
+    for name in ["RefuseOwnedCallback"]:
         source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
         native = output/(name+"-native")
         assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
