@@ -4,6 +4,7 @@ pub const text =
     \\@.sx.bounds = private constant [84 x i8] c"%s:%lld:%lld: runtime error: collection index %lld is out of bounds for count %lld\0A\00"
     \\@.sx.conversion = private constant [57 x i8] c"%s:%lld:%lld: runtime error: invalid numeric conversion\0A\00"
     \\@.sx.assert = private constant [48 x i8] c"%s:%lld:%lld: runtime error: assertion failed: \00"
+    \\@.sx.panic = private constant [30 x i8] c"%s:%lld:%lld: runtime error: \00"
     \\declare void @free(ptr)
     \\
     \\define internal fastcc ptr @sx_alloc(i64 %bytes) {
@@ -17,9 +18,7 @@ pub const text =
     \\  br i1 %null, label %fail, label %ready
     \\ready:
     \\  store i64 1, ptr %header
-    \\  %old = load i64, ptr @sx.live
-    \\  %next = add i64 %old, 1
-    \\  store i64 %next, ptr @sx.live
+    \\  %old = atomicrmw add ptr @sx.live, i64 1 monotonic
     \\  %data = getelementptr i8, ptr %header, i64 8
     \\  ret ptr %data
     \\fail:
@@ -38,9 +37,7 @@ pub const text =
     \\  br i1 %null, label %fail, label %ready
     \\ready:
     \\  store i64 0, ptr %header
-    \\  %old = load i64, ptr @sx.live
-    \\  %next = add i64 %old, 1
-    \\  store i64 %next, ptr @sx.live
+    \\  %old = atomicrmw add ptr @sx.live, i64 1 monotonic
     \\  %data = getelementptr i8, ptr %header, i64 8
     \\  ret ptr %data
     \\fail:
@@ -65,39 +62,46 @@ pub const text =
     \\  store i64 0, ptr %edges
     \\  %state = getelementptr i8, ptr %header, i64 24
     \\  store i64 0, ptr %state
-    \\  %old = load i64, ptr @sx.live
-    \\  %next = add i64 %old, 1
-    \\  store i64 %next, ptr @sx.live
+    \\  %old = atomicrmw add ptr @sx.live, i64 1 monotonic
     \\  ret ptr %header
     \\fail:
     \\  call void @exit(i32 1)
     \\  unreachable
     \\}
     \\
-    \\define internal fastcc void @sx_typed_class_retain(ptr %data) {
+    \\define internal fastcc void @sx_typed_class_retain(ptr %data, i64 %offset) {
     \\entry:
-    \\  %roots = getelementptr i8, ptr %data, i64 8
-    \\  %old = load i64, ptr %roots
-    \\  %next = add i64 %old, 1
-    \\  store i64 %next, ptr %roots
+    \\  %counter = getelementptr i8, ptr %data, i64 %offset
+    \\  %old = atomicrmw add ptr %counter, i64 1 monotonic
     \\  ret void
     \\}
     \\
-    \\define internal fastcc void @sx_typed_class_drop(ptr %data) {
+    \\define internal fastcc i1 @sx_typed_class_release(ptr %data, i64 %offset) {
     \\entry:
-    \\  %roots = getelementptr i8, ptr %data, i64 8
-    \\  %old = load i64, ptr %roots
+    \\  %counter = getelementptr i8, ptr %data, i64 %offset
+    \\  %old = atomicrmw sub ptr %counter, i64 1 acq_rel
     \\  %next = sub i64 %old, 1
-    \\  store i64 %next, ptr %roots
-    \\  %last = icmp eq i64 %next, 0
-    \\  br i1 %last, label %release, label %done
-    \\release:
-    \\  call void @free(ptr %data)
-    \\  %live = load i64, ptr @sx.live
-    \\  %remaining = sub i64 %live, 1
-    \\  store i64 %remaining, ptr @sx.live
-    \\  br label %done
+    \\  %roots.address = getelementptr i8, ptr %data, i64 8
+    \\  %roots = load atomic i64, ptr %roots.address acquire, align 8
+    \\  %edges.address = getelementptr i8, ptr %data, i64 16
+    \\  %edges = load atomic i64, ptr %edges.address acquire, align 8
+    \\  %no.roots = icmp eq i64 %roots, 0
+    \\  %no.edges = icmp eq i64 %edges, 0
+    \\  %unowned = and i1 %no.roots, %no.edges
+    \\  br i1 %unowned, label %claim, label %done
+    \\claim:
+    \\  %state = getelementptr i8, ptr %data, i64 24
+    \\  %claimed = cmpxchg ptr %state, i64 0, i64 1 acq_rel acquire
+    \\  %won = extractvalue { i64, i1 } %claimed, 1
+    \\  ret i1 %won
     \\done:
+    \\  ret i1 false
+    \\}
+    \\
+    \\define internal fastcc void @sx_typed_class_free(ptr %data) {
+    \\entry:
+    \\  call void @free(ptr %data)
+    \\  %live = atomicrmw sub ptr @sx.live, i64 1 acq_rel
     \\  ret void
     \\}
     \\
@@ -126,9 +130,7 @@ pub const text =
     \\  br i1 %last, label %release, label %done
     \\release:
     \\  call void @free(ptr %header)
-    \\  %live = load i64, ptr @sx.live
-    \\  %remaining = sub i64 %live, 1
-    \\  store i64 %remaining, ptr @sx.live
+    \\  %live = atomicrmw sub ptr @sx.live, i64 1 acq_rel
     \\  br label %done
     \\done:
     \\  ret void
@@ -218,7 +220,7 @@ pub const text =
     \\
     \\define internal fastcc void @sx_finish() {
     \\entry:
-    \\  %live = load i64, ptr @sx.live
+    \\  %live = load atomic i64, ptr @sx.live acquire, align 8
     \\  %empty = icmp eq i64 %live, 0
     \\  br i1 %empty, label %done, label %fail
     \\fail:
@@ -245,6 +247,18 @@ pub const text =
     \\define internal fastcc void @sx_assert(ptr %file, i64 %line, i64 %column, ptr %message) noreturn {
     \\entry:
     \\  %written.header = call i32 (i32, ptr, ...) @dprintf(i32 2, ptr @.sx.assert, ptr %file, i64 %line, i64 %column)
+    \\  %tagged = load i64, ptr %message
+    \\  %length = and i64 %tagged, 9223372036854775807
+    \\  %bytes = getelementptr i8, ptr %message, i64 8
+    \\  %written.message = call i64 @write(i32 2, ptr %bytes, i64 %length)
+    \\  %written.newline = call i64 @write(i32 2, ptr @.newline, i64 1)
+    \\  call void @exit(i32 1)
+    \\  unreachable
+    \\}
+    \\
+    \\define internal fastcc void @sx_panic(ptr %file, i64 %line, i64 %column, ptr %message) noreturn {
+    \\entry:
+    \\  %written.header = call i32 (i32, ptr, ...) @dprintf(i32 2, ptr @.sx.panic, ptr %file, i64 %line, i64 %column)
     \\  %tagged = load i64, ptr %message
     \\  %length = and i64 %tagged, 9223372036854775807
     \\  %bytes = getelementptr i8, ptr %message, i64 8

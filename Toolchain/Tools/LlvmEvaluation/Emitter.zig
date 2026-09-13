@@ -615,7 +615,13 @@ const FunctionEmitter = struct {
                     return err;
                 };
             }
-            try self.emitTerminator(block.terminator);
+            self.emitTerminator(block.terminator) catch |err| {
+                std.debug.print(
+                    "silex LLVM evaluation: emitter rejected function '{s}', block {d}, terminator ({s}): {t}\n",
+                    .{ self.function.name, block_id, @tagName(block.terminator), err },
+                );
+                return err;
+            };
         }
         try self.output.appendSlice(self.allocator,
             \\trap:
@@ -1434,9 +1440,12 @@ const FunctionEmitter = struct {
             return;
         }
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
-        if (value.ownership != .root or !materialClassStorage(self.program, structure))
+        if (!materialClassStorage(self.program, structure))
             return error.UnsupportedInstruction;
-        try self.write("  call fastcc void @sx_typed_class_retain(ptr %v{d})\n", .{value.operand});
+        try self.write("  call fastcc void @sx_typed_class_retain(ptr %v{d}, i64 {d})\n", .{
+            value.operand,
+            if (value.ownership == .root) @as(u8, 8) else 16,
+        });
     }
 
     fn emitClassDrop(self: *FunctionEmitter, value: Ir.Instruction.ClassDrop) Error!void {
@@ -1448,31 +1457,45 @@ const FunctionEmitter = struct {
             return;
         }
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
-        if (structure != value.static_type or value.ownership != .root or value.skip_cycle or
-            !materialClassStorage(self.program, structure) or !self.noopFinalizers(value))
-        {
+        if (structure != value.static_type or !materialClassStorage(self.program, structure) or value.plans.len == 0)
             return error.UnsupportedInstruction;
-        }
-        try self.write("  call fastcc void @sx_typed_class_drop(ptr %v{d})\n", .{value.operand});
-    }
-
-    fn noopFinalizers(self: *FunctionEmitter, value: Ir.Instruction.ClassDrop) bool {
-        if (value.plans.len != 1 or value.plans[0].structure != value.static_type)
-            return false;
-        for (value.plans[0].functions) |finalizer| {
-            if (finalizer.structure != value.static_type or
-                finalizer.function >= self.program.functions.len) return false;
-            const function = self.program.functions[finalizer.function];
-            if (function.capture_types.len != 0 or function.parameter_types.len != 1 or
-                function.parameter_types[0] != Ir.Type.structure(value.static_type) or
-                function.return_type != .void or function.local_types.len != 0 or
-                function.blocks.len != 1 or function.blocks[0].instructions.len != 0 or
-                function.blocks[0].terminator != .return_void)
-            {
-                return false;
+        for (value.plans) |plan| {
+            if (plan.structure >= self.program.structures.len or
+                !materialClassStorage(self.program, plan.structure)) return error.UnsupportedInstruction;
+            for (plan.functions) |finalizer| {
+                if (finalizer.structure != plan.structure or finalizer.function >= self.program.functions.len)
+                    return error.InvalidProgram;
+                const function = self.program.functions[finalizer.function];
+                if (function.capture_types.len != 0 or function.parameter_types.len != 1 or
+                    function.parameter_types[0] != Ir.Type.structure(plan.structure) or
+                    function.return_type != .void) return error.InvalidProgram;
             }
         }
-        return true;
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.class.finalize = call fastcc i1 @sx_typed_class_release(ptr %v{d}, i64 {d})\n", .{
+            serial,
+            value.operand,
+            if (value.ownership == .root) @as(u8, 8) else 16,
+        });
+        try self.write("  br i1 %t{d}.class.finalize, label %class.finalize{d}, label %class.done{d}\n", .{
+            serial,
+            serial,
+            serial,
+        });
+        try self.write("class.finalize{d}:\n", .{serial});
+        try self.write("  %t{d}.class.type = load i64, ptr %v{d}\n", .{ serial, value.operand });
+        try self.write("  switch i64 %t{d}.class.type, label %trap [\n", .{serial});
+        for (value.plans, 0..) |plan, plan_index|
+            try self.write("    i64 {d}, label %class.plan{d}.{d}\n", .{ plan.structure, serial, plan_index });
+        try self.write("  ]\n", .{});
+        for (value.plans, 0..) |plan, plan_index| {
+            try self.write("class.plan{d}.{d}:\n", .{ serial, plan_index });
+            for (plan.functions) |finalizer|
+                try self.write("  call fastcc void @sx_{d}(ptr %v{d})\n", .{ finalizer.function, value.operand });
+            try self.write("  call fastcc void @sx_typed_class_free(ptr %v{d})\n", .{value.operand});
+            try self.write("  br label %class.done{d}\n", .{serial});
+        }
+        try self.write("class.done{d}:\n", .{serial});
     }
 
     fn emitFieldLoad(self: *FunctionEmitter, value: Ir.Instruction.FieldLoad) Error!void {
@@ -2532,7 +2555,17 @@ const FunctionEmitter = struct {
                 value,
             }),
             .return_void => try self.output.appendSlice(self.allocator, "  ret void\n"),
-            .panic => return error.UnsupportedInstruction,
+            .panic => |value| {
+                if (try self.valueType(value.message) != .str or value.position.file >= self.program.files.len)
+                    return error.InvalidProgram;
+                try self.write("  call fastcc void @sx_panic(ptr @sx.file.{d}, i64 {d}, i64 {d}, ptr %v{d})\n", .{
+                    value.position.file,
+                    value.position.line,
+                    value.position.column,
+                    value.message,
+                });
+                try self.output.appendSlice(self.allocator, "  unreachable\n");
+            },
         }
     }
 

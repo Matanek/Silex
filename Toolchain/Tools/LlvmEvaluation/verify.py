@@ -69,6 +69,7 @@ def main():
         "LlvmEvaluation/EmbeddedBytes.sx": "4\n65\n195\n169\n0\n65\n",
         "LlvmEvaluation/AggregateOptional.sx": "-1\n42\ntrue\n",
         "LlvmEvaluation/RichClassStorage.sx": "42\ntrue\nempty\n",
+        "LlvmEvaluation/ClassFinalizers.sx": "leaf\nowner\nleaf\n",
         "LlvmEvaluation/PlainEnum.sx": "true\ntrue\n2\n3\n",
         "LlvmEvaluation/PayloadEnum.sx": "41\n7\n-2\n",
         "LlvmEvaluation/AssertSuccess.sx": "7\n",
@@ -124,7 +125,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/ClassFinalizers.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -153,6 +154,26 @@ def main():
     interpreted_failure = call("interpreter-AssertFailure", [args.native, "interpret", assert_failure, "--nocache"])
     assert {key: interpreted_failure[key] for key in ["returncode", "stdout", "stderr"]} == failed_observable
     print("ASSERT SUCCESS AND FAILURE OBSERVABLES PASS", flush=True)
+
+    panic_failure = (corpus/"LlvmEvaluation/PanicFailure.sx").resolve()
+    panic_observable = None
+    for mode in ["debug", "release", "O0", "O3"]:
+        binary = output/("PanicFailure-"+mode)
+        command = ([args.native, "compile", panic_failure, "--"+mode, "--nocache", "--output", binary]
+                   if mode in ["debug", "release"] else llvm_command(panic_failure, mode, binary))
+        built = call("PanicFailure-compile-"+mode, command)
+        assert built["returncode"] == 0, built
+        run = call("PanicFailure-run-"+mode, [binary])
+        observable = {key: run[key] for key in ["returncode", "stdout", "stderr"]}
+        assert run["returncode"] == 1 and run["stdout"] == "7\n", run
+        assert "runtime error: panique attendue\n" in run["stderr"], run
+        if panic_observable is None:
+            panic_observable = observable
+        else:
+            assert observable == panic_observable, (mode, panic_observable, observable)
+    interpreted_panic = call("interpreter-PanicFailure", [args.native, "interpret", panic_failure, "--nocache"])
+    assert {key: interpreted_panic[key] for key in ["returncode", "stdout", "stderr"]} == panic_observable
+    print("PANIC FAILURE OBSERVABLES PASS", flush=True)
 
     dominance = (corpus/"LlvmEvaluation/CommandsDominance.sx").resolve()
     native_observable = None
@@ -188,7 +209,7 @@ def main():
     ])
     assert canonicalized["returncode"] != 0, canonicalized
     assert "DefinitionDoesNotDominateUse" not in canonicalized["stderr"], canonicalized
-    assert "class_drop" in canonicalized["stderr"], canonicalized
+    assert "list_retain" in canonicalized["stderr"], canonicalized
     assert target.read_bytes() == b"existing output must survive later refusal"
     inventory = json.loads(boundary_report.read_text())
     assert inventory["reachable_direct_boundary_functions"] == 0, inventory
@@ -437,7 +458,7 @@ def main():
         ".protocol.tag = extractvalue",
         ".protocol.payload = getelementptr i8",
         "@sx_typed_class_retain",
-        "@sx_typed_class_drop",
+        "@sx_typed_class_release",
     ]:
         assert fragment in protocol_llvm, fragment
     print("TYPE-ERASED PROTOCOL VALUES PASS", flush=True)
@@ -491,8 +512,20 @@ def main():
         assert fragment in rich_class_llvm, fragment
     print("NATIVE-ABI RICH CLASS STORAGE PASS", flush=True)
 
-    # The ordinary compiler must accept each refusal witness first.
-    for name in ["RefuseCallback", "RefuseClassFinalizer"]:
+    class_finalizer_metadata = json.loads(Path(str(output/"ClassFinalizers-O0")+".json").read_text())
+    class_finalizer_llvm = (Path(class_finalizer_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "atomicrmw add ptr %counter, i64 1 monotonic",
+        "atomicrmw sub ptr %counter, i64 1 acq_rel",
+        "cmpxchg ptr %state, i64 0, i64 1 acq_rel acquire",
+        ".class.finalize = call fastcc i1 @sx_typed_class_release",
+        "call fastcc void @sx_typed_class_free",
+    ]:
+        assert fragment in class_finalizer_llvm, fragment
+    print("ROOT/EDGE CLASS FINALIZATION PASS", flush=True)
+
+    # The ordinary compiler must accept the refusal witness first.
+    for name in ["RefuseCallback"]:
         source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
         native = output/(name+"-native")
         assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
@@ -500,8 +533,6 @@ def main():
         target.write_bytes(b"existing output must survive refusal")
         rejected = call(name+"-llvm", llvm_command(source, "O3", target))
         assert rejected["returncode"] != 0 and "Unsupported" in rejected["stderr"], rejected
-        if name == "RefuseClassFinalizer":
-            assert "class_drop" in rejected["stderr"], rejected
         assert target.read_bytes() == b"existing output must survive refusal"
         print(name, "REFUSED before output", flush=True)
 

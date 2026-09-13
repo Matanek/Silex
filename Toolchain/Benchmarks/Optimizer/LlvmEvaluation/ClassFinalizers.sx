@@ -1,0 +1,17 @@
+class Leaf {
+    drop { print("leaf") }
+}
+
+class Owner {
+    var leaf:Leaf
+
+    init(leaf:Leaf) {
+        self.leaf = leaf
+    }
+
+    drop { print("owner") }
+}
+
+func main() {
+    var value = Owner(Leaf())
+}
