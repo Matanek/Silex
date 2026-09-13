@@ -83,6 +83,7 @@ def main():
         "LlvmEvaluation/EdgeCollectionReplaceBounds.sx": "7\n",
         "LlvmEvaluation/RichCollectionReplace.sx": "20\n30\n20\ntrue\ntrue\n31\n21\n40\n60\ntrue\n50\n",
         "LlvmEvaluation/RichCollectionReplaceBounds.sx": "7\n",
+        "LlvmEvaluation/OptionalStringEquality.sx": "true\nfalse\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -835,6 +836,18 @@ def main():
     ]:
         assert fragment in rich_replace_llvm, fragment
     print("RICH COLLECTION REPLACE PASS", flush=True)
+
+    optional_string_metadata = json.loads(Path(str(output/"OptionalStringEquality-O0")+".json").read_text())
+    optional_string_llvm = (Path(optional_string_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".same_presence = icmp eq i1",
+        ".both_present = and i1",
+        ".string_equal = call fastcc i1 @sx_string_equal",
+        ".same_payload = phi i1",
+        "select i1",
+    ]:
+        assert fragment in optional_string_llvm, fragment
+    print("OPTIONAL STRING EQUALITY PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

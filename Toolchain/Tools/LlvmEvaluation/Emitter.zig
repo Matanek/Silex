@@ -2298,7 +2298,7 @@ const FunctionEmitter = struct {
         if ((value.operator == .equal or value.operator == .not_equal) and
             try self.valueType(value.result) != .bool)
             return error.InvalidProgram;
-        if (left_type.optionalChild() != null) return self.emitOptionalEquality(value, left_type);
+        if (left_type.optionalChild() != null) return self.emitOptionalEquality(block_id, value, left_type);
         if (left_type == .str) {
             if (value.operator != .equal and value.operator != .not_equal)
                 return error.UnsupportedInstruction;
@@ -2527,6 +2527,7 @@ const FunctionEmitter = struct {
 
     fn emitOptionalEquality(
         self: *FunctionEmitter,
+        block_id: usize,
         value: Ir.Instruction.Binary,
         optional_type: Ir.Type,
     ) Error!void {
@@ -2554,6 +2555,17 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.right_payload = extractvalue {s} %v{d}, 1\n", .{ serial, optional_name, value.right });
         if (child.isFloat()) {
             try self.write("  %t{d}.same_payload = fcmp oeq {s} %t{d}.left_payload, %t{d}.right_payload\n", .{ serial, child_name, serial, serial });
+        } else if (child == .str) {
+            try self.write("  br i1 %t{d}.both_present, label %b{d}.optional.string.present{d}, label %b{d}.optional.string.absent{d}\n", .{ serial, block_id, serial, block_id, serial });
+            try self.write("b{d}.optional.string.present{d}:\n", .{ block_id, serial });
+            try self.write("  %t{d}.string_equal = call fastcc i1 @sx_string_equal(ptr %t{d}.left_payload, ptr %t{d}.right_payload)\n", .{ serial, serial, serial });
+            try self.write("  br label %b{d}.optional.string.done{d}\n", .{ block_id, serial });
+            try self.write("b{d}.optional.string.absent{d}:\n", .{ block_id, serial });
+            try self.write("  br label %b{d}.optional.string.done{d}\n", .{ block_id, serial });
+            try self.write("b{d}.optional.string.done{d}:\n", .{ block_id, serial });
+            try self.write("  %t{d}.same_payload = phi i1 [ %t{d}.string_equal, %b{d}.optional.string.present{d} ], [ false, %b{d}.optional.string.absent{d} ]\n", .{
+                serial, serial, block_id, serial, block_id, serial,
+            });
         } else if (child.isInteger() or child == .bool or child == .address or classType(self.program, child)) {
             try self.write("  %t{d}.same_payload = icmp eq {s} %t{d}.left_payload, %t{d}.right_payload\n", .{ serial, child_name, serial, serial });
         } else {

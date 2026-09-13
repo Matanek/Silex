@@ -1,0 +1,17 @@
+func equal(left:str?, right:str?) bool { return left == right }
+func different(left:str?, right:str?) bool { return left != right }
+
+func main() {
+    var none:str? = null
+    var first:str? = "same"
+    var second:str? = "sa" + "me"
+    var other:str? = "different"
+    print(equal(none, none))
+    print(equal(none, first))
+    print(equal(first, second))
+    print(equal(first, other))
+    print(different(none, none))
+    print(different(none, first))
+    print(different(first, second))
+    print(different(first, other))
+}
