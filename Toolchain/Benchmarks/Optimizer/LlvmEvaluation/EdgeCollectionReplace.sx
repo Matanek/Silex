@@ -1,0 +1,33 @@
+struct Sample {
+    let x:float64
+    let y:float64
+    let count:int
+}
+
+class Buffer {
+    var values:Sample[]
+
+    init() {
+        self.values = [
+            Sample(x:1.0, y:2.0, count:3),
+            Sample(x:4.0, y:5.0, count:6)
+        ]
+    }
+
+    func replace(index:int, value:Sample) Sample {
+        return self.values.replace(index, value)
+    }
+}
+
+func main() {
+    var buffer = Buffer()
+    var alias = buffer
+    let snapshot = buffer.values
+    let previous = buffer.replace(1, Sample(x:7.0, y:8.0, count:9))
+    print("$(previous.x)")
+    print(previous.count)
+    print("$(alias.values[1].y)")
+    print(alias.values[1].count)
+    print("$(snapshot[1].x)")
+    print(snapshot[1].count)
+}

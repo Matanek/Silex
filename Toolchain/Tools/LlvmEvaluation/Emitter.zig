@@ -1986,12 +1986,25 @@ const FunctionEmitter = struct {
     fn emitCollectionReplace(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionReplace) Error!void {
         const collection_type = try self.valueType(value.collection);
         const collection = try self.collectionInfo(collection_type);
-        if (value.ownership != .root or
-            try self.valueType(value.result) != collection_type or
-            try self.valueType(value.index) != .int or
-            try self.valueType(value.replacement) != collection.element or
+        const result_type = try self.valueType(value.result);
+        const index_type = try self.valueType(value.index);
+        const replacement_type = try self.valueType(value.replacement);
+        if (result_type != collection_type or
+            index_type != .int or
+            replacement_type != collection.element or
             !plainValue(self.program, collection.element, 0))
         {
+            std.debug.print(
+                "silex LLVM evaluation: unsupported collection replacement collection={s}, result={s}, index={s}, replacement={s}, element={s}, plain={}\n",
+                .{
+                    try reportTypeName(self.allocator, self.program, collection_type),
+                    try reportTypeName(self.allocator, self.program, result_type),
+                    try reportTypeName(self.allocator, self.program, index_type),
+                    try reportTypeName(self.allocator, self.program, replacement_type),
+                    try reportTypeName(self.allocator, self.program, collection.element),
+                    plainValue(self.program, collection.element, 0),
+                },
+            );
             return error.UnsupportedInstruction;
         }
         const serial = self.nextTemporary();
@@ -2009,13 +2022,20 @@ const FunctionEmitter = struct {
         if (!collection.view) {
             try self.emitCollectionBytes(serial, collection.element);
             try self.write("  %t{d}.copy = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+            if (value.ownership == .edge) {
+                try self.write("  call fastcc void @sx_retain(ptr %t{d}.copy, i64 -16)\n", .{serial});
+                try self.write("  call fastcc void @sx_drop(ptr %t{d}.copy, i64 -24)\n", .{serial});
+            }
             try self.write(
                 "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.copy, ptr %t{d}.data, i64 %t{d}.bytes, i1 false)\n",
                 .{ serial, serial, serial },
             );
-            // collection_replace transfers the consumed owning root to its result.
-            // Cloning the payload must release that root, including when it was shared.
-            try self.write("  call fastcc void @sx_drop(ptr %t{d}.data, i64 -24)\n", .{serial});
+            // collection_replace transfers the consumed owning storage to its
+            // result. Cloning the payload must release that source owner.
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.data, i64 {d})\n", .{
+                serial,
+                if (value.ownership == .root) @as(i8, -24) else -16,
+            });
         }
         try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.{s}, i64 %t{d}.index\n", .{
             serial,

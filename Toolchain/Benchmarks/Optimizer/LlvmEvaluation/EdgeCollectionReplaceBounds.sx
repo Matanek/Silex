@@ -1,0 +1,15 @@
+struct Sample { let value:int }
+
+class Buffer {
+    var values:Sample[] = [Sample(value:1), Sample(value:2)]
+    func replace(index:int) Sample {
+        return self.values.replace(index, Sample(value:3))
+    }
+}
+
+func main() {
+    var buffer = Buffer()
+    print(7)
+    print(buffer.replace(2).value)
+    print(8)
+}
