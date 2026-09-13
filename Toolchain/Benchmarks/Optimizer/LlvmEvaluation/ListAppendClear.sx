@@ -1,0 +1,18 @@
+struct Sample {
+    var value:int
+    var ready:bool
+}
+
+func main() {
+    let original:Sample[] = [Sample(value:2, ready:false)]
+    var changed = original
+    changed.append(Sample(value:5, ready:true))
+    print(original.count())
+    print(original[0].value)
+    print(changed.count())
+    print(changed[1].value)
+    print(changed[1].ready)
+    changed.clear()
+    print(changed.count())
+    print(original.count())
+}

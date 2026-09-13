@@ -105,7 +105,11 @@ diagnostics and output emitted before failure.
 
 Plain owning collections use heap storage with a reference-count header. Retains
 and drops are emitted from composed IR, and `collection_replace` consumes the old
-owning root when it creates replacement storage. The same private allocation
+owning root when it creates replacement storage. `append` and `clear` follow the
+same rule for dynamic lists of resource-free elements: they allocate exact new
+storage, preserve the retained prefix when applicable, then consume the input
+root. This intentionally has no spare-capacity optimization in the experiment.
+Other edit kinds and resource-bearing elements remain conditional refusals. The same private allocation
 foundation now covers exact, non-inherited classes whose fields are only numeric
 or boolean: class values stay opaque pointers while a separate private storage
 type drives allocation, field loads and field stores. A store mutates that private

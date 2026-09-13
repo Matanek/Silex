@@ -633,6 +633,7 @@ const FunctionEmitter = struct {
             .list_init => |value| try self.emitListInit(value),
             .list_retain => |value| try self.emitListResource(value, "sx_retain"),
             .list_drop => |value| try self.emitListResource(value, "sx_drop"),
+            .list_edit => |value| try self.emitListEdit(block_id, value),
             .field_load => |value| try self.emitFieldLoad(value),
             .field_store => |value| try self.emitFieldStore(value),
             .collection_load => |value| try self.emitCollectionLoad(block_id, value),
@@ -1192,6 +1193,49 @@ const FunctionEmitter = struct {
             serial,
             value.values.len,
         });
+    }
+
+    fn emitListEdit(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.ListEdit) Error!void {
+        const type_value = try self.valueType(value.collection);
+        const collection = try self.collectionInfo(type_value);
+        if (value.ownership != .root or collection.view or collection.length != null or
+            try self.valueType(value.result) != type_value or !plainValue(self.program, collection.element, 0) or
+            value.index != null or value.removed != null)
+            return error.UnsupportedInstruction;
+        const argument = switch (value.kind) {
+            .clear => if (value.argument == null) null else return error.InvalidProgram,
+            .append => value.argument orelse return error.InvalidProgram,
+            else => return error.UnsupportedInstruction,
+        };
+        if (argument) |operand| {
+            if (try self.valueType(operand) != collection.element) return error.InvalidProgram;
+        }
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, type_value);
+        const element_name = try llvmType(self.allocator, self.program, collection.element);
+        try self.write("  %t{d}.old.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
+        try self.write("  %t{d}.old.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
+        if (argument != null) {
+            try self.write("  %t{d}.count.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.old.count, i64 1)\n", .{ serial, serial });
+            try self.write("  %t{d}.count = extractvalue {{ i64, i1 }} %t{d}.count.checked, 0\n", .{ serial, serial });
+            try self.write("  %t{d}.count.overflow = extractvalue {{ i64, i1 }} %t{d}.count.checked, 1\n", .{ serial, serial });
+            try self.write("  br i1 %t{d}.count.overflow, label %trap, label %b{d}.list{d}\n", .{ serial, block_id, serial });
+            try self.write("b{d}.list{d}:\n", .{ block_id, serial });
+        } else {
+            try self.write("  %t{d}.count = add i64 0, 0\n", .{serial});
+        }
+        try self.emitCollectionBytes(serial, collection.element);
+        try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+        if (argument) |operand| {
+            try self.write("  %t{d}.old.end = getelementptr {s}, ptr null, i64 %t{d}.old.count\n", .{ serial, element_name, serial });
+            try self.write("  %t{d}.old.bytes = ptrtoint ptr %t{d}.old.end to i64\n", .{ serial, serial });
+            try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.old.bytes, i1 false)\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.appended = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.old.count\n", .{ serial, element_name, serial, serial });
+            try self.write("  store {s} %v{d}, ptr %t{d}.appended\n", .{ element_name, operand, serial });
+        }
+        try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data)\n", .{serial});
+        try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial });
+        try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{ value.result, type_name, serial, serial });
     }
 
     fn emitCollectionCount(self: *FunctionEmitter, value: Ir.Instruction.CollectionCount) Error!void {

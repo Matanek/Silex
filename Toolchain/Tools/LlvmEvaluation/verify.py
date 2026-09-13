@@ -68,6 +68,7 @@ def main():
         "LlvmEvaluation/StringLiterals.sx": "0\nSilex\n3\ntrue\nfalse\nA\0B\n",
         "LlvmEvaluation/StringBytes.sx": "4\n195\n169\n0\n65\n",
         "LlvmEvaluation/StringAddress.sx": "true\ntrue\n",
+        "LlvmEvaluation/ListAppendClear.sx": "1\n2\n2\n5\ntrue\n0\n1\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -99,7 +100,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -309,6 +310,17 @@ def main():
     string_address_llvm = (Path(string_address_metadata["artifact_directory"])/"raw.ll").read_text()
     assert "getelementptr i8, ptr" in string_address_llvm, string_address_llvm
     print("STRING BYTE PROJECTIONS PASS", flush=True)
+
+    list_edit_metadata = json.loads(Path(str(output/"ListAppendClear-O0")+".json").read_text())
+    list_edit_llvm = (Path(list_edit_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".count.checked = call { i64, i1 } @llvm.uadd.with.overflow.i64",
+        ".appended = getelementptr",
+        "call fastcc void @sx_drop(ptr",
+        ".count = add i64 0, 0",
+    ]:
+        assert fragment in list_edit_llvm, fragment
+    print("PLAIN LIST APPEND AND CLEAR PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseDynamicString", "RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:
