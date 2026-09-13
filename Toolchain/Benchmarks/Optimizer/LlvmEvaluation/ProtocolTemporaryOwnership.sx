@@ -1,0 +1,28 @@
+class Item { drop { print("item dropped") } }
+protocol Value { func consume() }
+struct Box:Value {
+    private var value:Item?
+    init(value:Item) { self.value = value }
+    func consume() {
+        var value = self.value
+        self.value = null
+        if var present = value { print("consumed") }
+    }
+}
+class Bag {
+    private var values:Value[]
+    init() { self.values = [] }
+    func add(value:Item) { self.values.append(Box(value)) }
+    func take() Value[] {
+        var values = self.values
+        self.values = []
+        return values
+    }
+}
+func main() {
+    var bag = Bag()
+    bag.add(Item())
+    var values = bag.take()
+    for var value in values { value.consume() }
+    print("done")
+}

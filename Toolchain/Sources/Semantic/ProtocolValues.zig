@@ -70,7 +70,12 @@ pub fn erase(
         .operand = value.value,
         .structure = structure_index,
     } });
-    return .{ .type = target, .value = result };
+    // Erasure changes the representation, not the payload's ownership. In
+    // particular, a transferred temporary must not acquire a second root.
+    var erased = value;
+    erased.type = target;
+    erased.value = result;
+    return erased;
 }
 
 pub fn conformers(self: anytype, protocol_index: usize) ![]const usize {

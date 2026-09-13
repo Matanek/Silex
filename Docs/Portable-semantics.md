@@ -60,6 +60,10 @@ Their closed-program discriminant and inline payload layout remain private to
 target lowering; no witness table, machine address or calling convention is
 exposed in source.
 
+Erasure preserves the payload's ownership and transfer status. A temporary
+structure converted to a protocol carries its existing resources into the
+destination; a conversion of a stored value retains the ordinary copy rules.
+
 A generic parameter may carry one protocol identity through parsing, module
 activation and public interfaces. Specialization validates the selected
 concrete type's nominal or inherited conformance before rewriting the body;
