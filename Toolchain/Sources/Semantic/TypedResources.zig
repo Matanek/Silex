@@ -70,6 +70,8 @@ fn emitScope(self: anytype, builder: anytype, structure: usize) !void {
             values[index] = parent;
         } else if (std.mem.eql(u8, field.name, GenericResources.order_field_name)) {
             values[index] = try emptyList(self, builder, field.type);
+            try Ownership.retainValueOwned(self, builder, field.type, values[index], .edge);
+            try Ownership.releaseTransferredRoot(self, builder, field.type, values[index]);
         } else {
             const empty = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .optional_null = .{ .result = empty } });
@@ -104,6 +106,7 @@ fn emitInsert(self: anytype, builder: anytype, structure: usize, field: usize, m
         .result = updated_order,
         .collection = order,
         .kind = .append,
+        .ownership = .edge,
         .argument = resource_id,
         .position = method.name_position,
     } });
@@ -312,6 +315,7 @@ fn emitClear(self: anytype, builder: anytype, structure: usize, invalidate: bool
         .result = empty_order,
         .collection = final_order,
         .kind = .clear,
+        .ownership = .edge,
         .position = self.program.structures[structure].position,
     } });
     const order_result = try self.newValue(builder, .structure(structure));

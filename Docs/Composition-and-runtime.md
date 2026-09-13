@@ -64,3 +64,9 @@ dispatch, and query-range adapters. Borrowing the resource store through
 `__silex_system_resources` does not transfer or cancel that host ownership.
 Repeated injected calls therefore do not keep the application alive after its
 last user owner leaves scope.
+
+The internal resource-registration order is an owning collection stored as a
+class edge. Scope construction transfers its temporary root to that edge, and
+insertion and clearing consume and return the edge explicitly in shared IR.
+Resource slots retain their separate transfer contract; the order list is not
+a local root merely because an intrinsic creates its operations.

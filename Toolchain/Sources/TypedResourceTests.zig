@@ -333,6 +333,49 @@ test "injected systems forward positional named and default process modes" {
     _ = try Lower.lower(allocator, compilation.ir);
 }
 
+test "typed resource bookkeeping mutates collection edges owned by its class" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application.Resources
+        \\func main() {
+        \\    var resources = Resources()
+        \\    resources.insert(41)
+        \\    var child = resources.scope()
+        \\    child.insert(42)
+        \\    print(child.get<int>())
+        \\    child.clear()
+        \\    print(child.get<int>())
+        \\    resources.clear()
+        \\}
+        ,
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("42\n41\n", result.stdout);
+    // The bookkeeping list is a class field. Its edit must consume and return
+    // that edge, irrespective of the backend's private collection layout.
+    var edits: usize = 0;
+    for (compilation.ir.functions) |function| {
+        if (!std.mem.startsWith(u8, function.name, "GFX.Application.Resources.")) continue;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction != .list_edit) continue;
+            try std.testing.expectEqual(Ir.Ownership.edge, instruction.list_edit.ownership);
+            edits += 1;
+        };
+    }
+    try std.testing.expect(edits >= 2);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
 test "injected systems consume their host argument without retaining it after return" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
