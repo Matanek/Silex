@@ -120,6 +120,11 @@ already present around the instruction retain responsibility for ownership. Thei
 root count starts at zero, matching the native IR contract, and explicit root
 retains/drops control reclamation.
 
+Slices of dynamic collections with resource-free elements normalize negative
+bounds, clamp both ends and allocate an exact independent owning copy. Inverted
+ranges produce an empty owning list. Slices whose elements carry resources and
+slice results that remain borrowed views are still refused.
+
 This class subset accepts a drop only when its exact static plan contains solely
 provably empty finalizers. Effective finalizers, resource fields, inheritance,
 edge ownership and cycles remain explicit refusals; this is not a substitute for

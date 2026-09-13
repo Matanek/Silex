@@ -645,6 +645,7 @@ const FunctionEmitter = struct {
             .collection_reference => |value| try self.emitCollectionReference(block_id, value),
             .collection_replace => |value| try self.emitCollectionReplace(block_id, value),
             .collection_count => |value| try self.emitCollectionCount(value),
+            .collection_slice => |value| try self.emitCollectionSlice(value),
             .collection_view => |value| try self.emitCollectionView(block_id, value),
             .function_reference => |value| try self.emitFunctionReference(value),
             .local_load => |value| try self.write(
@@ -1563,6 +1564,43 @@ const FunctionEmitter = struct {
             serial,
             serial,
         });
+    }
+
+    fn emitCollectionSlice(self: *FunctionEmitter, value: Ir.Instruction.CollectionSlice) Error!void {
+        const source_type = try self.valueType(value.collection);
+        const result_type = try self.valueType(value.result);
+        const source = try self.collectionInfo(source_type);
+        const result = try self.collectionInfo(result_type);
+        if (value.reference != null or source.element != result.element or
+            result.view or result.length != null or
+            try self.valueType(value.start) != .int or
+            try self.valueType(value.end) != .int)
+            return error.InvalidProgram;
+        if (!plainValue(self.program, source.element, 0)) return error.UnsupportedInstruction;
+
+        const serial = self.nextTemporary();
+        const source_name = try llvmType(self.allocator, self.program, source_type);
+        const result_name = try llvmType(self.allocator, self.program, result_type);
+        const element_name = try llvmType(self.allocator, self.program, source.element);
+        try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, source_name, value.collection });
+        try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, source_name, value.collection });
+        try self.emitClampedSliceBound(serial, "start", value.start);
+        try self.emitClampedSliceBound(serial, "end", value.end);
+        try self.write("  %t{d}.slice.difference = sub i64 %t{d}.end.clamped, %t{d}.start.clamped\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.slice.nonempty = icmp sgt i64 %t{d}.slice.difference, 0\n", .{ serial, serial });
+        try self.write("  %t{d}.slice.count = select i1 %t{d}.slice.nonempty, i64 %t{d}.slice.difference, i64 0\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.slice.source = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.start.clamped\n", .{ serial, element_name, serial, serial });
+        try self.write("  %t{d}.slice.end = getelementptr {s}, ptr null, i64 %t{d}.slice.count\n", .{ serial, element_name, serial });
+        try self.write("  %t{d}.bytes = ptrtoint ptr %t{d}.slice.end to i64\n", .{ serial, serial });
+        // Slicing lowers with an explicit retain for the produced root. Start
+        // at zero so that retain, rather than the allocation site, owns it.
+        try self.write("  %t{d}.slice.storage = call fastcc ptr @sx_unowned_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+        try self.write(
+            "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.slice.storage, ptr %t{d}.slice.source, i64 %t{d}.bytes, i1 false)\n",
+            .{ serial, serial, serial },
+        );
+        try self.write("  %t{d}.slice.value = insertvalue {s} poison, ptr %t{d}.slice.storage, 0\n", .{ serial, result_name, serial });
+        try self.write("  %v{d} = insertvalue {s} %t{d}.slice.value, i64 %t{d}.slice.count, 1\n", .{ value.result, result_name, serial, serial });
     }
 
     fn emitClampedSliceBound(self: *FunctionEmitter, serial: usize, comptime name: []const u8, value: Ir.ValueId) Error!void {

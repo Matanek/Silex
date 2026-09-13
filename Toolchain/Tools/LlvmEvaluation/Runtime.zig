@@ -48,6 +48,12 @@ pub const text =
     \\  unreachable
     \\}
     \\
+    \\define internal fastcc ptr @sx_unowned_alloc(i64 %bytes) {
+    \\entry:
+    \\  %data = call fastcc ptr @sx_class_alloc(i64 %bytes)
+    \\  ret ptr %data
+    \\}
+    \\
     \\define internal fastcc void @sx_retain(ptr %data) {
     \\entry:
     \\  %header = getelementptr i8, ptr %data, i64 -8

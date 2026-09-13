@@ -1,0 +1,22 @@
+func sum(values:@int[..]) int {
+    var result = 0
+    for value in values { result += value }
+    return result
+}
+
+func main() {
+    var values = [10, 20, 30, 40, 50]
+    let middle = values[1:4]
+    values[2] = 300
+    print(middle.count())
+    print(middle[0])
+    print(middle[-1])
+
+    let negative = values[-4:-1]
+    let clamped = values[-99:99]
+    let inverse = values[4:2]
+    print(sum(@negative[0:negative.count()]))
+    print(sum(@clamped[0:clamped.count()]))
+    print(inverse.is_empty())
+
+}
