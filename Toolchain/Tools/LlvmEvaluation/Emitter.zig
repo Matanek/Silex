@@ -1829,7 +1829,7 @@ const FunctionEmitter = struct {
             "silex LLVM evaluation: unsupported collection reference, view {}, ownership {s}, mutable source {}, element {s}\n",
             .{ collection.view, @tagName(value.ownership), value.reference != null, element_name },
         );
-        if (collection.length != null or value.ownership != .root)
+        if (collection.length != null)
             return error.UnsupportedInstruction;
         if (!collection.view and (value.reference == null or !plainValue(self.program, collection.element, 0)))
             return error.UnsupportedInstruction;
@@ -1854,10 +1854,17 @@ const FunctionEmitter = struct {
             try self.write("collection.detach{d}:\n", .{serial});
             try self.emitCollectionBytes(serial, collection.element);
             try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+            if (value.ownership == .edge) {
+                try self.write("  call fastcc void @sx_retain(ptr %t{d}.storage, i64 -16)\n", .{serial});
+                try self.write("  call fastcc void @sx_drop(ptr %t{d}.storage, i64 -24)\n", .{serial});
+            }
             try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.bytes, i1 false)\n", .{ serial, serial, serial });
             try self.write("  %t{d}.detached.data = insertvalue {s} %t{d}.source, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial, serial });
             try self.write("  store {s} %t{d}.detached.data, ptr %v{d}\n", .{ type_name, serial, reference });
-            try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 -24)\n", .{serial});
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 {d})\n", .{
+                serial,
+                if (value.ownership == .root) @as(i8, -24) else -16,
+            });
             try self.write("  br label %collection.ready{d}\n", .{serial});
             try self.write("collection.unique{d}:\n", .{serial});
             try self.write("  br label %collection.ready{d}\n", .{serial});

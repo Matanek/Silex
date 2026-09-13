@@ -71,6 +71,7 @@ def main():
         "LlvmEvaluation/FloatNarrowingOverflow.sx": "7\n",
         "LlvmEvaluation/FloatNarrowingNaN.sx": "7\n",
         "LlvmEvaluation/ClassFieldReference.sx": "1\nalpha\n2\nalpha\nbeta\n7\n",
+        "LlvmEvaluation/ClassCollectionReference.sx": "10\n20\n11\n22\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -694,6 +695,21 @@ def main():
     ]:
         assert fragment in class_field_reference_llvm, fragment
     print("RICH CLASS FIELD REFERENCE PASS", flush=True)
+
+    class_collection_reference_metadata = json.loads(Path(str(output/"ClassCollectionReference-O0")+".json").read_text())
+    class_collection_reference_llvm = (Path(class_collection_reference_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".roots.address = getelementptr i8",
+        ".edges.address = getelementptr i8",
+        ".owners = add i64",
+        "call fastcc void @sx_retain(ptr %t",
+        "i64 -16)",
+        "call fastcc void @sx_drop(ptr %t",
+        ".old.data, i64 -16)",
+        ".data = phi ptr",
+    ]:
+        assert fragment in class_collection_reference_llvm, fragment
+    print("COPY-ON-WRITE EDGE COLLECTION REFERENCE PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

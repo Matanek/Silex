@@ -1,0 +1,23 @@
+class State {
+    var values:uint[]
+
+    init() {
+        self.values = [10 as uint, 20 as uint]
+    }
+
+    func mutate() {
+        let before = self.values
+        self.values[0] = 11 as uint
+        self.values[1] = 22 as uint
+        print(before[0])
+        print(before[1])
+    }
+}
+
+func main() {
+    var state = State()
+    var alias = state
+    state.mutate()
+    print(alias.values[0])
+    print(alias.values[1])
+}
