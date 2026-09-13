@@ -1,0 +1,13 @@
+func signed8(value:float64) int8 { return value as int8 }
+func unsigned8(value:float64) uint8 { return value as uint8 }
+func signed(value:float) int { return value as int }
+func wide(value:float64) int { return value as int }
+
+func main() {
+    print(signed8(-128.0 as float64))
+    print(signed8(127.0 as float64))
+    print(unsigned8(0.0 as float64))
+    print(unsigned8(255.0 as float64))
+    print(signed(42.0))
+    print(wide(-42.0 as float64))
+}

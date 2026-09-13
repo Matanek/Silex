@@ -57,6 +57,11 @@ def main():
         "LlvmEvaluation/NegativeBounds.sx": "7\n",
         "LlvmEvaluation/DivisionByZero.sx": "7\n",
         "LlvmEvaluation/Conversion.sx": "7\n",
+        "LlvmEvaluation/FloatToInteger.sx": "-128\n127\n0\n255\n42\n-42\n",
+        "LlvmEvaluation/FloatToIntegerFraction.sx": "7\n",
+        "LlvmEvaluation/FloatToIntegerNaN.sx": "7\n",
+        "LlvmEvaluation/FloatToIntegerInfinity.sx": "7\n",
+        "LlvmEvaluation/FloatToIntegerBounds.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -111,7 +116,11 @@ def main():
             run = call(source.stem+"-run-"+mode, [binary])
             observable = {key: run[key] for key in ["returncode", "stdout", "stderr"]}
             assert run["stdout"] == expected_stdout, run
-            assert run["returncode"] == (1 if source.stem in ["Overflow", "Bounds", "NegativeBounds", "DivisionByZero", "Conversion"] else 0), run
+            assert run["returncode"] == (1 if source.stem in [
+                "Overflow", "Bounds", "NegativeBounds", "DivisionByZero", "Conversion",
+                "FloatToIntegerFraction", "FloatToIntegerNaN", "FloatToIntegerInfinity",
+                "FloatToIntegerBounds",
+            ] else 0), run
             if expected is None:
                 expected = observable
             else:
@@ -129,7 +138,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/ClassFinalizers.sx", "LlvmEvaluation/OwnedStringList.sx", "LlvmEvaluation/PlainStructureEquality.sx", "LlvmEvaluation/RefuseCallback.sx", "LlvmEvaluation/OwningCollectionReference.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/ClassFinalizers.sx", "LlvmEvaluation/OwnedStringList.sx", "LlvmEvaluation/PlainStructureEquality.sx", "LlvmEvaluation/RefuseCallback.sx", "LlvmEvaluation/OwningCollectionReference.sx", "LlvmEvaluation/FloatToInteger.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -577,6 +586,20 @@ def main():
     ]:
         assert fragment in owning_reference_llvm, fragment
     print("COPY-ON-WRITE OWNING COLLECTION REFERENCE PASS", flush=True)
+
+    float_to_integer_metadata = json.loads(Path(str(output/"FloatToInteger-O0")+".json").read_text())
+    float_to_integer_llvm = (Path(float_to_integer_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".lower = sitofp i128 -128 to double",
+        ".upper = uitofp i128 256 to double",
+        "call i8 @llvm.fptosi.sat.i8.f64",
+        "call i8 @llvm.fptoui.sat.i8.f64",
+        "call i64 @llvm.fptosi.sat.i64.f32",
+        ".integral = fcmp oeq",
+        "call fastcc void @sx_conversion",
+    ]:
+        assert fragment in float_to_integer_llvm, fragment
+    print("EXACT FLOAT TO INTEGER CONVERSIONS PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

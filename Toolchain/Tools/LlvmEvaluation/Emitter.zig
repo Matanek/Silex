@@ -2547,7 +2547,22 @@ const FunctionEmitter = struct {
             return self.write("  %v{d} = fpext float %v{d} to double\n", .{ value.result, value.operand });
         if (value.source.isInteger() and value.target.isFloat())
             return self.emitIntegerToFloat(block_id, value);
-        if (!value.source.isInteger() or !value.target.isInteger()) return error.UnsupportedInstruction;
+        if (value.source.isFloat() and value.target.isInteger())
+            return self.emitFloatToInteger(block_id, value);
+        if (!value.source.isInteger() or !value.target.isInteger()) {
+            std.debug.print(
+                "silex LLVM evaluation: unsupported conversion {s} -> {s}, checked {}, at {d}:{d}:{d}\n",
+                .{
+                    try reportTypeName(self.allocator, self.program, value.source),
+                    try reportTypeName(self.allocator, self.program, value.target),
+                    value.checked,
+                    value.position.file,
+                    value.position.line,
+                    value.position.column,
+                },
+            );
+            return error.UnsupportedInstruction;
+        }
         const serial = self.nextTemporary();
         const source_name = try llvmType(self.allocator, self.program, value.source);
         try self.write("  %t{d}.wide = {s} {s} %v{d} to i128\n", .{
@@ -2621,6 +2636,53 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.exact = xor i1 %t{d}.same, false\n", .{ serial, serial });
         }
         try self.emitConversionFailure(block_id, serial, value, true);
+    }
+
+    fn emitFloatToInteger(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Convert) Error!void {
+        const serial = self.nextTemporary();
+        const source_name = try llvmType(self.allocator, self.program, value.source);
+        const target_name = try llvmType(self.allocator, self.program, value.target);
+        const width = value.target.bitWidth();
+        const signed = value.target.isSignedInteger();
+        const lower = integerMinimum(value.target);
+        const upper_exclusive = @as(i128, integerMaximum(value.target)) + 1;
+
+        try self.write("  %t{d}.lower = {s} i128 {d} to {s}\n", .{
+            serial,
+            if (signed) "sitofp" else "uitofp",
+            lower,
+            source_name,
+        });
+        try self.write("  %t{d}.upper = {s} i128 {d} to {s}\n", .{
+            serial,
+            if (signed) "sitofp" else "uitofp",
+            upper_exclusive,
+            source_name,
+        });
+        try self.write("  %t{d}.low = fcmp olt {s} %v{d}, %t{d}.lower\n", .{ serial, source_name, value.operand, serial });
+        try self.write("  %t{d}.high = fcmp oge {s} %v{d}, %t{d}.upper\n", .{ serial, source_name, value.operand, serial });
+        try self.write("  %t{d}.outside = or i1 %t{d}.low, %t{d}.high\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.converted = call {s} @llvm.{s}.sat.i{d}.{s}({s} %v{d})\n", .{
+            serial,
+            target_name,
+            if (signed) "fptosi" else "fptoui",
+            width,
+            if (value.source == .float32) "f32" else "f64",
+            source_name,
+            value.operand,
+        });
+        try self.write("  %t{d}.roundtrip = {s} {s} %t{d}.converted to {s}\n", .{
+            serial,
+            if (signed) "sitofp" else "uitofp",
+            target_name,
+            serial,
+            source_name,
+        });
+        try self.write("  %t{d}.integral = fcmp oeq {s} %v{d}, %t{d}.roundtrip\n", .{ serial, source_name, value.operand, serial });
+        try self.write("  %t{d}.not_integral = xor i1 %t{d}.integral, true\n", .{ serial, serial });
+        try self.write("  %t{d}.invalid = or i1 %t{d}.outside, %t{d}.not_integral\n", .{ serial, serial, serial });
+        try self.emitConversionFailure(block_id, serial, value, false);
+        try self.write("  %v{d} = add {s} %t{d}.converted, 0\n", .{ value.result, target_name, serial });
     }
 
     fn emitCall(self: *FunctionEmitter, value: Ir.Instruction.Call) Error!void {

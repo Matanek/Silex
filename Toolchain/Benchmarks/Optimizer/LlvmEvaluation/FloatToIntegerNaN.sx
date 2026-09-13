@@ -1,0 +1,2 @@
+func convert(value:float64) int { return value as int }
+func main() { print(7); print(convert((0.0 / 0.0) as float64)); print(8) }

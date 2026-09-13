@@ -1,0 +1,2 @@
+func convert(value:float) int { return value as int }
+func main() { print(7); print(convert(3.5)); print(8) }
