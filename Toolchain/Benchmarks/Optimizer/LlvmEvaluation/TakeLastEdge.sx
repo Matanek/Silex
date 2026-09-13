@@ -1,0 +1,20 @@
+class Stack {
+    var values:str[]
+
+    init() {
+        self.values = ["alpha", "beta"]
+    }
+
+    func pop() str {
+        return self.values.take_last()
+    }
+}
+
+func main() {
+    var stack = Stack()
+    var alias = stack
+    let removed = stack.pop()
+    print(removed)
+    print(alias.values.count())
+    print(alias.values[0])
+}

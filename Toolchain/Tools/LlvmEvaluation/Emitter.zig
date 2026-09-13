@@ -1685,17 +1685,20 @@ const FunctionEmitter = struct {
             },
         );
         if (collection.view or collection.length != null or
-            try self.valueType(value.result) != type_value or
-            value.removed != null)
+            try self.valueType(value.result) != type_value)
             return error.UnsupportedInstruction;
         const argument = switch (value.kind) {
-            .clear => if (value.argument == null) null else return error.InvalidProgram,
+            .clear, .take_last => if (value.argument == null) null else return error.InvalidProgram,
             .append, .insert => value.argument orelse return error.InvalidProgram,
             else => return error.UnsupportedInstruction,
         };
         if (value.kind == .insert) {
             if (value.index == null or try self.valueType(value.index.?) != .int) return error.InvalidProgram;
         } else if (value.index != null) return error.InvalidProgram;
+        if (value.kind == .take_last) {
+            const removed = value.removed orelse return error.InvalidProgram;
+            if (try self.valueType(removed) != collection.element) return error.InvalidProgram;
+        } else if (value.removed != null) return error.InvalidProgram;
         if (argument) |operand| {
             if (try self.valueType(operand) != collection.element) return error.InvalidProgram;
         }
@@ -1742,6 +1745,24 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.count.overflow = extractvalue {{ i64, i1 }} %t{d}.count.checked, 1\n", .{ serial, serial });
             try self.write("  br i1 %t{d}.count.overflow, label %trap, label %b{d}.list{d}\n", .{ serial, block_id, serial });
             try self.write("b{d}.list{d}:\n", .{ block_id, serial });
+        } else if (value.kind == .take_last) {
+            try self.write("  %t{d}.empty = icmp eq i64 %t{d}.old.count, 0\n", .{ serial, serial });
+            try self.write("  br i1 %t{d}.empty, label %b{d}.take.fail{d}, label %b{d}.take.cont{d}\n", .{
+                serial,
+                block_id,
+                serial,
+                block_id,
+                serial,
+            });
+            try self.write("b{d}.take.fail{d}:\n", .{ block_id, serial });
+            try self.write("  call fastcc void @sx_bounds(ptr @sx.file.{d}, i64 {d}, i64 {d}, i64 0, i64 %t{d}.old.count)\n", .{
+                value.position.file,
+                value.position.line,
+                value.position.column,
+                serial,
+            });
+            try self.write("  unreachable\nb{d}.take.cont{d}:\n", .{ block_id, serial });
+            try self.write("  %t{d}.count = sub i64 %t{d}.old.count, 1\n", .{ serial, serial });
         } else {
             try self.write("  %t{d}.count = add i64 0, 0\n", .{serial});
         }
@@ -1772,9 +1793,22 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.tail.index = add i64 %t{d}.index, 1\n", .{ serial, serial });
             try self.write("  %t{d}.tail.destination = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.tail.index\n", .{ serial, element_name, serial, serial });
             try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.tail.destination, ptr %t{d}.tail.source, i64 %t{d}.tail.bytes, i1 false)\n", .{ serial, serial, serial });
-        };
-        // The semantic IR emits the source list_drop for indexed edits. Append
-        // and clear delegate that source release to the list runtime itself.
+        } else if (value.kind == .take_last) {
+            try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.bytes, i1 false)\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.removed.address = getelementptr {s}, ptr %t{d}.old.data, i64 %t{d}.count\n", .{
+                serial,
+                element_name,
+                serial,
+                serial,
+            });
+            try self.write("  %v{d} = load {s}, ptr %t{d}.removed.address\n", .{
+                value.removed.?,
+                element_name,
+                serial,
+            });
+        }
+        // The semantic IR emits the source list_drop for indexed edits and
+        // removals. Append and clear delegate that source release here.
         if (value.kind == .append or value.kind == .clear)
             try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 {d})\n", .{
                 serial,

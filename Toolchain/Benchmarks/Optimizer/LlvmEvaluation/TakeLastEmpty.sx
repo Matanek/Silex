@@ -1,0 +1,11 @@
+class Stack {
+    var values:str[] = []
+    func pop() str { return self.values.take_last() }
+}
+
+func main() {
+    var stack = Stack()
+    print(7)
+    print(stack.pop())
+    print(8)
+}

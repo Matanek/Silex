@@ -72,6 +72,8 @@ def main():
         "LlvmEvaluation/FloatNarrowingNaN.sx": "7\n",
         "LlvmEvaluation/ClassFieldReference.sx": "1\nalpha\n2\nalpha\nbeta\n7\n",
         "LlvmEvaluation/ClassCollectionReference.sx": "10\n20\n11\n22\n",
+        "LlvmEvaluation/TakeLastEdge.sx": "beta\n1\nalpha\n",
+        "LlvmEvaluation/TakeLastEmpty.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -130,7 +132,7 @@ def main():
                 "Overflow", "Bounds", "NegativeBounds", "DivisionByZero", "Conversion",
                 "FloatToIntegerFraction", "FloatToIntegerNaN", "FloatToIntegerInfinity",
                 "FloatToIntegerBounds", "ListInsertBounds", "FloatNarrowingInexact",
-                "FloatNarrowingOverflow", "FloatNarrowingNaN",
+                "FloatNarrowingOverflow", "FloatNarrowingNaN", "TakeLastEmpty",
             ] else 0), run
             if expected is None:
                 expected = observable
@@ -710,6 +712,20 @@ def main():
     ]:
         assert fragment in class_collection_reference_llvm, fragment
     print("COPY-ON-WRITE EDGE COLLECTION REFERENCE PASS", flush=True)
+
+    take_last_metadata = json.loads(Path(str(output/"TakeLastEdge-O0")+".json").read_text())
+    take_last_llvm = (Path(take_last_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".empty = icmp eq i64",
+        "call fastcc void @sx_bounds",
+        ".count = sub i64",
+        ".removed.address = getelementptr ptr",
+    ]:
+        assert fragment in take_last_llvm, fragment
+    removed_at = take_last_llvm.index(".removed.address = getelementptr ptr")
+    result_at = take_last_llvm.index(".collection = insertvalue", removed_at)
+    assert "call fastcc void @sx_drop" not in take_last_llvm[removed_at:result_at]
+    print("EDGE LIST TAKE LAST PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:
