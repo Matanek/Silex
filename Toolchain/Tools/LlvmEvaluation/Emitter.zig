@@ -2000,7 +2000,14 @@ const FunctionEmitter = struct {
 
     fn emitBinary(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Binary) Error!void {
         const left_type = try self.valueType(value.left);
-        if (left_type != try self.valueType(value.right)) return error.InvalidProgram;
+        const right_type = try self.valueType(value.right);
+        const left_type_name = try reportTypeName(self.allocator, self.program, left_type);
+        const right_type_name = try reportTypeName(self.allocator, self.program, right_type);
+        errdefer std.debug.print(
+            "silex LLVM evaluation: unsupported binary operator {s}, left type {s}, right type {s}\n",
+            .{ @tagName(value.operator), left_type_name, right_type_name },
+        );
+        if (left_type != right_type) return error.InvalidProgram;
         if ((value.operator == .equal or value.operator == .not_equal) and
             try self.valueType(value.result) != .bool)
             return error.InvalidProgram;
@@ -2045,6 +2052,8 @@ const FunctionEmitter = struct {
                     });
                 }
             }
+            if (plainValue(self.program, left_type, 0))
+                return self.emitPlainAggregateEquality(value, left_type);
         }
         const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
@@ -2134,6 +2143,87 @@ const FunctionEmitter = struct {
                     value.right,
                 });
             },
+        }
+    }
+
+    fn emitPlainAggregateEquality(
+        self: *FunctionEmitter,
+        value: Ir.Instruction.Binary,
+        type_value: Ir.Type,
+    ) Error!void {
+        if (value.operator != .equal and value.operator != .not_equal)
+            return error.UnsupportedInstruction;
+        var accumulator: ?usize = null;
+        const left = try std.fmt.allocPrint(self.allocator, "%v{d}", .{value.left});
+        const right = try std.fmt.allocPrint(self.allocator, "%v{d}", .{value.right});
+        try self.emitPlainEqualityLeaves(type_value, left, right, &accumulator, 0);
+        if (accumulator) |serial| {
+            return self.write("  %v{d} = xor i1 %t{d}.aggregate.equal, {s}\n", .{
+                value.result,
+                serial,
+                if (value.operator == .equal) "false" else "true",
+            });
+        }
+        try self.write("  %v{d} = xor i1 false, {s}\n", .{
+            value.result,
+            if (value.operator == .equal) "true" else "false",
+        });
+    }
+
+    fn emitPlainEqualityLeaves(
+        self: *FunctionEmitter,
+        type_value: Ir.Type,
+        left: []const u8,
+        right: []const u8,
+        accumulator: *?usize,
+        depth: usize,
+    ) Error!void {
+        if (type_value.isNumeric() or type_value == .bool) {
+            const serial = self.nextTemporary();
+            const type_name = try llvmType(self.allocator, self.program, type_value);
+            try self.write("  %t{d}.aggregate.leaf = {s} {s} {s}, {s}\n", .{
+                serial,
+                if (type_value.isFloat()) "fcmp oeq" else "icmp eq",
+                type_name,
+                left,
+                right,
+            });
+            if (accumulator.*) |previous| {
+                try self.write("  %t{d}.aggregate.equal = and i1 %t{d}.aggregate.equal, %t{d}.aggregate.leaf\n", .{
+                    serial,
+                    previous,
+                    serial,
+                });
+            } else {
+                try self.write("  %t{d}.aggregate.equal = xor i1 %t{d}.aggregate.leaf, false\n", .{ serial, serial });
+            }
+            accumulator.* = serial;
+            return;
+        }
+        const structure_index = type_value.structureIndex() orelse return error.UnsupportedType;
+        if (structure_index >= self.program.structures.len or depth >= self.program.structures.len)
+            return error.InvalidProgram;
+        const structure = self.program.structures[structure_index];
+        if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null)
+            return error.UnsupportedType;
+        const type_name = try llvmType(self.allocator, self.program, type_value);
+        for (structure.fields, 0..) |field, field_index| {
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.aggregate.left = extractvalue {s} {s}, {d}\n", .{
+                serial,
+                type_name,
+                left,
+                field_index,
+            });
+            try self.write("  %t{d}.aggregate.right = extractvalue {s} {s}, {d}\n", .{
+                serial,
+                type_name,
+                right,
+                field_index,
+            });
+            const field_left = try std.fmt.allocPrint(self.allocator, "%t{d}.aggregate.left", .{serial});
+            const field_right = try std.fmt.allocPrint(self.allocator, "%t{d}.aggregate.right", .{serial});
+            try self.emitPlainEqualityLeaves(field.type, field_left, field_right, accumulator, depth + 1);
         }
     }
 

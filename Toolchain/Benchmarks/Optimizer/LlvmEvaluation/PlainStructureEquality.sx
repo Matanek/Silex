@@ -1,0 +1,19 @@
+struct Id {
+    let value:uint32
+}
+
+struct Pair {
+    let id:Id
+    let enabled:bool
+    let weight:float
+}
+
+func main() {
+    let first = Pair(id:Id(value:42), enabled:true, weight:1.5)
+    let same = Pair(id:Id(value:42), enabled:true, weight:1.5)
+    let different = Pair(id:Id(value:43), enabled:true, weight:1.5)
+    print(first == same)
+    print(first != same)
+    print(first == different)
+    print(first != different)
+}
