@@ -1,0 +1,2 @@
+func shift(value:uint16, count:uint8) uint16 { return value >> count }
+func main() { print(7); print(shift(3 as uint16, 16 as uint8)); print(8) }

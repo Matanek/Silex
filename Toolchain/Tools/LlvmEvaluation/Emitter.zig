@@ -2106,7 +2106,8 @@ const FunctionEmitter = struct {
             "silex LLVM evaluation: unsupported binary operator {s}, left type {s}, right type {s}\n",
             .{ @tagName(value.operator), left_type_name, right_type_name },
         );
-        if (left_type != right_type) return error.InvalidProgram;
+        const shift = value.operator == .shift_left or value.operator == .shift_right;
+        if (left_type != right_type and !shift) return error.InvalidProgram;
         if ((value.operator == .equal or value.operator == .not_equal) and
             try self.valueType(value.result) != .bool)
             return error.InvalidProgram;
@@ -2502,6 +2503,7 @@ const FunctionEmitter = struct {
         if (!left_type.isInteger()) return error.UnsupportedInstruction;
         const right_type = try self.valueType(value.right);
         if (!right_type.isInteger()) return error.UnsupportedInstruction;
+        if (try self.valueType(value.result) != left_type) return error.InvalidProgram;
         const serial = self.nextTemporary();
         const right_name = try llvmType(self.allocator, self.program, right_type);
         if (right_type.isSignedInteger()) {

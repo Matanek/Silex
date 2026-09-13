@@ -1,0 +1,9 @@
+func left16(value:uint16, count:int) uint16 { return value << count }
+func right32(value:uint32, count:uint8) uint32 { return value >> count }
+func left8(value:uint8, count:uint32) uint8 { return value << count }
+
+func main() {
+    print(left16(3 as uint16, 4))
+    print(right32(240 as uint32, 4 as uint8))
+    print(left8(5 as uint8, 3 as uint32))
+}

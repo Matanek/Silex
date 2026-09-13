@@ -62,6 +62,7 @@ def main():
         "LlvmEvaluation/FloatToIntegerNaN.sx": "7\n",
         "LlvmEvaluation/FloatToIntegerInfinity.sx": "7\n",
         "LlvmEvaluation/FloatToIntegerBounds.sx": "7\n",
+        "LlvmEvaluation/MixedIntegerShifts.sx": "48\n15\n40\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -138,7 +139,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/ClassFinalizers.sx", "LlvmEvaluation/OwnedStringList.sx", "LlvmEvaluation/PlainStructureEquality.sx", "LlvmEvaluation/RefuseCallback.sx", "LlvmEvaluation/OwningCollectionReference.sx", "LlvmEvaluation/FloatToInteger.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/ClassFinalizers.sx", "LlvmEvaluation/OwnedStringList.sx", "LlvmEvaluation/PlainStructureEquality.sx", "LlvmEvaluation/RefuseCallback.sx", "LlvmEvaluation/OwningCollectionReference.sx", "LlvmEvaluation/FloatToInteger.sx", "LlvmEvaluation/MixedIntegerShifts.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -600,6 +601,34 @@ def main():
     ]:
         assert fragment in float_to_integer_llvm, fragment
     print("EXACT FLOAT TO INTEGER CONVERSIONS PASS", flush=True)
+
+    mixed_shifts_metadata = json.loads(Path(str(output/"MixedIntegerShifts-O0")+".json").read_text())
+    mixed_shifts_llvm = (Path(mixed_shifts_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".negative = icmp slt i64",
+        ".large = icmp uge i64",
+        ".count = trunc i64",
+        ".count = zext i8",
+        " = shl i16 ",
+        " = lshr i32 ",
+    ]:
+        assert fragment in mixed_shifts_llvm, fragment
+    print("MIXED-WIDTH INTEGER SHIFTS PASS", flush=True)
+
+    # The reference interpreter rejects invalid shift counts. The current native
+    # backend masks them, so do not weaken the experimental LLVM backend to match
+    # that pre-existing discrepancy.
+    for name in ["MixedIntegerShiftNegative", "MixedIntegerShiftLarge"]:
+        source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
+        interpreted = call("interpreter-"+name, [args.native, "interpret", source, "--nocache"])
+        assert interpreted["returncode"] == 1, interpreted
+        for mode in ["O0", "O3"]:
+            binary = output/(name+"-"+mode)
+            built = call(name+"-compile-"+mode, llvm_command(source, mode, binary))
+            assert built["returncode"] == 0, built
+            run = call(name+"-run-"+mode, [binary])
+            assert run["returncode"] == 1, run
+    print("INVALID MIXED-WIDTH INTEGER SHIFTS PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:
