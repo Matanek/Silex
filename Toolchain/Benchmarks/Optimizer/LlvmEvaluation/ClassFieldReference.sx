@@ -1,0 +1,26 @@
+class Owner {
+    var values:str[]
+    var marker:int
+
+    init() {
+        self.values = ["alpha"]
+        self.marker = 7
+    }
+
+    func mutate() {
+        let before = self.values
+        self.values.append("beta")
+        print(before.count())
+        print(before[0])
+    }
+}
+
+func main() {
+    var owner = Owner()
+    var alias = owner
+    owner.mutate()
+    print(alias.values.count())
+    print(alias.values[0])
+    print(alias.values[1])
+    print(alias.marker)
+}

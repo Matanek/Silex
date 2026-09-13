@@ -1684,7 +1684,7 @@ const FunctionEmitter = struct {
                 value.removed != null,
             },
         );
-        if (value.ownership != .root or collection.view or collection.length != null or
+        if (collection.view or collection.length != null or
             try self.valueType(value.result) != type_value or
             value.removed != null)
             return error.UnsupportedInstruction;
@@ -1747,6 +1747,12 @@ const FunctionEmitter = struct {
         }
         try self.emitCollectionBytes(serial, collection.element);
         try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+        if (value.ownership == .edge) {
+            // The result is written directly back into a class field. Move the
+            // fresh allocation's initial root to the edge owned by that field.
+            try self.write("  call fastcc void @sx_retain(ptr %t{d}.storage, i64 -16)\n", .{serial});
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.storage, i64 -24)\n", .{serial});
+        }
         if (argument) |operand| if (value.kind == .append) {
             try self.write("  %t{d}.old.end = getelementptr {s}, ptr null, i64 %t{d}.old.count\n", .{ serial, element_name, serial });
             try self.write("  %t{d}.old.bytes = ptrtoint ptr %t{d}.old.end to i64\n", .{ serial, serial });
@@ -1770,7 +1776,10 @@ const FunctionEmitter = struct {
         // The semantic IR emits the source list_drop for indexed edits. Append
         // and clear delegate that source release to the list runtime itself.
         if (value.kind == .append or value.kind == .clear)
-            try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 -24)\n", .{serial});
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 {d})\n", .{
+                serial,
+                if (value.ownership == .root) @as(i8, -24) else -16,
+            });
         try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial });
         try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{ value.result, type_name, serial, serial });
     }
@@ -2094,8 +2103,17 @@ const FunctionEmitter = struct {
         {
             return error.InvalidProgram;
         }
-        if (self.program.structures[value.structure].is_class)
-            return error.UnsupportedInstruction;
+        if (self.program.structures[value.structure].is_class) {
+            if (!materialClassStorage(self.program, value.structure)) return error.UnsupportedInstruction;
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.class = load ptr, ptr %v{d}\n", .{ serial, value.reference });
+            try self.write("  %v{d} = getelementptr i8, ptr %t{d}.class, i64 {d}\n", .{
+                value.result,
+                serial,
+                8 * (4 + try classFieldStorageOffset(self.program, value.structure, value.field)),
+            });
+            return;
+        }
         try self.write("  %v{d} = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
             value.result,
             try llvmType(self.allocator, self.program, Ir.Type.structure(value.structure)),

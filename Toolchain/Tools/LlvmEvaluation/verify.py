@@ -70,6 +70,7 @@ def main():
         "LlvmEvaluation/FloatNarrowingInexact.sx": "7\n",
         "LlvmEvaluation/FloatNarrowingOverflow.sx": "7\n",
         "LlvmEvaluation/FloatNarrowingNaN.sx": "7\n",
+        "LlvmEvaluation/ClassFieldReference.sx": "1\nalpha\n2\nalpha\nbeta\n7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -681,6 +682,18 @@ def main():
     ]:
         assert fragment in float_narrowing_llvm, fragment
     print("EXACT FLOAT NARROWING PASS", flush=True)
+
+    class_field_reference_metadata = json.loads(Path(str(output/"ClassFieldReference-O0")+".json").read_text())
+    class_field_reference_llvm = (Path(class_field_reference_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".class = load ptr, ptr",
+        "getelementptr i8, ptr %t",
+        ".class, i64 32",
+        "call fastcc void @sx_drop(ptr %t",
+        "i64 -16)",
+    ]:
+        assert fragment in class_field_reference_llvm, fragment
+    print("RICH CLASS FIELD REFERENCE PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:
