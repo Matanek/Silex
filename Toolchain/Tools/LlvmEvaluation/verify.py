@@ -84,6 +84,7 @@ def main():
             "-1234567890123456789\n9000000000000000000\n-13.5\n1234.25\n"
         ),
         "LlvmEvaluation/CollectionSlice.sx": "3\n20\n40\n360\n420\ntrue\n",
+        "LlvmEvaluation/StringFromBytes.sx": "4\n3\n195\ntrue\né\0A\ntrue\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -115,7 +116,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -392,6 +393,19 @@ def main():
     ]:
         assert fragment in slice_llvm, fragment
     print("PLAIN OWNING COLLECTION SLICE PASS", flush=True)
+
+    from_bytes_metadata = json.loads(Path(str(output/"StringFromBytes-O0")+".json").read_text())
+    from_bytes_llvm = (Path(from_bytes_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".from_bytes.data = extractvalue",
+        ".from_bytes.count = extractvalue",
+        ".from_bytes.allocation.checked = call { i64, i1 } @llvm.uadd.with.overflow.i64",
+        ".from_bytes.tagged = or i64",
+        ".from_bytes.destination = getelementptr i8",
+        "call void @llvm.memcpy.p0.p0.i64",
+    ]:
+        assert fragment in from_bytes_llvm, fragment
+    print("OWNED STRING FROM BYTE VIEW PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:

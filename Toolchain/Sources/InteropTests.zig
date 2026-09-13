@@ -242,6 +242,33 @@ test "compose typed loads and stores from explicit interop address bits" {
     try std.testing.expect(std.mem.indexOf(u8, text, "boundary.store") != null);
 }
 
+test "transfer ownership of strings constructed from byte views" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Interop.C
+        \\func main() {
+        \\    let bytes:uint8[] = [83 as uint8]
+        \\    let stored = C.string(@bytes[0:1])
+        \\    print(stored)
+        \\    print(C.string(@bytes[0:1]))
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, text, "str.from_bytes"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, text, "str.drop"));
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, text, "str.retain"));
+}
+
 test "compose float32 loads and stores for private platform layouts" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

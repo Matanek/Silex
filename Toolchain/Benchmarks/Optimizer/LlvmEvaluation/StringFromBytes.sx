@@ -1,0 +1,16 @@
+use Interop.C
+
+func main() {
+    var bytes:uint8[] = [195 as uint8, 169 as uint8, 0 as uint8, 65 as uint8]
+    let text = C.string(@bytes[0:bytes.count()])
+    bytes[0] = 66 as uint8
+
+    print(C.byte_count(text))
+    print(text.count())
+    print(C.byte_at(text, 0 as uint))
+    print(text == "é\0A")
+    print(text)
+
+    let empty:uint8[] = []
+    print(C.string(@empty[0:0]) == "")
+}

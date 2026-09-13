@@ -139,6 +139,10 @@ floating-point rendering comes from the explicit object built with the adapter.
 Concatenation allocates a dynamic descriptor,
 checks both value and allocation-size overflow, and copies the exact bytes without
 adding a terminator; operand lifetime remains controlled by explicit IR drops.
+`C.string` copies a compact `uint8` view into the same owning descriptor, preserving
+UTF-8 and embedded zero bytes. Its semantic result transfers the allocation's
+initial root to the consumer, so a stored or immediately consumed conversion emits
+exactly the corresponding drop instead of leaking or retaining an extra root.
 Byte length masks the descriptor's dynamic
 flag, byte access checks the index before reading, and the explicit interop pointer
 addresses the first byte after the descriptor header. These byte projections stay

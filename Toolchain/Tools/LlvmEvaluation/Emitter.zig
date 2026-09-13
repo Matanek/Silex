@@ -667,6 +667,7 @@ const FunctionEmitter = struct {
             .string_address => |value| try self.emitStringAddress(value),
             .string_byte_count => |value| try self.emitStringByteCount(value),
             .string_byte_at => |value| try self.emitStringByteAt(block_id, value),
+            .string_from_bytes => |value| try self.emitStringFromBytes(block_id, value),
             .string_count => |value| try self.emitStringCount(value),
             .string_concat => |value| try self.emitStringConcat(block_id, value),
             .format_value => |value| try self.emitFormatValue(value),
@@ -734,6 +735,34 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.string.offset = add i64 %v{d}, 8\n", .{ serial, value.index });
         try self.write("  %t{d}.string.address = getelementptr i8, ptr %v{d}, i64 %t{d}.string.offset\n", .{ serial, value.operand, serial });
         try self.write("  %v{d} = load i8, ptr %t{d}.string.address\n", .{ value.result, serial });
+    }
+
+    fn emitStringFromBytes(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.StringFromBytes) Error!void {
+        if (try self.valueType(value.result) != .str) return error.InvalidProgram;
+        const bytes_type = try self.valueType(value.bytes);
+        const bytes = try self.collectionInfo(bytes_type);
+        if (!bytes.view or bytes.element != .uint8) return error.InvalidProgram;
+
+        const serial = self.nextTemporary();
+        const bytes_name = try llvmType(self.allocator, self.program, bytes_type);
+        try self.write("  %t{d}.from_bytes.data = extractvalue {s} %v{d}, 0\n", .{ serial, bytes_name, value.bytes });
+        try self.write("  %t{d}.from_bytes.count = extractvalue {s} %v{d}, 1\n", .{ serial, bytes_name, value.bytes });
+        try self.write("  %t{d}.from_bytes.count.invalid = icmp slt i64 %t{d}.from_bytes.count, 0\n", .{ serial, serial });
+        try self.write("  %t{d}.from_bytes.allocation.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.from_bytes.count, i64 8)\n", .{ serial, serial });
+        try self.write("  %t{d}.from_bytes.allocation = extractvalue {{ i64, i1 }} %t{d}.from_bytes.allocation.checked, 0\n", .{ serial, serial });
+        try self.write("  %t{d}.from_bytes.allocation.overflow = extractvalue {{ i64, i1 }} %t{d}.from_bytes.allocation.checked, 1\n", .{ serial, serial });
+        try self.write("  %t{d}.from_bytes.invalid = or i1 %t{d}.from_bytes.count.invalid, %t{d}.from_bytes.allocation.overflow\n", .{ serial, serial, serial });
+        try self.write("  br i1 %t{d}.from_bytes.invalid, label %trap, label %b{d}.from_bytes{d}\n", .{ serial, block_id, serial });
+        try self.write("b{d}.from_bytes{d}:\n", .{ block_id, serial });
+        try self.write("  %t{d}.from_bytes.descriptor = call fastcc ptr @sx_alloc(i64 %t{d}.from_bytes.allocation)\n", .{ serial, serial });
+        try self.write("  %t{d}.from_bytes.tagged = or i64 %t{d}.from_bytes.count, -9223372036854775808\n", .{ serial, serial });
+        try self.write("  store i64 %t{d}.from_bytes.tagged, ptr %t{d}.from_bytes.descriptor\n", .{ serial, serial });
+        try self.write("  %t{d}.from_bytes.destination = getelementptr i8, ptr %t{d}.from_bytes.descriptor, i64 8\n", .{ serial, serial });
+        try self.write(
+            "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.from_bytes.destination, ptr %t{d}.from_bytes.data, i64 %t{d}.from_bytes.count, i1 false)\n",
+            .{ serial, serial, serial },
+        );
+        try self.write("  %v{d} = getelementptr i8, ptr %t{d}.from_bytes.descriptor, i64 0\n", .{ value.result, serial });
     }
 
     fn emitStringConcat(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.StringConcat) Error!void {

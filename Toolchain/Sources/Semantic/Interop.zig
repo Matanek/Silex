@@ -1038,7 +1038,10 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
         }
         const result = try self.newValue(builder, .str);
         try self.emit(builder, .{ .string_from_bytes = .{ .result = result, .bytes = source.value } });
-        return .{ .type = .str, .value = result };
+        // The conversion allocates an owning dynamic string. Mark its initial
+        // root as transferred so a consumer either adopts or drops it instead
+        // of retaining an additional root and leaking the original one.
+        return .{ .type = .str, .value = result, .transferred = true };
     }
     if (call.receiver == null and std.mem.eql(u8, call.name, "C.mutable_string_pointer")) {
         if (call.type_arguments.len != 0 or call.named_arguments.len != 0 or call.arguments.len != 1) {
