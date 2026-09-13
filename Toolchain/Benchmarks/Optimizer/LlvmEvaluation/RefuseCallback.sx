@@ -1,2 +1,5 @@
 func apply(callback:func() int) int { return callback() }
-func main() { print(apply(func() int { return 3 })) }
+func main() {
+    let captured = 3
+    print(apply(func() int { return captured }))
+}

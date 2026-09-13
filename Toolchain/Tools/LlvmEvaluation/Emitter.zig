@@ -700,6 +700,7 @@ const FunctionEmitter = struct {
             .binary => |value| try self.emitBinary(block_id, value),
             .convert => |value| try self.emitConvert(block_id, value),
             .call => |value| try self.emitCall(value),
+            .indirect_call => |value| try self.emitIndirectCall(value),
             .boundary_call => |value| try self.emitBoundaryCall(value),
             .print => |value| try self.emitPrint(value),
             .assert => |value| try self.emitAssert(block_id, value),
@@ -1365,6 +1366,12 @@ const FunctionEmitter = struct {
 
     fn emitClassRetain(self: *FunctionEmitter, value: Ir.Instruction.ClassRetain) Error!void {
         const type_value = try self.valueType(value.operand);
+        if (type_value.functionIndex()) |signature| {
+            if (signature >= self.program.function_types.len) return error.InvalidProgram;
+            // The LLVM subset rejects every captured function reference, so
+            // its remaining callback value is only a non-owning code pointer.
+            return;
+        }
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
         if (value.ownership != .root or !plainClassStorage(self.program, structure))
             return error.UnsupportedInstruction;
@@ -1373,6 +1380,12 @@ const FunctionEmitter = struct {
 
     fn emitClassDrop(self: *FunctionEmitter, value: Ir.Instruction.ClassDrop) Error!void {
         const type_value = try self.valueType(value.operand);
+        if (type_value.functionIndex()) |signature| {
+            if (signature >= self.program.function_types.len) return error.InvalidProgram;
+            // See emitClassRetain: capture-free code pointers own no runtime
+            // environment and therefore have no lifetime action to emit.
+            return;
+        }
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
         if (structure != value.static_type or value.ownership != .root or value.skip_cycle or
             !plainClassStorage(self.program, structure) or !self.noopFinalizers(value))
@@ -2327,6 +2340,35 @@ const FunctionEmitter = struct {
         try self.output.appendSlice(self.allocator, ")\n");
     }
 
+    fn emitIndirectCall(self: *FunctionEmitter, value: Ir.Instruction.IndirectCall) Error!void {
+        const signature_index = (try self.valueType(value.callee)).functionIndex() orelse
+            return error.InvalidProgram;
+        if (signature_index >= self.program.function_types.len) return error.InvalidProgram;
+        const signature = self.program.function_types[signature_index];
+        if (signature.parameter_types.len != value.arguments.len) return error.InvalidProgram;
+        if (signature.return_type == .void) {
+            if (value.result != null) return error.InvalidProgram;
+        } else {
+            const result = value.result orelse return error.InvalidProgram;
+            if (try self.valueType(result) != signature.return_type) return error.InvalidProgram;
+        }
+        try self.output.appendSlice(self.allocator, "  ");
+        if (value.result) |result| try self.write("%v{d} = ", .{result});
+        try self.write("call fastcc {s} %v{d}(", .{
+            try llvmType(self.allocator, self.program, signature.return_type),
+            value.callee,
+        });
+        for (value.arguments, signature.parameter_types, 0..) |argument, parameter_type, index| {
+            if (try self.valueType(argument) != parameter_type) return error.InvalidProgram;
+            if (index != 0) try self.output.appendSlice(self.allocator, ", ");
+            try self.write("{s} %v{d}", .{
+                try llvmType(self.allocator, self.program, parameter_type),
+                argument,
+            });
+        }
+        try self.output.appendSlice(self.allocator, ")\n");
+    }
+
     fn emitBoundaryCall(self: *FunctionEmitter, value: Ir.Instruction.BoundaryCall) Error!void {
         if (value.function >= self.boundaries.len) return error.InvalidProgram;
         const boundary = self.boundaries[value.function];
@@ -2889,4 +2931,46 @@ test "optional reference projection follows the typed LLVM layout" {
         llvm,
         "%v3 = getelementptr { i1, i64 }, ptr %v2, i32 0, i32 1",
     ) != null);
+}
+
+test "capture-free function references use typed indirect calls" {
+    const callback_type = Ir.Type.function(0);
+    const program: Ir.Program = .{
+        .function_types = &.{.{
+            .parameter_types = &.{.int},
+            .return_type = .int,
+        }},
+        .functions = &.{
+            .{
+                .name = "increment",
+                .parameter_types = &.{.int},
+                .return_type = .int,
+                .value_types = &.{ .int, .int, .int },
+                .blocks = &.{.{
+                    .instructions = &.{
+                        .{ .constant_int = .{ .result = 1, .bits = 1 } },
+                        .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
+                    },
+                    .terminator = .{ .return_value = 2 },
+                }},
+            },
+            .{
+                .name = "main",
+                .parameter_types = &.{},
+                .return_type = .void,
+                .value_types = &.{ callback_type, .int, .int },
+                .blocks = &.{.{
+                    .instructions = &.{
+                        .{ .function_reference = .{ .result = 0, .function = 0 } },
+                        .{ .constant_int = .{ .result = 1, .bits = 41 } },
+                        .{ .indirect_call = .{ .result = 2, .callee = 0, .arguments = &.{1} } },
+                    },
+                    .terminator = .return_void,
+                }},
+            },
+        },
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "%v2 = call fastcc i64 %v0(i64 %v1)") != null);
 }

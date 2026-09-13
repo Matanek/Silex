@@ -1,0 +1,12 @@
+func increment(value:int) int { return value + 1 }
+func announce() { print(7) }
+
+func apply(callback:func(int) int, value:int) int { return callback(value) }
+func invoke(callback:func()) { callback() }
+
+func main() {
+    let operation:func(int) int = increment
+    let notification:func() = announce
+    print(apply(operation, 41))
+    invoke(notification)
+}
