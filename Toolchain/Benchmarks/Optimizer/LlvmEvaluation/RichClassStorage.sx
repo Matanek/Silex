@@ -1,0 +1,28 @@
+struct Payload {
+    let count:int
+    let ready:bool
+}
+
+class Box {
+    var value:Payload? = null
+
+    init(value:Payload) {
+        self.value = value
+    }
+
+    func take() Payload? {
+        var previous = self.value
+        self.value = null
+        return previous
+    }
+}
+
+func main() {
+    var box = Box(Payload(count:42, ready:true))
+    let value = box.take()
+    if let payload = value {
+        print(payload.count)
+        print(payload.ready)
+    }
+    if box.take() == null { print("empty") }
+}

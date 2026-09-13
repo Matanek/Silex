@@ -50,7 +50,7 @@ pub const text =
     \\
     \\define internal fastcc ptr @sx_typed_class_alloc(i64 %bytes, i64 %type) {
     \\entry:
-    \\  %size = add i64 %bytes, 16
+    \\  %size = add i64 %bytes, 32
     \\  %wrapped = icmp ult i64 %size, %bytes
     \\  br i1 %wrapped, label %fail, label %allocate
     \\allocate:
@@ -58,14 +58,17 @@ pub const text =
     \\  %null = icmp eq ptr %header, null
     \\  br i1 %null, label %fail, label %ready
     \\ready:
-    \\  store i64 0, ptr %header
-    \\  %type.address = getelementptr i8, ptr %header, i64 8
-    \\  store i64 %type, ptr %type.address
+    \\  store i64 %type, ptr %header
+    \\  %roots = getelementptr i8, ptr %header, i64 8
+    \\  store i64 0, ptr %roots
+    \\  %edges = getelementptr i8, ptr %header, i64 16
+    \\  store i64 0, ptr %edges
+    \\  %state = getelementptr i8, ptr %header, i64 24
+    \\  store i64 0, ptr %state
     \\  %old = load i64, ptr @sx.live
     \\  %next = add i64 %old, 1
     \\  store i64 %next, ptr @sx.live
-    \\  %data = getelementptr i8, ptr %header, i64 16
-    \\  ret ptr %data
+    \\  ret ptr %header
     \\fail:
     \\  call void @exit(i32 1)
     \\  unreachable
@@ -73,23 +76,23 @@ pub const text =
     \\
     \\define internal fastcc void @sx_typed_class_retain(ptr %data) {
     \\entry:
-    \\  %header = getelementptr i8, ptr %data, i64 -16
-    \\  %old = load i64, ptr %header
+    \\  %roots = getelementptr i8, ptr %data, i64 8
+    \\  %old = load i64, ptr %roots
     \\  %next = add i64 %old, 1
-    \\  store i64 %next, ptr %header
+    \\  store i64 %next, ptr %roots
     \\  ret void
     \\}
     \\
     \\define internal fastcc void @sx_typed_class_drop(ptr %data) {
     \\entry:
-    \\  %header = getelementptr i8, ptr %data, i64 -16
-    \\  %old = load i64, ptr %header
+    \\  %roots = getelementptr i8, ptr %data, i64 8
+    \\  %old = load i64, ptr %roots
     \\  %next = sub i64 %old, 1
-    \\  store i64 %next, ptr %header
+    \\  store i64 %next, ptr %roots
     \\  %last = icmp eq i64 %next, 0
     \\  br i1 %last, label %release, label %done
     \\release:
-    \\  call void @free(ptr %header)
+    \\  call void @free(ptr %data)
     \\  %live = load i64, ptr @sx.live
     \\  %remaining = sub i64 %live, 1
     \\  store i64 %remaining, ptr @sx.live

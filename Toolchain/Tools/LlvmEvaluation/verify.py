@@ -68,6 +68,7 @@ def main():
         "LlvmEvaluation/Mutex.sx": "nested\n42\n",
         "LlvmEvaluation/EmbeddedBytes.sx": "4\n65\n195\n169\n0\n65\n",
         "LlvmEvaluation/AggregateOptional.sx": "-1\n42\ntrue\n",
+        "LlvmEvaluation/RichClassStorage.sx": "42\ntrue\nempty\n",
         "LlvmEvaluation/PlainEnum.sx": "true\ntrue\n2\n3\n",
         "LlvmEvaluation/PayloadEnum.sx": "41\n7\n-2\n",
         "LlvmEvaluation/AssertSuccess.sx": "7\n",
@@ -123,7 +124,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/RichClassStorage.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -258,11 +259,11 @@ def main():
     class_metadata = json.loads(Path(str(output/"ClassOwnership-O0")+".json").read_text())
     class_llvm = (Path(class_metadata["artifact_directory"])/"raw.ll").read_text()
     for fragment in [
-        "= type { i64 }",
+        "= type { i64, i64, i64, i64, [1 x i64] }",
         "call fastcc ptr @sx_class_alloc",
         "call fastcc void @sx_retain(ptr",
         "call fastcc void @sx_drop(ptr",
-        ".class.field = getelementptr",
+        ".class.field = getelementptr i8",
         "{ i1, ptr }",
     ]:
         assert fragment in class_llvm, fragment
@@ -271,8 +272,8 @@ def main():
     class_store_metadata = json.loads(Path(str(output/"ClassFieldStore-O0")+".json").read_text())
     class_store_llvm = (Path(class_store_metadata["artifact_directory"])/"raw.ll").read_text()
     for fragment in [
-        "= type { i64, i1 }",
-        ".class.store.field = getelementptr",
+        "= type { i64, i64, i64, i64, [2 x i64] }",
+        ".class.store.field = getelementptr i8",
         "store i64",
         "store i1",
     ]:
@@ -432,7 +433,7 @@ def main():
     protocol_llvm = (Path(protocol_metadata["artifact_directory"])/"raw.ll").read_text()
     for fragment in [
         "= type { i64, [",
-        ".protocol.class.tag.address = getelementptr i8",
+        ".protocol.class.tag = load i64, ptr",
         ".protocol.tag = extractvalue",
         ".protocol.payload = getelementptr i8",
         "@sx_typed_class_retain",
@@ -477,6 +478,18 @@ def main():
     aggregate_optional_llvm = (Path(aggregate_optional_metadata["artifact_directory"])/"raw.ll").read_text()
     assert "{ i1, %sx.type." in aggregate_optional_llvm, aggregate_optional_llvm
     print("AGGREGATE OPTIONAL VALUES PASS", flush=True)
+
+    rich_class_metadata = json.loads(Path(str(output/"RichClassStorage-O0")+".json").read_text())
+    rich_class_llvm = (Path(rich_class_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "= type { i64, i64, i64, i64, [3 x i64] }",
+        "getelementptr i8, ptr %v",
+        "i64 32",
+        "store { i1, %sx.type.",
+        "load { i1, %sx.type.",
+    ]:
+        assert fragment in rich_class_llvm, fragment
+    print("NATIVE-ABI RICH CLASS STORAGE PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer"]:

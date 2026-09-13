@@ -178,20 +178,14 @@ pub fn emitWithBoundaries(
             try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
             continue;
         }
-        // Classes remain opaque values. Only the proven plain-storage subset
-        // receives a private layout; richer object operations still refuse.
+        // Class values remain pointers, while their allocation follows the
+        // native four-slot header and fixed-width leaf storage ABI.
         if (structure.is_class) {
-            if (!plainClassStorage(program, structure_index)) continue;
-            try appendFmt(&output, allocator, "%sx.class.{d} = type {{ ", .{structure_index});
-            for (structure.fields, 0..) |field, field_index| {
-                if (field_index != 0) try output.appendSlice(allocator, ", ");
-                const field_type = llvmType(allocator, program, field.type) catch |err| {
-                    std.debug.print("silex LLVM evaluation: cannot declare class '{s}' field '{s}': {t}\n", .{ structure.name, field.name, err });
-                    return err;
-                };
-                try output.appendSlice(allocator, field_type);
-            }
-            try output.appendSlice(allocator, " }\n");
+            if (!materialClassStorage(program, structure_index)) continue;
+            try appendFmt(&output, allocator, "%sx.class.{d} = type {{ i64, i64, i64, i64, [{d} x i64] }}\n", .{
+                structure_index,
+                try classStorageSlots(program, structure_index),
+            });
             continue;
         }
         if (structure.is_protocol) {
@@ -1355,8 +1349,7 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.protocol = alloca {s}\n", .{ serial, protocol_type });
         try self.write("  store {s} zeroinitializer, ptr %t{d}.protocol\n", .{ protocol_type, serial });
         if (self.program.structures[value.structure].is_class) {
-            try self.write("  %t{d}.protocol.class.tag.address = getelementptr i8, ptr %v{d}, i64 -8\n", .{ serial, value.operand });
-            try self.write("  %t{d}.protocol.class.tag = load i64, ptr %t{d}.protocol.class.tag.address\n", .{ serial, serial });
+            try self.write("  %t{d}.protocol.class.tag = load i64, ptr %v{d}\n", .{ serial, value.operand });
             try self.write("  store i64 %t{d}.protocol.class.tag, ptr %t{d}.protocol\n", .{ serial, serial });
         } else {
             try self.write("  store i64 {d}, ptr %t{d}.protocol\n", .{ value.structure, serial });
@@ -1401,29 +1394,27 @@ const FunctionEmitter = struct {
     }
 
     fn emitClassInit(self: *FunctionEmitter, value: Ir.Instruction.StructureInit) Error!void {
-        if (!plainClassStorage(self.program, value.structure)) return error.UnsupportedType;
+        if (!materialClassStorage(self.program, value.structure)) return error.UnsupportedType;
         const structure = self.program.structures[value.structure];
         if (value.fields.len != structure.fields.len or
             try self.valueType(value.result) != Ir.Type.structure(value.structure))
             return error.InvalidProgram;
         const serial = self.nextTemporary();
-        const storage_name = try classStorageType(self.allocator, value.structure);
-        if (structure.fields.len == 0) {
-            try self.write("  %v{d} = call fastcc ptr @sx_typed_class_alloc(i64 0, i64 {d})\n", .{ value.result, value.structure });
-            return;
-        }
-        try self.write("  %t{d}.class.end = getelementptr {s}, ptr null, i32 1\n", .{ serial, storage_name });
-        try self.write("  %t{d}.class.bytes = ptrtoint ptr %t{d}.class.end to i64\n", .{ serial, serial });
-        try self.write("  %v{d} = call fastcc ptr @sx_typed_class_alloc(i64 %t{d}.class.bytes, i64 {d})\n", .{ value.result, serial, value.structure });
+        const field_bytes = std.math.mul(usize, try classStorageSlots(self.program, value.structure), 8) catch
+            return error.UnsupportedType;
+        try self.write("  %v{d} = call fastcc ptr @sx_typed_class_alloc(i64 {d}, i64 {d})\n", .{
+            value.result,
+            field_bytes,
+            value.structure,
+        });
         for (value.fields, 0..) |field, field_index| {
             if (try self.valueType(field) != structure.fields[field_index].type)
                 return error.InvalidProgram;
-            try self.write("  %t{d}.class.field{d} = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
+            try self.write("  %t{d}.class.field{d} = getelementptr i8, ptr %v{d}, i64 {d}\n", .{
                 serial,
                 field_index,
-                storage_name,
                 value.result,
-                field_index,
+                8 * (4 + try classFieldStorageOffset(self.program, value.structure, field_index)),
             });
             try self.write("  store {s} %v{d}, ptr %t{d}.class.field{d}\n", .{
                 try llvmType(self.allocator, self.program, structure.fields[field_index].type),
@@ -1443,7 +1434,7 @@ const FunctionEmitter = struct {
             return;
         }
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
-        if (value.ownership != .root or !plainClassStorage(self.program, structure))
+        if (value.ownership != .root or !materialClassStorage(self.program, structure))
             return error.UnsupportedInstruction;
         try self.write("  call fastcc void @sx_typed_class_retain(ptr %v{d})\n", .{value.operand});
     }
@@ -1458,7 +1449,7 @@ const FunctionEmitter = struct {
         }
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
         if (structure != value.static_type or value.ownership != .root or value.skip_cycle or
-            !plainClassStorage(self.program, structure) or !self.noopFinalizers(value))
+            !materialClassStorage(self.program, structure) or !self.noopFinalizers(value))
         {
             return error.UnsupportedInstruction;
         }
@@ -1506,14 +1497,13 @@ const FunctionEmitter = struct {
         value: Ir.Instruction.FieldLoad,
         structure_index: usize,
     ) Error!void {
-        if (!plainClassStorage(self.program, structure_index)) return error.UnsupportedType;
+        if (!materialClassStorage(self.program, structure_index)) return error.UnsupportedType;
         const serial = self.nextTemporary();
         const field_type = self.program.structures[structure_index].fields[value.field].type;
-        try self.write("  %t{d}.class.field = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
+        try self.write("  %t{d}.class.field = getelementptr i8, ptr %v{d}, i64 {d}\n", .{
             serial,
-            try classStorageType(self.allocator, structure_index),
             value.base,
-            value.field,
+            8 * (4 + try classFieldStorageOffset(self.program, structure_index, value.field)),
         });
         try self.write("  %v{d} = load {s}, ptr %t{d}.class.field\n", .{
             value.result,
@@ -1533,14 +1523,13 @@ const FunctionEmitter = struct {
         {
             return error.InvalidProgram;
         }
-        if (!plainClassStorage(self.program, structure_index)) return error.UnsupportedType;
+        if (!materialClassStorage(self.program, structure_index)) return error.UnsupportedType;
         const serial = self.nextTemporary();
         const field_type = structure.fields[value.field].type;
-        try self.write("  %t{d}.class.store.field = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
+        try self.write("  %t{d}.class.store.field = getelementptr i8, ptr %v{d}, i64 {d}\n", .{
             serial,
-            try classStorageType(self.allocator, structure_index),
             value.base,
-            value.field,
+            8 * (4 + try classFieldStorageOffset(self.program, structure_index, value.field)),
         });
         try self.write("  store {s} %v{d}, ptr %t{d}.class.store.field\n", .{
             try llvmType(self.allocator, self.program, field_type),
@@ -2798,18 +2787,35 @@ fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Erro
     };
 }
 
-fn plainClassStorage(program: Ir.Program, structure_index: usize) bool {
+fn materialClassStorage(program: Ir.Program, structure_index: usize) bool {
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
     if (!structure.is_class or structure.base != null) return false;
     for (structure.fields) |field| {
-        if (!field.type.isNumeric() and field.type != .bool) return false;
+        _ = llvmStorageSlots(program, field.type, 0) catch return false;
     }
     return true;
 }
 
-fn classStorageType(allocator: Allocator, structure_index: usize) Allocator.Error![]const u8 {
-    return std.fmt.allocPrint(allocator, "%sx.class.{d}", .{structure_index});
+fn classStorageSlots(program: Ir.Program, structure_index: usize) Error!usize {
+    if (structure_index >= program.structures.len) return error.InvalidProgram;
+    const structure = program.structures[structure_index];
+    if (!structure.is_class or structure.base != null) return error.UnsupportedType;
+    var slots: usize = 0;
+    for (structure.fields) |field|
+        slots = std.math.add(usize, slots, try llvmStorageSlots(program, field.type, 0)) catch
+            return error.UnsupportedType;
+    return slots;
+}
+
+fn classFieldStorageOffset(program: Ir.Program, structure_index: usize, field_index: usize) Error!usize {
+    if (structure_index >= program.structures.len or field_index >= program.structures[structure_index].fields.len)
+        return error.InvalidProgram;
+    var slots: usize = 0;
+    for (program.structures[structure_index].fields[0..field_index]) |field|
+        slots = std.math.add(usize, slots, try llvmStorageSlots(program, field.type, 0)) catch
+            return error.UnsupportedType;
+    return slots;
 }
 
 fn optionalPayloadType(program: Ir.Program, type_value: Ir.Type, depth: usize) bool {
