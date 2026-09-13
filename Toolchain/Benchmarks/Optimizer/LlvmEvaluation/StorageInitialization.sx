@@ -1,0 +1,28 @@
+struct Sample {
+    let first:int
+    let second:float64
+
+    init(first:int, second:float64) {
+        self.second = second
+        self.first = first
+    }
+}
+
+class Box {
+    let count:int
+    let active:bool
+
+    init(count:int, active:bool) {
+        self.active = active
+        self.count = count
+    }
+}
+
+func main() {
+    let sample = Sample(first:7, second:2.5)
+    var box = Box(count:42, active:true)
+    print(sample.first)
+    print(sample.second == 2.5)
+    print(box.count)
+    print(box.active)
+}

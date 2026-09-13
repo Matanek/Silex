@@ -113,7 +113,10 @@ already present in Silex IR. Protocol conformers outside the currently supported
 concrete type and lifetime subsets remain conditional refusals.
 Optional construction, extraction, copies, parameters, results, local storage and
 equality use the explicit presence tag; equality ignores the payload when both
-values are absent. Floating operations have no fast-math permissions, and machine
+values are absent. Compiler-only `storage_init` placeholders materialize as a
+typed zero constant; definite-initialization analysis guarantees that source code
+cannot observe them before the explicit field replacement. Floating operations
+have no fast-math permissions, and machine
 contraction is disabled. Overflow and division errors preserve standalone failure
 status; collection bounds and checked conversions preserve source-position
 diagnostics and output emitted before failure.

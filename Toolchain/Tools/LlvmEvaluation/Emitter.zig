@@ -650,6 +650,7 @@ const FunctionEmitter = struct {
             .class_drop => |value| try self.emitClassDrop(value),
             .string_retain => |value| try self.emitStringResource(value, "sx_string_retain"),
             .string_drop => |value| try self.emitStringResource(value, "sx_string_drop"),
+            .storage_init => |value| try self.emitStorageInit(value),
             .structure_init => |value| try self.emitStructureInit(value),
             .protocol_init => |value| try self.emitProtocolInit(value),
             .protocol_test => |value| try self.emitProtocolTest(value),
@@ -703,6 +704,13 @@ const FunctionEmitter = struct {
             .assert => |value| try self.emitAssert(block_id, value),
             else => return error.UnsupportedInstruction,
         }
+    }
+
+    fn emitStorageInit(self: *FunctionEmitter, value: Ir.Instruction.StorageInit) Error!void {
+        try self.write("  %v{d} = freeze {s} zeroinitializer\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, try self.valueType(value.result)),
+        });
     }
 
     fn emitConstantString(

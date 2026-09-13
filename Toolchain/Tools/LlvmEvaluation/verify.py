@@ -87,6 +87,7 @@ def main():
         "LlvmEvaluation/StringFromBytes.sx": "4\n3\n195\ntrue\né\0A\ntrue\n",
         "LlvmEvaluation/RawEnum.sx": "-7\n42\ntrue\ntrue\ntrue\né\0A\ntrue\n",
         "LlvmEvaluation/ProtocolValues.sx": "7\n42\n41\n41\n41\n",
+        "LlvmEvaluation/StorageInitialization.sx": "7\ntrue\n42\ntrue\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -118,7 +119,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -435,6 +436,16 @@ def main():
     ]:
         assert fragment in protocol_llvm, fragment
     print("TYPE-ERASED PROTOCOL VALUES PASS", flush=True)
+
+    storage_metadata = json.loads(Path(str(output/"StorageInitialization-O0")+".json").read_text())
+    storage_llvm = (Path(storage_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "= freeze i64 zeroinitializer",
+        "= freeze double zeroinitializer",
+        "= freeze i1 zeroinitializer",
+    ]:
+        assert fragment in storage_llvm, fragment
+    print("TRANSIENT FIELD STORAGE INITIALIZATION PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer"]:
