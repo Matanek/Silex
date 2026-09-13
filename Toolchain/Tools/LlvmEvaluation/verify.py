@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 
+from verify_runtime import verify_counts
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -168,6 +170,8 @@ def main():
             else:
                 assert observable == expected, (source, mode, expected, observable)
             print(source.stem, mode, "PASS", flush=True)
+
+    verify_counts(output, corpus, call)
 
     minmax_metadata = json.loads(Path(str(output/"ScalarMinMax-O3")+".json").read_text())
     minmax_llvm = (Path(minmax_metadata["artifact_directory"])/"raw.ll").read_text()
@@ -578,7 +582,7 @@ def main():
     class_finalizer_llvm = (Path(class_finalizer_metadata["artifact_directory"])/"raw.ll").read_text()
     for fragment in [
         "atomicrmw add ptr %counter, i64 1 monotonic",
-        "atomicrmw sub ptr %counter, i64 1 acq_rel",
+        "cmpxchg ptr %counter, i64 %old, i64 %next acq_rel acquire",
         "cmpxchg ptr %state, i64 0, i64 1 acq_rel acquire",
         ".class.finalize = call fastcc i1 @sx_typed_class_release",
         "call fastcc void @sx_typed_class_free",
@@ -592,7 +596,7 @@ def main():
         "getelementptr i8, ptr %data, i64 -24",
         "getelementptr i8, ptr %data, i64 -16",
         "atomicrmw add ptr %counter, i64 1 monotonic",
-        "atomicrmw sub ptr %counter, i64 1 acq_rel",
+        "cmpxchg ptr %counter, i64 %old, i64 %next acq_rel acquire",
         "call fastcc void @sx_retain(ptr",
         "i64 -16)",
         "call fastcc void @sx_string_drop(ptr",

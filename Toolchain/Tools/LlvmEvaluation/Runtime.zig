@@ -1,6 +1,8 @@
 // Private collection runtime for the bounded macOS ARM64 evaluation.
 // Untyped allocations store byte capacity before roots/edges/destruction state.
 // Their payload-relative ownership offsets and the typed class ABI stay fixed.
+// Match native release semantics: class temporaries may start without a root;
+// a zero collection count makes that ownership release a no-op. Never wrap it.
 pub const text =
     \\@sx.live = internal global i64 0
     \\@.sx.bounds = private constant [84 x i8] c"%s:%lld:%lld: runtime error: collection index %lld is out of bounds for count %lld\0A\00"
@@ -128,11 +130,28 @@ pub const text =
     \\  ret void
     \\}
     \\
+    \\define internal fastcc i64 @sx_release_count(ptr %counter) {
+    \\entry:
+    \\  %initial = load atomic i64, ptr %counter acquire, align 8
+    \\  br label %retry
+    \\retry:
+    \\  %old = phi i64 [ %initial, %entry ], [ %observed, %decrement ]
+    \\  %zero = icmp eq i64 %old, 0
+    \\  br i1 %zero, label %done, label %decrement
+    \\decrement:
+    \\  %next = sub i64 %old, 1
+    \\  %changed = cmpxchg ptr %counter, i64 %old, i64 %next acq_rel acquire
+    \\  %observed = extractvalue { i64, i1 } %changed, 0
+    \\  %won = extractvalue { i64, i1 } %changed, 1
+    \\  br i1 %won, label %done, label %retry
+    \\done:
+    \\  ret i64 %old
+    \\}
+    \\
     \\define internal fastcc i1 @sx_typed_class_release(ptr %data, i64 %offset) {
     \\entry:
     \\  %counter = getelementptr i8, ptr %data, i64 %offset
-    \\  %old = atomicrmw sub ptr %counter, i64 1 acq_rel
-    \\  %next = sub i64 %old, 1
+    \\  %old = call fastcc i64 @sx_release_count(ptr %counter)
     \\  %roots.address = getelementptr i8, ptr %data, i64 8
     \\  %roots = load atomic i64, ptr %roots.address acquire, align 8
     \\  %edges.address = getelementptr i8, ptr %data, i64 16
@@ -173,8 +192,10 @@ pub const text =
     \\define internal fastcc void @sx_drop(ptr %data, i64 %offset) {
     \\entry:
     \\  %counter = getelementptr i8, ptr %data, i64 %offset
-    \\  %old = atomicrmw sub ptr %counter, i64 1 acq_rel
-    \\  %next = sub i64 %old, 1
+    \\  %old = call fastcc i64 @sx_release_count(ptr %counter)
+    \\  %released = icmp ne i64 %old, 0
+    \\  br i1 %released, label %inspect, label %done
+    \\inspect:
     \\  %roots.address = getelementptr i8, ptr %data, i64 -24
     \\  %roots = load atomic i64, ptr %roots.address acquire, align 8
     \\  %edges.address = getelementptr i8, ptr %data, i64 -16

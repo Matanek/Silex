@@ -247,3 +247,14 @@ reserve growth falls back to the required size when doubling cannot fit.
 snapshots, appending an existing element, replacement, and clear/reuse in native
 Debug/Release and LLVM O0/O3 with the full Silex prefix. Existing bounds and
 ownership witnesses cover the other edits and finalization.
+
+## Zero ownership counts
+
+The private LLVM counters follow the native release contract. Class construction
+starts with zero roots, and dropping an unrooted temporary can still claim its
+finalization when no edges remain. Releasing a zero collection ownership count
+is a no-op. Both paths use an atomic compare/exchange loop that never wraps zero
+to the maximum integer. `RuntimeCounts.ll` exercises these direct runtime
+contracts in LLVM O0/O3, including an edge that keeps an unrooted class alive
+and a collection transferred from a root to an edge. The ordinary differential
+corpus continues to check source-level finalizer order and ownership.
