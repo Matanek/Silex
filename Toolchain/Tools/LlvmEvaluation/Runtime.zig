@@ -9,7 +9,7 @@ pub const text =
     \\
     \\define internal fastcc ptr @sx_alloc(i64 %bytes) {
     \\entry:
-    \\  %size = add i64 %bytes, 8
+    \\  %size = add i64 %bytes, 24
     \\  %wrapped = icmp ult i64 %size, %bytes
     \\  br i1 %wrapped, label %fail, label %allocate
     \\allocate:
@@ -18,8 +18,12 @@ pub const text =
     \\  br i1 %null, label %fail, label %ready
     \\ready:
     \\  store i64 1, ptr %header
+    \\  %edges = getelementptr i8, ptr %header, i64 8
+    \\  store i64 0, ptr %edges
+    \\  %state = getelementptr i8, ptr %header, i64 16
+    \\  store i64 0, ptr %state
     \\  %old = atomicrmw add ptr @sx.live, i64 1 monotonic
-    \\  %data = getelementptr i8, ptr %header, i64 8
+    \\  %data = getelementptr i8, ptr %header, i64 24
     \\  ret ptr %data
     \\fail:
     \\  call void @exit(i32 1)
@@ -28,7 +32,7 @@ pub const text =
     \\
     \\define internal fastcc ptr @sx_class_alloc(i64 %bytes) {
     \\entry:
-    \\  %size = add i64 %bytes, 8
+    \\  %size = add i64 %bytes, 24
     \\  %wrapped = icmp ult i64 %size, %bytes
     \\  br i1 %wrapped, label %fail, label %allocate
     \\allocate:
@@ -37,8 +41,12 @@ pub const text =
     \\  br i1 %null, label %fail, label %ready
     \\ready:
     \\  store i64 0, ptr %header
+    \\  %edges = getelementptr i8, ptr %header, i64 8
+    \\  store i64 0, ptr %edges
+    \\  %state = getelementptr i8, ptr %header, i64 16
+    \\  store i64 0, ptr %state
     \\  %old = atomicrmw add ptr @sx.live, i64 1 monotonic
-    \\  %data = getelementptr i8, ptr %header, i64 8
+    \\  %data = getelementptr i8, ptr %header, i64 24
     \\  ret ptr %data
     \\fail:
     \\  call void @exit(i32 1)
@@ -111,24 +119,33 @@ pub const text =
     \\  ret ptr %data
     \\}
     \\
-    \\define internal fastcc void @sx_retain(ptr %data) {
+    \\define internal fastcc void @sx_retain(ptr %data, i64 %offset) {
     \\entry:
-    \\  %header = getelementptr i8, ptr %data, i64 -8
-    \\  %old = load i64, ptr %header
-    \\  %next = add i64 %old, 1
-    \\  store i64 %next, ptr %header
+    \\  %counter = getelementptr i8, ptr %data, i64 %offset
+    \\  %old = atomicrmw add ptr %counter, i64 1 monotonic
     \\  ret void
     \\}
     \\
-    \\define internal fastcc void @sx_drop(ptr %data) {
+    \\define internal fastcc void @sx_drop(ptr %data, i64 %offset) {
     \\entry:
-    \\  %header = getelementptr i8, ptr %data, i64 -8
-    \\  %old = load i64, ptr %header
+    \\  %counter = getelementptr i8, ptr %data, i64 %offset
+    \\  %old = atomicrmw sub ptr %counter, i64 1 acq_rel
     \\  %next = sub i64 %old, 1
-    \\  store i64 %next, ptr %header
-    \\  %last = icmp eq i64 %next, 0
-    \\  br i1 %last, label %release, label %done
+    \\  %roots.address = getelementptr i8, ptr %data, i64 -24
+    \\  %roots = load atomic i64, ptr %roots.address acquire, align 8
+    \\  %edges.address = getelementptr i8, ptr %data, i64 -16
+    \\  %edges = load atomic i64, ptr %edges.address acquire, align 8
+    \\  %no.roots = icmp eq i64 %roots, 0
+    \\  %no.edges = icmp eq i64 %edges, 0
+    \\  %unowned = and i1 %no.roots, %no.edges
+    \\  br i1 %unowned, label %claim, label %done
+    \\claim:
+    \\  %state = getelementptr i8, ptr %data, i64 -8
+    \\  %claimed = cmpxchg ptr %state, i64 0, i64 1 acq_rel acquire
+    \\  %won = extractvalue { i64, i1 } %claimed, 1
+    \\  br i1 %won, label %release, label %done
     \\release:
+    \\  %header = getelementptr i8, ptr %data, i64 -24
     \\  call void @free(ptr %header)
     \\  %live = atomicrmw sub ptr @sx.live, i64 1 acq_rel
     \\  br label %done
@@ -136,25 +153,25 @@ pub const text =
     \\  ret void
     \\}
     \\
-    \\define internal fastcc void @sx_string_retain(ptr %descriptor) {
+    \\define internal fastcc void @sx_string_retain(ptr %descriptor, i64 %offset) {
     \\entry:
     \\  %tagged = load i64, ptr %descriptor
     \\  %dynamic = icmp slt i64 %tagged, 0
     \\  br i1 %dynamic, label %retain, label %done
     \\retain:
-    \\  call fastcc void @sx_retain(ptr %descriptor)
+    \\  call fastcc void @sx_retain(ptr %descriptor, i64 %offset)
     \\  br label %done
     \\done:
     \\  ret void
     \\}
     \\
-    \\define internal fastcc void @sx_string_drop(ptr %descriptor) {
+    \\define internal fastcc void @sx_string_drop(ptr %descriptor, i64 %offset) {
     \\entry:
     \\  %tagged = load i64, ptr %descriptor
     \\  %dynamic = icmp slt i64 %tagged, 0
     \\  br i1 %dynamic, label %drop, label %done
     \\drop:
-    \\  call fastcc void @sx_drop(ptr %descriptor)
+    \\  call fastcc void @sx_drop(ptr %descriptor, i64 %offset)
     \\  br label %done
     \\done:
     \\  ret void

@@ -1,0 +1,18 @@
+class Owner {
+    var values:str[] = []
+
+    init() {
+        self.values = ["alpha", "beta"]
+    }
+
+    func report() {
+        print(self.values.count())
+        print(self.values[0])
+        print(self.values[1])
+    }
+}
+
+func main() {
+    var owner = Owner()
+    owner.report()
+}

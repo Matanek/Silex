@@ -799,9 +799,13 @@ const FunctionEmitter = struct {
     }
 
     fn emitStringResource(self: *FunctionEmitter, value: Ir.Instruction.ListResource, comptime operation: []const u8) Error!void {
-        if (try self.valueType(value.operand) != .str or value.ownership != .root)
+        if (try self.valueType(value.operand) != .str)
             return error.UnsupportedInstruction;
-        try self.write("  call fastcc void @{s}(ptr %v{d})\n", .{ operation, value.operand });
+        try self.write("  call fastcc void @{s}(ptr %v{d}, i64 {d})\n", .{
+            operation,
+            value.operand,
+            if (value.ownership == .root) @as(i8, -24) else -16,
+        });
     }
 
     fn emitStringCount(self: *FunctionEmitter, value: Ir.Instruction.StringCount) Error!void {
@@ -1033,11 +1037,16 @@ const FunctionEmitter = struct {
     fn emitListResource(self: *FunctionEmitter, value: Ir.Instruction.ListResource, comptime operation: []const u8) Error!void {
         const type_value = try self.valueType(value.operand);
         const collection = try self.collectionInfo(type_value);
-        if (value.ownership != .root or collection.view or !plainValue(self.program, collection.element, 0))
+        if (collection.view or collection.length != null)
             return error.UnsupportedInstruction;
+        _ = try llvmType(self.allocator, self.program, collection.element);
         const serial = self.nextTemporary();
         try self.write("  %t{d}.owned = extractvalue {s} %v{d}, 0\n", .{ serial, try llvmType(self.allocator, self.program, type_value), value.operand });
-        try self.write("  call fastcc void @{s}(ptr %t{d}.owned)\n", .{ operation, serial });
+        try self.write("  call fastcc void @{s}(ptr %t{d}.owned, i64 {d})\n", .{
+            operation,
+            serial,
+            if (value.ownership == .root) @as(i8, -24) else -16,
+        });
     }
 
     fn emitBoundsFailure(self: *FunctionEmitter, block_id: usize, serial: usize, index: Ir.ValueId, position: @TypeOf(@as(Ir.Instruction.CollectionLoad, undefined).position)) Error!void {
@@ -1565,7 +1574,7 @@ const FunctionEmitter = struct {
     fn emitListInit(self: *FunctionEmitter, value: Ir.Instruction.ListInit) Error!void {
         const type_value = try self.valueType(value.result);
         const collection = try self.collectionInfo(type_value);
-        if (!plainValue(self.program, collection.element, 0)) return error.UnsupportedType;
+        if (collection.view or collection.length != null) return error.UnsupportedType;
         const element_name = try llvmType(self.allocator, self.program, collection.element);
         const type_name = try llvmType(self.allocator, self.program, type_value);
         const serial = self.nextTemporary();
@@ -1632,7 +1641,7 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.appended = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.old.count\n", .{ serial, element_name, serial, serial });
             try self.write("  store {s} %v{d}, ptr %t{d}.appended\n", .{ element_name, operand, serial });
         }
-        try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data)\n", .{serial});
+        try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 -24)\n", .{serial});
         try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial });
         try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{ value.result, type_name, serial, serial });
     }
@@ -1747,7 +1756,7 @@ const FunctionEmitter = struct {
             );
             // collection_replace transfers the consumed owning root to its result.
             // Cloning the payload must release that root, including when it was shared.
-            try self.write("  call fastcc void @sx_drop(ptr %t{d}.data)\n", .{serial});
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.data, i64 -24)\n", .{serial});
         }
         try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.{s}, i64 %t{d}.index\n", .{
             serial,
