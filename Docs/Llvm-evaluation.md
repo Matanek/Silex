@@ -84,6 +84,9 @@ cases, unsupported source forms, cache reuse/repair, and native/LLVM/native runs
 Numeric operations, branches, calls, plain aggregates, scalar/aggregate references,
 plain-value collections, resource-free optionals, and immutable string literals
 cover the selected corpus.
+Enumerations whose variants have neither payload nor raw value use an internal
+integer tag; construction, variant tests and equality are covered. Payload and raw
+enumerations remain explicit refusals.
 Optional construction, extraction, copies, parameters, results, local storage and
 equality use the explicit presence tag; equality ignores the payload when both
 values are absent. Floating operations have no fast-math permissions, and machine

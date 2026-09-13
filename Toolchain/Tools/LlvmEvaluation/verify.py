@@ -62,6 +62,7 @@ def main():
         "LlvmEvaluation/ClassOwnership.sx": "7\n-1\n",
         "LlvmEvaluation/ClassFieldStore.sx": "7\nfalse\n41\ntrue\n",
         "LlvmEvaluation/FunctionAddress.sx": "true\ntrue\n",
+        "LlvmEvaluation/PlainEnum.sx": "true\ntrue\n2\n3\n",
         "LlvmEvaluation/StringLiterals.sx": "0\nSilex\n3\ntrue\nfalse\nA\0B\n",
     }
     for relative, expected_stdout in cases.items():
@@ -94,7 +95,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/StringLiterals.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/StringLiterals.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -138,7 +139,7 @@ def main():
     ])
     assert canonicalized["returncode"] != 0, canonicalized
     assert "DefinitionDoesNotDominateUse" not in canonicalized["stderr"], canonicalized
-    assert "enum_test" in canonicalized["stderr"], canonicalized
+    assert "enum_payload" in canonicalized["stderr"], canonicalized
     assert target.read_bytes() == b"existing output must survive later refusal"
     inventory = json.loads(boundary_report.read_text())
     assert inventory["reachable_direct_boundary_functions"] == 0, inventory
@@ -236,6 +237,12 @@ def main():
     assert "ptrtoint ptr" in function_llvm, function_llvm
     print("CAPTURE-FREE FUNCTION ADDRESS EMISSION PASS", flush=True)
 
+    enum_metadata = json.loads(Path(str(output/"PlainEnum-O0")+".json").read_text())
+    enum_llvm = (Path(enum_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert "icmp eq i64" in enum_llvm, enum_llvm
+    assert "icmp ne i64" in enum_llvm, enum_llvm
+    print("PAYLOAD-FREE ENUM EMISSION PASS", flush=True)
+
     string_metadata = json.loads(Path(str(output/"StringLiterals-O0")+".json").read_text())
     string_llvm = (Path(string_metadata["artifact_directory"])/"raw.ll").read_text()
     for fragment in [
@@ -253,7 +260,7 @@ def main():
     print("STATIC STRING DESCRIPTOR AND LIFETIME EMISSION PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
-    for name in ["RefuseDynamicString", "RefuseCallback", "RefuseClassFinalizer"]:
+    for name in ["RefuseDynamicString", "RefuseCallback", "RefuseClassFinalizer", "RefuseEnumPayload"]:
         source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
         native = output/(name+"-native")
         assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
@@ -265,6 +272,8 @@ def main():
             assert "class_drop" in rejected["stderr"], rejected
         if name == "RefuseDynamicString":
             assert "string_concat" in rejected["stderr"], rejected
+        if name == "RefuseEnumPayload":
+            assert "enum_payload" in rejected["stderr"], rejected
         assert target.read_bytes() == b"existing output must survive refusal"
         print(name, "REFUSED before output", flush=True)
 

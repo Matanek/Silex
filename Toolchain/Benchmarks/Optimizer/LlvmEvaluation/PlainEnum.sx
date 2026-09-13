@@ -1,0 +1,22 @@
+enum Phase {
+    initialize
+    update
+    render
+}
+
+func score(phase:Phase) int {
+    return match phase {
+        initialize => 1
+        update => 2
+        render => 3
+    }
+}
+
+func main() {
+    let first = Phase.initialize
+    let second = Phase.update
+    print(first == Phase.initialize)
+    print(first != second)
+    print(score(second))
+    print(score(Phase.render))
+}

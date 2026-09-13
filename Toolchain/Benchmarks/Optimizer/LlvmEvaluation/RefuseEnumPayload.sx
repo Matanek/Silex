@@ -1,0 +1,9 @@
+enum Outcome {
+    success(int)
+    failure
+}
+
+func main() {
+    let result = Outcome.success(7)
+    print(match result { success(value) => value; failure => -1 })
+}

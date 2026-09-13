@@ -140,6 +140,7 @@ pub fn emitWithBoundaries(
     // attribution even when the composed program also contains types outside
     // the prototype.
     for (program.structures, 0..) |structure, structure_index| {
+        if (enumIndexForStructure(program, structure_index) != null) continue;
         if (structure.collection != null) {
             try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
             continue;
@@ -613,6 +614,8 @@ const FunctionEmitter = struct {
             .string_retain => |value| try self.emitStringResource(value, "sx_string_retain"),
             .string_drop => |value| try self.emitStringResource(value, "sx_string_drop"),
             .structure_init => |value| try self.emitStructureInit(value),
+            .enum_init => |value| try self.emitEnumInit(value),
+            .enum_test => |value| try self.emitEnumTest(value),
             .list_init => |value| try self.emitListInit(value),
             .list_retain => |value| try self.emitListResource(value, "sx_retain"),
             .list_drop => |value| try self.emitListResource(value, "sx_drop"),
@@ -765,6 +768,28 @@ const FunctionEmitter = struct {
             value.function,
             value.function,
         });
+    }
+
+    fn emitEnumInit(self: *FunctionEmitter, value: Ir.Instruction.EnumInit) Error!void {
+        if (!plainTagEnum(self.program, value.enumeration) or
+            value.variant >= self.program.enums[value.enumeration].variants.len or
+            value.values.len != 0 or
+            try self.valueType(value.result) != Ir.Type.structure(self.program.enums[value.enumeration].type_index))
+        {
+            return error.UnsupportedType;
+        }
+        try self.write("  %v{d} = add i64 0, {d}\n", .{ value.result, value.variant });
+    }
+
+    fn emitEnumTest(self: *FunctionEmitter, value: Ir.Instruction.EnumTest) Error!void {
+        if (!plainTagEnum(self.program, value.enumeration) or
+            value.variant >= self.program.enums[value.enumeration].variants.len or
+            try self.valueType(value.operand) != Ir.Type.structure(self.program.enums[value.enumeration].type_index) or
+            try self.valueType(value.result) != .bool)
+        {
+            return error.UnsupportedType;
+        }
+        try self.write("  %v{d} = icmp eq i64 %v{d}, {d}\n", .{ value.result, value.operand, value.variant });
     }
 
     fn emitOptionalNull(self: *FunctionEmitter, value: Ir.Instruction.OptionalNull) Error!void {
@@ -1338,6 +1363,16 @@ const FunctionEmitter = struct {
             if (value.operator == .equal)
                 return self.write("  %v{d} = xor i1 %t{d}.string.equal, false\n", .{ value.result, serial });
             return self.write("  %v{d} = xor i1 %t{d}.string.equal, true\n", .{ value.result, serial });
+        }
+        if (plainTagEnumType(self.program, left_type)) {
+            if (value.operator != .equal and value.operator != .not_equal)
+                return error.UnsupportedInstruction;
+            return self.write("  %v{d} = icmp {s} i64 %v{d}, %v{d}\n", .{
+                value.result,
+                if (value.operator == .equal) "eq" else "ne",
+                value.left,
+                value.right,
+            });
         }
         const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
@@ -1924,6 +1959,29 @@ fn pointerRepresentation(program: Ir.Program, type_value: Ir.Type) bool {
         type_value.functionIndex() != null or classType(program, type_value);
 }
 
+fn enumIndexForStructure(program: Ir.Program, structure_index: usize) ?usize {
+    for (program.enums, 0..) |enumeration, index| {
+        if (enumeration.type_index == structure_index) return index;
+    }
+    return null;
+}
+
+fn plainTagEnum(program: Ir.Program, enumeration_index: usize) bool {
+    if (enumeration_index >= program.enums.len) return false;
+    const enumeration = program.enums[enumeration_index];
+    if (enumeration.raw_type != null) return false;
+    for (enumeration.variants) |variant| {
+        if (variant.associated_types.len != 0 or variant.raw_value != null) return false;
+    }
+    return true;
+}
+
+fn plainTagEnumType(program: Ir.Program, type_value: Ir.Type) bool {
+    const structure_index = type_value.structureIndex() orelse return false;
+    const enumeration_index = enumIndexForStructure(program, structure_index) orelse return false;
+    return plainTagEnum(program, enumeration_index);
+}
+
 fn plainClassStorage(program: Ir.Program, structure_index: usize) bool {
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
@@ -1957,6 +2015,10 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
     }
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;
+        if (enumIndexForStructure(program, structure_index)) |enumeration_index| {
+            if (!plainTagEnum(program, enumeration_index)) return error.UnsupportedType;
+            return "i64";
+        }
         if (program.structures[structure_index].is_class) return "ptr";
         if (program.structures[structure_index].is_static or program.structures[structure_index].is_protocol)
             return error.UnsupportedType;
