@@ -139,7 +139,7 @@ pub fn emitWithBoundaries(
         if (!reachable[function_id]) continue;
         lowered_functions[function_id] = try @import("../OptimizerOracle/LlvmValues.zig").lower(allocator, function);
     }
-    try emitStringLiterals(&output, allocator, lowered_functions);
+    try emitStringLiterals(&output, allocator, program, lowered_functions);
     // Normalize the whole reachable value graph before declaring aggregate
     // layouts. Unsupported instructions therefore keep their precise
     // attribution even when the composed program also contains types outside
@@ -147,6 +147,15 @@ pub fn emitWithBoundaries(
     for (program.structures, 0..) |structure, structure_index| {
         if (enumIndexForStructure(program, structure_index)) |enumeration_index| {
             if (plainTagEnum(program, enumeration_index)) continue;
+            if (try rawEnumType(program, enumeration_index)) |raw_type| {
+                try appendFmt(
+                    &output,
+                    allocator,
+                    "%sx.enum.{d} = type {{ i64, {s} }}\n",
+                    .{ enumeration_index, try llvmType(allocator, program, raw_type) },
+                );
+                continue;
+            }
             const payload_slots = enumPayloadStorageSlots(program, enumeration_index, 0) catch |err| switch (err) {
                 error.UnsupportedType => continue,
                 else => return err,
@@ -635,6 +644,7 @@ const FunctionEmitter = struct {
             .enum_init => |value| try self.emitEnumInit(value),
             .enum_test => |value| try self.emitEnumTest(value),
             .enum_payload => |value| try self.emitEnumPayload(value),
+            .enum_raw => |value| try self.emitEnumRaw(value),
             .list_init => |value| try self.emitListInit(value),
             .list_retain => |value| try self.emitListResource(value, "sx_retain"),
             .list_drop => |value| try self.emitListResource(value, "sx_drop"),
@@ -1029,6 +1039,27 @@ const FunctionEmitter = struct {
             if (value.values.len != 0) return error.InvalidProgram;
             return self.write("  %v{d} = add i64 0, {d}\n", .{ value.result, value.variant });
         }
+        if (try rawEnumType(self.program, value.enumeration)) |raw_type| {
+            if (value.values.len != 0) return error.InvalidProgram;
+            const raw_value = variant.raw_value orelse return error.InvalidProgram;
+            const serial = self.nextTemporary();
+            const type_name = try llvmType(self.allocator, self.program, try self.valueType(value.result));
+            try self.write("  %t{d}.enum.tagged = insertvalue {s} poison, i64 {d}, 0\n", .{ serial, type_name, value.variant });
+            switch (raw_value) {
+                .integer => |integer| {
+                    if (raw_type != .int) return error.InvalidProgram;
+                    return self.write("  %v{d} = insertvalue {s} %t{d}.enum.tagged, i64 {d}, 1\n", .{ value.result, type_name, serial, integer });
+                },
+                .string => |string| {
+                    if (raw_type != .str) return error.InvalidProgram;
+                    try self.write(
+                        "  %t{d}.enum.raw = getelementptr {{ i64, [{d} x i8] }}, ptr @sx.enum.raw.{d}.{d}, i32 0, i32 0\n",
+                        .{ serial, string.len, value.enumeration, value.variant },
+                    );
+                    return self.write("  %v{d} = insertvalue {s} %t{d}.enum.tagged, ptr %t{d}.enum.raw, 1\n", .{ value.result, type_name, serial, serial });
+                },
+            }
+        }
         _ = try enumPayloadStorageSlots(self.program, value.enumeration, 0);
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, try self.valueType(value.result));
@@ -1065,7 +1096,8 @@ const FunctionEmitter = struct {
         }
         if (plainTagEnum(self.program, value.enumeration))
             return self.write("  %v{d} = icmp eq i64 %v{d}, {d}\n", .{ value.result, value.operand, value.variant });
-        _ = try enumPayloadStorageSlots(self.program, value.enumeration, 0);
+        if ((try rawEnumType(self.program, value.enumeration)) == null)
+            _ = try enumPayloadStorageSlots(self.program, value.enumeration, 0);
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
         try self.write("  %t{d}.enum.tag = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.operand });
@@ -1093,6 +1125,17 @@ const FunctionEmitter = struct {
         try self.write("  store {s} %v{d}, ptr %t{d}.enum\n", .{ enum_type, value.operand, serial });
         try self.write("  %t{d}.enum.payload = getelementptr i8, ptr %t{d}.enum, i64 {d}\n", .{ serial, serial, offset });
         try self.write("  %v{d} = load {s}, ptr %t{d}.enum.payload\n", .{ value.result, payload_type, serial });
+    }
+
+    fn emitEnumRaw(self: *FunctionEmitter, value: Ir.Instruction.EnumRaw) Error!void {
+        if (value.enumeration >= self.program.enums.len) return error.InvalidProgram;
+        const enumeration = self.program.enums[value.enumeration];
+        const raw_type = (try rawEnumType(self.program, value.enumeration)) orelse return error.InvalidProgram;
+        if (try self.valueType(value.operand) != Ir.Type.structure(enumeration.type_index) or
+            try self.valueType(value.result) != raw_type)
+            return error.InvalidProgram;
+        const enum_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
+        try self.write("  %v{d} = extractvalue {s} %v{d}, 1\n", .{ value.result, enum_type, value.operand });
     }
 
     fn emitOptionalNull(self: *FunctionEmitter, value: Ir.Instruction.OptionalNull) Error!void {
@@ -1757,6 +1800,24 @@ const FunctionEmitter = struct {
                 value.right,
             });
         }
+        if (left_type.structureIndex()) |structure_index| {
+            if (enumIndexForStructure(self.program, structure_index)) |enumeration_index| {
+                if ((try rawEnumType(self.program, enumeration_index)) != null) {
+                    if (value.operator != .equal and value.operator != .not_equal)
+                        return error.UnsupportedInstruction;
+                    const serial = self.nextTemporary();
+                    const type_name = try llvmType(self.allocator, self.program, left_type);
+                    try self.write("  %t{d}.enum.left.tag = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.left });
+                    try self.write("  %t{d}.enum.right.tag = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.right });
+                    return self.write("  %v{d} = icmp {s} i64 %t{d}.enum.left.tag, %t{d}.enum.right.tag\n", .{
+                        value.result,
+                        if (value.operator == .equal) "eq" else "ne",
+                        serial,
+                        serial,
+                    });
+                }
+            }
+        }
         const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
             .add, .subtract, .multiply => {
@@ -2365,6 +2426,22 @@ fn plainTagEnumType(program: Ir.Program, type_value: Ir.Type) bool {
     return plainTagEnum(program, enumeration_index);
 }
 
+fn rawEnumType(program: Ir.Program, enumeration_index: usize) Error!?Ir.Type {
+    if (enumeration_index >= program.enums.len) return error.InvalidProgram;
+    const enumeration = program.enums[enumeration_index];
+    const raw_type = enumeration.raw_type orelse return null;
+    if (raw_type != .int and raw_type != .str) return error.InvalidProgram;
+    for (enumeration.variants) |variant| {
+        if (variant.associated_types.len != 0) return error.InvalidProgram;
+        const raw_value = variant.raw_value orelse return error.InvalidProgram;
+        switch (raw_value) {
+            .integer => if (raw_type != .int) return error.InvalidProgram,
+            .string => if (raw_type != .str) return error.InvalidProgram,
+        }
+    }
+    return raw_type;
+}
+
 fn enumPayloadStorageSlots(program: Ir.Program, enumeration_index: usize, depth: usize) Error!usize {
     if (enumeration_index >= program.enums.len) return error.InvalidProgram;
     if (depth >= program.structures.len + program.enums.len + 8) return error.UnsupportedType;
@@ -2458,6 +2535,8 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
         if (structure_index >= program.structures.len) return error.InvalidProgram;
         if (enumIndexForStructure(program, structure_index)) |enumeration_index| {
             if (plainTagEnum(program, enumeration_index)) return "i64";
+            if ((try rawEnumType(program, enumeration_index)) != null)
+                return std.fmt.allocPrint(allocator, "%sx.enum.{d}", .{enumeration_index});
             _ = try enumPayloadStorageSlots(program, enumeration_index, 0);
             return std.fmt.allocPrint(allocator, "%sx.enum.{d}", .{enumeration_index});
         }
@@ -2519,9 +2598,36 @@ fn emitSourceFiles(output: *std.ArrayList(u8), allocator: Allocator, program: Ir
 fn emitStringLiterals(
     output: *std.ArrayList(u8),
     allocator: Allocator,
+    program: Ir.Program,
     functions: []const ?Ir.Function,
 ) Error!void {
     var emitted = false;
+    for (program.enums, 0..) |enumeration, enumeration_index| {
+        if (enumeration.raw_type != .str) continue;
+        for (enumeration.variants, 0..) |variant, variant_index| {
+            const raw_value = variant.raw_value orelse return error.InvalidProgram;
+            const value = switch (raw_value) {
+                .string => |string| string,
+                .integer => return error.InvalidProgram,
+            };
+            try appendFmt(output, allocator, "@sx.enum.raw.{d}.{d} = private constant {{ i64, [{d} x i8] }} {{ i64 {d}, [{d} x i8] ", .{
+                enumeration_index,
+                variant_index,
+                value.len,
+                value.len,
+                value.len,
+            });
+            if (value.len == 0) {
+                try output.appendSlice(allocator, "zeroinitializer");
+            } else {
+                try output.appendSlice(allocator, "c\"");
+                try appendEscapedBytes(output, allocator, value);
+                try output.append(allocator, '"');
+            }
+            try output.appendSlice(allocator, " }\n");
+            emitted = true;
+        }
+    }
     for (functions, 0..) |maybe_function, function_id| {
         const function = maybe_function orelse continue;
         for (function.blocks, 0..) |block, block_id| for (block.instructions, 0..) |instruction, instruction_index| switch (instruction) {

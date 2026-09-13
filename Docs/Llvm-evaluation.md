@@ -96,8 +96,11 @@ tag followed by an aligned word reserve sized for the widest variant from the
 LLVM representation of its payloads. Construction zeroes the reserve before
 storing the selected values; variant tests read the tag and payload extraction
 loads the requested typed region. Copies remain value copies: ownership retains
-and drops stay explicit in the composed Silex IR. Payload enum equality and raw
-enumerations remain explicit refusals.
+and drops stay explicit in the composed Silex IR. Raw enumerations with `int` or
+`str` backing use a two-field representation containing the stable variant tag
+and the declared raw value. Raw projection reads the second field; matching and
+equality compare the tag, while string raw values point to private static
+descriptors. Equality for associated-value enums remains an explicit refusal.
 Optional construction, extraction, copies, parameters, results, local storage and
 equality use the explicit presence tag; equality ignores the payload when both
 values are absent. Floating operations have no fast-math permissions, and machine

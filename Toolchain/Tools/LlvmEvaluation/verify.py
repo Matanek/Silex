@@ -85,6 +85,7 @@ def main():
         ),
         "LlvmEvaluation/CollectionSlice.sx": "3\n20\n40\n360\n420\ntrue\n",
         "LlvmEvaluation/StringFromBytes.sx": "4\n3\n195\ntrue\né\0A\ntrue\n",
+        "LlvmEvaluation/RawEnum.sx": "-7\n42\ntrue\ntrue\ntrue\né\0A\ntrue\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -116,7 +117,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -407,8 +408,22 @@ def main():
         assert fragment in from_bytes_llvm, fragment
     print("OWNED STRING FROM BYTE VIEW PASS", flush=True)
 
+    raw_enum_metadata = json.loads(Path(str(output/"RawEnum-O0")+".json").read_text())
+    raw_enum_llvm = (Path(raw_enum_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "= type { i64, i64 }",
+        "= type { i64, ptr }",
+        "@sx.enum.raw.",
+        ".enum.tagged = insertvalue",
+        "extractvalue %sx.enum.",
+        ".enum.left.tag = extractvalue",
+        ".enum.right.tag = extractvalue",
+    ]:
+        assert fragment in raw_enum_llvm, fragment
+    print("INTEGER AND STRING RAW ENUM PASS", flush=True)
+
     # The ordinary compiler must accept each refusal witness first.
-    for name in ["RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:
+    for name in ["RefuseCallback", "RefuseClassFinalizer"]:
         source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
         native = output/(name+"-native")
         assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
@@ -418,8 +433,6 @@ def main():
         assert rejected["returncode"] != 0 and "Unsupported" in rejected["stderr"], rejected
         if name == "RefuseClassFinalizer":
             assert "class_drop" in rejected["stderr"], rejected
-        if name == "RefuseRawEnum":
-            assert "enum_raw" in rejected["stderr"], rejected
         assert target.read_bytes() == b"existing output must survive refusal"
         print(name, "REFUSED before output", flush=True)
 

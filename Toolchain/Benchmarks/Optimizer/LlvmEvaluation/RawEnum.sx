@@ -1,0 +1,20 @@
+enum Code:int {
+    first = -7
+    second = 42
+}
+
+enum Label:str {
+    packed = "é\0A"
+    empty = ""
+}
+
+func main() {
+    let selected = Code.first
+    print(selected.raw_value)
+    print(Code.second.raw_value)
+    print(selected == Code.first)
+    print(selected != Code.second)
+    print(Label.packed.raw_value == "é\0A")
+    print(Label.packed.raw_value)
+    print(Label.empty.raw_value == "")
+}
