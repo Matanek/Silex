@@ -1,0 +1,12 @@
+func main() {
+    var values:int[] = [10, 30]
+    let snapshot = values
+    values.insert(0, 5)
+    values.insert(2, 20)
+    values.insert(-1, 25)
+    values.insert(values.count(), 40)
+    print(values.count())
+    for value in values { print(value) }
+    print(snapshot.count())
+    for value in snapshot { print(value) }
+}

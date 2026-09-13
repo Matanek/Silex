@@ -1686,13 +1686,16 @@ const FunctionEmitter = struct {
         );
         if (value.ownership != .root or collection.view or collection.length != null or
             try self.valueType(value.result) != type_value or
-            value.index != null or value.removed != null)
+            value.removed != null)
             return error.UnsupportedInstruction;
         const argument = switch (value.kind) {
             .clear => if (value.argument == null) null else return error.InvalidProgram,
-            .append => value.argument orelse return error.InvalidProgram,
+            .append, .insert => value.argument orelse return error.InvalidProgram,
             else => return error.UnsupportedInstruction,
         };
+        if (value.kind == .insert) {
+            if (value.index == null or try self.valueType(value.index.?) != .int) return error.InvalidProgram;
+        } else if (value.index != null) return error.InvalidProgram;
         if (argument) |operand| {
             if (try self.valueType(operand) != collection.element) return error.InvalidProgram;
         }
@@ -1703,6 +1706,36 @@ const FunctionEmitter = struct {
         const element_name = try llvmType(self.allocator, self.program, collection.element);
         try self.write("  %t{d}.old.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
         try self.write("  %t{d}.old.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
+        if (value.kind == .insert) {
+            const index = value.index.?;
+            try self.write("  %t{d}.index.negative = icmp slt i64 %v{d}, 0\n", .{ serial, index });
+            try self.write("  %t{d}.index.wrapped = add i64 %t{d}.old.count, %v{d}\n", .{ serial, serial, index });
+            try self.write("  %t{d}.index = select i1 %t{d}.index.negative, i64 %t{d}.index.wrapped, i64 %v{d}\n", .{
+                serial,
+                serial,
+                serial,
+                index,
+            });
+            try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
+            try self.write("  %t{d}.index.high = icmp sgt i64 %t{d}.index, %t{d}.old.count\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
+            try self.write("  br i1 %t{d}.index.invalid, label %b{d}.insert.fail{d}, label %b{d}.insert.cont{d}\n", .{
+                serial,
+                block_id,
+                serial,
+                block_id,
+                serial,
+            });
+            try self.write("b{d}.insert.fail{d}:\n", .{ block_id, serial });
+            try self.write("  call fastcc void @sx_bounds(ptr @sx.file.{d}, i64 {d}, i64 {d}, i64 %v{d}, i64 %t{d}.old.count)\n", .{
+                value.position.file,
+                value.position.line,
+                value.position.column,
+                index,
+                serial,
+            });
+            try self.write("  unreachable\nb{d}.insert.cont{d}:\n", .{ block_id, serial });
+        }
         if (argument != null) {
             try self.write("  %t{d}.count.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.old.count, i64 1)\n", .{ serial, serial });
             try self.write("  %t{d}.count = extractvalue {{ i64, i1 }} %t{d}.count.checked, 0\n", .{ serial, serial });
@@ -1714,14 +1747,30 @@ const FunctionEmitter = struct {
         }
         try self.emitCollectionBytes(serial, collection.element);
         try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
-        if (argument) |operand| {
+        if (argument) |operand| if (value.kind == .append) {
             try self.write("  %t{d}.old.end = getelementptr {s}, ptr null, i64 %t{d}.old.count\n", .{ serial, element_name, serial });
             try self.write("  %t{d}.old.bytes = ptrtoint ptr %t{d}.old.end to i64\n", .{ serial, serial });
             try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.old.bytes, i1 false)\n", .{ serial, serial, serial });
             try self.write("  %t{d}.appended = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.old.count\n", .{ serial, element_name, serial, serial });
             try self.write("  store {s} %v{d}, ptr %t{d}.appended\n", .{ element_name, operand, serial });
-        }
-        try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 -24)\n", .{serial});
+        } else {
+            try self.write("  %t{d}.prefix.end = getelementptr {s}, ptr null, i64 %t{d}.index\n", .{ serial, element_name, serial });
+            try self.write("  %t{d}.prefix.bytes = ptrtoint ptr %t{d}.prefix.end to i64\n", .{ serial, serial });
+            try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.prefix.bytes, i1 false)\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.inserted = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.index\n", .{ serial, element_name, serial, serial });
+            try self.write("  store {s} %v{d}, ptr %t{d}.inserted\n", .{ element_name, operand, serial });
+            try self.write("  %t{d}.tail.count = sub i64 %t{d}.old.count, %t{d}.index\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.tail.end = getelementptr {s}, ptr null, i64 %t{d}.tail.count\n", .{ serial, element_name, serial });
+            try self.write("  %t{d}.tail.bytes = ptrtoint ptr %t{d}.tail.end to i64\n", .{ serial, serial });
+            try self.write("  %t{d}.tail.source = getelementptr {s}, ptr %t{d}.old.data, i64 %t{d}.index\n", .{ serial, element_name, serial, serial });
+            try self.write("  %t{d}.tail.index = add i64 %t{d}.index, 1\n", .{ serial, serial });
+            try self.write("  %t{d}.tail.destination = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.tail.index\n", .{ serial, element_name, serial, serial });
+            try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.tail.destination, ptr %t{d}.tail.source, i64 %t{d}.tail.bytes, i1 false)\n", .{ serial, serial, serial });
+        };
+        // The semantic IR emits the source list_drop for indexed edits. Append
+        // and clear delegate that source release to the list runtime itself.
+        if (value.kind == .append or value.kind == .clear)
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 -24)\n", .{serial});
         try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial });
         try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{ value.result, type_name, serial, serial });
     }

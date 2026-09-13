@@ -1,0 +1,6 @@
+func main() {
+    var values:int[] = [10]
+    print(7)
+    values.insert(2, 20)
+    print(8)
+}

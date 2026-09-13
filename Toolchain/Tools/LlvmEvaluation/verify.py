@@ -64,6 +64,8 @@ def main():
         "LlvmEvaluation/FloatToIntegerBounds.sx": "7\n",
         "LlvmEvaluation/MixedIntegerShifts.sx": "48\n15\n40\n",
         "LlvmEvaluation/RichListAppendClear.sx": "3\nalpha\ngamma\n0\n2\nalpha\nbeta\n",
+        "LlvmEvaluation/ListInsert.sx": "6\n5\n10\n20\n25\n30\n40\n2\n10\n30\n",
+        "LlvmEvaluation/ListInsertBounds.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -121,7 +123,7 @@ def main():
             assert run["returncode"] == (1 if source.stem in [
                 "Overflow", "Bounds", "NegativeBounds", "DivisionByZero", "Conversion",
                 "FloatToIntegerFraction", "FloatToIntegerNaN", "FloatToIntegerInfinity",
-                "FloatToIntegerBounds",
+                "FloatToIntegerBounds", "ListInsertBounds",
             ] else 0), run
             if expected is None:
                 expected = observable
@@ -643,6 +645,26 @@ def main():
     ]:
         assert fragment in rich_list_llvm, fragment
     print("RICH MATERIAL LIST APPEND AND CLEAR PASS", flush=True)
+
+    list_insert_metadata = json.loads(Path(str(output/"ListInsert-O0")+".json").read_text())
+    list_insert_llvm = (Path(list_insert_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".index.high = icmp sgt i64",
+        ".prefix.bytes = ptrtoint ptr",
+        ".inserted = getelementptr i64",
+        ".tail.count = sub i64",
+        ".tail.destination = getelementptr i64",
+        "call fastcc void @sx_bounds",
+    ]:
+        assert fragment in list_insert_llvm, fragment
+    print("OWNING LIST INSERTION PASS", flush=True)
+    frozen_insert_interpreter = call(
+        "interpreter-ListInsert-end-position",
+        [args.native, "interpret", corpus/"LlvmEvaluation/ListInsert.sx", "--nocache"],
+    )
+    assert frozen_insert_interpreter["returncode"] == 1, frozen_insert_interpreter
+    assert "collection index 5 is out of bounds for count 5" in frozen_insert_interpreter["stderr"], frozen_insert_interpreter
+    print("FROZEN INTERPRETER INSERT-END DISCREPANCY RECORDED", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:
