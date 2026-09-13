@@ -39,6 +39,10 @@ def main():
         return record
 
     def llvm_command(path, mode, binary, silex_prefix="none"):
+        # Exercise merged address/offset values introduced by the full Silex
+        # prefix, as encountered in the optimized Boids package closure.
+        if path.stem == "MergedRawMemory":
+            silex_prefix = "branch_snapshot_sinking"
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
                 "--shadercross", args.shadercross,
@@ -47,6 +51,7 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/MergedRawMemory.sx": "1\n2\n3\n4\n9\n9\n9\n9\n",
         "LlvmEvaluation/Rounding.sx": "true\n",
         "Regressions/BoundedCollectionLoop.sx": "1056000000\n2\n",
         "ReferenceAliasing.sx": "38\n29\n",

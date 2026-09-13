@@ -50,6 +50,11 @@ existing executable.
 selects the cumulative prefix ending at that pass. This is an attribution control
 for determining which Silex canonicalizations remain necessary before LLVM; it is
 not a public optimizer switch or permission to enable the full Release pipeline.
+The full prefix is also an explicit diagnostic comparison for Boids and Physics.
+Virtual-register normalization reloads raw-memory addresses and byte offsets
+after control-flow merges, including loop-carried values produced by the Silex
+passes. `MergedRawMemory.sx` exercises both operands through loads and stores
+with the full prefix in LLVM O0 and O3.
 The adapter also accepts the analysis-only option `--closure-report REPORT.json`
 after `--silex-prefix` (`--boundary-report` remains a compatibility alias). Once
 the closed program verifies, it records direct package boundaries and global

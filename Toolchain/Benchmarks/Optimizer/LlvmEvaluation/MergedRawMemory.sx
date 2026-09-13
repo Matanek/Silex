@@ -1,0 +1,18 @@
+use Interop.C
+
+func main() {
+    var storage:uint = 0
+    let base = C.address_bits(C.mutable_pointer(storage))
+    var offset:uint = 0
+    while offset < 4 {
+        C.store<uint8>(base, offset, (offset + 1) as uint8)
+        print(C.load<uint8>(base, offset))
+        offset++
+    }
+    var address = base
+    while address < base + 4 {
+        C.store<uint8>(address, 0 as uint, 9 as uint8)
+        print(C.load<uint8>(address, 0 as uint))
+        address++
+    }
+}
