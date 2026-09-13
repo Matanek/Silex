@@ -209,3 +209,20 @@ Direct floating-point `print` uses the same native formatter as interpolation,
 including float32/float64, signed zero, infinities and NaN. It writes the scratch
 buffer directly, without allocating a temporary owning string. This preserves
 the ordinary Physics kernel's field-by-field diagnostic output.
+
+## Scalar minimum and maximum
+
+The `minimum`/`maximum` operations in Silex IR lower to LLVM 21
+`llvm.minimumnum`/`llvm.maximumnum`. These intrinsics preserve signed-zero
+ordering and return the numeric input when the other input is NaN. An explicit
+selection of the original right operand when the left is NaN also preserves
+Silex's exact result bits when both inputs are NaNs. No fast-math assumption is
+added. See the [LLVM 21.1.8 semantics](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.8/llvm/docs/LangRef.rst#llvmminimumnum-intrinsic).
+
+`ScalarMinMax.sx` compares 576 results bit for bit against the source semantics:
+both operations, float32 and float64, all ordered pairs of signed zeros,
+subnormals, finite values, infinities, quiet NaNs and signaling NaNs. The LLVM
+matrix uses the full Silex prefix and checks that both widths reach the
+intrinsic lowering. This targets the cost exposed by `scalar_math_intrinsics`
+in the unchanged Physics contact kernel; enabling every Silex pass does not
+imply a speedup for an entire application.

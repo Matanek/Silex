@@ -41,7 +41,7 @@ def main():
     def llvm_command(path, mode, binary, silex_prefix="none"):
         # Exercise the full Silex prefix on merged raw operands and mutable
         # collection views used by the Boids and Physics consumers.
-        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut"]:
+        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax"]:
             silex_prefix = "branch_snapshot_sinking"
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
@@ -51,6 +51,7 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/ScalarMinMax.sx": "float32 exact\nfloat64 exact\n",
         "Regressions/DenseBlockLiveOut.sx": "42\n",
         "LlvmEvaluation/PrintFloats.sx": "1.5|-0.0|1.2345678806304932\n0.0|-0.0|inf|-inf|nan\n",
         "LlvmEvaluation/MutableOwningView.sx": "24.0\n11.0\n24.0\n1.0\n4.0\n21.0\n44.0\n0\n",
@@ -166,6 +167,15 @@ def main():
             else:
                 assert observable == expected, (source, mode, expected, observable)
             print(source.stem, mode, "PASS", flush=True)
+
+    minmax_metadata = json.loads(Path(str(output/"ScalarMinMax-O3")+".json").read_text())
+    minmax_llvm = (Path(minmax_metadata["artifact_directory"])/"raw.ll").read_text()
+    for operation in ["minimumnum", "maximumnum"]:
+        for width in ["f32", "f64"]:
+            assert "@llvm."+operation+"."+width in minmax_llvm
+    assert ".number = call float @llvm." in minmax_llvm
+    assert ".number = call double @llvm." in minmax_llvm
+    print("EXACT FLOAT MINIMUM/MAXIMUM INTRINSICS PASS", flush=True)
 
     system_metadata = json.loads(Path(str(output/"SystemBoundary-O0")+".json").read_text())
     system_llvm = (Path(system_metadata["artifact_directory"])/"raw.ll").read_text()

@@ -1,0 +1,74 @@
+use Interop.C
+use STD.Math
+
+func reference_min(left:float32, right:float32) float32 {
+    if left != left { return right }
+    if right != right { return left }
+    if left < right { return left }
+    if right < left { return right }
+    if Math.sign_bit(left) { return left }
+    return right
+}
+func reference_max(left:float32, right:float32) float32 {
+    if left != left { return right }
+    if right != right { return left }
+    if left > right { return left }
+    if right > left { return right }
+    if !Math.sign_bit(left) { return left }
+    return right
+}
+func reference_min(left:float64, right:float64) float64 {
+    if left != left { return right }
+    if right != right { return left }
+    if left < right { return left }
+    if right < left { return right }
+    if Math.sign_bit(left) { return left }
+    return right
+}
+func reference_max(left:float64, right:float64) float64 {
+    if left != left { return right }
+    if right != right { return left }
+    if left > right { return left }
+    if right > left { return right }
+    if !Math.sign_bit(left) { return left }
+    return right
+}
+func bits(value:float32) uint32 {
+    var storage = value
+    return C.load<uint32>(C.mutable_pointer(storage), 0 as uint)
+}
+func bits(value:float64) uint {
+    var storage = value
+    return C.load<uint>(C.mutable_pointer(storage), 0 as uint)
+}
+func main() {
+    let narrow:uint32[] = [0, 0x80000000, 1, 0x80000001, 0x3f800000,
+        0xbf800000, 0x7f800000, 0xff800000, 0x7fc00001, 0xffc00002,
+        0x7f800003, 0xff800004]
+    for first in narrow {
+        for second in narrow {
+            var first_bits = first
+            var second_bits = second
+            let left = C.load<float32>(C.mutable_pointer(first_bits), 0 as uint)
+            let right = C.load<float32>(C.mutable_pointer(second_bits), 0 as uint)
+            assert(bits(Math.min(left, right)) == bits(reference_min(left, right)))
+            assert(bits(Math.max(left, right)) == bits(reference_max(left, right)))
+        }
+    }
+    print("float32 exact")
+    let wide:uint[] = [0, 0x8000000000000000, 1, 0x8000000000000001,
+        0x3ff0000000000000, 0xbff0000000000000, 0x7ff0000000000000,
+        0xfff0000000000000, 0x7ff8000000000001, 0xfff8000000000002,
+        0x7ff0000000000003, 0xfff0000000000004]
+    for first in wide {
+        for second in wide {
+            var first_bits = first
+            var second_bits = second
+            let left = C.load<float64>(C.mutable_pointer(first_bits), 0 as uint)
+            let right = C.load<float64>(C.mutable_pointer(second_bits), 0 as uint)
+            assert(bits(Math.min(left, right)) == bits(reference_min(left, right)))
+            assert(bits(Math.max(left, right)) == bits(reference_max(left, right)))
+        }
+    }
+    print("float64 exact")
+}

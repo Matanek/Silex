@@ -89,6 +89,10 @@ pub fn emitWithBoundaries(
         \\declare i64 @silex_format_unsigned(i64, ptr)
         \\declare i64 @silex_format_float(i64, ptr, i64)
         \\declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+        \\declare float @llvm.minimumnum.f32(float, float)
+        \\declare double @llvm.minimumnum.f64(double, double)
+        \\declare float @llvm.maximumnum.f32(float, float)
+        \\declare double @llvm.maximumnum.f64(double, double)
         \\declare void @exit(i32) noreturn
         \\
     );
@@ -2698,47 +2702,19 @@ const FunctionEmitter = struct {
         if (!type_value.isFloat()) return error.UnsupportedInstruction;
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, type_value);
-        const integer_name = if (type_value == .float32) "i32" else "i64";
+        // minimumNumber preserves signed-zero ordering and the numeric operand
+        // for either kind of NaN. Select the original right operand when the
+        // left is NaN to preserve Silex's exact payload for two NaNs as well.
         try self.write("  %t{d}.left_nan = fcmp uno {s} %v{d}, %v{d}\n", .{
             serial, type_name, value.left, value.left,
         });
-        try self.write("  %t{d}.right_nan = fcmp uno {s} %v{d}, %v{d}\n", .{
-            serial, type_name, value.right, value.right,
+        try self.write("  %t{d}.number = call {s} @llvm.{s}.{s}({s} %v{d}, {s} %v{d})\n", .{
+            serial,                                                         type_name,
+            if (value.operator == .minimum) "minimumnum" else "maximumnum", if (type_value == .float32) "f32" else "f64",
+            type_name,                                                      value.left,
+            type_name,                                                      value.right,
         });
-        try self.write("  %t{d}.ordered = fcmp {s} {s} %v{d}, %v{d}\n", .{
-            serial,
-            if (value.operator == .minimum) "olt" else "ogt",
-            type_name,
-            value.left,
-            value.right,
-        });
-        try self.write("  %t{d}.equal = fcmp oeq {s} %v{d}, %v{d}\n", .{
-            serial, type_name, value.left, value.right,
-        });
-        try self.write("  %t{d}.left_bits = bitcast {s} %v{d} to {s}\n", .{
-            serial, type_name, value.left, integer_name,
-        });
-        try self.write("  %t{d}.left_negative = icmp slt {s} %t{d}.left_bits, 0\n", .{
-            serial, integer_name, serial,
-        });
-        try self.write("  %t{d}.equal_value = select i1 %t{d}.left_negative, {s} %v{d}, {s} %v{d}\n", .{
-            serial,
-            serial,
-            type_name,
-            if (value.operator == .minimum) value.left else value.right,
-            type_name,
-            if (value.operator == .minimum) value.right else value.left,
-        });
-        try self.write("  %t{d}.ordered_value = select i1 %t{d}.ordered, {s} %v{d}, {s} %v{d}\n", .{
-            serial, serial, type_name, value.left, type_name, value.right,
-        });
-        try self.write("  %t{d}.finite_value = select i1 %t{d}.equal, {s} %t{d}.equal_value, {s} %t{d}.ordered_value\n", .{
-            serial, serial, type_name, serial, type_name, serial,
-        });
-        try self.write("  %t{d}.right_checked = select i1 %t{d}.right_nan, {s} %v{d}, {s} %t{d}.finite_value\n", .{
-            serial, serial, type_name, value.left, type_name, serial,
-        });
-        try self.write("  %v{d} = select i1 %t{d}.left_nan, {s} %v{d}, {s} %t{d}.right_checked\n", .{
+        try self.write("  %v{d} = select i1 %t{d}.left_nan, {s} %v{d}, {s} %t{d}.number\n", .{
             value.result, serial, type_name, value.right, type_name, serial,
         });
     }
