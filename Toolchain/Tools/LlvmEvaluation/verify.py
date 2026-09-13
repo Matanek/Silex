@@ -61,6 +61,7 @@ def main():
         "LlvmEvaluation/OptionalValues.sx": "-1\n41\n-1\n",
         "LlvmEvaluation/ClassOwnership.sx": "7\n-1\n",
         "LlvmEvaluation/ClassFieldStore.sx": "7\nfalse\n41\ntrue\n",
+        "LlvmEvaluation/FunctionAddress.sx": "true\ntrue\n",
         "LlvmEvaluation/StringLiterals.sx": "0\nSilex\n3\ntrue\nfalse\nA\0B\n",
     }
     for relative, expected_stdout in cases.items():
@@ -96,6 +97,12 @@ def main():
     for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/StringLiterals.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
+
+    function_interpreted = call("interpreter-FunctionAddress-known-limit", [
+        args.native, "interpret", corpus/"LlvmEvaluation/FunctionAddress.sx", "--nocache",
+    ])
+    assert function_interpreted["returncode"] != 0, function_interpreted
+    assert "InvalidProgram" in function_interpreted["stderr"], function_interpreted
 
     dominance = (corpus/"LlvmEvaluation/CommandsDominance.sx").resolve()
     native_observable = None
@@ -222,6 +229,12 @@ def main():
     ]:
         assert fragment in class_store_llvm, fragment
     print("PLAIN CLASS FIELD STORE EMISSION PASS", flush=True)
+
+    function_metadata = json.loads(Path(str(output/"FunctionAddress-O0")+".json").read_text())
+    function_llvm = (Path(function_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert "select i1 true, ptr @sx_" in function_llvm, function_llvm
+    assert "ptrtoint ptr" in function_llvm, function_llvm
+    print("CAPTURE-FREE FUNCTION ADDRESS EMISSION PASS", flush=True)
 
     string_metadata = json.loads(Path(str(output/"StringLiterals-O0")+".json").read_text())
     string_llvm = (Path(string_metadata["artifact_directory"])/"raw.ll").read_text()

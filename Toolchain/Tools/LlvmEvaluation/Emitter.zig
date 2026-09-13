@@ -623,6 +623,7 @@ const FunctionEmitter = struct {
             .collection_replace => |value| try self.emitCollectionReplace(block_id, value),
             .collection_count => |value| try self.emitCollectionCount(value),
             .collection_view => |value| try self.emitCollectionView(block_id, value),
+            .function_reference => |value| try self.emitFunctionReference(value),
             .local_load => |value| try self.write(
                 "  %v{d} = load {s}, ptr %local{d}\n",
                 .{ value.result, try llvmType(self.allocator, self.program, try self.valueType(value.result)), value.local },
@@ -728,13 +729,41 @@ const FunctionEmitter = struct {
     }
 
     fn copyValue(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
-        const type_name = try llvmType(self.allocator, self.program, try self.valueType(result));
+        const result_type = try self.valueType(result);
+        const operand_type = try self.valueType(operand);
+        if (result_type == .uint and pointerRepresentation(self.program, operand_type))
+            return self.write("  %v{d} = ptrtoint ptr %v{d} to i64\n", .{ result, operand });
+        if (operand_type == .uint and pointerRepresentation(self.program, result_type))
+            return self.write("  %v{d} = inttoptr i64 %v{d} to ptr\n", .{ result, operand });
+        if (result_type != operand_type) return error.UnsupportedInstruction;
+        const type_name = try llvmType(self.allocator, self.program, result_type);
         try self.write("  %v{d} = select i1 true, {s} %v{d}, {s} %v{d}\n", .{
             result,
             type_name,
             operand,
             type_name,
             operand,
+        });
+    }
+
+    fn emitFunctionReference(self: *FunctionEmitter, value: Ir.Instruction.FunctionReference) Error!void {
+        if (value.function >= self.program.functions.len) return error.InvalidProgram;
+        const result_type = try self.valueType(value.result);
+        const function_type_index = result_type.functionIndex() orelse return error.InvalidProgram;
+        if (function_type_index >= self.program.function_types.len) return error.InvalidProgram;
+        const function_type = self.program.function_types[function_type_index];
+        const target = self.program.functions[value.function];
+        if (value.captures.len != target.capture_types.len or
+            !std.mem.eql(Ir.Type, function_type.parameter_types, target.parameter_types) or
+            function_type.return_type != target.return_type)
+        {
+            return error.InvalidProgram;
+        }
+        if (value.captures.len != 0) return error.UnsupportedInstruction;
+        try self.write("  %v{d} = select i1 true, ptr @sx_{d}, ptr @sx_{d}\n", .{
+            value.result,
+            value.function,
+            value.function,
         });
     }
 
@@ -1890,6 +1919,11 @@ fn classType(program: Ir.Program, type_value: Ir.Type) bool {
     return index < program.structures.len and program.structures[index].is_class;
 }
 
+fn pointerRepresentation(program: Ir.Program, type_value: Ir.Type) bool {
+    return type_value == .address or type_value == .str or
+        type_value.functionIndex() != null or classType(program, type_value);
+}
+
 fn plainClassStorage(program: Ir.Program, structure_index: usize) bool {
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
@@ -1916,6 +1950,10 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
     if (type_value.optionalChild()) |child| {
         if (!optionalPayloadType(program, child, 0)) return error.UnsupportedType;
         return std.fmt.allocPrint(allocator, "{{ i1, {s} }}", .{try llvmType(allocator, program, child)});
+    }
+    if (type_value.functionIndex()) |function_type| {
+        if (function_type >= program.function_types.len) return error.InvalidProgram;
+        return "ptr";
     }
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;

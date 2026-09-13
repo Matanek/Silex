@@ -1,0 +1,10 @@
+use Interop.C
+
+func marker(context:uint) uint { return context }
+
+func main() {
+    let first = C.function_address(marker)
+    let second = C.function_address(marker)
+    print(first != 0)
+    print(first == second)
+}
