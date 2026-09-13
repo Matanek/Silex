@@ -48,6 +48,56 @@ pub const text =
     \\  unreachable
     \\}
     \\
+    \\define internal fastcc ptr @sx_typed_class_alloc(i64 %bytes, i64 %type) {
+    \\entry:
+    \\  %size = add i64 %bytes, 16
+    \\  %wrapped = icmp ult i64 %size, %bytes
+    \\  br i1 %wrapped, label %fail, label %allocate
+    \\allocate:
+    \\  %header = call ptr @malloc(i64 %size)
+    \\  %null = icmp eq ptr %header, null
+    \\  br i1 %null, label %fail, label %ready
+    \\ready:
+    \\  store i64 0, ptr %header
+    \\  %type.address = getelementptr i8, ptr %header, i64 8
+    \\  store i64 %type, ptr %type.address
+    \\  %old = load i64, ptr @sx.live
+    \\  %next = add i64 %old, 1
+    \\  store i64 %next, ptr @sx.live
+    \\  %data = getelementptr i8, ptr %header, i64 16
+    \\  ret ptr %data
+    \\fail:
+    \\  call void @exit(i32 1)
+    \\  unreachable
+    \\}
+    \\
+    \\define internal fastcc void @sx_typed_class_retain(ptr %data) {
+    \\entry:
+    \\  %header = getelementptr i8, ptr %data, i64 -16
+    \\  %old = load i64, ptr %header
+    \\  %next = add i64 %old, 1
+    \\  store i64 %next, ptr %header
+    \\  ret void
+    \\}
+    \\
+    \\define internal fastcc void @sx_typed_class_drop(ptr %data) {
+    \\entry:
+    \\  %header = getelementptr i8, ptr %data, i64 -16
+    \\  %old = load i64, ptr %header
+    \\  %next = sub i64 %old, 1
+    \\  store i64 %next, ptr %header
+    \\  %last = icmp eq i64 %next, 0
+    \\  br i1 %last, label %release, label %done
+    \\release:
+    \\  call void @free(ptr %header)
+    \\  %live = load i64, ptr @sx.live
+    \\  %remaining = sub i64 %live, 1
+    \\  store i64 %remaining, ptr @sx.live
+    \\  br label %done
+    \\done:
+    \\  ret void
+    \\}
+    \\
     \\define internal fastcc ptr @sx_unowned_alloc(i64 %bytes) {
     \\entry:
     \\  %data = call fastcc ptr @sx_class_alloc(i64 %bytes)

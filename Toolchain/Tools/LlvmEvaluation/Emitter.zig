@@ -184,7 +184,17 @@ pub fn emitWithBoundaries(
             try output.appendSlice(allocator, " }\n");
             continue;
         }
-        if (structure.is_static or structure.is_protocol)
+        if (structure.is_protocol) {
+            const payload_slots = try protocolPayloadStorageSlots(program, structure_index, 0);
+            try appendFmt(
+                &output,
+                allocator,
+                "%sx.protocol.{d} = type {{ i64, [{d} x i64] }}\n",
+                .{ structure_index, payload_slots },
+            );
+            continue;
+        }
+        if (structure.is_static)
             return error.UnsupportedType;
         try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ", .{structure_index});
         for (structure.fields, 0..) |field, field_index| {
@@ -641,6 +651,9 @@ const FunctionEmitter = struct {
             .string_retain => |value| try self.emitStringResource(value, "sx_string_retain"),
             .string_drop => |value| try self.emitStringResource(value, "sx_string_drop"),
             .structure_init => |value| try self.emitStructureInit(value),
+            .protocol_init => |value| try self.emitProtocolInit(value),
+            .protocol_test => |value| try self.emitProtocolTest(value),
+            .protocol_extract => |value| try self.emitProtocolExtract(value),
             .enum_init => |value| try self.emitEnumInit(value),
             .enum_test => |value| try self.emitEnumTest(value),
             .enum_payload => |value| try self.emitEnumPayload(value),
@@ -1245,6 +1258,68 @@ const FunctionEmitter = struct {
         }
     }
 
+    fn emitProtocolInit(self: *FunctionEmitter, value: Ir.Instruction.ProtocolInit) Error!void {
+        if (value.structure >= self.program.structures.len or
+            try self.valueType(value.operand) != Ir.Type.structure(value.structure))
+            return error.InvalidProgram;
+        const protocol_index = (try self.valueType(value.result)).structureIndex() orelse
+            return error.InvalidProgram;
+        if (protocol_index >= self.program.structures.len or
+            !self.program.structures[protocol_index].is_protocol or
+            !irConforms(self.program, value.structure, protocol_index))
+            return error.InvalidProgram;
+        _ = try protocolPayloadStorageSlots(self.program, protocol_index, 0);
+        const serial = self.nextTemporary();
+        const protocol_type = try llvmType(self.allocator, self.program, try self.valueType(value.result));
+        const concrete_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
+        try self.write("  %t{d}.protocol = alloca {s}\n", .{ serial, protocol_type });
+        try self.write("  store {s} zeroinitializer, ptr %t{d}.protocol\n", .{ protocol_type, serial });
+        if (self.program.structures[value.structure].is_class) {
+            try self.write("  %t{d}.protocol.class.tag.address = getelementptr i8, ptr %v{d}, i64 -8\n", .{ serial, value.operand });
+            try self.write("  %t{d}.protocol.class.tag = load i64, ptr %t{d}.protocol.class.tag.address\n", .{ serial, serial });
+            try self.write("  store i64 %t{d}.protocol.class.tag, ptr %t{d}.protocol\n", .{ serial, serial });
+        } else {
+            try self.write("  store i64 {d}, ptr %t{d}.protocol\n", .{ value.structure, serial });
+        }
+        try self.write("  %t{d}.protocol.payload = getelementptr i8, ptr %t{d}.protocol, i64 8\n", .{ serial, serial });
+        try self.write("  store {s} %v{d}, ptr %t{d}.protocol.payload\n", .{ concrete_type, value.operand, serial });
+        try self.write("  %v{d} = load {s}, ptr %t{d}.protocol\n", .{ value.result, protocol_type, serial });
+    }
+
+    fn emitProtocolTest(self: *FunctionEmitter, value: Ir.Instruction.ProtocolTest) Error!void {
+        if (value.structure >= self.program.structures.len or try self.valueType(value.result) != .bool)
+            return error.InvalidProgram;
+        const protocol_index = (try self.valueType(value.operand)).structureIndex() orelse
+            return error.InvalidProgram;
+        if (protocol_index >= self.program.structures.len or
+            !self.program.structures[protocol_index].is_protocol or
+            !irConforms(self.program, value.structure, protocol_index))
+            return error.InvalidProgram;
+        const protocol_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.protocol.tag = extractvalue {s} %v{d}, 0\n", .{ serial, protocol_type, value.operand });
+        try self.write("  %v{d} = icmp eq i64 %t{d}.protocol.tag, {d}\n", .{ value.result, serial, value.structure });
+    }
+
+    fn emitProtocolExtract(self: *FunctionEmitter, value: Ir.Instruction.ProtocolExtract) Error!void {
+        if (value.structure >= self.program.structures.len or
+            try self.valueType(value.result) != Ir.Type.structure(value.structure))
+            return error.InvalidProgram;
+        const protocol_index = (try self.valueType(value.operand)).structureIndex() orelse
+            return error.InvalidProgram;
+        if (protocol_index >= self.program.structures.len or
+            !self.program.structures[protocol_index].is_protocol or
+            !irConforms(self.program, value.structure, protocol_index))
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        const protocol_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
+        const concrete_type = try llvmType(self.allocator, self.program, try self.valueType(value.result));
+        try self.write("  %t{d}.protocol = alloca {s}\n", .{ serial, protocol_type });
+        try self.write("  store {s} %v{d}, ptr %t{d}.protocol\n", .{ protocol_type, value.operand, serial });
+        try self.write("  %t{d}.protocol.payload = getelementptr i8, ptr %t{d}.protocol, i64 8\n", .{ serial, serial });
+        try self.write("  %v{d} = load {s}, ptr %t{d}.protocol.payload\n", .{ value.result, concrete_type, serial });
+    }
+
     fn emitClassInit(self: *FunctionEmitter, value: Ir.Instruction.StructureInit) Error!void {
         if (!plainClassStorage(self.program, value.structure)) return error.UnsupportedType;
         const structure = self.program.structures[value.structure];
@@ -1254,12 +1329,12 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         const storage_name = try classStorageType(self.allocator, value.structure);
         if (structure.fields.len == 0) {
-            try self.write("  %v{d} = call fastcc ptr @sx_class_alloc(i64 0)\n", .{value.result});
+            try self.write("  %v{d} = call fastcc ptr @sx_typed_class_alloc(i64 0, i64 {d})\n", .{ value.result, value.structure });
             return;
         }
         try self.write("  %t{d}.class.end = getelementptr {s}, ptr null, i32 1\n", .{ serial, storage_name });
         try self.write("  %t{d}.class.bytes = ptrtoint ptr %t{d}.class.end to i64\n", .{ serial, serial });
-        try self.write("  %v{d} = call fastcc ptr @sx_class_alloc(i64 %t{d}.class.bytes)\n", .{ value.result, serial });
+        try self.write("  %v{d} = call fastcc ptr @sx_typed_class_alloc(i64 %t{d}.class.bytes, i64 {d})\n", .{ value.result, serial, value.structure });
         for (value.fields, 0..) |field, field_index| {
             if (try self.valueType(field) != structure.fields[field_index].type)
                 return error.InvalidProgram;
@@ -1284,7 +1359,7 @@ const FunctionEmitter = struct {
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
         if (value.ownership != .root or !plainClassStorage(self.program, structure))
             return error.UnsupportedInstruction;
-        try self.write("  call fastcc void @sx_retain(ptr %v{d})\n", .{value.operand});
+        try self.write("  call fastcc void @sx_typed_class_retain(ptr %v{d})\n", .{value.operand});
     }
 
     fn emitClassDrop(self: *FunctionEmitter, value: Ir.Instruction.ClassDrop) Error!void {
@@ -1295,7 +1370,7 @@ const FunctionEmitter = struct {
         {
             return error.UnsupportedInstruction;
         }
-        try self.write("  call fastcc void @sx_drop(ptr %v{d})\n", .{value.operand});
+        try self.write("  call fastcc void @sx_typed_class_drop(ptr %v{d})\n", .{value.operand});
     }
 
     fn noopFinalizers(self: *FunctionEmitter, value: Ir.Instruction.ClassDrop) bool {
@@ -2459,6 +2534,32 @@ fn enumPayloadStorageSlots(program: Ir.Program, enumeration_index: usize, depth:
     return maximum;
 }
 
+fn protocolPayloadStorageSlots(program: Ir.Program, protocol_index: usize, depth: usize) Error!usize {
+    if (protocol_index >= program.structures.len or !program.structures[protocol_index].is_protocol)
+        return error.InvalidProgram;
+    if (depth >= program.structures.len + program.enums.len + 8) return error.UnsupportedType;
+    var maximum: usize = 0;
+    for (program.structures, 0..) |structure, candidate| {
+        if (structure.is_protocol or !irConforms(program, candidate, protocol_index)) continue;
+        maximum = @max(maximum, try llvmStorageSlots(program, .structure(candidate), depth + 1));
+    }
+    return maximum;
+}
+
+fn irConforms(program: Ir.Program, structure_index: usize, protocol_index: usize) bool {
+    if (structure_index >= program.structures.len or protocol_index >= program.structures.len)
+        return false;
+    var current: ?usize = structure_index;
+    var depth: usize = 0;
+    while (current) |candidate| : (depth += 1) {
+        if (candidate >= program.structures.len or depth >= program.structures.len) return false;
+        for (program.structures[candidate].conformances) |conformance|
+            if (conformance == protocol_index) return true;
+        current = program.structures[candidate].base;
+    }
+    return false;
+}
+
 fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Error!usize {
     if (depth >= program.structures.len + program.enums.len + 8) return error.UnsupportedType;
     if (type_value.optionalChild()) |child|
@@ -2473,7 +2574,9 @@ fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Erro
             return 1 + try enumPayloadStorageSlots(program, enumeration_index, depth + 1);
         const structure = program.structures[structure_index];
         if (structure.is_class) return 1;
-        if (structure.is_static or structure.is_protocol) return error.UnsupportedType;
+        if (structure.is_protocol)
+            return 1 + try protocolPayloadStorageSlots(program, structure_index, depth + 1);
+        if (structure.is_static) return error.UnsupportedType;
         if (structure.collection != null) return 2;
         var result: usize = 0;
         for (structure.fields) |field|
@@ -2541,7 +2644,11 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
             return std.fmt.allocPrint(allocator, "%sx.enum.{d}", .{enumeration_index});
         }
         if (program.structures[structure_index].is_class) return "ptr";
-        if (program.structures[structure_index].is_static or program.structures[structure_index].is_protocol)
+        if (program.structures[structure_index].is_protocol) {
+            _ = try protocolPayloadStorageSlots(program, structure_index, 0);
+            return std.fmt.allocPrint(allocator, "%sx.protocol.{d}", .{structure_index});
+        }
+        if (program.structures[structure_index].is_static)
             return error.UnsupportedType;
         return std.fmt.allocPrint(allocator, "%sx.type.{d}", .{structure_index});
     }

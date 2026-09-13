@@ -1,0 +1,44 @@
+protocol Metric {
+    func read() int
+}
+
+struct Number:Metric {
+    let value:int
+    func read() int { return self.value }
+}
+
+struct Pair:Metric {
+    let first:int
+    let second:int
+    func read() int { return self.first + self.second }
+}
+
+class Box:Metric {
+    var value:int
+
+    init(value:int) {
+        self.value = value
+    }
+
+    func read() int { return self.value }
+    func increment() { self.value += 1 }
+}
+
+func inspect(value:Metric) int {
+    return value.read()
+}
+
+func main() {
+    var number:Metric = Number(value:7)
+    var pair:Metric = Pair(first:20, second:22)
+    print(inspect(number))
+    print(inspect(pair))
+
+    var box = Box(value:40)
+    var erased:Metric = box
+    var duplicate = erased
+    box.increment()
+    print(inspect(erased))
+    print(inspect(duplicate))
+    print(box.value)
+}

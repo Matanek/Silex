@@ -101,6 +101,16 @@ and drops stay explicit in the composed Silex IR. Raw enumerations with `int` or
 and the declared raw value. Raw projection reads the second field; matching and
 equality compare the tag, while string raw values point to private static
 descriptors. Equality for associated-value enums remains an explicit refusal.
+Dynamic protocol values likewise use a private tagged reserve: the first word is
+the concrete structure index and the aligned payload is sized for the widest
+conformer in the composed program. Construction zeroes the reserve, protocol
+tests compare the tag, and extraction loads the requested concrete LLVM value.
+Class conformers keep their opaque pointer in the payload; classes emitted by
+the supported exact-class subset carry their dynamic structure index beside the
+reference-count header so erasure does not substitute a static tag. Structure
+copies and class identity remain governed by the explicit retain/drop sequence
+already present in Silex IR. Protocol conformers outside the currently supported
+concrete type and lifetime subsets remain conditional refusals.
 Optional construction, extraction, copies, parameters, results, local storage and
 equality use the explicit presence tag; equality ignores the payload when both
 values are absent. Floating operations have no fast-math permissions, and machine

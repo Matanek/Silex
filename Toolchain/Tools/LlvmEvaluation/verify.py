@@ -86,6 +86,7 @@ def main():
         "LlvmEvaluation/CollectionSlice.sx": "3\n20\n40\n360\n420\ntrue\n",
         "LlvmEvaluation/StringFromBytes.sx": "4\n3\n195\ntrue\né\0A\ntrue\n",
         "LlvmEvaluation/RawEnum.sx": "-7\n42\ntrue\ntrue\ntrue\né\0A\ntrue\n",
+        "LlvmEvaluation/ProtocolValues.sx": "7\n42\n41\n41\n41\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -117,7 +118,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -181,7 +182,7 @@ def main():
     ])
     assert canonicalized["returncode"] != 0, canonicalized
     assert "DefinitionDoesNotDominateUse" not in canonicalized["stderr"], canonicalized
-    assert "protocol_test" in canonicalized["stderr"], canonicalized
+    assert "class_drop" in canonicalized["stderr"], canonicalized
     assert target.read_bytes() == b"existing output must survive later refusal"
     inventory = json.loads(boundary_report.read_text())
     assert inventory["reachable_direct_boundary_functions"] == 0, inventory
@@ -421,6 +422,19 @@ def main():
     ]:
         assert fragment in raw_enum_llvm, fragment
     print("INTEGER AND STRING RAW ENUM PASS", flush=True)
+
+    protocol_metadata = json.loads(Path(str(output/"ProtocolValues-O0")+".json").read_text())
+    protocol_llvm = (Path(protocol_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "= type { i64, [",
+        ".protocol.class.tag.address = getelementptr i8",
+        ".protocol.tag = extractvalue",
+        ".protocol.payload = getelementptr i8",
+        "@sx_typed_class_retain",
+        "@sx_typed_class_drop",
+    ]:
+        assert fragment in protocol_llvm, fragment
+    print("TYPE-ERASED PROTOCOL VALUES PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer"]:
