@@ -1,0 +1,24 @@
+class Item {
+    var value:int
+    init(value:int) { self.value = value }
+}
+
+func replace(item:&Item, value:int) {
+    item = Item(value)
+}
+
+func replace_middle(values:&Item[]) {
+    replace(values[1], 25)
+}
+
+func main() {
+    var values:Item[] = [Item(10), Item(20), Item(30)]
+    var snapshot = values
+    replace_middle(values)
+    print(values[1].value)
+    print(snapshot[1].value)
+    print(values.count())
+    print(snapshot.count())
+    print(values[0].value)
+    print(values[2].value)
+}

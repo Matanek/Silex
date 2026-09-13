@@ -77,6 +77,7 @@ def main():
         "LlvmEvaluation/TakeIndexedEdge.sx": "20\n2\n3\n20\n25\n10\n1\n30\n",
         "LlvmEvaluation/TakeIndexedBounds.sx": "7\n",
         "LlvmEvaluation/RichCollectionReadReference.sx": "20\n25\n",
+        "LlvmEvaluation/MutableRichCollectionReference.sx": "25\n20\n3\n3\n10\n30\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -784,6 +785,18 @@ def main():
             else:
                 assert run["stderr"] == llvm_bounds, run
     print("FROZEN NATIVE RICH REFERENCE BOUNDS DISCREPANCY RECORDED", flush=True)
+
+    mutable_rich_metadata = json.loads(Path(str(output/"MutableRichCollectionReference-O0")+".json").read_text())
+    mutable_rich_llvm = (Path(mutable_rich_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "collection.detach",
+        ".storage = call fastcc ptr @sx_alloc",
+        "call void @llvm.memcpy.p0.p0.i64",
+        ".old.data, i64 -24)",
+        "getelementptr ptr, ptr",
+    ]:
+        assert fragment in mutable_rich_llvm, fragment
+    print("MUTABLE RICH OWNING COLLECTION REFERENCE PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

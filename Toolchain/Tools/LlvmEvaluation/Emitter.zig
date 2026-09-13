@@ -1910,8 +1910,6 @@ const FunctionEmitter = struct {
         );
         if (collection.length != null)
             return error.UnsupportedInstruction;
-        if (!collection.view and value.reference != null and !plainValue(self.program, collection.element, 0))
-            return error.UnsupportedInstruction;
         _ = try llvmType(self.allocator, self.program, collection.element);
         if (try self.valueType(value.index) != .int or try self.valueType(value.result) != .address)
             return error.InvalidProgram;
