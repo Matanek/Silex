@@ -1668,8 +1668,24 @@ const FunctionEmitter = struct {
     fn emitListEdit(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.ListEdit) Error!void {
         const type_value = try self.valueType(value.collection);
         const collection = try self.collectionInfo(type_value);
+        const report_element_name = try reportTypeName(self.allocator, self.program, collection.element);
+        errdefer std.debug.print(
+            "silex LLVM evaluation: unsupported list edit {s}, ownership {s}, view {}, fixed {}, element {s}, plain {}, index {}, argument {}, transferred {}, removed {}\n",
+            .{
+                @tagName(value.kind),
+                @tagName(value.ownership),
+                collection.view,
+                collection.length != null,
+                report_element_name,
+                plainValue(self.program, collection.element, 0),
+                value.index != null,
+                value.argument != null,
+                value.argument_transferred,
+                value.removed != null,
+            },
+        );
         if (value.ownership != .root or collection.view or collection.length != null or
-            try self.valueType(value.result) != type_value or !plainValue(self.program, collection.element, 0) or
+            try self.valueType(value.result) != type_value or
             value.index != null or value.removed != null)
             return error.UnsupportedInstruction;
         const argument = switch (value.kind) {
@@ -1682,6 +1698,8 @@ const FunctionEmitter = struct {
         }
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, type_value);
+        // Retains and drops for resource-bearing elements are explicit in the
+        // surrounding Silex IR. The list edit moves their material values.
         const element_name = try llvmType(self.allocator, self.program, collection.element);
         try self.write("  %t{d}.old.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
         try self.write("  %t{d}.old.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });

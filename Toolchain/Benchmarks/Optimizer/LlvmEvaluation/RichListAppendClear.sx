@@ -1,0 +1,26 @@
+struct Entry {
+    let name:str
+    let weight:float64
+}
+
+func collect(source:@Entry[]) Entry[] {
+    var entries:Entry[] = []
+    for entry in source { entries.append(entry) }
+    return entries
+}
+
+func main() {
+    let dynamic = "al" + "pha"
+    var original:Entry[] = [Entry(name:dynamic, weight:1.5), Entry(name:"beta", weight:2.5)]
+    let snapshot = original
+    var copied = collect(original)
+    copied.append(Entry(name:"gamma", weight:3.5))
+    print(copied.count())
+    print(copied[0].name)
+    print(copied[2].name)
+    copied.clear()
+    print(copied.count())
+    print(snapshot.count())
+    print(snapshot[0].name)
+    print(snapshot[1].name)
+}
