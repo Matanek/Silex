@@ -1,0 +1,8 @@
+func narrow(value:float64) float32 { return value as float32 }
+
+func main() {
+    print("$(narrow(1.5 as float64))")
+    print("$(narrow(-0.0 as float64))")
+    print("$(narrow((1.0 / 0.0) as float64))")
+    print("$(narrow((-1.0 / 0.0) as float64))")
+}

@@ -1,0 +1,2 @@
+func narrow(value:float64) float32 { return value as float32 }
+func main() { print(7); assert(narrow((0.0 / 0.0) as float64) == 0.0 as float32, "unreachable"); print(8) }

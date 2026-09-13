@@ -2614,6 +2614,8 @@ const FunctionEmitter = struct {
         if (value.source == value.target) return self.copyValue(value.result, value.operand);
         if (value.source == .float32 and value.target == .float64)
             return self.write("  %v{d} = fpext float %v{d} to double\n", .{ value.result, value.operand });
+        if (value.source == .float64 and value.target == .float32)
+            return self.emitFloatNarrowing(block_id, value);
         if (value.source.isInteger() and value.target.isFloat())
             return self.emitIntegerToFloat(block_id, value);
         if (value.source.isFloat() and value.target.isInteger())
@@ -2704,6 +2706,15 @@ const FunctionEmitter = struct {
         } else {
             try self.write("  %t{d}.exact = xor i1 %t{d}.same, false\n", .{ serial, serial });
         }
+        try self.emitConversionFailure(block_id, serial, value, true);
+    }
+
+    fn emitFloatNarrowing(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Convert) Error!void {
+        try self.write("  %v{d} = fptrunc double %v{d} to float\n", .{ value.result, value.operand });
+        if (!value.checked) return;
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.roundtrip = fpext float %v{d} to double\n", .{ serial, value.result });
+        try self.write("  %t{d}.exact = fcmp oeq double %v{d}, %t{d}.roundtrip\n", .{ serial, value.operand, serial });
         try self.emitConversionFailure(block_id, serial, value, true);
     }
 

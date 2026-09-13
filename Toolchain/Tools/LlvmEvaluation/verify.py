@@ -66,6 +66,10 @@ def main():
         "LlvmEvaluation/RichListAppendClear.sx": "3\nalpha\ngamma\n0\n2\nalpha\nbeta\n",
         "LlvmEvaluation/ListInsert.sx": "6\n5\n10\n20\n25\n30\n40\n2\n10\n30\n",
         "LlvmEvaluation/ListInsertBounds.sx": "7\n",
+        "LlvmEvaluation/FloatNarrowing.sx": "1.5\n-0.0\ninf\n-inf\n",
+        "LlvmEvaluation/FloatNarrowingInexact.sx": "7\n",
+        "LlvmEvaluation/FloatNarrowingOverflow.sx": "7\n",
+        "LlvmEvaluation/FloatNarrowingNaN.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -123,7 +127,8 @@ def main():
             assert run["returncode"] == (1 if source.stem in [
                 "Overflow", "Bounds", "NegativeBounds", "DivisionByZero", "Conversion",
                 "FloatToIntegerFraction", "FloatToIntegerNaN", "FloatToIntegerInfinity",
-                "FloatToIntegerBounds", "ListInsertBounds",
+                "FloatToIntegerBounds", "ListInsertBounds", "FloatNarrowingInexact",
+                "FloatNarrowingOverflow", "FloatNarrowingNaN",
             ] else 0), run
             if expected is None:
                 expected = observable
@@ -665,6 +670,17 @@ def main():
     assert frozen_insert_interpreter["returncode"] == 1, frozen_insert_interpreter
     assert "collection index 5 is out of bounds for count 5" in frozen_insert_interpreter["stderr"], frozen_insert_interpreter
     print("FROZEN INTERPRETER INSERT-END DISCREPANCY RECORDED", flush=True)
+
+    float_narrowing_metadata = json.loads(Path(str(output/"FloatNarrowing-O0")+".json").read_text())
+    float_narrowing_llvm = (Path(float_narrowing_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "fptrunc double",
+        ".roundtrip = fpext float",
+        ".exact = fcmp oeq double",
+        "call fastcc void @sx_conversion",
+    ]:
+        assert fragment in float_narrowing_llvm, fragment
+    print("EXACT FLOAT NARROWING PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

@@ -1,0 +1,7 @@
+func narrow(value:float64) float32 { return value as float32 }
+func main() {
+    let value:float64 = 1.1
+    print(7)
+    assert(narrow(value) == 0.0 as float32, "unreachable")
+    print(8)
+}
