@@ -1,0 +1,25 @@
+func main() {
+    let signed8 = (-127 - 1) as int8
+    let signed16 = (-32767 - 1) as int16
+    let signed32 = (-2147483647 - 1) as int32
+    let signed64 = -9223372036854775807 - 1
+    let unsigned8 = 255 as uint8
+    let unsigned16 = 65535 as uint16
+    let unsigned32 = 4294967295 as uint32
+    let unsigned64 = 9223372036854775807 as uint
+    let narrow = 1.5 as float32
+    let narrow_negative_zero = -0.0 as float32
+    let wide:float64 = 1.2345678901234567 as float64
+    let positive_zero:float64 = 0.0 as float64
+    let negative_zero:float64 = -0.0 as float64
+    let positive_infinity:float64 = (1.0 / 0.0) as float64
+    let negative_infinity:float64 = (-1.0 / 0.0) as float64
+    let not_a_number:float64 = (0.0 / 0.0) as float64
+    let text = "Silex"
+
+    print("$(signed8)|$(signed16)|$(signed32)|$(signed64)")
+    print("$(unsigned8)|$(unsigned16)|$(unsigned32)|$(unsigned64)")
+    print("$(narrow)|$(narrow_negative_zero)|$(wide)")
+    print("$(positive_zero)|$(negative_zero)|$(positive_infinity)|$(negative_infinity)|$(not_a_number)")
+    print("$(true)|$(false)|$(text)")
+}

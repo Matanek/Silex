@@ -26,6 +26,7 @@ def compile_source(args):
         raise RuntimeError("this evaluation is qualified only for macOS ARM64")
     source = Path(args.source).resolve(strict=True)
     adapter = Path(args.adapter).resolve(strict=True)
+    format_runtime = Path(args.format_runtime).resolve(strict=True)
     llvm = Path(args.llvm_dir).resolve(strict=True)
     sdk = Path(args.sdk).resolve(strict=True)
     output = Path(args.output).resolve()
@@ -79,6 +80,7 @@ def compile_source(args):
                       shadercross_sha256=sha(args.shadercross),
                       sdk_settings_sha256=sha(sdk/"SDKSettings.json"),
                       system_stub_sha256=sha(sdk/"usr/lib/libSystem.tbd"),
+                      format_runtime=str(format_runtime), format_runtime_sha256=sha(format_runtime),
                       tools={str(p): sha(p) for p in [adapter, llvm/"bin/opt", llvm/"bin/llc",
                              llvm/"lib/libLLVM.dylib", llvm/"lib/libzstd.1.dylib", Path("/usr/bin/ld")]})
         key = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
@@ -99,7 +101,7 @@ def compile_source(args):
                                  "-mtriple=arm64-apple-macosx26.0.0", "-mcpu="+args.cpu,
                                  "-fp-contract=off", optimized, "-o", obj])
             run("link", ["/usr/bin/ld", "-arch", "arm64", "-platform_version", "macos", "26.0", "26.5",
-                         "-syslibroot", sdk, "-lSystem", obj, "-o", executable])
+                         "-syslibroot", sdk, "-lSystem", obj, format_runtime, "-o", executable])
             # Publish the cache entry only after every stage succeeds.
             destination.mkdir(exist_ok=True)
             for item in [raw, optimized, obj, executable]:
@@ -121,6 +123,7 @@ def main():
     parser.add_argument("--backend", choices=["llvm"], required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--adapter", required=True)
+    parser.add_argument("--format-runtime", required=True)
     parser.add_argument("--shadercross", required=True)
     parser.add_argument("--silex-prefix", default="none")
     parser.add_argument("--llvm-dir", required=True)

@@ -75,11 +75,16 @@ pub fn emitWithBoundaries(
         \\@.fmt.boolean.inline = private constant [3 x i8] c"%s\00"
         \\@.true = private constant [5 x i8] c"true\00"
         \\@.false = private constant [6 x i8] c"false\00"
+        \\@sx.format.true = private constant { i64, [4 x i8] } { i64 4, [4 x i8] c"true" }
+        \\@sx.format.false = private constant { i64, [5 x i8] } { i64 5, [5 x i8] c"false" }
         \\@.newline = private constant [1 x i8] c"\0A"
         \\
         \\declare i32 @dprintf(i32, ptr, ...)
         \\declare i64 @write(i32, ptr, i64)
         \\declare ptr @malloc(i64)
+        \\declare i64 @silex_format_signed(i64, ptr)
+        \\declare i64 @silex_format_unsigned(i64, ptr)
+        \\declare i64 @silex_format_float(i64, ptr, i64)
         \\declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
         \\declare void @exit(i32) noreturn
         \\
@@ -661,6 +666,7 @@ const FunctionEmitter = struct {
             .string_byte_at => |value| try self.emitStringByteAt(block_id, value),
             .string_count => |value| try self.emitStringCount(value),
             .string_concat => |value| try self.emitStringConcat(block_id, value),
+            .format_value => |value| try self.emitFormatValue(value),
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
             .convert => |value| try self.emitConvert(block_id, value),
@@ -756,6 +762,67 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.right.data = getelementptr i8, ptr %v{d}, i64 8\n", .{ serial, value.right });
         try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.right.destination, ptr %t{d}.right.data, i64 %t{d}.right.length, i1 false)\n", .{ serial, serial, serial });
         try self.write("  %v{d} = getelementptr i8, ptr %t{d}.descriptor, i64 0\n", .{ value.result, serial });
+    }
+
+    fn emitFormatValue(self: *FunctionEmitter, value: Ir.Instruction.FormatValue) Error!void {
+        const operand_type = try self.valueType(value.operand);
+        if (try self.valueType(value.result) != .str) return error.InvalidProgram;
+        if (operand_type == .bool) {
+            try self.write(
+                "  %v{d} = select i1 %v{d}, ptr @sx.format.true, ptr @sx.format.false\n",
+                .{ value.result, value.operand },
+            );
+            return;
+        }
+        if (operand_type == .str) {
+            try self.write("  %v{d} = getelementptr i8, ptr %v{d}, i64 0\n", .{ value.result, value.operand });
+            return;
+        }
+        if (!operand_type.isNumeric()) return error.UnsupportedInstruction;
+
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.format.scratch = alloca [384 x i8]\n", .{serial});
+        try self.write(
+            "  %t{d}.format.output = getelementptr [384 x i8], ptr %t{d}.format.scratch, i32 0, i32 0\n",
+            .{ serial, serial },
+        );
+        if (operand_type.isInteger()) {
+            if (operand_type.bitWidth() == 64) {
+                try self.write("  %t{d}.format.bits = add i64 0, %v{d}\n", .{ serial, value.operand });
+            } else {
+                try self.write(
+                    "  %t{d}.format.bits = {s} i{d} %v{d} to i64\n",
+                    .{ serial, if (operand_type.isSignedInteger()) "sext" else "zext", operand_type.bitWidth(), value.operand },
+                );
+            }
+            try self.write(
+                "  %t{d}.format.length = call i64 @{s}(i64 %t{d}.format.bits, ptr %t{d}.format.output)\n",
+                .{ serial, if (operand_type.isSignedInteger()) "silex_format_signed" else "silex_format_unsigned", serial, serial },
+            );
+        } else if (operand_type == .float32) {
+            try self.write("  %t{d}.format.f32 = bitcast float %v{d} to i32\n", .{ serial, value.operand });
+            try self.write("  %t{d}.format.bits = zext i32 %t{d}.format.f32 to i64\n", .{ serial, serial });
+            try self.write(
+                "  %t{d}.format.length = call i64 @silex_format_float(i64 %t{d}.format.bits, ptr %t{d}.format.output, i64 0)\n",
+                .{ serial, serial, serial },
+            );
+        } else {
+            try self.write("  %t{d}.format.bits = bitcast double %v{d} to i64\n", .{ serial, value.operand });
+            try self.write(
+                "  %t{d}.format.length = call i64 @silex_format_float(i64 %t{d}.format.bits, ptr %t{d}.format.output, i64 1)\n",
+                .{ serial, serial, serial },
+            );
+        }
+        try self.write("  %t{d}.format.allocation = add i64 %t{d}.format.length, 8\n", .{ serial, serial });
+        try self.write("  %t{d}.format.descriptor = call fastcc ptr @sx_alloc(i64 %t{d}.format.allocation)\n", .{ serial, serial });
+        try self.write("  %t{d}.format.tagged = or i64 %t{d}.format.length, -9223372036854775808\n", .{ serial, serial });
+        try self.write("  store i64 %t{d}.format.tagged, ptr %t{d}.format.descriptor\n", .{ serial, serial });
+        try self.write("  %t{d}.format.data = getelementptr i8, ptr %t{d}.format.descriptor, i64 8\n", .{ serial, serial });
+        try self.write(
+            "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.format.data, ptr %t{d}.format.output, i64 %t{d}.format.length, i1 false)\n",
+            .{ serial, serial, serial },
+        );
+        try self.write("  %v{d} = getelementptr i8, ptr %t{d}.format.descriptor, i64 0\n", .{ value.result, serial });
     }
 
     fn emitGlobalLoad(self: *FunctionEmitter, value: Ir.Instruction.GlobalLoad) Error!void {

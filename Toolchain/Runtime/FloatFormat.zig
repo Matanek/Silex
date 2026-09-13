@@ -4,9 +4,21 @@ const output_capacity = std.fmt.float.bufferSize(.decimal, f64);
 
 pub fn main() void {}
 
-export fn silex_format_float(bits: u64, output: [*]u8, is_double: u64) callconv(.c) usize {
+pub export fn silex_format_float(bits: u64, output: [*]u8, is_double: u64) callconv(.c) usize {
     if (is_double != 0) return format(f64, @bitCast(bits), output);
     return format(f32, @bitCast(@as(u32, @truncate(bits))), output);
+}
+
+pub export fn silex_format_signed(bits: u64, output: [*]u8) callconv(.c) usize {
+    var buffer: [32]u8 = undefined;
+    const rendered = std.fmt.bufPrint(&buffer, "{d}", .{@as(i64, @bitCast(bits))}) catch return 0;
+    return copy(output, rendered);
+}
+
+pub export fn silex_format_unsigned(bits: u64, output: [*]u8) callconv(.c) usize {
+    var buffer: [32]u8 = undefined;
+    const rendered = std.fmt.bufPrint(&buffer, "{d}", .{bits}) catch return 0;
+    return copy(output, rendered);
 }
 
 fn format(comptime Float: type, value: Float, output: [*]u8) usize {

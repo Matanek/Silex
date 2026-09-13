@@ -341,8 +341,30 @@ pub fn build(b: *std.Build) void {
         .root_module = llvm_evaluation_module,
     });
     const llvm_evaluation_install = b.addInstallArtifact(llvm_evaluation, .{});
+    const llvm_format_runtime_module = b.createModule(.{
+        .root_source_file = b.path("Tools/LlvmEvaluation/FormatRuntime.zig"),
+        .target = runtime_target,
+        .optimize = .ReleaseSmall,
+        .pic = true,
+        .strip = true,
+        .unwind_tables = .none,
+        .red_zone = false,
+    });
+    llvm_format_runtime_module.addAnonymousImport("format_core", .{
+        .root_source_file = b.path("Runtime/FloatFormat.zig"),
+    });
+    const llvm_format_runtime = b.addObject(.{
+        .name = "silex-llvm-format",
+        .root_module = llvm_format_runtime_module,
+    });
+    const llvm_format_runtime_install = b.addInstallFileWithDir(
+        llvm_format_runtime.getEmittedBin(),
+        .lib,
+        "silex-llvm-format.o",
+    );
     const llvm_evaluation_step = b.step("llvm-evaluation", "Build the explicitly selected experimental LLVM evaluation adapter");
     llvm_evaluation_step.dependOn(&llvm_evaluation_install.step);
+    llvm_evaluation_step.dependOn(&llvm_format_runtime_install.step);
 
     const optimizer_oracle = b.addExecutable(.{
         .name = "silex-optimizer-oracle",

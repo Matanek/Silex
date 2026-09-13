@@ -1,8 +1,9 @@
 # Experimental LLVM evaluation
 
 The `llvm-evaluation` Zig build step installs a separate development executable,
-`silex-llvm-evaluation`, into the explicitly chosen prefix. The ordinary `silex`
-command and default installation do not select or depend on LLVM. This is a
+`silex-llvm-evaluation`, and its exact scalar-formatting object,
+`lib/silex-llvm-format.o`, into the explicitly chosen prefix. The ordinary `silex`
+command and default installation do not select or depend on either artifact. This is a
 bounded macOS ARM64 experiment, not a distributed backend or a migration decision.
 
 The adapter uses `Project.Compiler` for package resolution and typed composition,
@@ -29,6 +30,7 @@ python3 Silex/Toolchain/Tools/LlvmEvaluation/compile.py \
   --backend llvm \
   --source Silex/Toolchain/Benchmarks/Optimizer/LlvmEvaluation/SteeringWorkload.sx \
   --adapter Tools/Adapter/bin/silex-llvm-evaluation \
+  --format-runtime Tools/Adapter/lib/silex-llvm-format.o \
   --shadercross Tools/Shadercross/install/bin/shadercross \
   --silex-prefix none \
   --llvm-dir Tools/LLVM-21.1.8 \
@@ -78,7 +80,7 @@ never an exposed field layout. Loads and stores refer to an internal LLVM global
 by stable IR index; stores additionally require a mutable declaration. Runtime
 initialization and non-optional aggregate initializers remain explicit refusals.
 
-`verify.py` accepts `--native`, `--adapter`, `--shadercross`, `--llvm-dir`, `--sdk`,
+`verify.py` accepts `--native`, `--adapter`, `--format-runtime`, `--shadercross`, `--llvm-dir`, `--sdk`,
 `--output-dir`, and `--report`. It compares exact stdout, stderr, and exit status in native Debug,
 native Release, LLVM O0, and LLVM O3; it also checks the interpreter on bounded
 cases, unsupported source forms, cache reuse/repair, and native/LLVM/native runs.
@@ -126,8 +128,10 @@ mono-pointer descriptor: an explicit byte length followed by the exact bytes,
 without using a trailing zero as value data. Their descriptors are private and
 static, so string retain/drop recognize them without allocating or freeing.
 Content equality, Unicode scalar count, calls, returns and output preserve empty,
-UTF-8 and embedded-zero values. Dynamic string construction, interpolation and
-formatting remain explicit refusals. Concatenation allocates a dynamic descriptor,
+UTF-8 and embedded-zero values. Numeric, boolean and string interpolation now
+preserve the native rendering; numeric results allocate a dynamic descriptor and
+floating-point rendering comes from the explicit object built with the adapter.
+Concatenation allocates a dynamic descriptor,
 checks both value and allocation-size overflow, and copies the exact bytes without
 adding a terminator; operand lifetime remains controlled by explicit IR drops.
 Byte length masks the descriptor's dynamic
@@ -142,7 +146,7 @@ validation, including both collection replacement and the optional-class witness
 This counter is part of the prototype cost; it is not a production GC design.
 
 The cache lives under the group's single `.silex/llvm-evaluation/v1` root. Keys
-include emitted IR, source identity, adapter and driver hashes, LLVM and linker
+include emitted IR, source identity, adapter, formatting runtime and driver hashes, LLVM and linker
 hashes, SDK settings/stubs, CPU, and optimization mode. Cache hits validate the
 executable hash. Native artifacts use their existing independent namespace.
 

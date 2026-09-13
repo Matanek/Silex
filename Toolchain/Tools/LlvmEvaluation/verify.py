@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the bounded LLVM backend against exact native observables and refusals."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in [
-        "native", "adapter", "shadercross", "llvm-dir", "sdk", "output-dir", "report",
+        "native", "adapter", "format-runtime", "shadercross", "llvm-dir", "sdk", "output-dir", "report",
     ]:
         parser.add_argument("--"+name, required=True)
     args = parser.parse_args()
@@ -39,7 +40,8 @@ def main():
 
     def llvm_command(path, mode, binary, silex_prefix="none"):
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
-                "--adapter", args.adapter, "--shadercross", args.shadercross,
+                "--adapter", args.adapter, "--format-runtime", args.format_runtime,
+                "--shadercross", args.shadercross,
                 "--silex-prefix", silex_prefix,
                 "--llvm-dir", args.llvm_dir, "--sdk", args.sdk,
                 "--opt", mode, "--output", binary]
@@ -70,6 +72,13 @@ def main():
         "LlvmEvaluation/StringAddress.sx": "true\ntrue\n",
         "LlvmEvaluation/ListAppendClear.sx": "1\n2\n2\n5\ntrue\n0\n1\n",
         "LlvmEvaluation/StringConcat.sx": "3\n4\ntrue\né\0A\n",
+        "LlvmEvaluation/FormatValues.sx": (
+            "-128|-32768|-2147483648|-9223372036854775808\n"
+            "255|65535|4294967295|9223372036854775807\n"
+            "1.5|-0.0|1.2345678806304932\n"
+            "0.0|-0.0|inf|-inf|nan\n"
+            "true|false|Silex\n"
+        ),
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -101,7 +110,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -333,6 +342,22 @@ def main():
     ]:
         assert fragment in concat_llvm, fragment
     print("DYNAMIC STRING CONCATENATION PASS", flush=True)
+
+    format_metadata = json.loads(Path(str(output/"FormatValues-O0")+".json").read_text())
+    format_llvm = (Path(format_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "call i64 @silex_format_signed",
+        "call i64 @silex_format_unsigned",
+        "call i64 @silex_format_float",
+        ".format.scratch = alloca [384 x i8]",
+        "@sx.format.true = private constant",
+        "@sx.format.false = private constant",
+    ]:
+        assert fragment in format_llvm, fragment
+    runtime = Path(args.format_runtime).resolve()
+    assert format_metadata["inputs"]["format_runtime"] == str(runtime), format_metadata
+    assert format_metadata["inputs"]["format_runtime_sha256"] == hashlib.sha256(runtime.read_bytes()).hexdigest(), format_metadata
+    print("EXACT SCALAR FORMATTING RUNTIME PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:
