@@ -1,0 +1,19 @@
+class Item {
+    var value:int
+    init(value:int) { self.value = value }
+}
+
+class Shelf {
+    var values:Item[]
+    init() { self.values = [Item(10)] }
+
+    func replace(index:int, item:Item) Item {
+        return self.values.replace(index, item)
+    }
+}
+
+func main() {
+    var shelf = Shelf()
+    print(7)
+    print(shelf.replace(1, Item(20)).value)
+}

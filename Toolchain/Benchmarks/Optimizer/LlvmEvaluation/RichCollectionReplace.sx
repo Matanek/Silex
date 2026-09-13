@@ -1,0 +1,41 @@
+class Item {
+    var value:int
+    init(value:int) { self.value = value }
+}
+
+class Shelf {
+    var values:Item[]
+
+    init() {
+        self.values = [Item(10), Item(20)]
+    }
+
+    func replace(index:int, item:Item) Item {
+        return self.values.replace(index, item)
+    }
+}
+
+func main() {
+    var shelf = Shelf()
+    var alias = shelf
+    var snapshot = shelf.values
+    var incoming = Item(30)
+    var removed = shelf.replace(1, incoming)
+    print(removed.value)
+    print(shelf.values[1].value)
+    print(snapshot[1].value)
+    print(shelf.values[1] == incoming)
+    print(snapshot[1] == removed)
+    incoming.value = 31
+    removed.value = 21
+    print(alias.values[1].value)
+    print(snapshot[1].value)
+
+    var root:Item[] = [Item(40), Item(50)]
+    var root_incoming = Item(60)
+    var root_removed = root.replace(-2, root_incoming)
+    print(root_removed.value)
+    print(root[0].value)
+    print(root[0] == root_incoming)
+    print(root[1].value)
+}

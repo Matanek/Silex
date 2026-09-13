@@ -1991,18 +1991,16 @@ const FunctionEmitter = struct {
         const replacement_type = try self.valueType(value.replacement);
         if (result_type != collection_type or
             index_type != .int or
-            replacement_type != collection.element or
-            !plainValue(self.program, collection.element, 0))
+            replacement_type != collection.element)
         {
             std.debug.print(
-                "silex LLVM evaluation: unsupported collection replacement collection={s}, result={s}, index={s}, replacement={s}, element={s}, plain={}\n",
+                "silex LLVM evaluation: unsupported collection replacement collection={s}, result={s}, index={s}, replacement={s}, element={s}\n",
                 .{
                     try reportTypeName(self.allocator, self.program, collection_type),
                     try reportTypeName(self.allocator, self.program, result_type),
                     try reportTypeName(self.allocator, self.program, index_type),
                     try reportTypeName(self.allocator, self.program, replacement_type),
                     try reportTypeName(self.allocator, self.program, collection.element),
-                    plainValue(self.program, collection.element, 0),
                 },
             );
             return error.UnsupportedInstruction;

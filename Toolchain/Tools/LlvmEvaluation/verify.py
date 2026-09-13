@@ -81,6 +81,8 @@ def main():
         "LlvmEvaluation/ClassIdentityEquality.sx": "true\nfalse\nfalse\ntrue\n",
         "LlvmEvaluation/EdgeCollectionReplace.sx": "4.0\n6\n8.0\n9\n4.0\n6\n",
         "LlvmEvaluation/EdgeCollectionReplaceBounds.sx": "7\n",
+        "LlvmEvaluation/RichCollectionReplace.sx": "20\n30\n20\ntrue\ntrue\n31\n21\n40\n60\ntrue\n50\n",
+        "LlvmEvaluation/RichCollectionReplaceBounds.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -141,6 +143,7 @@ def main():
                 "FloatToIntegerBounds", "ListInsertBounds", "FloatNarrowingInexact",
                 "FloatNarrowingOverflow", "FloatNarrowingNaN", "TakeLastEmpty", "TakeIndexedBounds",
                 "EdgeCollectionReplaceBounds",
+                "RichCollectionReplaceBounds",
             ] else 0), run
             if expected is None:
                 expected = observable
@@ -819,6 +822,19 @@ def main():
     ]:
         assert fragment in edge_replace_llvm, fragment
     print("EDGE PLAIN COLLECTION REPLACE PASS", flush=True)
+
+    rich_replace_metadata = json.loads(Path(str(output/"RichCollectionReplace-O0")+".json").read_text())
+    rich_replace_llvm = (Path(rich_replace_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".copy = call fastcc ptr @sx_alloc",
+        ".copy, i64 -16)",
+        ".data, i64 -16)",
+        "call fastcc void @sx_typed_class_retain",
+        "call fastcc i1 @sx_typed_class_release",
+        "store ptr %v",
+    ]:
+        assert fragment in rich_replace_llvm, fragment
+    print("RICH COLLECTION REPLACE PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:
