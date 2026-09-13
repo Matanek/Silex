@@ -655,6 +655,9 @@ const FunctionEmitter = struct {
             .reference_load => |value| try self.emitReferenceLoad(value),
             .reference_store => |value| try self.emitReferenceStore(value),
             .reference_field => |value| try self.emitReferenceField(value),
+            .string_address => |value| try self.emitStringAddress(value),
+            .string_byte_count => |value| try self.emitStringByteCount(value),
+            .string_byte_at => |value| try self.emitStringByteAt(block_id, value),
             .string_count => |value| try self.emitStringCount(value),
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
@@ -690,6 +693,36 @@ const FunctionEmitter = struct {
         if (try self.valueType(value.operand) != .str or try self.valueType(value.result) != .int)
             return error.InvalidProgram;
         try self.write("  %v{d} = call fastcc i64 @sx_string_count(ptr %v{d})\n", .{ value.result, value.operand });
+    }
+
+    fn emitStringAddress(self: *FunctionEmitter, value: Ir.Instruction.StringProjection) Error!void {
+        if (try self.valueType(value.operand) != .str or try self.valueType(value.result) != .address)
+            return error.InvalidProgram;
+        try self.write("  %v{d} = getelementptr i8, ptr %v{d}, i64 8\n", .{ value.result, value.operand });
+    }
+
+    fn emitStringByteCount(self: *FunctionEmitter, value: Ir.Instruction.StringProjection) Error!void {
+        if (try self.valueType(value.operand) != .str or try self.valueType(value.result) != .uint)
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.string.tagged = load i64, ptr %v{d}\n", .{ serial, value.operand });
+        try self.write("  %v{d} = and i64 %t{d}.string.tagged, 9223372036854775807\n", .{ value.result, serial });
+    }
+
+    fn emitStringByteAt(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.StringByteAt) Error!void {
+        if (try self.valueType(value.operand) != .str or
+            try self.valueType(value.index) != .uint or
+            try self.valueType(value.result) != .uint8)
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.string.tagged = load i64, ptr %v{d}\n", .{ serial, value.operand });
+        try self.write("  %t{d}.string.length = and i64 %t{d}.string.tagged, 9223372036854775807\n", .{ serial, serial });
+        try self.write("  %t{d}.string.invalid = icmp uge i64 %v{d}, %t{d}.string.length\n", .{ serial, value.index, serial });
+        try self.write("  br i1 %t{d}.string.invalid, label %trap, label %b{d}.string{d}\n", .{ serial, block_id, serial });
+        try self.write("b{d}.string{d}:\n", .{ block_id, serial });
+        try self.write("  %t{d}.string.offset = add i64 %v{d}, 8\n", .{ serial, value.index });
+        try self.write("  %t{d}.string.address = getelementptr i8, ptr %v{d}, i64 %t{d}.string.offset\n", .{ serial, value.operand, serial });
+        try self.write("  %v{d} = load i8, ptr %t{d}.string.address\n", .{ value.result, serial });
     }
 
     fn emitGlobalLoad(self: *FunctionEmitter, value: Ir.Instruction.GlobalLoad) Error!void {

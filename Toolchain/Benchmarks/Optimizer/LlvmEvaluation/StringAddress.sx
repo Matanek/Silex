@@ -1,0 +1,9 @@
+use Interop.C
+
+func main() {
+    let text = "Silex"
+    let first = C.address_bits(C.pointer(text))
+    let second = C.address_bits(C.pointer(text))
+    print(first != 0)
+    print(first == second)
+}

@@ -66,6 +66,8 @@ def main():
         "LlvmEvaluation/PayloadEnum.sx": "41\n7\n-2\n",
         "LlvmEvaluation/AssertSuccess.sx": "7\n",
         "LlvmEvaluation/StringLiterals.sx": "0\nSilex\n3\ntrue\nfalse\nA\0B\n",
+        "LlvmEvaluation/StringBytes.sx": "4\n195\n169\n0\n65\n",
+        "LlvmEvaluation/StringAddress.sx": "true\ntrue\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -97,7 +99,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -292,6 +294,21 @@ def main():
         assert fragment in string_llvm, fragment
     assert "[3 x i8] c\"\\41\\00\\42\"" in string_llvm, string_llvm
     print("STATIC STRING DESCRIPTOR AND LIFETIME EMISSION PASS", flush=True)
+
+    string_bytes_metadata = json.loads(Path(str(output/"StringBytes-O0")+".json").read_text())
+    string_bytes_llvm = (Path(string_bytes_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".string.tagged = load i64",
+        ".string.length = and i64",
+        ".string.invalid = icmp uge i64",
+        ".string.address = getelementptr i8",
+        "load i8",
+    ]:
+        assert fragment in string_bytes_llvm, fragment
+    string_address_metadata = json.loads(Path(str(output/"StringAddress-O0")+".json").read_text())
+    string_address_llvm = (Path(string_address_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert "getelementptr i8, ptr" in string_address_llvm, string_address_llvm
+    print("STRING BYTE PROJECTIONS PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseDynamicString", "RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:
