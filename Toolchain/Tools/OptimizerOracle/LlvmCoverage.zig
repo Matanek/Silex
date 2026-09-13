@@ -7,9 +7,9 @@ pub const Support = enum { conditional, abstract_lifetime, unsupported };
 
 pub fn classify(tag: std.meta.Tag(Silex.Ir.Instruction)) Support {
     return switch (tag) {
-        .constant_int, .constant_bool, .constant_str, .constant_float32, .constant_float64, .optional_null, .optional_some, .optional_unwrap, .copy, .deep_copy, .structure_init, .class_retain, .class_drop, .string_retain, .string_drop, .list_init, .enum_init, .enum_test, .field_load, .field_store, .collection_load, .collection_reference, .collection_replace, .collection_count, .collection_view, .function_reference, .local_load, .local_store, .global_load, .global_store, .local_address, .reference_load, .reference_store, .reference_field, .string_count, .unary, .binary, .convert, .call, .boundary_call, .print => .conditional,
+        .constant_int, .constant_bool, .constant_str, .constant_float32, .constant_float64, .optional_null, .optional_some, .optional_unwrap, .copy, .deep_copy, .structure_init, .class_retain, .class_drop, .string_retain, .string_drop, .list_init, .enum_init, .enum_test, .field_load, .field_store, .collection_load, .collection_reference, .collection_replace, .collection_count, .collection_view, .function_reference, .local_load, .local_store, .global_load, .global_store, .local_address, .reference_load, .reference_store, .reference_field, .string_count, .unary, .binary, .convert, .call, .boundary_call, .print, .assert => .conditional,
         .list_retain, .list_drop => .abstract_lifetime,
-        .constant_bytes, .class_cast, .class_test, .storage_init, .protocol_init, .protocol_test, .protocol_extract, .enum_payload, .enum_raw, .list_edit, .collection_slice, .string_address, .string_byte_count, .string_byte_at, .string_from_bytes, .address_load, .address_store, .reference_optional, .format_value, .string_concat, .indirect_call, .boundary_indirect_call, .dynamic_call, .assert, .mutex_lock, .mutex_unlock => .unsupported,
+        .constant_bytes, .class_cast, .class_test, .storage_init, .protocol_init, .protocol_test, .protocol_extract, .enum_payload, .enum_raw, .list_edit, .collection_slice, .string_address, .string_byte_count, .string_byte_at, .string_from_bytes, .address_load, .address_store, .reference_optional, .format_value, .string_concat, .indirect_call, .boundary_indirect_call, .dynamic_call, .mutex_lock, .mutex_unlock => .unsupported,
     };
 }
 
@@ -28,4 +28,5 @@ test "LLVM coverage explicitly separates value modeling from lifetime cost" {
     try std.testing.expectEqual(Support.conditional, classify(.function_reference));
     try std.testing.expectEqual(Support.conditional, classify(.enum_init));
     try std.testing.expectEqual(Support.conditional, classify(.enum_test));
+    try std.testing.expectEqual(Support.conditional, classify(.assert));
 }

@@ -3,6 +3,7 @@ pub const text =
     \\@sx.live = internal global i64 0
     \\@.sx.bounds = private constant [84 x i8] c"%s:%lld:%lld: runtime error: collection index %lld is out of bounds for count %lld\0A\00"
     \\@.sx.conversion = private constant [57 x i8] c"%s:%lld:%lld: runtime error: invalid numeric conversion\0A\00"
+    \\@.sx.assert = private constant [48 x i8] c"%s:%lld:%lld: runtime error: assertion failed: \00"
     \\declare void @free(ptr)
     \\
     \\define internal fastcc ptr @sx_alloc(i64 %bytes) {
@@ -178,6 +179,18 @@ pub const text =
     \\define internal fastcc void @sx_conversion(ptr %file, i64 %line, i64 %column) noreturn {
     \\entry:
     \\  %written = call i32 (i32, ptr, ...) @dprintf(i32 2, ptr @.sx.conversion, ptr %file, i64 %line, i64 %column)
+    \\  call void @exit(i32 1)
+    \\  unreachable
+    \\}
+    \\
+    \\define internal fastcc void @sx_assert(ptr %file, i64 %line, i64 %column, ptr %message) noreturn {
+    \\entry:
+    \\  %written.header = call i32 (i32, ptr, ...) @dprintf(i32 2, ptr @.sx.assert, ptr %file, i64 %line, i64 %column)
+    \\  %tagged = load i64, ptr %message
+    \\  %length = and i64 %tagged, 9223372036854775807
+    \\  %bytes = getelementptr i8, ptr %message, i64 8
+    \\  %written.message = call i64 @write(i32 2, ptr %bytes, i64 %length)
+    \\  %written.newline = call i64 @write(i32 2, ptr @.newline, i64 1)
     \\  call void @exit(i32 1)
     \\  unreachable
     \\}

@@ -63,6 +63,7 @@ def main():
         "LlvmEvaluation/ClassFieldStore.sx": "7\nfalse\n41\ntrue\n",
         "LlvmEvaluation/FunctionAddress.sx": "true\ntrue\n",
         "LlvmEvaluation/PlainEnum.sx": "true\ntrue\n2\n3\n",
+        "LlvmEvaluation/AssertSuccess.sx": "7\n",
         "LlvmEvaluation/StringLiterals.sx": "0\nSilex\n3\ntrue\nfalse\nA\0B\n",
     }
     for relative, expected_stdout in cases.items():
@@ -104,6 +105,26 @@ def main():
     ])
     assert function_interpreted["returncode"] != 0, function_interpreted
     assert "InvalidProgram" in function_interpreted["stderr"], function_interpreted
+
+    assert_failure = (corpus/"LlvmEvaluation/AssertFailure.sx").resolve()
+    failed_observable = None
+    for mode in ["debug", "release", "O0", "O3"]:
+        binary = output/("AssertFailure-"+mode)
+        command = ([args.native, "compile", assert_failure, "--"+mode, "--nocache", "--output", binary]
+                   if mode in ["debug", "release"] else llvm_command(assert_failure, mode, binary))
+        built = call("AssertFailure-compile-"+mode, command)
+        assert built["returncode"] == 0, built
+        run = call("AssertFailure-run-"+mode, [binary])
+        observable = {key: run[key] for key in ["returncode", "stdout", "stderr"]}
+        assert run["returncode"] == 1 and run["stdout"] == "7\n", run
+        assert "runtime error: assertion failed: échec attendu\n" in run["stderr"], run
+        if failed_observable is None:
+            failed_observable = observable
+        else:
+            assert observable == failed_observable, (mode, failed_observable, observable)
+    interpreted_failure = call("interpreter-AssertFailure", [args.native, "interpret", assert_failure, "--nocache"])
+    assert {key: interpreted_failure[key] for key in ["returncode", "stdout", "stderr"]} == failed_observable
+    print("ASSERT SUCCESS AND FAILURE OBSERVABLES PASS", flush=True)
 
     dominance = (corpus/"LlvmEvaluation/CommandsDominance.sx").resolve()
     native_observable = None

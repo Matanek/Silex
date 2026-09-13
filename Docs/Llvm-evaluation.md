@@ -60,6 +60,10 @@ coverage class (`conditional`, `abstract_lifetime`, or `unsupported`).
 effects can still be rejected later, so these counts are a lower-bound gap
 analysis rather than a promise of whole-program emission.
 
+Assertions retain their runtime branch. Failure writes the source path, line,
+column and exact string message to stderr after preserving prior stdout, then
+terminates with status 1; successful assertions have no observable output.
+
 Direct boundary calls are emitted only when every parameter and result already
 has an explicit scalar or address LLVM representation. Void calls carry no
 synthetic result. Duplicate declarations must keep the same provider and exact

@@ -648,6 +648,7 @@ const FunctionEmitter = struct {
             .call => |value| try self.emitCall(value),
             .boundary_call => |value| try self.emitBoundaryCall(value),
             .print => |value| try self.emitPrint(value),
+            .assert => |value| try self.emitAssert(block_id, value),
             else => return error.UnsupportedInstruction,
         }
     }
@@ -729,6 +730,24 @@ const FunctionEmitter = struct {
         try self.write("b{d}.fail{d}:\n", .{ block_id, serial });
         try self.write("  call fastcc void @sx_conversion(ptr @sx.file.{d}, i64 {d}, i64 {d})\n", .{ value.position.file, value.position.line, value.position.column });
         try self.write("  unreachable\nb{d}.cont{d}:\n", .{ block_id, serial });
+    }
+
+    fn emitAssert(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Assert) Error!void {
+        if (try self.valueType(value.condition) != .bool or
+            try self.valueType(value.message) != .str or
+            value.position.file >= self.program.files.len)
+        {
+            return error.InvalidProgram;
+        }
+        const serial = self.nextTemporary();
+        try self.write("  br i1 %v{d}, label %b{d}.assert.cont{d}, label %b{d}.assert.fail{d}\n", .{
+            value.condition, block_id, serial, block_id, serial,
+        });
+        try self.write("b{d}.assert.fail{d}:\n", .{ block_id, serial });
+        try self.write("  call fastcc void @sx_assert(ptr @sx.file.{d}, i64 {d}, i64 {d}, ptr %v{d})\n", .{
+            value.position.file, value.position.line, value.position.column, value.message,
+        });
+        try self.write("  unreachable\nb{d}.assert.cont{d}:\n", .{ block_id, serial });
     }
 
     fn copyValue(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
