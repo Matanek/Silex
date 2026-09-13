@@ -1,0 +1,27 @@
+struct Point {
+    var x:int
+    var y:int
+}
+
+func shift_x(point:&Point, delta:int) {
+    point.x += delta
+}
+
+func shift_y(point:&Point, delta:int) {
+    point.y += delta
+}
+
+func shift(points:&Point[]) {
+    shift_x(points[0], 10)
+    shift_y(points[1], 20)
+}
+
+func main() {
+    var points:Point[] = [Point(x:1, y:2), Point(x:3, y:4)]
+    let snapshot = points
+    shift(points)
+    print(points[0].x)
+    print(points[1].y)
+    print(snapshot[0].x)
+    print(snapshot[1].y)
+}

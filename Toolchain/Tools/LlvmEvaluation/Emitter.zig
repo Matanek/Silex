@@ -1748,15 +1748,52 @@ const FunctionEmitter = struct {
     fn emitCollectionReference(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.CollectionReference) Error!void {
         const collection_type = try self.valueType(value.collection);
         const collection = try self.collectionInfo(collection_type);
-        // Owning references can require detaching shared storage. Only borrowed
-        // views are modeled here; never silently turn copy-on-write into aliasing.
-        if (!collection.view or value.ownership != .root or !plainValue(self.program, collection.element, 0))
+        const element_name = try reportTypeName(self.allocator, self.program, collection.element);
+        errdefer std.debug.print(
+            "silex LLVM evaluation: unsupported collection reference, view {}, ownership {s}, mutable source {}, element {s}\n",
+            .{ collection.view, @tagName(value.ownership), value.reference != null, element_name },
+        );
+        if (collection.length != null or value.ownership != .root)
             return error.UnsupportedInstruction;
+        if (!collection.view and (value.reference == null or !plainValue(self.program, collection.element, 0)))
+            return error.UnsupportedInstruction;
+        _ = try llvmType(self.allocator, self.program, collection.element);
         if (try self.valueType(value.index) != .int or try self.valueType(value.result) != .address)
             return error.InvalidProgram;
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, collection_type);
-        if (value.reference) |reference| {
+        if (!collection.view) {
+            const reference = value.reference.?;
+            if (try self.valueType(reference) != .address) return error.InvalidProgram;
+            try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });
+            try self.write("  %t{d}.old.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, type_name, serial });
+            try self.write("  %t{d}.count = extractvalue {s} %t{d}.source, 1\n", .{ serial, type_name, serial });
+            try self.write("  %t{d}.roots.address = getelementptr i8, ptr %t{d}.old.data, i64 -24\n", .{ serial, serial });
+            try self.write("  %t{d}.roots = load atomic i64, ptr %t{d}.roots.address acquire, align 8\n", .{ serial, serial });
+            try self.write("  %t{d}.edges.address = getelementptr i8, ptr %t{d}.old.data, i64 -16\n", .{ serial, serial });
+            try self.write("  %t{d}.edges = load atomic i64, ptr %t{d}.edges.address acquire, align 8\n", .{ serial, serial });
+            try self.write("  %t{d}.owners = add i64 %t{d}.roots, %t{d}.edges\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.shared = icmp ne i64 %t{d}.owners, 1\n", .{ serial, serial });
+            try self.write("  br i1 %t{d}.shared, label %collection.detach{d}, label %collection.unique{d}\n", .{ serial, serial, serial });
+            try self.write("collection.detach{d}:\n", .{serial});
+            try self.emitCollectionBytes(serial, collection.element);
+            try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+            try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.bytes, i1 false)\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.detached.data = insertvalue {s} %t{d}.source, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial, serial });
+            try self.write("  store {s} %t{d}.detached.data, ptr %v{d}\n", .{ type_name, serial, reference });
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 -24)\n", .{serial});
+            try self.write("  br label %collection.ready{d}\n", .{serial});
+            try self.write("collection.unique{d}:\n", .{serial});
+            try self.write("  br label %collection.ready{d}\n", .{serial});
+            try self.write("collection.ready{d}:\n", .{serial});
+            try self.write("  %t{d}.data = phi ptr [ %t{d}.storage, %collection.detach{d} ], [ %t{d}.old.data, %collection.unique{d} ]\n", .{
+                serial,
+                serial,
+                serial,
+                serial,
+                serial,
+            });
+        } else if (value.reference) |reference| {
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
             try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });
             try self.write("  %t{d}.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, type_name, serial });
