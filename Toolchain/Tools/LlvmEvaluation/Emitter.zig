@@ -688,6 +688,7 @@ const FunctionEmitter = struct {
             .address_store => |value| try self.emitAddressStore(value),
             .reference_store => |value| try self.emitReferenceStore(value),
             .reference_field => |value| try self.emitReferenceField(value),
+            .reference_optional => |value| try self.emitReferenceOptional(value),
             .string_address => |value| try self.emitStringAddress(value),
             .string_byte_count => |value| try self.emitStringByteCount(value),
             .string_byte_at => |value| try self.emitStringByteAt(block_id, value),
@@ -1833,6 +1834,46 @@ const FunctionEmitter = struct {
         });
     }
 
+    fn emitReferenceOptional(self: *FunctionEmitter, value: Ir.Instruction.ReferenceOptional) Error!void {
+        if (try self.valueType(value.reference) != .address or try self.valueType(value.result) != .address)
+            return error.InvalidProgram;
+        const optional_type = try self.referencePointeeType(value.reference, 0);
+        if (optional_type.optionalChild() == null) return error.InvalidProgram;
+        try self.write("  %v{d} = getelementptr {s}, ptr %v{d}, i32 0, i32 1\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, optional_type),
+            value.reference,
+        });
+    }
+
+    fn referencePointeeType(self: *FunctionEmitter, reference: Ir.ValueId, depth: usize) Error!Ir.Type {
+        if (depth >= self.function.value_types.len) return error.UnsupportedType;
+        for (self.function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .local_address => |value| if (value.result == reference) {
+                if (value.local >= self.function.local_types.len) return error.InvalidProgram;
+                return self.function.local_types[value.local];
+            },
+            .reference_field => |value| if (value.result == reference) {
+                if (value.structure >= self.program.structures.len or
+                    value.field >= self.program.structures[value.structure].fields.len)
+                    return error.InvalidProgram;
+                return self.program.structures[value.structure].fields[value.field].type;
+            },
+            .collection_reference => |value| if (value.result == reference) {
+                return (try self.collectionInfo(try self.valueType(value.collection))).element;
+            },
+            .reference_optional => |value| if (value.result == reference) {
+                return (try self.referencePointeeType(value.reference, depth + 1)).optionalChild() orelse
+                    error.InvalidProgram;
+            },
+            .copy => |value| if (value.result == reference) {
+                return self.referencePointeeType(value.operand, depth + 1);
+            },
+            else => {},
+        };
+        return error.UnsupportedType;
+    }
+
     fn emitNegate(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Unary) Error!void {
         const type_value = try self.valueType(value.operand);
         if (value.operator != .negate) return error.UnsupportedInstruction;
@@ -2813,4 +2854,39 @@ test "statically null optional class global keeps tag and opaque reference" {
     ) != null);
     try std.testing.expect(std.mem.indexOf(u8, llvm, "load { i1, ptr }, ptr @sx.global.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, llvm, "store { i1, ptr } %v0, ptr @sx.global.0") != null);
+}
+
+test "optional reference projection follows the typed LLVM layout" {
+    const optional_bool = Ir.Type.optional(.bool);
+    const optional_int = Ir.Type.optional(.int);
+    const program: Ir.Program = .{
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{ .address, .address, .address, .address },
+            .local_types = &.{ optional_bool, optional_int },
+            .blocks = &.{.{
+                .instructions = &.{
+                    .{ .local_address = .{ .result = 0, .local = 0 } },
+                    .{ .reference_optional = .{ .result = 1, .reference = 0 } },
+                    .{ .local_address = .{ .result = 2, .local = 1 } },
+                    .{ .reference_optional = .{ .result = 3, .reference = 2 } },
+                },
+                .terminator = .return_void,
+            }},
+        }},
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        llvm,
+        "%v1 = getelementptr { i1, i1 }, ptr %v0, i32 0, i32 1",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        llvm,
+        "%v3 = getelementptr { i1, i64 }, ptr %v2, i32 0, i32 1",
+    ) != null);
 }

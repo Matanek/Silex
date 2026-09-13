@@ -115,7 +115,11 @@ Optional construction, extraction, copies, parameters, results, local storage an
 equality use the explicit presence tag; equality ignores the payload when both
 values are absent. Compiler-only `storage_init` placeholders materialize as a
 typed zero constant; definite-initialization analysis guarantees that source code
-cannot observe them before the explicit field replacement. Floating operations
+cannot observe them before the explicit field replacement. A
+`reference_optional` projection recovers the pointee type from its local, field,
+collection or prior projection provenance and uses a typed LLVM `getelementptr`;
+it therefore preserves payload offsets for both narrow and word-aligned optionals
+instead of assuming the native stack-slot offset. Floating operations
 have no fast-math permissions, and machine
 contraction is disabled. Overflow and division errors preserve standalone failure
 status; collection bounds and checked conversions preserve source-position
