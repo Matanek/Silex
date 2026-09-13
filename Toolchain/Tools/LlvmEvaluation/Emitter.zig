@@ -75,8 +75,10 @@ pub fn emitWithBoundaries(
         \\@.fmt.boolean.inline = private constant [3 x i8] c"%s\00"
         \\@.true = private constant [5 x i8] c"true\00"
         \\@.false = private constant [6 x i8] c"false\00"
+        \\@.newline = private constant [1 x i8] c"\0A"
         \\
         \\declare i32 @dprintf(i32, ptr, ...)
+        \\declare i64 @write(i32, ptr, i64)
         \\declare ptr @malloc(i64)
         \\declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
         \\declare void @exit(i32) noreturn
@@ -132,6 +134,7 @@ pub fn emitWithBoundaries(
         if (!reachable[function_id]) continue;
         lowered_functions[function_id] = try @import("../OptimizerOracle/LlvmValues.zig").lower(allocator, function);
     }
+    try emitStringLiterals(&output, allocator, lowered_functions);
     // Normalize the whole reachable value graph before declaring aggregate
     // layouts. Unsupported instructions therefore keep their precise
     // attribution even when the composed program also contains types outside
@@ -554,7 +557,7 @@ const FunctionEmitter = struct {
                 }
             }
             for (block.instructions, 0..) |instruction, instruction_index| {
-                self.emitInstruction(block_id, instruction) catch |err| {
+                self.emitInstruction(block_id, instruction_index, instruction) catch |err| {
                     std.debug.print(
                         "silex LLVM evaluation: emitter rejected function '{s}', block {d}, instruction {d} ({s}): {t}\n",
                         .{ self.function.name, block_id, instruction_index, @tagName(instruction), err },
@@ -573,7 +576,12 @@ const FunctionEmitter = struct {
         );
     }
 
-    fn emitInstruction(self: *FunctionEmitter, block_id: usize, instruction: Ir.Instruction) Error!void {
+    fn emitInstruction(
+        self: *FunctionEmitter,
+        block_id: usize,
+        instruction_index: usize,
+        instruction: Ir.Instruction,
+    ) Error!void {
         if (Coverage.classify(std.meta.activeTag(instruction)) == .unsupported)
             return error.UnsupportedInstruction;
         switch (instruction) {
@@ -586,6 +594,7 @@ const FunctionEmitter = struct {
                 "  %v{d} = xor i1 false, {s}\n",
                 .{ value.result, if (value.value) "true" else "false" },
             ),
+            .constant_str => |value| try self.emitConstantString(block_id, instruction_index, value),
             .constant_float32 => |value| try self.write(
                 "  %v{d} = bitcast i32 {d} to float\n",
                 .{ value.result, value.bits },
@@ -601,6 +610,8 @@ const FunctionEmitter = struct {
             .deep_copy => |value| try self.emitDeepCopy(value.result, value.operand),
             .class_retain => |value| try self.emitClassRetain(value),
             .class_drop => |value| try self.emitClassDrop(value),
+            .string_retain => |value| try self.emitStringResource(value, "sx_string_retain"),
+            .string_drop => |value| try self.emitStringResource(value, "sx_string_drop"),
             .structure_init => |value| try self.emitStructureInit(value),
             .list_init => |value| try self.emitListInit(value),
             .list_retain => |value| try self.emitListResource(value, "sx_retain"),
@@ -625,6 +636,7 @@ const FunctionEmitter = struct {
             .reference_load => |value| try self.emitReferenceLoad(value),
             .reference_store => |value| try self.emitReferenceStore(value),
             .reference_field => |value| try self.emitReferenceField(value),
+            .string_count => |value| try self.emitStringCount(value),
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
             .convert => |value| try self.emitConvert(block_id, value),
@@ -633,6 +645,31 @@ const FunctionEmitter = struct {
             .print => |value| try self.emitPrint(value),
             else => return error.UnsupportedInstruction,
         }
+    }
+
+    fn emitConstantString(
+        self: *FunctionEmitter,
+        block_id: usize,
+        instruction_index: usize,
+        value: Ir.Instruction.ConstantStr,
+    ) Error!void {
+        if (try self.valueType(value.result) != .str) return error.InvalidProgram;
+        try self.write(
+            "  %v{d} = getelementptr {{ i64, [{d} x i8] }}, ptr @sx.string.{d}.{d}.{d}, i32 0, i32 0\n",
+            .{ value.result, value.value.len, self.function_id, block_id, instruction_index },
+        );
+    }
+
+    fn emitStringResource(self: *FunctionEmitter, value: Ir.Instruction.ListResource, comptime operation: []const u8) Error!void {
+        if (try self.valueType(value.operand) != .str or value.ownership != .root)
+            return error.UnsupportedInstruction;
+        try self.write("  call fastcc void @{s}(ptr %v{d})\n", .{ operation, value.operand });
+    }
+
+    fn emitStringCount(self: *FunctionEmitter, value: Ir.Instruction.StringCount) Error!void {
+        if (try self.valueType(value.operand) != .str or try self.valueType(value.result) != .int)
+            return error.InvalidProgram;
+        try self.write("  %v{d} = call fastcc i64 @sx_string_count(ptr %v{d})\n", .{ value.result, value.operand });
     }
 
     fn emitGlobalLoad(self: *FunctionEmitter, value: Ir.Instruction.GlobalLoad) Error!void {
@@ -1231,6 +1268,19 @@ const FunctionEmitter = struct {
             try self.valueType(value.result) != .bool)
             return error.InvalidProgram;
         if (left_type.optionalChild() != null) return self.emitOptionalEquality(value, left_type);
+        if (left_type == .str) {
+            if (value.operator != .equal and value.operator != .not_equal)
+                return error.UnsupportedInstruction;
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.string.equal = call fastcc i1 @sx_string_equal(ptr %v{d}, ptr %v{d})\n", .{
+                serial,
+                value.left,
+                value.right,
+            });
+            if (value.operator == .equal)
+                return self.write("  %v{d} = xor i1 %t{d}.string.equal, false\n", .{ value.result, serial });
+            return self.write("  %v{d} = xor i1 %t{d}.string.equal, true\n", .{ value.result, serial });
+        }
         const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
             .add, .subtract, .multiply => {
@@ -1647,6 +1697,14 @@ const FunctionEmitter = struct {
     fn emitPrint(self: *FunctionEmitter, value: Ir.Instruction.Print) Error!void {
         const type_value = try self.valueType(value.value);
         const serial = self.nextTemporary();
+        if (type_value == .str) {
+            try self.write("  %t{d}.tagged = load i64, ptr %v{d}\n", .{ serial, value.value });
+            try self.write("  %t{d}.length = and i64 %t{d}.tagged, 9223372036854775807\n", .{ serial, serial });
+            try self.write("  %t{d}.data = getelementptr i8, ptr %v{d}, i64 8\n", .{ serial, value.value });
+            try self.write("  %t{d}.print = call i64 @write(i32 1, ptr %t{d}.data, i64 %t{d}.length)\n", .{ serial, serial, serial });
+            if (value.newline) try self.write("  %t{d}.newline = call i64 @write(i32 1, ptr @.newline, i64 1)\n", .{serial});
+            return;
+        }
         if (type_value == .bool) {
             try self.write("  %t{d}.text = select i1 %v{d}, ptr @.true, ptr @.false\n", .{ serial, value.value });
             try self.write("  %t{d}.print = call i32 (i32, ptr, ...) @dprintf(i32 1, ptr @{s}, ptr %t{d}.text)\n", .{
@@ -1846,6 +1904,7 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
         .int, .uint => "i64",
         .float32 => "float",
         .float64 => "double",
+        .str => "ptr",
         .address => "ptr",
         else => error.UnsupportedType,
     };
@@ -1884,6 +1943,44 @@ fn emitSourceFiles(output: *std.ArrayList(u8), allocator: Allocator, program: Ir
         for (path) |byte| try appendFmt(output, allocator, "\\{X:0>2}", .{byte});
         try output.appendSlice(allocator, "\\00\"\n");
     }
+}
+
+fn emitStringLiterals(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    functions: []const ?Ir.Function,
+) Error!void {
+    var emitted = false;
+    for (functions, 0..) |maybe_function, function_id| {
+        const function = maybe_function orelse continue;
+        for (function.blocks, 0..) |block, block_id| for (block.instructions, 0..) |instruction, instruction_index| switch (instruction) {
+            .constant_str => |value| {
+                try appendFmt(output, allocator, "@sx.string.{d}.{d}.{d} = private constant {{ i64, [{d} x i8] }} {{ i64 {d}, [{d} x i8] ", .{
+                    function_id,
+                    block_id,
+                    instruction_index,
+                    value.value.len,
+                    value.value.len,
+                    value.value.len,
+                });
+                if (value.value.len == 0) {
+                    try output.appendSlice(allocator, "zeroinitializer");
+                } else {
+                    try output.appendSlice(allocator, "c\"");
+                    try appendEscapedBytes(output, allocator, value.value);
+                    try output.append(allocator, '"');
+                }
+                try output.appendSlice(allocator, " }\n");
+                emitted = true;
+            },
+            else => {},
+        };
+    }
+    if (emitted) try output.append(allocator, '\n');
+}
+
+fn appendEscapedBytes(output: *std.ArrayList(u8), allocator: Allocator, bytes: []const u8) Allocator.Error!void {
+    for (bytes) |byte| try appendFmt(output, allocator, "\\{X:0>2}", .{byte});
 }
 
 test "statically null optional class global keeps tag and opaque reference" {

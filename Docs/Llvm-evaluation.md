@@ -82,7 +82,8 @@ cases, unsupported source forms, cache reuse/repair, and native/LLVM/native runs
 ## Current semantic boundary
 
 Numeric operations, branches, calls, plain aggregates, scalar/aggregate references,
-plain-value collections, and resource-free optionals cover the selected corpus.
+plain-value collections, resource-free optionals, and immutable string literals
+cover the selected corpus.
 Optional construction, extraction, copies, parameters, results, local storage and
 equality use the explicit presence tag; equality ignores the payload when both
 values are absent. Floating operations have no fast-math permissions, and machine
@@ -101,7 +102,13 @@ the native IR contract, and explicit root retains/drops control reclamation.
 This class subset accepts a drop only when its exact static plan contains solely
 provably empty finalizers. Effective finalizers, resource fields, inheritance,
 edge ownership and cycles remain explicit refusals; this is not a substitute for
-the native object graph collector. Callbacks, other non-integer globals, package
+the native object graph collector. String literals use the native-style
+mono-pointer descriptor: an explicit byte length followed by the exact bytes,
+without using a trailing zero as value data. Their descriptors are private and
+static, so string retain/drop recognize them without allocating or freeing.
+Content equality, Unicode scalar count, calls, returns and output preserve empty,
+UTF-8 and embedded-zero values. Dynamic string construction, interpolation and
+concatenation remain explicit refusals. Callbacks, other non-integer globals, package
 providers, and mutable views requiring owning storage detachment are also still
 rejected. A live-allocation counter checked after normal return makes leaks fail
 validation, including both collection replacement and the optional-class witness.

@@ -74,6 +74,88 @@ pub const text =
     \\  ret void
     \\}
     \\
+    \\define internal fastcc void @sx_string_retain(ptr %descriptor) {
+    \\entry:
+    \\  %tagged = load i64, ptr %descriptor
+    \\  %dynamic = icmp slt i64 %tagged, 0
+    \\  br i1 %dynamic, label %retain, label %done
+    \\retain:
+    \\  call fastcc void @sx_retain(ptr %descriptor)
+    \\  br label %done
+    \\done:
+    \\  ret void
+    \\}
+    \\
+    \\define internal fastcc void @sx_string_drop(ptr %descriptor) {
+    \\entry:
+    \\  %tagged = load i64, ptr %descriptor
+    \\  %dynamic = icmp slt i64 %tagged, 0
+    \\  br i1 %dynamic, label %drop, label %done
+    \\drop:
+    \\  call fastcc void @sx_drop(ptr %descriptor)
+    \\  br label %done
+    \\done:
+    \\  ret void
+    \\}
+    \\
+    \\define internal fastcc i1 @sx_string_equal(ptr %left, ptr %right) {
+    \\entry:
+    \\  %left.tagged = load i64, ptr %left
+    \\  %right.tagged = load i64, ptr %right
+    \\  %left.length = and i64 %left.tagged, 9223372036854775807
+    \\  %right.length = and i64 %right.tagged, 9223372036854775807
+    \\  %same.length = icmp eq i64 %left.length, %right.length
+    \\  br i1 %same.length, label %length.match, label %unequal
+    \\length.match:
+    \\  %empty = icmp eq i64 %left.length, 0
+    \\  br i1 %empty, label %equal, label %compare
+    \\compare:
+    \\  %index = phi i64 [ 0, %length.match ], [ %next, %advance ]
+    \\  %left.offset = add i64 %index, 8
+    \\  %right.offset = add i64 %index, 8
+    \\  %left.address = getelementptr i8, ptr %left, i64 %left.offset
+    \\  %right.address = getelementptr i8, ptr %right, i64 %right.offset
+    \\  %left.byte = load i8, ptr %left.address
+    \\  %right.byte = load i8, ptr %right.address
+    \\  %same.byte = icmp eq i8 %left.byte, %right.byte
+    \\  br i1 %same.byte, label %advance, label %unequal
+    \\advance:
+    \\  %next = add i64 %index, 1
+    \\  %finished = icmp eq i64 %next, %left.length
+    \\  br i1 %finished, label %equal, label %compare
+    \\equal:
+    \\  ret i1 true
+    \\unequal:
+    \\  ret i1 false
+    \\}
+    \\
+    \\define internal fastcc i64 @sx_string_count(ptr %descriptor) {
+    \\entry:
+    \\  %tagged = load i64, ptr %descriptor
+    \\  %length = and i64 %tagged, 9223372036854775807
+    \\  %empty = icmp eq i64 %length, 0
+    \\  br i1 %empty, label %done.empty, label %scan
+    \\scan:
+    \\  %index = phi i64 [ 0, %entry ], [ %next, %advance ]
+    \\  %count = phi i64 [ 0, %entry ], [ %next.count, %advance ]
+    \\  %offset = add i64 %index, 8
+    \\  %address = getelementptr i8, ptr %descriptor, i64 %offset
+    \\  %byte = load i8, ptr %address
+    \\  %prefix = and i8 %byte, -64
+    \\  %continuation = icmp eq i8 %prefix, -128
+    \\  %increment = select i1 %continuation, i64 0, i64 1
+    \\  %next.count = add i64 %count, %increment
+    \\  br label %advance
+    \\advance:
+    \\  %next = add i64 %index, 1
+    \\  %finished = icmp eq i64 %next, %length
+    \\  br i1 %finished, label %done, label %scan
+    \\done:
+    \\  ret i64 %next.count
+    \\done.empty:
+    \\  ret i64 0
+    \\}
+    \\
     \\define internal fastcc void @sx_finish() {
     \\entry:
     \\  %live = load i64, ptr @sx.live

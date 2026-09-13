@@ -60,6 +60,7 @@ def main():
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
         "LlvmEvaluation/OptionalValues.sx": "-1\n41\n-1\n",
         "LlvmEvaluation/ClassOwnership.sx": "7\n-1\n",
+        "LlvmEvaluation/StringLiterals.sx": "0\nSilex\n3\ntrue\nfalse\nA\0B\n",
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -91,7 +92,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/StringLiterals.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -210,8 +211,24 @@ def main():
         assert fragment in class_llvm, fragment
     print("ROOT-OWNED OPTIONAL CLASS EMISSION PASS", flush=True)
 
+    string_metadata = json.loads(Path(str(output/"StringLiterals-O0")+".json").read_text())
+    string_llvm = (Path(string_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "private constant { i64, [5 x i8] }",
+        "private constant { i64, [7 x i8] }",
+        "private constant { i64, [3 x i8] }",
+        "call fastcc void @sx_string_retain(ptr",
+        "call fastcc void @sx_string_drop(ptr",
+        "call fastcc i1 @sx_string_equal(ptr",
+        "call fastcc i64 @sx_string_count(ptr",
+        "call i64 @write(i32 1, ptr",
+    ]:
+        assert fragment in string_llvm, fragment
+    assert "[3 x i8] c\"\\41\\00\\42\"" in string_llvm, string_llvm
+    print("STATIC STRING DESCRIPTOR AND LIFETIME EMISSION PASS", flush=True)
+
     # The ordinary compiler must accept each refusal witness first.
-    for name in ["RefuseString", "RefuseCallback", "RefuseClassFinalizer"]:
+    for name in ["RefuseDynamicString", "RefuseCallback", "RefuseClassFinalizer"]:
         source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
         native = output/(name+"-native")
         assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
@@ -221,6 +238,8 @@ def main():
         assert rejected["returncode"] != 0 and "Unsupported" in rejected["stderr"], rejected
         if name == "RefuseClassFinalizer":
             assert "class_drop" in rejected["stderr"], rejected
+        if name == "RefuseDynamicString":
+            assert "string_concat" in rejected["stderr"], rejected
         assert target.read_bytes() == b"existing output must survive refusal"
         print(name, "REFUSED before output", flush=True)
 

@@ -1,0 +1,17 @@
+func relay(value:str) str { return value }
+
+func same(left:str, right:str) bool { return left == right }
+
+func main() {
+    let empty = relay("")
+    let ascii = relay("Silex")
+    let unicode = relay("A\u{1F642}\u{E9}")
+    let zero = relay("A\0B")
+
+    print(empty.count())
+    print(ascii)
+    print(unicode.count())
+    print(same(ascii, "Silex"))
+    print(same(ascii, "silex"))
+    print(zero)
+}
