@@ -1,0 +1,19 @@
+func read(values:@uint[4], index:int) uint { return values[index] }
+
+func write(values:&uint[4], index:int, value:uint) {
+    values[index] = value
+}
+
+func main() {
+    var values:uint[4] = [10, 20, 30, 40]
+    print(values.count())
+    print(read(values, 2))
+    write(values, 1, 25)
+    print(values[1])
+    print(values[-1])
+
+    var zero:uint[4]
+    print(zero[0])
+    write(zero, -1, 99)
+    print(zero[3])
+}

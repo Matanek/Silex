@@ -174,8 +174,16 @@ pub fn emitWithBoundaries(
             );
             continue;
         }
-        if (structure.collection != null) {
-            try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
+        if (structure.collection) |collection| {
+            if (collection.length) |length| {
+                try appendFmt(&output, allocator, "%sx.type.{d} = type [{d} x {s}]\n", .{
+                    structure_index,
+                    length,
+                    try llvmType(allocator, program, collection.element),
+                });
+            } else {
+                try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
+            }
             continue;
         }
         // Class values remain pointers, while their allocation follows the
@@ -1865,8 +1873,12 @@ const FunctionEmitter = struct {
 
     fn emitCollectionCount(self: *FunctionEmitter, value: Ir.Instruction.CollectionCount) Error!void {
         const collection_type = try self.valueType(value.collection);
-        _ = try self.collectionInfo(collection_type);
+        const collection = try self.collectionInfo(collection_type);
         if (try self.valueType(value.result) != .int) return error.InvalidProgram;
+        if (collection.length) |length| {
+            try self.write("  %v{d} = add i64 0, {d}\n", .{ value.result, length });
+            return;
+        }
         try self.write("  %v{d} = extractvalue {s} %v{d}, 1\n", .{
             value.result,
             try llvmType(self.allocator, self.program, collection_type),
@@ -1882,8 +1894,14 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, collection_type);
         const element_name = try llvmType(self.allocator, self.program, collection.element);
-        try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
-        try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
+        if (collection.length) |length| {
+            try self.write("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
+            try self.write("  store {s} %v{d}, ptr %t{d}.storage\n", .{ type_name, value.collection, serial });
+            try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
+        } else {
+            try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
+            try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
+        }
         try self.emitNormalizedIndex(serial, "index", value.index);
         if (value.checked) {
             try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
@@ -1891,12 +1909,10 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
             try self.emitBoundsFailure(block_id, serial, value.index, value.position);
         }
-        try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.index\n", .{
-            serial,
-            element_name,
-            serial,
-            serial,
-        });
+        if (collection.length != null)
+            try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.storage, i32 0, i64 %t{d}.index\n", .{ serial, type_name, serial, serial })
+        else
+            try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.index\n", .{ serial, element_name, serial, serial });
         try self.write("  %v{d} = load {s}, ptr %t{d}.element\n", .{ value.result, element_name, serial });
     }
 
@@ -1908,13 +1924,33 @@ const FunctionEmitter = struct {
             "silex LLVM evaluation: unsupported collection reference, view {}, ownership {s}, mutable source {}, element {s}\n",
             .{ collection.view, @tagName(value.ownership), value.reference != null, element_name },
         );
-        if (collection.length != null)
-            return error.UnsupportedInstruction;
         _ = try llvmType(self.allocator, self.program, collection.element);
         if (try self.valueType(value.index) != .int or try self.valueType(value.result) != .address)
             return error.InvalidProgram;
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, collection_type);
+        if (collection.length) |length| {
+            try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
+            const storage = if (value.reference) |reference| fixed: {
+                if (try self.valueType(reference) != .address) return error.InvalidProgram;
+                break :fixed try std.fmt.allocPrint(self.allocator, "%v{d}", .{reference});
+            } else fixed: {
+                try self.write("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
+                try self.write("  store {s} %v{d}, ptr %t{d}.storage\n", .{ type_name, value.collection, serial });
+                break :fixed try std.fmt.allocPrint(self.allocator, "%t{d}.storage", .{serial});
+            };
+            try self.emitNormalizedIndex(serial, "index", value.index);
+            if (value.checked) {
+                try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
+                try self.write("  %t{d}.index.high = icmp sge i64 %t{d}.index, %t{d}.count\n", .{ serial, serial, serial });
+                try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
+                try self.emitBoundsFailure(block_id, serial, value.index, value.position);
+            }
+            try self.write("  %v{d} = getelementptr {s}, ptr {s}, i32 0, i64 %t{d}.index\n", .{
+                value.result, type_name, storage, serial,
+            });
+            return;
+        }
         if (!collection.view and value.reference != null) {
             const reference = value.reference.?;
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
@@ -2008,6 +2044,24 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, collection_type);
         const element_name = try llvmType(self.allocator, self.program, collection.element);
+        if (collection.length) |length| {
+            try self.write("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
+            try self.write("  store {s} %v{d}, ptr %t{d}.storage\n", .{ type_name, value.collection, serial });
+            try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
+            try self.emitNormalizedIndex(serial, "index", value.index);
+            if (value.checked) {
+                try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
+                try self.write("  %t{d}.index.high = icmp sge i64 %t{d}.index, %t{d}.count\n", .{ serial, serial, serial });
+                try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
+                try self.emitBoundsFailure(block_id, serial, value.index, value.position);
+            }
+            try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.storage, i32 0, i64 %t{d}.index\n", .{
+                serial, type_name, serial, serial,
+            });
+            try self.write("  store {s} %v{d}, ptr %t{d}.element\n", .{ element_name, value.replacement, serial });
+            try self.write("  %v{d} = load {s}, ptr %t{d}.storage\n", .{ value.result, type_name, serial });
+            return;
+        }
         try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
         try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
         try self.emitNormalizedIndex(serial, "index", value.index);
@@ -2065,7 +2119,7 @@ const FunctionEmitter = struct {
         const result_type = try self.valueType(value.result);
         const source = try self.collectionInfo(source_type);
         const result = try self.collectionInfo(result_type);
-        if (value.reference != null and !source.view) return error.UnsupportedInstruction;
+        if (value.reference != null and !source.view and source.length == null) return error.UnsupportedInstruction;
         if (source.element != result.element or !result.view or
             try self.valueType(value.start) != .int or try self.valueType(value.end) != .int)
             return error.InvalidProgram;
@@ -2073,7 +2127,17 @@ const FunctionEmitter = struct {
         const source_name = try llvmType(self.allocator, self.program, source_type);
         const result_name = try llvmType(self.allocator, self.program, result_type);
         const element_name = try llvmType(self.allocator, self.program, source.element);
-        if (value.reference) |reference| {
+        if (source.length) |length| {
+            if (value.reference) |reference| {
+                if (try self.valueType(reference) != .address) return error.InvalidProgram;
+                try self.write("  %t{d}.data = getelementptr {s}, ptr %v{d}, i32 0, i32 0\n", .{ serial, source_name, reference });
+            } else {
+                try self.write("  %t{d}.source = alloca {s}\n", .{ serial, source_name });
+                try self.write("  store {s} %v{d}, ptr %t{d}.source\n", .{ source_name, value.collection, serial });
+                try self.write("  %t{d}.data = getelementptr {s}, ptr %t{d}.source, i32 0, i32 0\n", .{ serial, source_name, serial });
+            }
+            try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
+        } else if (value.reference) |reference| {
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
             try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, source_name, reference });
             try self.write("  %t{d}.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, source_name, serial });
@@ -2119,8 +2183,15 @@ const FunctionEmitter = struct {
         const source_name = try llvmType(self.allocator, self.program, source_type);
         const result_name = try llvmType(self.allocator, self.program, result_type);
         const element_name = try llvmType(self.allocator, self.program, source.element);
-        try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, source_name, value.collection });
-        try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, source_name, value.collection });
+        if (source.length) |length| {
+            try self.write("  %t{d}.source = alloca {s}\n", .{ serial, source_name });
+            try self.write("  store {s} %v{d}, ptr %t{d}.source\n", .{ source_name, value.collection, serial });
+            try self.write("  %t{d}.data = getelementptr {s}, ptr %t{d}.source, i32 0, i32 0\n", .{ serial, source_name, serial });
+            try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
+        } else {
+            try self.write("  %t{d}.data = extractvalue {s} %v{d}, 0\n", .{ serial, source_name, value.collection });
+            try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, source_name, value.collection });
+        }
         try self.emitClampedSliceBound(serial, "start", value.start);
         try self.emitClampedSliceBound(serial, "end", value.end);
         try self.write("  %t{d}.slice.difference = sub i64 %t{d}.end.clamped, %t{d}.start.clamped\n", .{ serial, serial, serial });

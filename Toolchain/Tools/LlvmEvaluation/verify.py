@@ -84,6 +84,8 @@ def main():
         "LlvmEvaluation/RichCollectionReplace.sx": "20\n30\n20\ntrue\ntrue\n31\n21\n40\n60\ntrue\n50\n",
         "LlvmEvaluation/RichCollectionReplaceBounds.sx": "7\n",
         "LlvmEvaluation/OptionalStringEquality.sx": "true\nfalse\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\n",
+        "LlvmEvaluation/FixedCollectionStorage.sx": "4\n30\n25\n40\n0\n99\n",
+        "LlvmEvaluation/FixedCollectionBounds.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -145,6 +147,7 @@ def main():
                 "FloatNarrowingOverflow", "FloatNarrowingNaN", "TakeLastEmpty", "TakeIndexedBounds",
                 "EdgeCollectionReplaceBounds",
                 "RichCollectionReplaceBounds",
+                "FixedCollectionBounds",
             ] else 0), run
             if expected is None:
                 expected = observable
@@ -848,6 +851,18 @@ def main():
     ]:
         assert fragment in optional_string_llvm, fragment
     print("OPTIONAL STRING EQUALITY PASS", flush=True)
+
+    fixed_collection_metadata = json.loads(Path(str(output/"FixedCollectionStorage-O0")+".json").read_text())
+    fixed_collection_llvm = (Path(fixed_collection_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "= type [4 x i64]",
+        ".storage = alloca %sx.type.",
+        "getelementptr %sx.type.",
+        "i32 0, i64",
+        "= load %sx.type.",
+    ]:
+        assert fragment in fixed_collection_llvm, fragment
+    print("FIXED COLLECTION STORAGE PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:
