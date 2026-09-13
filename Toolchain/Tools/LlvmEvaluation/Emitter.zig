@@ -1910,14 +1910,14 @@ const FunctionEmitter = struct {
         );
         if (collection.length != null)
             return error.UnsupportedInstruction;
-        if (!collection.view and (value.reference == null or !plainValue(self.program, collection.element, 0)))
+        if (!collection.view and value.reference != null and !plainValue(self.program, collection.element, 0))
             return error.UnsupportedInstruction;
         _ = try llvmType(self.allocator, self.program, collection.element);
         if (try self.valueType(value.index) != .int or try self.valueType(value.result) != .address)
             return error.InvalidProgram;
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, collection_type);
-        if (!collection.view) {
+        if (!collection.view and value.reference != null) {
             const reference = value.reference.?;
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
             try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });

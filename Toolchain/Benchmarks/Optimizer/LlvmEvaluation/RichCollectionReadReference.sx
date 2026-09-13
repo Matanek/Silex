@@ -1,0 +1,17 @@
+class Item {
+    var value:int
+    init(value:int) { self.value = value }
+}
+
+func read(values:Item[], index:int) int {
+    let item:@Item = @values[index]
+    return item.value
+}
+
+func main() {
+    var values:Item[] = [Item(10), Item(20), Item(30)]
+    print(read(values, 1))
+    var alias = values[1]
+    alias.value = 25
+    print(read(values, -2))
+}

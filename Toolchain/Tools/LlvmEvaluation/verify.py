@@ -76,6 +76,7 @@ def main():
         "LlvmEvaluation/TakeLastEmpty.sx": "7\n",
         "LlvmEvaluation/TakeIndexedEdge.sx": "20\n2\n3\n20\n25\n10\n1\n30\n",
         "LlvmEvaluation/TakeIndexedBounds.sx": "7\n",
+        "LlvmEvaluation/RichCollectionReadReference.sx": "20\n25\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -744,6 +745,45 @@ def main():
     result_at = take_indexed_llvm.index(".collection = insertvalue", removed_at)
     assert "call fastcc void @sx_drop" not in take_indexed_llvm[removed_at:result_at]
     print("EDGE LIST INDEXED TAKE PASS", flush=True)
+
+    rich_read_metadata = json.loads(Path(str(output/"RichCollectionReadReference-O0")+".json").read_text())
+    rich_read_llvm = (Path(rich_read_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".data = extractvalue",
+        ".index.wrapped = add i64",
+        "getelementptr ptr, ptr",
+    ]:
+        assert fragment in rich_read_llvm, fragment
+    assert "collection.detach" not in rich_read_llvm
+    print("RICH OWNING COLLECTION READ REFERENCE PASS", flush=True)
+
+    # The frozen native reference truncates this rich-reference bounds message
+    # after "count ". LLVM keeps the already-established complete bounds
+    # contract; record the discrepancy rather than reproducing the native bug.
+    rich_bounds_source = (corpus/"LlvmEvaluation/RichCollectionReadReferenceBounds.sx").resolve()
+    native_bounds = None
+    llvm_bounds = None
+    for mode in ["debug", "release", "O0", "O3"]:
+        binary = output/("RichCollectionReadReferenceBounds-"+mode)
+        command = ([args.native, "compile", rich_bounds_source, "--"+mode, "--nocache", "--output", binary]
+                   if mode in ["debug", "release"] else llvm_command(rich_bounds_source, mode, binary))
+        built = call("RichCollectionReadReferenceBounds-compile-"+mode, command)
+        assert built["returncode"] == 0, built
+        run = call("RichCollectionReadReferenceBounds-run-"+mode, [binary])
+        assert run["returncode"] == 1 and run["stdout"] == "7\n", run
+        if mode in ["debug", "release"]:
+            assert run["stderr"].endswith("collection index 2 is out of bounds for count "), run
+            if native_bounds is None:
+                native_bounds = run["stderr"]
+            else:
+                assert run["stderr"] == native_bounds, run
+        else:
+            assert run["stderr"].endswith("collection index 2 is out of bounds for count 2\n"), run
+            if llvm_bounds is None:
+                llvm_bounds = run["stderr"]
+            else:
+                assert run["stderr"] == llvm_bounds, run
+    print("FROZEN NATIVE RICH REFERENCE BOUNDS DISCREPANCY RECORDED", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:
