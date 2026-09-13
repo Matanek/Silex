@@ -90,6 +90,12 @@ pub fn emitWithBoundaries(
         \\
     );
     try output.appendSlice(allocator, @import("Runtime.zig").text);
+    if (reachableUsesMutex(program, reachable)) try output.appendSlice(allocator,
+        \\@sx.mutex = private global [8 x i64] zeroinitializer, align 8
+        \\declare void @os_unfair_recursive_lock_lock_with_options(ptr, i64)
+        \\declare void @os_unfair_recursive_lock_unlock(ptr)
+        \\
+    );
     try emitSourceFiles(&output, allocator, program);
     for ([_]u7{ 8, 16, 32, 64 }) |width| {
         for ([_][]const u8{ "sadd", "ssub", "smul", "uadd", "usub", "umul" }) |operation| {
@@ -704,8 +710,24 @@ const FunctionEmitter = struct {
             .boundary_call => |value| try self.emitBoundaryCall(value),
             .print => |value| try self.emitPrint(value),
             .assert => |value| try self.emitAssert(block_id, value),
+            .mutex_lock => try self.emitMutexLock(),
+            .mutex_unlock => try self.emitMutexUnlock(),
             else => return error.UnsupportedInstruction,
         }
+    }
+
+    fn emitMutexLock(self: *FunctionEmitter) Error!void {
+        try self.output.appendSlice(
+            self.allocator,
+            "  call void @os_unfair_recursive_lock_lock_with_options(ptr @sx.mutex, i64 0)\n",
+        );
+    }
+
+    fn emitMutexUnlock(self: *FunctionEmitter) Error!void {
+        try self.output.appendSlice(
+            self.allocator,
+            "  call void @os_unfair_recursive_lock_unlock(ptr @sx.mutex)\n",
+        );
     }
 
     fn emitStorageInit(self: *FunctionEmitter, value: Ir.Instruction.StorageInit) Error!void {
@@ -2858,6 +2880,17 @@ fn appendEscapedBytes(output: *std.ArrayList(u8), allocator: Allocator, bytes: [
     for (bytes) |byte| try appendFmt(output, allocator, "\\{X:0>2}", .{byte});
 }
 
+fn reachableUsesMutex(program: Ir.Program, reachable: []const bool) bool {
+    for (program.functions, 0..) |function, function_id| {
+        if (!reachable[function_id]) continue;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .mutex_lock, .mutex_unlock => return true,
+            else => {},
+        };
+    }
+    return false;
+}
+
 test "statically null optional class global keeps tag and opaque reference" {
     const class_type = Ir.Type.structure(0);
     const optional_type = Ir.Type.optional(class_type);
@@ -2973,4 +3006,24 @@ test "capture-free function references use typed indirect calls" {
     const llvm = try emit(std.testing.allocator, program);
     defer std.testing.allocator.free(llvm);
     try std.testing.expect(std.mem.indexOf(u8, llvm, "%v2 = call fastcc i64 %v0(i64 %v1)") != null);
+}
+
+test "reachable mutex operations use the recursive Darwin lock" {
+    const program: Ir.Program = .{
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{},
+            .blocks = &.{.{
+                .instructions = &.{ .mutex_lock, .mutex_unlock },
+                .terminator = .return_void,
+            }},
+        }},
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "@sx.mutex = private global [8 x i64]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "call void @os_unfair_recursive_lock_lock_with_options(ptr @sx.mutex, i64 0)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "call void @os_unfair_recursive_lock_unlock(ptr @sx.mutex)") != null);
 }

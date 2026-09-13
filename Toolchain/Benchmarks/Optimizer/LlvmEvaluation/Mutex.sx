@@ -1,0 +1,10 @@
+func nested() { mutex { print("nested") } }
+
+func guarded() int {
+    mutex {
+        nested()
+        return 42
+    }
+}
+
+func main() { print(guarded()) }

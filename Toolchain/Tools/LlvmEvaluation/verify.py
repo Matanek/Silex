@@ -65,6 +65,7 @@ def main():
         "LlvmEvaluation/ClassFieldStore.sx": "7\nfalse\n41\ntrue\n",
         "LlvmEvaluation/FunctionAddress.sx": "true\ntrue\n",
         "LlvmEvaluation/IndirectCalls.sx": "42\n7\n",
+        "LlvmEvaluation/Mutex.sx": "nested\n42\n",
         "LlvmEvaluation/PlainEnum.sx": "true\ntrue\n2\n3\n",
         "LlvmEvaluation/PayloadEnum.sx": "41\n7\n-2\n",
         "LlvmEvaluation/AssertSuccess.sx": "7\n",
@@ -120,7 +121,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -453,6 +454,16 @@ def main():
     assert "call fastcc i64 %v" in indirect_llvm, indirect_llvm
     assert "call fastcc void %v" in indirect_llvm, indirect_llvm
     print("CAPTURE-FREE INDIRECT CALLS PASS", flush=True)
+
+    mutex_metadata = json.loads(Path(str(output/"Mutex-O0")+".json").read_text())
+    mutex_llvm = (Path(mutex_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "@sx.mutex = private global [8 x i64] zeroinitializer",
+        "call void @os_unfair_recursive_lock_lock_with_options(ptr @sx.mutex, i64 0)",
+        "call void @os_unfair_recursive_lock_unlock(ptr @sx.mutex)",
+    ]:
+        assert fragment in mutex_llvm, fragment
+    print("RECURSIVE MUTEX AND EARLY RELEASE PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer"]:
