@@ -1848,6 +1848,8 @@ const FunctionEmitter = struct {
         } else {
             try self.write("  %t{d}.count = add i64 0, 0\n", .{serial});
         }
+        if (value.kind == .append)
+            return @import("ListStorage.zig").append(self, serial, type_name, element_name, value);
         try self.emitCollectionBytes(serial, collection.element);
         try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
         if (value.ownership == .edge) {
@@ -1856,13 +1858,7 @@ const FunctionEmitter = struct {
             try self.write("  call fastcc void @sx_retain(ptr %t{d}.storage, i64 -16)\n", .{serial});
             try self.write("  call fastcc void @sx_drop(ptr %t{d}.storage, i64 -24)\n", .{serial});
         }
-        if (argument) |operand| if (value.kind == .append) {
-            try self.write("  %t{d}.old.end = getelementptr {s}, ptr null, i64 %t{d}.old.count\n", .{ serial, element_name, serial });
-            try self.write("  %t{d}.old.bytes = ptrtoint ptr %t{d}.old.end to i64\n", .{ serial, serial });
-            try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.old.bytes, i1 false)\n", .{ serial, serial, serial });
-            try self.write("  %t{d}.appended = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.old.count\n", .{ serial, element_name, serial, serial });
-            try self.write("  store {s} %v{d}, ptr %t{d}.appended\n", .{ element_name, operand, serial });
-        } else {
+        if (argument) |operand| {
             try self.write("  %t{d}.prefix.end = getelementptr {s}, ptr null, i64 %t{d}.index\n", .{ serial, element_name, serial });
             try self.write("  %t{d}.prefix.bytes = ptrtoint ptr %t{d}.prefix.end to i64\n", .{ serial, serial });
             try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.prefix.bytes, i1 false)\n", .{ serial, serial, serial });
@@ -1890,8 +1886,8 @@ const FunctionEmitter = struct {
             });
         }
         // The semantic IR emits the source list_drop for indexed edits and
-        // removals. Append and clear delegate that source release here.
-        if (value.kind == .append or value.kind == .clear)
+        // removals. Clear delegates that source release here.
+        if (value.kind == .clear)
             try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 {d})\n", .{
                 serial,
                 if (value.ownership == .root) @as(i8, -24) else -16,
@@ -2103,14 +2099,24 @@ const FunctionEmitter = struct {
             try self.emitBoundsFailure(block_id, serial, value.index, value.position);
         }
         if (!collection.view) {
+            // A consumed unique owner transfers its storage unchanged.
+            // Shared owners detach so snapshots keep their old values.
+            try self.write("  %t{d}.roots.address = getelementptr i8, ptr %t{d}.data, i64 -24\n", .{ serial, serial });
+            try self.write("  %t{d}.roots = load atomic i64, ptr %t{d}.roots.address acquire, align 8\n", .{ serial, serial });
+            try self.write("  %t{d}.edges.address = getelementptr i8, ptr %t{d}.data, i64 -16\n", .{ serial, serial });
+            try self.write("  %t{d}.edges = load atomic i64, ptr %t{d}.edges.address acquire, align 8\n", .{ serial, serial });
+            try self.write("  %t{d}.owners = add i64 %t{d}.roots, %t{d}.edges\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.shared = icmp ne i64 %t{d}.owners, 1\n", .{ serial, serial });
+            try self.write("  br i1 %t{d}.shared, label %replace.detach{d}, label %replace.unique{d}\n", .{ serial, serial, serial });
+            try self.write("replace.detach{d}:\n", .{serial});
             try self.emitCollectionBytes(serial, collection.element);
-            try self.write("  %t{d}.copy = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+            try self.write("  %t{d}.detached = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
             if (value.ownership == .edge) {
-                try self.write("  call fastcc void @sx_retain(ptr %t{d}.copy, i64 -16)\n", .{serial});
-                try self.write("  call fastcc void @sx_drop(ptr %t{d}.copy, i64 -24)\n", .{serial});
+                try self.write("  call fastcc void @sx_retain(ptr %t{d}.detached, i64 -16)\n", .{serial});
+                try self.write("  call fastcc void @sx_drop(ptr %t{d}.detached, i64 -24)\n", .{serial});
             }
             try self.write(
-                "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.copy, ptr %t{d}.data, i64 %t{d}.bytes, i1 false)\n",
+                "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.detached, ptr %t{d}.data, i64 %t{d}.bytes, i1 false)\n",
                 .{ serial, serial, serial },
             );
             // collection_replace transfers the consumed owning storage to its
@@ -2119,6 +2125,11 @@ const FunctionEmitter = struct {
                 serial,
                 if (value.ownership == .root) @as(i8, -24) else -16,
             });
+            try self.write("  br label %replace.ready{d}\n", .{serial});
+            try self.write("replace.unique{d}:\n", .{serial});
+            try self.write("  br label %replace.ready{d}\n", .{serial});
+            try self.write("replace.ready{d}:\n", .{serial});
+            try self.write("  %t{d}.copy = phi ptr [ %t{d}.detached, %replace.detach{d} ], [ %t{d}.data, %replace.unique{d} ]\n", .{ serial, serial, serial, serial, serial });
         }
         try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.{s}, i64 %t{d}.index\n", .{
             serial,

@@ -41,7 +41,7 @@ def main():
     def llvm_command(path, mode, binary, silex_prefix="none"):
         # Exercise the full Silex prefix on merged raw operands and mutable
         # collection views used by the Boids and Physics consumers.
-        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax"]:
+        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "ListGrowth"]:
             silex_prefix = "branch_snapshot_sinking"
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
@@ -51,6 +51,7 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/ListGrowth.sx": "32896\n257\n258\n999\n42\n257\n777\ndynamic\n258\n888\ndynamic\n777\n",
         "LlvmEvaluation/ScalarMinMax.sx": "float32 exact\nfloat64 exact\n",
         "Regressions/DenseBlockLiveOut.sx": "42\n",
         "LlvmEvaluation/PrintFloats.sx": "1.5|-0.0|1.2345678806304932\n0.0|-0.0|inf|-inf|nan\n",
@@ -840,9 +841,9 @@ def main():
     edge_replace_metadata = json.loads(Path(str(output/"EdgeCollectionReplace-O0")+".json").read_text())
     edge_replace_llvm = (Path(edge_replace_metadata["artifact_directory"])/"raw.ll").read_text()
     for fragment in [
-        ".copy = call fastcc ptr @sx_alloc",
-        ".copy, i64 -16)",
-        ".copy, i64 -24)",
+        ".detached = call fastcc ptr @sx_alloc",
+        ".detached, i64 -16)",
+        ".detached, i64 -24)",
         ".data, i64 -16)",
         "store %sx.type.",
     ]:
@@ -852,8 +853,8 @@ def main():
     rich_replace_metadata = json.loads(Path(str(output/"RichCollectionReplace-O0")+".json").read_text())
     rich_replace_llvm = (Path(rich_replace_metadata["artifact_directory"])/"raw.ll").read_text()
     for fragment in [
-        ".copy = call fastcc ptr @sx_alloc",
-        ".copy, i64 -16)",
+        ".detached = call fastcc ptr @sx_alloc",
+        ".detached, i64 -16)",
         ".data, i64 -16)",
         "call fastcc void @sx_typed_class_retain",
         "call fastcc i1 @sx_typed_class_release",

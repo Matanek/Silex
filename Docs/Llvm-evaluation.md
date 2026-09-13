@@ -226,3 +226,24 @@ matrix uses the full Silex prefix and checks that both widths reach the
 intrinsic lowering. This targets the cost exposed by `scalar_math_intrinsics`
 in the unchanged Physics contact kernel; enabling every Silex pass does not
 imply a speedup for an entire application.
+
+## Reusing private collection storage
+
+Owning replacements reuse storage when its root and edge counts sum to one.
+Shared storage still detaches before the write, preserving snapshots. Append
+uses the same uniqueness condition and grows byte capacity geometrically, so a
+sequence of appends no longer copies every prefix. Both operations consume and
+transfer the source owner; resource-bearing element transitions remain explicit
+in Silex IR. Indexed insertions and removals retain their existing copy paths.
+
+Untyped private allocations now place byte capacity at payload offset -32,
+followed by roots (-24), edges (-16) and destruction state (-8). Typed classes
+keep their separate native-compatible layout. This is an experimental adapter
+detail, with no change to the native backend or public collection API. The live
+allocation guard remains enabled. Append checks count and byte-size overflow;
+reserve growth falls back to the required size when doubling cannot fit.
+
+`ListGrowth.sx` checks repeated root and edge growth, rich values, shared
+snapshots, appending an existing element, replacement, and clear/reuse in native
+Debug/Release and LLVM O0/O3 with the full Silex prefix. Existing bounds and
+ownership witnesses cover the other edits and finalization.

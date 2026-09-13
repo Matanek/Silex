@@ -1,4 +1,6 @@
-// Private plain-value collection runtime for the bounded macOS ARM64 evaluation.
+// Private collection runtime for the bounded macOS ARM64 evaluation.
+// Untyped allocations store byte capacity before roots/edges/destruction state.
+// Their payload-relative ownership offsets and the typed class ABI stay fixed.
 pub const text =
     \\@sx.live = internal global i64 0
     \\@.sx.bounds = private constant [84 x i8] c"%s:%lld:%lld: runtime error: collection index %lld is out of bounds for count %lld\0A\00"
@@ -9,7 +11,7 @@ pub const text =
     \\
     \\define internal fastcc ptr @sx_alloc(i64 %bytes) {
     \\entry:
-    \\  %size = add i64 %bytes, 24
+    \\  %size = add i64 %bytes, 32
     \\  %wrapped = icmp ult i64 %size, %bytes
     \\  br i1 %wrapped, label %fail, label %allocate
     \\allocate:
@@ -17,13 +19,15 @@ pub const text =
     \\  %null = icmp eq ptr %header, null
     \\  br i1 %null, label %fail, label %ready
     \\ready:
-    \\  store i64 1, ptr %header
-    \\  %edges = getelementptr i8, ptr %header, i64 8
+    \\  store i64 %bytes, ptr %header
+    \\  %roots = getelementptr i8, ptr %header, i64 8
+    \\  store i64 1, ptr %roots
+    \\  %edges = getelementptr i8, ptr %header, i64 16
     \\  store i64 0, ptr %edges
-    \\  %state = getelementptr i8, ptr %header, i64 16
+    \\  %state = getelementptr i8, ptr %header, i64 24
     \\  store i64 0, ptr %state
     \\  %old = atomicrmw add ptr @sx.live, i64 1 monotonic
-    \\  %data = getelementptr i8, ptr %header, i64 24
+    \\  %data = getelementptr i8, ptr %header, i64 32
     \\  ret ptr %data
     \\fail:
     \\  call void @exit(i32 1)
@@ -32,7 +36,7 @@ pub const text =
     \\
     \\define internal fastcc ptr @sx_class_alloc(i64 %bytes) {
     \\entry:
-    \\  %size = add i64 %bytes, 24
+    \\  %size = add i64 %bytes, 32
     \\  %wrapped = icmp ult i64 %size, %bytes
     \\  br i1 %wrapped, label %fail, label %allocate
     \\allocate:
@@ -40,17 +44,57 @@ pub const text =
     \\  %null = icmp eq ptr %header, null
     \\  br i1 %null, label %fail, label %ready
     \\ready:
-    \\  store i64 0, ptr %header
-    \\  %edges = getelementptr i8, ptr %header, i64 8
+    \\  store i64 %bytes, ptr %header
+    \\  %roots = getelementptr i8, ptr %header, i64 8
+    \\  store i64 0, ptr %roots
+    \\  %edges = getelementptr i8, ptr %header, i64 16
     \\  store i64 0, ptr %edges
-    \\  %state = getelementptr i8, ptr %header, i64 16
+    \\  %state = getelementptr i8, ptr %header, i64 24
     \\  store i64 0, ptr %state
     \\  %old = atomicrmw add ptr @sx.live, i64 1 monotonic
-    \\  %data = getelementptr i8, ptr %header, i64 24
+    \\  %data = getelementptr i8, ptr %header, i64 32
     \\  ret ptr %data
     \\fail:
     \\  call void @exit(i32 1)
     \\  unreachable
+    \\}
+    \\
+    \\define internal fastcc ptr @sx_list_grow(ptr %data, i64 %used, i64 %required, i64 %offset) {
+    \\entry:
+    \\  %roots.address = getelementptr i8, ptr %data, i64 -24
+    \\  %roots = load atomic i64, ptr %roots.address acquire, align 8
+    \\  %edges.address = getelementptr i8, ptr %data, i64 -16
+    \\  %edges = load atomic i64, ptr %edges.address acquire, align 8
+    \\  %owners = add i64 %roots, %edges
+    \\  %unique = icmp eq i64 %owners, 1
+    \\  %capacity.address = getelementptr i8, ptr %data, i64 -32
+    \\  %capacity = load i64, ptr %capacity.address
+    \\  %fits = icmp ule i64 %required, %capacity
+    \\  %reuse = and i1 %unique, %fits
+    \\  br i1 %reuse, label %done, label %grow
+    \\grow:
+    \\  %double.checked = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %capacity, i64 %capacity)
+    \\  %double = extractvalue { i64, i1 } %double.checked, 0
+    \\  %overflow = extractvalue { i64, i1 } %double.checked, 1
+    \\  %too.big = icmp ugt i64 %double, -33
+    \\  %invalid = or i1 %overflow, %too.big
+    \\  %safe = select i1 %invalid, i64 %required, i64 %double
+    \\  %reserve = select i1 %unique, i64 %safe, i64 %required
+    \\  %enough = icmp uge i64 %reserve, %required
+    \\  %bytes = select i1 %enough, i64 %reserve, i64 %required
+    \\  %storage = call fastcc ptr @sx_alloc(i64 %bytes)
+    \\  call void @llvm.memcpy.p0.p0.i64(ptr %storage, ptr %data, i64 %used, i1 false)
+    \\  %edge = icmp eq i64 %offset, -16
+    \\  br i1 %edge, label %transfer, label %release
+    \\transfer:
+    \\  call fastcc void @sx_retain(ptr %storage, i64 -16)
+    \\  call fastcc void @sx_drop(ptr %storage, i64 -24)
+    \\  br label %release
+    \\release:
+    \\  call fastcc void @sx_drop(ptr %data, i64 %offset)
+    \\  ret ptr %storage
+    \\done:
+    \\  ret ptr %data
     \\}
     \\
     \\define internal fastcc ptr @sx_typed_class_alloc(i64 %bytes, i64 %type) {
@@ -145,7 +189,7 @@ pub const text =
     \\  %won = extractvalue { i64, i1 } %claimed, 1
     \\  br i1 %won, label %release, label %done
     \\release:
-    \\  %header = getelementptr i8, ptr %data, i64 -24
+    \\  %header = getelementptr i8, ptr %data, i64 -32
     \\  call void @free(ptr %header)
     \\  %live = atomicrmw sub ptr @sx.live, i64 1 acq_rel
     \\  br label %done

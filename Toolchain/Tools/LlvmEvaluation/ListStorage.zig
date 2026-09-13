@@ -48,3 +48,27 @@ pub fn detach(
         serial,
     });
 }
+
+// Append consumes its source owner. Reserve grows geometrically only when that
+// owner is unique; shared snapshots detach without changing their elements.
+pub fn append(
+    self: anytype,
+    serial: usize,
+    type_name: []const u8,
+    element_name: []const u8,
+    value: Ir.Instruction.ListEdit,
+) error{OutOfMemory}!void {
+    try self.write("  %t{d}.stride.end = getelementptr {s}, ptr null, i64 1\n", .{ serial, element_name });
+    try self.write("  %t{d}.stride = ptrtoint ptr %t{d}.stride.end to i64\n", .{ serial, serial });
+    try self.write("  %t{d}.bytes.checked = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %t{d}.count, i64 %t{d}.stride)\n", .{ serial, serial, serial });
+    try self.write("  %t{d}.bytes = extractvalue {{ i64, i1 }} %t{d}.bytes.checked, 0\n", .{ serial, serial });
+    try self.write("  %t{d}.bytes.overflow = extractvalue {{ i64, i1 }} %t{d}.bytes.checked, 1\n", .{ serial, serial });
+    try self.write("  br i1 %t{d}.bytes.overflow, label %trap, label %append.ready{d}\n", .{ serial, serial });
+    try self.write("append.ready{d}:\n", .{serial});
+    try self.write("  %t{d}.old.bytes = mul i64 %t{d}.old.count, %t{d}.stride\n", .{ serial, serial, serial });
+    try self.write("  %t{d}.storage = call fastcc ptr @sx_list_grow(ptr %t{d}.old.data, i64 %t{d}.old.bytes, i64 %t{d}.bytes, i64 {d})\n", .{ serial, serial, serial, serial, if (value.ownership == .root) @as(i8, -24) else -16 });
+    try self.write("  %t{d}.appended = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.old.count\n", .{ serial, element_name, serial, serial });
+    try self.write("  store {s} %v{d}, ptr %t{d}.appended\n", .{ element_name, value.argument.?, serial });
+    try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial });
+    try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{ value.result, type_name, serial, serial });
+}

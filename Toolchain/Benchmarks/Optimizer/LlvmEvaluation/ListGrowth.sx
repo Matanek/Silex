@@ -1,0 +1,46 @@
+struct Entry {
+    let name:str
+    var value:int
+}
+
+class Store {
+    var entries:Entry[]
+    init() { self.entries = [] }
+    func add(entry:Entry) { self.entries.append(entry) }
+    func replace(index:int, entry:Entry) { self.entries.replace(index, entry) }
+}
+
+func main() {
+    var values:int[] = []
+    var i = 0
+    while i < 257 { values.append(i); i++ }
+    let snapshot = values
+    values.append(values[0])
+    values.replace(-1, 999)
+    var sum = 0
+    for value in snapshot { sum += value }
+    print(sum)
+    print(snapshot.count())
+    print(values.count())
+    print(values[-1])
+    values.clear()
+    values.append(42)
+    print(values[0])
+
+    var store = Store()
+    let name = "dy" + "namic"
+    i = 0
+    while i < 257 { store.add(Entry(name:name, value:i)); i++ }
+    store.replace(-1, Entry(name:name, value:777))
+    let saved = store.entries
+    store.add(store.entries[0])
+    store.replace(0, Entry(name:"changed", value:888))
+    print(saved.count())
+    print(saved[-1].value)
+    print(saved[0].name)
+    print(store.entries.count())
+    print(store.entries[0].value)
+    print(store.entries[-1].name)
+    store.entries.clear()
+    print(saved[-1].value)
+}
