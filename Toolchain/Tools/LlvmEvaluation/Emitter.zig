@@ -185,13 +185,20 @@ pub fn emitWithBoundaries(
             try appendFmt(&output, allocator, "%sx.class.{d} = type {{ ", .{structure_index});
             for (structure.fields, 0..) |field, field_index| {
                 if (field_index != 0) try output.appendSlice(allocator, ", ");
-                try output.appendSlice(allocator, try llvmType(allocator, program, field.type));
+                const field_type = llvmType(allocator, program, field.type) catch |err| {
+                    std.debug.print("silex LLVM evaluation: cannot declare class '{s}' field '{s}': {t}\n", .{ structure.name, field.name, err });
+                    return err;
+                };
+                try output.appendSlice(allocator, field_type);
             }
             try output.appendSlice(allocator, " }\n");
             continue;
         }
         if (structure.is_protocol) {
-            const payload_slots = try protocolPayloadStorageSlots(program, structure_index, 0);
+            const payload_slots = protocolPayloadStorageSlots(program, structure_index, 0) catch |err| {
+                std.debug.print("silex LLVM evaluation: cannot declare protocol type '{s}': {t}\n", .{ structure.name, err });
+                return err;
+            };
             try appendFmt(
                 &output,
                 allocator,
@@ -200,12 +207,17 @@ pub fn emitWithBoundaries(
             );
             continue;
         }
-        if (structure.is_static)
-            return error.UnsupportedType;
+        // Static structures are namespaces, not runtime values. llvmType
+        // still rejects any attempt to use one in a material value position.
+        if (structure.is_static) continue;
         try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ", .{structure_index});
         for (structure.fields, 0..) |field, field_index| {
             if (field_index != 0) try output.appendSlice(allocator, ", ");
-            try output.appendSlice(allocator, try llvmType(allocator, program, field.type));
+            const field_type = llvmType(allocator, program, field.type) catch |err| {
+                std.debug.print("silex LLVM evaluation: cannot declare structure '{s}' field '{s}': {t}\n", .{ structure.name, field.name, err });
+                return err;
+            };
+            try output.appendSlice(allocator, field_type);
         }
         try output.appendSlice(allocator, " }\n");
     }
@@ -2690,7 +2702,14 @@ fn protocolPayloadStorageSlots(program: Ir.Program, protocol_index: usize, depth
     var maximum: usize = 0;
     for (program.structures, 0..) |structure, candidate| {
         if (structure.is_protocol or !irConforms(program, candidate, protocol_index)) continue;
-        maximum = @max(maximum, try llvmStorageSlots(program, .structure(candidate), depth + 1));
+        const slots = llvmStorageSlots(program, .structure(candidate), depth + 1) catch |err| {
+            std.debug.print(
+                "silex LLVM evaluation: protocol '{s}' cannot store conformer '{s}': {t}\n",
+                .{ program.structures[protocol_index].name, structure.name, err },
+            );
+            return err;
+        };
+        maximum = @max(maximum, slots);
     }
     return maximum;
 }
@@ -2719,8 +2738,11 @@ fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Erro
     }
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;
-        if (enumIndexForStructure(program, structure_index)) |enumeration_index|
+        if (enumIndexForStructure(program, structure_index)) |enumeration_index| {
+            if (plainTagEnum(program, enumeration_index)) return 1;
+            if ((try rawEnumType(program, enumeration_index)) != null) return 2;
             return 1 + try enumPayloadStorageSlots(program, enumeration_index, depth + 1);
+        }
         const structure = program.structures[structure_index];
         if (structure.is_class) return 1;
         if (structure.is_protocol)
@@ -2728,8 +2750,15 @@ fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Erro
         if (structure.is_static) return error.UnsupportedType;
         if (structure.collection != null) return 2;
         var result: usize = 0;
-        for (structure.fields) |field|
-            result += try llvmStorageSlots(program, field.type, depth + 1);
+        for (structure.fields) |field| {
+            result += llvmStorageSlots(program, field.type, depth + 1) catch |err| {
+                std.debug.print(
+                    "silex LLVM evaluation: cannot size structure '{s}' field '{s}': {t}\n",
+                    .{ structure.name, field.name, err },
+                );
+                return err;
+            };
+        }
         return result;
     }
     return switch (type_value) {
@@ -3084,4 +3113,57 @@ test "reachable mutex operations use the recursive Darwin lock" {
     try std.testing.expect(std.mem.indexOf(u8, llvm, "@sx.mutex = private global [8 x i64]") != null);
     try std.testing.expect(std.mem.indexOf(u8, llvm, "call void @os_unfair_recursive_lock_lock_with_options(ptr @sx.mutex, i64 0)") != null);
     try std.testing.expect(std.mem.indexOf(u8, llvm, "call void @os_unfair_recursive_lock_unlock(ptr @sx.mutex)") != null);
+}
+
+test "static namespaces require no material LLVM layout" {
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "Math",
+            .fields = &.{},
+            .is_static = true,
+        }},
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{},
+            .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+        }},
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "%sx.type.0 = type") == null);
+}
+
+test "protocol storage sizes payload-free enum fields" {
+    const enum_type = Ir.Type.structure(0);
+    const program: Ir.Program = .{
+        .structures = &.{
+            .{ .name = "Mode", .fields = &.{} },
+            .{ .name = "Plugin", .fields = &.{}, .is_protocol = true },
+            .{
+                .name = "ConcretePlugin",
+                .fields = &.{.{ .name = "mode", .type = enum_type, .mutable = false }},
+                .conformances = &.{1},
+            },
+        },
+        .enums = &.{.{
+            .name = "Mode",
+            .type_index = 0,
+            .variants = &.{
+                .{ .name = "first", .associated_types = &.{} },
+                .{ .name = "second", .associated_types = &.{} },
+            },
+        }},
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{},
+            .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+        }},
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "%sx.protocol.1 = type { i64, [1 x i64] }") != null);
 }
