@@ -1,0 +1,44 @@
+use Interop.C
+
+func main() {
+    var small:uint = 0
+    let small_bits = C.address_bits(C.mutable_pointer(small))
+    C.store<int8>(C.mutable_pointer(small), 1 as uint, -7 as int8)
+    C.store<uint8>(small_bits, 2 as uint, 250 as uint8)
+    print(C.load<int8>(C.mutable_pointer(small), 1 as uint))
+    print(C.load<uint8>(small_bits, 2 as uint))
+
+    var medium:uint = 0
+    let medium_bits = C.address_bits(C.mutable_pointer(medium))
+    C.store<int16>(medium_bits, 1 as uint, -12345 as int16)
+    C.store<uint16>(C.mutable_pointer(medium), 3 as uint, 54321 as uint16)
+    print(C.load<int16>(C.mutable_pointer(medium), 1 as uint))
+    print(C.load<uint16>(medium_bits, 3 as uint))
+
+    var wide:uint = 0
+    let wide_bits = C.address_bits(C.mutable_pointer(wide))
+    C.store<int32>(C.mutable_pointer(wide), 0 as uint, -123456789 as int32)
+    C.store<uint32>(wide_bits, 4 as uint, 4000000000 as uint32)
+    print(C.load<int32>(wide_bits, 0 as uint))
+    print(C.load<uint32>(C.mutable_pointer(wide), 4 as uint))
+
+    var signed:uint = 0
+    let signed_bits = C.address_bits(C.mutable_pointer(signed))
+    C.store<int>(C.mutable_pointer(signed), 0 as uint, -1234567890123456789)
+    print(C.load<int>(signed_bits, 0 as uint))
+
+    var unsigned:uint = 0
+    let unsigned_bits = C.address_bits(C.mutable_pointer(unsigned))
+    C.store<uint>(unsigned_bits, 0 as uint, 9000000000000000000 as uint)
+    print(C.load<uint>(C.mutable_pointer(unsigned), 0 as uint))
+
+    var narrow:uint = 0
+    let narrow_bits = C.address_bits(C.mutable_pointer(narrow))
+    C.store<float32>(C.mutable_pointer(narrow), 1 as uint, -13.5 as float32)
+    print("$(C.load<float32>(narrow_bits, 1 as uint))")
+
+    var floating:uint = 0
+    let floating_bits = C.address_bits(C.mutable_pointer(floating))
+    C.store<float64>(floating_bits, 0 as uint, 1234.25 as float64)
+    print("$(C.load<float64>(C.mutable_pointer(floating), 0 as uint))")
+}

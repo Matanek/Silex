@@ -141,7 +141,10 @@ distinct from Unicode scalar count. Capture-free function references can expose
 their internal symbol address through the explicit `C.function_address` bridge;
 capturing closures and indirect calls remain refused. Other non-integer globals, package
 providers, and mutable views requiring owning storage detachment are also still
-rejected. A live-allocation counter checked after normal return makes leaks fail
+rejected. Typed raw numeric loads and stores accept either an opaque interop
+address or explicit address bits, add their offset in bytes, and use alignment
+one so LLVM cannot infer an ABI alignment that the interop contract does not
+guarantee. A live-allocation counter checked after normal return makes leaks fail
 validation, including both collection replacement and the optional-class witness.
 This counter is part of the prototype cost; it is not a production GC design.
 

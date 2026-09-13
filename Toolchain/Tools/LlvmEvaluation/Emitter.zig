@@ -659,6 +659,8 @@ const FunctionEmitter = struct {
             .global_store => |value| try self.emitGlobalStore(value),
             .local_address => |value| try self.emitLocalAddress(value),
             .reference_load => |value| try self.emitReferenceLoad(value),
+            .address_load => |value| try self.emitAddressLoad(value),
+            .address_store => |value| try self.emitAddressStore(value),
             .reference_store => |value| try self.emitReferenceStore(value),
             .reference_field => |value| try self.emitReferenceField(value),
             .string_address => |value| try self.emitStringAddress(value),
@@ -835,6 +837,52 @@ const FunctionEmitter = struct {
             try llvmType(self.allocator, self.program, global.type),
             value.global,
         });
+    }
+
+    fn emitAddressLoad(self: *FunctionEmitter, value: Ir.Instruction.AddressLoad) Error!void {
+        const address_type = try self.valueType(value.address);
+        if ((address_type != .address and address_type != .uint) or
+            try self.valueType(value.byte_offset) != .uint or
+            try self.valueType(value.result) != value.type or
+            (!value.type.isNumeric() and value.type != .address))
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        if (address_type == .uint) {
+            try self.write("  %t{d}.raw.base = inttoptr i64 %v{d} to ptr\n", .{ serial, value.address });
+        } else {
+            try self.write("  %t{d}.raw.base = getelementptr i8, ptr %v{d}, i64 0\n", .{ serial, value.address });
+        }
+        try self.write(
+            "  %t{d}.raw.address = getelementptr i8, ptr %t{d}.raw.base, i64 %v{d}\n",
+            .{ serial, serial, value.byte_offset },
+        );
+        try self.write(
+            "  %v{d} = load {s}, ptr %t{d}.raw.address, align 1\n",
+            .{ value.result, try llvmType(self.allocator, self.program, value.type), serial },
+        );
+    }
+
+    fn emitAddressStore(self: *FunctionEmitter, value: Ir.Instruction.AddressStore) Error!void {
+        const address_type = try self.valueType(value.address);
+        if ((address_type != .address and address_type != .uint) or
+            try self.valueType(value.byte_offset) != .uint or
+            try self.valueType(value.operand) != value.type or
+            !value.type.isNumeric())
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        if (address_type == .uint) {
+            try self.write("  %t{d}.raw.base = inttoptr i64 %v{d} to ptr\n", .{ serial, value.address });
+        } else {
+            try self.write("  %t{d}.raw.base = getelementptr i8, ptr %v{d}, i64 0\n", .{ serial, value.address });
+        }
+        try self.write(
+            "  %t{d}.raw.address = getelementptr i8, ptr %t{d}.raw.base, i64 %v{d}\n",
+            .{ serial, serial, value.byte_offset },
+        );
+        try self.write(
+            "  store {s} %v{d}, ptr %t{d}.raw.address, align 1\n",
+            .{ try llvmType(self.allocator, self.program, value.type), value.operand, serial },
+        );
     }
 
     fn emitGlobalStore(self: *FunctionEmitter, value: Ir.Instruction.GlobalStore) Error!void {

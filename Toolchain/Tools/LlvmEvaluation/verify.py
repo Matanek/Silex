@@ -79,6 +79,10 @@ def main():
             "0.0|-0.0|inf|-inf|nan\n"
             "true|false|Silex\n"
         ),
+        "LlvmEvaluation/RawMemory.sx": (
+            "-7\n250\n-12345\n54321\n-123456789\n4000000000\n"
+            "-1234567890123456789\n9000000000000000000\n-13.5\n1234.25\n"
+        ),
     }
     for relative, expected_stdout in cases.items():
         source = (corpus/relative).resolve()
@@ -358,6 +362,23 @@ def main():
     assert format_metadata["inputs"]["format_runtime"] == str(runtime), format_metadata
     assert format_metadata["inputs"]["format_runtime_sha256"] == hashlib.sha256(runtime.read_bytes()).hexdigest(), format_metadata
     print("EXACT SCALAR FORMATTING RUNTIME PASS", flush=True)
+
+    raw_memory_metadata = json.loads(Path(str(output/"RawMemory-O0")+".json").read_text())
+    raw_memory_llvm = (Path(raw_memory_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "inttoptr i64",
+        ".raw.address = getelementptr i8",
+        "load i8, ptr",
+        "load i16, ptr",
+        "load i32, ptr",
+        "load i64, ptr",
+        "load float, ptr",
+        "load double, ptr",
+        "align 1",
+    ]:
+        assert fragment in raw_memory_llvm, fragment
+    assert raw_memory_llvm.count("store ") > 10, raw_memory_llvm
+    print("UNALIGNED TYPED RAW MEMORY PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer", "RefuseRawEnum"]:
