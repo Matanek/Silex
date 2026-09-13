@@ -1417,3 +1417,31 @@ test "protocol dispatch defines results and updated receivers on every returning
         try std.testing.expectEqual(raw.exit_code, after.exit_code);
     }
 }
+
+test "dense simplification preserves scalar snapshots used by inlined successor blocks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Point { var x:float; var y:float }
+        \\struct Manifold { var normal:Point; var points:int[] }
+        \\func finite(value:float) bool { return value == value && (value == 0.0 || value + value != value) }
+        \\func finite_point(value:Point) bool { return finite(value.x) && finite(value.y) }
+        \\func check(value:Manifold?) {
+        \\    if let manifold = value {
+        \\        if manifold.points.count() < 1 || manifold.points.count() > 2 || !finite_point(manifold.normal) {
+        \\            panic("invalid manifold")
+        \\        }
+        \\    }
+        \\}
+        \\func main() { check(null); check(Manifold(normal:Point(x:1.0, y:0.0), points:[1, 2])); print(42) }
+    );
+    const raw = try Interpreter.runCapture(allocator, compilation.ir);
+    const optimized = try Release.optimizeWithOptions(allocator, compilation.ir, .{ .verify_each_pass = true });
+    const actual = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings("42\n", raw.stdout);
+    try std.testing.expectEqualStrings(raw.stdout, actual.stdout);
+    try std.testing.expectEqualStrings(raw.stderr, actual.stderr);
+    try std.testing.expectEqual(raw.exit_code, actual.exit_code);
+}

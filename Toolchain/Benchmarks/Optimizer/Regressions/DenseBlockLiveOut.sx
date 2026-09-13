@@ -1,0 +1,12 @@
+struct Point { var x:float; var y:float }
+struct Manifold { var normal:Point; var points:int[] }
+func finite(value:float) bool { return value == value && (value == 0.0 || value + value != value) }
+func finite_point(value:Point) bool { return finite(value.x) && finite(value.y) }
+func check(value:Manifold?) {
+    if let manifold = value {
+        if manifold.points.count() < 1 || manifold.points.count() > 2 || !finite_point(manifold.normal) {
+            panic("invalid manifold")
+        }
+    }
+}
+func main() { check(null); check(Manifold(normal:Point(x:1.0, y:0.0), points:[1, 2])); print(42) }

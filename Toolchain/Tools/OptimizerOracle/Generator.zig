@@ -87,6 +87,7 @@ pub const RegressionEntry = struct {
 };
 
 pub const corpus = [_]CorpusEntry{
+    .{ .name = "Regressions/DenseBlockLiveOut.sx", .timing = false },
     .{ .name = "Regressions/DominatedReferenceReads.sx", .timing = false },
     .{ .name = "Regressions/LateScalarClosure.sx", .timing = false },
     .{ .name = "Regressions/ValueModules/Main.sx", .timing = false, .project = true },

@@ -1,4 +1,25 @@
+const std = @import("std");
 const Ir = @import("../Ir.zig");
+
+// Block-local aliases cannot replace definitions observed by another block.
+// Keep a value-producing copy there; the SSA passes can remove it with CFG facts.
+pub const Forwarding = struct {
+    allocator: std.mem.Allocator,
+    instructions: *std.ArrayList(Ir.Instruction),
+    aliases: []Ir.ValueId,
+    definitions: []const usize,
+    uses: []const usize,
+    block_uses: []const usize,
+
+    pub fn replace(self: Forwarding, result: Ir.ValueId, previous: Ir.ValueId) !void {
+        const source = @import("ValueOperands.zig").canonical(self.aliases, previous);
+        if (self.definitions[result] == 1 and self.uses[result] == self.block_uses[result]) {
+            self.aliases[result] = source;
+        } else {
+            try self.instructions.append(self.allocator, .{ .copy = .{ .result = result, .operand = source } });
+        }
+    }
+};
 
 pub fn isEligible(function: Ir.Function) bool {
     if (containsCalls(function)) return false;

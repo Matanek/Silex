@@ -63,6 +63,13 @@ workspace links remain available.
 
 ## Simplify portable IR
 
+Dense-block load reuse keeps an explicit copy when the reused value is read
+from another block or has several definitions. Only single-definition values
+whose uses stay in the block may disappear through its local alias table.
+This preserves scalar snapshots exposed by aggregate splitting and inlining;
+subsequent SSA passes may simplify the copy using control-flow facts.
+`Regressions/DenseBlockLiveOut.sx` exercises this interaction.
+
 Release propagates constants and copies across the control-flow graph. It
 promotes profitable, non-addressed integer and boolean locals to SSA values,
 constructs join values, removes trivial joins, lowers the remaining parallel

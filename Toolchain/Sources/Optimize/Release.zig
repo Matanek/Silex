@@ -1615,6 +1615,14 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
         var collection_loads: std.ArrayList(Ir.Instruction.CollectionLoad) = .empty;
         var collection_references: std.ArrayList(Ir.Instruction.CollectionReference) = .empty;
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        const forwarding: DenseBlocks.Forwarding = .{
+            .allocator = allocator,
+            .instructions = &instructions,
+            .aliases = aliases,
+            .definitions = definitions,
+            .uses = uses,
+            .block_uses = block_uses,
+        };
         for (block.instructions) |original| {
             var instruction = try rewriteInstruction(allocator, original, aliases);
             switch (instruction) {
@@ -1623,7 +1631,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                         uses[copy.result] == block_uses[copy.result] and
                         function.value_types[copy.result] == function.value_types[copy.operand])
                     {
-                        aliases[copy.result] = canonical(aliases, copy.operand);
+                        try forwarding.replace(copy.result, copy.operand);
                         continue;
                     }
                 },
@@ -1634,7 +1642,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                         (value_type.isNumeric() or value_type == .bool) and
                         value_type == function.value_types[copy.operand])
                     {
-                        aliases[copy.result] = canonical(aliases, copy.operand);
+                        try forwarding.replace(copy.result, copy.operand);
                         continue;
                     }
                 },
@@ -1642,7 +1650,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                     const local_type = function.local_types[load.local];
                     if (local_type.isNumeric() or local_type == .bool or isViewType(program, local_type)) {
                         if (local_values[load.local]) |previous| {
-                            aliases[load.result] = canonical(aliases, previous);
+                            try forwarding.replace(load.result, previous);
                             continue;
                         }
                         local_values[load.local] = load.result;
@@ -1661,7 +1669,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                 },
                 .field_load => |load| {
                     if (matchingFieldLoad(field_loads.items, load)) |previous| {
-                        aliases[load.result] = canonical(aliases, previous);
+                        try forwarding.replace(load.result, previous);
                         continue;
                     }
                     try field_loads.append(allocator, load);
@@ -1669,14 +1677,14 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                 .reference_load => |load| {
                     if (projectedFieldOrigin(function, definitions, load.reference)) |origin| {
                         if (matchingBorrowedFieldLoad(borrowed_field_loads.items, origin)) |previous| {
-                            aliases[load.result] = canonical(aliases, previous);
+                            try forwarding.replace(load.result, previous);
                             continue;
                         }
                         const stable = readonlyFlatAddressRoot(function, uses, origin.root) and
                             aggregateReferenceStableAcrossBlocks(program, function, origin.structure);
                         if (stable and block_index != 0) {
                             if (matchingBorrowedFieldLoad(entry_borrowed_fields.items, origin)) |previous| {
-                                aliases[load.result] = canonical(aliases, previous);
+                                try forwarding.replace(load.result, previous);
                                 continue;
                             }
                         }
@@ -1694,7 +1702,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                     const result_type = function.value_types[load.result];
                     if (result_type.isNumeric() or result_type == .bool) {
                         if (matchingCollectionLoad(collection_loads.items, load)) |previous| {
-                            aliases[load.result] = canonical(aliases, previous);
+                            try forwarding.replace(load.result, previous);
                             continue;
                         }
                         try collection_loads.append(allocator, load);
@@ -1721,7 +1729,7 @@ fn optimizeDenseBlocks(allocator: Allocator, program: Ir.Program, function: Ir.F
                         instruction.collection_reference.checked = false;
                     }
                     if (matchingCollectionReference(collection_references.items, reference)) |previous| {
-                        aliases[reference.result] = canonical(aliases, previous);
+                        try forwarding.replace(reference.result, previous);
                         continue;
                     }
                     try collection_references.append(allocator, reference);
