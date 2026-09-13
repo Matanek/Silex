@@ -96,8 +96,11 @@ and drops are emitted from composed IR, and `collection_replace` consumes the ol
 owning root when it creates replacement storage. The same private allocation
 foundation now covers exact, non-inherited classes whose fields are only numeric
 or boolean: class values stay opaque pointers while a separate private storage
-type drives allocation and field loads. Their root count starts at zero, matching
-the native IR contract, and explicit root retains/drops control reclamation.
+type drives allocation, field loads and field stores. A store mutates that private
+storage and returns the same opaque class pointer, while the retain/drop operations
+already present around the instruction retain responsibility for ownership. Their
+root count starts at zero, matching the native IR contract, and explicit root
+retains/drops control reclamation.
 
 This class subset accepts a drop only when its exact static plan contains solely
 provably empty finalizers. Effective finalizers, resource fields, inheritance,

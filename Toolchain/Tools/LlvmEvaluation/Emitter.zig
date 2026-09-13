@@ -617,6 +617,7 @@ const FunctionEmitter = struct {
             .list_retain => |value| try self.emitListResource(value, "sx_retain"),
             .list_drop => |value| try self.emitListResource(value, "sx_drop"),
             .field_load => |value| try self.emitFieldLoad(value),
+            .field_store => |value| try self.emitFieldStore(value),
             .collection_load => |value| try self.emitCollectionLoad(block_id, value),
             .collection_reference => |value| try self.emitCollectionReference(block_id, value),
             .collection_replace => |value| try self.emitCollectionReplace(block_id, value),
@@ -952,6 +953,34 @@ const FunctionEmitter = struct {
             try llvmType(self.allocator, self.program, field_type),
             serial,
         });
+    }
+
+    fn emitFieldStore(self: *FunctionEmitter, value: Ir.Instruction.FieldStore) Error!void {
+        const base_type = try self.valueType(value.base);
+        const structure_index = base_type.structureIndex() orelse return error.InvalidProgram;
+        if (structure_index >= self.program.structures.len) return error.InvalidProgram;
+        const structure = self.program.structures[structure_index];
+        if (!structure.is_class or value.field >= structure.fields.len or
+            try self.valueType(value.result) != base_type or
+            try self.valueType(value.replacement) != structure.fields[value.field].type)
+        {
+            return error.InvalidProgram;
+        }
+        if (!plainClassStorage(self.program, structure_index)) return error.UnsupportedType;
+        const serial = self.nextTemporary();
+        const field_type = structure.fields[value.field].type;
+        try self.write("  %t{d}.class.store.field = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
+            serial,
+            try classStorageType(self.allocator, structure_index),
+            value.base,
+            value.field,
+        });
+        try self.write("  store {s} %v{d}, ptr %t{d}.class.store.field\n", .{
+            try llvmType(self.allocator, self.program, field_type),
+            value.replacement,
+            serial,
+        });
+        try self.copyValue(value.result, value.base);
     }
 
     fn emitListInit(self: *FunctionEmitter, value: Ir.Instruction.ListInit) Error!void {

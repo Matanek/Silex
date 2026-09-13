@@ -60,6 +60,7 @@ def main():
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
         "LlvmEvaluation/OptionalValues.sx": "-1\n41\n-1\n",
         "LlvmEvaluation/ClassOwnership.sx": "7\n-1\n",
+        "LlvmEvaluation/ClassFieldStore.sx": "7\nfalse\n41\ntrue\n",
         "LlvmEvaluation/StringLiterals.sx": "0\nSilex\n3\ntrue\nfalse\nA\0B\n",
     }
     for relative, expected_stdout in cases.items():
@@ -92,7 +93,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/StringLiterals.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/StringLiterals.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -210,6 +211,17 @@ def main():
     ]:
         assert fragment in class_llvm, fragment
     print("ROOT-OWNED OPTIONAL CLASS EMISSION PASS", flush=True)
+
+    class_store_metadata = json.loads(Path(str(output/"ClassFieldStore-O0")+".json").read_text())
+    class_store_llvm = (Path(class_store_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        "= type { i64, i1 }",
+        ".class.store.field = getelementptr",
+        "store i64",
+        "store i1",
+    ]:
+        assert fragment in class_store_llvm, fragment
+    print("PLAIN CLASS FIELD STORE EMISSION PASS", flush=True)
 
     string_metadata = json.loads(Path(str(output/"StringLiterals-O0")+".json").read_text())
     string_llvm = (Path(string_metadata["artifact_directory"])/"raw.ll").read_text()
