@@ -54,3 +54,13 @@ ordinary semantic analysis and portable IR construction; they never enter a
 module interface or ordinary executable. On a macos-arm64 host, test
 compilation lowers each selected source once and emits an isolated native
 process entry for every block, including the active system boundaries.
+
+## Injected system callback lifetime
+
+Generated system adapters consume their host argument with the same ownership
+contract as ordinary callbacks. After the target invocation and writer cleanup,
+they release the host on every normal-return path, including direct, query
+dispatch, and query-range adapters. Borrowing the resource store through
+`__silex_system_resources` does not transfer or cancel that host ownership.
+Repeated injected calls therefore do not keep the application alive after its
+last user owner leaves scope.

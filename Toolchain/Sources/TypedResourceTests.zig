@@ -333,6 +333,38 @@ test "injected systems forward positional named and default process modes" {
     _ = try Lower.lower(allocator, compilation.ir);
 }
 
+test "injected systems consume their host argument without retaining it after return" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data = try std.mem.replaceOwned(u8, allocator, application_source, "drop { self.store.clear() }", "drop { print(\"host dropped\"); self.store.clear() }"),
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\func update() { print("tick") }
+        \\func main() {
+        \\    var application = Application()
+        \\    application.add_system(0, update)
+        \\    application.add_after_system(0, update)
+        \\    print("done")
+        \\}
+        ,
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("tick\ntick\ndone\nhost dropped\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
 test "injected systems borrow the application resource store when the host exposes the compiler hook" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

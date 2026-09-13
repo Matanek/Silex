@@ -56,6 +56,9 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
     if (!borrowed_resources) {
         try Ownership.emitDrop(self, &builder, .structure(resources), try loadLocal(self, &builder, resources_local, .structure(resources)));
     }
+    // Adapters are ordinary value-parameter callbacks. Their caller retains
+    // the host, independently of the borrowed resource-store projection.
+    try Ownership.emitDrop(self, &builder, adapter.host_type, 0);
     self.terminate(&builder, .return_void);
     return finishFunction(self, function, &builder);
 }
