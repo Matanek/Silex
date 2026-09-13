@@ -1,0 +1,12 @@
+use STD.Threading
+
+struct Increment:Threading.Job {
+    var value:int
+    func execute() { self.value++ }
+}
+
+func main() {
+    var executor = Threading.Executor(worker_count:1)
+    var handle = executor.submit(Increment(value:41))
+    print(handle.complete().value)
+}

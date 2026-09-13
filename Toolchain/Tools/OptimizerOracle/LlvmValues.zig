@@ -118,7 +118,7 @@ const State = struct {
 };
 
 fn operandField(comptime name: []const u8) bool {
-    inline for (.{ "operand", "left", "right", "value", "base", "index", "collection", "reference", "replacement", "start", "end" }) |candidate|
+    inline for (.{ "operand", "left", "right", "value", "base", "index", "collection", "reference", "replacement", "argument", "start", "end" }) |candidate|
         if (std.mem.eql(u8, name, candidate)) return true;
     return false;
 }

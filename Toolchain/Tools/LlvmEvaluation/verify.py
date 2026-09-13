@@ -86,6 +86,10 @@ def main():
         "LlvmEvaluation/OptionalStringEquality.sx": "true\nfalse\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\n",
         "LlvmEvaluation/FixedCollectionStorage.sx": "4\n30\n25\n40\n0\n99\n",
         "LlvmEvaluation/FixedCollectionBounds.sx": "7\n",
+        "LlvmEvaluation/CallbackZeroInitialization.sx": "42\n10\n",
+        "LlvmEvaluation/MergedListAppendArgument.sx": "alpha\nbeta\n",
+        "LlvmEvaluation/CFunctionAddressCallback.sx": "42\n",
+        "LlvmEvaluation/GpuVertexBufferLayouts.sx": "2\n0\n16\n1\n48\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -863,6 +867,30 @@ def main():
     ]:
         assert fragment in fixed_collection_llvm, fragment
     print("FIXED COLLECTION STORAGE PASS", flush=True)
+
+    gpu_layout_metadata = json.loads(Path(str(output/"GpuVertexBufferLayouts-O0")+".json").read_text())
+    gpu_layout_llvm = (Path(gpu_layout_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert 'target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"' in gpu_layout_llvm
+    assert 'target triple = "arm64-apple-macosx26.0.0"' in gpu_layout_llvm
+    print("TARGET DATA LAYOUT PASS", flush=True)
+
+    callback_zero_metadata = json.loads(Path(str(output/"CallbackZeroInitialization-O0")+".json").read_text())
+    callback_zero_llvm = (Path(callback_zero_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert "freeze { ptr, ptr, ptr } zeroinitializer" in callback_zero_llvm
+    assert "add { ptr, ptr, ptr }" not in callback_zero_llvm
+    print("CALLBACK ZERO INITIALIZATION PASS", flush=True)
+
+    merged_append_metadata = json.loads(Path(str(output/"MergedListAppendArgument-O0")+".json").read_text())
+    merged_append_llvm = (Path(merged_append_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert ".appended" in merged_append_llvm
+    assert "store ptr %v" in merged_append_llvm
+    print("MERGED LIST APPEND ARGUMENT PASS", flush=True)
+
+    c_callback_metadata = json.loads(Path(str(output/"CFunctionAddressCallback-O0")+".json").read_text())
+    c_callback_llvm = (Path(c_callback_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert "define internal i64 @sx.c.callback." in c_callback_llvm
+    assert "call fastcc i64 @sx_" in c_callback_llvm
+    print("C FUNCTION ADDRESS CALLBACK PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

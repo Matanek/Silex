@@ -27,8 +27,10 @@ def compile_source(args):
     source = Path(args.source).resolve(strict=True)
     adapter = Path(args.adapter).resolve(strict=True)
     format_runtime = Path(args.format_runtime).resolve(strict=True)
+    archives = [Path(path).resolve(strict=True) for path in args.archive]
     llvm = Path(args.llvm_dir).resolve(strict=True)
     sdk = Path(args.sdk).resolve(strict=True)
+    linker = Path(args.linker).resolve(strict=True)
     output = Path(args.output).resolve()
     cache = root / ".silex/llvm-evaluation/v1"
     cache.mkdir(parents=True, exist_ok=True)
@@ -81,8 +83,10 @@ def compile_source(args):
                       sdk_settings_sha256=sha(sdk/"SDKSettings.json"),
                       system_stub_sha256=sha(sdk/"usr/lib/libSystem.tbd"),
                       format_runtime=str(format_runtime), format_runtime_sha256=sha(format_runtime),
+                      archives=[dict(path=str(path), sha256=sha(path)) for path in archives],
+                      frameworks=args.framework, libraries=args.library,
                       tools={str(p): sha(p) for p in [adapter, llvm/"bin/opt", llvm/"bin/llc",
-                             llvm/"lib/libLLVM.dylib", llvm/"lib/libzstd.1.dylib", Path("/usr/bin/ld")]})
+                             llvm/"lib/libLLVM.dylib", llvm/"lib/libzstd.1.dylib", linker]})
         key = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
         destination = cache / key
         cached = destination / "program"
@@ -100,8 +104,18 @@ def compile_source(args):
             run("llvm_codegen", [llvm/"bin/llc", "-filetype=obj", "-O="+level,
                                  "-mtriple=arm64-apple-macosx26.0.0", "-mcpu="+args.cpu,
                                  "-fp-contract=off", optimized, "-o", obj])
-            run("link", ["/usr/bin/ld", "-arch", "arm64", "-platform_version", "macos", "26.0", "26.5",
-                         "-syslibroot", sdk, "-lSystem", obj, format_runtime, "-o", executable])
+            if linker.name == "zig":
+                link = [linker, "cc", "-target", "aarch64-macos", "-isysroot", sdk,
+                        "-F", sdk/"System/Library/Frameworks", "-L", sdk/"usr/lib",
+                        obj, format_runtime, *archives]
+            else:
+                link = [linker, "-arch", "arm64", "-platform_version", "macos", "26.0", "26.5",
+                        "-syslibroot", sdk, "-lSystem", obj, format_runtime, *archives]
+            for framework in args.framework:
+                link.extend(["-framework", framework])
+            link.extend("-l"+library for library in args.library)
+            link.extend(["-o", executable])
+            run("link", link)
             # Publish the cache entry only after every stage succeeds.
             destination.mkdir(exist_ok=True)
             for item in [raw, optimized, obj, executable]:
@@ -124,10 +138,14 @@ def main():
     parser.add_argument("--source", required=True)
     parser.add_argument("--adapter", required=True)
     parser.add_argument("--format-runtime", required=True)
+    parser.add_argument("--archive", action="append", default=[])
+    parser.add_argument("--framework", action="append", default=[])
+    parser.add_argument("--library", action="append", default=[])
     parser.add_argument("--shadercross", required=True)
     parser.add_argument("--silex-prefix", default="none")
     parser.add_argument("--llvm-dir", required=True)
     parser.add_argument("--sdk", required=True)
+    parser.add_argument("--linker", default="/usr/bin/ld")
     parser.add_argument("--opt", choices=["O0", "O3"], required=True)
     parser.add_argument("--cpu", default="apple-m3")
     parser.add_argument("--output", required=True)

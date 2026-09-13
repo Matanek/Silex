@@ -1,0 +1,33 @@
+enum VertexRate:int {
+    vertex = 0
+    instance = 1
+}
+
+struct VertexBufferLayout {
+    let slot:int
+    let pitch:int
+    var rate:VertexRate? = null
+}
+
+struct GraphicsPipelineSettings {
+    var vertex_buffers:VertexBufferLayout[]? = null
+}
+
+func inspect(settings:GraphicsPipelineSettings) {
+    var configured:VertexBufferLayout[] = []
+    if let values = settings.vertex_buffers { configured = values }
+    print(configured.count())
+    print(configured[0].slot)
+    print(configured[0].pitch)
+    print(configured[1].slot)
+    print(configured[1].pitch)
+}
+
+func main() {
+    var layouts:VertexBufferLayout[] = []
+    layouts.append(VertexBufferLayout(slot:0, pitch:16))
+    layouts.append(VertexBufferLayout(slot:1, pitch:48))
+    var settings = GraphicsPipelineSettings()
+    settings.vertex_buffers = layouts
+    inspect(settings)
+}

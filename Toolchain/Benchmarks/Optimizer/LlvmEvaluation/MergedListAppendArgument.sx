@@ -1,0 +1,25 @@
+protocol Named {
+    func id() str
+}
+
+struct Alpha:Named {
+    func id() str { return "alpha" }
+}
+
+struct Beta:Named {
+    func id() str { return "beta" }
+}
+
+func collect(value:Named) str {
+    let id = value.id()
+    var values:str[] = []
+    values.append(id)
+    return values[0]
+}
+
+func main() {
+    var alpha:Named = Alpha()
+    var beta:Named = Beta()
+    print(collect(alpha))
+    print(collect(beta))
+}

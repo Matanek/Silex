@@ -1,0 +1,15 @@
+func increment(value:int) int { return value + 1 }
+
+struct Holder {
+    var callback:func(int) int
+}
+
+func main() {
+    var operation:func(int) int
+    operation = increment
+    print(operation(41))
+
+    var holder = Holder()
+    holder.callback = increment
+    print(holder.callback(9))
+}

@@ -67,6 +67,11 @@ fn run(init: std.process.Init) !u8 {
         return err;
     };
     const verified_at = std.Io.Clock.awake.now(init.io);
+    if (init.environ_map.get("SILEX_LLVM_IR_DUMP")) |path| {
+        const ir_file = try std.Io.Dir.cwd().createFile(init.io, path, .{});
+        defer ir_file.close(init.io);
+        try ir_file.writeStreamingAll(init.io, try Silex.Ir.writeText(allocator, program));
+    }
     if (args.len == 11) {
         const report = try Emitter.closureReport(allocator, program, compiled.boundaries);
         const report_file = try std.Io.Dir.cwd().createFile(init.io, args[8], .{});
