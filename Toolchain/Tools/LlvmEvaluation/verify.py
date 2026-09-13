@@ -67,6 +67,7 @@ def main():
         "LlvmEvaluation/IndirectCalls.sx": "42\n7\n",
         "LlvmEvaluation/Mutex.sx": "nested\n42\n",
         "LlvmEvaluation/EmbeddedBytes.sx": "4\n65\n195\n169\n0\n65\n",
+        "LlvmEvaluation/AggregateOptional.sx": "-1\n42\ntrue\n",
         "LlvmEvaluation/PlainEnum.sx": "true\ntrue\n2\n3\n",
         "LlvmEvaluation/PayloadEnum.sx": "41\n7\n-2\n",
         "LlvmEvaluation/AssertSuccess.sx": "7\n",
@@ -122,7 +123,7 @@ def main():
         assert fragment in system_llvm, fragment
     print("DIRECT SCALAR AND VOID SYSTEM BOUNDARIES PASS", flush=True)
 
-    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
+    for relative in ["LlvmEvaluation/Rounding.sx", "ReferenceAliasing.sx", "OwningCollectionCopy.sx", "LlvmEvaluation/Lifetime.sx", "LlvmEvaluation/OptionalValues.sx", "LlvmEvaluation/ClassOwnership.sx", "LlvmEvaluation/ClassFieldStore.sx", "LlvmEvaluation/IndirectCalls.sx", "LlvmEvaluation/Mutex.sx", "LlvmEvaluation/EmbeddedBytes.sx", "LlvmEvaluation/AggregateOptional.sx", "LlvmEvaluation/PlainEnum.sx", "LlvmEvaluation/PayloadEnum.sx", "LlvmEvaluation/StringLiterals.sx", "LlvmEvaluation/StringBytes.sx", "LlvmEvaluation/ListAppendClear.sx", "LlvmEvaluation/StringConcat.sx", "LlvmEvaluation/FormatValues.sx", "LlvmEvaluation/CollectionSlice.sx", "LlvmEvaluation/StringFromBytes.sx", "LlvmEvaluation/RawEnum.sx", "LlvmEvaluation/ProtocolValues.sx", "LlvmEvaluation/StorageInitialization.sx"]:
         interpreted = call("interpreter-"+Path(relative).stem, [args.native, "interpret", corpus/relative, "--nocache"])
         assert interpreted["returncode"] == 0 and interpreted["stdout"] == cases[relative], interpreted
 
@@ -248,8 +249,8 @@ def main():
         "insertvalue { i1, i64 } zeroinitializer, i1 false, 0",
         "insertvalue { i1, i64 } zeroinitializer, i1 true, 0",
         "extractvalue { i1, i64 }",
-        ".same_presence = icmp eq i1",
-        ".same_payload = icmp eq i64",
+        ".present = extractvalue { i1, i64 }",
+        "xor i1",
     ]:
         assert fragment in optional_llvm, fragment
     print("STRUCTURED OPTIONAL VALUE EMISSION PASS", flush=True)
@@ -471,6 +472,11 @@ def main():
     assert "private constant [4 x i8] c\"\\41\\C3\\A9\\0A\"" in embedded_llvm, embedded_llvm
     assert "call void @llvm.memcpy.p0.p0.i64" in embedded_llvm, embedded_llvm
     print("OWNED EMBEDDED BYTES PASS", flush=True)
+
+    aggregate_optional_metadata = json.loads(Path(str(output/"AggregateOptional-O0")+".json").read_text())
+    aggregate_optional_llvm = (Path(aggregate_optional_metadata["artifact_directory"])/"raw.ll").read_text()
+    assert "{ i1, %sx.type." in aggregate_optional_llvm, aggregate_optional_llvm
+    print("AGGREGATE OPTIONAL VALUES PASS", flush=True)
 
     # The ordinary compiler must accept each refusal witness first.
     for name in ["RefuseCallback", "RefuseClassFinalizer"]:

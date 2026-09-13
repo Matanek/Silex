@@ -2124,9 +2124,18 @@ const FunctionEmitter = struct {
         if (value.operator != .equal and value.operator != .not_equal)
             return error.UnsupportedInstruction;
         const child = optional_type.optionalChild() orelse return error.InvalidProgram;
-        if (child.optionalChild() != null) return error.UnsupportedType;
         const serial = self.nextTemporary();
         const optional_name = try llvmType(self.allocator, self.program, optional_type);
+        if (self.isOptionalNull(value.left) or self.isOptionalNull(value.right)) {
+            const operand = if (self.isOptionalNull(value.left)) value.right else value.left;
+            try self.write("  %t{d}.present = extractvalue {s} %v{d}, 0\n", .{ serial, optional_name, operand });
+            return self.write("  %v{d} = xor i1 %t{d}.present, {s}\n", .{
+                value.result,
+                serial,
+                if (value.operator == .equal) "true" else "false",
+            });
+        }
+        if (child.optionalChild() != null) return error.UnsupportedType;
         const child_name = try llvmType(self.allocator, self.program, child);
         try self.write("  %t{d}.left_present = extractvalue {s} %v{d}, 0\n", .{ serial, optional_name, value.left });
         try self.write("  %t{d}.right_present = extractvalue {s} %v{d}, 0\n", .{ serial, optional_name, value.right });
@@ -2147,6 +2156,14 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.equal = select i1 %t{d}.both_present, i1 %t{d}.same_payload, i1 %t{d}.same_presence\n", .{ serial, serial, serial, serial });
             try self.write("  %v{d} = xor i1 %t{d}.equal, true\n", .{ value.result, serial });
         }
+    }
+
+    fn isOptionalNull(self: *FunctionEmitter, value_id: Ir.ValueId) bool {
+        for (self.function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .optional_null => |value| if (value.result == value_id) return true,
+            else => {},
+        };
+        return false;
     }
 
     fn emitFloatMinimumMaximum(
@@ -2805,7 +2822,7 @@ fn optionalPayloadType(program: Ir.Program, type_value: Ir.Type, depth: usize) b
 
 fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
     if (type_value.optionalChild()) |child| {
-        if (!optionalPayloadType(program, child, 0)) return error.UnsupportedType;
+        if (child == .void) return error.UnsupportedType;
         return std.fmt.allocPrint(allocator, "{{ i1, {s} }}", .{try llvmType(allocator, program, child)});
     }
     if (type_value.functionIndex()) |function_type| {

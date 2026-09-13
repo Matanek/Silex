@@ -1,0 +1,20 @@
+struct Snapshot {
+    let count:int
+    let ready:bool
+}
+
+func inspect(value:Snapshot?) {
+    if let snapshot = value {
+        print(snapshot.count)
+        print(snapshot.ready)
+        return
+    }
+    print(-1)
+}
+
+func main() {
+    let missing:Snapshot? = null
+    let present:Snapshot? = Snapshot(count:42, ready:true)
+    inspect(missing)
+    inspect(present)
+}
