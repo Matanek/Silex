@@ -74,6 +74,8 @@ def main():
         "LlvmEvaluation/ClassCollectionReference.sx": "10\n20\n11\n22\n",
         "LlvmEvaluation/TakeLastEdge.sx": "beta\n1\nalpha\n",
         "LlvmEvaluation/TakeLastEmpty.sx": "7\n",
+        "LlvmEvaluation/TakeIndexedEdge.sx": "20\n2\n3\n20\n25\n10\n1\n30\n",
+        "LlvmEvaluation/TakeIndexedBounds.sx": "7\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -132,7 +134,7 @@ def main():
                 "Overflow", "Bounds", "NegativeBounds", "DivisionByZero", "Conversion",
                 "FloatToIntegerFraction", "FloatToIntegerNaN", "FloatToIntegerInfinity",
                 "FloatToIntegerBounds", "ListInsertBounds", "FloatNarrowingInexact",
-                "FloatNarrowingOverflow", "FloatNarrowingNaN", "TakeLastEmpty",
+                "FloatNarrowingOverflow", "FloatNarrowingNaN", "TakeLastEmpty", "TakeIndexedBounds",
             ] else 0), run
             if expected is None:
                 expected = observable
@@ -726,6 +728,22 @@ def main():
     result_at = take_last_llvm.index(".collection = insertvalue", removed_at)
     assert "call fastcc void @sx_drop" not in take_last_llvm[removed_at:result_at]
     print("EDGE LIST TAKE LAST PASS", flush=True)
+
+    take_indexed_metadata = json.loads(Path(str(output/"TakeIndexedEdge-O0")+".json").read_text())
+    take_indexed_llvm = (Path(take_indexed_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [
+        ".index.wrapped = add i64",
+        ".index.high = icmp sge i64",
+        ".prefix.bytes = ptrtoint ptr",
+        ".tail.count.with.removed = sub i64",
+        ".tail.source.index = add i64",
+        ".removed.address = getelementptr ptr",
+    ]:
+        assert fragment in take_indexed_llvm, fragment
+    removed_at = take_indexed_llvm.index(".removed.address = getelementptr ptr")
+    result_at = take_indexed_llvm.index(".collection = insertvalue", removed_at)
+    assert "call fastcc void @sx_drop" not in take_indexed_llvm[removed_at:result_at]
+    print("EDGE LIST INDEXED TAKE PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

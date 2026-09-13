@@ -1688,14 +1688,14 @@ const FunctionEmitter = struct {
             try self.valueType(value.result) != type_value)
             return error.UnsupportedInstruction;
         const argument = switch (value.kind) {
-            .clear, .take_last => if (value.argument == null) null else return error.InvalidProgram,
+            .clear, .take, .take_last => if (value.argument == null) null else return error.InvalidProgram,
             .append, .insert => value.argument orelse return error.InvalidProgram,
             else => return error.UnsupportedInstruction,
         };
-        if (value.kind == .insert) {
+        if (value.kind == .insert or value.kind == .take) {
             if (value.index == null or try self.valueType(value.index.?) != .int) return error.InvalidProgram;
         } else if (value.index != null) return error.InvalidProgram;
-        if (value.kind == .take_last) {
+        if (value.kind == .take or value.kind == .take_last) {
             const removed = value.removed orelse return error.InvalidProgram;
             if (try self.valueType(removed) != collection.element) return error.InvalidProgram;
         } else if (value.removed != null) return error.InvalidProgram;
@@ -1709,7 +1709,7 @@ const FunctionEmitter = struct {
         const element_name = try llvmType(self.allocator, self.program, collection.element);
         try self.write("  %t{d}.old.data = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, value.collection });
         try self.write("  %t{d}.old.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, value.collection });
-        if (value.kind == .insert) {
+        if (value.kind == .insert or value.kind == .take) {
             const index = value.index.?;
             try self.write("  %t{d}.index.negative = icmp slt i64 %v{d}, 0\n", .{ serial, index });
             try self.write("  %t{d}.index.wrapped = add i64 %t{d}.old.count, %v{d}\n", .{ serial, serial, index });
@@ -1720,16 +1720,21 @@ const FunctionEmitter = struct {
                 index,
             });
             try self.write("  %t{d}.index.low = icmp slt i64 %t{d}.index, 0\n", .{ serial, serial });
-            try self.write("  %t{d}.index.high = icmp sgt i64 %t{d}.index, %t{d}.old.count\n", .{ serial, serial, serial });
+            try self.write("  %t{d}.index.high = icmp {s} i64 %t{d}.index, %t{d}.old.count\n", .{
+                serial,
+                if (value.kind == .insert) "sgt" else "sge",
+                serial,
+                serial,
+            });
             try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
-            try self.write("  br i1 %t{d}.index.invalid, label %b{d}.insert.fail{d}, label %b{d}.insert.cont{d}\n", .{
+            try self.write("  br i1 %t{d}.index.invalid, label %b{d}.index.fail{d}, label %b{d}.index.cont{d}\n", .{
                 serial,
                 block_id,
                 serial,
                 block_id,
                 serial,
             });
-            try self.write("b{d}.insert.fail{d}:\n", .{ block_id, serial });
+            try self.write("b{d}.index.fail{d}:\n", .{ block_id, serial });
             try self.write("  call fastcc void @sx_bounds(ptr @sx.file.{d}, i64 {d}, i64 {d}, i64 %v{d}, i64 %t{d}.old.count)\n", .{
                 value.position.file,
                 value.position.line,
@@ -1737,7 +1742,7 @@ const FunctionEmitter = struct {
                 index,
                 serial,
             });
-            try self.write("  unreachable\nb{d}.insert.cont{d}:\n", .{ block_id, serial });
+            try self.write("  unreachable\nb{d}.index.cont{d}:\n", .{ block_id, serial });
         }
         if (argument != null) {
             try self.write("  %t{d}.count.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.old.count, i64 1)\n", .{ serial, serial });
@@ -1745,7 +1750,11 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.count.overflow = extractvalue {{ i64, i1 }} %t{d}.count.checked, 1\n", .{ serial, serial });
             try self.write("  br i1 %t{d}.count.overflow, label %trap, label %b{d}.list{d}\n", .{ serial, block_id, serial });
             try self.write("b{d}.list{d}:\n", .{ block_id, serial });
-        } else if (value.kind == .take_last) {
+        } else if (value.kind == .take or value.kind == .take_last) {
+            if (value.kind == .take) {
+                try self.write("  %t{d}.count = sub i64 %t{d}.old.count, 1\n", .{ serial, serial });
+                return self.emitListTake(value, serial, type_name, element_name, collection.element);
+            }
             try self.write("  %t{d}.empty = icmp eq i64 %t{d}.old.count, 0\n", .{ serial, serial });
             try self.write("  br i1 %t{d}.empty, label %b{d}.take.fail{d}, label %b{d}.take.cont{d}\n", .{
                 serial,
@@ -1814,6 +1823,42 @@ const FunctionEmitter = struct {
                 serial,
                 if (value.ownership == .root) @as(i8, -24) else -16,
             });
+        try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial });
+        try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{ value.result, type_name, serial, serial });
+    }
+
+    fn emitListTake(
+        self: *FunctionEmitter,
+        value: Ir.Instruction.ListEdit,
+        serial: usize,
+        type_name: []const u8,
+        element_name: []const u8,
+        element_type: Ir.Type,
+    ) Error!void {
+        try self.emitCollectionBytes(serial, element_type);
+        try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
+        if (value.ownership == .edge) {
+            try self.write("  call fastcc void @sx_retain(ptr %t{d}.storage, i64 -16)\n", .{serial});
+            try self.write("  call fastcc void @sx_drop(ptr %t{d}.storage, i64 -24)\n", .{serial});
+        }
+        try self.write("  %t{d}.prefix.end = getelementptr {s}, ptr null, i64 %t{d}.index\n", .{ serial, element_name, serial });
+        try self.write("  %t{d}.prefix.bytes = ptrtoint ptr %t{d}.prefix.end to i64\n", .{ serial, serial });
+        try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.prefix.bytes, i1 false)\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.removed.address = getelementptr {s}, ptr %t{d}.old.data, i64 %t{d}.index\n", .{
+            serial,
+            element_name,
+            serial,
+            serial,
+        });
+        try self.write("  %v{d} = load {s}, ptr %t{d}.removed.address\n", .{ value.removed.?, element_name, serial });
+        try self.write("  %t{d}.tail.count.with.removed = sub i64 %t{d}.old.count, %t{d}.index\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.tail.count = sub i64 %t{d}.tail.count.with.removed, 1\n", .{ serial, serial });
+        try self.write("  %t{d}.tail.end = getelementptr {s}, ptr null, i64 %t{d}.tail.count\n", .{ serial, element_name, serial });
+        try self.write("  %t{d}.tail.bytes = ptrtoint ptr %t{d}.tail.end to i64\n", .{ serial, serial });
+        try self.write("  %t{d}.tail.source.index = add i64 %t{d}.index, 1\n", .{ serial, serial });
+        try self.write("  %t{d}.tail.source = getelementptr {s}, ptr %t{d}.old.data, i64 %t{d}.tail.source.index\n", .{ serial, element_name, serial, serial });
+        try self.write("  %t{d}.tail.destination = getelementptr {s}, ptr %t{d}.storage, i64 %t{d}.index\n", .{ serial, element_name, serial, serial });
+        try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.tail.destination, ptr %t{d}.tail.source, i64 %t{d}.tail.bytes, i1 false)\n", .{ serial, serial, serial });
         try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial });
         try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{ value.result, type_name, serial, serial });
     }

@@ -1,0 +1,32 @@
+class Item {
+    var value:int
+    init(value:int) { self.value = value }
+}
+
+class Shelf {
+    var values:Item[]
+
+    init() {
+        self.values = [Item(10), Item(20), Item(30)]
+    }
+
+    func take(index:int) Item {
+        return self.values.take(index)
+    }
+}
+
+func main() {
+    var shelf = Shelf()
+    var snapshot = shelf.values
+    var removed = shelf.take(1)
+    print(removed.value)
+    print(shelf.values.count())
+    print(snapshot.count())
+    print(snapshot[1].value)
+    removed.value = 25
+    print(snapshot[1].value)
+    var first = shelf.take(-2)
+    print(first.value)
+    print(shelf.values.count())
+    print(shelf.values[0].value)
+}

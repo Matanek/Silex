@@ -1,0 +1,16 @@
+class Item {
+    var value:int
+    init(value:int) { self.value = value }
+}
+
+class Shelf {
+    var values:Item[] = [Item(10), Item(20)]
+    func take(index:int) Item { return self.values.take(index) }
+}
+
+func main() {
+    var shelf = Shelf()
+    print(7)
+    print(shelf.take(2).value)
+    print(8)
+}
