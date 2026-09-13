@@ -78,6 +78,7 @@ def main():
         "LlvmEvaluation/TakeIndexedBounds.sx": "7\n",
         "LlvmEvaluation/RichCollectionReadReference.sx": "20\n25\n",
         "LlvmEvaluation/MutableRichCollectionReference.sx": "25\n20\n3\n3\n10\n30\n",
+        "LlvmEvaluation/ClassIdentityEquality.sx": "true\nfalse\nfalse\ntrue\n",
         "LlvmEvaluation/SteeringWorkload.sx": "1000000\ntrue\n",
         "LlvmEvaluation/SystemBoundary.sx": "true\n",
         "LlvmEvaluation/GlobalInventory.sx": "2\n",
@@ -797,6 +798,12 @@ def main():
     ]:
         assert fragment in mutable_rich_llvm, fragment
     print("MUTABLE RICH OWNING COLLECTION REFERENCE PASS", flush=True)
+
+    class_identity_metadata = json.loads(Path(str(output/"ClassIdentityEquality-O0")+".json").read_text())
+    class_identity_llvm = (Path(class_identity_metadata["artifact_directory"])/"raw.ll").read_text()
+    for fragment in [" = icmp eq ptr ", " = icmp ne ptr "]:
+        assert fragment in class_identity_llvm, fragment
+    print("CLASS IDENTITY EQUALITY PASS", flush=True)
 
     # The ordinary compiler must accept the refusal witness first.
     for name in ["RefuseOwnedCallback"]:

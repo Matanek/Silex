@@ -1,0 +1,14 @@
+class Node {
+    var value:int
+    init(value:int) { self.value = value }
+}
+
+func main() {
+    var first = Node(7)
+    var alias = first
+    var other = Node(7)
+    print(first == alias)
+    print(first != alias)
+    print(first == other)
+    print(first != other)
+}

@@ -2321,6 +2321,17 @@ const FunctionEmitter = struct {
                     });
                 }
             }
+            if (structure_index >= self.program.structures.len) return error.InvalidProgram;
+            if (self.program.structures[structure_index].is_class) {
+                if (value.operator != .equal and value.operator != .not_equal)
+                    return error.UnsupportedInstruction;
+                return self.write("  %v{d} = icmp {s} ptr %v{d}, %v{d}\n", .{
+                    value.result,
+                    if (value.operator == .equal) "eq" else "ne",
+                    value.left,
+                    value.right,
+                });
+            }
             if (plainValue(self.program, left_type, 0))
                 return self.emitPlainAggregateEquality(value, left_type);
         }
