@@ -639,6 +639,7 @@ const FunctionEmitter = struct {
                 .{ value.result, if (value.value) "true" else "false" },
             ),
             .constant_str => |value| try self.emitConstantString(block_id, instruction_index, value),
+            .constant_bytes => |value| try self.emitConstantBytes(block_id, instruction_index, value),
             .constant_float32 => |value| try self.write(
                 "  %v{d} = bitcast i32 {d} to float\n",
                 .{ value.result, value.bits },
@@ -748,6 +749,41 @@ const FunctionEmitter = struct {
             "  %v{d} = getelementptr {{ i64, [{d} x i8] }}, ptr @sx.string.{d}.{d}.{d}, i32 0, i32 0\n",
             .{ value.result, value.value.len, self.function_id, block_id, instruction_index },
         );
+    }
+
+    fn emitConstantBytes(
+        self: *FunctionEmitter,
+        block_id: usize,
+        instruction_index: usize,
+        value: Ir.Instruction.ConstantBytes,
+    ) Error!void {
+        const type_value = try self.valueType(value.result);
+        const collection = try self.collectionInfo(type_value);
+        if (collection.element != .uint8 or collection.length != null or collection.view)
+            return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, type_value);
+        // The semantic IR immediately installs the literal's owning root with
+        // list_retain. Start at zero so that this explicit retain owns it.
+        try self.write("  %t{d}.bytes.storage = call fastcc ptr @sx_unowned_alloc(i64 {d})\n", .{
+            serial,
+            value.value.len,
+        });
+        if (value.value.len != 0) try self.write(
+            "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.bytes.storage, ptr @sx.bytes.{d}.{d}.{d}, i64 {d}, i1 false)\n",
+            .{ serial, self.function_id, block_id, instruction_index, value.value.len },
+        );
+        try self.write("  %t{d}.bytes.value = insertvalue {s} poison, ptr %t{d}.bytes.storage, 0\n", .{
+            serial,
+            type_name,
+            serial,
+        });
+        try self.write("  %v{d} = insertvalue {s} %t{d}.bytes.value, i64 {d}, 1\n", .{
+            value.result,
+            type_name,
+            serial,
+            value.value.len,
+        });
     }
 
     fn emitStringResource(self: *FunctionEmitter, value: Ir.Instruction.ListResource, comptime operation: []const u8) Error!void {
@@ -2870,6 +2906,23 @@ fn emitStringLiterals(
                 try output.appendSlice(allocator, " }\n");
                 emitted = true;
             },
+            .constant_bytes => |value| {
+                try appendFmt(output, allocator, "@sx.bytes.{d}.{d}.{d} = private constant [{d} x i8] ", .{
+                    function_id,
+                    block_id,
+                    instruction_index,
+                    value.value.len,
+                });
+                if (value.value.len == 0) {
+                    try output.appendSlice(allocator, "zeroinitializer");
+                } else {
+                    try output.appendSlice(allocator, "c\"");
+                    try appendEscapedBytes(output, allocator, value.value);
+                    try output.append(allocator, '"');
+                }
+                try output.append(allocator, '\n');
+                emitted = true;
+            },
             else => {},
         };
     }
@@ -2877,7 +2930,12 @@ fn emitStringLiterals(
 }
 
 fn appendEscapedBytes(output: *std.ArrayList(u8), allocator: Allocator, bytes: []const u8) Allocator.Error!void {
-    for (bytes) |byte| try appendFmt(output, allocator, "\\{X:0>2}", .{byte});
+    const digits = "0123456789ABCDEF";
+    for (bytes) |byte| {
+        try output.append(allocator, '\\');
+        try output.append(allocator, digits[byte >> 4]);
+        try output.append(allocator, digits[byte & 0x0f]);
+    }
 }
 
 fn reachableUsesMutex(program: Ir.Program, reachable: []const bool) bool {

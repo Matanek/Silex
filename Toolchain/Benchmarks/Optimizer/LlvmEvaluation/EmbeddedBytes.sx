@@ -1,0 +1,11 @@
+func main() {
+    var first = embed_bytes("EmbeddedBytes.txt")
+    let second = embed_bytes("EmbeddedBytes.txt")
+    print(first.count())
+    print(first[0])
+    print(first[1])
+    print(first[2])
+    first[0] = 0 as uint8
+    print(first[0])
+    print(second[0])
+}
