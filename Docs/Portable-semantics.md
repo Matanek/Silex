@@ -146,3 +146,16 @@ Safe member access uses the same pattern at expression granularity: one
 receiver evaluation, a presence branch, ordinary member resolution on the
 unwrapped child, and a flat optional result merged with the absent edge.
 Arguments and mutating write-back live exclusively on the present edge.
+
+## Ownership of nested value receivers
+
+Mutating value methods return their updated receiver to the caller. When that
+receiver is stored in a class field, the caller keeps the original edge alive
+and gives the callee a temporary root. Collection writes therefore preserve the
+stored value observed through reentrant class aliases until receiver write-back,
+just as scalar fields do. At return, the updated receiver moves back to the edge
+and the old edge is released. These internal ownership transfers do not invoke
+additional value `drop` hooks; class finalizers run when their last reachable
+owner disappears. Positional, named, optional and protocol calls use the same
+write-back rule. Explicit mutable-reference calls retain their separate location
+semantics.

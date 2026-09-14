@@ -1,0 +1,27 @@
+class Item {
+ let id:int
+ init(id:int) { self.id = id }
+ drop { print("item ", self.id) }
+}
+struct Values {
+ private var items:Item[]
+ init() { self.items = [] }
+ func add(value:Item) { self.items.append(value) }
+ func clear() int { self.items.clear(); print("body"); return 0 }
+ drop { print("values") }
+}
+struct Nested {
+ var values:Values
+ init() { self.values = Values() }
+}
+class Store {
+ private var nested:Nested
+ init() { self.nested = Nested() }
+ func exercise() {
+  self.nested.values.add(Item(1))
+  print(self.nested.values.clear())
+  self.nested.values.add(value:Item(2))
+  print("done")
+ }
+}
+func main() { var store = Store(); store.exercise() }

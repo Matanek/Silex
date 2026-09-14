@@ -1,0 +1,17 @@
+struct Values {
+ var items:int[]
+ init() { self.items = [1] }
+ func edit(owner:Owner) {
+  self.items.replace(0, 99)
+  owner.observe()
+  self.items.append(7)
+  owner.observe()
+ }
+}
+class Owner {
+ var values:Values
+ init() { self.values = Values() }
+ func observe() { print(self.values.items.count(), " ", self.values.items[0]) }
+ func exercise() { self.values.edit(self); self.observe() }
+}
+func main() { var owner = Owner(); owner.exercise() }

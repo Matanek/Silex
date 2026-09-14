@@ -26,6 +26,7 @@ const Place = struct {
     reference: ?Ir.ValueId,
     root_type: Ast.Type,
     fields: []const usize,
+    receiver_type: ?Ast.Type = null,
 };
 
 pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]const bool {
@@ -553,13 +554,16 @@ pub fn analyzeCallWithReceiver(
         const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
         return self.fail(call.name_position, message);
     }
-    const place = if (mutating and !borrowed_mutable)
+    var place = if (mutating and !borrowed_mutable)
         if (class_receiver and receiver.borrowed_mode != .mutable)
             try findMutablePlace(self, builder, receiver_expression)
         else
             try requireMutablePlace(self, builder, receiver_expression, call.name)
     else
         null;
+    if (place) |target| if (!class_receiver) {
+        place = try prepareReceiverPlace(self, builder, target, receiver, safe_receiver_type);
+    };
     const borrowed_receiver = if (borrowed_mutable)
         try MutableReferences.prepare(self, builder, receiver_expression, receiver.type)
     else
@@ -796,13 +800,16 @@ fn analyzeNamedCall(
         const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
         return self.fail(call.name_position, message);
     }
-    const place = if (mutating and !borrowed_mutable)
+    var place = if (mutating and !borrowed_mutable)
         if (class_receiver and receiver.borrowed_mode != .mutable)
             try findMutablePlace(self, builder, receiver_expression)
         else
             try requireMutablePlace(self, builder, receiver_expression, call.name)
     else
         null;
+    if (place) |target| if (!class_receiver) {
+        place = try prepareReceiverPlace(self, builder, target, receiver, safe_receiver_type);
+    };
     const borrowed_receiver = if (borrowed_mutable) try MutableReferences.prepare(self, builder, receiver_expression, receiver.type) else null;
     const method_receiver = if (receiver_structure_index != structure_index and borrowed_receiver == null)
         try self.coerce(builder, resolved_receiver, .structure(structure_index), call.name_position)
@@ -956,7 +963,7 @@ fn analyzeProtocolCall(
 ) !?Model.TypedValue {
     if (requirement.return_mode != .value) return self.fail(call.name_position, "dynamic protocol methods cannot return '@T' or '&T'");
     try Borrowing.validateReadArguments(self, requirement.parameters, call.arguments);
-    const place = try requireMutablePlace(self, builder, call.receiver.?, call.name);
+    const place = try prepareReceiverPlace(self, builder, try requireMutablePlace(self, builder, call.receiver.?, call.name), receiver, safe_receiver_type);
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
     var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
@@ -1141,7 +1148,33 @@ fn findMutablePlace(self: anytype, builder: anytype, expression: *const Ast.Expr
     };
 }
 
+/// Mutating value receivers are returned by value. Keep the original class
+/// edge alive until write-back, so reentrant aliases see the stored value and
+/// collection mutations cannot consume an ownership domain they do not own.
+fn prepareReceiverPlace(self: anytype, builder: anytype, place: Place, receiver: Model.TypedValue, optional_type: ?Ast.Type) !Place {
+    var type_value = place.root_type;
+    var edge = false;
+    for (place.fields) |field_index| {
+        const structure = self.structures[type_value.structureIndex().?];
+        edge = edge or structure.is_class;
+        type_value = structure.fields[field_index].type;
+    }
+    if (!edge or !Resources.requiresRetain(self, receiver.type)) return place;
+    const value = if (optional_type) |wrapped|
+        (try Optionals.promote(self, builder, receiver, wrapped)).?
+    else
+        receiver;
+    try Resources.retainValue(self, builder, value.type, value.value);
+    var prepared = place;
+    prepared.receiver_type = value.type;
+    return prepared;
+}
+
 fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: Ir.ValueId) !void {
+    if (place.receiver_type) |type_value| {
+        try Resources.retainValueOwned(self, builder, type_value, replacement_value, .edge);
+        try Resources.releaseTransferredRoot(self, builder, type_value, replacement_value);
+    }
     if (place.fields.len == 0) {
         if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement_value } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement_value } });
         return;
@@ -1162,6 +1195,15 @@ fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: 
             current_type = field_type;
         }
     }
+
+    // An alias may have replaced the field while the value method ran. Release
+    // the value currently stored here, not the original receiver's old bits.
+    const previous_receiver = if (place.receiver_type) |type_value| previous: {
+        const value = try self.newValue(builder, type_value);
+        const last = place.fields.len - 1;
+        try self.emit(builder, .{ .field_load = .{ .result = value, .base = bases[last], .field = place.fields[last] } });
+        break :previous value;
+    } else null;
 
     var replacement = replacement_value;
     var path_index = place.fields.len;
@@ -1197,6 +1239,9 @@ fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: 
         } });
     }
     if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement } });
+    if (place.receiver_type) |type_value| {
+        try Resources.releaseTransferredValue(self, builder, type_value, previous_receiver.?, .edge);
+    }
 }
 
 fn restoreClassReceiver(

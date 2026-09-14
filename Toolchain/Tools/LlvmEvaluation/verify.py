@@ -43,7 +43,7 @@ def main():
     def llvm_command(path, mode, binary, silex_prefix="none"):
         # Exercise the full Silex prefix on merged raw operands and mutable
         # collection views used by the Boids and Physics consumers.
-        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "ListGrowth", "ProtocolTemporaryOwnership"]:
+        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "ListGrowth", "ProtocolTemporaryOwnership", "NestedReceiver", "ReceiverAliasing", "ReceiverForms", "ReceiverReentry"]:
             silex_prefix = "branch_snapshot_sinking"
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
@@ -53,6 +53,10 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/ReceiverReentry.sx": "item 1\nbody\nitem 2\ndone\n",
+        "LlvmEvaluation/ReceiverForms.sx": "done\nitem 3\nitem 3\n",
+        "LlvmEvaluation/ReceiverAliasing.sx": "1 1\n1 1\n2 99\n",
+        "LlvmEvaluation/NestedReceiver.sx": "values\nvalues\nvalues\nbody\nitem 1\n0\ndone\nvalues\nitem 2\n",
         "LlvmEvaluation/ProtocolTemporaryOwnership.sx": "consumed\nitem dropped\ndone\n",
         "LlvmEvaluation/ListGrowth.sx": "32896\n257\n258\n999\n42\n257\n777\ndynamic\n258\n888\ndynamic\n777\n",
         "LlvmEvaluation/ScalarMinMax.sx": "float32 exact\nfloat64 exact\n",

@@ -168,3 +168,113 @@ test "drop rejects return and try" {
     ));
     try std.testing.expectEqualStrings("drop cannot contain 'return' or 'try'", frontend.diagnostic.?.message);
 }
+
+test "nested value receivers keep collection ownership until writeback" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\struct Values {
+        \\ private var items:Item[]
+        \\ init() { self.items = [] }
+        \\ func add(value:Item) { self.items.append(value) }
+        \\ func clear() int { self.items.clear(); print("body"); return 0 }
+        \\ drop { print("values") }
+        \\}
+        \\struct Nested {
+        \\ var values:Values
+        \\ init() { self.values = Values() }
+        \\}
+        \\class Store {
+        \\ private var nested:Nested
+        \\ init() { self.nested = Nested() }
+        \\ func exercise() {
+        \\  self.nested.values.add(Item(1))
+        \\  print(self.nested.values.clear())
+        \\  self.nested.values.add(value:Item(2))
+        \\  print("done")
+        \\ }
+        \\}
+        \\func main() { var store = Store(); store.exercise() }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("values\nvalues\nvalues\nbody\nitem 1\n0\ndone\nvalues\nitem 2\n", output);
+}
+
+test "nested value receiver writes stay invisible through class aliases until return" {
+    const output = try run(
+        \\struct Values {
+        \\ var items:int[]
+        \\ init() { self.items = [1] }
+        \\ func edit(owner:Owner) {
+        \\  self.items.replace(0, 99)
+        \\  owner.observe()
+        \\  self.items.append(7)
+        \\  owner.observe()
+        \\ }
+        \\}
+        \\class Owner {
+        \\ var values:Values
+        \\ init() { self.values = Values() }
+        \\ func observe() { print(self.values.items.count(), " ", self.values.items[0]) }
+        \\ func exercise() { self.values.edit(self); self.observe() }
+        \\}
+        \\func main() { var owner = Owner(); owner.exercise() }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1 1\n1 1\n2 99\n", output);
+}
+
+test "nested value receivers preserve protocol and optional ownership" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\protocol Bag { func add() }
+        \\struct Values : Bag {
+        \\ var items:Item[]
+        \\ init() { self.items = [] }
+        \\ func add() { self.items.append(Item(3)) }
+        \\}
+        \\class Owner {
+        \\ var erased:Bag
+        \\ var maybe:Values?
+        \\ init() { self.erased = Values(); self.maybe = Values() }
+        \\}
+        \\func main() { var owner = Owner(); owner.erased.add(); owner.maybe?.add(); print("done") }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("done\nitem 3\nitem 3\n", output);
+}
+
+test "nested value receivers release a field replaced during reentry" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\struct Values {
+        \\ var items:Item[]
+        \\ init(id:int) { self.items = [Item(id)] }
+        \\ func edit(owner:Owner) {
+        \\  owner.reset()
+        \\  self.items.clear()
+        \\  print("body")
+        \\ }
+        \\}
+        \\class Owner {
+        \\ var values:Values
+        \\ init() { self.values = Values(1) }
+        \\ func reset() { self.values = Values(2) }
+        \\ func exercise() { self.values.edit(self); print("done") }
+        \\}
+        \\func main() { var owner = Owner(); owner.exercise() }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("item 1\nbody\nitem 2\ndone\n", output);
+}

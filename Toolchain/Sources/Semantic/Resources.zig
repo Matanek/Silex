@@ -275,7 +275,13 @@ pub fn emitReadTemporaryDrops(self: anytype, builder: anytype, values: []const M
 /// value `drop` hooks. The value itself remains alive in its new storage; only
 /// the resource roots carried by the temporary are released.
 pub fn releaseTransferredRoot(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
-    return emitDropOwnedInner(self, builder, type_value, value, .root, false);
+    return releaseTransferredValue(self, builder, type_value, value, .root);
+}
+
+/// Releases an internal ownership obligation after the value has moved to
+/// another place. This must not create an additional observable value drop.
+pub fn releaseTransferredValue(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
+    return emitDropOwnedInner(self, builder, type_value, value, ownership, false);
 }
 
 /// Discards the temporary base-class allocation after its retained fields have
