@@ -108,6 +108,10 @@ def compile_source(args):
                 link = [linker, "cc", "-target", "aarch64-macos", "-isysroot", sdk,
                         "-F", sdk/"System/Library/Frameworks", "-L", sdk/"usr/lib",
                         obj, format_runtime, *archives]
+            elif linker.name in {"clang", "cc"}:
+                link = [linker, "-target", "arm64-apple-macosx26.0.0", "-isysroot", sdk,
+                        "-F", sdk/"System/Library/Frameworks", "-L", sdk/"usr/lib",
+                        obj, format_runtime, *archives]
             else:
                 link = [linker, "-arch", "arm64", "-platform_version", "macos", "26.0", "26.5",
                         "-syslibroot", sdk, "-lSystem", obj, format_runtime, *archives]
@@ -145,7 +149,7 @@ def main():
     parser.add_argument("--silex-prefix", default="none")
     parser.add_argument("--llvm-dir", required=True)
     parser.add_argument("--sdk", required=True)
-    parser.add_argument("--linker", default="/usr/bin/ld")
+    parser.add_argument("--linker", default="/usr/bin/clang")
     parser.add_argument("--opt", choices=["O0", "O3"], required=True)
     parser.add_argument("--cpu", default="apple-m3")
     parser.add_argument("--output", required=True)

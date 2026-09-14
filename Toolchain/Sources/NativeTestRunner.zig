@@ -373,7 +373,7 @@ test "link a package boundary provider into a native test" {
     const archive = try std.fs.path.join(allocator, &.{ base, "libProvider.a" });
     const executable = try std.fs.path.join(allocator, &.{ base, "provider-test" });
     for ([_][]const []const u8{
-        &.{ "zig", "cc", "-target", "aarch64-macos", "-c", provider_source, "-o", provider_object },
+        &.{ "zig", "cc", "-target", "aarch64-macos", "-fno-sanitize=all", "-c", provider_source, "-o", provider_object },
         &.{ "zig", "ar", "rcs", archive, provider_object },
     }) |arguments| {
         const result = try std.process.run(allocator, std.testing.io, .{ .argv = arguments });

@@ -16,8 +16,10 @@ is a separate fork so the oracle's coverage and lifetime guards remain unchanged
 Internal Silex calls use LLVM `fastcc`, including aggregate arguments and results.
 The system entry point and `malloc`, `free`, `dprintf`, and `exit` calls are explicit
 system boundaries. No C/C++ source, Clang frontend, JIT, or native Silex function is
-mixed into the executable. `opt` and `llc` produce an object, and the system linker
-produces the executable.
+mixed into the executable. `opt` and `llc` produce an object. On macOS, the Apple
+Clang driver then invokes the system linker and selects Apple's target runtime. This
+avoids letting Zig's monolithic compiler-rt archive interpose system math symbols
+when a package boundary references a platform availability helper.
 
 ## Run the experiment
 
@@ -35,6 +37,7 @@ python3 Silex/Toolchain/Tools/LlvmEvaluation/compile.py \
   --silex-prefix none \
   --llvm-dir Tools/LLVM-21.1.8 \
   --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk \
+  --linker /usr/bin/clang \
   --opt O3 --output Evaluations/SteeringWorkload-O3
 ```
 
@@ -42,7 +45,9 @@ The tool requires macOS ARM64; the current target is macOS 26 with the 26.5 SDK,
 an explicit Shadercross executable and an explicit CPU selection (default
 `apple-m3`). The Shadercross path lets package composition compile HLSL without
 reading a user-global toolchain installation, and its digest participates in the
-cache key. The tool never falls back to the native backend. Unsupported IR is
+cache key. Apple Clang is the default linker driver; an explicit Zig driver remains
+available for linkage attribution, but is not the semantic reference for macOS
+package boundaries. The tool never falls back to the native backend. Unsupported IR is
 rejected before creating LLVM output, and a failed stage does not replace an
 existing executable.
 

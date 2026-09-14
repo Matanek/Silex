@@ -27,11 +27,13 @@ pub fn executable(
     const sdk_path = try sdkPath(allocator, io);
     const framework_path = try std.fs.path.join(allocator, &.{ sdk_path, "System/Library/Frameworks" });
     const library_path = try std.fs.path.join(allocator, &.{ sdk_path, "usr/lib" });
+    const runtime_path = try appleRuntimePath(allocator, io);
     var arguments: std.ArrayList([]const u8) = .empty;
     try arguments.appendSlice(allocator, &.{
-        linker_path,  "cc",        "-g", "-target",      triple,
-        "-isysroot",  sdk_path,    "-F", framework_path, "-L",
-        library_path, object_path, "-o", output_path,
+        linker_path, "cc",           "-nostdlib", "-g",
+        "-target",   triple,         "-isysroot", sdk_path,
+        "-F",        framework_path, "-L",        library_path,
+        object_path, "-o",           output_path,
     });
     for (providers) |provider| if (provider.archive) |archive| try arguments.append(allocator, archive);
     var frameworks: std.ArrayList([]const u8) = .empty;
@@ -66,6 +68,7 @@ pub fn executable(
     std.mem.sort([]const u8, libraries.items, {}, stringLessThan);
     for (libraries.items) |library| try arguments.append(allocator, try std.fmt.allocPrint(allocator, "-l{s}", .{library}));
     if (usesWebKit(functions)) try arguments.append(allocator, "-lobjc");
+    try arguments.appendSlice(allocator, &.{ "-lSystem", runtime_path });
 
     const result = try std.process.run(allocator, io, .{ .argv = arguments.items });
     switch (result.term) {
@@ -100,6 +103,21 @@ fn sdkPath(allocator: Allocator, io: Io) ![]const u8 {
     return error.LinkFailed;
 }
 
+fn appleRuntimePath(allocator: Allocator, io: Io) ![]const u8 {
+    const result = try std.process.run(allocator, io, .{
+        .argv = &.{ "/usr/bin/clang", "--print-runtime-dir" },
+    });
+    switch (result.term) {
+        .exited => |code| if (code == 0) {
+            const directory = std.mem.trim(u8, result.stdout, " \t\r\n");
+            if (directory.len != 0) return std.fs.path.join(allocator, &.{ directory, "libclang_rt.osx.a" });
+        },
+        else => {},
+    }
+    if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
+    return error.LinkFailed;
+}
+
 fn stringLessThan(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.lessThan(u8, left, right);
 }
@@ -115,7 +133,12 @@ test "link and execute a symbol from a static ARM64 archive" {
     defer temporary.cleanup();
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "provider.c",
-        .data = "int boundary_answer(void) { return 42; }\n",
+        .data =
+        \\int boundary_answer(void) {
+        \\    if (__builtin_available(macOS 14.0, *)) return 42;
+        \\    return 42;
+        \\}
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "main.c",
@@ -130,8 +153,8 @@ test "link and execute a symbol from a static ARM64 archive" {
     const output = try std.fs.path.join(allocator, &.{ base, "program" });
 
     for ([_][]const []const u8{
-        &.{ "zig", "cc", "-target", "aarch64-macos", "-c", provider_source, "-o", provider_object },
-        &.{ "zig", "cc", "-target", "aarch64-macos", "-c", main_source, "-o", main_object },
+        &.{ "zig", "cc", "-target", "aarch64-macos", "-fno-sanitize=all", "-c", provider_source, "-o", provider_object },
+        &.{ "zig", "cc", "-target", "aarch64-macos", "-fno-sanitize=all", "-c", main_source, "-o", main_object },
         &.{ "zig", "ar", "rcs", archive, provider_object },
     }) |arguments| {
         const result = try std.process.run(allocator, std.testing.io, .{ .argv = arguments });
@@ -146,6 +169,9 @@ test "link and execute a symbol from a static ARM64 archive" {
     try executable(allocator, std.testing.io, "zig", .macos_arm64, main_object, output, &providers, &.{});
     const executed = try std.process.run(allocator, std.testing.io, .{ .argv = &.{output} });
     try std.testing.expectEqual(@as(u8, 0), exitCode(executed.term));
+    const symbols = try std.process.run(allocator, std.testing.io, .{ .argv = &.{ "nm", output } });
+    try std.testing.expectEqual(@as(u8, 0), exitCode(symbols.term));
+    try std.testing.expect(std.mem.indexOf(u8, symbols.stdout, "_compiler_rt.sin.sinf") == null);
 }
 
 fn exitCode(termination: std.process.Child.Term) u8 {

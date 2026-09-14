@@ -128,11 +128,15 @@ diagnostics but are not the target's native verification gate.
 
 For a referenced package-private provider, the compiler writes a relocatable
 object for the selected target: ARM64 or X64 Mach-O, x64 or AArch64 ELF, or
-x64/ARM64 COFF. It
-then invokes the bootstrap linker with only the resolved package archives,
-declared Apple frameworks, and named system libraries. This path does not
-compile foreign sources and does not define a stable Silex object format or
-ABI.
+x64/ARM64 COFF. On macOS, the managed Zig linker runs without its automatic
+standard libraries; Silex supplies `libSystem` and Apple's granular target
+runtime explicitly. Platform availability helpers are therefore resolved
+without pulling Zig's monolithic compiler-rt math implementations. Other
+systems keep the regular managed Zig bootstrap link. Both paths receive only
+the resolved package archives, declared Apple frameworks, and named system
+libraries. Provider archives are production artifacts and must not retain
+sanitizer-runtime dependencies. These paths do not compile foreign sources and
+do not define a stable Silex object format or ABI.
 
 Package platform adapters may call a raw function-table entry through
 `C.call<func(...) T>`. Semantic analysis records its checked C signature in
