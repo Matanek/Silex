@@ -3,6 +3,17 @@ const TargetModule = @import("Target.zig");
 
 pub const Mode = enum { debug, release };
 
+pub const Backend = enum {
+    native,
+    llvm,
+
+    pub fn parse(value: []const u8) ?Backend {
+        if (std.mem.eql(u8, value, "native")) return .native;
+        if (std.mem.eql(u8, value, "llvm")) return .llvm;
+        return null;
+    }
+};
+
 pub const Diagnostic = struct {
     kind: Kind,
     argument: ?[]const u8 = null,
@@ -17,6 +28,9 @@ pub const Diagnostic = struct {
         missing_target,
         duplicate_target,
         unknown_target,
+        missing_backend,
+        duplicate_backend,
+        unknown_backend,
         missing_workspace,
         duplicate_workspace,
         duplicate_dev,
@@ -33,6 +47,7 @@ pub const RunOptions = struct {
     emit_ir: bool,
     mode: Mode,
     cache: bool,
+    backend: Backend,
 };
 
 pub const InterpretOptions = struct {
@@ -47,6 +62,14 @@ pub const CompileOptions = struct {
     mode: Mode,
     cache: bool,
     target: ?TargetModule.Target,
+    backend: Backend,
+};
+
+pub const TestOptions = struct {
+    source_path: []const u8,
+    emit_ir: bool,
+    cache: bool,
+    backend: Backend,
 };
 
 pub const InstallOptions = struct {
@@ -95,6 +118,11 @@ pub const InterpretResult = union(enum) {
     diagnostic: Diagnostic,
 };
 
+pub const TestResult = union(enum) {
+    options: TestOptions,
+    diagnostic: Diagnostic,
+};
+
 pub const InstallResult = union(enum) {
     options: InstallOptions,
     diagnostic: Diagnostic,
@@ -126,8 +154,12 @@ pub fn parseRun(args: []const []const u8) RunResult {
     var mode: Mode = .release;
     var explicit_mode: ?Mode = null;
     var cache = true;
+    var backend: Backend = .native;
+    var explicit_backend = false;
+    var index: usize = 0;
 
-    for (args) |argument| {
+    while (index < args.len) : (index += 1) {
+        const argument = args[index];
         if (std.mem.eql(u8, argument, "--emit-ir")) {
             emit_ir = true;
         } else if (modeFor(argument)) |selected| {
@@ -138,6 +170,15 @@ pub fn parseRun(args: []const []const u8) RunResult {
             explicit_mode = selected;
         } else if (isNoCacheOption(argument)) {
             cache = false;
+        } else if (std.mem.eql(u8, argument, "--backend")) {
+            if (explicit_backend) return failure(RunResult, .duplicate_backend, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(RunResult, .missing_backend, argument);
+            }
+            backend = Backend.parse(args[index]) orelse
+                return failure(RunResult, .unknown_backend, args[index]);
+            explicit_backend = true;
         } else if (isOutputOption(argument)) {
             return failure(RunResult, .option_unavailable, argument);
         } else if (std.mem.startsWith(u8, argument, "-")) {
@@ -154,6 +195,7 @@ pub fn parseRun(args: []const []const u8) RunResult {
         .emit_ir = emit_ir,
         .mode = mode,
         .cache = cache,
+        .backend = backend,
     } };
 }
 
@@ -167,7 +209,7 @@ pub fn parseInterpret(args: []const []const u8) InterpretResult {
             emit_ir = true;
         } else if (isNoCacheOption(argument)) {
             cache = false;
-        } else if (isNativeOption(argument)) {
+        } else if (isNativeOption(argument) or std.mem.eql(u8, argument, "--backend")) {
             return failure(InterpretResult, .option_unavailable, argument);
         } else if (std.mem.startsWith(u8, argument, "-")) {
             return failure(InterpretResult, .unknown_option, argument);
@@ -185,6 +227,48 @@ pub fn parseInterpret(args: []const []const u8) InterpretResult {
     } };
 }
 
+pub fn parseTest(args: []const []const u8) TestResult {
+    var source_path: ?[]const u8 = null;
+    var emit_ir = false;
+    var cache = true;
+    var backend: Backend = .native;
+    var explicit_backend = false;
+    var index: usize = 0;
+
+    while (index < args.len) : (index += 1) {
+        const argument = args[index];
+        if (std.mem.eql(u8, argument, "--emit-ir")) {
+            emit_ir = true;
+        } else if (isNoCacheOption(argument)) {
+            cache = false;
+        } else if (std.mem.eql(u8, argument, "--backend")) {
+            if (explicit_backend) return failure(TestResult, .duplicate_backend, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(TestResult, .missing_backend, argument);
+            }
+            backend = Backend.parse(args[index]) orelse
+                return failure(TestResult, .unknown_backend, args[index]);
+            explicit_backend = true;
+        } else if (isNativeOption(argument)) {
+            return failure(TestResult, .option_unavailable, argument);
+        } else if (std.mem.startsWith(u8, argument, "-")) {
+            return failure(TestResult, .unknown_option, argument);
+        } else if (source_path != null) {
+            return failure(TestResult, .multiple_sources, argument);
+        } else {
+            source_path = argument;
+        }
+    }
+
+    return .{ .options = .{
+        .source_path = source_path orelse return failure(TestResult, .missing_source, null),
+        .emit_ir = emit_ir,
+        .cache = cache,
+        .backend = backend,
+    } };
+}
+
 pub fn parseCompile(args: []const []const u8) CompileResult {
     var source_path: ?[]const u8 = null;
     var output_path: ?[]const u8 = null;
@@ -192,6 +276,8 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
     var explicit_mode: ?Mode = null;
     var cache = true;
     var target: ?TargetModule.Target = null;
+    var backend: Backend = .native;
+    var explicit_backend = false;
     var index: usize = 0;
 
     while (index < args.len) : (index += 1) {
@@ -217,6 +303,15 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
             }
             target = TargetModule.Target.parse(args[index]) catch
                 return failure(CompileResult, .unknown_target, args[index]);
+        } else if (std.mem.eql(u8, argument, "--backend")) {
+            if (explicit_backend) return failure(CompileResult, .duplicate_backend, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(CompileResult, .missing_backend, argument);
+            }
+            backend = Backend.parse(args[index]) orelse
+                return failure(CompileResult, .unknown_backend, args[index]);
+            explicit_backend = true;
         } else if (std.mem.startsWith(u8, argument, "-")) {
             return failure(CompileResult, .unknown_option, argument);
         } else if (source_path != null) {
@@ -232,6 +327,7 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
         .mode = mode,
         .cache = cache,
         .target = target,
+        .backend = backend,
     } };
 }
 
@@ -520,6 +616,28 @@ test "run accepts native modes and emit ir but owns its output" {
     try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--debug", "--release" }), .conflicting_modes, "--release");
 }
 
+test "compile run and test select a backend explicitly and default to native" {
+    try std.testing.expectEqual(Backend.native, parseCompile(&.{ "Main.sx", "-o", "App" }).options.backend);
+    try std.testing.expectEqual(Backend.llvm, parseCompile(&.{ "--backend", "llvm", "Main.sx", "-o", "App" }).options.backend);
+    try std.testing.expectEqual(Backend.native, parseRun(&.{"Main.sx"}).options.backend);
+    try std.testing.expectEqual(Backend.llvm, parseRun(&.{ "Main.sx", "--backend", "llvm" }).options.backend);
+    try std.testing.expectEqual(Backend.native, parseTest(&.{"Tests"}).options.backend);
+    try std.testing.expectEqual(Backend.llvm, parseTest(&.{ "--backend", "llvm", "Tests" }).options.backend);
+}
+
+test "backend selection diagnoses missing unknown and duplicate values" {
+    try expectDiagnostic(parseCompile(&.{ "Main.sx", "-o", "App", "--backend" }), .missing_backend, "--backend");
+    try expectDiagnostic(parseCompile(&.{ "Main.sx", "-o", "App", "--backend", "other" }), .unknown_backend, "other");
+    try expectDiagnostic(
+        parseCompile(&.{ "Main.sx", "-o", "App", "--backend", "native", "--backend", "native" }),
+        .duplicate_backend,
+        "--backend",
+    );
+    try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--backend" }), .missing_backend, "--backend");
+    try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--backend", "other" }), .unknown_backend, "other");
+    try expectTestDiagnostic(parseTest(&.{ "Tests", "--backend", "llvm", "--backend", "native" }), .duplicate_backend, "--backend");
+}
+
 test "run interpret and compile accept nocache aliases but reject grouped short forms" {
     try std.testing.expect(!parseRun(&.{ "Main.sx", "-n" }).options.cache);
     try std.testing.expect(!parseRun(&.{ "--nocache", "Main.sx" }).options.cache);
@@ -534,6 +652,7 @@ test "interpret retains the explicit reference execution surface" {
     try std.testing.expectEqualStrings("Main.sx", options.source_path);
     try expectInterpretDiagnostic(parseInterpret(&.{ "Main.sx", "--release" }), .option_unavailable, "--release");
     try expectInterpretDiagnostic(parseInterpret(&.{ "Main.sx", "--output", "Application" }), .option_unavailable, "--output");
+    try expectInterpretDiagnostic(parseInterpret(&.{ "Main.sx", "--backend", "llvm" }), .option_unavailable, "--backend");
 }
 
 fn expectDiagnostic(result: CompileResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
@@ -549,6 +668,12 @@ fn expectRunDiagnostic(result: RunResult, kind: Diagnostic.Kind, argument: ?[]co
 }
 
 fn expectInterpretDiagnostic(result: InterpretResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectTestDiagnostic(result: TestResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
     const diagnostic = result.diagnostic;
     try std.testing.expectEqual(kind, diagnostic.kind);
     if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);

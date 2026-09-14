@@ -85,6 +85,9 @@ Choose the subsystem that matches the question you are investigating:
   package graphs, namespace ownership, visibility, suites, and catalogs.
 - [Composition and runtime effects](Composition-and-runtime.md): closed-program
   assembly, interpreter comparisons, strings, output, entry points, and tests.
+- [Boundary between portable IR and compilation backends](Backend-boundary.md):
+  shared type, effect, aliasing, ownership, and numeric guarantees versus the
+  layouts, runtimes, and machine choices owned by `native` and `llvm`.
 - [Native code generation](Native-code-generation.md): target status, object
   formats, internal calling conventions, package boundaries, and system ABIs.
 - [Command-line compilation](Command-line-compilation.md): `run`, `interpret`,

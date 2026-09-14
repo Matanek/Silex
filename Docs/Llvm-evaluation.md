@@ -1,10 +1,17 @@
 # Experimental LLVM evaluation
 
+`silex compile|run|test --backend llvm` is now the integrated candidate path.
+It reuses the compiler's portable IR directly and never calls the Python driver
+described below. The current candidate is still bounded to macOS ARM64 and is
+not the delivered default; distribution and default promotion require their
+separate qualification.
+
 The `llvm-evaluation` Zig build step installs a separate development executable,
 `silex-llvm-evaluation`, and its exact scalar-formatting object,
-`lib/silex-llvm-format.o`, into the explicitly chosen prefix. The ordinary `silex`
-command and default installation do not select or depend on either artifact. This is a
-bounded macOS ARM64 experiment, not a distributed backend or a migration decision.
+`lib/silex-llvm-format.o`, into the explicitly chosen prefix. These remain the
+reproducible evaluation harness for historical measurements and reports. The
+driver is not part of the public CLI, and the integrated command does not invoke
+either development artifact.
 
 The adapter uses `Project.Compiler` for package resolution and typed composition,
 then `ProgramScope.executable` and the IR verifier. It does not run the Silex

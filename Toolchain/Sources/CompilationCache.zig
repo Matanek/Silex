@@ -18,6 +18,7 @@ const generated_cache_roots = [_][]const u8{
     ".silex/artifacts/v1",
     ".silex/run",
     ".silex/test",
+    ".silex/llvm",
 };
 
 // Part03 measured a 269 MiB peak for the representative GFX working set.
@@ -189,6 +190,9 @@ fn maintainRootAfterMutation(
     const shader_root = std.fs.path.join(allocator, &.{ root, "cache/shaders" }) catch return;
     defer allocator.free(shader_root);
     collectTrees(allocator, io, shader_root, &retained, &total, &current, session_started_at);
+    const llvm_root = std.fs.path.join(allocator, &.{ root, "llvm" }) catch return;
+    defer allocator.free(llvm_root);
+    collectTrees(allocator, io, llvm_root, &retained, &total, &current, session_started_at);
 
     const retained_limit = @max(history_reserve, current);
     if (total <= retained_limit) return;
@@ -262,7 +266,7 @@ fn clearGeneratedCache(io: Io) void {
 }
 
 fn clearGeneratedCacheAt(allocator: Allocator, io: Io, root: []const u8) void {
-    const relative_roots = [_][]const u8{ "cache/v4", "cache/shaders", "artifacts/v1", "run", "test" };
+    const relative_roots = [_][]const u8{ "cache/v4", "cache/shaders", "artifacts/v1", "run", "test", "llvm" };
     for (relative_roots) |relative| {
         const path = std.fs.path.join(allocator, &.{ root, relative }) catch continue;
         defer allocator.free(path);
@@ -387,7 +391,7 @@ pub fn key(
     hasher.update(variant);
     for (paths) |path| {
         hasher.update(path);
-        // Native cache keys also cover boundary archives. SDL3 alone is larger
+        // Backend cache keys also cover boundary archives. SDL3 alone is larger
         // than a regular source file, so the key must accept package artifacts
         // without silently disabling the linked-executable cache.
         const source = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(512 * 1024 * 1024));
@@ -401,6 +405,17 @@ pub fn key(
 }
 
 pub fn nativeKey(
+    allocator: Allocator,
+    io: Io,
+    files: []const []const u8,
+    providers: []const Packages.BoundaryProvider,
+    command: []const u8,
+    variant: []const u8,
+) ![Blake3.digest_length]u8 {
+    return backendKey(allocator, io, files, providers, command, variant);
+}
+
+pub fn backendKey(
     allocator: Allocator,
     io: Io,
     files: []const []const u8,

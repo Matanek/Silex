@@ -1,5 +1,5 @@
 const std = @import("std");
-const Silex = @import("silex_optimizer_api");
+const Silex = @import("root").silex_compiler_api;
 
 // A modeled opcode can still reject unsupported types, operators or effects.
 // Plain-value collection retains/drops model value semantics, not runtime cost.

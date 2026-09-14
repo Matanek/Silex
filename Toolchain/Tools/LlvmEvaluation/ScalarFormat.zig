@@ -1,4 +1,4 @@
-const Ir = @import("silex_optimizer_api").Ir;
+const Ir = @import("root").silex_compiler_api.Ir;
 
 // Use the native scalar formatter for identical text in interpolation and print.
 // Leaves %tN.format.output and %tN.format.length without a heap allocation.

@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     build_options.addOption([]const u8, "version", package_version);
 
     const module = b.createModule(.{
-        .root_source_file = b.path("Sources/Main.zig"),
+        .root_source_file = b.path("Root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -331,11 +331,11 @@ pub fn build(b: *std.Build) void {
     optimizer_api_module.addOptions("build_options", build_options);
     optimizer_oracle_module.addImport("silex_optimizer_api", optimizer_api_module);
     const llvm_evaluation_module = b.createModule(.{
-        .root_source_file = b.path("Tools/LlvmEvaluationMain.zig"),
+        .root_source_file = b.path("LlvmEvaluationRoot.zig"),
         .target = target,
         .optimize = optimize,
     });
-    llvm_evaluation_module.addImport("silex_optimizer_api", optimizer_api_module);
+    llvm_evaluation_module.addOptions("build_options", build_options);
     const llvm_evaluation = b.addExecutable(.{
         .name = "silex-llvm-evaluation",
         .root_module = llvm_evaluation_module,
@@ -362,6 +362,13 @@ pub fn build(b: *std.Build) void {
         .lib,
         "silex-llvm-format.o",
     );
+    const llvm_format_runtime_files = b.addWriteFiles();
+    _ = llvm_format_runtime_files.addCopyFile(llvm_format_runtime.getEmittedBin(), "silex-llvm-format.o");
+    const llvm_format_runtime_import = llvm_format_runtime_files.add(
+        "LlvmFormatRuntimeObject.zig",
+        "pub const object_bytes = @embedFile(\"silex-llvm-format.o\");\n",
+    );
+    module.addAnonymousImport("llvm_format_runtime_object", .{ .root_source_file = llvm_format_runtime_import });
     const llvm_evaluation_step = b.step("llvm-evaluation", "Build the explicitly selected experimental LLVM evaluation adapter");
     llvm_evaluation_step.dependOn(&llvm_evaluation_install.step);
     llvm_evaluation_step.dependOn(&llvm_format_runtime_install.step);

@@ -203,7 +203,7 @@ pub fn installPhaseName(phase: InstallPhase) []const u8 {
 fn phaseDetail(phase: Phase) []const u8 {
     return switch (phase) {
         .cache => "reusing compiled executable",
-        .emit => "native executable",
+        .emit => "executable",
         .link => "platform libraries",
         .write => "executable",
         else => "",

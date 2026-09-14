@@ -1,6 +1,6 @@
 // Experimental backend forked from the audited optimizer emitter; oracle guards stay unchanged.
 const std = @import("std");
-const Silex = @import("silex_optimizer_api");
+const Silex = @import("root").silex_compiler_api;
 const Coverage = @import("../OptimizerOracle/LlvmCoverage.zig");
 const IrStats = @import("../OptimizerOracle/IrStats.zig");
 
@@ -22,6 +22,16 @@ pub fn emitWithBoundaries(
     program: Ir.Program,
     boundaries: []const Silex.Boundary.Function,
 ) Error![]u8 {
+    return emitEntryWithBoundaries(allocator, program, boundaries, null);
+}
+
+pub fn emitEntryWithBoundaries(
+    allocator: Allocator,
+    program: Ir.Program,
+    boundaries: []const Silex.Boundary.Function,
+    entry_function: ?Ir.FunctionId,
+) Error![]u8 {
+    if (entry_function) |entry| if (entry >= program.functions.len) return error.InvalidProgram;
     const reachable = try IrStats.reachableFunctions(allocator, program);
     defer allocator.free(reachable);
     const boundary_use = try inspectBoundaryUse(allocator, program, boundaries, reachable);
@@ -140,12 +150,12 @@ pub fn emitWithBoundaries(
         boundary_use.direct_sites_by_function,
     );
     try emitGlobalDeclarations(&output, allocator, program, global_use);
-    var main_function: ?usize = null;
+    var main_function = entry_function;
     const lowered_functions = try allocator.alloc(?Ir.Function, program.functions.len);
     defer allocator.free(lowered_functions);
     @memset(lowered_functions, null);
     for (program.functions, 0..) |function, function_id| {
-        if (std.mem.eql(u8, function.name, "main")) {
+        if (entry_function == null and std.mem.eql(u8, function.name, "main")) {
             if (main_function != null) return error.InvalidProgram;
             main_function = function_id;
         }
@@ -3947,6 +3957,30 @@ test "static namespaces require no material LLVM layout" {
     const llvm = try emit(std.testing.allocator, program);
     defer std.testing.allocator.free(llvm);
     try std.testing.expect(std.mem.indexOf(u8, llvm, "%sx.type.0 = type") == null);
+}
+
+test "an explicit test entry becomes the system main without renaming portable IR" {
+    const program: Ir.Program = .{
+        .functions = &.{
+            .{
+                .name = "helper",
+                .parameter_types = &.{},
+                .return_type = .void,
+                .value_types = &.{},
+                .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+            },
+            .{
+                .name = "selected test",
+                .parameter_types = &.{},
+                .return_type = .void,
+                .value_types = &.{},
+                .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+            },
+        },
+    };
+    const llvm = try emitEntryWithBoundaries(std.testing.allocator, program, &.{}, 1);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "call fastcc void @sx_1(ptr null)") != null);
 }
 
 test "protocol storage sizes payload-free enum fields" {

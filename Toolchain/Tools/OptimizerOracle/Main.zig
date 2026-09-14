@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Silex = @import("silex_optimizer_api");
+pub const silex_compiler_api = @import("silex_optimizer_api");
+const Silex = silex_compiler_api;
 const Admission = @import("Admission.zig");
 const Advisor = @import("Advisor.zig");
 const Benchmark = @import("Benchmark.zig");
@@ -61,7 +62,7 @@ const usage =
     \\  parity-audit        Refuse open coverage or LLVM-transposition gaps
     \\  parity-gate         Run the blocking closure and statistically qualified comparison
     \\
-    \\LLVM is a development oracle only. The Silex compiler never consumes its output.
+    \\This command's LLVM path remains a development oracle; the explicit compiler backend is separate.
     \\
 ;
 

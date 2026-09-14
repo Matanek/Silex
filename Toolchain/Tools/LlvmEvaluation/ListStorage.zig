@@ -1,4 +1,4 @@
-const Ir = @import("silex_optimizer_api").Ir;
+const Ir = @import("root").silex_compiler_api.Ir;
 
 // Preserve the owner's value semantics before lending mutable element storage.
 // Both a single-element reference and a collection view use this same COW path.

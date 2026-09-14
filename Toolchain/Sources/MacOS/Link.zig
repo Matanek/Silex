@@ -18,6 +18,28 @@ pub fn executable(
     providers: []const Packages.BoundaryProvider,
     functions: []const Machine.ExternalFunction,
 ) !void {
+    return executableObjects(
+        allocator,
+        io,
+        linker_path,
+        target,
+        &.{object_path},
+        output_path,
+        providers,
+        functions,
+    );
+}
+
+pub fn executableObjects(
+    allocator: Allocator,
+    io: Io,
+    linker_path: []const u8,
+    target: TargetModule.Target,
+    object_paths: []const []const u8,
+    output_path: []const u8,
+    providers: []const Packages.BoundaryProvider,
+    functions: []const Machine.ExternalFunction,
+) !void {
     const triple = if (target.eql(.macos_arm64))
         "aarch64-macos"
     else if (target.eql(.macos_x64))
@@ -33,8 +55,9 @@ pub fn executable(
         linker_path, "cc",           "-nostdlib", "-g",
         "-target",   triple,         "-isysroot", sdk_path,
         "-F",        framework_path, "-L",        library_path,
-        object_path, "-o",           output_path,
+        "-o",        output_path,
     });
+    try arguments.appendSlice(allocator, object_paths);
     for (providers) |provider| if (provider.archive) |archive| try arguments.append(allocator, archive);
     var frameworks: std.ArrayList([]const u8) = .empty;
     for (providers) |provider| for (provider.frameworks) |framework| {

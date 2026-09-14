@@ -1,5 +1,5 @@
 const std = @import("std");
-const Silex = @import("silex_optimizer_api");
+const Silex = @import("root").silex_compiler_api;
 const Emitter = @import("LlvmEvaluation/Emitter.zig");
 
 pub fn main(init: std.process.Init) u8 {

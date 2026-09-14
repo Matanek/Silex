@@ -5,7 +5,7 @@ changing Silex semantics.
 
 ## Run, interpret, and compile
 
-The command `silex run [source.sx|directory]
+The command `silex run [source.sx|directory] [--backend native|llvm]
 [-d|--debug|-r|--release] [-n|--nocache]` expresses the intent to execute on
 the host. An explicit source remains authoritative. A directory selects its
 only direct `.sx` source that declares a root `main`; omitting the operand uses
@@ -19,11 +19,12 @@ explicit-entry contract, including artifact identity, diagnostics, asset
 provenance and the source directory used as the child process's working
 directory.
 
-`run` emits a private native executable under `.silex/run/`, inherits the
+`run` emits a private executable under `.silex/run/`, inherits the
 terminal streams, waits for the program and returns its exit code. Release is
-the default and applies semantics-preserving optimization; `--debug` disables
-those optimizations for backend diagnosis without weakening language safety in
-Release. When the child terminates through a signal, the CLI reports its
+the default and applies shared semantics-preserving optimization before backend
+lowering; `--debug` disables those optimizations for backend diagnosis without
+weakening language safety in Release. When a native child terminates through a
+signal, the CLI reports its
 symbolic name and meaning, source, mode, retained executable, no-cache Debug
 reproduction and host debugger command. It identifies native fault owners as
 generated code, embedded runtime or package boundary candidates without
@@ -35,9 +36,24 @@ image.
 
 `silex interpret <source.sx> [-n|--nocache] [--emit-ir]` explicitly selects
 the reference interpreter. It is intended for semantic validation and cannot
-execute most platform boundaries. `silex compile <source.sx>
-[--target <target>] [-d|--debug|-r|--release] [-n|--nocache]
+execute most platform boundaries. It rejects `--backend` because interpretation
+is not a compilation backend. `silex compile <source.sx>
+[--backend native|llvm] [--target <target>] [-d|--debug|-r|--release] [-n|--nocache]
 -o|--output <executable>` emits at a caller-selected path without running it.
+
+`silex test <source.sx|directory> [--backend native|llvm]` compiles each test
+entry with the selected backend. The omitted backend remains `native` while the
+LLVM delivery is being qualified. An explicit selection never falls back to
+the other backend: unsupported targets, missing tools, or unsupported IR fail
+with the selected backend named in the diagnostic.
+
+The integrated LLVM candidate is currently bounded to a `macos-arm64` host and
+requires LLVM 21.1.8. During stabilization, `SILEX_LLVM_DIR` names the explicit
+LLVM installation containing `bin/opt` and `bin/llc`; the CLI verifies the
+reported LLVM version and host CPU before compilation. This provisional tool
+location is internal to the candidate. Reproducible setup and the eventual
+default switch belong to delivery qualification. Building `silex` and using
+`--backend native` do not load or execute LLVM.
 
 ## Keep one bounded cache per execution context
 
@@ -55,6 +71,10 @@ working-set size. A later smaller session recovers the old peak rather than
 retaining it as a permanent floor.
 
 Cache entries belong to one compiler identity and private format generation.
+Executable identities also include the selected backend, compiler version,
+target, mode, and backend tool configuration. Native and LLVM outputs therefore
+cannot satisfy one another's cache lookups. The `run` filename exposes the
+backend identity for inspection.
 Changing either clears the previous generated generation. Writes are atomic,
 and a missing, truncated, corrupt, or unknown entry becomes a miss. A storage
 failure may prevent publication but does not invalidate a successful
@@ -72,7 +92,7 @@ package ABI or a public precompiled-interface format.
 
 ## Report interactive progress
 
-In an interactive terminal, native compilation reports intention-level
+In an interactive terminal, compilation reports intention-level
 progress through analysis, target preparation, executable construction,
 platform linkage, output publication, and launch. The progress channel is
 disabled when standard error is not a terminal, preserving quiet successful
@@ -83,10 +103,10 @@ progress when the operation completes but retains it when compilation fails.
 
 Compiler benchmarks can set the private `SILEX_COMPILATION_TRACE` environment
 variable to an output JSON path. `run` and `compile` then write one structured
-report for their native compilation stage. Normal invocations do not allocate a
+report for their compilation stage. Normal invocations do not allocate a
 trace payload, create a report, or print timing data.
 
-The report identifies the command, source, target, mode, compiler version,
+The report identifies the command, selected backend, source, target, mode, compiler version,
 selected compiler worker count, cache result, success state, total elapsed
 time, phase durations, and structural metrics. Native compilation selects one
 worker below 256 reachable functions. Larger programs use up to four workers,
@@ -101,11 +121,12 @@ Frontend subphases cover package resolution, module discovery and loading,
 composition, specialization, interface construction, and semantic analysis.
 Semantic measurements further separate materialization, preparation,
 validation, source functions, generated constructors and methods, resource
-helpers, and finalization. Native phases cover cache validation, program
-closure, optimization, lowering, register allocation, emission, linking,
-output, and cache publication. The structural metrics report both the complete
-portable function count and the reachable portable function count presented to
-every native backend. Cache metrics separately report entry hits, misses,
+helpers, and finalization. Backend phases cover cache validation, program
+closure, shared optimization, backend lowering, emission, linking, output, and
+cache publication; native register allocation remains separately measured. The
+structural metrics report both the complete portable function count and the
+reachable portable function count presented to the selected backend. Cache
+metrics separately report entry hits, misses,
 relocation failures, bytes read, and bytes written so a fast result can be
 distinguished from an expensive cache representation.
 

@@ -81,6 +81,7 @@ pub const Metrics = struct {
 
 pub const Metadata = struct {
     command: Command,
+    backend: []const u8,
     source_path: []const u8,
     target: []const u8,
     mode: []const u8,
@@ -95,8 +96,9 @@ const PhaseSample = struct {
 };
 
 const Report = struct {
-    schema_version: u8 = 1,
+    schema_version: u8 = 2,
     command: Command,
+    backend: []const u8,
     source_path: []const u8,
     target: []const u8,
     mode: []const u8,
@@ -217,6 +219,7 @@ pub const Reporter = struct {
         const elapsed = self.started.durationTo(Io.Clock.awake.now(self.io)).toNanoseconds();
         return std.json.Stringify.valueAlloc(allocator, Report{
             .command = self.metadata.command,
+            .backend = self.metadata.backend,
             .source_path = self.metadata.source_path,
             .target = self.metadata.target,
             .mode = self.metadata.mode,
@@ -249,6 +252,7 @@ pub const Span = struct {
 
 const test_metadata: Metadata = .{
     .command = .compile,
+    .backend = "native",
     .source_path = "Example.sx",
     .target = "macos-arm64",
     .mode = "release",
@@ -275,7 +279,8 @@ test "compilation trace encodes stable structured phases and metrics" {
     reporter.succeeded();
     const payload = try reporter.payload(std.testing.allocator);
     defer std.testing.allocator.free(payload);
-    try std.testing.expect(std.mem.indexOf(u8, payload, "\"schema_version\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"schema_version\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, payload, "\"backend\": \"native\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"worker_count\": 4") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"name\": \"frontend_total\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, payload, "\"nanoseconds\": 42") != null);

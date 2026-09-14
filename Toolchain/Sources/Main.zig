@@ -13,6 +13,7 @@ const Arm64Object = @import("Arm64/Object.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
 const Lsp = @import("Lsp/Server.zig");
+const LlvmBackend = @import("LlvmBackend.zig");
 const MachO = @import("MacOS/MachO.zig");
 const MachOObject = @import("MacOS/Object.zig");
 const MachOX64 = @import("MacOS/X64.zig");
@@ -27,6 +28,7 @@ const WindowsImports = @import("Windows/Imports.zig");
 const NativeLink = @import("NativeLink.zig");
 const NativeTermination = @import("NativeTermination.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
+const ReleaseVerifier = @import("Optimize/Verifier.zig");
 const Project = @import("Project.zig");
 const ProjectPaths = @import("Project/Paths.zig");
 const RunEntryDiscovery = @import("RunEntryDiscovery.zig");
@@ -46,10 +48,10 @@ const SelfUpdate = @import("SelfUpdate.zig");
 const Io = std.Io;
 
 const usage =
-    \\Usage: silex run [source.sx|directory] [-d|--debug|-r|--release] [-n|--nocache] [--emit-ir]
+    \\Usage: silex run [source.sx|directory] [--backend <native|llvm>] [-d|--debug|-r|--release] [-n|--nocache] [--emit-ir]
     \\       silex interpret <source.sx> [-n|--nocache] [--emit-ir]
-    \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
-    \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
+    \\       silex test <source.sx|directory> [--backend <native|llvm>] [-n|--nocache] [--emit-ir]
+    \\       silex compile <source.sx> [--backend <native|llvm>] [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
     \\       silex install <package|package-directory> [--suite] [--dev] [--target <target>]
     \\       silex check <package-directory>
     \\       silex register <package-directory>
@@ -63,7 +65,7 @@ const usage =
     \\       silex version
     \\       silex lsp
     \\
-    \\Builds and runs native Silex programs, validates and registers packages, executes
+    \\Builds and runs Silex programs with an explicit native or LLVM backend, validates and registers packages, executes
     \\portable IR through the reference interpreter, or serves editor requests.
     \\
 ;
@@ -87,6 +89,7 @@ test {
     _ = PackageRegistration;
     _ = GitHubRegistration;
     _ = SelfUpdate;
+    _ = LlvmBackend;
 }
 
 pub fn main(init: std.process.Init) u8 {
@@ -107,7 +110,7 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "run")) return runSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "interpret")) return interpretSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
-    if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "compile")) return compileSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "check")) return checkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "register")) return registerPackage(init, allocator, args[2..]);
@@ -731,17 +734,18 @@ fn listResolvedPackages(
 }
 
 fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    const options = switch (Cli.parseInterpret(args)) {
+    const options = switch (Cli.parseTest(args)) {
         .options => |options| options,
         .diagnostic => |diagnostic| {
             printCliDiagnostic("test", diagnostic);
             return 1;
         },
     };
+    if (options.backend == .llvm) return testSourceLlvm(init, allocator, options);
     if (options.cache) {
         CompilationCache.maintain(allocator, init.io);
-        defer CompilationCache.maintainAfterMutation(allocator, init.io);
     }
+    defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
     const target = TargetModule.Target.host() orelse {
         std.debug.print("silex: 'test' requires a recognized host target\n", .{});
         return 1;
@@ -931,6 +935,189 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
     return if (failed == 0 and source_errors == 0) 0 else 1;
 }
 
+fn testSourceLlvm(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    options: Cli.TestOptions,
+) !u8 {
+    const target = TargetModule.Target.host() orelse {
+        std.debug.print("silex: 'test --backend llvm' requires a recognized host target\n", .{});
+        return 1;
+    };
+    if (!target.eql(.macos_arm64)) {
+        std.debug.print(
+            "silex: LLVM backend {s} tests are currently available only on macos-arm64\n",
+            .{LlvmBackend.version},
+        );
+        return 1;
+    }
+    const tools = try LlvmBackend.resolveTools(init, allocator) orelse return 1;
+    if (options.cache) {
+        CompilationCache.maintain(allocator, init.io);
+    }
+    defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
+    const input_stat = Io.Dir.cwd().statFile(init.io, options.source_path, .{}) catch |err| {
+        std.debug.print("silex: cannot inspect test path '{s}': {t}\n", .{ options.source_path, err });
+        return 1;
+    };
+    const directory_input = input_stat.kind == .directory;
+    const sources = TestDiscovery.sources(allocator, init.io, options.source_path, target) catch |err| switch (err) {
+        error.InvalidTestPath => {
+            std.debug.print("silex: test path must be a .sx source file or a directory\n", .{});
+            return 1;
+        },
+        else => return err,
+    };
+    const packages_root = try globalPackagesRoot(allocator, init.environ_map);
+    const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
+    var passed: usize = 0;
+    var failed: usize = 0;
+    var source_errors: usize = 0;
+    for (sources) |source_path| {
+        var source_arena = std.heap.ArenaAllocator.init(init.gpa);
+        defer source_arena.deinit();
+        const source_allocator = source_arena.allocator();
+        var compiler = Project.Compiler.initWithPackagesAndCache(source_allocator, init.io, packages_root, options.cache);
+        configureUserPackageDiscovery(&compiler, init.environ_map);
+        compiler.target = target;
+        try configureShaderCompiler(&compiler, source_allocator, init.environ_map);
+        const compilation = compiler.compileTests(source_path) catch |err| switch (err) {
+            error.InvalidSource => {
+                printSourceDiagnostic(compiler, source_path);
+                source_errors += 1;
+                continue;
+            },
+            else => {
+                std.debug.print("silex: cannot compile tests in '{s}': {t}\n", .{ source_path, err });
+                source_errors += 1;
+                continue;
+            },
+        };
+        if (options.emit_ir) {
+            try Io.File.stdout().writeStreamingAll(init.io, try Ir.writeText(source_allocator, compilation.ir));
+        }
+        const boundary_providers = try requiredBoundaryProviders(
+            source_allocator,
+            compilation.boundaries,
+            compilation.packages,
+        );
+        const display_path = if (directory_input) relativeTestPath(options.source_path, source_path) else source_path;
+        for (compilation.tests) |case| {
+            const case_name = case.name orelse try std.fmt.allocPrint(source_allocator, "test at line {d}", .{case.position.line});
+            const label = if (directory_input)
+                try std.fmt.allocPrint(source_allocator, "{s} :: {s}", .{ display_path, case_name })
+            else
+                case_name;
+            const scope = ProgramScope.close(source_allocator, compilation.ir, &.{case.function}) catch |err| {
+                failed += 1;
+                std.debug.print("silex: LLVM test backend cannot close '{s}': {t}\n", .{ label, err });
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                continue;
+            };
+            const entry = scope.function(case.function) orelse {
+                failed += 1;
+                std.debug.print("silex: LLVM test entry '{s}' was not retained\n", .{label});
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                continue;
+            };
+            ReleaseVerifier.verify(source_allocator, scope.program) catch |err| {
+                failed += 1;
+                std.debug.print("silex: LLVM test backend rejected '{s}': {t}\n", .{ label, err });
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                continue;
+            };
+            const function_text = try std.fmt.allocPrint(source_allocator, "{d}", .{case.function});
+            const variant = try std.fmt.allocPrint(
+                source_allocator,
+                "llvm:{s}:{s}:{s}:{s}:{s}:{s}:debug:{s}:{s}",
+                .{ build_options.version, LlvmBackend.version, tools.opt, tools.llc, tools.cpu, target.name(), source_path, function_text },
+            );
+            const digest = if (options.cache)
+                CompilationCache.backendKey(
+                    source_allocator,
+                    init.io,
+                    compilation.cache_files,
+                    boundary_providers,
+                    "llvm-test-v1",
+                    variant,
+                ) catch CompilationCache.artifactKey("llvm-test", &.{ variant, label })
+            else
+                CompilationCache.artifactKey("llvm-test", &.{ variant, label });
+            const executable = try llvmTestArtifactPath(source_allocator, source_path, target, digest);
+            if (!fileExists(init.io, executable)) {
+                const built = try LlvmBackend.buildExecutable(
+                    init,
+                    source_allocator,
+                    .{
+                        .tools = tools,
+                        .target = target,
+                        .linker_path = linker_path,
+                        .program = scope.program,
+                        .boundaries = compilation.boundaries,
+                        .providers = boundary_providers,
+                        .mode = .debug,
+                        .output_path = executable,
+                        .entry_function = entry,
+                    },
+                );
+                if (!built) {
+                    failed += 1;
+                    try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                    continue;
+                }
+            }
+            const result = std.process.run(source_allocator, init.io, .{ .argv = &.{executable} }) catch |err| {
+                failed += 1;
+                std.debug.print("silex: cannot execute LLVM test '{s}': {t}\n", .{ label, err });
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                continue;
+            };
+            try Io.File.stdout().writeStreamingAll(init.io, result.stdout);
+            try Io.File.stderr().writeStreamingAll(init.io, result.stderr);
+            const succeeded = exitCode(result.term) == 0;
+            if (!succeeded) std.debug.print("silex: LLVM test '{s}' terminated abnormally\n", .{label});
+            if (!options.cache and succeeded) Io.Dir.cwd().deleteFile(init.io, executable) catch {};
+            const status = if (succeeded) status: {
+                passed += 1;
+                break :status "ok";
+            } else status: {
+                failed += 1;
+                break :status "FAILED";
+            };
+            try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "{s} - {s}\n", .{ status, label }));
+        }
+    }
+    const summary = if (directory_input)
+        try std.fmt.allocPrint(allocator, "{d} passed; {d} failed in {d} files", .{ passed, failed, sources.len })
+    else
+        try std.fmt.allocPrint(allocator, "{d} passed; {d} failed", .{ passed, failed });
+    const line = if (source_errors == 0)
+        try std.fmt.allocPrint(allocator, "{s}\n", .{summary})
+    else
+        try std.fmt.allocPrint(allocator, "{s}; {d} source errors\n", .{ summary, source_errors });
+    try Io.File.stdout().writeStreamingAll(init.io, line);
+    return if (failed == 0 and source_errors == 0) 0 else 1;
+}
+
+fn llvmTestArtifactPath(
+    allocator: std.mem.Allocator,
+    source_path: []const u8,
+    target: TargetModule.Target,
+    digest: [32]u8,
+) ![]const u8 {
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return std.fmt.allocPrint(
+        allocator,
+        ".silex/test/{s}-llvm-{s}{s}",
+        .{ std.fs.path.stem(source_path), hex[0..16], target.executableExtension() },
+    );
+}
+
+fn fileExists(io: Io, path: []const u8) bool {
+    _ = Io.Dir.cwd().statFile(io, path, .{}) catch return false;
+    return true;
+}
+
 fn relativeTestPath(root: []const u8, path: []const u8) []const u8 {
     if (std.mem.eql(u8, root, ".")) return path;
     var prefix_len = root.len;
@@ -1019,18 +1206,23 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
     var resolved_options = options;
     resolved_options.source_path = source_path;
     const output_path = try runArtifactPath(allocator, resolved_options, target);
-    const status = try compileNativeOptions(init, allocator, .{
+    const compile_options: Cli.CompileOptions = .{
         .source_path = source_path,
         .output_path = output_path,
         .mode = options.mode,
         .cache = options.cache,
         .target = target,
-    }, options.emit_ir, .run);
+        .backend = options.backend,
+    };
+    const status = switch (options.backend) {
+        .native => try compileNativeOptions(init, allocator, compile_options, options.emit_ir, .run),
+        .llvm => try compileLlvmOptions(init, allocator, compile_options, options.emit_ir, .run),
+    };
     if (status != 0) return status;
     var progress = CliProgress.Build.init(init.io);
     progress.source(.run, source_path);
     progress.finish();
-    return executeNative(init, allocator, output_path, source_path, options.mode);
+    return executeCompiled(init, allocator, output_path, source_path, options.mode, options.backend);
 }
 
 fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -1117,7 +1309,7 @@ fn containsBoundaryCall(program: Ir.Program) bool {
     return false;
 }
 
-fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+fn compileSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
     const options = switch (Cli.parseCompile(args)) {
         .options => |options| options,
         .diagnostic => |diagnostic| {
@@ -1126,7 +1318,218 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
         },
     };
     if (options.cache) CompilationCache.maintain(allocator, init.io);
-    return compileNativeOptions(init, allocator, options, false, .compile);
+    return switch (options.backend) {
+        .native => compileNativeOptions(init, allocator, options, false, .compile),
+        .llvm => compileLlvmOptions(init, allocator, options, false, .compile),
+    };
+}
+
+fn compileLlvmOptions(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    options: Cli.CompileOptions,
+    emit_ir: bool,
+    command: CompilationTrace.Command,
+) !u8 {
+    const target = options.target orelse TargetModule.Target.host() orelse {
+        std.debug.print("silex: 'compile --backend llvm' requires a recognized host target\n", .{});
+        return 1;
+    };
+    if (!target.eql(.macos_arm64) or TargetModule.Target.host() == null or
+        !TargetModule.Target.host().?.eql(.macos_arm64))
+    {
+        std.debug.print(
+            "silex: LLVM backend {s} is currently available only for the macos-arm64 host; requested '{s}'\n",
+            .{ LlvmBackend.version, target.name() },
+        );
+        return 1;
+    }
+    const tools = try LlvmBackend.resolveTools(init, allocator) orelse return 1;
+    var trace = CompilationTrace.Reporter.init(init.io, init.environ_map, .{
+        .command = command,
+        .backend = "llvm",
+        .source_path = options.source_path,
+        .target = target.name(),
+        .mode = @tagName(options.mode),
+        .cache_enabled = options.cache,
+        .compiler_version = build_options.version,
+    });
+    defer trace.write(allocator);
+    defer if (options.cache) {
+        const statistics = CompilationCache.statistics();
+        trace.metrics.cache_entry_hits = statistics.entry_hits;
+        trace.metrics.cache_entry_misses = statistics.entry_misses;
+        trace.metrics.cache_bytes_read = statistics.bytes_read;
+        trace.metrics.cache_bytes_written = statistics.bytes_written;
+    };
+    defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
+
+    var progress = CliProgress.Build.init(init.io);
+    progress.source(.analyze, options.source_path);
+    var compiler = Project.Compiler.initWithPackagesAndCache(
+        allocator,
+        init.io,
+        try globalPackagesRoot(allocator, init.environ_map),
+        options.cache,
+    );
+    configureUserPackageDiscovery(&compiler, init.environ_map);
+    compiler.target = target;
+    if (trace.enabled()) compiler.trace = &trace;
+    try configureShaderCompiler(&compiler, allocator, init.environ_map);
+    const compilation = compilation: {
+        var frontend_span = trace.span(.frontend_total);
+        defer frontend_span.finish();
+        break :compilation compiler.compile(options.source_path) catch |err| switch (err) {
+            error.InvalidSource => {
+                printSourceDiagnostic(compiler, options.source_path);
+                return 1;
+            },
+            else => return err,
+        };
+    };
+    const boundary_providers = try requiredBoundaryProviders(
+        allocator,
+        compilation.boundaries,
+        compilation.packages,
+    );
+    trace.metrics.packages = compilation.metrics.packages;
+    trace.metrics.discovered_modules = compilation.metrics.discovered_modules;
+    trace.metrics.loaded_modules = compilation.metrics.loaded_modules;
+    trace.metrics.parsed_modules = compilation.metrics.parsed_modules;
+    trace.metrics.indexed_declarations = compilation.metrics.indexed_declarations;
+    trace.metrics.source_bytes_read = compilation.metrics.source_bytes_read;
+    trace.metrics.ast_functions = compilation.metrics.ast_functions;
+    trace.metrics.portable_functions = compilation.metrics.portable_functions;
+    trace.metrics.package_functions_reused = compilation.metrics.package_functions_reused;
+    trace.metrics.package_function_misses = compilation.metrics.package_function_misses;
+    trace.metrics.package_function_relocation_failures = compilation.metrics.package_function_relocation_failures;
+    trace.metrics.package_functions_stored = compilation.metrics.package_functions_stored;
+    trace.metrics.boundaries = compilation.boundaries.len;
+    trace.metrics.boundary_providers = boundary_providers.len;
+    trace.metrics.dependency_files = compilation.cache_files.len;
+    if (options.cache and compilation.boundaries.len == 0) {
+        var cache_span = trace.span(.cache_update);
+        defer cache_span.finish();
+        CompilationCache.storeIr(
+            allocator,
+            init.io,
+            options.source_path,
+            target.name(),
+            compilation.cache_files,
+            compilation.ir,
+        );
+    }
+
+    const scoped_program = scoped: {
+        var closure_span = trace.span(.program_closure);
+        defer closure_span.finish();
+        const scope = ProgramScope.executable(allocator, compilation.ir) catch |err| {
+            std.debug.print("silex: cannot close the LLVM program from its entry: {t}\n", .{err});
+            return 1;
+        };
+        trace.metrics.reachable_portable_functions = scope.program.functions.len;
+        break :scoped scope.program;
+    };
+    const worker_count = compilationWorkerCount(init.environ_map, scoped_program.functions.len);
+    trace.workers(worker_count);
+    const optimized_program = optimized: {
+        if (options.mode == .debug) break :optimized scoped_program;
+        var optimize_span = trace.span(.optimization);
+        defer optimize_span.finish();
+        break :optimized ReleaseOptimizer.optimizeWithOptions(
+            allocator,
+            scoped_program,
+            ReleaseOptimizer.Options.forTarget(target, worker_count),
+        ) catch |err| {
+            std.debug.print("silex: optimizer rejected the portable IR for LLVM: {t}\n", .{err});
+            return 1;
+        };
+    };
+    ReleaseVerifier.verify(allocator, optimized_program) catch |err| {
+        std.debug.print("silex: LLVM backend rejected the optimized portable IR: {t}\n", .{err});
+        return 1;
+    };
+    if (emit_ir) {
+        const text = try Ir.writeText(allocator, optimized_program);
+        try Io.File.stdout().writeStreamingAll(init.io, text);
+    }
+
+    const variant = try std.fmt.allocPrint(
+        allocator,
+        "llvm:{s}:{s}:{s}:{s}:{s}:{s}:{s}:{s}",
+        .{ build_options.version, LlvmBackend.version, tools.opt, tools.llc, tools.cpu, target.name(), @tagName(options.mode), options.source_path },
+    );
+    const executable_kind = target.executableKind();
+    const cache_key = if (options.cache)
+        CompilationCache.backendKey(
+            allocator,
+            init.io,
+            compilation.cache_files,
+            boundary_providers,
+            "llvm-compile-v1",
+            variant,
+        ) catch null
+    else
+        null;
+    if (cache_key) |digest| if (CompilationCache.executableExists(allocator, init.io, digest, executable_kind)) {
+        progress.target(target.name(), "llvm/cache");
+        progress.stage(.cache);
+        progress.source(.write, options.output_path);
+        CompilationCache.materializeExecutable(
+            allocator,
+            init.io,
+            digest,
+            executable_kind,
+            options.output_path,
+        ) catch |err| {
+            std.debug.print("silex: unable to materialize cached LLVM executable: {t}\n", .{err});
+            return 1;
+        };
+        recordOutputSize(&trace, init.io, options.output_path);
+        trace.cacheHit(.hit_after_frontend);
+        trace.succeeded();
+        progress.source(.ready, options.output_path);
+        progress.finish();
+        return 0;
+    };
+
+    progress.target(target.name(), try std.fmt.allocPrint(allocator, "llvm/{s}", .{@tagName(options.mode)}));
+    progress.stage(.emit);
+    const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
+    if (!try LlvmBackend.buildExecutable(init, allocator, .{
+        .tools = tools,
+        .target = target,
+        .linker_path = linker_path,
+        .program = optimized_program,
+        .boundaries = compilation.boundaries,
+        .providers = boundary_providers,
+        .mode = options.mode,
+        .output_path = options.output_path,
+        .trace = &trace,
+    })) return 1;
+    recordOutputSize(&trace, init.io, options.output_path);
+    if (cache_key) |digest| {
+        var cache_span = trace.span(.cache_publication);
+        defer cache_span.finish();
+        CompilationCache.storeExecutableFile(
+            allocator,
+            init.io,
+            digest,
+            executable_kind,
+            options.output_path,
+        );
+    }
+    trace.succeeded();
+    progress.source(.ready, options.output_path);
+    progress.finish();
+    return 0;
+}
+
+fn exitCode(term: std.process.Child.Term) u8 {
+    return switch (term) {
+        .exited => |code| code,
+        else => 255,
+    };
 }
 
 fn compileNativeOptions(
@@ -1142,6 +1545,7 @@ fn compileNativeOptions(
     };
     var trace = CompilationTrace.Reporter.init(init.io, init.environ_map, .{
         .command = command,
+        .backend = "native",
         .source_path = options.source_path,
         .target = target.name(),
         .mode = @tagName(options.mode),
@@ -1159,7 +1563,11 @@ fn compileNativeOptions(
     var progress = CliProgress.Build.init(init.io);
     progress.source(.analyze, options.source_path);
     const executable_kind = target.executableKind();
-    const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ target.name(), @tagName(options.mode), options.source_path });
+    const native_variant = try std.fmt.allocPrint(
+        allocator,
+        "native:{s}:{s}:{s}:{s}",
+        .{ build_options.version, target.name(), @tagName(options.mode), options.source_path },
+    );
     {
         var cache_span = trace.span(.cache_validation);
         defer cache_span.finish();
@@ -1923,22 +2331,51 @@ fn writeExecutable(init: std.process.Init, output_path: []const u8, executable: 
 }
 
 fn runArtifactPath(allocator: std.mem.Allocator, options: Cli.RunOptions, target: TargetModule.Target) ![]const u8 {
-    const digest = CompilationCache.artifactKey("run-executable", &.{ options.source_path, target.name(), @tagName(options.mode) });
+    const digest = CompilationCache.artifactKey("run-executable", &.{
+        @tagName(options.backend),
+        build_options.version,
+        options.source_path,
+        target.name(),
+        @tagName(options.mode),
+    });
     const hex = std.fmt.bytesToHex(digest, .lower);
     const extension = target.executableExtension();
     return std.fmt.allocPrint(
         allocator,
-        ".silex/run/{s}-{s}-{s}-{s}{s}",
-        .{ std.fs.path.stem(options.source_path), target.name(), @tagName(options.mode), hex[0..16], extension },
+        ".silex/run/{s}-{s}-{s}-{s}-{s}{s}",
+        .{ std.fs.path.stem(options.source_path), @tagName(options.backend), target.name(), @tagName(options.mode), hex[0..16], extension },
     );
 }
 
-fn executeNative(
+test "run artifact identity separates native and LLVM backends" {
+    const native = try runArtifactPath(std.testing.allocator, .{
+        .source_path = "Examples/Main.sx",
+        .emit_ir = false,
+        .mode = .release,
+        .cache = true,
+        .backend = .native,
+    }, .macos_arm64);
+    defer std.testing.allocator.free(native);
+    const llvm = try runArtifactPath(std.testing.allocator, .{
+        .source_path = "Examples/Main.sx",
+        .emit_ir = false,
+        .mode = .release,
+        .cache = true,
+        .backend = .llvm,
+    }, .macos_arm64);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, native, "-native-") != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "-llvm-") != null);
+    try std.testing.expect(!std.mem.eql(u8, native, llvm));
+}
+
+fn executeCompiled(
     init: std.process.Init,
     allocator: std.mem.Allocator,
     executable_path: []const u8,
     source_path: []const u8,
     mode: Cli.Mode,
+    backend: Cli.Backend,
 ) !u8 {
     const current_directory = try std.process.currentPathAlloc(init.io, allocator);
     const absolute_executable = try std.fs.path.resolve(allocator, &.{ current_directory, executable_path });
@@ -1958,13 +2395,22 @@ fn executeNative(
     return switch (try child.wait(init.io)) {
         .exited => |code| code,
         .signal => |signal| terminated: {
-            const diagnostic = try NativeTermination.programDiagnostic(
-                allocator,
-                @intFromEnum(signal),
-                source_path,
-                absolute_executable,
-                mode,
-            );
+            const diagnostic = if (backend == .native)
+                try NativeTermination.programDiagnostic(
+                    allocator,
+                    @intFromEnum(signal),
+                    source_path,
+                    absolute_executable,
+                    mode,
+                )
+            else
+                try llvmProgramDiagnostic(
+                    allocator,
+                    @intFromEnum(signal),
+                    source_path,
+                    absolute_executable,
+                    mode,
+                );
             std.debug.print("{s}", .{diagnostic});
             break :terminated 1;
         },
@@ -1978,6 +2424,25 @@ fn executeNative(
             break :unknown 1;
         },
     };
+}
+
+fn llvmProgramDiagnostic(
+    allocator: std.mem.Allocator,
+    signal: u32,
+    source_path: []const u8,
+    executable_path: []const u8,
+    mode: Cli.Mode,
+) ![]const u8 {
+    const description = try NativeTermination.stoppedDescription(allocator, signal);
+    return std.fmt.allocPrint(
+        allocator,
+        "silex: LLVM program terminated by {s}\n" ++
+            "silex: source: {s}\n" ++
+            "silex: LLVM mode: {s}\n" ++
+            "silex: retained executable: {s}\n" ++
+            "silex: reproduce: silex run \"{s}\" --backend llvm --debug --nocache\n",
+        .{ description, source_path, if (mode == .debug) "Debug" else "Release", executable_path, source_path },
+    );
 }
 
 fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
@@ -2005,6 +2470,9 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
         .missing_target => std.debug.print("silex: option '--target' expects a target name\n", .{}),
         .duplicate_target => std.debug.print("silex: target is specified more than once\n", .{}),
         .unknown_target => std.debug.print("silex: unknown target '{s}'; expected macos-arm64, macos-x64, linux-arm64, linux-x64, windows-arm64 or windows-x64\n", .{diagnostic.argument.?}),
+        .missing_backend => std.debug.print("silex: option '--backend' expects 'native' or 'llvm'\n", .{}),
+        .duplicate_backend => std.debug.print("silex: backend is specified more than once\n", .{}),
+        .unknown_backend => std.debug.print("silex: unknown backend '{s}'; expected 'native' or 'llvm'\n", .{diagnostic.argument.?}),
         .missing_workspace => std.debug.print("silex: option '--workspace' expects a directory\n", .{}),
         .duplicate_workspace => std.debug.print("silex: workspace is specified more than once\n", .{}),
         .duplicate_dev => std.debug.print("silex: development dependencies are requested more than once\n", .{}),

@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ir = @import("silex_optimizer_api").Ir;
+const Ir = @import("root").silex_compiler_api.Ir;
 const Coverage = @import("LlvmCoverage.zig");
 const Allocator = std.mem.Allocator;
 const Error = Allocator.Error || error{ InvalidProgram, UnsupportedInstruction };
