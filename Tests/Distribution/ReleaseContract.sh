@@ -7,6 +7,10 @@ workflow="$repository_root/.github/workflows/release.yml"
 installer_workflow="$repository_root/.github/workflows/install-smoke.yml"
 windows_builder="$repository_root/.github/scripts/build-release-windows.ps1"
 windows_smoke="$repository_root/.github/scripts/smoke-release-windows.ps1"
+unix_builder="$repository_root/.github/scripts/build-release-unix.sh"
+unix_smoke="$repository_root/.github/scripts/smoke-public-unix.sh"
+windows_public_smoke="$repository_root/.github/scripts/smoke-public-windows.ps1"
+toolchain_setup="$repository_root/Toolchain/Sources/ToolchainSetup.zig"
 release_notes="$repository_root/.github/scripts/release-notes.py"
 
 "$repository_root/Tests/Distribution/InstallerUnixContract.sh"
@@ -14,7 +18,8 @@ manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' "$repos
 python3 "$release_notes" validate "$manifest_version"
 python3 "$release_notes" extract "$manifest_version" --locale en | grep -Fq '### Impact and migration'
 
-python3 - "$workflow" "$installer_workflow" "$windows_builder" "$windows_smoke" <<'PYTHON'
+python3 - "$workflow" "$installer_workflow" "$windows_builder" "$windows_smoke" \
+    "$unix_builder" "$unix_smoke" "$windows_public_smoke" "$toolchain_setup" <<'PYTHON'
 import re
 import sys
 
@@ -22,6 +27,10 @@ workflow = open(sys.argv[1], encoding="utf-8").read()
 installer_workflow = open(sys.argv[2], encoding="utf-8").read()
 windows_builder = open(sys.argv[3], encoding="utf-8").read()
 windows_smoke = open(sys.argv[4], encoding="utf-8").read()
+unix_builder = open(sys.argv[5], encoding="utf-8").read()
+unix_smoke = open(sys.argv[6], encoding="utf-8").read()
+windows_public_smoke = open(sys.argv[7], encoding="utf-8").read()
+toolchain_setup = open(sys.argv[8], encoding="utf-8").read()
 targets = (
     "macos-arm64",
     "macos-x64",
@@ -88,6 +97,23 @@ if 'release-notes.py validate "$RELEASE_VERSION"' not in workflow:
     raise SystemExit("release preflight must validate the canonical release notes")
 if '--notes-file "$RUNNER_TEMP/release-notes.md"' not in workflow or "--generate-notes" in workflow:
     raise SystemExit("GitHub releases must use the canonical release notes")
+
+llvm_contract = (
+    "llvm-21.1.8-silex.1",
+    "LLVM-21.1.8-macos-arm64.tar.gz",
+    "ab010a170718153633c4fcbf302c43eb9c69817db68cd710cf2798fcb7837c8f",
+    "llvm/21.1.8/macos-arm64",
+)
+for marker in llvm_contract:
+    if marker not in toolchain_setup:
+        raise SystemExit(f"missing managed LLVM setup marker: {marker}")
+
+for script in (unix_builder, unix_smoke):
+    if 'expected_backend=llvm' not in script or '--backend native' not in script:
+        raise SystemExit("Unix distribution smoke must verify the host default and explicit native backend")
+for script in (windows_smoke, windows_public_smoke):
+    if 'backend -ne "native"' not in script or '--backend native' not in script:
+        raise SystemExit("Windows distribution smoke must verify the native default and explicit native backend")
 
 print("Release workflow contract passed")
 PYTHON

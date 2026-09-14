@@ -1,6 +1,7 @@
-# Silex native compiler experiment
+# Silex compiler
 
-Silex is a native language and compiler experiment.
+Silex is a programming language and compiler with LLVM and direct native
+backends.
 
 ```sx
 func answer() int {
@@ -74,22 +75,25 @@ silex run
 Discovery is non-recursive and does not prefer the basename `Main.sx`. Pass a
 source file explicitly when a directory contains several entry points.
 
-Run the one-time toolchain setup before compiling applications that use native
-package boundaries or HLSL:
+Run the one-time toolchain setup before compiling on macOS ARM64 or compiling
+applications that use native package boundaries or HLSL:
 
 ```sh
 silex setup
 ```
 
-This installs verified, host-specific copies of Shadercross and the private Zig
-linker under `~/.silex/toolchain/`. They are implementation details of the
-Silex toolchain, not package dependencies. The user does not need a system Zig
-installation.
+This installs verified, host-specific copies of the required tools under
+`~/.silex/toolchain/`: LLVM 21.1.8 on macOS ARM64, Shadercross, and the private
+Zig linker. They are implementation details of the Silex toolchain, not package
+dependencies. The user does not need system installations of LLVM or Zig.
 
-`run` builds a private native executable under `.silex/run/`, executes it with
-the current terminal streams and returns its exit code. Release is the default;
-pass `--debug` to disable optimization while diagnosing the native backend. Add
-`--emit-ir` to inspect the portable typed IR before native lowering:
+`run` builds a private executable under `.silex/run/`, executes it with the
+current terminal streams and returns its exit code. LLVM is the default backend
+on macOS ARM64; the direct native backend remains the default on other hosts.
+Select either one explicitly with `--backend llvm` or `--backend native`.
+Release is the default mode; pass `--debug` to disable optimization while
+diagnosing the selected backend. Add `--emit-ir` to inspect the portable typed
+IR before backend lowering:
 
 In an interactive terminal, `compile` and `run` announce the active work:
 source and shader analysis, target preparation, executable construction,
@@ -120,7 +124,7 @@ The interpreter intentionally supports only the few platform boundaries it can
 model without reproducing an operating-system runtime. Use `run` for ordinary
 programs that depend on STD interop.
 
-## Compile a native program
+## Compile a program
 
 ```sh
 cd Toolchain
@@ -128,15 +132,17 @@ zig build run -- compile /path/to/Main.sx -d -o /path/to/program
 /path/to/program
 ```
 
-Release is the default and selects the optimized native pipeline. Debug favors
-compilation speed and direct backend diagnosis. Every frequent option has a
-short and a descriptive form:
+Release is the default and selects the optimized pipeline. Debug favors
+compilation speed and direct backend diagnosis. Every frequent mode option has
+a short and a descriptive form:
 
 ```sh
 silex compile Main.sx -d -o Application
 silex compile Main.sx --debug --output Application
 silex compile Main.sx -r -o Application
 silex compile Main.sx --release --output Application
+silex compile Main.sx --backend native --release --output Application
+silex compile Main.sx --backend llvm --release --output Application
 ```
 
 The commands use a content-addressed compilation cache rooted in
@@ -152,9 +158,9 @@ silex compile Sandbox/Main.sx -r -n -o Application
 For `run`, `--nocache` forces a rebuild but the executable still belongs under
 `.silex/run/`; cache policy does not change the command's output location.
 
-The cache selectively persists frontend or native input state, profitable
-machine-function fragments, generated shaders, test and run artifacts, and
-linked Mach-O, ELF or PE executables. The command-line compiler does not cache
+The cache selectively persists frontend and backend input state, profitable
+native machine-function fragments, generated shaders, test and run artifacts,
+and linked Mach-O, ELF or PE executables. The command-line compiler does not cache
 every parsed module: representations that cost more to read than to rebuild are
 excluded. For package graphs, a private binary fragment can reuse generated
 constructors, methods, drops, and class-field helpers whose identities and
@@ -186,9 +192,11 @@ The report checks observable output first, then records compiler versions,
 binary sizes, compilation times, and execution times under
 `.zig-cache/benchmark-native/`.
 
-The native path emits the selected platform's machine instructions and Mach-O,
-ELF, or PE executable container. It invokes no C/C++ generator, external
-assembler, or linker.
+The direct native path emits the selected platform's machine instructions and
+Mach-O, ELF, or PE executable container. It invokes no C/C++ generator,
+external assembler, or linker. The LLVM path is currently qualified only on
+macOS ARM64; it invokes the managed `opt` and `llc` 21.1.8 tools and the Apple
+system linker. An explicit backend selection never falls back to the other path.
 
 List the exact targets recognized by the current compiler with:
 
@@ -211,8 +219,8 @@ Toolchain/      autonomous Zig bootstrap project
   Sources/      compiler implementation
 ```
 
-The bootstrap also exposes a minimal editor server with `silex lsp`. The native
-backend, ABI, and generated bytes remain experimental.
+The bootstrap also exposes a minimal editor server with `silex lsp`. Backend
+ABIs and generated bytes remain implementation details and continue to evolve.
 
 ## License
 

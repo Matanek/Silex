@@ -72,7 +72,14 @@ try {
 
     $source = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx"
     $compiled = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
+    $trace = Join-Path $env:RUNNER_TEMP "distribution-default-trace.json"
+    $env:SILEX_COMPILATION_TRACE = $trace
     & $silex compile $source --release -o $compiled
+    Remove-Item Env:SILEX_COMPILATION_TRACE
+    $tracePayload = Get-Content $trace -Raw | ConvertFrom-Json
+    if ($tracePayload.backend -ne "native") {
+        throw "expected native as the default backend for $Target"
+    }
     $compiledOutput = @(& $compiled)
     if ($LASTEXITCODE -ne 0 -or $compiledOutput.Count -ne 1 -or
         $compiledOutput[0] -ne "silex distribution ready") {
@@ -84,6 +91,20 @@ try {
         throw "run distribution smoke failed"
     }
     & $silex test $source
+
+    $native = Join-Path $env:RUNNER_TEMP "distribution-smoke-native.exe"
+    & $silex compile $source --backend native --release -o $native
+    $nativeOutput = @(& $native)
+    if ($LASTEXITCODE -ne 0 -or $nativeOutput.Count -ne 1 -or
+        $nativeOutput[0] -ne "silex distribution ready") {
+        throw "explicit native distribution smoke failed"
+    }
+    $nativeRunOutput = @(& $silex run $source --backend native --release)
+    if ($LASTEXITCODE -ne 0 -or $nativeRunOutput.Count -ne 1 -or
+        $nativeRunOutput[0] -ne "silex distribution ready") {
+        throw "explicit native run smoke failed"
+    }
+    & $silex test $source --backend native
 } finally {
     Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
 }

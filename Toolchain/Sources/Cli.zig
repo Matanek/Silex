@@ -7,6 +7,17 @@ pub const Backend = enum {
     native,
     llvm,
 
+    pub fn default() Backend {
+        return defaultFor(TargetModule.Target.host());
+    }
+
+    pub fn defaultFor(host: ?TargetModule.Target) Backend {
+        if (host) |target| {
+            if (target.eql(.macos_arm64)) return .llvm;
+        }
+        return .native;
+    }
+
     pub fn parse(value: []const u8) ?Backend {
         if (std.mem.eql(u8, value, "native")) return .native;
         if (std.mem.eql(u8, value, "llvm")) return .llvm;
@@ -154,7 +165,7 @@ pub fn parseRun(args: []const []const u8) RunResult {
     var mode: Mode = .release;
     var explicit_mode: ?Mode = null;
     var cache = true;
-    var backend: Backend = .native;
+    var backend = Backend.default();
     var explicit_backend = false;
     var index: usize = 0;
 
@@ -231,7 +242,7 @@ pub fn parseTest(args: []const []const u8) TestResult {
     var source_path: ?[]const u8 = null;
     var emit_ir = false;
     var cache = true;
-    var backend: Backend = .native;
+    var backend = Backend.default();
     var explicit_backend = false;
     var index: usize = 0;
 
@@ -276,7 +287,7 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
     var explicit_mode: ?Mode = null;
     var cache = true;
     var target: ?TargetModule.Target = null;
-    var backend: Backend = .native;
+    var backend = Backend.default();
     var explicit_backend = false;
     var index: usize = 0;
 
@@ -616,12 +627,17 @@ test "run accepts native modes and emit ir but owns its output" {
     try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--debug", "--release" }), .conflicting_modes, "--release");
 }
 
-test "compile run and test select a backend explicitly and default to native" {
-    try std.testing.expectEqual(Backend.native, parseCompile(&.{ "Main.sx", "-o", "App" }).options.backend);
+test "compile run and test select a backend explicitly and use the qualified host default" {
+    try std.testing.expectEqual(Backend.llvm, Backend.defaultFor(.macos_arm64));
+    try std.testing.expectEqual(Backend.native, Backend.defaultFor(.macos_x64));
+    try std.testing.expectEqual(Backend.native, Backend.defaultFor(.linux_arm64));
+    try std.testing.expectEqual(Backend.native, Backend.defaultFor(.windows_x64));
+    try std.testing.expectEqual(Backend.native, Backend.defaultFor(null));
+    try std.testing.expectEqual(Backend.default(), parseCompile(&.{ "Main.sx", "-o", "App" }).options.backend);
     try std.testing.expectEqual(Backend.llvm, parseCompile(&.{ "--backend", "llvm", "Main.sx", "-o", "App" }).options.backend);
-    try std.testing.expectEqual(Backend.native, parseRun(&.{"Main.sx"}).options.backend);
+    try std.testing.expectEqual(Backend.default(), parseRun(&.{"Main.sx"}).options.backend);
     try std.testing.expectEqual(Backend.llvm, parseRun(&.{ "Main.sx", "--backend", "llvm" }).options.backend);
-    try std.testing.expectEqual(Backend.native, parseTest(&.{"Tests"}).options.backend);
+    try std.testing.expectEqual(Backend.default(), parseTest(&.{"Tests"}).options.backend);
     try std.testing.expectEqual(Backend.llvm, parseTest(&.{ "--backend", "llvm", "Tests" }).options.backend);
 }
 

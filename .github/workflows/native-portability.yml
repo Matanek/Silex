@@ -134,17 +134,17 @@ jobs:
           "$silex" link "$GITHUB_WORKSPACE/Toolchain/Fixtures/MacOSX64Boundary" \
             --workspace "$boundary_consumer" --target macos-x64
           "$silex" packages resolve "$boundary_consumer"
-          "$silex" compile "$boundary_consumer/Main.sx" \
+          "$silex" compile --backend native "$boundary_consumer/Main.sx" \
             --release -o "$RUNNER_TEMP/macos-x64-boundary"
           test "$("$RUNNER_TEMP/macos-x64-boundary")" = "macos x64 boundary ready"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
+          "$silex" test --backend native "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
           scalar_root="$RUNNER_TEMP/scalar-float-fixture"
           mkdir -p "$scalar_root"
           printf '%s\n' '{"sources":"."}' > "$scalar_root/Package.json"
           snapshot_fixture="$scalar_root/BranchSnapshots.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx" "$snapshot_fixture"
           for mode in debug release; do
-            "$silex" compile "$snapshot_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$snapshot_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/branch-snapshots-$mode"
             snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")
             test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
@@ -153,7 +153,7 @@ jobs:
           loop_exit_fixture="$scalar_root/LoopExitResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx" "$loop_exit_fixture"
           for mode in debug release; do
-            "$silex" compile "$loop_exit_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$loop_exit_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/loop-exit-residence-$mode"
             loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")
             test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
@@ -162,7 +162,7 @@ jobs:
           float_memory_fixture="$scalar_root/FloatMemoryResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx" "$float_memory_fixture"
           for mode in debug release; do
-            "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
             test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 22
@@ -171,7 +171,7 @@ jobs:
           float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
           for mode in debug release; do
-            "$silex" compile "$float_operands_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$float_operands_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-float-operands-$mode"
             float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")
             test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
@@ -180,7 +180,7 @@ jobs:
           private_length_fixture="$scalar_root/PrivateCollectionLengths.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx" "$private_length_fixture"
           for mode in debug release; do
-            "$silex" compile "$private_length_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$private_length_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/private-collection-lengths-$mode"
             private_length_output=$("$RUNNER_TEMP/private-collection-lengths-$mode")
             test "$(printf '%s\n' "$private_length_output" | wc -l)" -eq 10
@@ -189,7 +189,7 @@ jobs:
           class_leaf_fixture="$scalar_root/ScalarClassLeaves.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarClassLeaves.sx" "$class_leaf_fixture"
           for mode in debug release; do
-            "$silex" compile "$class_leaf_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$class_leaf_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-class-leaves-$mode"
             class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")
             test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 18
@@ -198,7 +198,7 @@ jobs:
           integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
           for mode in debug release; do
-            "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$integer_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/integer-memory-regions-$mode"
             integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
             test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
@@ -224,14 +224,14 @@ jobs:
             test "$output" = "silex distribution ready"
           }
           distribution="$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx"
-          "$silex" compile "$distribution" \
+          "$silex" compile --backend native "$distribution" \
             -o "$RUNNER_TEMP/distribution-smoke-debug"
           run_distribution "$RUNNER_TEMP/distribution-smoke-debug"
-          "$silex" compile "$distribution" \
+          "$silex" compile --backend native "$distribution" \
             --release -o "$RUNNER_TEMP/distribution-smoke-release"
           run_distribution "$RUNNER_TEMP/distribution-smoke-release"
-          test "$("$silex" run "$distribution" --release)" = "silex distribution ready"
-          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \
+          test "$("$silex" run --backend native "$distribution" --release)" = "silex distribution ready"
+          "$silex" compile --backend native "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \
             --release -o "$RUNNER_TEMP/native-portability"
           file "$RUNNER_TEMP/native-portability" | grep -F 'x86_64'
           portability_output=$("$RUNNER_TEMP/native-portability")
@@ -425,24 +425,24 @@ jobs:
 
           source="$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
           "$silex" interpret "$source" > "$RUNNER_TEMP/interpreted.txt"
-          "$silex" compile "$source" --debug -o "$RUNNER_TEMP/native-debug"
+          "$silex" compile --backend native "$source" --debug -o "$RUNNER_TEMP/native-debug"
           "$RUNNER_TEMP/native-debug" > "$RUNNER_TEMP/debug.txt"
           cmp "$RUNNER_TEMP/interpreted.txt" "$RUNNER_TEMP/debug.txt"
-          "$silex" compile "$source" --release -o "$RUNNER_TEMP/native-release"
+          "$silex" compile --backend native "$source" --release -o "$RUNNER_TEMP/native-release"
           "$RUNNER_TEMP/native-release" > "$RUNNER_TEMP/release.txt"
           cmp "$RUNNER_TEMP/interpreted.txt" "$RUNNER_TEMP/release.txt"
           file "$RUNNER_TEMP/native-release" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64)'
           readelf -h "$RUNNER_TEMP/native-release" | grep -E 'Machine:.*AArch64'
 
-          "$silex" run "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" --debug
-          "$silex" test "$source"
+          "$silex" run --backend native "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" --debug
+          "$silex" test --backend native "$source"
 
           "$managed_zig" cc -target aarch64-linux-gnu -O2 -c "$boundary/provider.c" \
             -o "$boundary/Boundary/linux-arm64/provider.o"
           "$managed_zig" ar rcs "$boundary/Boundary/linux-arm64/libProvider.a" \
             "$boundary/Boundary/linux-arm64/provider.o"
-          "$silex" test "$boundary/Tests/Boundary.sx"
-          "$silex" compile "$boundary/Tests/Boundary.sx" --release \
+          "$silex" test --backend native "$boundary/Tests/Boundary.sx"
+          "$silex" compile --backend native "$boundary/Tests/Boundary.sx" --release \
             -o "$RUNNER_TEMP/boundary"
           test "$("$RUNNER_TEMP/boundary")" = "linux arm64 boundary ready"
 
@@ -453,7 +453,7 @@ jobs:
           scalar_fixture="$scalar_root/ScalarFloatResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx" "$scalar_fixture"
           for mode in debug release; do
-            "$silex" compile "$scalar_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$scalar_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-float-residence-$mode"
             scalar_output=$("$RUNNER_TEMP/scalar-float-residence-$mode")
             test "$(printf '%s\n' "$scalar_output" | wc -l)" -eq 9
@@ -462,14 +462,14 @@ jobs:
           branch_fixture="$scalar_root/BranchComparisons.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx" "$branch_fixture"
           for mode in debug release; do
-            "$silex" compile "$branch_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$branch_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/branch-comparisons-$mode"
             test "$("$RUNNER_TEMP/branch-comparisons-$mode")" = "true"
           done
           snapshot_fixture="$scalar_root/BranchSnapshots.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx" "$snapshot_fixture"
           for mode in debug release; do
-            "$silex" compile "$snapshot_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$snapshot_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/branch-snapshots-$mode"
             snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")
             test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
@@ -478,7 +478,7 @@ jobs:
           loop_exit_fixture="$scalar_root/LoopExitResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx" "$loop_exit_fixture"
           for mode in debug release; do
-            "$silex" compile "$loop_exit_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$loop_exit_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/loop-exit-residence-$mode"
             loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")
             test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
@@ -487,7 +487,7 @@ jobs:
           float_memory_fixture="$scalar_root/FloatMemoryResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx" "$float_memory_fixture"
           for mode in debug release; do
-            "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
             test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 22
@@ -496,7 +496,7 @@ jobs:
           float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
           for mode in debug release; do
-            "$silex" compile "$float_operands_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$float_operands_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-float-operands-$mode"
             float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")
             test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
@@ -505,7 +505,7 @@ jobs:
           private_length_fixture="$scalar_root/PrivateCollectionLengths.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx" "$private_length_fixture"
           for mode in debug release; do
-            "$silex" compile "$private_length_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$private_length_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/private-collection-lengths-$mode"
             private_length_output=$("$RUNNER_TEMP/private-collection-lengths-$mode")
             test "$(printf '%s\n' "$private_length_output" | wc -l)" -eq 10
@@ -514,7 +514,7 @@ jobs:
           class_leaf_fixture="$scalar_root/ScalarClassLeaves.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarClassLeaves.sx" "$class_leaf_fixture"
           for mode in debug release; do
-            "$silex" compile "$class_leaf_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$class_leaf_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-class-leaves-$mode"
             class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")
             test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 18
@@ -523,7 +523,7 @@ jobs:
           integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
           for mode in debug release; do
-            "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$integer_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/integer-memory-regions-$mode"
             integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
             test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
@@ -569,28 +569,28 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" link "$GITHUB_WORKSPACE/Dependencies/STD" --workspace "$GITHUB_WORKSPACE"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
-          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \
+          "$silex" test --backend native "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
+          "$silex" test --backend native "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
+          "$silex" test --backend native "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx"
+          "$silex" compile --backend native "$GITHUB_WORKSPACE/Tests/Native/NativePortability.sx" \
             --release -o "$RUNNER_TEMP/native-portability"
           portability_output=$("$RUNNER_TEMP/native-portability")
           printf '%s\n' "$portability_output"
           cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')
           test "$cycle_drops" -eq 6
-          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" \
+          "$silex" compile --backend native "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" \
             --release -o "$RUNNER_TEMP/distribution-smoke"
           test "$("$RUNNER_TEMP/distribution-smoke")" = "silex distribution ready"
           aggregate_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/AggregateFieldStores.sx"
           test "$("$silex" interpret "$aggregate_fixture" --nocache)" = "aggregate field stores preserved"
           for mode in debug release; do
-            "$silex" compile "$aggregate_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$aggregate_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/aggregate-fields-$mode"
             test "$("$RUNNER_TEMP/aggregate-fields-$mode")" = "aggregate field stores preserved"
           done
           minmax_fixture="$GITHUB_WORKSPACE/Toolchain/Benchmarks/Native/ScalarMathMinMax.sx"
           for mode in debug release; do
-            "$silex" compile "$minmax_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$minmax_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-math-minmax-$mode"
             test "$("$RUNNER_TEMP/scalar-math-minmax-$mode")" = "scalar-math-minmax: pass"
           done
@@ -601,7 +601,7 @@ jobs:
           scalar_fixture="$scalar_root/ScalarFloatResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx" "$scalar_fixture"
           for mode in debug release; do
-            "$silex" compile "$scalar_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$scalar_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-float-residence-$mode"
             scalar_output=$("$RUNNER_TEMP/scalar-float-residence-$mode")
             test "$(printf '%s\n' "$scalar_output" | wc -l)" -eq 9
@@ -610,14 +610,14 @@ jobs:
           branch_fixture="$scalar_root/BranchComparisons.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx" "$branch_fixture"
           for mode in debug release; do
-            "$silex" compile "$branch_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$branch_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/branch-comparisons-$mode"
             test "$("$RUNNER_TEMP/branch-comparisons-$mode")" = "true"
           done
           snapshot_fixture="$scalar_root/BranchSnapshots.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx" "$snapshot_fixture"
           for mode in debug release; do
-            "$silex" compile "$snapshot_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$snapshot_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/branch-snapshots-$mode"
             snapshot_output=$("$RUNNER_TEMP/branch-snapshots-$mode")
             test "$(printf '%s\n' "$snapshot_output" | wc -l)" -eq 8
@@ -626,7 +626,7 @@ jobs:
           loop_exit_fixture="$scalar_root/LoopExitResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx" "$loop_exit_fixture"
           for mode in debug release; do
-            "$silex" compile "$loop_exit_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$loop_exit_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/loop-exit-residence-$mode"
             loop_exit_output=$("$RUNNER_TEMP/loop-exit-residence-$mode")
             test "$(printf '%s\n' "$loop_exit_output" | wc -l)" -eq 5
@@ -635,7 +635,7 @@ jobs:
           float_memory_fixture="$scalar_root/FloatMemoryResidence.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx" "$float_memory_fixture"
           for mode in debug release; do
-            "$silex" compile "$float_memory_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$float_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/float-memory-residence-$mode"
             float_memory_output=$("$RUNNER_TEMP/float-memory-residence-$mode")
             test "$(printf '%s\n' "$float_memory_output" | wc -l)" -eq 22
@@ -644,7 +644,7 @@ jobs:
           float_operands_fixture="$scalar_root/ScalarFloatOperands.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx" "$float_operands_fixture"
           for mode in debug release; do
-            "$silex" compile "$float_operands_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$float_operands_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-float-operands-$mode"
             float_operands_output=$("$RUNNER_TEMP/scalar-float-operands-$mode")
             test "$(printf '%s\n' "$float_operands_output" | wc -l)" -eq 18
@@ -653,7 +653,7 @@ jobs:
           private_length_fixture="$scalar_root/PrivateCollectionLengths.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx" "$private_length_fixture"
           for mode in debug release; do
-            "$silex" compile "$private_length_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$private_length_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/private-collection-lengths-$mode"
             private_length_output=$("$RUNNER_TEMP/private-collection-lengths-$mode")
             test "$(printf '%s\n' "$private_length_output" | wc -l)" -eq 10
@@ -662,7 +662,7 @@ jobs:
           class_leaf_fixture="$scalar_root/ScalarClassLeaves.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/ScalarClassLeaves.sx" "$class_leaf_fixture"
           for mode in debug release; do
-            "$silex" compile "$class_leaf_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$class_leaf_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/scalar-class-leaves-$mode"
             class_leaf_output=$("$RUNNER_TEMP/scalar-class-leaves-$mode")
             test "$(printf '%s\n' "$class_leaf_output" | wc -l)" -eq 18
@@ -671,7 +671,7 @@ jobs:
           integer_memory_fixture="$scalar_root/IntegerMemoryRegions.sx"
           cp "$GITHUB_WORKSPACE/Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx" "$integer_memory_fixture"
           for mode in debug release; do
-            "$silex" compile "$integer_memory_fixture" "--$mode" --nocache \
+            "$silex" compile --backend native "$integer_memory_fixture" "--$mode" --nocache \
               -o "$RUNNER_TEMP/integer-memory-regions-$mode"
             integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
             test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
@@ -724,11 +724,11 @@ jobs:
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
           & $silex link (Join-Path $env:GITHUB_WORKSPACE "Dependencies/STD") --workspace $env:GITHUB_WORKSPACE
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx")
+          & $silex test --backend native (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
+          & $silex test --backend native (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
+          & $silex test --backend native (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx")
           $portability = Join-Path $env:RUNNER_TEMP "native-portability.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx") `
+          & $silex compile --backend native (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/NativePortability.sx") `
             --release -o $portability
           $portabilityOutput = @(& $portability)
           $portabilityOutput | ForEach-Object { Write-Output $_ }
@@ -737,7 +737,7 @@ jobs:
             throw "expected 6 native cycle finalizers, got $cycleDrops"
           }
           $smoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx") `
+          & $silex compile --backend native (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx") `
             --release -o $smoke
           $smokeOutput = @(& $smoke)
           if ($LASTEXITCODE -ne 0 -or $smokeOutput.Count -ne 1 -or $smokeOutput[0] -ne "silex distribution ready") {
@@ -750,7 +750,7 @@ jobs:
           }
           foreach ($mode in @("debug", "release")) {
             $aggregateBinary = Join-Path $env:RUNNER_TEMP "aggregate-fields-$mode.exe"
-            & $silex compile $aggregateFixture "--$mode" --nocache -o $aggregateBinary
+            & $silex compile --backend native $aggregateFixture "--$mode" --nocache -o $aggregateBinary
             $aggregateOutput = @(& $aggregateBinary)
             if ($LASTEXITCODE -ne 0 -or $aggregateOutput.Count -ne 1 -or $aggregateOutput[0] -ne "aggregate field stores preserved") {
               throw "aggregate field $mode regression failed"
@@ -759,7 +759,7 @@ jobs:
           $minmaxFixture = Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Native/ScalarMathMinMax.sx"
           foreach ($mode in @("debug", "release")) {
             $minmaxBinary = Join-Path $env:RUNNER_TEMP "scalar-math-minmax-$mode.exe"
-            & $silex compile $minmaxFixture "--$mode" --nocache -o $minmaxBinary
+            & $silex compile --backend native $minmaxFixture "--$mode" --nocache -o $minmaxBinary
             $minmaxOutput = @(& $minmaxBinary)
             if ($LASTEXITCODE -ne 0 -or $minmaxOutput.Count -ne 1 -or $minmaxOutput[0] -ne "scalar-math-minmax: pass") {
               throw "scalar math minmax $mode regression failed"
@@ -773,7 +773,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx") $scalarFixture
           foreach ($mode in @("debug", "release")) {
             $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"
-            & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary
+            & $silex compile --backend native $scalarFixture "--$mode" --nocache -o $scalarBinary
             $scalarOutput = @(& $scalarBinary)
             if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "scalar float residence $mode regression failed"
@@ -783,7 +783,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx") $branchFixture
           foreach ($mode in @("debug", "release")) {
             $branchBinary = Join-Path $env:RUNNER_TEMP "branch-comparisons-$mode.exe"
-            & $silex compile $branchFixture "--$mode" --nocache -o $branchBinary
+            & $silex compile --backend native $branchFixture "--$mode" --nocache -o $branchBinary
             if ($LASTEXITCODE -ne 0) { throw "branch comparison compilation failed" }
             $branchOutput = @(& $branchBinary)
             if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {
@@ -794,7 +794,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx") $snapshotFixture
           foreach ($mode in @("debug", "release")) {
             $snapshotBinary = Join-Path $env:RUNNER_TEMP "branch-snapshots-$mode.exe"
-            & $silex compile $snapshotFixture "--$mode" --nocache -o $snapshotBinary
+            & $silex compile --backend native $snapshotFixture "--$mode" --nocache -o $snapshotBinary
             if ($LASTEXITCODE -ne 0) { throw "branch snapshot compilation failed" }
             $snapshotOutput = @(& $snapshotBinary)
             if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -805,7 +805,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx") $loopExitFixture
           foreach ($mode in @("debug", "release")) {
             $loopExitBinary = Join-Path $env:RUNNER_TEMP "loop-exit-residence-$mode.exe"
-            & $silex compile $loopExitFixture "--$mode" --nocache -o $loopExitBinary
+            & $silex compile --backend native $loopExitFixture "--$mode" --nocache -o $loopExitBinary
             if ($LASTEXITCODE -ne 0) { throw "loop exit residence compilation failed" }
             $loopExitOutput = @(& $loopExitBinary)
             if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -816,7 +816,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx") $floatMemoryFixture
           foreach ($mode in @("debug", "release")) {
             $floatMemoryBinary = Join-Path $env:RUNNER_TEMP "float-memory-residence-$mode.exe"
-            & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
+            & $silex compile --backend native $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
             $floatMemoryOutput = @(& $floatMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 22 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -827,7 +827,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx") $floatOperandsFixture
           foreach ($mode in @("debug", "release")) {
             $floatOperandsBinary = Join-Path $env:RUNNER_TEMP "scalar-float-operands-$mode.exe"
-            & $silex compile $floatOperandsFixture "--$mode" --nocache -o $floatOperandsBinary
+            & $silex compile --backend native $floatOperandsFixture "--$mode" --nocache -o $floatOperandsBinary
             if ($LASTEXITCODE -ne 0) { throw "scalar float operands compilation failed" }
             $floatOperandsOutput = @(& $floatOperandsBinary)
             if ($LASTEXITCODE -ne 0 -or $floatOperandsOutput.Count -ne 18 -or @($floatOperandsOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -838,7 +838,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx") $privateLengthFixture
           foreach ($mode in @("debug", "release")) {
             $privateLengthBinary = Join-Path $env:RUNNER_TEMP "private-collection-lengths-$mode.exe"
-            & $silex compile $privateLengthFixture "--$mode" --nocache -o $privateLengthBinary
+            & $silex compile --backend native $privateLengthFixture "--$mode" --nocache -o $privateLengthBinary
             if ($LASTEXITCODE -ne 0) { throw "private collection lengths compilation failed" }
             $privateLengthOutput = @(& $privateLengthBinary)
             if ($LASTEXITCODE -ne 0 -or $privateLengthOutput.Count -ne 10 -or @($privateLengthOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -849,7 +849,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarClassLeaves.sx") $classLeafFixture
           foreach ($mode in @("debug", "release")) {
             $classLeafBinary = Join-Path $env:RUNNER_TEMP "scalar-class-leaves-$mode.exe"
-            & $silex compile $classLeafFixture "--$mode" --nocache -o $classLeafBinary
+            & $silex compile --backend native $classLeafFixture "--$mode" --nocache -o $classLeafBinary
             if ($LASTEXITCODE -ne 0) { throw "scalar class leaves compilation failed" }
             $classLeafOutput = @(& $classLeafBinary)
             if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 18 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -860,7 +860,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx") $integerMemoryFixture
           foreach ($mode in @("debug", "release")) {
             $integerMemoryBinary = Join-Path $env:RUNNER_TEMP "integer-memory-regions-$mode.exe"
-            & $silex compile $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
+            & $silex compile --backend native $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "integer memory regions compilation failed" }
             $integerMemoryOutput = @(& $integerMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 18 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1064,7 +1064,7 @@ jobs:
           # Preserve and inspect independently linked tests if native execution
           # fails before PowerShell can report the full NTSTATUS.
           $PSNativeCommandUseErrorActionPreference = $false
-          & $silex test $portabilitySource --nocache
+          & $silex test --backend native $portabilitySource --nocache
           $testExitCode = $LASTEXITCODE
           if ($testExitCode -ne 0) {
             $debuggersRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/Debuggers"
@@ -1086,8 +1086,8 @@ jobs:
 
           $portabilityDebug = Join-Path $env:RUNNER_TEMP "native-portability-debug.exe"
           $portabilityRelease = Join-Path $env:RUNNER_TEMP "native-portability-release.exe"
-          & $silex compile $portabilitySource --debug --nocache -o $portabilityDebug
-          & $silex compile $portabilitySource --release --nocache -o $portabilityRelease
+          & $silex compile --backend native $portabilitySource --debug --nocache -o $portabilityDebug
+          & $silex compile --backend native $portabilitySource --release --nocache -o $portabilityRelease
           Assert-Arm64Pe $portabilityDebug
           Assert-Arm64Pe $portabilityRelease
           $debugOutput = @(Invoke-NativeCapture $portabilityDebug)
@@ -1098,7 +1098,7 @@ jobs:
             throw "Debug and Release portability outputs differ"
           }
 
-          & $silex test $portabilitySource --nocache
+          & $silex test --backend native $portabilitySource --nocache
 
           $smokeSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx"
           $debugSmoke = @(Invoke-NativeCapture -Path $silex -Arguments @("run", $smokeSource, "--debug", "--nocache"))
@@ -1108,7 +1108,7 @@ jobs:
             throw "distribution run smoke failed"
           }
           $standaloneSmoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
-          & $silex compile $smokeSource --release --nocache -o $standaloneSmoke
+          & $silex compile --backend native $smokeSource --release --nocache -o $standaloneSmoke
           Assert-Arm64Pe $standaloneSmoke
           $standaloneOutput = @(Invoke-NativeCapture $standaloneSmoke)
           if ($standaloneOutput.Count -ne 1 -or $standaloneOutput[0] -ne "silex distribution ready") {
@@ -1117,11 +1117,11 @@ jobs:
 
           $boundaryTest = Join-Path $probeRoot "Tests/Boundary.sx"
           $boundaryMain = Join-Path $probeRoot "Tests/BoundaryMain.sx"
-          & $silex test $boundaryTest --nocache
+          & $silex test --backend native $boundaryTest --nocache
           $boundaryDebug = Join-Path $env:RUNNER_TEMP "boundary-debug.exe"
           $boundaryRelease = Join-Path $env:RUNNER_TEMP "boundary-release.exe"
-          & $silex compile $boundaryMain --debug --nocache -o $boundaryDebug
-          & $silex compile $boundaryMain --release --nocache -o $boundaryRelease
+          & $silex compile --backend native $boundaryMain --debug --nocache -o $boundaryDebug
+          & $silex compile --backend native $boundaryMain --release --nocache -o $boundaryRelease
           Assert-Arm64Pe $boundaryDebug
           Assert-Arm64Pe $boundaryRelease
           $boundaryDebugOutput = @(Invoke-NativeCapture $boundaryDebug)
@@ -1139,7 +1139,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatResidence.sx") $scalarFixture
           foreach ($mode in @("debug", "release")) {
             $scalarBinary = Join-Path $env:RUNNER_TEMP "scalar-float-residence-$mode.exe"
-            & $silex compile $scalarFixture "--$mode" --nocache -o $scalarBinary
+            & $silex compile --backend native $scalarFixture "--$mode" --nocache -o $scalarBinary
             Assert-Arm64Pe $scalarBinary
             $scalarOutput = @(Invoke-NativeCapture $scalarBinary)
             if ($LASTEXITCODE -ne 0 -or $scalarOutput.Count -ne 9 -or @($scalarOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1150,7 +1150,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchComparisons.sx") $branchFixture
           foreach ($mode in @("debug", "release")) {
             $branchBinary = Join-Path $env:RUNNER_TEMP "branch-comparisons-$mode.exe"
-            & $silex compile $branchFixture "--$mode" --nocache -o $branchBinary
+            & $silex compile --backend native $branchFixture "--$mode" --nocache -o $branchBinary
             if ($LASTEXITCODE -ne 0) { throw "branch comparison compilation failed" }
             $branchOutput = @(& $branchBinary)
             if ($LASTEXITCODE -ne 0 -or $branchOutput.Count -ne 1 -or $branchOutput[0] -ne "true") {
@@ -1161,7 +1161,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/BranchSnapshots.sx") $snapshotFixture
           foreach ($mode in @("debug", "release")) {
             $snapshotBinary = Join-Path $env:RUNNER_TEMP "branch-snapshots-$mode.exe"
-            & $silex compile $snapshotFixture "--$mode" --nocache -o $snapshotBinary
+            & $silex compile --backend native $snapshotFixture "--$mode" --nocache -o $snapshotBinary
             if ($LASTEXITCODE -ne 0) { throw "branch snapshot compilation failed" }
             $snapshotOutput = @(& $snapshotBinary)
             if ($LASTEXITCODE -ne 0 -or $snapshotOutput.Count -ne 8 -or @($snapshotOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1172,7 +1172,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/LoopExitResidence.sx") $loopExitFixture
           foreach ($mode in @("debug", "release")) {
             $loopExitBinary = Join-Path $env:RUNNER_TEMP "loop-exit-residence-$mode.exe"
-            & $silex compile $loopExitFixture "--$mode" --nocache -o $loopExitBinary
+            & $silex compile --backend native $loopExitFixture "--$mode" --nocache -o $loopExitBinary
             if ($LASTEXITCODE -ne 0) { throw "loop exit residence compilation failed" }
             $loopExitOutput = @(& $loopExitBinary)
             if ($LASTEXITCODE -ne 0 -or $loopExitOutput.Count -ne 5 -or @($loopExitOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1183,7 +1183,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/FloatMemoryResidence.sx") $floatMemoryFixture
           foreach ($mode in @("debug", "release")) {
             $floatMemoryBinary = Join-Path $env:RUNNER_TEMP "float-memory-residence-$mode.exe"
-            & $silex compile $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
+            & $silex compile --backend native $floatMemoryFixture "--$mode" --nocache -o $floatMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "float memory residence compilation failed" }
             $floatMemoryOutput = @(& $floatMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $floatMemoryOutput.Count -ne 22 -or @($floatMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1194,7 +1194,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarFloatOperands.sx") $floatOperandsFixture
           foreach ($mode in @("debug", "release")) {
             $floatOperandsBinary = Join-Path $env:RUNNER_TEMP "scalar-float-operands-$mode.exe"
-            & $silex compile $floatOperandsFixture "--$mode" --nocache -o $floatOperandsBinary
+            & $silex compile --backend native $floatOperandsFixture "--$mode" --nocache -o $floatOperandsBinary
             if ($LASTEXITCODE -ne 0) { throw "scalar float operands compilation failed" }
             $floatOperandsOutput = @(& $floatOperandsBinary)
             if ($LASTEXITCODE -ne 0 -or $floatOperandsOutput.Count -ne 18 -or @($floatOperandsOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1205,7 +1205,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/PrivateCollectionLengths.sx") $privateLengthFixture
           foreach ($mode in @("debug", "release")) {
             $privateLengthBinary = Join-Path $env:RUNNER_TEMP "private-collection-lengths-$mode.exe"
-            & $silex compile $privateLengthFixture "--$mode" --nocache -o $privateLengthBinary
+            & $silex compile --backend native $privateLengthFixture "--$mode" --nocache -o $privateLengthBinary
             if ($LASTEXITCODE -ne 0) { throw "private collection lengths compilation failed" }
             $privateLengthOutput = @(& $privateLengthBinary)
             if ($LASTEXITCODE -ne 0 -or $privateLengthOutput.Count -ne 10 -or @($privateLengthOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1216,7 +1216,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/ScalarClassLeaves.sx") $classLeafFixture
           foreach ($mode in @("debug", "release")) {
             $classLeafBinary = Join-Path $env:RUNNER_TEMP "scalar-class-leaves-$mode.exe"
-            & $silex compile $classLeafFixture "--$mode" --nocache -o $classLeafBinary
+            & $silex compile --backend native $classLeafFixture "--$mode" --nocache -o $classLeafBinary
             if ($LASTEXITCODE -ne 0) { throw "scalar class leaves compilation failed" }
             $classLeafOutput = @(& $classLeafBinary)
             if ($LASTEXITCODE -ne 0 -or $classLeafOutput.Count -ne 18 -or @($classLeafOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
@@ -1227,7 +1227,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Benchmarks/Optimizer/Regressions/IntegerMemoryRegions.sx") $integerMemoryFixture
           foreach ($mode in @("debug", "release")) {
             $integerMemoryBinary = Join-Path $env:RUNNER_TEMP "integer-memory-regions-$mode.exe"
-            & $silex compile $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
+            & $silex compile --backend native $integerMemoryFixture "--$mode" --nocache -o $integerMemoryBinary
             if ($LASTEXITCODE -ne 0) { throw "integer memory regions compilation failed" }
             $integerMemoryOutput = @(& $integerMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 18 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {

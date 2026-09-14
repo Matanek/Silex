@@ -93,10 +93,22 @@ silex="$SILEX_INSTALL_DIR/silex"
 
 source="$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx"
 compiled="$RUNNER_TEMP/distribution-smoke"
-"$silex" compile "$source" --release -o "$compiled"
+trace="$RUNNER_TEMP/distribution-default-trace.json"
+SILEX_COMPILATION_TRACE="$trace" "$silex" compile "$source" --release -o "$compiled"
+expected_backend=native
+if [ "$target" = "macos-arm64" ]; then
+    expected_backend=llvm
+fi
+grep -Fq "\"backend\": \"$expected_backend\"" "$trace"
 test "$("$compiled")" = "silex distribution ready"
 test "$("$silex" run "$source" --release)" = "silex distribution ready"
 "$silex" test "$source"
+
+native="$RUNNER_TEMP/distribution-smoke-native"
+"$silex" compile "$source" --backend native --release -o "$native"
+test "$("$native")" = "silex distribution ready"
+test "$("$silex" run "$source" --backend native --release)" = "silex distribution ready"
+"$silex" test "$source" --backend native
 
 kill "$server_pid"
 wait "$server_pid" 2>/dev/null || true

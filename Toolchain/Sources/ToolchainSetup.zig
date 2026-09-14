@@ -4,7 +4,10 @@ const TargetModule = @import("Target.zig");
 
 const release = "https://github.com/Matanek/Silex-Toolchain-Assets/releases/download/shadercross-3.0.0-e55cf5e-silex.1/";
 const portability_release = "https://github.com/Matanek/Silex-Toolchain-Assets/releases/download/shadercross-3.0.0-e55cf5e-silex.3/";
+const llvm_release = "https://github.com/Matanek/Silex-Toolchain-Assets/releases/download/llvm-21.1.8-silex.1/";
 const zig_release = "https://ziglang.org/download/0.16.0/";
+
+pub const llvm_version = "21.1.8";
 
 pub fn shadercross(host: TargetModule.Target) Artifacts.ToolSpec {
     if (host.eql(.macos_arm64) or host.eql(.macos_x64)) return .{
@@ -128,6 +131,22 @@ pub fn linker(host: TargetModule.Target) Artifacts.ToolSpec {
     unreachable;
 }
 
+pub fn llvm(host: TargetModule.Target) ?Artifacts.ToolSpec {
+    if (!host.eql(.macos_arm64)) return null;
+    return .{
+        .name = "LLVM",
+        .path = "downloads/LLVM-21.1.8-macos-arm64.tar.gz",
+        .url = llvm_release ++ "LLVM-21.1.8-macos-arm64.tar.gz",
+        .sha256 = "ab010a170718153633c4fcbf302c43eb9c69817db68cd710cf2798fcb7837c8f",
+        .archive = .{
+            .format = .tar_gz,
+            .into = "llvm/21.1.8/macos-arm64",
+            .provides = "bin/opt",
+            .strip_components = 1,
+        },
+    };
+}
+
 pub fn executablePath(
     allocator: std.mem.Allocator,
     toolchain_root: []const u8,
@@ -144,6 +163,15 @@ pub fn linkerExecutablePath(
 ) ![]const u8 {
     const spec = linker(host);
     return std.fs.path.join(allocator, &.{ toolchain_root, spec.archive.into, spec.archive.provides });
+}
+
+pub fn llvmRootPath(
+    allocator: std.mem.Allocator,
+    toolchain_root: []const u8,
+    host: TargetModule.Target,
+) !?[]const u8 {
+    const spec = llvm(host) orelse return null;
+    return try std.fs.path.join(allocator, &.{ toolchain_root, spec.archive.into });
 }
 
 test "Shadercross belongs to the host toolchain" {
@@ -180,4 +208,10 @@ test "Shadercross belongs to the host toolchain" {
     const windows_arm64_linker = linker(.windows_arm64);
     try std.testing.expectEqualStrings("zig/0.16.0/windows-x64", windows_arm64_linker.archive.into);
     try std.testing.expect(std.mem.endsWith(u8, windows_arm64_linker.url, "zig-x86_64-windows-0.16.0.zip"));
+
+    const llvm_macos = llvm(.macos_arm64).?;
+    try std.testing.expectEqualStrings("llvm/21.1.8/macos-arm64", llvm_macos.archive.into);
+    try std.testing.expectEqualStrings("bin/opt", llvm_macos.archive.provides);
+    try std.testing.expect(llvm(.macos_x64) == null);
+    try std.testing.expect(llvm(.linux_arm64) == null);
 }

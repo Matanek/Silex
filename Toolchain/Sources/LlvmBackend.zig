@@ -7,13 +7,14 @@ const Emitter = @import("../Tools/LlvmEvaluation/Emitter.zig");
 const Ir = @import("Ir.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const Packages = @import("Packages.zig");
+const ToolchainSetup = @import("ToolchainSetup.zig");
 const TargetModule = @import("Target.zig");
 const format_runtime = @import("llvm_format_runtime_object");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-pub const version = "21.1.8";
+pub const version = ToolchainSetup.llvm_version;
 
 pub const Tools = struct {
     opt: []const u8,
@@ -38,9 +39,14 @@ pub fn resolveTools(
     init: std.process.Init,
     allocator: Allocator,
 ) !?Tools {
-    const root = init.environ_map.get("SILEX_LLVM_DIR") orelse {
+    const override_root = init.environ_map.get("SILEX_LLVM_DIR");
+    const root = override_root orelse managed_root: {
+        const home = init.environ_map.get("HOME") orelse init.environ_map.get("USERPROFILE") orelse break :managed_root null;
+        const toolchain_root = try std.fs.path.join(allocator, &.{ home, ".silex", "toolchain" });
+        break :managed_root try ToolchainSetup.llvmRootPath(allocator, toolchain_root, .macos_arm64);
+    } orelse {
         std.debug.print(
-            "silex: LLVM backend {s} is not configured; set SILEX_LLVM_DIR to its installation directory\n",
+            "silex: LLVM backend {s} is not configured; run 'silex setup' or set SILEX_LLVM_DIR to its installation directory\n",
             .{version},
         );
         return null;
@@ -52,11 +58,25 @@ pub fn resolveTools(
         .{ .name = "llc", .path = llc },
     }) |tool| {
         const status = Io.Dir.cwd().statFile(init.io, tool.path, .{}) catch {
-            std.debug.print("silex: LLVM backend cannot locate {s} at '{s}'\n", .{ tool.name, tool.path });
+            if (override_root == null) {
+                std.debug.print(
+                    "silex: managed LLVM {s} is incomplete; run 'silex setup' to install {s}\n",
+                    .{ version, tool.name },
+                );
+            } else {
+                std.debug.print("silex: LLVM backend cannot locate {s} at '{s}'\n", .{ tool.name, tool.path });
+            }
             return null;
         };
         if (status.kind != .file) {
-            std.debug.print("silex: LLVM backend expected a file at '{s}'\n", .{tool.path});
+            if (override_root == null) {
+                std.debug.print(
+                    "silex: managed LLVM {s} is incomplete; run 'silex setup' to reinstall {s}\n",
+                    .{ version, tool.name },
+                );
+            } else {
+                std.debug.print("silex: LLVM backend expected a file at '{s}'\n", .{tool.path});
+            }
             return null;
         }
     }

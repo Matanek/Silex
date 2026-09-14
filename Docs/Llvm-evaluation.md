@@ -2,9 +2,9 @@
 
 `silex compile|run|test --backend llvm` is now the integrated candidate path.
 It reuses the compiler's portable IR directly and never calls the Python driver
-described below. The current candidate is still bounded to macOS ARM64 and is
-not the delivered default; distribution and default promotion require their
-separate qualification.
+described below. LLVM is the default backend on the qualified macOS ARM64 host;
+`silex setup` installs its pinned LLVM 21.1.8 tools. Other hosts retain the
+direct native default until their LLVM path has been executed and qualified.
 
 The `llvm-evaluation` Zig build step installs a separate development executable,
 `silex-llvm-evaluation`, and its exact scalar-formatting object,

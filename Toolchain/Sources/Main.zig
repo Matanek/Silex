@@ -65,8 +65,9 @@ const usage =
     \\       silex version
     \\       silex lsp
     \\
-    \\Builds and runs Silex programs with an explicit native or LLVM backend, validates and registers packages, executes
-    \\portable IR through the reference interpreter, or serves editor requests.
+    \\Builds and runs Silex programs with LLVM by default on macOS ARM64 and the native backend elsewhere.
+    \\Use --backend native or --backend llvm to select a backend explicitly. The command also validates and registers
+    \\packages, executes portable IR through the reference interpreter, or serves editor requests.
     \\
 ;
 
@@ -247,12 +248,16 @@ fn setupToolchain(init: std.process.Init, allocator: std.mem.Allocator, args: []
         return 1;
     };
     var installer = Artifacts.Installer.init(allocator, init.gpa, init.io);
-    var tools: [2]Artifacts.ToolSpec = undefined;
+    var tools: [3]Artifacts.ToolSpec = undefined;
     var tool_count: usize = 0;
     tools[tool_count] = ToolchainSetup.shadercross(host);
     tool_count += 1;
     tools[tool_count] = ToolchainSetup.linker(host);
     tool_count += 1;
+    if (ToolchainSetup.llvm(host)) |llvm| {
+        tools[tool_count] = llvm;
+        tool_count += 1;
+    }
     for (tools[0..tool_count]) |tool| {
         const summary = installer.installTool(root, tool) catch |err| switch (err) {
             error.InvalidManifest => {

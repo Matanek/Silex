@@ -397,8 +397,15 @@ pub fn build(b: *std.Build) void {
     );
     optimizer_gate_step.dependOn(&optimizer_gate_command.step);
 
-    const optimizer_oracle_tests = b.addTest(.{ .root_module = optimizer_oracle_module });
+    const optimizer_oracle_tests = b.addTest(.{
+        .root_module = optimizer_oracle_module,
+        .test_runner = .{
+            .path = b.path("OptimizerOracleTestRunner.zig"),
+            .mode = .simple,
+        },
+    });
     const optimizer_oracle_test_command = b.addRunArtifact(optimizer_oracle_tests);
+    optimizer_oracle_test_command.setCwd(b.path(""));
     const optimizer_oracle_test_step = b.step(
         "test-optimizer-oracle",
         "Run optimizer-oracle unit and differential tests",
@@ -474,6 +481,7 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
+    test_command.setCwd(b.path(""));
     const deep_copy_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("Runtime/DeepCopy.zig"),
@@ -497,6 +505,7 @@ pub fn build(b: *std.Build) void {
     language_test_command.setCwd(b.path("../.."));
     language_test_command.addArg("test");
     language_test_command.addDirectoryArg(b.path("../Tests"));
+    language_test_command.addArgs(&.{ "--backend", "native" });
     // Language validation shares the Spec/workspace-root package graph and
     // must not create a second project cache under Silex/Toolchain.
     language_test_command.addArg("--nocache");
@@ -520,13 +529,13 @@ pub fn build(b: *std.Build) void {
         native_math_debug.setCwd(b.path("../.."));
         native_math_debug.addArg("run");
         native_math_debug.addFileArg(b.path("Benchmarks/Native/MathCallResidence.sx"));
-        native_math_debug.addArgs(&.{ "--debug", "--nocache" });
+        native_math_debug.addArgs(&.{ "--backend", "native", "--debug", "--nocache" });
         const native_math_release = b.addRunArtifact(executable);
         native_math_release.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
         native_math_release.setCwd(b.path("../.."));
         native_math_release.addArg("run");
         native_math_release.addFileArg(b.path("Benchmarks/Native/MathCallResidence.sx"));
-        native_math_release.addArgs(&.{ "--release", "--nocache" });
+        native_math_release.addArgs(&.{ "--backend", "native", "--release", "--nocache" });
         native_math_release.step.dependOn(&native_math_debug.step);
         const native_math_step = b.step("test-native-math-calls", "Verify linked ARM64 math calls in Debug and Release");
         native_math_step.dependOn(&native_math_release.step);
@@ -560,6 +569,7 @@ pub fn build(b: *std.Build) void {
 
     const lsp_tests = b.addTest(.{ .root_module = lsp_test_module });
     const lsp_test_command = b.addRunArtifact(lsp_tests);
+    lsp_test_command.setCwd(b.path(""));
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");
     lsp_test_step.dependOn(&lsp_test_command.step);
     const lsp_completion_gate_step = b.step(
