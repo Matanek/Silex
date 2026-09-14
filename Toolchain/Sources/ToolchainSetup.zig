@@ -213,5 +213,8 @@ test "Shadercross belongs to the host toolchain" {
     try std.testing.expectEqualStrings("llvm/21.1.8/macos-arm64", llvm_macos.archive.into);
     try std.testing.expectEqualStrings("bin/opt", llvm_macos.archive.provides);
     try std.testing.expect(llvm(.macos_x64) == null);
+    try std.testing.expect(llvm(.linux_x64) == null);
     try std.testing.expect(llvm(.linux_arm64) == null);
+    try std.testing.expect(llvm(.windows_x64) == null);
+    try std.testing.expect(llvm(.windows_arm64) == null);
 }

@@ -630,8 +630,10 @@ test "run accepts native modes and emit ir but owns its output" {
 test "compile run and test select a backend explicitly and use the qualified host default" {
     try std.testing.expectEqual(Backend.llvm, Backend.defaultFor(.macos_arm64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(.macos_x64));
+    try std.testing.expectEqual(Backend.native, Backend.defaultFor(.linux_x64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(.linux_arm64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(.windows_x64));
+    try std.testing.expectEqual(Backend.native, Backend.defaultFor(.windows_arm64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(null));
     try std.testing.expectEqual(Backend.default(), parseCompile(&.{ "Main.sx", "-o", "App" }).options.backend);
     try std.testing.expectEqual(Backend.llvm, parseCompile(&.{ "--backend", "llvm", "Main.sx", "-o", "App" }).options.backend);
