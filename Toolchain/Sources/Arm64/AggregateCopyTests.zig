@@ -2,6 +2,54 @@ const std = @import("std");
 const Machine = @import("Machine.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
 
+test "aggregate call forwarding preserves a value in an earlier laid out successor" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const caller: Machine.Function = .{
+        .name = "aggregate_successor",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 2, .aggregate = true }},
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &.{
+            .{ .jump = 3 },
+            .{ .binary = .{ .result = 4, .operator = .add, .left = 2, .right = 3, .type = .int } },
+            .{ .return_value = .{ .start = 4, .width = 1 } },
+            .{ .copy_range = .{
+                .result = .{ .start = 2, .width = 2, .aggregate = true },
+                .operand = .{ .start = 0, .width = 2, .aggregate = true },
+            } },
+            .{ .call = .{
+                .result = null,
+                .function = 1,
+                .arguments = &.{.{ .start = 2, .width = 2, .aggregate = true }},
+            } },
+            .{ .jump = 1 },
+        },
+    };
+    const callee: Machine.Function = .{
+        .name = "consume_aggregate",
+        .parameter_count = 1,
+        .parameters = caller.parameters,
+        .return_type = .void,
+        .slot_count = 2,
+        .frame_size = try Machine.frameSize(2),
+        .instructions = &.{.return_void},
+    };
+    const optimized = try @import("AggregateCallForwarding.zig").optimize(allocator, caller);
+    const values = [_]i64{ 40, 2 };
+    for ([_]Machine.Function{ caller, optimized }) |function| {
+        const result = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{ function, callee } }, 0, &.{@intCast(@intFromPtr(&values))});
+        try std.testing.expectEqual(Machine.Status.success, result.status);
+        try std.testing.expectEqual(@as(i64, 42), result.value);
+    }
+}
+
 test "view replacement preserves live volatile registers across paired and trailing copies" {
     const builtin = @import("builtin");
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;

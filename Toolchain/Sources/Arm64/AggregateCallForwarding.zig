@@ -72,8 +72,11 @@ fn remapTarget(removed: []const bool, target: usize) usize {
 
 fn soleDirectCallUse(instructions: []const Machine.Instruction, span: Machine.Span, after: usize) ?usize {
     var found: ?usize = null;
-    for (instructions[after + 1 ..], after + 1..) |instruction, index| {
+    // Block layout is not execution order: a successor can precede the copy.
+    // Every use must participate in the single-consumer proof.
+    for (instructions, 0..) |instruction, index| {
         if (!instructionUsesSpan(instruction, span)) continue;
+        if (index <= after) return null;
         const call = switch (instruction) {
             .call => |value| value,
             else => return null,
@@ -205,4 +208,30 @@ test "remap control flow that targets a removed aggregate copy" {
     try std.testing.expectEqual(@as(usize, 3), result.instructions.len);
     try std.testing.expectEqual(@as(usize, 1), result.instructions[0].branch.then_instruction);
     try std.testing.expectEqual(@as(usize, 2), result.instructions[0].branch.else_instruction);
+}
+
+test "retain an aggregate copy used in an earlier laid out successor" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const instructions = [_]Machine.Instruction{
+        .{ .jump = 3 },
+        .{ .copy_range = .{
+            .result = .{ .start = 5, .width = 2, .aggregate = true },
+            .operand = .{ .start = 2, .width = 2, .aggregate = true },
+        } },
+        .return_void,
+        .{ .copy_range = .{
+            .result = .{ .start = 2, .width = 2, .aggregate = true },
+            .operand = .{ .start = 0, .width = 2, .aggregate = true },
+        } },
+        .{ .call = .{
+            .result = null,
+            .function = 1,
+            .arguments = &.{.{ .start = 2, .width = 2, .aggregate = true }},
+        } },
+        .{ .jump = 1 },
+    };
+    const result = try optimize(arena.allocator(), fixture(&instructions));
+    try std.testing.expectEqual(@as(usize, instructions.len), result.instructions.len);
+    try std.testing.expectEqual(@as(Machine.Slot, 2), result.instructions[4].call.arguments[0].start);
 }
