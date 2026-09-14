@@ -165,6 +165,10 @@ const FunctionEmitter = struct {
                 "  %v{d} = xor i1 false, {s}\n",
                 .{ value.result, if (value.value) "true" else "false" },
             ),
+            .constant_str => |value| try self.write(
+                "  %v{d} = select i1 true, ptr null, ptr null\n",
+                .{value.result},
+            ),
             .constant_float32 => |value| try self.write(
                 "  %v{d} = bitcast i32 {d} to float\n",
                 .{ value.result, value.bits },
@@ -173,6 +177,9 @@ const FunctionEmitter = struct {
                 "  %v{d} = bitcast i64 {d} to double\n",
                 .{ value.result, value.bits },
             ),
+            .optional_null => |value| try self.emitOptionalNull(value),
+            .optional_some => |value| try self.emitOptionalSome(value),
+            .optional_unwrap => |value| try self.emitOptionalUnwrap(value),
             .copy => |value| try self.copyValue(value.result, value.operand),
             .deep_copy => |value| try self.emitDeepCopy(value.result, value.operand),
             .structure_init => |value| try self.emitStructureInit(value),
@@ -202,6 +209,7 @@ const FunctionEmitter = struct {
             .call => |value| try self.emitCall(value),
             .boundary_call => |value| try self.emitBoundaryCall(value),
             .print => |value| try self.emitPrint(value),
+            .assert => |value| try self.emitAssert(block_id, value),
             else => return error.UnsupportedInstruction,
         }
     }
@@ -215,6 +223,59 @@ const FunctionEmitter = struct {
             type_name,
             operand,
         });
+    }
+
+    fn emitOptionalNull(self: *FunctionEmitter, value: Ir.Instruction.OptionalNull) Error!void {
+        const type_value = try self.valueType(value.result);
+        if (type_value.optionalChild() == null) return error.InvalidProgram;
+        try self.write("  %v{d} = insertvalue {s} zeroinitializer, i1 false, 0\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, type_value),
+        });
+    }
+
+    fn emitOptionalSome(self: *FunctionEmitter, value: Ir.Instruction.OptionalSome) Error!void {
+        const type_value = try self.valueType(value.result);
+        const child = type_value.optionalChild() orelse return error.InvalidProgram;
+        if (try self.valueType(value.operand) != child) return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        const type_name = try llvmType(self.allocator, self.program, type_value);
+        try self.write("  %t{d}.optional = insertvalue {s} zeroinitializer, i1 true, 0\n", .{
+            serial,
+            type_name,
+        });
+        try self.write("  %v{d} = insertvalue {s} %t{d}.optional, {s} %v{d}, 1\n", .{
+            value.result,
+            type_name,
+            serial,
+            try llvmType(self.allocator, self.program, child),
+            value.operand,
+        });
+    }
+
+    fn emitOptionalUnwrap(self: *FunctionEmitter, value: Ir.Instruction.OptionalUnwrap) Error!void {
+        const optional_type = try self.valueType(value.operand);
+        const child = optional_type.optionalChild() orelse return error.InvalidProgram;
+        if (try self.valueType(value.result) != child) return error.InvalidProgram;
+        try self.write("  %v{d} = extractvalue {s} %v{d}, 1\n", .{
+            value.result,
+            try llvmType(self.allocator, self.program, optional_type),
+            value.operand,
+        });
+    }
+
+    fn emitAssert(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Assert) Error!void {
+        if (try self.valueType(value.condition) != .bool or
+            try self.valueType(value.message) != .str or
+            value.position.file >= self.program.files.len)
+        {
+            return error.InvalidProgram;
+        }
+        const serial = self.nextTemporary();
+        try self.write("  br i1 %v{d}, label %b{d}.assert.cont{d}, label %trap\n", .{
+            value.condition, block_id, serial,
+        });
+        try self.write("b{d}.assert.cont{d}:\n", .{ block_id, serial });
     }
 
     fn emitDeepCopy(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
@@ -614,6 +675,8 @@ const FunctionEmitter = struct {
 
     fn emitBinary(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Binary) Error!void {
         const left_type = try self.valueType(value.left);
+        if (left_type != try self.valueType(value.right)) return error.InvalidProgram;
+        if (left_type.optionalChild() != null) return self.emitOptionalEquality(value, left_type);
         const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
             .add, .subtract, .multiply => {
@@ -703,6 +766,35 @@ const FunctionEmitter = struct {
                 });
             },
         }
+    }
+
+    fn emitOptionalEquality(
+        self: *FunctionEmitter,
+        value: Ir.Instruction.Binary,
+        optional_type: Ir.Type,
+    ) Error!void {
+        if (value.operator != .equal and value.operator != .not_equal)
+            return error.UnsupportedInstruction;
+        _ = optional_type.optionalChild() orelse return error.InvalidProgram;
+        const serial = self.nextTemporary();
+        const optional_name = try llvmType(self.allocator, self.program, optional_type);
+        if (!self.isOptionalNull(value.left) and !self.isOptionalNull(value.right))
+            return error.UnsupportedType;
+        const operand = if (self.isOptionalNull(value.left)) value.right else value.left;
+        try self.write("  %t{d}.present = extractvalue {s} %v{d}, 0\n", .{ serial, optional_name, operand });
+        try self.write("  %v{d} = xor i1 %t{d}.present, {s}\n", .{
+            value.result,
+            serial,
+            if (value.operator == .equal) "true" else "false",
+        });
+    }
+
+    fn isOptionalNull(self: *FunctionEmitter, value_id: Ir.ValueId) bool {
+        for (self.function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .optional_null => |value| if (value.result == value_id) return true,
+            else => {},
+        };
+        return false;
     }
 
     fn emitFloatMinimumMaximum(
@@ -1042,7 +1134,7 @@ const FunctionEmitter = struct {
                 value,
             }),
             .return_void => try self.output.appendSlice(self.allocator, "  ret void\n"),
-            .panic => return error.UnsupportedInstruction,
+            .panic => try self.output.appendSlice(self.allocator, "  br label %trap\n"),
         }
     }
 
@@ -1106,6 +1198,10 @@ fn plainValue(program: Ir.Program, type_value: Ir.Type, depth: usize) bool {
 }
 
 fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
+    if (type_value.optionalChild()) |child| {
+        if (child == .void) return error.UnsupportedType;
+        return std.fmt.allocPrint(allocator, "{{ i1, {s} }}", .{try llvmType(allocator, program, child)});
+    }
     if (type_value.structureIndex()) |structure_index| {
         if (structure_index >= program.structures.len) return error.InvalidProgram;
         return std.fmt.allocPrint(allocator, "%sx.type.{d}", .{structure_index});
@@ -1119,6 +1215,7 @@ fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Erro
         .int, .uint => "i64",
         .float32 => "float",
         .float64 => "double",
+        .str => "ptr",
         .address => "ptr",
         else => error.UnsupportedType,
     };
@@ -1367,6 +1464,31 @@ test "LLVM aggregate view probes preserve independent observations in both IR mo
             return err;
         };
     }
+}
+
+test "LLVM emitter supports optional aggregate values and cold panic paths" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Silex.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Point { var x:float; var y:float }
+        \\struct Manifold { var normal:Point; var points:int[] }
+        \\func finite(value:float) bool { return value == value && (value == 0.0 || value + value != value) }
+        \\func finite_point(value:Point) bool { return finite(value.x) && finite(value.y) }
+        \\func check(value:Manifold?) {
+        \\    if let manifold = value {
+        \\        if manifold.points.count() < 1 || manifold.points.count() > 2 || !finite_point(manifold.normal) {
+        \\            panic("invalid manifold")
+        \\        }
+        \\    }
+        \\}
+        \\func main() { check(null); check(Manifold(normal:Point(x:1.0, y:0.0), points:[1, 2])); print(42) }
+    );
+    const text = try emit(allocator, compilation.ir);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "insertvalue { i1, %sx.type."));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "extractvalue { i1, %sx.type."));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "br label %trap"));
 }
 
 test "LLVM collection references reject owning storage rather than erase copy-on-write" {
