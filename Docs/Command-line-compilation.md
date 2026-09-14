@@ -48,12 +48,12 @@ executed and qualified there. An explicit selection never falls back to the
 other backend: unsupported targets, missing tools, or unsupported IR fail with
 the selected backend named in the diagnostic.
 
-The LLVM backend is currently bounded to a `macos-arm64` host and requires LLVM
-21.1.8. `silex setup` installs the verified toolchain under the user toolchain
-root; the CLI verifies `opt`, `llc`, their LLVM version and reported host CPU
-before compilation. `SILEX_LLVM_DIR` may override that managed installation for
-compiler development. Building `silex` and using `--backend native` do not load
-or execute LLVM.
+The LLVM backend is currently bounded to a `macos-arm64` host running macOS 14
+or later and requires LLVM 21.1.8. `silex setup` installs the verified toolchain
+under the user toolchain root; the CLI verifies `opt`, `llc`, their LLVM version
+and reported host CPU before compilation. `SILEX_LLVM_DIR` may override that
+managed installation for compiler development. Building `silex` and using
+`--backend native` do not load or execute LLVM.
 
 ## Keep one bounded cache per execution context
 

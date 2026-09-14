@@ -83,9 +83,10 @@ silex setup
 ```
 
 This installs verified, host-specific copies of the required tools under
-`~/.silex/toolchain/`: LLVM 21.1.8 on macOS ARM64, Shadercross, and the private
-Zig linker. They are implementation details of the Silex toolchain, not package
-dependencies. The user does not need system installations of LLVM or Zig.
+`~/.silex/toolchain/`: LLVM 21.1.8 on macOS 14 or later on ARM64,
+Shadercross, and the private Zig linker. They are implementation details of the
+Silex toolchain, not package dependencies. The user does not need system
+installations of LLVM or Zig.
 
 `run` builds a private executable under `.silex/run/`, executes it with the
 current terminal streams and returns its exit code. LLVM is the default backend
