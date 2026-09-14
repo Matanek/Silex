@@ -1,0 +1,19 @@
+use GFX.Application.Resources
+class Item {
+ let id:int
+ init(id:int) { self.id = id }
+ drop { print("item ", self.id) }
+}
+struct Pool {
+ var items:Item[]
+ init() { self.items = [Item(1)] }
+ func append() { self.items.append(Item(2)) }
+}
+func main() {
+ var resources = Resources()
+ resources.insert(Pool())
+ if true { var pool:&Pool = resources.get_mut<Pool>(); pool.append() }
+ print("clear")
+ resources.clear()
+ print("done")
+}

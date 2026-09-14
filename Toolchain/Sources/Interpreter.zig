@@ -533,7 +533,7 @@ fn executeInstruction(
         ),
         .local_address => |address| {
             if (address.local >= locals.len or locals[address.local] == null) return error.InvalidProgram;
-            try store(function, values, address.result, .{ .reference = .{ .optional = &locals[address.local] } });
+            try store(function, values, address.result, .{ .reference = .{ .pointer = .{ .optional = &locals[address.local] } } });
         },
         .reference_load => |reference| {
             const pointer = switch (try load(values, reference.reference)) {
@@ -557,7 +557,7 @@ fn executeInstruction(
                 .reference => |value| value,
                 else => return error.InvalidProgram,
             };
-            const root = switch (pointer) {
+            const root = switch (pointer.pointer) {
                 .optional => |value| value.* orelse return error.InvalidProgram,
                 .value => |value| value.*,
             };
@@ -569,7 +569,7 @@ fn executeInstruction(
             const structure_index = structure.type.structureIndex() orelse return error.InvalidProgram;
             if (!structureSupportsField(program, structure_index, field.structure) or field.field >= structure.fields.len)
                 return error.InvalidProgram;
-            try store(function, values, field.result, .{ .reference = .{ .value = &structure.fields[field.field] } });
+            try store(function, values, field.result, .{ .reference = .{ .pointer = .{ .value = &structure.fields[field.field] }, .ownership = if (root == .class) .edge else pointer.ownership } });
         },
         .reference_optional => |optional| {
             const pointer = switch (try load(values, optional.reference)) {
@@ -581,7 +581,7 @@ fn executeInstruction(
                 .optional => |value| value.value orelse return error.InvalidProgram,
                 else => return error.InvalidProgram,
             };
-            try store(function, values, optional.result, .{ .reference = .{ .value = @constCast(payload) } });
+            try store(function, values, optional.result, .{ .reference = .{ .pointer = .{ .value = @constCast(payload) }, .ownership = pointer.ownership } });
         },
         .convert => |conversion| {
             const operand = try load(values, conversion.operand);
@@ -615,7 +615,11 @@ fn executeInstruction(
         },
         .unary => |unary| {
             const operand = try load(values, unary.operand);
-            const result = try negateValue(operand);
+            const result: Value = switch (unary.operator) {
+                .reference_is_edge => .{ .boolean = operand.reference.ownership == .edge },
+                .reference_address => .{ .reference = .{ .pointer = operand.reference.pointer } },
+                .negate => try negateValue(operand),
+            };
             try store(function, values, unary.result, result);
         },
         .binary => |binary| {
@@ -1050,7 +1054,7 @@ fn executeCollectionReference(
         session.terminated = true;
         return error.RuntimeTerminated;
     };
-    try store(function, values, access.result, .{ .reference = .{ .value = &fields[offset] } });
+    try store(function, values, access.result, .{ .reference = .{ .pointer = .{ .value = &fields[offset] }, .ownership = if (access.reference) |reference| (try load(values, reference)).reference.ownership else access.ownership } });
 }
 
 fn executeCollectionReplace(

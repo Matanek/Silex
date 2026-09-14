@@ -6,6 +6,7 @@ const Optionals = @import("Optionals.zig");
 const Model = @import("Model.zig");
 const Support = @import("Support.zig");
 const Borrowing = @import("Borrowing.zig");
+const StorageOwnership = @import("StorageOwnership.zig");
 const Resources = @import("Resources.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
@@ -70,7 +71,7 @@ pub fn analyzeQualifiedStaticCall(self: anytype, builder: anytype, call: Ast.Exp
 pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver.?;
     var source: Model.TypedValue = undefined;
-    var ownership: Ir.Ownership = .root;
+    var ownership: StorageOwnership.Domain = .root;
     const binding: Model.Binding = switch (receiver_expression.value) {
         .identifier => |name| binding: {
             const existing = findBinding(builder.bindings.items, name) orelse return self.fail(receiver_expression.position, "unknown collection variable");
@@ -141,6 +142,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         },
         else => return null,
     };
+    if (binding.reference) |reference| ownership = try StorageOwnership.reference(self, builder, reference);
     const collection = collectionForType(self.structures, binding.type) orelse return self.fail(receiver_expression.position, "collection mutation requires an array or list");
     if (call.safe or call.named_arguments.len != 0 or call.type_arguments.len != 0) return self.fail(call.name_position, "collection mutations use positional arguments");
     if (collection.view and binding.borrowed_mode != .mutable and binding.parameter_mode != .mutable) {
@@ -155,21 +157,15 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         const replacement = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
         if (Resources.requiresRetain(self, collection.element)) {
             if (!replacement.transferred) {
-                try Resources.retainValueOwned(self, builder, collection.element, replacement.value, ownership);
-            } else if (ownership == .edge) {
-                try Resources.retainValueOwned(self, builder, collection.element, replacement.value, .edge);
-                try Resources.releaseTransferredRoot(self, builder, collection.element, replacement.value);
-            }
+                try StorageOwnership.apply(self, builder, ownership, .retain, collection.element, replacement.value);
+            } else try StorageOwnership.apply(self, builder, ownership, .adopt, collection.element, replacement.value);
         }
         const previous = try self.newValue(builder, collection.element);
         try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = source.value, .index = index.value, .position = call.name_position } });
         const updated = try self.newValue(builder, binding.type);
-        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = source.value, .index = index.value, .replacement = replacement.value, .ownership = ownership, .position = call.name_position } });
+        try StorageOwnership.emit(self, builder, ownership, .{ .collection_replace = .{ .result = updated, .collection = source.value, .index = index.value, .replacement = replacement.value, .ownership = .root, .position = call.name_position } });
         try storeBinding(self, builder, binding, updated);
-        if (ownership == .edge and Resources.requiresRetain(self, collection.element)) {
-            try Resources.retainValue(self, builder, collection.element, previous);
-            try Resources.emitDropOwned(self, builder, collection.element, previous, .edge);
-        }
+        if (Resources.requiresRetain(self, collection.element)) try StorageOwnership.apply(self, builder, ownership, .to_root, collection.element, previous);
         return .{
             .type = collection.element,
             .value = previous,
@@ -186,8 +182,8 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try self.emit(builder, .{ .collection_load = .{ .result = right, .collection = source.value, .index = right_index.value, .position = call.name_position } });
         const first = try self.newValue(builder, binding.type);
         const updated = try self.newValue(builder, binding.type);
-        try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = source.value, .index = left_index.value, .replacement = right, .ownership = ownership, .position = call.name_position } });
-        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = first, .index = right_index.value, .replacement = left, .ownership = ownership, .position = call.name_position } });
+        try StorageOwnership.emit(self, builder, ownership, .{ .collection_replace = .{ .result = first, .collection = source.value, .index = left_index.value, .replacement = right, .ownership = .root, .position = call.name_position } });
+        try StorageOwnership.emit(self, builder, ownership, .{ .collection_replace = .{ .result = updated, .collection = first, .index = right_index.value, .replacement = left, .ownership = .root, .position = call.name_position } });
         try storeBinding(self, builder, binding, updated);
         return null;
     }
@@ -204,8 +200,8 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             try self.emit(builder, .{ .collection_load = .{ .result = right, .collection = updated, .index = right_constant, .position = call.name_position } });
             const first = try self.newValue(builder, binding.type);
             const next = try self.newValue(builder, binding.type);
-            try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = updated, .index = left_constant, .replacement = right, .ownership = ownership, .position = call.name_position } });
-            try self.emit(builder, .{ .collection_replace = .{ .result = next, .collection = first, .index = right_constant, .replacement = left, .ownership = ownership, .position = call.name_position } });
+            try StorageOwnership.emit(self, builder, ownership, .{ .collection_replace = .{ .result = first, .collection = updated, .index = left_constant, .replacement = right, .ownership = .root, .position = call.name_position } });
+            try StorageOwnership.emit(self, builder, ownership, .{ .collection_replace = .{ .result = next, .collection = first, .index = right_constant, .replacement = left, .ownership = .root, .position = call.name_position } });
             updated = next;
         }
         try storeBinding(self, builder, binding, updated);
@@ -226,7 +222,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
     } else if (std.mem.eql(u8, call.name, "clear")) {
         try requireArity(self, call, 0);
         if (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type)) {
-            try Resources.emitCollectionElementsDropOwned(self, builder, binding.type, source.value, ownership);
+            try StorageOwnership.apply(self, builder, ownership, .drop_elements, binding.type, source.value);
         }
         kind = .clear;
     } else if (std.mem.eql(u8, call.name, "append")) {
@@ -284,34 +280,25 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         if (kind == .append_sequence) {
             if (Resources.requiresRetain(self, collection.element)) {
                 if (!argument_transferred) {
-                    try Resources.emitCollectionElementsRetainOwned(self, builder, argument_type.?, value, ownership);
-                } else if (ownership == .edge) {
-                    try Resources.emitCollectionElementsRetainOwned(self, builder, argument_type.?, value, .edge);
-                    try Resources.releaseCollectionElementsTransferredRoot(self, builder, argument_type.?, value);
-                }
+                    try StorageOwnership.apply(self, builder, ownership, .retain_elements, argument_type.?, value);
+                } else try StorageOwnership.apply(self, builder, ownership, .adopt_elements, argument_type.?, value);
             }
         } else if (Resources.requiresRetain(self, argument_type.?)) {
             if (!argument_transferred) {
-                try Resources.retainValueOwned(self, builder, argument_type.?, value, ownership);
-            } else if (ownership == .edge) {
-                try Resources.retainValueOwned(self, builder, argument_type.?, value, .edge);
-                try Resources.releaseTransferredRoot(self, builder, argument_type.?, value);
-            }
+                try StorageOwnership.apply(self, builder, ownership, .retain, argument_type.?, value);
+            } else try StorageOwnership.apply(self, builder, ownership, .adopt, argument_type.?, value);
         }
     }
     const updated = try self.newValue(builder, binding.type);
-    try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .ownership = ownership, .kind = kind, .index = index, .argument = argument, .argument_transferred = argument_transferred, .removed = removed, .position = call.name_position } });
+    try StorageOwnership.emit(self, builder, ownership, .{ .list_edit = .{ .result = updated, .collection = source.value, .ownership = .root, .kind = kind, .index = index, .argument = argument, .argument_transferred = argument_transferred, .removed = removed, .position = call.name_position } });
     try storeBinding(self, builder, binding, updated);
-    if (kind != .append and kind != .clear) try self.emit(builder, .{ .list_drop = .{
+    if (kind != .append and kind != .clear) try StorageOwnership.emit(self, builder, ownership, .{ .list_drop = .{
         .operand = source.value,
-        .ownership = ownership,
+        .ownership = .root,
         .deallocate = true,
     } });
     if (removed) |value| {
-        if (ownership == .edge and Resources.requiresRetain(self, return_type)) {
-            try Resources.retainValue(self, builder, return_type, value);
-            try Resources.emitDropOwned(self, builder, return_type, value, .edge);
-        }
+        if (Resources.requiresRetain(self, return_type)) try StorageOwnership.apply(self, builder, ownership, .to_root, return_type, value);
         return .{ .type = return_type, .value = value, .transferred = Resources.ownsValue(self, return_type) };
     }
     return null;

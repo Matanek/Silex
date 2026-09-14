@@ -8,6 +8,7 @@ const Enums = @import("Enums.zig");
 const Collections = @import("Collections.zig");
 const Moves = @import("Moves.zig");
 const Borrowing = @import("Borrowing.zig");
+const StorageOwnership = @import("StorageOwnership.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
@@ -22,7 +23,7 @@ const PathStep = union(enum) {
         base: Ir.ValueId,
         type: Ast.Type,
         index: Ir.ValueId,
-        ownership: Ir.Ownership,
+        ownership: StorageOwnership.Domain,
         position: @import("../Source.zig").Position,
     },
     optional: struct { base: Ir.ValueId, type: Ast.Type },
@@ -104,13 +105,14 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         };
         const current = if (assignment.operator == .assign) null else try loadBinding(self, builder, binding);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
-        if (Resources.requiresRetain(self, binding.type) and !replacement.transferred) {
-            try Resources.retainValue(self, builder, binding.type, replacement.value);
+        const domain: StorageOwnership.Domain = if (Resources.requiresRetain(self, binding.type)) if (binding.reference) |reference| try StorageOwnership.reference(self, builder, reference) else .root else .root;
+        if (Resources.requiresRetain(self, binding.type)) {
+            try StorageOwnership.apply(self, builder, domain, if (replacement.transferred) .adopt else .retain, binding.type, replacement.value);
         }
-        if (binding.available and (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type))) {
-            try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
-        }
+        const previous = if (binding.available and (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type))) try loadBinding(self, builder, binding) else null;
+        if (domain == .root) if (previous) |value| try Resources.emitDrop(self, builder, binding.type, value);
         try storeBinding(self, builder, binding, replacement.value);
+        if (domain != .root) if (previous) |value| try StorageOwnership.apply(self, builder, domain, .drop, binding.type, value);
         builder.bindings.items[binding_index].available = true;
         builder.bindings.items[binding_index].lexical_captures = replacement.lexical_captures;
         builder.bindings.items[binding_index].lexical_borrows = replacement.lexical_borrows;
@@ -123,7 +125,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     var current_type = binding.type;
     var current_value = root;
     var mutable_path = binding.mutable;
-    var storage_ownership: Ir.Ownership = .root;
+    var storage_ownership: StorageOwnership.Domain = if (Resources.requiresRetain(self, binding.type)) if (binding.reference) |reference| try StorageOwnership.reference(self, builder, reference) else .root else .root;
     var safe_merge: ?Ir.BlockId = null;
     for (target.fields) |target_field| {
         if (target_field.safe) try enterSafeAssignmentPath(
@@ -216,14 +218,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     // mutation when the target field is stored.
     try refreshPathBases(self, builder, binding, steps.items);
     if (Resources.requiresRetain(self, current_type)) {
-        if (storage_ownership == .edge) {
-            try Resources.retainValueOwned(self, builder, current_type, analyzed_replacement.value, .edge);
-            if (analyzed_replacement.transferred) {
-                try Resources.releaseTransferredRoot(self, builder, current_type, analyzed_replacement.value);
-            }
-        } else if (!analyzed_replacement.transferred) {
-            try Resources.retainValueOwned(self, builder, current_type, analyzed_replacement.value, .root);
-        }
+        try StorageOwnership.apply(self, builder, storage_ownership, if (analyzed_replacement.transferred) .adopt else .retain, current_type, analyzed_replacement.value);
     }
     const drops_replaced_value = Resources.needsDrop(self, current_type) or Resources.containsClass(self, current_type);
     if (drops_replaced_value and storage_ownership == .root) {
@@ -311,12 +306,12 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                     else => {},
                 };
                 const result = try self.newValue(builder, step.type);
-                try self.emit(builder, .{ .collection_replace = .{
+                try StorageOwnership.emit(self, builder, step.ownership, .{ .collection_replace = .{
                     .result = result,
                     .collection = step.base,
                     .index = step.index,
                     .replacement = replacement,
-                    .ownership = step.ownership,
+                    .ownership = .root,
                     .position = step.position,
                 } });
                 replacement = result;
@@ -338,6 +333,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     }
     if (binding.local != null or binding.reference != null) {
         try storeBinding(self, builder, binding, replacement);
+        if (storage_ownership == .dynamic and drops_replaced_value) try StorageOwnership.apply(self, builder, storage_ownership, .drop, current_type, current_value);
     }
     if (safe_merge) |merge| {
         self.terminate(builder, .{ .jump = merge });
@@ -345,7 +341,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     }
 }
 
-fn updateStorageOwnership(self: anytype, steps: []const PathStep, ownership: *Ir.Ownership) void {
+fn updateStorageOwnership(self: anytype, steps: []const PathStep, ownership: *StorageOwnership.Domain) void {
     if (steps.len == 0) return;
     switch (steps[steps.len - 1]) {
         .field => |step| if (self.structures[step.structure].is_class) {

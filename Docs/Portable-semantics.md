@@ -159,3 +159,30 @@ additional value `drop` hooks; class finalizers run when their last reachable
 owner disappears. Positional, named, optional and protocol calls use the same
 write-back rule. Explicit mutable-reference calls retain their separate location
 semantics.
+
+## Ownership carried by mutable references
+
+An internal mutable reference identifies both a storage address and the
+ownership domain of that place. Class-field projections select an edge;
+structure, optional and array-element projections preserve the enclosing
+domain. Calls, returns and captured mutable receivers preserve that metadata.
+`reference.is_edge` lets semantic lowering select the existing root or edge
+retain/drop operations without exposing a new source type or reference ABI.
+
+A mutating value receiver reached through a reference holds a temporary root
+until write-back. Write-back reloads the current destination after the call,
+so a reentrant replacement is released in its actual domain. Whole-value
+assignment and collection edits also use the referenced place's domain.
+
+Compiler-generated typed resource slots are deliberately root owners although
+they reside in a class. Their references explicitly remove the edge domain;
+the resource registry's bookkeeping collection remains a class-owned edge.
+Physical containment alone therefore does not establish ownership.
+
+The current ARM64, X64 and evaluation LLVM encoders use bit 63 of an internal
+reference word for the edge flag and clear it before dereferencing. This
+private representation assumes user-space addresses below bit 63. Conversion
+through `C.mutable_pointer` clears the flag before exposing an ordinary C
+address. `reference.address` expresses that normalization in portable IR;
+the interpreter keeps the same domain explicitly beside its reference value.
+These details are not a public serialization or foreign-call ABI.

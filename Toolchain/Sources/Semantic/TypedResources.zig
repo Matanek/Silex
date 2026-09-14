@@ -379,7 +379,11 @@ fn loadField(self: anytype, builder: anytype, structure: usize, field: usize, ty
 fn fieldReference(self: anytype, builder: anytype, structure: usize, field: usize, receiver: Ir.ValueId) !Ir.ValueId {
     const result = try self.newValue(builder, .address);
     try self.emit(builder, .{ .reference_field = .{ .result = result, .reference = receiver, .structure = structure, .field = field } });
-    return result;
+    // Resource slots own roots (insert/clear transfer and release roots), even
+    // though their physical storage lives inside the Resources class.
+    const root_reference = try self.newValue(builder, .address);
+    try self.emit(builder, .{ .unary = .{ .result = root_reference, .operator = .reference_address, .operand = result } });
+    return root_reference;
 }
 
 fn presence(self: anytype, builder: anytype, slot_type: Ast.Type, slot: Ir.ValueId) !Ir.ValueId {

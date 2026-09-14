@@ -1,0 +1,22 @@
+class Item {
+ let id:int
+ init(id:int) { self.id = id }
+ drop { print("item ", self.id) }
+}
+struct Values {
+ var items:Item[]
+ init(id:int) { self.items = [Item(id)] }
+ func edit(owner:Owner) {
+  owner.reset()
+  self.items.clear()
+  print("body")
+ }
+}
+class Owner {
+ var values:Values
+ init() { self.values = Values(1) }
+ func reset() { self.values = Values(2) }
+}
+func main() { var owner = Owner(); forward(owner.values, owner); print("done") }
+
+func forward(values:&Values, owner:Owner) { values.edit(owner) }

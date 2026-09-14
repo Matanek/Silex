@@ -20,7 +20,12 @@ def verify_counts(output, corpus, call):
                                             emitted, count=1, flags=re.M | re.S)
             assert replacements == 1
             (folder / "raw.ll").write_text(source + "\n" + fixture)
-            for stage in metadata["stages"][1:]:
+            # A cache hit reports composition only. Reuse the original build
+            # commands from the sealed artifact manifest for this runtime probe.
+            stages = metadata["stages"]
+            if metadata["cache_hit"]:
+                stages = json.loads((Path(metadata["artifact_directory"]) / "manifest.json").read_text())["stages"]
+            for stage in stages[1:]:
                 argv = [str(folder / Path(arg).name) if "/staging-" in arg else arg
                         for arg in stage["argv"]]
                 result = call(label + "-" + stage["stage"], argv)

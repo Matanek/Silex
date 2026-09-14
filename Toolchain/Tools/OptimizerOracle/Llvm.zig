@@ -583,7 +583,18 @@ const FunctionEmitter = struct {
 
     fn emitNegate(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Unary) Error!void {
         const type_value = try self.valueType(value.operand);
-        if (value.operator != .negate) return error.UnsupportedInstruction;
+        if (value.operator == .reference_is_edge or value.operator == .reference_address) {
+            if (type_value != .address) return error.InvalidProgram;
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.reference.bits = ptrtoint ptr %v{d} to i64\n", .{ serial, value.operand });
+            if (value.operator == .reference_is_edge) {
+                try self.write("  %v{d} = icmp slt i64 %t{d}.reference.bits, 0\n", .{ value.result, serial });
+            } else {
+                try self.write("  %t{d}.reference.address = and i64 %t{d}.reference.bits, 9223372036854775807\n", .{ serial, serial });
+                try self.write("  %v{d} = inttoptr i64 %t{d}.reference.address to ptr\n", .{ value.result, serial });
+            }
+            return;
+        }
         if (type_value.isFloat()) return self.write("  %v{d} = fneg {s} %v{d}\n", .{
             value.result,
             try llvmType(self.allocator, self.program, type_value),

@@ -524,6 +524,7 @@ pub fn emitView(
     }
     if (value.reference) |reference| {
         try words.append(allocator, A64.loadStack(.x10, reference));
+        try words.append(allocator, A64.referenceAddress(.x10, .x10));
         if (value.source_view) {
             try words.append(allocator, A64.load64(.x13, .x10, 8));
             try words.append(allocator, A64.load64(.x10, .x10, 0));
@@ -573,8 +574,33 @@ fn detachDynamicRoot(
     element_stride: u12,
     ownership: Ir.Ownership,
 ) Error!void {
+    _ = ownership;
+    try words.append(allocator, A64.loadStack(.x10, reference));
+    try words.append(allocator, A64.compareRegisters(.x10, .zero_or_sp));
+    const edge = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.minus));
+    try detachDynamicOwned(allocator, words, epilogue, sites, platform, reference, element_width, element_stride, .root);
+    const done = words.items.len;
+    try words.append(allocator, A64.branch());
+    try Fixups.patch19(words.items, edge, words.items.len);
+    try detachDynamicOwned(allocator, words, epilogue, sites, platform, reference, element_width, element_stride, .edge);
+    try Fixups.patch26(words.items, done, words.items.len);
+}
+
+fn detachDynamicOwned(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
+    reference: Machine.Slot,
+    element_width: u12,
+    element_stride: u12,
+    ownership: Ir.Ownership,
+) Error!void {
     const restart = words.items.len;
     try words.append(allocator, A64.loadStack(.x10, reference));
+    try words.append(allocator, A64.referenceAddress(.x10, .x10));
     try words.append(allocator, A64.load64(.x14, .x10, 0));
     try words.append(allocator, A64.load64(.x13, .x14, 0));
     try words.append(allocator, A64.load64(.x11, .x14, root_count_offset));
@@ -1332,6 +1358,14 @@ pub fn emitReference(
     try immediate(allocator, words, .x11, elementStride(value.element_width, value.element_stride));
     try words.append(allocator, A64.multiply(.x9, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
+    if (value.reference) |reference| {
+        try words.append(allocator, A64.loadStack(.x11, reference));
+        try words.append(allocator, A64.compareRegisters(.x11, .zero_or_sp));
+        const root = words.items.len;
+        try words.append(allocator, A64.conditionalBranch(.plus));
+        try words.append(allocator, A64.referenceEdge(.x10, .x10));
+        try Fixups.patch19(words.items, root, words.items.len);
+    } else if (value.ownership == .edge) try words.append(allocator, A64.referenceEdge(.x10, .x10));
     try words.append(allocator, A64.storeStack(.x10, value.result));
     if (bounds == null) return;
     const complete = words.items.len;
@@ -1553,6 +1587,7 @@ fn boundsDynamic(allocator: Allocator, words: *std.ArrayList(u32), collection: M
 
 fn boundsDynamicReference(allocator: Allocator, words: *std.ArrayList(u32), reference: Machine.Slot, index: Machine.Slot) Error!Bounds {
     try words.append(allocator, A64.loadStack(.x10, reference));
+    try words.append(allocator, A64.referenceAddress(.x10, .x10));
     try words.append(allocator, A64.load64(.x10, .x10, 0));
     try words.append(allocator, A64.load64(.x13, .x10, 0));
     return boundsWithLoadedCollection(allocator, words, index);

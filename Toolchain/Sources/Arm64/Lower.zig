@@ -942,6 +942,8 @@ fn lowerInstruction(
             .result = layout.values[unary.result].start,
             .operator = switch (unary.operator) {
                 .negate => .negate,
+                .reference_is_edge => .reference_is_edge,
+                .reference_address => .reference_address,
             },
             .operand = layout.values[unary.operand].start,
             .type = function.value_types[unary.result],

@@ -2,6 +2,8 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Callbacks = @import("Callbacks.zig");
+const Resources = @import("Resources.zig");
+const StorageOwnership = @import("StorageOwnership.zig");
 const Model = @import("Model.zig");
 const Inheritance = @import("Inheritance.zig");
 
@@ -27,6 +29,8 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
 
     const receiver = if (bound.owns_receiver) 0 else try self.newValue(&builder, receiver_type);
     if (!bound.owns_receiver) try self.emit(&builder, .{ .reference_load = .{ .result = receiver, .reference = 0 } });
+    const preserve_receiver = mutating and !self.structures[bound.owner].is_class and Resources.requiresRetain(self, receiver_type);
+    if (preserve_receiver) try Resources.retainValue(self, &builder, receiver_type, receiver);
     var arguments: std.ArrayList(Ir.ValueId) = .empty;
     try arguments.append(self.allocator, receiver);
     for (parameter_types, 0..) |_, index| try arguments.append(self.allocator, index + 1);
@@ -55,23 +59,23 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
     if (!mutating) {
         if (call_result) |result| self.terminate(&builder, .{ .return_value = result }) else self.terminate(&builder, .return_void);
     } else if (method.return_type == .void) {
-        if (!bound.owns_receiver) try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = call_result.? } });
+        if (preserve_receiver) try StorageOwnership.replaceReference(self, &builder, 0, receiver_type, call_result.?) else if (!bound.owns_receiver) try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = call_result.? } });
         self.terminate(&builder, .return_void);
     } else {
         if (!bound.owns_receiver) {
             const updated = try self.newValue(&builder, receiver_type);
             try self.emit(&builder, .{ .field_load = .{ .result = updated, .base = call_result.?, .field = 0 } });
-            try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = updated } });
+            if (preserve_receiver) try StorageOwnership.replaceReference(self, &builder, 0, receiver_type, updated) else try self.emit(&builder, .{ .reference_store = .{ .reference = 0, .operand = updated } });
         }
         const value = try self.newValue(&builder, method.return_type);
         try self.emit(&builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
         self.terminate(&builder, .{ .return_value = value });
     }
 
-    const blocks = try self.allocator.alloc(Ir.Block, 1);
-    blocks[0] = .{
-        .instructions = try builder.blocks.items[0].instructions.toOwnedSlice(self.allocator),
-        .terminator = builder.blocks.items[0].terminator orelse return error.InvalidSource,
+    const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
+    for (builder.blocks.items, 0..) |*block, index| blocks[index] = .{
+        .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .terminator = block.terminator orelse return error.InvalidSource,
     };
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#bound{d}", .{ self.program.structures[bound.owner].name, method.name, self.bound_methods.items.len }),

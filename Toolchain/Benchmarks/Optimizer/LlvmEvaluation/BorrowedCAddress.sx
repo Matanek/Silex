@@ -1,0 +1,9 @@
+use Interop.C
+class Owner { var value:uint; init() { self.value = 0 } }
+func write(value:&uint) {
+ let bits = C.address_bits(C.mutable_pointer(value))
+ assert(bits >> 63 == 0)
+ C.store<uint>(C.mutable_pointer(value), 0 as uint, 42 as uint)
+ print(C.load<uint>(bits, 0 as uint))
+}
+func main() { var owner = Owner(); write(owner.value); print(owner.value) }

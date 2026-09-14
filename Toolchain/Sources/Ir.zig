@@ -16,10 +16,14 @@ pub const Ownership = enum { root, edge };
 
 pub const UnaryOperator = enum {
     negate,
+    reference_is_edge,
+    reference_address,
 
     fn name(self: UnaryOperator) []const u8 {
         return switch (self) {
             .negate => "neg",
+            .reference_is_edge => "reference.is_edge",
+            .reference_address => "reference.address",
         };
     }
 };

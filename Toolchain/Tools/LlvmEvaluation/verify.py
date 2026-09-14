@@ -43,7 +43,7 @@ def main():
     def llvm_command(path, mode, binary, silex_prefix="none"):
         # Exercise the full Silex prefix on merged raw operands and mutable
         # collection views used by the Boids and Physics consumers.
-        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "ListGrowth", "ProtocolTemporaryOwnership", "NestedReceiver", "ReceiverAliasing", "ReceiverForms", "ReceiverReentry"]:
+        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "ListGrowth", "ProtocolTemporaryOwnership", "NestedReceiver", "ReceiverAliasing", "ReceiverForms", "ReceiverReentry", "BorrowedReceiver", "BorrowedAliasing", "BorrowedReentry", "BorrowedAssignment", "BorrowedElement", "BorrowedList", "BorrowedCallback", "BorrowedReturn", "BorrowedCAddress", "BorrowedView", "BorrowedResource"] or "BorrowedResource" in path.parts:
             silex_prefix = "branch_snapshot_sinking"
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
@@ -53,6 +53,19 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/BorrowedView.sx": "42\n2\n",
+        "LlvmEvaluation/BorrowedResource/GFX/Smokes/Main.sx": "clear\nitem 2\nitem 1\ndone\n",
+        "LlvmEvaluation/BorrowedCallback.sx": "done\nitem 2\nitem 2\n",
+        "LlvmEvaluation/BorrowedReturn.sx": "done\nitem 2\n",
+        "LlvmEvaluation/BorrowedCAddress.sx": "42\n42\n",
+
+        "LlvmEvaluation/BorrowedReceiver.sx": "1\n0\n",
+        "LlvmEvaluation/BorrowedAliasing.sx": "1 1\n1 1\n2 99\n",
+        "LlvmEvaluation/BorrowedReentry.sx": "item 1\nbody\nitem 2\ndone\n",
+        "LlvmEvaluation/BorrowedAssignment.sx": "item 1\nset\nitem 2\n",
+        "LlvmEvaluation/BorrowedElement.sx": "done\nitem 2\n",
+        "LlvmEvaluation/BorrowedList.sx": "item 1\nchanged 2\nitem 2\nitem 3\ndone\n",
+
         "LlvmEvaluation/ReceiverReentry.sx": "item 1\nbody\nitem 2\ndone\n",
         "LlvmEvaluation/ReceiverForms.sx": "done\nitem 3\nitem 3\n",
         "LlvmEvaluation/ReceiverAliasing.sx": "1 1\n1 1\n2 99\n",
@@ -754,10 +767,13 @@ def main():
         "call fastcc void @sx_retain(ptr %t",
         "i64 -16)",
         "call fastcc void @sx_drop(ptr %t",
-        ".old.data, i64 -16)",
+        ".owner.edge = icmp slt i64",
+        ".owner.offset = select i1",
+        "i64 -16, i64 -24",
         ".data = phi ptr",
     ]:
         assert fragment in class_collection_reference_llvm, fragment
+    assert re.search(r"call fastcc void @sx_drop\(ptr %t(\d+)\.old\.data, i64 %t\1\.owner\.offset\)", class_collection_reference_llvm)
     print("COPY-ON-WRITE EDGE COLLECTION REFERENCE PASS", flush=True)
 
     take_last_metadata = json.loads(Path(str(output/"TakeLastEdge-O0")+".json").read_text())
@@ -835,10 +851,13 @@ def main():
         "collection.detach",
         ".storage = call fastcc ptr @sx_alloc",
         "call void @llvm.memcpy.p0.p0.i64",
-        ".old.data, i64 -24)",
+        ".owner.edge = icmp slt i64",
+        ".owner.offset = select i1",
+        "i64 -16, i64 -24",
         "getelementptr ptr, ptr",
     ]:
         assert fragment in mutable_rich_llvm, fragment
+    assert re.search(r"call fastcc void @sx_drop\(ptr %t(\d+)\.old\.data, i64 %t\1\.owner\.offset\)", mutable_rich_llvm)
     print("MUTABLE RICH OWNING COLLECTION REFERENCE PASS", flush=True)
 
     class_identity_metadata = json.loads(Path(str(output/"ClassIdentityEquality-O0")+".json").read_text())

@@ -1298,7 +1298,9 @@ fn encodeFunction(
             },
             .reference_indirect_offset => |offset| {
                 try loadValue(allocator, words, function, .x9, offset.reference);
+                try words.append(allocator, A64.referenceAddress(.x9, .x9));
                 try words.append(allocator, load64(.x9, .x9, 0));
+                try words.append(allocator, A64.referenceEdge(.x9, .x9));
                 if (offset.byte_offset <= std.math.maxInt(u12)) {
                     try words.append(allocator, addSubtractImmediate(.x9, .x9, @intCast(offset.byte_offset), true));
                 } else {
@@ -1690,6 +1692,12 @@ fn encodeFunction(
                 conversion,
             ),
             .unary => |unary| {
+                if (unary.operator == .reference_is_edge or unary.operator == .reference_address) {
+                    try loadCachedValue(allocator, words, function, &scalar_cache, .x9, unary.operand);
+                    try words.append(allocator, if (unary.operator == .reference_is_edge) A64.logicalShiftRightImmediate(.x11, .x9, 63) else A64.referenceAddress(.x11, .x9));
+                    try storeCachedValue(allocator, words, function, &scalar_cache, .x11, unary.result);
+                    continue;
+                }
                 if (unary.type.isFloat()) {
                     if (negationFeedsNextMultiply(function, instruction_index, unary)) continue;
                     const double = unary.type == .float64;
@@ -2738,8 +2746,10 @@ fn emitOffsetReferenceCopy(
     scalar_type: ?Ir.Type,
     load_reference: bool,
 ) Allocator.Error!void {
-    const base = valueResultRegister(function, reference) orelse .x9;
-    if (base == .x9) try words.append(allocator, loadStack(.x9, reference));
+    const source = valueResultRegister(function, reference) orelse .x9;
+    if (source == .x9) try words.append(allocator, loadStack(.x9, reference));
+    const base: Register = .x9;
+    try words.append(allocator, A64.referenceAddress(base, source));
     for (0..span.width) |index| {
         const offset = @as(usize, byte_offset) + index * Machine.slot_size;
         const slot: Machine.Slot = @intCast(@as(usize, span.start) + index);

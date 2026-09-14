@@ -147,6 +147,10 @@ pub fn verifyInstructionType(program: Ir.Program, function: Ir.Function, instruc
         },
         inline .string_retain, .string_drop => |value| if (types[value.operand] == .str) {} else return error.InvalidProgram,
         .unary => |value| {
+            if (value.operator == .reference_is_edge or value.operator == .reference_address) {
+                if (types[value.operand] != .address or types[value.result] != (if (value.operator == .reference_is_edge) @as(Ir.Type, .bool) else .address)) return error.InvalidProgram;
+                return;
+            }
             if (!types[value.operand].isNumeric() or types[value.result] != types[value.operand])
                 return error.InvalidProgram;
         },

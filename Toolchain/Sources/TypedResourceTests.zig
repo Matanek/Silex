@@ -1241,3 +1241,42 @@ test "injected systems reject invalid signatures and mutable conflicts" {
         try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, case.expected) != null);
     }
 }
+
+test "mutable typed resource slots preserve root ownership through value receivers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application.Resources
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\struct Pool {
+        \\ var items:Item[]
+        \\ init() { self.items = [Item(1)] }
+        \\ func append() { self.items.append(Item(2)) }
+        \\}
+        \\func main() {
+        \\ var resources = Resources()
+        \\ resources.insert(Pool())
+        \\ if true { var pool:&Pool = resources.get_mut<Pool>(); pool.append() }
+        \\ print("clear")
+        \\ resources.clear()
+        \\ print("done")
+        \\}
+        ,
+    });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("clear\nitem 2\nitem 1\ndone\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}

@@ -36,6 +36,16 @@ pub const Register = enum(u5) {
     zero_or_sp = 31,
 };
 
+pub fn referenceAddress(destination: Register, source: Register) u32 {
+    // UBFM Xd, Xn, #0, #62: retain the user-space address bits.
+    return 0xd340f800 | (registerBits(source) << 5) | registerBits(destination);
+}
+
+pub fn referenceEdge(destination: Register, source: Register) u32 {
+    // ORR Xd, Xn, #0x8000000000000000.
+    return 0xb2410000 | (registerBits(source) << 5) | registerBits(destination);
+}
+
 pub fn registerBits(register: Register) u32 {
     return @intFromEnum(register);
 }

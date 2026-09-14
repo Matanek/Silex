@@ -11,7 +11,12 @@ pub fn detach(
     reference: Ir.ValueId,
     ownership: Ir.Ownership,
 ) error{OutOfMemory}!void {
-    try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });
+    _ = ownership;
+    const pointer = try self.referencePointer(reference);
+    try self.write("  %t{d}.owner.bits = ptrtoint ptr %v{d} to i64\n", .{ serial, reference });
+    try self.write("  %t{d}.owner.edge = icmp slt i64 %t{d}.owner.bits, 0\n", .{ serial, serial });
+    try self.write("  %t{d}.owner.offset = select i1 %t{d}.owner.edge, i64 -16, i64 -24\n", .{ serial, serial });
+    try self.write("  %t{d}.source = load {s}, ptr {s}\n", .{ serial, type_name, pointer });
     try self.write("  %t{d}.old.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, type_name, serial });
     try self.write("  %t{d}.count = extractvalue {s} %t{d}.source, 1\n", .{ serial, type_name, serial });
     try self.write("  %t{d}.roots.address = getelementptr i8, ptr %t{d}.old.data, i64 -24\n", .{ serial, serial });
@@ -25,17 +30,12 @@ pub fn detach(
     try self.write("  %t{d}.storage.end = getelementptr {s}, ptr null, i64 %t{d}.count\n", .{ serial, element_name, serial });
     try self.write("  %t{d}.bytes = ptrtoint ptr %t{d}.storage.end to i64\n", .{ serial, serial });
     try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
-    if (ownership == .edge) {
-        try self.write("  call fastcc void @sx_retain(ptr %t{d}.storage, i64 -16)\n", .{serial});
-        try self.write("  call fastcc void @sx_drop(ptr %t{d}.storage, i64 -24)\n", .{serial});
-    }
+    try self.write("  call fastcc void @sx_retain(ptr %t{d}.storage, i64 %t{d}.owner.offset)\n", .{ serial, serial });
+    try self.write("  call fastcc void @sx_drop(ptr %t{d}.storage, i64 -24)\n", .{serial});
     try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.old.data, i64 %t{d}.bytes, i1 false)\n", .{ serial, serial, serial });
     try self.write("  %t{d}.detached.data = insertvalue {s} %t{d}.source, ptr %t{d}.storage, 0\n", .{ serial, type_name, serial, serial });
-    try self.write("  store {s} %t{d}.detached.data, ptr %v{d}\n", .{ type_name, serial, reference });
-    try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 {d})\n", .{
-        serial,
-        if (ownership == .root) @as(i8, -24) else -16,
-    });
+    try self.write("  store {s} %t{d}.detached.data, ptr {s}\n", .{ type_name, serial, pointer });
+    try self.write("  call fastcc void @sx_drop(ptr %t{d}.old.data, i64 %t{d}.owner.offset)\n", .{ serial, serial });
     try self.write("  br label %collection.ready{d}\n", .{serial});
     try self.write("collection.unique{d}:\n", .{serial});
     try self.write("  br label %collection.ready{d}\n", .{serial});

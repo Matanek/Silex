@@ -19,6 +19,8 @@ const Matches = @import("Matches.zig");
 const TypedResources = @import("TypedResources.zig");
 const EcsComponents = @import("EcsComponents.zig");
 
+const StorageOwnership = @import("StorageOwnership.zig");
+
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
 const Place = struct {
@@ -27,6 +29,7 @@ const Place = struct {
     root_type: Ast.Type,
     fields: []const usize,
     receiver_type: ?Ast.Type = null,
+    receiver_domain: StorageOwnership.Domain = .edge,
 };
 
 pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]const bool {
@@ -1159,7 +1162,7 @@ fn prepareReceiverPlace(self: anytype, builder: anytype, place: Place, receiver:
         edge = edge or structure.is_class;
         type_value = structure.fields[field_index].type;
     }
-    if (!edge or !Resources.requiresRetain(self, receiver.type)) return place;
+    if ((!edge and place.reference == null) or !Resources.requiresRetain(self, receiver.type)) return place;
     const value = if (optional_type) |wrapped|
         (try Optionals.promote(self, builder, receiver, wrapped)).?
     else
@@ -1167,16 +1170,23 @@ fn prepareReceiverPlace(self: anytype, builder: anytype, place: Place, receiver:
     try Resources.retainValue(self, builder, value.type, value.value);
     var prepared = place;
     prepared.receiver_type = value.type;
+    prepared.receiver_domain = if (edge) .edge else try StorageOwnership.reference(self, builder, place.reference.?);
     return prepared;
 }
 
 fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: Ir.ValueId) !void {
     if (place.receiver_type) |type_value| {
-        try Resources.retainValueOwned(self, builder, type_value, replacement_value, .edge);
+        try StorageOwnership.apply(self, builder, place.receiver_domain, .retain, type_value, replacement_value);
         try Resources.releaseTransferredRoot(self, builder, type_value, replacement_value);
     }
     if (place.fields.len == 0) {
+        const previous = if (place.receiver_type) |type_value| previous: {
+            const value = try self.newValue(builder, type_value);
+            try self.emit(builder, .{ .reference_load = .{ .result = value, .reference = place.reference.? } });
+            break :previous value;
+        } else null;
         if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement_value } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement_value } });
+        if (place.receiver_type) |type_value| try StorageOwnership.apply(self, builder, place.receiver_domain, .release, type_value, previous.?);
         return;
     }
     const root = try self.newValue(builder, place.root_type);
@@ -1240,7 +1250,7 @@ fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: 
     }
     if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement } });
     if (place.receiver_type) |type_value| {
-        try Resources.releaseTransferredValue(self, builder, type_value, previous_receiver.?, .edge);
+        try StorageOwnership.apply(self, builder, place.receiver_domain, .release, type_value, previous_receiver.?);
     }
 }
 

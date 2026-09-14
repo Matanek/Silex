@@ -666,3 +666,39 @@ func main() {
     verify_deep_copy()
     verify_cycles()
 }
+
+struct NativeBorrowedValues {
+    var items:NativeReplacementToken[]
+    init() { self.items = [] }
+    func add() { self.items.append(NativeReplacementToken()) }
+}
+
+class NativeBorrowedOwner {
+    var values:NativeBorrowedValues
+    init() { self.values = NativeBorrowedValues() }
+}
+
+func mutate_native_borrow(values:&NativeBorrowedValues) {
+    let add:func() = values.add
+    add()
+    add()
+}
+
+func project_native_borrow(owner:&NativeBorrowedOwner) &NativeBorrowedValues {
+    return owner.values
+}
+
+test "mutable owning borrows preserve field ownership across callbacks and returns" {
+    NativeReplacementToken.drops = 0
+    {
+        var owner = NativeBorrowedOwner()
+        mutate_native_borrow(owner.values)
+        assert(NativeReplacementToken.drops == 0)
+        {
+            var values = project_native_borrow(owner)
+            values.add()
+        }
+        assert(owner.values.items.count() == 3)
+    }
+    assert(NativeReplacementToken.drops == 3)
+}

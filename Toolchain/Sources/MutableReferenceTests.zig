@@ -119,3 +119,195 @@ test "reference mode does not distinguish overloads" {
     ));
     try std.testing.expectEqualStrings("function 'update' with these parameter types is already declared", frontend.diagnostic.?.message);
 }
+
+test "mutable ownership BorrowedReceiver" {
+    const output = try run(
+        \\struct Values {
+        \\    private var items:int[]
+        \\    init() { self.items = [] }
+        \\    func add(value:int) { self.items.append(value) }
+        \\    func clear() { self.items.clear() }
+        \\    func count() int { return self.items.count() }
+        \\}
+        \\class Store {
+        \\    private var values:Values
+        \\    init() { self.values = Values() }
+        \\    func exercise() {
+        \\        forward(self.values)
+        \\        print(self.values.count())
+        \\        self.values.clear()
+        \\        print(self.values.count())
+        \\    }
+        \\}
+        \\func main() { var store = Store(); store.exercise() }
+        \\
+        \\func forward(values:&Values) { append(values) }
+        \\func append(values:&Values) { values.add(42) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1\n0\n", output);
+}
+
+test "mutable ownership BorrowedAliasing" {
+    const output = try run(
+        \\struct Values {
+        \\ var items:int[]
+        \\ init() { self.items = [1] }
+        \\ func edit(owner:Owner) {
+        \\  self.items.replace(0, 99)
+        \\  owner.observe()
+        \\  self.items.append(7)
+        \\  owner.observe()
+        \\ }
+        \\}
+        \\class Owner {
+        \\ var values:Values
+        \\ init() { self.values = Values() }
+        \\ func observe() { print(self.values.items.count(), " ", self.values.items[0]) }
+        \\}
+        \\func main() { var owner = Owner(); forward(owner.values, owner); owner.observe() }
+        \\
+        \\func forward(values:&Values, owner:Owner) { values.edit(owner) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1 1\n1 1\n2 99\n", output);
+}
+
+test "mutable ownership BorrowedReentry" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\struct Values {
+        \\ var items:Item[]
+        \\ init(id:int) { self.items = [Item(id)] }
+        \\ func edit(owner:Owner) {
+        \\  owner.reset()
+        \\  self.items.clear()
+        \\  print("body")
+        \\ }
+        \\}
+        \\class Owner {
+        \\ var values:Values
+        \\ init() { self.values = Values(1) }
+        \\ func reset() { self.values = Values(2) }
+        \\}
+        \\func main() { var owner = Owner(); forward(owner.values, owner); print("done") }
+        \\
+        \\func forward(values:&Values, owner:Owner) { values.edit(owner) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("item 1\nbody\nitem 2\ndone\n", output);
+}
+
+test "mutable ownership BorrowedAssignment" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\class Owner {
+        \\ var item:Item
+        \\ init() { self.item = Item(1) }
+        \\}
+        \\func replace(item:&Item) { item = Item(2) }
+        \\func main() { var owner = Owner(); replace(owner.item); print("set") }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("item 1\nset\nitem 2\n", output);
+}
+
+test "mutable ownership BorrowedElement" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\struct Values {
+        \\ var items:Item[]
+        \\ init() { self.items = [] }
+        \\ func add() { self.items.append(Item(2)) }
+        \\}
+        \\class Owner {
+        \\ var values:Values[]
+        \\ init() { self.values = [Values()] }
+        \\}
+        \\func modify(values:&Values) { values.add() }
+        \\func main() { var owner = Owner(); modify(owner.values[0]); print("done"); owner.values.clear() }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("done\nitem 2\n", output);
+}
+
+test "mutable ownership BorrowedList" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\class Owner {
+        \\ var items:Item[]
+        \\ init() { self.items = [Item(1)] }
+        \\}
+        \\func modify(items:&Item[]) {
+        \\ items.append(Item(2))
+        \\ items[0] = Item(3)
+        \\ print("changed ", items.count())
+        \\ items.clear()
+        \\}
+        \\func main() { var owner = Owner(); modify(owner.items); print("done") }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("item 1\nchanged 2\nitem 2\nitem 3\ndone\n", output);
+}
+
+test "mutable ownership BorrowedCallback" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\struct Values {
+        \\ var items:Item[]
+        \\ init() { self.items = [] }
+        \\ func add() { self.items.append(Item(2)) }
+        \\}
+        \\class Owner {
+        \\ var values:Values
+        \\ init() { self.values = Values() }
+        \\}
+        \\func modify(values:&Values) { let action:func() = values.add; action(); action() }
+        \\func main() { var owner = Owner(); modify(owner.values); print("done") }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("done\nitem 2\nitem 2\n", output);
+}
+
+test "mutable ownership BorrowedReturn" {
+    const output = try run(
+        \\class Item {
+        \\ let id:int
+        \\ init(id:int) { self.id = id }
+        \\ drop { print("item ", self.id) }
+        \\}
+        \\struct Values {
+        \\ var items:Item[]
+        \\ init() { self.items = [] }
+        \\ func add() { self.items.append(Item(2)) }
+        \\}
+        \\class Owner {
+        \\ var values:Values
+        \\ init() { self.values = Values() }
+        \\}
+        \\func project(owner:&Owner) &Values { return owner.values }
+        \\func main() { var owner = Owner(); if true { var value = project(owner); value.add() } print("done") }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("done\nitem 2\n", output);
+}

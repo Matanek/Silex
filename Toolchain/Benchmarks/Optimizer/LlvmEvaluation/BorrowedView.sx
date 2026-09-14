@@ -1,0 +1,11 @@
+class Owner {
+ var values:int[2]
+ init() { self.values = [1, 2] }
+}
+func edit(values:&int[..]) { values[0] = 42 }
+func main() {
+ var owner = Owner()
+ if true { var view = &owner.values[0:2]; edit(view) }
+ print(owner.values[0])
+ print(owner.values[1])
+}

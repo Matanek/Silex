@@ -46,6 +46,8 @@ pub const Status = enum(u8) {
 
 pub const UnaryOperator = enum {
     negate,
+    reference_is_edge,
+    reference_address,
 };
 
 pub const BinaryOperator = enum {

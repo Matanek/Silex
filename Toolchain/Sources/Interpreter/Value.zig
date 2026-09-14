@@ -29,19 +29,19 @@ pub const Value = union(enum) {
         captures: []const Value = &.{},
     };
 
-    pub const Reference = union(enum) {
-        optional: *?Value,
-        value: *Value,
+    pub const Reference = struct {
+        pointer: union(enum) { optional: *?Value, value: *Value },
+        ownership: Ir.Ownership = .root,
 
         pub fn load(self: Reference) Error!Value {
-            return switch (self) {
+            return switch (self.pointer) {
                 .optional => |pointer| pointer.* orelse error.InvalidProgram,
                 .value => |pointer| pointer.*,
             };
         }
 
         pub fn store(self: Reference, value: Value) void {
-            switch (self) {
+            switch (self.pointer) {
                 .optional => |pointer| pointer.* = value,
                 .value => |pointer| pointer.* = value,
             }

@@ -1,0 +1,16 @@
+class Item {
+ let id:int
+ init(id:int) { self.id = id }
+ drop { print("item ", self.id) }
+}
+class Owner {
+ var items:Item[]
+ init() { self.items = [Item(1)] }
+}
+func modify(items:&Item[]) {
+ items.append(Item(2))
+ items[0] = Item(3)
+ print("changed ", items.count())
+ items.clear()
+}
+func main() { var owner = Owner(); modify(owner.items); print("done") }

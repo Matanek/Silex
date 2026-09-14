@@ -1077,7 +1077,11 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
         if (prepared.temporary != null) {
             return self.fail(call.arguments[0].position, "C.mutable_pointer requires stable mutable storage");
         }
-        return .{ .type = .address, .value = prepared.reference };
+        // C pointers expose an ordinary address; mutable Silex borrows keep
+        // their ownership metadata only inside the Silex calling convention.
+        const address = try self.newValue(builder, .address);
+        try self.emit(builder, .{ .unary = .{ .result = address, .operator = .reference_address, .operand = prepared.reference } });
+        return .{ .type = .address, .value = address };
     }
     return null;
 }

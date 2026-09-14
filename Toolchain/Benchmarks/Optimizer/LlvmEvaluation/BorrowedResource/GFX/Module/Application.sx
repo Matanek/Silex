@@ -1,0 +1,13 @@
+public intrinsic class Resources {
+    func scope() Resources
+    func insert<T>(value:T)
+    module func retain_class<T>(value:T)
+    func has<T>() bool
+    func get<T>() @T
+    func get_mut<T>() &T
+    func try_get<T>() @T?
+    func try_get_mut<T>() &T?
+    func remove<T>() T?
+    func clear()
+    module func invalidate()
+}

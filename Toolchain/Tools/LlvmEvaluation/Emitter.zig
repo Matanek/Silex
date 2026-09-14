@@ -2018,7 +2018,7 @@ const FunctionEmitter = struct {
             try @import("ListStorage.zig").detach(self, serial, type_name, element_name, reference, value.ownership);
         } else if (value.reference) |reference| {
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
-            try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, type_name, reference });
+            try self.write("  %t{d}.source = load {s}, ptr {s}\n", .{ serial, type_name, try self.referencePointer(reference) });
             try self.write("  %t{d}.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, type_name, serial });
             try self.write("  %t{d}.count = extractvalue {s} %t{d}.source, 1\n", .{ serial, type_name, serial });
         } else {
@@ -2032,9 +2032,18 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.index.invalid = or i1 %t{d}.index.low, %t{d}.index.high\n", .{ serial, serial, serial });
             try self.emitBoundsFailure(block_id, serial, value.index, value.position);
         }
-        try self.write("  %v{d} = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.index\n", .{
-            value.result, try llvmType(self.allocator, self.program, collection.element), serial, serial,
+        try self.write("  %t{d}.element = getelementptr {s}, ptr %t{d}.data, i64 %t{d}.index\n", .{
+            serial, try llvmType(self.allocator, self.program, collection.element), serial, serial,
         });
+        if (value.reference) |reference| {
+            try self.write("  %t{d}.source.bits = ptrtoint ptr %v{d} to i64\n", .{ serial, reference });
+            try self.write("  %t{d}.owner.tag = and i64 %t{d}.source.bits, -9223372036854775808\n", .{ serial, serial });
+            try self.write("  %t{d}.element.bits = ptrtoint ptr %t{d}.element to i64\n", .{ serial, serial });
+            try self.write("  %t{d}.element.tagged = or i64 %t{d}.element.bits, %t{d}.owner.tag\n", .{ serial, serial, serial });
+            try self.write("  %v{d} = inttoptr i64 %t{d}.element.tagged to ptr\n", .{ value.result, serial });
+        } else {
+            try self.write("  %v{d} = getelementptr i8, ptr %t{d}.element, i64 0\n", .{ value.result, serial });
+        }
     }
 
     fn emitCollectionBytes(self: *FunctionEmitter, serial: usize, element: Ir.Type) Error!void {
@@ -2173,7 +2182,8 @@ const FunctionEmitter = struct {
         if (source.length) |length| {
             if (value.reference) |reference| {
                 if (try self.valueType(reference) != .address) return error.InvalidProgram;
-                try self.write("  %t{d}.data = getelementptr {s}, ptr %v{d}, i32 0, i32 0\n", .{ serial, source_name, reference });
+                const pointer = try self.referencePointer(reference);
+                try self.write("  %t{d}.data = getelementptr {s}, ptr {s}, i32 0, i32 0\n", .{ serial, source_name, pointer });
             } else {
                 try self.write("  %t{d}.source = alloca {s}\n", .{ serial, source_name });
                 try self.write("  store {s} %v{d}, ptr %t{d}.source\n", .{ source_name, value.collection, serial });
@@ -2186,7 +2196,8 @@ const FunctionEmitter = struct {
             try @import("ListStorage.zig").detach(self, serial, source_name, element_name, reference, .root);
         } else if (value.reference) |reference| {
             if (try self.valueType(reference) != .address) return error.InvalidProgram;
-            try self.write("  %t{d}.source = load {s}, ptr %v{d}\n", .{ serial, source_name, reference });
+            const pointer = try self.referencePointer(reference);
+            try self.write("  %t{d}.source = load {s}, ptr {s}\n", .{ serial, source_name, pointer });
             try self.write("  %t{d}.data = extractvalue {s} %t{d}.source, 0\n", .{ serial, source_name, serial });
             try self.write("  %t{d}.count = extractvalue {s} %t{d}.source, 1\n", .{ serial, source_name, serial });
         } else {
@@ -2297,21 +2308,31 @@ const FunctionEmitter = struct {
         });
     }
 
+    pub fn referencePointer(self: *FunctionEmitter, reference: Ir.ValueId) error{OutOfMemory}![]const u8 {
+        const serial = self.nextTemporary();
+        try self.write("  %t{d}.ref.bits = ptrtoint ptr %v{d} to i64\n", .{ serial, reference });
+        try self.write("  %t{d}.ref.address = and i64 %t{d}.ref.bits, 9223372036854775807\n", .{ serial, serial });
+        try self.write("  %t{d}.ref.pointer = inttoptr i64 %t{d}.ref.address to ptr\n", .{ serial, serial });
+        return std.fmt.allocPrint(self.allocator, "%t{d}.ref.pointer", .{serial});
+    }
+
     fn emitReferenceLoad(self: *FunctionEmitter, value: Ir.Instruction.ReferenceLoad) Error!void {
         if (try self.valueType(value.reference) != .address) return error.InvalidProgram;
-        try self.write("  %v{d} = load {s}, ptr %v{d}\n", .{
+        const pointer = try self.referencePointer(value.reference);
+        try self.write("  %v{d} = load {s}, ptr {s}\n", .{
             value.result,
             try llvmType(self.allocator, self.program, try self.valueType(value.result)),
-            value.reference,
+            pointer,
         });
     }
 
     fn emitReferenceStore(self: *FunctionEmitter, value: Ir.Instruction.ReferenceStore) Error!void {
         if (try self.valueType(value.reference) != .address) return error.InvalidProgram;
-        try self.write("  store {s} %v{d}, ptr %v{d}\n", .{
+        const pointer = try self.referencePointer(value.reference);
+        try self.write("  store {s} %v{d}, ptr {s}\n", .{
             try llvmType(self.allocator, self.program, try self.valueType(value.operand)),
             value.operand,
-            value.reference,
+            pointer,
         });
     }
 
@@ -2326,12 +2347,16 @@ const FunctionEmitter = struct {
         if (self.program.structures[value.structure].is_class) {
             if (!materialClassStorage(self.program, value.structure)) return error.UnsupportedInstruction;
             const serial = self.nextTemporary();
-            try self.write("  %t{d}.class = load ptr, ptr %v{d}\n", .{ serial, value.reference });
-            try self.write("  %v{d} = getelementptr i8, ptr %t{d}.class, i64 {d}\n", .{
-                value.result,
+            const pointer = try self.referencePointer(value.reference);
+            try self.write("  %t{d}.class = load ptr, ptr {s}\n", .{ serial, pointer });
+            try self.write("  %t{d}.field = getelementptr i8, ptr %t{d}.class, i64 {d}\n", .{
+                serial,
                 serial,
                 8 * (4 + try classFieldStorageOffset(self.program, value.structure, value.field)),
             });
+            try self.write("  %t{d}.field.bits = ptrtoint ptr %t{d}.field to i64\n", .{ serial, serial });
+            try self.write("  %t{d}.field.edge = or i64 %t{d}.field.bits, -9223372036854775808\n", .{ serial, serial });
+            try self.write("  %v{d} = inttoptr i64 %t{d}.field.edge to ptr\n", .{ value.result, serial });
             return;
         }
         try self.write("  %v{d} = getelementptr {s}, ptr %v{d}, i32 0, i32 {d}\n", .{
@@ -2377,6 +2402,9 @@ const FunctionEmitter = struct {
             .copy => |value| if (value.result == reference) {
                 return self.referencePointeeType(value.operand, depth + 1);
             },
+            .unary => |value| if (value.result == reference and value.operator == .reference_address) {
+                return self.referencePointeeType(value.operand, depth + 1);
+            },
             else => {},
         };
         return error.UnsupportedType;
@@ -2384,7 +2412,19 @@ const FunctionEmitter = struct {
 
     fn emitNegate(self: *FunctionEmitter, block_id: usize, value: Ir.Instruction.Unary) Error!void {
         const type_value = try self.valueType(value.operand);
-        if (value.operator != .negate) return error.UnsupportedInstruction;
+        if (value.operator == .reference_address) {
+            if (type_value != .address or try self.valueType(value.result) != .address) return error.InvalidProgram;
+            const pointer = try self.referencePointer(value.operand);
+            try self.write("  %v{d} = getelementptr i8, ptr {s}, i64 0\n", .{ value.result, pointer });
+            return;
+        }
+        if (value.operator == .reference_is_edge) {
+            if (type_value != .address or try self.valueType(value.result) != .bool) return error.InvalidProgram;
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.ref.bits = ptrtoint ptr %v{d} to i64\n", .{ serial, value.operand });
+            try self.write("  %v{d} = icmp slt i64 %t{d}.ref.bits, 0\n", .{ value.result, serial });
+            return;
+        }
         if (type_value.isFloat()) return self.write("  %v{d} = fneg {s} %v{d}\n", .{
             value.result,
             try llvmType(self.allocator, self.program, type_value),

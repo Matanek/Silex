@@ -1,0 +1,21 @@
+struct Values {
+    private var items:int[]
+    init() { self.items = [] }
+    func add(value:int) { self.items.append(value) }
+    func clear() { self.items.clear() }
+    func count() int { return self.items.count() }
+}
+class Store {
+    private var values:Values
+    init() { self.values = Values() }
+    func exercise() {
+        forward(self.values)
+        print(self.values.count())
+        self.values.clear()
+        print(self.values.count())
+    }
+}
+func main() { var store = Store(); store.exercise() }
+
+func forward(values:&Values) { append(values) }
+func append(values:&Values) { values.add(42) }

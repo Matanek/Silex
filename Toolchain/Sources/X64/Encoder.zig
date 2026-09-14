@@ -546,6 +546,7 @@ fn encodeFunction(
             },
             .reference_load => |load| {
                 try emitLoadStack(allocator, bytes, .rcx, load.reference);
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xf1, 0x3f }); // btr rcx, 63
                 for (0..load.result.width) |leaf| {
                     try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));
                     try emitStoreScalar(allocator, bytes, function, .rax, @intCast(@as(usize, load.result.start) + leaf));
@@ -583,6 +584,7 @@ fn encodeFunction(
             .reference_store => |store| {
                 if (store.operand.width == 0) return error.InvalidMachineProgram;
                 try emitLoadStack(allocator, bytes, .rcx, store.reference);
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xf1, 0x3f }); // btr rcx, 63
                 for (0..store.operand.width) |leaf| {
                     try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, store.operand.start) + leaf));
                     try emitStoreMemory(allocator, bytes, .rcx, @intCast(leaf * Machine.slot_size), .rax);
@@ -595,7 +597,9 @@ fn encodeFunction(
             },
             .reference_indirect_offset => |offset| {
                 try emitLoadStack(allocator, bytes, .rax, offset.reference);
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xf0, 0x3f }); // btr rax, 63
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x8b, 0x00 });
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xe8, 0x3f }); // bts rax, 63
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x05 });
                 try appendInt(allocator, bytes, u32, offset.byte_offset);
                 try emitStoreStack(allocator, bytes, .rax, offset.result);
@@ -768,7 +772,11 @@ fn encodeFunction(
             ),
             .unary => |unary| {
                 try emitLoadScalar(allocator, bytes, function, .rax, unary.operand);
-                if (unary.type == .float32) {
+                if (unary.operator == .reference_is_edge) {
+                    try bytes.appendSlice(allocator, &.{ 0x48, 0xc1, 0xe8, 0x3f }); // shr rax, 63
+                } else if (unary.operator == .reference_address) {
+                    try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xf0, 0x3f }); // btr rax, 63
+                } else if (unary.type == .float32) {
                     try bytes.append(allocator, 0x35);
                     try appendInt(allocator, bytes, u32, 0x8000_0000);
                 } else if (unary.type == .float64) {
@@ -2358,6 +2366,31 @@ fn emitDetachDynamicRoot(
     element_stride: u12,
     ownership: @import("../Ir.zig").Ownership,
 ) Error!void {
+    _ = ownership;
+    try emitLoadStack(allocator, bytes, .rax, reference);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x88 });
+    const edge = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitDetachDynamicOwned(allocator, bytes, import_sites, platform, epilogue, reference, element_width, element_stride, .root);
+    try bytes.append(allocator, 0xe9);
+    const done = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, edge, bytes.items.len);
+    try emitDetachDynamicOwned(allocator, bytes, import_sites, platform, epilogue, reference, element_width, element_stride, .edge);
+    try patchRelative(bytes.items, done, bytes.items.len);
+}
+
+fn emitDetachDynamicOwned(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    epilogue: *std.ArrayList(EpilogueFixup),
+    reference: Machine.Slot,
+    element_width: u12,
+    element_stride: u12,
+    ownership: @import("../Ir.zig").Ownership,
+) Error!void {
     const stride = if (element_stride != 0)
         element_stride
     else
@@ -2366,6 +2399,7 @@ fn emitDetachDynamicRoot(
 
     const restart = bytes.items.len;
     try emitLoadStack(allocator, bytes, .r15, reference);
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x0f, 0xba, 0xf7, 0x3f }); // decode internal reference
     try emitLoadMemory(allocator, bytes, .r14, .r15, 0);
     try emitLoadMemory(allocator, bytes, .rax, .r14, root_count_offset);
     try emitLoadMemory(allocator, bytes, .r11, .r14, edge_count_offset);
@@ -2456,6 +2490,7 @@ fn emitCollectionReference(
     if (value.dynamic) {
         if (!value.view and value.reference != null) {
             try emitLoadStack(allocator, bytes, .rbx, value.reference.?);
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xf3, 0x3f }); // decode internal reference
             try emitLoadMemory(allocator, bytes, .rbx, .rbx, 0);
         } else try emitLoadStack(allocator, bytes, .rbx, value.collection.start);
         if (value.view) {
@@ -2466,6 +2501,7 @@ fn emitCollectionReference(
         }
     } else {
         try emitLoadStack(allocator, bytes, .rbx, value.reference orelse return error.InvalidMachineProgram);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xf3, 0x3f }); // decode internal reference
         try emitImmediate(allocator, bytes, .rcx, value.count);
     }
     try emitLoadStack(allocator, bytes, .rax, value.index);
@@ -2480,6 +2516,10 @@ fn emitCollectionReference(
     try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
     try appendInt(allocator, bytes, u32, if (value.element_stride != 0) value.element_stride else @as(u32, value.element_width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xd8 });
+    if (value.reference) |reference| {
+        try emitLoadStack(allocator, bytes, .rcx, reference);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc9, 0x79, 0x05, 0x48, 0x0f, 0xba, 0xe8, 0x3f }); // jns skips bts rax, 63
+    } else if (value.ownership == .edge) try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xe8, 0x3f });
     try emitStoreStack(allocator, bytes, .rax, value.result);
 }
 
@@ -2963,6 +3003,7 @@ fn emitCollectionView(
     }
     if (value.reference) |reference| {
         try emitLoadStack(allocator, bytes, .rbx, reference);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xba, 0xf3, 0x3f }); // decode internal reference
         if (value.source_view) {
             try emitLoadMemory(allocator, bytes, .rcx, .rbx, Machine.slot_size);
             try emitLoadMemory(allocator, bytes, .rbx, .rbx, 0);
