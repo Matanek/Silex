@@ -1,0 +1,148 @@
+use STD.Math
+
+enum BodyKind {
+    fixed
+    dynamic
+}
+
+struct Vector {
+    let x:float
+    let y:float
+
+    init(x:float, y:float) {
+        self.x = x
+        self.y = y
+    }
+}
+
+struct LargePayload {
+    let a:int
+    let b:int
+    let c:int
+    let d:int
+    let e:int
+
+    init(a:int, b:int, c:int, d:int, e:int) {
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+        self.e = e
+    }
+}
+
+enum Shape {
+    box(LargePayload)
+    point(Vector)
+}
+
+struct Filter {
+    let category:int
+    let mask:int
+    let group:int
+
+    init(category:int, mask:int, group:int) {
+        self.category = category
+        self.mask = mask
+        self.group = group
+    }
+}
+
+struct Settings {
+    var body_kind:BodyKind
+    var shape:Shape?
+    var position:Vector
+    var velocity:Vector
+    var rotation:float
+    var angular_velocity:float
+    var gravity_scale:float
+    var mass:float
+    var restitution:float
+    var friction:float
+    var linear_damping:float
+    var angular_damping:float
+    var sleep_threshold:float
+    var allow_sleep:bool
+    var fixed_rotation:bool
+    var is_bullet:bool
+    var is_enabled:bool
+    var debug_label:str
+    var is_sensor:bool
+    var enable_move_events:bool
+    var enable_contact_events:bool
+    var enable_hit_events:bool
+    var enable_sensor_events:bool
+    var filter:Filter
+    var create_implicit_shape:bool
+
+    init() {
+        self.body_kind = BodyKind.dynamic
+        self.shape = null
+        self.position = Vector(0.0, 0.0)
+        self.velocity = Vector(0.0, 0.0)
+        self.rotation = 0.0
+        self.angular_velocity = 0.0
+        self.gravity_scale = 1.0
+        self.mass = 0.0
+        self.restitution = 0.0
+        self.friction = 0.6
+        self.linear_damping = 0.0
+        self.angular_damping = 0.0
+        self.sleep_threshold = 0.05
+        self.allow_sleep = true
+        self.fixed_rotation = false
+        self.is_bullet = false
+        self.is_enabled = true
+        self.debug_label = ""
+        self.is_sensor = false
+        self.enable_move_events = false
+        self.enable_contact_events = false
+        self.enable_hit_events = false
+        self.enable_sensor_events = false
+        self.filter = Filter(1, -1, 0)
+        self.create_implicit_shape = true
+    }
+}
+
+class Store {
+    var labels:str[]
+
+    init() { self.labels = [] }
+
+    func append(settings:Settings) int {
+        self.labels.append(settings.debug_label)
+        return self.labels.count()
+    }
+}
+
+class World {
+    var store:Store
+    var maximum:float
+
+    init() {
+        self.store = Store()
+        self.maximum = 0.0
+    }
+
+    func create(settings:Settings) int {
+        let result = self.store.append(settings)
+        self.maximum = Math.max(self.maximum, settings.friction)
+        print(settings.debug_label.count())
+        print(settings.friction)
+        return result
+    }
+}
+
+func main() {
+    var world = World()
+    let result = world.create(Settings()
+        ..body_kind = BodyKind.fixed
+        ..shape = Shape.box(LargePayload(1, 2, 3, 4, 5))
+        ..position = Vector(13.2, -5.0)
+        ..friction = 0.9
+    )
+    print(world.store.labels.count())
+    print(world.store.labels[0].count())
+    print(world.maximum)
+    print(result)
+}

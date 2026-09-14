@@ -325,15 +325,31 @@ fn emitCallbackWrappers(
             if (index != 0) try output.appendSlice(allocator, ", ");
             try appendFmt(output, allocator, "{s} %v{d}", .{ try llvmType(allocator, program, parameter), index });
         }
-        try output.appendSlice(allocator, ") {\nentry:\n  ");
+        try output.appendSlice(allocator, ") {\nentry:\n");
+        for (function.parameter_types, 0..) |parameter, index| {
+            if (!try indirectSilexParameter(program, parameter)) continue;
+            const type_name = try llvmType(allocator, program, parameter);
+            try appendFmt(output, allocator, "  %sx.callback.argument.{d} = alloca {s}\n", .{ index, type_name });
+            try appendFmt(output, allocator, "  store {s} %v{d}, ptr %sx.callback.argument.{d}\n", .{
+                type_name,
+                index,
+                index,
+            });
+        }
+        try output.appendSlice(allocator, "  ");
         if (function.return_type != .void) try output.appendSlice(allocator, "%result = ");
         try appendFmt(output, allocator, "call fastcc {s} @sx_{d}(ptr null", .{ return_name, function_id });
-        for (function.parameter_types, 0..) |parameter, index| try appendFmt(
-            output,
-            allocator,
-            ", {s} %v{d}",
-            .{ try llvmType(allocator, program, parameter), index },
-        );
+        for (function.parameter_types, 0..) |parameter, index| {
+            if (try indirectSilexParameter(program, parameter))
+                try appendFmt(output, allocator, ", ptr %sx.callback.argument.{d}", .{index})
+            else
+                try appendFmt(
+                    output,
+                    allocator,
+                    ", {s} %v{d}",
+                    .{ try llvmType(allocator, program, parameter), index },
+                );
+        }
         try output.appendSlice(allocator, ")\n  ret ");
         if (function.return_type == .void)
             try output.appendSlice(allocator, "void\n}\n")
@@ -687,10 +703,13 @@ const FunctionEmitter = struct {
         try self.write("; Silex function: {s}\n", .{self.function.name});
         try self.write("define internal fastcc {s} @sx_{d}(ptr %sx.environment", .{ try llvmType(self.allocator, self.program, self.function.return_type), self.function_id });
         for (self.function.parameter_types, 0..) |type_value, index| {
-            try self.write(", {s} %v{d}", .{
-                try llvmType(self.allocator, self.program, type_value),
-                self.function.capture_types.len + index,
-            });
+            if (try indirectSilexParameter(self.program, type_value))
+                try self.write(", ptr %sx.parameter.{d}", .{index})
+            else
+                try self.write(", {s} %v{d}", .{
+                    try llvmType(self.allocator, self.program, type_value),
+                    self.function.capture_types.len + index,
+                });
         }
         try self.output.appendSlice(self.allocator, ") {\n");
         for (self.function.blocks, 0..) |block, block_id| {
@@ -715,6 +734,15 @@ const FunctionEmitter = struct {
                         });
                     }
                 }
+                for (self.function.parameter_types, 0..) |type_value, index| {
+                    if (!try indirectSilexParameter(self.program, type_value)) continue;
+                    try self.write("  %v{d} = load {s}, ptr %sx.parameter.{d}\n", .{
+                        self.function.capture_types.len + index,
+                        try llvmType(self.allocator, self.program, type_value),
+                        index,
+                    });
+                }
+                try self.emitCallArgumentAllocas();
                 for (self.function.local_types, 0..) |type_value, local| {
                     try self.write("  %local{d} = alloca {s}\n", .{ local, try llvmType(self.allocator, self.program, type_value) });
                 }
@@ -840,8 +868,8 @@ const FunctionEmitter = struct {
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
             .convert => |value| try self.emitConvert(block_id, value),
-            .call => |value| try self.emitCall(value),
-            .indirect_call => |value| try self.emitIndirectCall(value),
+            .call => |value| try self.emitCall(block_id, instruction_index, value),
+            .indirect_call => |value| try self.emitIndirectCall(block_id, instruction_index, value),
             .boundary_call => |value| try self.emitBoundaryCall(value),
             .print => |value| try self.emitPrint(value),
             .assert => |value| try self.emitAssert(block_id, value),
@@ -3038,21 +3066,83 @@ const FunctionEmitter = struct {
         try self.write("  %v{d} = add {s} %t{d}.converted, 0\n", .{ value.result, target_name, serial });
     }
 
-    fn emitCall(self: *FunctionEmitter, value: Ir.Instruction.Call) Error!void {
+    fn emitCallArgumentAllocas(self: *FunctionEmitter) Error!void {
+        for (self.function.blocks, 0..) |block, block_id| for (block.instructions, 0..) |instruction, instruction_index| switch (instruction) {
+            .call => |value| {
+                if (value.function >= self.program.functions.len) return error.InvalidProgram;
+                const callee = self.program.functions[value.function];
+                if (callee.parameter_types.len != value.arguments.len) return error.InvalidProgram;
+                for (callee.parameter_types, 0..) |parameter_type, argument_index| {
+                    if (!try indirectSilexParameter(self.program, parameter_type)) continue;
+                    try self.write("  %sx.call.argument.{d}.{d}.{d} = alloca {s}\n", .{
+                        block_id,
+                        instruction_index,
+                        argument_index,
+                        try llvmType(self.allocator, self.program, parameter_type),
+                    });
+                }
+            },
+            .indirect_call => |value| {
+                const signature_index = (try self.valueType(value.callee)).functionIndex() orelse
+                    return error.InvalidProgram;
+                if (signature_index >= self.program.function_types.len) return error.InvalidProgram;
+                const signature = self.program.function_types[signature_index];
+                if (signature.parameter_types.len != value.arguments.len) return error.InvalidProgram;
+                for (signature.parameter_types, 0..) |parameter_type, argument_index| {
+                    if (!try indirectSilexParameter(self.program, parameter_type)) continue;
+                    try self.write("  %sx.call.argument.{d}.{d}.{d} = alloca {s}\n", .{
+                        block_id,
+                        instruction_index,
+                        argument_index,
+                        try llvmType(self.allocator, self.program, parameter_type),
+                    });
+                }
+            },
+            else => {},
+        };
+    }
+
+    fn emitCall(
+        self: *FunctionEmitter,
+        block_id: usize,
+        instruction_index: usize,
+        value: Ir.Instruction.Call,
+    ) Error!void {
         if (value.function >= self.program.functions.len) return error.InvalidProgram;
         const callee = self.program.functions[value.function];
         if (callee.capture_types.len != 0 or callee.parameter_types.len != value.arguments.len)
             return error.InvalidProgram;
+        for (value.arguments, 0..) |argument, index| {
+            const parameter_type = callee.parameter_types[index];
+            if (!try indirectSilexParameter(self.program, parameter_type)) continue;
+            const type_name = try llvmType(self.allocator, self.program, parameter_type);
+            try self.write("  store {s} %v{d}, ptr %sx.call.argument.{d}.{d}.{d}\n", .{
+                type_name,
+                argument,
+                block_id,
+                instruction_index,
+                index,
+            });
+        }
         try self.output.appendSlice(self.allocator, "  ");
         if (value.result) |result| try self.write("%v{d} = ", .{result});
         try self.write("call fastcc {s} @sx_{d}(ptr null", .{ try llvmType(self.allocator, self.program, callee.return_type), value.function });
         for (value.arguments, 0..) |argument, index| {
-            try self.write(", {s} %v{d}", .{ try llvmType(self.allocator, self.program, callee.parameter_types[index]), argument });
+            const parameter_type = callee.parameter_types[index];
+            if (try indirectSilexParameter(self.program, parameter_type))
+                try self.write(", ptr %sx.call.argument.{d}.{d}.{d}", .{ block_id, instruction_index, index })
+            else
+                try self.write(", {s} %v{d}", .{ try llvmType(self.allocator, self.program, parameter_type), argument });
         }
         try self.output.appendSlice(self.allocator, ")\n");
     }
 
-    fn emitIndirectCall(self: *FunctionEmitter, value: Ir.Instruction.IndirectCall) Error!void {
+    fn emitIndirectCall(
+        self: *FunctionEmitter,
+        block_id: usize,
+        instruction_index: usize,
+        value: Ir.Instruction.IndirectCall,
+    ) Error!void {
         const signature_index = (try self.valueType(value.callee)).functionIndex() orelse
             return error.InvalidProgram;
         if (signature_index >= self.program.function_types.len) return error.InvalidProgram;
@@ -3067,6 +3157,18 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         try self.write("  %t{d}.closure.code = extractvalue {{ ptr, ptr, ptr }} %v{d}, 0\n", .{ serial, value.callee });
         try self.write("  %t{d}.closure.environment = extractvalue {{ ptr, ptr, ptr }} %v{d}, 1\n", .{ serial, value.callee });
+        for (value.arguments, signature.parameter_types, 0..) |argument, parameter_type, index| {
+            if (try self.valueType(argument) != parameter_type) return error.InvalidProgram;
+            if (!try indirectSilexParameter(self.program, parameter_type)) continue;
+            const type_name = try llvmType(self.allocator, self.program, parameter_type);
+            try self.write("  store {s} %v{d}, ptr %sx.call.argument.{d}.{d}.{d}\n", .{
+                type_name,
+                argument,
+                block_id,
+                instruction_index,
+                index,
+            });
+        }
         try self.output.appendSlice(self.allocator, "  ");
         if (value.result) |result| try self.write("%v{d} = ", .{result});
         try self.write("call fastcc {s} %t{d}.closure.code(ptr %t{d}.closure.environment", .{
@@ -3076,11 +3178,13 @@ const FunctionEmitter = struct {
         });
         for (value.arguments, signature.parameter_types, 0..) |argument, parameter_type, index| {
             if (try self.valueType(argument) != parameter_type) return error.InvalidProgram;
-            _ = index;
-            try self.write(", {s} %v{d}", .{
-                try llvmType(self.allocator, self.program, parameter_type),
-                argument,
-            });
+            if (try indirectSilexParameter(self.program, parameter_type))
+                try self.write(", ptr %sx.call.argument.{d}.{d}.{d}", .{ block_id, instruction_index, index })
+            else
+                try self.write(", {s} %v{d}", .{
+                    try llvmType(self.allocator, self.program, parameter_type),
+                    argument,
+                });
         }
         try self.output.appendSlice(self.allocator, ")\n");
     }
@@ -3299,6 +3403,21 @@ fn classType(program: Ir.Program, type_value: Ir.Type) bool {
 fn pointerRepresentation(program: Ir.Program, type_value: Ir.Type) bool {
     return type_value == .address or type_value == .str or
         type_value.functionIndex() != null or classType(program, type_value);
+}
+
+// Keep the internal Silex calling convention independent from target ABI
+// classification. LLVM aggregate arguments containing i1 fields can otherwise
+// be assigned incompatible register/stack layouts at a caller and its callee
+// when an unrelated instruction changes register pressure.
+fn indirectSilexParameter(program: Ir.Program, type_value: Ir.Type) Error!bool {
+    if (type_value.optionalChild() != null or type_value.functionIndex() != null) return true;
+    const structure_index = type_value.structureIndex() orelse return false;
+    if (structure_index >= program.structures.len) return error.InvalidProgram;
+    if (enumIndexForStructure(program, structure_index)) |enumeration_index|
+        return !plainTagEnum(program, enumeration_index);
+    const structure = program.structures[structure_index];
+    if (structure.is_static) return error.UnsupportedType;
+    return !structure.is_class;
 }
 
 fn enumIndexForStructure(program: Ir.Program, structure_index: usize) ?usize {

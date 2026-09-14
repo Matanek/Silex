@@ -43,7 +43,7 @@ def main():
     def llvm_command(path, mode, binary, silex_prefix="none"):
         # Exercise the full Silex prefix on merged raw operands and mutable
         # collection views used by the Boids and Physics consumers.
-        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "ListGrowth", "ProtocolTemporaryOwnership", "NestedReceiver", "ReceiverAliasing", "ReceiverForms", "ReceiverReentry", "BorrowedReceiver", "BorrowedAliasing", "BorrowedReentry", "BorrowedAssignment", "BorrowedElement", "BorrowedList", "BorrowedCallback", "BorrowedReturn", "BorrowedCAddress", "BorrowedView", "BorrowedResource"] or "BorrowedResource" in path.parts:
+        if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "MixedAggregateCallAbi", "ListGrowth", "ProtocolTemporaryOwnership", "NestedReceiver", "ReceiverAliasing", "ReceiverForms", "ReceiverReentry", "BorrowedReceiver", "BorrowedAliasing", "BorrowedReentry", "BorrowedAssignment", "BorrowedElement", "BorrowedList", "BorrowedCallback", "BorrowedReturn", "BorrowedCAddress", "BorrowedView", "BorrowedResource"] or "BorrowedResource" in path.parts:
             silex_prefix = "branch_snapshot_sinking"
         return [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
@@ -73,6 +73,7 @@ def main():
         "LlvmEvaluation/ProtocolTemporaryOwnership.sx": "consumed\nitem dropped\ndone\n",
         "LlvmEvaluation/ListGrowth.sx": "32896\n257\n258\n999\n42\n257\n777\ndynamic\n258\n888\ndynamic\n777\n",
         "LlvmEvaluation/ScalarMinMax.sx": "float32 exact\nfloat64 exact\n",
+        "LlvmEvaluation/MixedAggregateCallAbi.sx": "0\n0.9\n1\n0\n0.9\n1\n",
         "Regressions/DenseBlockLiveOut.sx": "42\n",
         "LlvmEvaluation/PrintFloats.sx": "1.5|-0.0|1.2345678806304932\n0.0|-0.0|inf|-inf|nan\n",
         "LlvmEvaluation/MutableOwningView.sx": "24.0\n11.0\n24.0\n1.0\n4.0\n21.0\n44.0\n0\n",
