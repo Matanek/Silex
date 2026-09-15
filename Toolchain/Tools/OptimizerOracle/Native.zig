@@ -85,6 +85,8 @@ fn compileAndRun(
             silex_binary,
             "compile",
             source_path,
+            "--backend",
+            "native",
             mode.argument(),
             "-n",
             "-o",

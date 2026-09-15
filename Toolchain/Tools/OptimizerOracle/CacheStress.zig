@@ -48,14 +48,14 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, silex_binary: []const u8) !
     const concurrent_a = directory ++ "/concurrent-a";
     const concurrent_b = directory ++ "/concurrent-b";
     var child_a = try std.process.spawn(io, .{
-        .argv = &.{ silex_binary, "compile", source_path, "-r", "-o", concurrent_a },
+        .argv = &.{ silex_binary, "compile", source_path, "--backend", "native", "-r", "-o", concurrent_a },
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .inherit,
     });
     defer child_a.kill(io);
     var child_b = try std.process.spawn(io, .{
-        .argv = &.{ silex_binary, "compile", source_path, "-r", "-o", concurrent_b },
+        .argv = &.{ silex_binary, "compile", source_path, "--backend", "native", "-r", "-o", concurrent_b },
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .inherit,
@@ -103,9 +103,9 @@ fn compile(
     nocache: bool,
 ) !void {
     if (nocache) {
-        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-n", "-o", output_path });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "--backend", "native", "-r", "-n", "-o", output_path });
     } else {
-        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-o", output_path });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "--backend", "native", "-r", "-o", output_path });
     }
 }
 

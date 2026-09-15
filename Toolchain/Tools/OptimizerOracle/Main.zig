@@ -859,9 +859,9 @@ fn verifyCacheReproducibility(
         const cold_path = try std.fmt.allocPrint(allocator, "{s}/cache-proof/{s}-cold", .{ output_directory, stem });
         const primed_path = try std.fmt.allocPrint(allocator, "{s}/cache-proof/{s}-primed", .{ output_directory, stem });
         const warm_path = try std.fmt.allocPrint(allocator, "{s}/cache-proof/{s}-warm", .{ output_directory, stem });
-        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-n", "-o", cold_path });
-        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-o", primed_path });
-        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "-r", "-o", warm_path });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "--backend", "native", "-r", "-n", "-o", cold_path });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "--backend", "native", "-r", "-o", primed_path });
+        _ = try successfulCommand(allocator, io, &.{ silex_binary, "compile", source_path, "--backend", "native", "-r", "-o", warm_path });
         const cold_hash = try fileSha256(allocator, io, cold_path);
         const primed_hash = try fileSha256(allocator, io, primed_path);
         const warm_hash = try fileSha256(allocator, io, warm_path);
@@ -1173,7 +1173,7 @@ fn compareCorpus(
             cpu_argument,      optimized_llvm_path, "-o",      llvm_binary_path,
         });
         _ = try successfulCommand(allocator, io, &.{
-            silex_binary, "compile", source_path, "-r", "-n", "-o", native_binary_path,
+            silex_binary, "compile", source_path, "--backend", "native", "-r", "-n", "-o", native_binary_path,
         });
 
         const llvm_result = try successfulCommand(allocator, io, &.{llvm_binary_path});

@@ -2,8 +2,9 @@
 
 The development oracle under `Toolchain/Tools/OptimizerOracle/` compares the
 raw and Release portable IR, reference interpretation, native Debug and
-Release execution, and a pinned Clang/LLVM `-O3` configuration. LLVM output is
-never consumed by the Silex compiler.
+Release execution, and a pinned Clang/LLVM `-O3` configuration. Native probes
+select `--backend native` explicitly, independently of the CLI default. The
+oracle's LLVM output is not consumed by the Silex compiler.
 
 ## Choose the reference for the question
 
@@ -109,7 +110,9 @@ entry must carry semantic, cost-model, Debug, Release, structural, and target
 proofs. A `gap` remains visible with the Part that owns its resolution; it is
 not interpreted as a passing parity claim.
 
-Run commands from `Silex/Toolchain/`:
+Run build commands from `Silex/Toolchain/`. The build runner starts oracle
+commands from the workspace root, so every nested source compilation shares
+the workspace `.silex` cache:
 
 ```text
 zig build optimizer-oracle -- audit
@@ -207,7 +210,8 @@ zig build --build-file Silex/Toolchain/build.zig optimizer-oracle -- \
   Boids2D.Silex.steering
 ```
 
-Generated evidence is recreated under `.zig-cache/optimizer-oracle/`:
+Generated evidence is recreated under the workspace root's
+`.zig-cache/optimizer-oracle/`:
 
 - `coverage-plan.tsv` contains the seeded pairwise and risk-triplet plan;
 - `cache-proof.tsv` contains cold, primed, warm, and output hashes;

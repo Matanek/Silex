@@ -378,6 +378,7 @@ pub fn build(b: *std.Build) void {
         .root_module = optimizer_oracle_module,
     });
     const optimizer_oracle_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_oracle_command.setCwd(b.path("../.."));
     optimizer_oracle_command.addArtifactArg(executable);
     optimizer_oracle_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     if (b.args) |args| optimizer_oracle_command.addArgs(args);
@@ -388,6 +389,7 @@ pub fn build(b: *std.Build) void {
     optimizer_oracle_step.dependOn(&optimizer_oracle_command.step);
 
     const optimizer_gate_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_gate_command.setCwd(b.path("../.."));
     optimizer_gate_command.addArtifactArg(executable);
     optimizer_gate_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     optimizer_gate_command.addArg("gate");
@@ -414,6 +416,7 @@ pub fn build(b: *std.Build) void {
     optimizer_gate_step.dependOn(&optimizer_oracle_test_command.step);
 
     const optimizer_admission_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_admission_command.setCwd(b.path("../.."));
     optimizer_admission_command.addArtifactArg(executable);
     optimizer_admission_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     if (b.args) |args| optimizer_admission_command.addArgs(args);
@@ -425,6 +428,7 @@ pub fn build(b: *std.Build) void {
     optimizer_admission_step.dependOn(&optimizer_admission_command.step);
 
     const optimizer_admission_quick_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_admission_quick_command.setCwd(b.path("../.."));
     optimizer_admission_quick_command.addArtifactArg(executable);
     optimizer_admission_quick_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     optimizer_admission_quick_command.addArg("admission-quick");
@@ -436,6 +440,7 @@ pub fn build(b: *std.Build) void {
     optimizer_admission_quick_step.dependOn(&optimizer_admission_quick_command.step);
 
     const optimizer_parity_gate_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_parity_gate_command.setCwd(b.path("../.."));
     optimizer_parity_gate_command.addArtifactArg(executable);
     optimizer_parity_gate_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     optimizer_parity_gate_command.addArg("parity-gate");
@@ -447,6 +452,7 @@ pub fn build(b: *std.Build) void {
     optimizer_parity_gate_step.dependOn(&optimizer_parity_gate_command.step);
 
     const optimizer_robustness_quick_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_robustness_quick_command.setCwd(b.path("../.."));
     optimizer_robustness_quick_command.addArtifactArg(executable);
     optimizer_robustness_quick_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     optimizer_robustness_quick_command.addArg("robustness-quick");
@@ -458,6 +464,7 @@ pub fn build(b: *std.Build) void {
     optimizer_robustness_quick_step.dependOn(&optimizer_robustness_quick_command.step);
 
     const optimizer_robustness_qualified_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_robustness_qualified_command.setCwd(b.path("../.."));
     optimizer_robustness_qualified_command.addArtifactArg(executable);
     optimizer_robustness_qualified_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     optimizer_robustness_qualified_command.addArg("robustness-qualified");
@@ -469,6 +476,7 @@ pub fn build(b: *std.Build) void {
     optimizer_robustness_qualified_step.dependOn(&optimizer_robustness_qualified_command.step);
 
     const optimizer_robustness_soak_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_robustness_soak_command.setCwd(b.path("../.."));
     optimizer_robustness_soak_command.addArtifactArg(executable);
     optimizer_robustness_soak_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
     optimizer_robustness_soak_command.addArg("robustness-soak");
