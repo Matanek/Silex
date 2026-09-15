@@ -110,6 +110,11 @@ with every entry ever compiled. Its key covers package sources and ancestor
 manifests, target, test mode, private format, and compiler identity; it is not a
 package ABI or a public precompiled-interface format.
 
+LLVM currently optimizes and emits one closed program per executable. Semantic
+fragments do not cache LLVM machine code for packages independently of the
+consumer. A new entry therefore still needs its own LLVM compilation, while
+alternating between unchanged cached entries reuses their executables.
+
 ## Report interactive progress
 
 In an interactive terminal, compilation and package installation show a live

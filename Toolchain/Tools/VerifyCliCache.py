@@ -47,6 +47,27 @@ def main():
         value = 41
         compile_case("initial LLVM Release", "miss")
         compile_case("unchanged LLVM Release", "hit_before_frontend")
+        # Switching directory entries must preserve both executables. Exercise
+        # the exact run-directory path as well as compile's explicit file path.
+        with tempfile.TemporaryDirectory(prefix="silex-cache-second-entry-") as second:
+            second_root = Path(second)
+            (second_root / "Main.sx").write_text('func main() { print(97) }\n')
+            for directory, output, expected in (
+                (root, 41, "hit_before_frontend"),
+                (second_root, 97, "miss"),
+                (root, 41, "hit_before_frontend"),
+                (second_root, 97, "hit_before_frontend"),
+            ):
+                result = subprocess.run([str(compiler), "run", str(directory),
+                                         "--backend", "llvm", "--release"],
+                                        env=env, capture_output=True, text=True, check=True)
+                assert result.stdout.strip() == str(output) and not result.stderr, result
+                report = json.loads(trace.read_text())
+                assert report["cache_result"] == expected, report
+                if expected == "hit_before_frontend":
+                    for phase in ("frontend_total", "optimization", "lowering", "emission", "linking"):
+                        assert next(p for p in report["phases"] if p["name"] == phase)["invocations"] == 0, report
+            print("alternating run directories preserves both executables", flush=True)
         compile_case("separate Debug artifact", "miss", mode="debug")
         compile_case("unchanged LLVM Debug", "hit_before_frontend", mode="debug")
         compile_case("separate native artifact", "miss", backend="native")
