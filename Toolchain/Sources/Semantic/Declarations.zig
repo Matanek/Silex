@@ -51,6 +51,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             .name = name,
             .fields = fields,
             .is_tuple = declaration.is_tuple,
+            .tuple_placeholder = declaration.tuple_placeholder,
             .tuple_named = declaration.tuple_named,
             .is_class = declaration.is_class,
             .is_copyable = declaration.is_copyable,

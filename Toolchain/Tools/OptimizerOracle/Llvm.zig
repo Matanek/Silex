@@ -69,6 +69,7 @@ pub fn emitWithBoundaries(
     try output.append(allocator, '\n');
     try emitBoundaryDeclarations(&output, allocator, program, boundaries);
     for (program.structures, 0..) |structure, structure_index| {
+        if (structure.tuple_placeholder) continue;
         if (structure.collection != null) {
             try appendFmt(&output, allocator, "%sx.type.{d} = type {{ ptr, i64 }}\n", .{structure_index});
             continue;

@@ -83,6 +83,7 @@ pub fn analyzeLiteral(
         @constCast(&self.structures[placeholder]).fields = target.fields;
         @constCast(&self.structures[placeholder]).name = target.name;
     }
+    @constCast(&self.structures[literal.placeholder_type.structureIndex().?]).tuple_placeholder = false;
     const result_type = if (expected) |value| value else literal.placeholder_type;
     const result = try self.newValue(builder, result_type);
     try self.emit(builder, .{ .structure_init = .{

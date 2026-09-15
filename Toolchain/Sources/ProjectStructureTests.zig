@@ -198,6 +198,69 @@ test "invalidate the cached package graph when a consumer source changes" {
     try std.testing.expectEqual(@as(usize, 0), second.metrics.package_functions_reused);
 }
 
+test "package cache keeps skipped tuple literals marked as frontend placeholders" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources");
+    try temporary.dir.createDirPath(std.testing.io, "DependencySources/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Package.json",
+        .data = "{\"sources\":\"Sources\",\"dependencies\":{\"Tuples\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Package.json",
+        .data = "{\"name\":\"Tuples\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "DependencySources/Module/PairFactory.sx",
+        .data =
+        \\public class PairFactory {
+        \\    init() {}
+        \\    func total() int {
+        \\        let pair:(left:int, right:int) = (left:20, right:22)
+        \\        return pair.left + pair.right
+        \\    }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Application/Sources/Main.sx",
+        .data =
+        \\use Tuples.PairFactory.PairFactory
+        \\func main() {
+        \\    var factory = PairFactory()
+        \\    print(factory.total())
+        \\}
+        ,
+    });
+    const entry = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Application",
+        "Sources",
+        "Main.sx",
+    });
+
+    var first_compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+    const first = try first_compiler.compile(entry);
+    try std.testing.expect(first.metrics.package_functions_stored != 0);
+    for (first.ir.structures) |structure| try std.testing.expect(!structure.tuple_placeholder);
+
+    var second_compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+    const second = try second_compiler.compile(entry);
+    const result = try Interpreter.runCapture(allocator, second.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    try std.testing.expect(second.metrics.package_functions_reused != 0);
+    var unresolved_placeholder = false;
+    for (second.ir.structures) |structure| unresolved_placeholder = unresolved_placeholder or structure.tuple_placeholder;
+    try std.testing.expect(unresolved_placeholder);
+}
+
 test "resolve a custom source root through canonical package and module paths" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

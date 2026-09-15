@@ -567,6 +567,9 @@ pub const Structure = struct {
     name: []const u8,
     fields: []const StructureField,
     is_tuple: bool = false,
+    /// Frontend-only tuple shape awaiting contextual inference. A cached
+    /// generated function can legitimately leave such a placeholder unused.
+    tuple_placeholder: bool = false,
     tuple_named: bool = false,
     is_class: bool = false,
     is_copyable: bool = true,

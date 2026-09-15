@@ -168,6 +168,7 @@ pub fn emitEntryWithBoundaries(
     // attribution even when the composed program also contains types outside
     // the prototype.
     for (program.structures, 0..) |structure, structure_index| {
+        if (structure.tuple_placeholder) continue;
         if (enumIndexForStructure(program, structure_index)) |enumeration_index| {
             if (plainTagEnum(program, enumeration_index)) continue;
             if (try rawEnumType(program, enumeration_index)) |raw_type| {
@@ -3945,6 +3946,31 @@ test "static namespaces require no material LLVM layout" {
             .name = "Math",
             .fields = &.{},
             .is_static = true,
+        }},
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{},
+            .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+        }},
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "%sx.type.0 = type") == null);
+}
+
+test "unresolved tuple placeholders require no material LLVM layout" {
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "$tuple.literal.0.0",
+            .fields = &.{
+                .{ .name = "left", .type = .void, .mutable = false },
+                .{ .name = "right", .type = .void, .mutable = false },
+            },
+            .is_tuple = true,
+            .tuple_placeholder = true,
+            .tuple_named = true,
         }},
         .functions = &.{.{
             .name = "main",

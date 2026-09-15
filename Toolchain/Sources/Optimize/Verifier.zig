@@ -22,6 +22,13 @@ pub fn verify(allocator: Allocator, program: Ir.Program) Error!void {
     var validation_arena = std.heap.ArenaAllocator.init(allocator);
     defer validation_arena.deinit();
     _ = try Ir.writeText(validation_arena.allocator(), program);
+    try verifyControlFlow(allocator, program);
+}
+
+/// Validate definitions, uses and dominance after typed IR construction.
+/// Compiler backends use this path because their input has already passed the
+/// frontend's type construction; exhaustive optimizer oracles keep `verify`.
+pub fn verifyControlFlow(allocator: Allocator, program: Ir.Program) Error!void {
     for (program.functions) |function| try verifyFunction(allocator, program, function);
 }
 
@@ -70,9 +77,9 @@ pub fn verifyFunction(allocator: Allocator, program: Ir.Program, function: Ir.Fu
         }
     }
 
-    const predecessors = try predecessorMatrix(allocator, function);
-    defer allocator.free(predecessors);
-    const dominators = try dominatorMatrix(allocator, function, predecessors);
+    const reachable = try reachableBlocks(allocator, function);
+    defer allocator.free(reachable);
+    const dominators = try dominatorMatrix(allocator, function, reachable);
     defer allocator.free(dominators);
     const multiple_definition_entries = try allocator.alloc(bool, value_count * function.blocks.len);
     defer allocator.free(multiple_definition_entries);
@@ -83,7 +90,7 @@ pub fn verifyFunction(allocator: Allocator, program: Ir.Program, function: Ir.Fu
             try validateMultipleDefinitions(
                 allocator,
                 function,
-                predecessors,
+                reachable,
                 value,
                 multiple_definition_entries[value * function.blocks.len ..][0..function.blocks.len],
             );
@@ -98,6 +105,7 @@ pub fn verifyFunction(allocator: Allocator, program: Ir.Program, function: Ir.Fu
                 first_definitions,
                 multiple_definition_entries,
                 dominators,
+                reachable,
                 instruction,
                 .{ .block = block_index, .instruction = instruction_index },
             );
@@ -108,6 +116,7 @@ pub fn verifyFunction(allocator: Allocator, program: Ir.Program, function: Ir.Fu
             first_definitions,
             multiple_definition_entries,
             dominators,
+            reachable,
             block.terminator,
             .{ .block = block_index, .instruction = block.instructions.len },
         );
@@ -244,138 +253,102 @@ pub fn verifyTerminatorType(function: Ir.Function, terminator: Ir.Terminator) Er
     }
 }
 
-fn predecessorMatrix(allocator: Allocator, function: Ir.Function) Error![]bool {
-    const block_count = function.blocks.len;
-    const result = try allocator.alloc(bool, block_count * block_count);
-    @memset(result, false);
-    for (function.blocks, 0..) |block, source| switch (block.terminator) {
-        .jump => |target| {
-            if (target >= block_count) return error.InvalidProgram;
-            result[target * block_count + source] = true;
-        },
-        .branch => |branch_value| {
-            if (branch_value.then_block >= block_count or branch_value.else_block >= block_count)
-                return error.InvalidProgram;
-            result[branch_value.then_block * block_count + source] = true;
-            result[branch_value.else_block * block_count + source] = true;
-        },
-        else => {},
-    };
-    return result;
-}
-
 fn dominatorMatrix(
     allocator: Allocator,
     function: Ir.Function,
-    predecessors: []const bool,
+    reachable: []const bool,
 ) Error![]bool {
     const block_count = function.blocks.len;
-    const reachable = try allocator.alloc(bool, block_count);
-    defer allocator.free(reachable);
-    @memset(reachable, false);
-    reachable[0] = true;
-    var reachability_changed = true;
-    while (reachability_changed) {
-        reachability_changed = false;
-        for (function.blocks, 0..) |block, source| {
-            if (!reachable[source]) continue;
+    const result = try allocator.alloc(bool, block_count * block_count);
+    @memset(result, false);
+    const without_candidate = try allocator.alloc(bool, block_count);
+    defer allocator.free(without_candidate);
+    var pending: std.ArrayList(Ir.BlockId) = .empty;
+    defer pending.deinit(allocator);
+    for (0..block_count) |candidate| {
+        @memset(without_candidate, false);
+        pending.clearRetainingCapacity();
+        if (candidate != 0) {
+            without_candidate[0] = true;
+            try pending.append(allocator, 0);
+        }
+        var cursor: usize = 0;
+        while (cursor < pending.items.len) : (cursor += 1) {
+            const block = function.blocks[pending.items[cursor]];
             switch (block.terminator) {
-                .jump => |target| {
-                    if (!reachable[target]) {
-                        reachable[target] = true;
-                        reachability_changed = true;
-                    }
-                },
+                .jump => |target| try markReachableExcept(allocator, without_candidate, &pending, target, candidate),
                 .branch => |branch_value| {
-                    if (!reachable[branch_value.then_block]) {
-                        reachable[branch_value.then_block] = true;
-                        reachability_changed = true;
-                    }
-                    if (!reachable[branch_value.else_block]) {
-                        reachable[branch_value.else_block] = true;
-                        reachability_changed = true;
-                    }
+                    try markReachableExcept(allocator, without_candidate, &pending, branch_value.then_block, candidate);
+                    try markReachableExcept(allocator, without_candidate, &pending, branch_value.else_block, candidate);
                 },
                 else => {},
             }
         }
-    }
-    const result = try allocator.alloc(bool, block_count * block_count);
-    @memset(result, true);
-    for (0..block_count) |candidate| result[candidate] = candidate == 0;
-    for (1..block_count) |block| if (!reachable[block]) {
-        for (0..block_count) |candidate| result[block * block_count + candidate] = candidate == block;
-    };
-
-    var changed = true;
-    while (changed) {
-        changed = false;
-        for (1..block_count) |block| {
-            if (!reachable[block]) continue;
-            var has_predecessor = false;
-            for (0..block_count) |candidate| {
-                var dominated = true;
-                for (0..block_count) |predecessor| {
-                    if (!reachable[predecessor] or !predecessors[block * block_count + predecessor]) continue;
-                    has_predecessor = true;
-                    dominated = dominated and result[predecessor * block_count + candidate];
-                }
-                if (!has_predecessor) dominated = false;
-                if (candidate == block) dominated = true;
-                const index = block * block_count + candidate;
-                if (result[index] != dominated) {
-                    result[index] = dominated;
-                    changed = true;
-                }
-            }
+        for (0..block_count) |block| {
+            result[block * block_count + candidate] = if (reachable[block])
+                !without_candidate[block]
+            else
+                block == candidate;
         }
     }
     return result;
+}
+
+fn markReachableExcept(
+    allocator: Allocator,
+    reachable: []bool,
+    pending: *std.ArrayList(Ir.BlockId),
+    block: Ir.BlockId,
+    excluded: Ir.BlockId,
+) Error!void {
+    if (block >= reachable.len) return error.InvalidProgram;
+    if (block == excluded or reachable[block]) return;
+    reachable[block] = true;
+    try pending.append(allocator, block);
 }
 
 fn reachableBlocks(allocator: Allocator, function: Ir.Function) Error![]bool {
     const reachable = try allocator.alloc(bool, function.blocks.len);
     @memset(reachable, false);
     reachable[0] = true;
-    var changed = true;
-    while (changed) {
-        changed = false;
-        for (function.blocks, 0..) |block, source| {
-            if (!reachable[source]) continue;
-            switch (block.terminator) {
-                .jump => |target| {
-                    if (!reachable[target]) {
-                        reachable[target] = true;
-                        changed = true;
-                    }
-                },
-                .branch => |branch_value| {
-                    if (!reachable[branch_value.then_block]) {
-                        reachable[branch_value.then_block] = true;
-                        changed = true;
-                    }
-                    if (!reachable[branch_value.else_block]) {
-                        reachable[branch_value.else_block] = true;
-                        changed = true;
-                    }
-                },
-                else => {},
-            }
+    var pending: std.ArrayList(Ir.BlockId) = .empty;
+    defer pending.deinit(allocator);
+    try pending.append(allocator, 0);
+    var cursor: usize = 0;
+    while (cursor < pending.items.len) : (cursor += 1) {
+        const block = function.blocks[pending.items[cursor]];
+        switch (block.terminator) {
+            .jump => |target| try markReachable(allocator, reachable, &pending, target),
+            .branch => |branch_value| {
+                try markReachable(allocator, reachable, &pending, branch_value.then_block);
+                try markReachable(allocator, reachable, &pending, branch_value.else_block);
+            },
+            else => {},
         }
     }
     return reachable;
 }
 
+fn markReachable(
+    allocator: Allocator,
+    reachable: []bool,
+    pending: *std.ArrayList(Ir.BlockId),
+    block: Ir.BlockId,
+) Error!void {
+    if (block >= reachable.len) return error.InvalidProgram;
+    if (reachable[block]) return;
+    reachable[block] = true;
+    try pending.append(allocator, block);
+}
+
 fn validateMultipleDefinitions(
     allocator: Allocator,
     function: Ir.Function,
-    predecessors: []const bool,
+    reachable: []const bool,
     value: Ir.ValueId,
     definite_entry: []bool,
 ) Error!void {
     const block_count = function.blocks.len;
-    const reachable = try reachableBlocks(allocator, function);
-    defer allocator.free(reachable);
     const block_defines = try allocator.alloc(bool, block_count);
     defer allocator.free(block_defines);
     @memset(block_defines, false);
@@ -386,35 +359,29 @@ fn validateMultipleDefinitions(
             block_defines[block_index] = true;
         }
     }
-    const definite_exit = try allocator.alloc(bool, block_count);
-    defer allocator.free(definite_exit);
-    for (0..block_count) |block| {
-        definite_entry[block] = reachable[block] and block != 0;
-        definite_exit[block] = definite_entry[block] or block_defines[block];
-    }
-    var changed = true;
-    while (changed) {
-        changed = false;
-        for (0..block_count) |block| {
-            if (!reachable[block]) continue;
-            var next_entry = false;
-            if (block != 0) {
-                next_entry = true;
-                var has_predecessor = false;
-                for (0..block_count) |predecessor| {
-                    if (!reachable[predecessor] or !predecessors[block * block_count + predecessor]) continue;
-                    has_predecessor = true;
-                    next_entry = next_entry and definite_exit[predecessor];
-                }
-                if (!has_predecessor) next_entry = false;
-            }
-            const next_exit = next_entry or block_defines[block];
-            if (definite_entry[block] != next_entry or definite_exit[block] != next_exit) {
-                definite_entry[block] = next_entry;
-                definite_exit[block] = next_exit;
-                changed = true;
-            }
+    const without_definition = try allocator.alloc(bool, block_count);
+    defer allocator.free(without_definition);
+    @memset(without_definition, false);
+    without_definition[0] = true;
+    var pending: std.ArrayList(Ir.BlockId) = .empty;
+    defer pending.deinit(allocator);
+    try pending.append(allocator, 0);
+    var cursor: usize = 0;
+    while (cursor < pending.items.len) : (cursor += 1) {
+        const source = pending.items[cursor];
+        if (block_defines[source]) continue;
+        const block = function.blocks[source];
+        switch (block.terminator) {
+            .jump => |target| try markReachable(allocator, without_definition, &pending, target),
+            .branch => |branch_value| {
+                try markReachable(allocator, without_definition, &pending, branch_value.then_block);
+                try markReachable(allocator, without_definition, &pending, branch_value.else_block);
+            },
+            else => {},
         }
+    }
+    for (0..block_count) |block| {
+        definite_entry[block] = reachable[block] and !without_definition[block];
     }
 }
 
@@ -450,12 +417,28 @@ test "verifier ignores unreachable predecessors when proving dominance" {
     try verify(std.testing.allocator, program);
 }
 
+test "verifier accepts values flowing inside an unreachable block component" {
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "unreachable_component",
+        .parameter_types = &.{},
+        .return_type = .int,
+        .value_types = &.{ .int, .int },
+        .blocks = &.{
+            .{ .instructions = &.{.{ .constant_int = .{ .result = 0, .bits = 7 } }}, .terminator = .{ .return_value = 0 } },
+            .{ .instructions = &.{.{ .constant_int = .{ .result = 1, .bits = 9 } }}, .terminator = .{ .jump = 2 } },
+            .{ .instructions = &.{}, .terminator = .{ .return_value = 1 } },
+        },
+    }} };
+    try verify(std.testing.allocator, program);
+}
+
 fn verifyUse(
     function: Ir.Function,
     definition_counts: []const usize,
     first_definitions: []const ?Location,
     multiple_definition_entries: []const bool,
     dominators: []const bool,
+    reachable: []const bool,
     value: Ir.ValueId,
     use: Location,
 ) Error!void {
@@ -463,7 +446,8 @@ fn verifyUse(
     if (definition_counts[value] == 0) return error.MissingDefinition;
     const block_count = function.blocks.len;
     if (definition_counts[value] > 1) {
-        if (multiple_definition_entries[value * block_count + use.block] or
+        if (!reachable[use.block] or
+            multiple_definition_entries[value * block_count + use.block] or
             definedBeforeUse(function, value, use)) return;
         return error.DefinitionDoesNotDominateUse;
     }
@@ -472,7 +456,7 @@ fn verifyUse(
         if (definition.instruction >= use.instruction) {
             return error.DefinitionDoesNotDominateUse;
         }
-    } else if (!dominators[use.block * block_count + definition.block]) {
+    } else if (reachable[use.block] and !dominators[use.block * block_count + definition.block]) {
         return error.DefinitionDoesNotDominateUse;
     }
 }
@@ -490,6 +474,7 @@ fn verifyInstructionUses(
     first_definitions: []const ?Location,
     multiple_definition_entries: []const bool,
     dominators: []const bool,
+    reachable: []const bool,
     instruction: Ir.Instruction,
     location: Location,
 ) Error!void {
@@ -499,6 +484,7 @@ fn verifyInstructionUses(
         first_definitions: []const ?Location,
         multiple_definition_entries: []const bool,
         dominators: []const bool,
+        reachable: []const bool,
         location: Location,
 
         fn one(self: @This(), value: Ir.ValueId) Error!void {
@@ -508,6 +494,7 @@ fn verifyInstructionUses(
                 self.first_definitions,
                 self.multiple_definition_entries,
                 self.dominators,
+                self.reachable,
                 value,
                 self.location,
             );
@@ -525,6 +512,7 @@ fn verifyInstructionUses(
         .first_definitions = first_definitions,
         .multiple_definition_entries = multiple_definition_entries,
         .dominators = dominators,
+        .reachable = reachable,
         .location = location,
     };
     switch (instruction) {
@@ -618,6 +606,7 @@ fn verifyTerminatorUses(
     first_definitions: []const ?Location,
     multiple_definition_entries: []const bool,
     dominators: []const bool,
+    reachable: []const bool,
     terminator: Ir.Terminator,
     location: Location,
 ) Error!void {
@@ -627,7 +616,7 @@ fn verifyTerminatorUses(
         .panic => |value| value.message,
         else => return,
     };
-    try verifyUse(function, definition_counts, first_definitions, multiple_definition_entries, dominators, value, location);
+    try verifyUse(function, definition_counts, first_definitions, multiple_definition_entries, dominators, reachable, value, location);
 }
 
 fn instructionResult(instruction: Ir.Instruction) ?Ir.ValueId {

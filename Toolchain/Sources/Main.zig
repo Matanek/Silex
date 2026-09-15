@@ -1450,7 +1450,7 @@ fn compileLlvmOptions(
             return 1;
         };
     };
-    ReleaseVerifier.verify(allocator, optimized_program) catch |err| {
+    ReleaseVerifier.verifyControlFlow(allocator, optimized_program) catch |err| {
         std.debug.print("silex: LLVM backend rejected the optimized portable IR: {t}\n", .{err});
         return 1;
     };
