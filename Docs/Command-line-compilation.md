@@ -20,10 +20,11 @@ provenance and the source directory used as the child process's working
 directory.
 
 `run` emits a private executable under `.silex/run/`, inherits the
-terminal streams, waits for the program and returns its exit code. Release is
-the default and applies shared semantics-preserving optimization before backend
-lowering; `--debug` disables those optimizations for backend diagnosis without
-weakening language safety in Release. When a native child terminates through a
+terminal streams, waits for the program and returns its exit code. Debug is
+the `run` default; `--release` applies shared semantics-preserving optimization
+before backend lowering. `compile` continues to default to Release. Debug
+disables those optimizations for backend diagnosis without weakening language
+safety in Release. When a native child terminates through a
 signal, the CLI reports its
 symbolic name and meaning, source, mode, retained executable, no-cache Debug
 reproduction and host debugger command. It identifies native fault owners as
@@ -54,6 +55,13 @@ under the user toolchain root; the CLI verifies `opt`, `llc`, their LLVM version
 and reported host CPU before compilation. `SILEX_LLVM_DIR` may override that
 managed installation for compiler development. Building `silex` and using
 `--backend native` do not load or execute LLVM.
+
+On macOS, package-provider linkage first uses the selected Apple developer
+tools when both the SDK and compiler runtime are usable. If that selection is
+unavailable, including when Xcode's license blocks its tools, the linker tries
+installed Command Line Tools instead. It applies the same private choice to
+SDK discovery, runtime discovery and the linker child for both `native` and
+`llvm`; callers do not need to set `DEVELOPER_DIR`.
 
 ## Keep one bounded cache per execution context
 

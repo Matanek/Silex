@@ -92,8 +92,8 @@ installations of LLVM or Zig.
 current terminal streams and returns its exit code. LLVM is the default backend
 on macOS ARM64; the direct native backend remains the default on other hosts.
 Select either one explicitly with `--backend llvm` or `--backend native`.
-Release is the default mode; pass `--debug` to disable optimization while
-diagnosing the selected backend. Add `--emit-ir` to inspect the portable typed
+Debug is the default mode for `run`; pass `--release` to enable optimization
+for the selected backend. Add `--emit-ir` to inspect the portable typed
 IR before backend lowering:
 
 In an interactive terminal, `compile` and `run` announce the active work:

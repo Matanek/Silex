@@ -8,6 +8,13 @@ const Io = std.Io;
 
 pub const Error = Allocator.Error || error{LinkFailed};
 
+const DeveloperToolchain = enum { selected, command_line_tools };
+const DeveloperTools = struct {
+    sdk_path: []const u8,
+    runtime_path: []const u8,
+    toolchain: DeveloperToolchain,
+};
+
 pub fn executable(
     allocator: Allocator,
     io: Io,
@@ -46,14 +53,13 @@ pub fn executableObjects(
         "x86_64-macos"
     else
         return error.LinkFailed;
-    const sdk_path = try sdkPath(allocator, io);
-    const framework_path = try std.fs.path.join(allocator, &.{ sdk_path, "System/Library/Frameworks" });
-    const library_path = try std.fs.path.join(allocator, &.{ sdk_path, "usr/lib" });
-    const runtime_path = try appleRuntimePath(allocator, io);
+    const tools = try sdkPath(allocator, io);
+    const framework_path = try std.fs.path.join(allocator, &.{ tools.sdk_path, "System/Library/Frameworks" });
+    const library_path = try std.fs.path.join(allocator, &.{ tools.sdk_path, "usr/lib" });
     var arguments: std.ArrayList([]const u8) = .empty;
     try arguments.appendSlice(allocator, &.{
         linker_path, "cc",           "-nostdlib", "-g",
-        "-target",   triple,         "-isysroot", sdk_path,
+        "-target",   triple,         "-isysroot", tools.sdk_path,
         "-F",        framework_path, "-L",        library_path,
         "-o",        output_path,
     });
@@ -91,9 +97,9 @@ pub fn executableObjects(
     std.mem.sort([]const u8, libraries.items, {}, stringLessThan);
     for (libraries.items) |library| try arguments.append(allocator, try std.fmt.allocPrint(allocator, "-l{s}", .{library}));
     if (usesWebKit(functions)) try arguments.append(allocator, "-lobjc");
-    try arguments.appendSlice(allocator, &.{ "-lSystem", runtime_path });
+    try arguments.appendSlice(allocator, &.{ "-lSystem", tools.runtime_path });
 
-    const result = try std.process.run(allocator, io, .{ .argv = arguments.items });
+    const result = try runTool(allocator, io, arguments.items, tools.toolchain);
     switch (result.term) {
         .exited => |code| if (code == 0) return,
         else => {},
@@ -111,38 +117,57 @@ fn usesWebKit(functions: []const Machine.ExternalFunction) bool {
     return false;
 }
 
-fn sdkPath(allocator: Allocator, io: Io) ![]const u8 {
-    const result = try std.process.run(allocator, io, .{
-        .argv = &.{ "xcrun", "--sdk", "macosx", "--show-sdk-path" },
-    });
-    switch (result.term) {
-        .exited => |code| if (code == 0) {
-            const path = std.mem.trim(u8, result.stdout, " \t\r\n");
-            if (path.len != 0) return path;
-        },
-        else => {},
-    }
-    if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
+fn sdkPath(allocator: Allocator, io: Io) !DeveloperTools {
+    if (try probeDeveloperTools(allocator, io, .selected)) |tools| return tools;
+    if (try probeDeveloperTools(allocator, io, .command_line_tools)) |tools| return tools;
+    std.debug.print(
+        "silex: no usable macOS SDK and Apple compiler runtime; install Command Line Tools or make the selected Xcode usable\n",
+        .{},
+    );
     return error.LinkFailed;
 }
 
-fn appleRuntimePath(allocator: Allocator, io: Io) ![]const u8 {
-    const result = try std.process.run(allocator, io, .{
-        .argv = &.{ "/usr/bin/clang", "--print-runtime-dir" },
-    });
-    switch (result.term) {
-        .exited => |code| if (code == 0) {
-            const directory = std.mem.trim(u8, result.stdout, " \t\r\n");
-            if (directory.len != 0) return std.fs.path.join(allocator, &.{ directory, "libclang_rt.osx.a" });
-        },
-        else => {},
-    }
-    if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
-    return error.LinkFailed;
+fn probeDeveloperTools(allocator: Allocator, io: Io, toolchain: DeveloperToolchain) !?DeveloperTools {
+    const sdk = runTool(allocator, io, &.{ "xcrun", "--sdk", "macosx", "--show-sdk-path" }, toolchain) catch return null;
+    if (exitCode(sdk.term) != 0) return null;
+    const sdk_path = std.mem.trim(u8, sdk.stdout, " \t\r\n");
+    if (sdk_path.len == 0) return null;
+
+    const runtime = runTool(allocator, io, &.{ "/usr/bin/clang", "--print-runtime-dir" }, toolchain) catch return null;
+    if (exitCode(runtime.term) != 0) return null;
+    const runtime_directory = std.mem.trim(u8, runtime.stdout, " \t\r\n");
+    if (runtime_directory.len == 0) return null;
+    return .{
+        .sdk_path = sdk_path,
+        .runtime_path = try std.fs.path.join(allocator, &.{ runtime_directory, "libclang_rt.osx.a" }),
+        .toolchain = toolchain,
+    };
+}
+
+fn runTool(allocator: Allocator, io: Io, argv: []const []const u8, toolchain: DeveloperToolchain) !std.process.RunResult {
+    if (toolchain == .selected) return std.process.run(allocator, io, .{ .argv = argv });
+
+    const wrapped = try allocator.alloc([]const u8, argv.len + 2);
+    defer allocator.free(wrapped);
+    wrapped[0] = "/usr/bin/env";
+    wrapped[1] = "DEVELOPER_DIR=/Library/Developer/CommandLineTools";
+    @memcpy(wrapped[2..], argv);
+    return std.process.run(allocator, io, .{ .argv = wrapped });
 }
 
 fn stringLessThan(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.lessThan(u8, left, right);
+}
+
+test "macOS SDK selection works without caller developer-dir overrides" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tools = try sdkPath(arena.allocator(), std.testing.io);
+    try std.testing.expect(tools.sdk_path.len != 0);
+    try std.testing.expect(tools.runtime_path.len != 0);
 }
 
 test "link and execute a symbol from a static ARM64 archive" {
@@ -152,6 +177,7 @@ test "link and execute a symbol from a static ARM64 archive" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
+    const tools = try sdkPath(allocator, std.testing.io);
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.writeFile(std.testing.io, .{
@@ -180,7 +206,7 @@ test "link and execute a symbol from a static ARM64 archive" {
         &.{ "zig", "cc", "-target", "aarch64-macos", "-fno-sanitize=all", "-c", main_source, "-o", main_object },
         &.{ "zig", "ar", "rcs", archive, provider_object },
     }) |arguments| {
-        const result = try std.process.run(allocator, std.testing.io, .{ .argv = arguments });
+        const result = try runTool(allocator, std.testing.io, arguments, tools.toolchain);
         try std.testing.expectEqual(@as(u8, 0), exitCode(result.term));
     }
     const providers = [_]Packages.BoundaryProvider{.{
@@ -192,7 +218,7 @@ test "link and execute a symbol from a static ARM64 archive" {
     try executable(allocator, std.testing.io, "zig", .macos_arm64, main_object, output, &providers, &.{});
     const executed = try std.process.run(allocator, std.testing.io, .{ .argv = &.{output} });
     try std.testing.expectEqual(@as(u8, 0), exitCode(executed.term));
-    const symbols = try std.process.run(allocator, std.testing.io, .{ .argv = &.{ "nm", output } });
+    const symbols = try runTool(allocator, std.testing.io, &.{ "nm", output }, tools.toolchain);
     try std.testing.expectEqual(@as(u8, 0), exitCode(symbols.term));
     try std.testing.expect(std.mem.indexOf(u8, symbols.stdout, "_compiler_rt.sin.sinf") == null);
 }
