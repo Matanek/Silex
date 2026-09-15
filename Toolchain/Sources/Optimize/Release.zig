@@ -203,7 +203,7 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
     if (options.stop_after == .ssa_promotion_post) return current;
 
     if (options.disabled != .value_range_analysis) {
-        current = try ValueRanges.optimize(allocator, current);
+        current = try ValueRanges.optimizeWithWorkers(allocator, current, options.worker_count);
         try verifyAfterPass(allocator, current, options);
     }
     if (options.stop_after == .value_range_analysis) return current;
@@ -222,7 +222,7 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
             current = expanded;
             try verifyAfterPass(allocator, current, options);
             if (options.disabled != .value_range_analysis) {
-                current = try ValueRanges.optimize(allocator, current);
+                current = try ValueRanges.optimizeWithWorkers(allocator, current, options.worker_count);
                 try verifyAfterPass(allocator, current, options);
             }
             if (options.disabled != .ssa_value_simplification) {

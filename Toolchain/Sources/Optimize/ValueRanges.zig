@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
+const Workers = @import("../Workers.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -16,18 +17,64 @@ const Fact = union(enum) {
 };
 
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithWorkers(allocator, program, 1);
+}
+
+pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, requested: u16) !Ir.Program {
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
-    for (program.functions, 0..) |function, index| {
-        functions[index] = try optimizeFunction(allocator, function);
+    const count = Workers.selectedCount(program.functions.len, requested);
+    if (count == 1) {
+        for (program.functions, 0..) |function, index|
+            functions[index] = try optimizeFunction(allocator, function);
+    } else {
+        var next = std.atomic.Value(usize).init(0);
+        var workers: [Workers.max_count]Worker = undefined;
+        for (workers[0..count]) |*worker| worker.* = .{
+            .allocator = allocator,
+            .source = program.functions,
+            .destination = functions,
+            .next = &next,
+        };
+        Workers.run(Worker, workers[0..count], Worker.run);
+        for (workers[0..count]) |worker| if (worker.failure) |err| return err;
     }
     var result = program;
     result.functions = functions;
     return result;
 }
 
+const Worker = struct {
+    allocator: Allocator,
+    source: []const Ir.Function,
+    destination: []Ir.Function,
+    next: *std.atomic.Value(usize),
+    failure: ?anyerror = null,
+
+    fn run(self: *Worker) void {
+        while (true) {
+            // Function costs vary sharply; claim the next function instead of
+            // leaving one worker with all the large loop bodies.
+            const index = self.next.fetchAdd(1, .monotonic);
+            if (index >= self.source.len) return;
+            self.destination[index] = optimizeFunction(self.allocator, self.source[index]) catch |err| {
+                self.failure = err;
+                return;
+            };
+        }
+    }
+};
+
 fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    return solveFunction(allocator, function, true, null);
+}
+
+// Keep the dense schedule as a test oracle. The incremental schedule visits
+// blocks in the same order and keeps the same widening iterations.
+fn solveFunction(allocator: Allocator, function: Ir.Function, comptime incremental: bool, evaluations: ?*usize) !Ir.Function {
     if (function.blocks.len == 0 or function.value_types.len == 0) return function;
     const value_count = function.value_types.len;
+    const active_values = try activeValues(allocator, function, incremental);
+    defer allocator.free(active_values);
     const block_count = function.blocks.len;
     const predecessors = try buildPredecessors(allocator, function.blocks);
     const comparisons = try comparisonDefinitions(allocator, function);
@@ -42,16 +89,24 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
     const incoming = try allocator.alloc(Fact, value_count);
     const working = try allocator.alloc(Fact, value_count);
 
+    const pending = try allocator.alloc(bool, block_count);
+    defer allocator.free(pending);
+    @memset(pending, false);
+    pending[0] = true;
     var converged = false;
     const maximum_iterations = block_count * 4 + 8;
     for (0..maximum_iterations) |iteration| {
         var changed = false;
         for (0..block_count) |block_id| {
+            if (incremental and !pending[block_id]) continue;
+            pending[block_id] = false;
+            if (evaluations) |count| count.* += 1;
             const incoming_reachable = incomingFacts(
                 function,
                 block_id,
                 predecessors,
                 comparisons,
+                active_values,
                 exit,
                 exit_reachable,
                 incoming,
@@ -66,7 +121,7 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
             // Widening every block in the cyclic region would erase bounds
             // established by a dominating branch before its loop body.
             const widen = iteration >= block_count and hasBackwardPredecessor(predecessors[block_id].items, block_id);
-            for (0..value_count) |value| {
+            for (active_values) |value| {
                 if (accumulate(
                     &entry[at(value_count, block_id, value)],
                     incoming[value],
@@ -79,17 +134,31 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
             for (function.blocks[block_id].instructions) |instruction| {
                 transfer(function, working, instruction);
             }
+            var exit_changed = false;
             if (!exit_reachable[block_id]) {
                 exit_reachable[block_id] = true;
-                changed = true;
+                exit_changed = true;
             }
-            for (0..value_count) |value| {
+            for (active_values) |value| {
                 if (accumulate(
                     &exit[at(value_count, block_id, value)],
                     working[value],
                     function.value_types[value],
                     widen,
-                )) changed = true;
+                )) exit_changed = true;
+            }
+            if (exit_changed) {
+                changed = true;
+                // Reconsider both branch edges: changed facts can make a
+                // previously impossible edge reachable.
+                switch (function.blocks[block_id].terminator) {
+                    .jump => |target| pending[target] = true,
+                    .branch => |branch| {
+                        pending[branch.then_block] = true;
+                        pending[branch.else_block] = true;
+                    },
+                    else => {},
+                }
             }
         }
         if (!changed) {
@@ -119,11 +188,33 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
     return result;
 }
 
+// Only integer parameters and integer results can acquire an interval.
+// Descriptor slots left by earlier passes and non-integer values stay absent.
+fn activeValues(allocator: Allocator, function: Ir.Function, comptime sparse: bool) ![]Ir.ValueId {
+    const present = try allocator.alloc(bool, function.value_types.len);
+    defer allocator.free(present);
+    @memset(present, !sparse);
+    if (sparse) {
+        for (0..function.capture_types.len + function.parameter_types.len) |value|
+            present[value] = function.value_types[value].isInteger();
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instructionResult(instruction)) |value|
+                present[value] = function.value_types[value].isInteger();
+        };
+    }
+    var values: std.ArrayList(Ir.ValueId) = .empty;
+    for (present, 0..) |included, value| if (included) {
+        try values.append(allocator, value);
+    };
+    return values.toOwnedSlice(allocator);
+}
+
 fn incomingFacts(
     function: Ir.Function,
     block_id: Ir.BlockId,
     predecessors: []const std.ArrayList(Ir.BlockId),
     comparisons: []const ?Ir.Instruction.Binary,
+    active_values: []const Ir.ValueId,
     exits: []const Fact,
     exit_reachable: []const bool,
     facts: []Fact,
@@ -147,7 +238,7 @@ fn incomingFacts(
             exits[predecessor * value_count ..][0..value_count],
         )) continue;
         reachable = true;
-        for (0..value_count) |value| {
+        for (active_values) |value| {
             var incoming = exits[at(value_count, predecessor, value)];
             incoming = refineForEdge(
                 function,
@@ -713,4 +804,108 @@ test "constant divisors remove only proven division checks" {
     try std.testing.expect(!optimized.functions[0].blocks[0].instructions[1].binary.checked);
     try std.testing.expect(optimized.functions[0].blocks[0].instructions[3].binary.checked);
     try std.testing.expect(optimized.functions[0].blocks[0].instructions[4].binary.checked);
+}
+
+test "incremental range analysis matches dense widening without revisiting stable prefixes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const prefix = 24;
+    const block_count = prefix + 4;
+    for ([_]bool{ false, true }) |reverse| {
+        for ([_]bool{ false, true }) |constant_bound| {
+            const blocks = try allocator.alloc(Ir.Block, block_count);
+            blocks[0] = .{ .instructions = &.{
+                .{ .constant_int = .{ .result = 1, .bits = 0 } },
+                .{ .copy = .{ .result = 5, .operand = 1 } },
+            }, .terminator = .{ .jump = 1 } };
+            if (constant_bound) {
+                const instructions = try allocator.alloc(Ir.Instruction, blocks[0].instructions.len + 1);
+                @memcpy(instructions[0..blocks[0].instructions.len], blocks[0].instructions);
+                instructions[instructions.len - 1] = .{ .constant_int = .{ .result = 0, .bits = 10 } };
+                blocks[0].instructions = instructions;
+            }
+            for (1..prefix) |index| blocks[index] = .{ .instructions = &.{}, .terminator = .{ .jump = index + 1 } };
+            blocks[prefix] = .{ .instructions = &.{
+                .{ .binary = .{ .result = 2, .operator = .less, .left = 5, .right = 0 } },
+            }, .terminator = .{ .branch = .{ .condition = 2, .then_block = prefix + 1, .else_block = prefix + 2 } } };
+            blocks[prefix + 1] = .{ .instructions = &.{
+                .{ .constant_int = .{ .result = 3, .bits = 1 } },
+                .{ .binary = .{ .result = 4, .operator = .add, .left = 5, .right = 3, .checked = true } },
+                .{ .copy = .{ .result = 5, .operand = 4 } },
+            }, .terminator = .{ .jump = prefix } };
+            blocks[prefix + 2] = .{ .instructions = &.{}, .terminator = .{ .return_value = 5 } };
+            // An unreachable predecessor must never supply facts to the loop.
+            blocks[prefix + 3] = .{ .instructions = &.{
+                .{ .constant_int = .{ .result = 5, .bits = 127 } },
+            }, .terminator = .{ .jump = prefix } };
+            if (reverse) {
+                std.mem.reverse(Ir.Block, blocks[1..]);
+                for (blocks) |*block| switch (block.terminator) {
+                    .jump => |*target| target.* = block_count - target.*,
+                    .branch => |*branch| {
+                        branch.then_block = block_count - branch.then_block;
+                        branch.else_block = block_count - branch.else_block;
+                    },
+                    else => {},
+                };
+            }
+            const value_types = try allocator.alloc(Ir.Type, 256);
+            @memcpy(value_types[0..6], &[_]Ir.Type{ .int, .int, .bool, .int, .int, .int });
+            @memset(value_types[6..128], .float64);
+            @memset(value_types[128..], .int);
+            const function: Ir.Function = .{
+                .name = "scheduled_loop",
+                .parameter_types = &.{.int},
+                .return_type = .int,
+                .value_types = value_types,
+                .blocks = blocks,
+            };
+            try std.testing.expectEqual(@as(usize, 5), (try activeValues(allocator, function, true)).len);
+            var dense_evaluations: usize = 0;
+            var incremental_evaluations: usize = 0;
+            const dense = try solveFunction(allocator, function, false, &dense_evaluations);
+            const incremental = try solveFunction(allocator, function, true, &incremental_evaluations);
+            const expected = try Ir.writeText(allocator, .{ .functions = &.{dense} });
+            const actual = try Ir.writeText(allocator, .{ .functions = &.{incremental} });
+            try std.testing.expectEqualStrings(expected, actual);
+            try std.testing.expect(incremental_evaluations < dense_evaluations / 2);
+        }
+    }
+}
+
+test "parallel range analysis preserves function order and loop decisions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const functions = try allocator.alloc(Ir.Function, Workers.minimum_items + 17);
+    for (functions, 0..) |*function, index| {
+        const instructions = try allocator.alloc(Ir.Instruction, 2);
+        instructions[0] = .{ .constant_int = .{ .result = 1, .bits = index } };
+        instructions[1] = .{ .copy = .{ .result = 5, .operand = 1 } };
+        const blocks = try allocator.alloc(Ir.Block, 4);
+        blocks[0] = .{ .instructions = instructions, .terminator = .{ .jump = 1 } };
+        blocks[1] = .{ .instructions = &.{
+            .{ .binary = .{ .result = 2, .operator = .less, .left = 5, .right = 0 } },
+        }, .terminator = .{ .branch = .{ .condition = 2, .then_block = 2, .else_block = 3 } } };
+        blocks[2] = .{ .instructions = &.{
+            .{ .constant_int = .{ .result = 3, .bits = 1 } },
+            .{ .binary = .{ .result = 4, .operator = .add, .left = 5, .right = 3, .checked = true } },
+            .{ .copy = .{ .result = 5, .operand = 4 } },
+        }, .terminator = .{ .jump = 1 } };
+        blocks[3] = .{ .instructions = &.{}, .terminator = .{ .return_value = 5 } };
+        function.* = .{
+            .name = try std.fmt.allocPrint(allocator, "range_{d}", .{index}),
+            .parameter_types = &.{.int},
+            .return_type = .int,
+            .value_types = &.{ .int, .int, .bool, .int, .int, .int },
+            .blocks = blocks,
+        };
+    }
+    const program: Ir.Program = .{ .functions = functions };
+    const serial = try Ir.writeText(allocator, try optimize(allocator, program));
+    for ([_]u16{ 2, Workers.max_count }) |count| {
+        const parallel = try optimizeWithWorkers(allocator, program, count);
+        try std.testing.expectEqualStrings(serial, try Ir.writeText(allocator, parallel));
+    }
 }

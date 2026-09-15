@@ -93,7 +93,12 @@ branch targets are never coalesced when they require different incoming values.
 The following value-range pass propagates signed and unsigned integer
 intervals through the verified CFG. True and false comparison edges refine
 their operands; joins take a conservative hull, and cyclic growth widens only
-at loop headers so a dominating body condition remains available. Remainders
+at loop headers so a dominating body condition remains available. The solver
+revisits a block only when a predecessor gains reachability or its outgoing
+facts change. It preserves block order and widening iterations; a dense
+schedule remains a test oracle for identical optimization decisions. Only
+integer parameters and integer instruction results participate in fact merging;
+non-integer values and unused descriptor slots remain absent. Remainders
 by a proven constant nonzero divisor contribute their signed or unsigned result
 interval without removing the divisor check. Release removes an integer add,
 subtract, multiply, or conversion check only when the complete mathematical
@@ -145,8 +150,10 @@ excludes the type minimum. ARM64 then omits both the zero and signed-overflow
 guards. Every unresolved divisor retains both observable failures.
 
 When the closed program contains at least 256 functions, the optimizer applies
-its independent per-function simplification and scalar aggregate replacement
-through at most four fixed worker ranges. Global summaries are complete before
+its independent per-function simplification, scalar aggregate replacement, and
+integer-range analysis through at most four workers. Range analysis claims
+functions dynamically to balance uneven loop costs; the other passes use fixed
+ranges. Global summaries are complete before
 workers start. Inlining, SSA promotion, validation, and every transformation
 that can change cross-function identities remain sequential barriers. Each
 worker writes the original function index in a separate output slice, so using
