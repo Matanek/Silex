@@ -118,7 +118,7 @@ const State = struct {
 };
 
 fn operandField(comptime name: []const u8) bool {
-    inline for (.{ "operand", "left", "right", "value", "base", "address", "byte_offset", "index", "collection", "reference", "replacement", "argument", "start", "end" }) |candidate|
+    inline for (.{ "operand", "left", "right", "value", "base", "address", "byte_offset", "index", "collection", "reference", "replacement", "argument", "start", "end", "condition" }) |candidate|
         if (std.mem.eql(u8, name, candidate)) return true;
     return false;
 }
@@ -150,6 +150,8 @@ test "virtual register homes preserve short circuit effects and loop edge copies
         \\func choose(first:bool, second:bool) int {
         \\    var counter = Counter()
         \\    let chosen = first && touch(counter, second)
+        \\    assert(!first || counter.value == 1)
+        \\    assert(counter.value >= 0 && counter.value <= 1)
         \\    var result = counter.value * 2
         \\    if chosen { result += 1 }
         \\    return result
