@@ -37,6 +37,7 @@ const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
 const PackageRegistration = @import("PackageRegistration.zig");
 const GitHubRegistration = @import("GitHubRegistration.zig");
+const RegistryLogin = @import("RegistryLogin.zig");
 const PackageStore = @import("PackageStore.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
@@ -56,6 +57,8 @@ const usage =
     \\       silex install <package|package-directory> [--suite] [--dev] [--target <target>]
     \\       silex check <package-directory>
     \\       silex register <package-directory>
+    \\       silex login [--no-browser]
+    \\       silex logout
     \\       silex link <package-directory> [--workspace <directory>] [--target <target>]
     \\       silex unlink <package-name> [--workspace <directory>]
     \\       silex packages
@@ -90,6 +93,7 @@ test {
     _ = PackageRegistry;
     _ = PackageRegistration;
     _ = GitHubRegistration;
+    _ = RegistryLogin;
     _ = SelfUpdate;
     _ = LlvmBackend;
 }
@@ -118,6 +122,8 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "check")) return checkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "register")) return registerPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "login")) return RegistryLogin.run(init, args[2..], false);
+    if (std.mem.eql(u8, args[1], "logout")) return RegistryLogin.run(init, args[2..], true);
     if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "unlink")) return unlinkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "packages")) return listPackages(init, allocator, args[2..]);

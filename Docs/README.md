@@ -92,6 +92,8 @@ Choose the subsystem that matches the question you are investigating:
   formats, internal calling conventions, package boundaries, and system ABIs.
 - [Command-line compilation](Command-line-compilation.md): `run`, `interpret`,
   `compile`, Debug diagnostics, and interactive progress.
+- [Registry identity qualification](Registry-login.md): isolated login/logout
+  client, private state, protocol boundaries and offline end-to-end tests.
 - [Release optimization](Release-optimization.md): portable IR simplification,
   pass verification, inlining, bounds analysis, register allocation, and SIMD
   selection.
