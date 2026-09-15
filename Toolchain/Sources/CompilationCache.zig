@@ -43,7 +43,7 @@ pub fn statistics() Statistics {
     return active_statistics;
 }
 
-pub const NativeState = struct {
+pub const BackendState = struct {
     files: []const []const u8,
     providers: []const Packages.BoundaryProvider,
 };
@@ -291,25 +291,26 @@ pub fn storeIr(allocator: Allocator, io: Io, source_path: []const u8, target_nam
     store(allocator, io, artifactKey("frontend-state", &.{ source_path, target_name }), "state", state_payload);
 }
 
-pub fn loadNativeState(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8) ?NativeState {
-    const state_digest = artifactKey("native-input-state", &.{ source_path, target_name });
+pub fn loadBackendState(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8, backend: []const u8) ?BackendState {
+    const state_digest = artifactKey("backend-input-state", &.{ source_path, target_name, backend });
     const state_bytes = load(allocator, io, state_digest, "state") orelse return null;
-    return std.json.parseFromSliceLeaky(NativeState, allocator, state_bytes, .{}) catch null;
+    return std.json.parseFromSliceLeaky(BackendState, allocator, state_bytes, .{}) catch null;
 }
 
-pub fn storeNativeState(
+pub fn storeBackendState(
     allocator: Allocator,
     io: Io,
     source_path: []const u8,
     target_name: []const u8,
+    backend: []const u8,
     files: []const []const u8,
     providers: []const Packages.BoundaryProvider,
 ) void {
-    const state_payload = std.json.Stringify.valueAlloc(allocator, NativeState{
+    const state_payload = std.json.Stringify.valueAlloc(allocator, BackendState{
         .files = files,
         .providers = providers,
     }, .{}) catch return;
-    store(allocator, io, artifactKey("native-input-state", &.{ source_path, target_name }), "state", state_payload);
+    store(allocator, io, artifactKey("backend-input-state", &.{ source_path, target_name, backend }), "state", state_payload);
 }
 
 pub fn loadAst(allocator: Allocator, io: Io, path: []const u8, source: []const u8) ?Ast.Program {
@@ -801,9 +802,9 @@ test "compact native state serialization retains linked boundary providers" {
         .frameworks = &.{"Metal"},
         .libraries = &.{},
     }};
-    const state = NativeState{ .files = files, .providers = providers };
+    const state = BackendState{ .files = files, .providers = providers };
     const payload = try std.json.Stringify.valueAlloc(allocator, state, .{});
-    const loaded = try std.json.parseFromSliceLeaky(NativeState, allocator, payload, .{});
+    const loaded = try std.json.parseFromSliceLeaky(BackendState, allocator, payload, .{});
 
     try std.testing.expectEqual(@as(usize, 1), loaded.providers.len);
     try std.testing.expectEqualStrings("SDL3", loaded.providers[0].name);

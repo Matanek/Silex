@@ -88,6 +88,13 @@ and a missing, truncated, corrupt, or unknown entry becomes a miss. A storage
 failure may prevent publication but does not invalidate a successful
 compilation. `--nocache` performs no reusable cache reads or writes.
 
+LLVM and native compilation both revalidate the saved source and provider list
+before frontend work. An unchanged executable skips analysis, Release
+optimization, emission, and linkage. LLVM `--emit-ir` still runs the frontend
+and optimizer to produce the requested IR. The executable-cache regression is
+`python3 Silex/Toolchain/Tools/VerifyCliCache.py Silex/Toolchain/zig-out/bin/silex`,
+run from the workspace root on macOS ARM64 with managed LLVM installed.
+
 An unchanged package graph may publish one private binary semantic fragment in
 this same root cache. It contains generated functions only when their package,
 source declaration, and referenced function identities can be mapped without

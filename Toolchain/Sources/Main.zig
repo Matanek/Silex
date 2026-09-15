@@ -1367,10 +1367,39 @@ fn compileLlvmOptions(
         trace.metrics.cache_bytes_read = statistics.bytes_read;
         trace.metrics.cache_bytes_written = statistics.bytes_written;
     };
-    defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
 
     var progress = CliProgress.Build.init(init.io);
     progress.source(.analyze, options.source_path);
+    // Dependency discovery is shared with the native backend. Rehash those
+    // inputs before doing frontend or Release work, exactly as for native.
+    // An IR request still needs compilation even when the executable exists.
+    const variant = try std.fmt.allocPrint(
+        allocator,
+        "llvm:{s}:{s}:{s}:{s}:{s}:{s}:{s}:{s}",
+        .{ build_options.version, LlvmBackend.version, tools.opt, tools.llc, tools.cpu, target.name(), @tagName(options.mode), options.source_path },
+    );
+    const executable_kind = target.executableKind();
+    if (options.cache and !emit_ir) {
+        var cache_span = trace.span(.cache_validation);
+        defer cache_span.finish();
+        if (CompilationCache.loadBackendState(allocator, init.io, options.source_path, target.name(), "llvm")) |state| {
+            const key = CompilationCache.backendKey(allocator, init.io, state.files, state.providers, "llvm-compile-v1", variant) catch null;
+            if (key) |digest| if (CompilationCache.executableExists(allocator, init.io, digest, executable_kind)) {
+                progress.stage(.cache);
+                var output_span = trace.span(.output_write);
+                defer output_span.finish();
+                try CompilationCache.materializeExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+                recordOutputSize(&trace, init.io, options.output_path);
+                trace.cacheHit(.hit_before_frontend);
+                trace.succeeded();
+                progress.source(.ready, options.output_path);
+                progress.finish();
+                return 0;
+            };
+        }
+    }
+    defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
+
     var compiler = Project.Compiler.initWithPackagesAndCache(
         allocator,
         init.io,
@@ -1425,6 +1454,16 @@ fn compileLlvmOptions(
         );
     }
 
+    if (options.cache) CompilationCache.storeBackendState(
+        allocator,
+        init.io,
+        options.source_path,
+        target.name(),
+        "llvm",
+        compilation.cache_files,
+        boundary_providers,
+    );
+
     const scoped_program = scoped: {
         var closure_span = trace.span(.program_closure);
         defer closure_span.finish();
@@ -1459,12 +1498,6 @@ fn compileLlvmOptions(
         try Io.File.stdout().writeStreamingAll(init.io, text);
     }
 
-    const variant = try std.fmt.allocPrint(
-        allocator,
-        "llvm:{s}:{s}:{s}:{s}:{s}:{s}:{s}:{s}",
-        .{ build_options.version, LlvmBackend.version, tools.opt, tools.llc, tools.cpu, target.name(), @tagName(options.mode), options.source_path },
-    );
-    const executable_kind = target.executableKind();
     const cache_key = if (options.cache)
         CompilationCache.backendKey(
             allocator,
@@ -1576,7 +1609,7 @@ fn compileNativeOptions(
     {
         var cache_span = trace.span(.cache_validation);
         defer cache_span.finish();
-        if (options.cache) if (CompilationCache.loadNativeState(allocator, init.io, options.source_path, target.name())) |state| {
+        if (options.cache) if (CompilationCache.loadBackendState(allocator, init.io, options.source_path, target.name(), "native")) |state| {
             const digest = CompilationCache.nativeKey(
                 allocator,
                 init.io,
@@ -1654,11 +1687,12 @@ fn compileNativeOptions(
             if (options.cache and boundaries.len == 0) {
                 CompilationCache.storeIr(allocator, init.io, options.source_path, target.name(), compilation.cache_files, compilation.ir);
             }
-            if (options.cache) CompilationCache.storeNativeState(
+            if (options.cache) CompilationCache.storeBackendState(
                 allocator,
                 init.io,
                 options.source_path,
                 target.name(),
+                "native",
                 compilation.cache_files,
                 boundary_providers,
             );
