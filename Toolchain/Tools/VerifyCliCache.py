@@ -13,11 +13,49 @@ import subprocess
 import tempfile
 
 
+def verify_shared_functions(compiler):
+    """Different entries must reuse a common module, including Debug bodies."""
+    with tempfile.TemporaryDirectory(prefix="silex-shared-functions-") as directory:
+        root = Path(directory)
+        helper = root / "Shared.sx"
+        helper.write_text("public func answer() int { return 73 }\n")
+        first, second = root / "First.sx", root / "Second.sx"
+        body = "use Module.Shared.answer\nfunc main() { print(answer()) }\n"
+        first.write_text(body)
+        second.write_text(body)
+        trace, executable = root / "trace.json", root / "program"
+        env = dict(os.environ, SILEX_COMPILATION_TRACE=str(trace),
+                   SILEX_USER_PACKAGE_ALLOWLIST="STD")
+        for source, expected, shared in [(first, "73", False), (second, "73", True)]:
+            result = subprocess.run([str(compiler), "compile", str(source),
+                                     "--backend", "llvm", "--debug", "-o", str(executable)],
+                                    env=env, capture_output=True, text=True, check=True)
+            assert not result.stdout and not result.stderr, result
+            report = json.loads(trace.read_text())
+            assert report["cache_result"] == "miss", report
+            if shared:
+                # Only the new source main and its process entry may differ.
+                assert report["metrics"]["llvm_units_compiled"] <= 2, report
+                assert report["metrics"]["llvm_functions_reused"] > 2, report
+            output = subprocess.run([str(executable)], capture_output=True, text=True, check=True)
+            assert output.stdout.strip() == expected and not output.stderr, output
+        # A cache hit must not conceal an edited dependency.
+        helper.write_text("public func answer() int { return 74 }\n")
+        subprocess.run([str(compiler), "compile", str(second), "--backend", "llvm",
+                        "--debug", "-o", str(executable)], env=env, check=True)
+        report = json.loads(trace.read_text())
+        assert report["metrics"]["llvm_units_compiled"] == 1, report
+        output = subprocess.run([str(executable)], capture_output=True, text=True, check=True)
+        assert output.stdout.strip() == "74" and not output.stderr, output
+        print("shared module reused across entries; edited callee rebuilt independently", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("compiler", type=Path)
     args = parser.parse_args()
     compiler = args.compiler.resolve(strict=True)
+    verify_shared_functions(compiler)
     with tempfile.TemporaryDirectory(prefix="silex-cli-cache-") as directory:
         root = Path(directory)
         source = root / "Main.sx"
@@ -74,7 +112,9 @@ def main():
         compile_case("native discovery preserves LLVM reuse", "hit_before_frontend")
         source.write_text('func main() { print(42) }\n')
         value = 42
-        compile_case("changed source invalidates", "miss")
+        edited = compile_case("changed source invalidates", "miss")
+        assert edited["metrics"]["llvm_units_compiled"] == 1, edited
+        assert edited["metrics"]["llvm_functions_reused"] > 0, edited
         compile_case("changed source now cached", "hit_before_frontend")
         compile_case("nocache bypasses executable", "disabled", extra=("--nocache",))
         dependency = root / "Helper.sx"

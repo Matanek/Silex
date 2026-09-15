@@ -77,6 +77,7 @@ pub const pass_descriptors = [_]PassDescriptor{
 };
 
 pub const Options = struct {
+    range_cache: ?@import("RangeCache.zig").Context = null,
     worker_count: u16 = 1,
     verify_each_pass: bool = false,
     stop_after: ?PassId = null,
@@ -203,7 +204,7 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
     if (options.stop_after == .ssa_promotion_post) return current;
 
     if (options.disabled != .value_range_analysis) {
-        current = try ValueRanges.optimizeWithWorkers(allocator, current, options.worker_count);
+        current = try ValueRanges.optimizeWithCache(allocator, current, options.worker_count, options.range_cache);
         try verifyAfterPass(allocator, current, options);
     }
     if (options.stop_after == .value_range_analysis) return current;
@@ -222,7 +223,7 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
             current = expanded;
             try verifyAfterPass(allocator, current, options);
             if (options.disabled != .value_range_analysis) {
-                current = try ValueRanges.optimizeWithWorkers(allocator, current, options.worker_count);
+                current = try ValueRanges.optimizeWithCache(allocator, current, options.worker_count, options.range_cache);
                 try verifyAfterPass(allocator, current, options);
             }
             if (options.disabled != .ssa_value_simplification) {

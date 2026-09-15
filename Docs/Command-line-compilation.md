@@ -110,10 +110,14 @@ with every entry ever compiled. Its key covers package sources and ancestor
 manifests, target, test mode, private format, and compiler identity; it is not a
 package ABI or a public precompiled-interface format.
 
-LLVM currently optimizes and emits one closed program per executable. Semantic
-fragments do not cache LLVM machine code for packages independently of the
-consumer. A new entry therefore still needs its own LLVM compilation, while
-alternating between unchanged cached entries reuses their executables.
+LLVM additionally shares compiled functions between consumers through the
+user-global `~/.silex/cache/compiled-v1` store. Typed composition and Silex
+optimization still precede this lookup; unchanged canonical LLVM functions
+reuse their machine code even when a different application consumes them.
+Release imports a bounded set of callee bodies for LLVM inlining, and those
+bodies participate in the caller's key. A changed caller does not invalidate
+an unchanged callee. See [shared compilation fragments](Cache-and-editor-tooling.md#share-llvm-compilation-fragments)
+for identity, invalidation, and storage limits.
 
 ## Report interactive progress
 
@@ -175,3 +179,10 @@ does not claim process CPU or peak RSS; the owning benchmark records those from
 the process boundary and preserves every raw sample. The JSON schema is private
 toolchain data and may evolve with the compiler rather than becoming a public
 CLI or IR contract.
+
+LLVM trace metrics include `llvm_units_reused`, `llvm_units_compiled`,
+`llvm_functions_reused`, `range_functions_reused`, and
+`range_functions_computed`. A unit normally owns one Silex function and its
+optional C boundary callback; runtime helpers, mutable globals, and the process
+entry have separate units. Cache hits require no LLVM subprocess. Misses run
+through bounded workers, with completed-unit progress in interactive terminals.

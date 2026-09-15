@@ -11,6 +11,10 @@ const Packages = @import("Packages.zig");
 const ToolchainSetup = @import("ToolchainSetup.zig");
 const TargetModule = @import("Target.zig");
 const format_runtime = @import("llvm_format_runtime_object");
+const Units = @import("Llvm/Units.zig");
+const Store = @import("Llvm/Store.zig").Store;
+const Compile = @import("Llvm/Compile.zig");
+const StoreLimit = @import("Llvm/Store.zig").limit;
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -35,6 +39,8 @@ pub const BuildOptions = struct {
     entry_function: ?Ir.FunctionId = null,
     trace: ?*CompilationTrace.Reporter = null,
     progress: ?*CliProgress.Build = null,
+    cache: bool = true,
+    worker_count: u16 = 1,
 };
 
 pub fn resolveTools(
@@ -131,10 +137,7 @@ pub fn buildExecutable(
     const llvm_text = llvm_text: {
         var span = if (options.trace) |trace| trace.span(.lowering) else CompilationTrace.Span{};
         defer span.finish();
-        break :llvm_text (if (options.entry_function) |entry|
-            Emitter.emitEntryWithBoundaries(allocator, options.program, options.boundaries, entry)
-        else
-            Emitter.emitWithBoundaries(allocator, options.program, options.boundaries)) catch |err| {
+        break :llvm_text Emitter.emitCacheableEntry(allocator, options.program, options.boundaries, options.entry_function) catch |err| {
             std.debug.print("silex: LLVM backend cannot lower this program: {t}\n", .{err});
             return false;
         };
@@ -143,35 +146,69 @@ pub fn buildExecutable(
     const staging = try std.fmt.allocPrint(allocator, ".silex/llvm/staging-{d}", .{timestamp});
     try Io.Dir.cwd().createDirPath(init.io, staging);
     defer Io.Dir.cwd().deleteTree(init.io, staging) catch {};
-    const raw_path = try std.fs.path.join(allocator, &.{ staging, "program.ll" });
-    const optimized_path = try std.fs.path.join(allocator, &.{ staging, "program.opt.ll" });
-    const object_path = try std.fs.path.join(allocator, &.{ staging, "program.o" });
     const format_path = try std.fs.path.join(allocator, &.{ staging, "silex-llvm-format.o" });
-    try writeFile(init.io, raw_path, llvm_text);
     try writeFile(init.io, format_path, format_runtime.object_bytes);
 
+    const units = try Units.split(allocator, options.program, llvm_text, options.mode == .release);
+    const cache = if (options.cache) try Store.init(init, allocator) else null;
+    var objects: std.ArrayList([]const u8) = .empty;
+    try objects.append(allocator, format_path);
+
+    var jobs: std.ArrayList(Compile.Job) = .empty;
+    for (units, 0..) |unit, index| {
+        const object_path = try std.fmt.allocPrint(allocator, "{s}/unit-{d}.o", .{ staging, index });
+        try objects.append(allocator, object_path);
+        const digest = Store.key("llvm-unit-v2", &.{ version, options.tools.cpu, options.target.name(), @tagName(options.mode), unit.text });
+        if (cache) |store| if (store.load(digest)) |bytes| {
+            try writeFile(init.io, object_path, bytes);
+            if (options.trace) |trace| {
+                trace.metrics.llvm_units_reused += 1;
+                trace.metrics.llvm_functions_reused += unit.functions;
+            }
+            continue;
+        };
+        if (options.trace) |trace| trace.metrics.llvm_units_compiled += 1;
+        try jobs.append(allocator, .{
+            .text = unit.text,
+            .object_path = object_path,
+            .raw_path = try std.fmt.allocPrint(allocator, "{s}/unit-{d}.ll", .{ staging, index }),
+            .optimized_path = try std.fmt.allocPrint(allocator, "{s}/unit-{d}.opt.ll", .{ staging, index }),
+            .digest = digest,
+        });
+    }
     const optimization = if (options.mode == .debug) "0" else "3";
-    const passes = try std.fmt.allocPrint(allocator, "-passes=verify,default<O{s}>", .{optimization});
-    {
+    const succeeded = compiled: {
         var span = if (options.trace) |trace| trace.span(.emission) else CompilationTrace.Span{};
         defer span.finish();
         if (options.progress) |progress| progress.stage(.optimize_backend);
-        if (!try runStage(init, "opt", &.{ options.tools.opt, "-S", passes, raw_path, "-o", optimized_path })) return false;
-        const level = try std.fmt.allocPrint(allocator, "-O={s}", .{optimization});
-        const cpu = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{options.tools.cpu});
-        if (options.progress) |progress| progress.stage(.emit);
-        if (!try runStage(init, "llc", &.{
-            options.tools.llc,
-            "-filetype=obj",
-            level,
-            "-mtriple=arm64-apple-macosx26.0.0",
-            cpu,
-            "-fp-contract=off",
-            optimized_path,
-            "-o",
-            object_path,
-        })) return false;
+        break :compiled Compile.run(.{
+            .allocator = allocator,
+            .io = init.io,
+            .opt = options.tools.opt,
+            .llc = options.tools.llc,
+            .passes = try std.fmt.allocPrint(allocator, "-passes=verify,default<O{s}>", .{optimization}),
+            .level = try std.fmt.allocPrint(allocator, "-O={s}", .{optimization}),
+            .cpu = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{options.tools.cpu}),
+            .workers = options.worker_count,
+            .progress = options.progress,
+        }, jobs.items);
+    };
+    if (cache) |store| {
+        var fragments: std.ArrayList(Store.Fragment) = .empty;
+        for (jobs.items) |job| if (job.succeeded) {
+            const bytes = Io.Dir.cwd().readFileAlloc(init.io, job.object_path, allocator, .limited(StoreLimit)) catch continue;
+            fragments.append(allocator, .{ .digest = job.digest, .bytes = bytes }) catch continue;
+        };
+        store.publishMany(fragments.items) catch {};
     }
+    if (!succeeded) return false;
+    const response_path = try std.fs.path.join(allocator, &.{ staging, "objects.rsp" });
+    var response: std.ArrayList(u8) = .empty;
+    for (objects.items) |path| {
+        try response.appendSlice(allocator, path);
+        try response.append(allocator, '\n');
+    }
+    try writeFile(init.io, response_path, response.items);
 
     try CompilationCache.ensureOutputParent(init.io, options.output_path);
     Io.Dir.cwd().deleteFile(init.io, options.output_path) catch |err| switch (err) {
@@ -187,7 +224,7 @@ pub fn buildExecutable(
             init.io,
             options.linker_path,
             options.target,
-            &.{ object_path, format_path },
+            &.{try std.fmt.allocPrint(allocator, "@{s}", .{response_path})},
             options.output_path,
             options.providers,
             &.{},
@@ -197,18 +234,6 @@ pub fn buildExecutable(
         };
     }
     return true;
-}
-
-fn runStage(init: std.process.Init, stage: []const u8, arguments: []const []const u8) !bool {
-    const result = std.process.run(init.arena.allocator(), init.io, .{ .argv = arguments }) catch |err| {
-        std.debug.print("silex: LLVM {s} stage could not start: {t}\n", .{ stage, err });
-        return false;
-    };
-    if (exitCode(result.term) == 0) return true;
-    if (result.stdout.len != 0) std.debug.print("{s}", .{result.stdout});
-    if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
-    std.debug.print("silex: LLVM {s} stage failed\n", .{stage});
-    return false;
 }
 
 fn exitCode(term: std.process.Child.Term) u8 {

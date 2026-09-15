@@ -3,4 +3,6 @@ pub const main = @import("Sources/Main.zig").main;
 
 test {
     _ = @import("Sources/MacOS/Link.zig");
+    _ = @import("Sources/Llvm/Units.zig");
+    _ = @import("Sources/Llvm/Store.zig");
 }

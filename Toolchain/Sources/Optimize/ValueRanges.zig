@@ -2,6 +2,7 @@ const std = @import("std");
 const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Workers = @import("../Workers.zig");
+const RangeCache = @import("RangeCache.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -21,11 +22,16 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
 }
 
 pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, requested: u16) !Ir.Program {
+    return optimizeWithCache(allocator, program, requested, null);
+}
+
+pub fn optimizeWithCache(allocator: Allocator, program: Ir.Program, requested: u16, cache: ?RangeCache.Context) !Ir.Program {
+    defer if (cache) |context| RangeCache.flush(context);
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     const count = Workers.selectedCount(program.functions.len, requested);
     if (count == 1) {
         for (program.functions, 0..) |function, index|
-            functions[index] = try optimizeFunction(allocator, function);
+            functions[index] = try optimizeCachedFunction(allocator, function, cache);
     } else {
         var next = std.atomic.Value(usize).init(0);
         var workers: [Workers.max_count]Worker = undefined;
@@ -34,6 +40,7 @@ pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, requested:
             .source = program.functions,
             .destination = functions,
             .next = &next,
+            .cache = cache,
         };
         Workers.run(Worker, workers[0..count], Worker.run);
         for (workers[0..count]) |worker| if (worker.failure) |err| return err;
@@ -49,6 +56,7 @@ const Worker = struct {
     destination: []Ir.Function,
     next: *std.atomic.Value(usize),
     failure: ?anyerror = null,
+    cache: ?RangeCache.Context,
 
     fn run(self: *Worker) void {
         while (true) {
@@ -56,13 +64,24 @@ const Worker = struct {
             // leaving one worker with all the large loop bodies.
             const index = self.next.fetchAdd(1, .monotonic);
             if (index >= self.source.len) return;
-            self.destination[index] = optimizeFunction(self.allocator, self.source[index]) catch |err| {
+            self.destination[index] = optimizeCachedFunction(self.allocator, self.source[index], self.cache) catch |err| {
                 self.failure = err;
                 return;
             };
         }
     }
 };
+
+fn optimizeCachedFunction(allocator: Allocator, function: Ir.Function, cache: ?RangeCache.Context) !Ir.Function {
+    const digest = if (cache != null) try RangeCache.key(allocator, function) else null;
+    if (digest) |key| {
+        if (RangeCache.load(allocator, cache.?, key, function)) |cached| return cached;
+        _ = cache.?.counters.misses.fetchAdd(1, .monotonic);
+    }
+    const optimized = try optimizeFunction(allocator, function);
+    if (digest) |key| RangeCache.store(allocator, cache.?, key, function, optimized);
+    return optimized;
+}
 
 fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
     return solveFunction(allocator, function, true, null);
@@ -908,4 +927,60 @@ test "parallel range analysis preserves function order and loop decisions" {
         const parallel = try optimizeWithWorkers(allocator, program, count);
         try std.testing.expectEqualStrings(serial, try Ir.writeText(allocator, parallel));
     }
+}
+
+test "range decisions survive consumer symbol relocation and invalidate numeric changes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    var counters: RangeCache.Counters = .{};
+    const context: RangeCache.Context = .{ .store = .{
+        .allocator = a,
+        .io = std.testing.io,
+        .root = try std.fs.path.join(a, &.{ ".zig-cache", "tmp", &temporary.sub_path }),
+    }, .counters = &counters };
+    const value_types = try a.alloc(Ir.Type, 64);
+    @memset(value_types, .int);
+    value_types[4] = .bool;
+    value_types[5] = .structure(0);
+    const blocks = try a.alloc(Ir.Block, 16);
+    for (blocks, 0..) |*block, index| block.* = .{
+        .instructions = &.{},
+        .terminator = if (index + 1 < blocks.len) .{ .jump = index + 1 } else .{ .return_value = 3 },
+    };
+    blocks[0].instructions = &.{
+        .{ .call = .{ .result = 0, .function = 17, .arguments = &.{} } },
+        .{ .constant_int = .{ .result = 1, .bits = 2 } },
+        .{ .constant_int = .{ .result = 2, .bits = 3 } },
+        .{ .binary = .{ .result = 3, .operator = .add, .left = 1, .right = 2, .checked = true } },
+        .{ .binary = .{ .result = 4, .operator = .less, .left = 1, .right = 2 } },
+    };
+    var function: Ir.Function = .{
+        .name = "first",
+        .parameter_types = &.{},
+        .return_type = .int,
+        .value_types = value_types,
+        .blocks = blocks,
+    };
+    const first = try optimizeCachedFunction(a, function, context);
+    RangeCache.flush(context);
+    try std.testing.expect(!first.blocks[0].instructions[3].binary.checked);
+    try std.testing.expect(first.blocks[0].instructions[4].constant_bool.value);
+    const instructions = try a.dupe(Ir.Instruction, blocks[0].instructions);
+    instructions[0].call.function = 92;
+    blocks[0].instructions = instructions;
+    value_types[5] = .structure(123);
+    function.name = "second";
+    const relocated = try optimizeCachedFunction(a, function, context);
+    try std.testing.expectEqual(@as(usize, 1), counters.hits.load(.monotonic));
+    try std.testing.expectEqual(@as(usize, 92), relocated.blocks[0].instructions[0].call.function);
+    try std.testing.expectEqual(Ir.Type.structure(123), relocated.value_types[5]);
+    const independent = try optimizeFunction(a, function);
+    try std.testing.expectEqualDeep(independent, relocated);
+    instructions[2].constant_int.bits = 1;
+    const changed = try optimizeCachedFunction(a, function, context);
+    try std.testing.expectEqual(@as(usize, 2), counters.misses.load(.monotonic));
+    try std.testing.expect(!changed.blocks[0].instructions[4].constant_bool.value);
 }

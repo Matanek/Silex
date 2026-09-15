@@ -1067,6 +1067,7 @@ fn testSourceLlvm(
                         .mode = .debug,
                         .output_path = executable,
                         .entry_function = entry,
+                        .cache = options.cache,
                     },
                 );
                 if (!built) {
@@ -1511,6 +1512,12 @@ fn compileLlvmOptions(
     };
     const worker_count = compilationWorkerCount(init.environ_map, scoped_program.functions.len);
     trace.workers(worker_count);
+    var range_counters: @import("Optimize/RangeCache.zig").Counters = .{};
+    var release_options = ReleaseOptimizer.Options.forTarget(target, worker_count);
+    if (options.cache) {
+        if (try @import("Llvm/Store.zig").Store.init(init, allocator)) |store|
+            release_options.range_cache = .{ .store = store, .counters = &range_counters };
+    }
     const optimized_program = optimized: {
         if (options.mode == .debug) break :optimized scoped_program;
         progress.stage(.optimize);
@@ -1519,12 +1526,14 @@ fn compileLlvmOptions(
         break :optimized ReleaseOptimizer.optimizeWithOptions(
             allocator,
             scoped_program,
-            ReleaseOptimizer.Options.forTarget(target, worker_count),
+            release_options,
         ) catch |err| {
             std.debug.print("silex: optimizer rejected the portable IR for LLVM: {t}\n", .{err});
             return 1;
         };
     };
+    trace.metrics.range_functions_reused = range_counters.hits.load(.monotonic);
+    trace.metrics.range_functions_computed = range_counters.misses.load(.monotonic);
     ReleaseVerifier.verifyControlFlow(allocator, optimized_program) catch |err| {
         std.debug.print("silex: LLVM backend rejected the optimized portable IR: {t}\n", .{err});
         return 1;
@@ -1574,12 +1583,14 @@ fn compileLlvmOptions(
         .target = target,
         .linker_path = linker_path,
         .program = optimized_program,
+        .worker_count = worker_count,
         .boundaries = compilation.boundaries,
         .providers = boundary_providers,
         .mode = options.mode,
         .output_path = options.output_path,
         .trace = &trace,
         .progress = &progress,
+        .cache = options.cache,
     })) return 1;
     recordOutputSize(&trace, init.io, options.output_path);
     if (cache_key) |digest| {

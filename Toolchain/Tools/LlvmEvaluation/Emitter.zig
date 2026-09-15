@@ -3,6 +3,7 @@ const std = @import("std");
 const Silex = @import("root").silex_compiler_api;
 const Coverage = @import("../OptimizerOracle/LlvmCoverage.zig");
 const IrStats = @import("../OptimizerOracle/IrStats.zig");
+const Identity = @import("../../Sources/Llvm/Identity.zig");
 
 const Allocator = std.mem.Allocator;
 const Ir = Silex.Ir;
@@ -31,6 +32,24 @@ pub fn emitEntryWithBoundaries(
     boundaries: []const Silex.Boundary.Function,
     entry_function: ?Ir.FunctionId,
 ) Error![]u8 {
+    return emitInternal(allocator, program, boundaries, entry_function, false);
+}
+
+pub fn emitCacheableEntry(allocator: Allocator, program: Ir.Program, boundaries: []const Silex.Boundary.Function, entry_function: ?Ir.FunctionId) Error![]u8 {
+    // A dynamic type tag cannot be an index in a consumer-specific type table.
+    // Detect collisions before emitting any independently reusable code.
+    var tags: std.AutoHashMapUnmanaged(u64, usize) = .empty;
+    defer tags.deinit(allocator);
+    for (program.structures, 0..) |structure, index| {
+        if (!structure.is_class and structure.conformances.len == 0) continue;
+        const entry = try tags.getOrPut(allocator, Identity.typeTag(program, index));
+        if (entry.found_existing and !std.mem.eql(u8, structure.name, program.structures[entry.value_ptr.*].name)) return error.InvalidProgram;
+        entry.value_ptr.* = index;
+    }
+    return emitInternal(allocator, program, boundaries, entry_function, true);
+}
+
+fn emitInternal(allocator: Allocator, program: Ir.Program, boundaries: []const Silex.Boundary.Function, entry_function: ?Ir.FunctionId, stable_tags: bool) Error![]u8 {
     if (entry_function) |entry| if (entry >= program.functions.len) return error.InvalidProgram;
     const reachable = try IrStats.reachableFunctions(allocator, program);
     defer allocator.free(reachable);
@@ -252,6 +271,7 @@ pub fn emitEntryWithBoundaries(
             .boundaries = boundaries,
             .function = lowered_functions[function_id].?,
             .function_id = function_id,
+            .stable_tags = stable_tags,
         };
         emitter.emit() catch |err| {
             std.debug.print(
@@ -708,6 +728,7 @@ const FunctionEmitter = struct {
     boundaries: []const Silex.Boundary.Function,
     function: Ir.Function,
     function_id: usize,
+    stable_tags: bool = false,
     temporary: usize = 0,
 
     fn emit(self: *FunctionEmitter) Error!void {
@@ -1541,7 +1562,7 @@ const FunctionEmitter = struct {
             try self.write("  %t{d}.protocol.class.tag = load i64, ptr %v{d}\n", .{ serial, value.operand });
             try self.write("  store i64 %t{d}.protocol.class.tag, ptr %t{d}.protocol\n", .{ serial, serial });
         } else {
-            try self.write("  store i64 {d}, ptr %t{d}.protocol\n", .{ value.structure, serial });
+            try self.write("  store i64 {d}, ptr %t{d}.protocol\n", .{ self.typeTag(value.structure), serial });
         }
         try self.write("  %t{d}.protocol.payload = getelementptr i8, ptr %t{d}.protocol, i64 8\n", .{ serial, serial });
         try self.write("  store {s} %v{d}, ptr %t{d}.protocol.payload\n", .{ concrete_type, value.operand, serial });
@@ -1560,7 +1581,7 @@ const FunctionEmitter = struct {
         const protocol_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
         const serial = self.nextTemporary();
         try self.write("  %t{d}.protocol.tag = extractvalue {s} %v{d}, 0\n", .{ serial, protocol_type, value.operand });
-        try self.write("  %v{d} = icmp eq i64 %t{d}.protocol.tag, {d}\n", .{ value.result, serial, value.structure });
+        try self.write("  %v{d} = icmp eq i64 %t{d}.protocol.tag, {d}\n", .{ value.result, serial, self.typeTag(value.structure) });
     }
 
     fn emitProtocolExtract(self: *FunctionEmitter, value: Ir.Instruction.ProtocolExtract) Error!void {
@@ -1594,7 +1615,7 @@ const FunctionEmitter = struct {
         try self.write("  %v{d} = call fastcc ptr @sx_typed_class_alloc(i64 {d}, i64 {d})\n", .{
             value.result,
             field_bytes,
-            value.structure,
+            self.typeTag(value.structure),
         });
         for (value.fields, 0..) |field, field_index| {
             if (try self.valueType(field) != structure.fields[field_index].type)
@@ -1669,7 +1690,7 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.class.type = load i64, ptr %v{d}\n", .{ serial, value.operand });
         try self.write("  switch i64 %t{d}.class.type, label %trap [\n", .{serial});
         for (value.plans, 0..) |plan, plan_index|
-            try self.write("    i64 {d}, label %class.plan{d}.{d}\n", .{ plan.structure, serial, plan_index });
+            try self.write("    i64 {d}, label %class.plan{d}.{d}\n", .{ self.typeTag(plan.structure), serial, plan_index });
         try self.write("  ]\n", .{});
         for (value.plans, 0..) |plan, plan_index| {
             try self.write("class.plan{d}.{d}:\n", .{ serial, plan_index });
@@ -3316,6 +3337,10 @@ const FunctionEmitter = struct {
         const temporary = self.temporary;
         self.temporary += 1;
         return temporary;
+    }
+
+    fn typeTag(self: *FunctionEmitter, index: usize) u64 {
+        return if (self.stable_tags) Identity.typeTag(self.program, index) else index;
     }
 
     pub fn write(self: *FunctionEmitter, comptime format: []const u8, arguments: anytype) Allocator.Error!void {
