@@ -1,0 +1,11 @@
+func main() {
+    var iteration = 0
+    while iteration < 20_000 {
+        let number = iteration as float32
+        let formatted = "$(number)|$(iteration)"
+        print(formatted)
+        print(number, "|", iteration)
+        iteration++
+    }
+    print("done")
+}

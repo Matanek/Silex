@@ -3,10 +3,9 @@ const Ir = @import("root").silex_compiler_api.Ir;
 // Use the native scalar formatter for identical text in interpolation and print.
 // Leaves %tN.format.output and %tN.format.length without a heap allocation.
 pub fn emit(self: anytype, serial: usize, operand_type: Ir.Type, operand: Ir.ValueId) error{OutOfMemory}!void {
-    try self.write("  %t{d}.format.scratch = alloca [384 x i8]\n", .{serial});
     try self.write(
-        "  %t{d}.format.output = getelementptr [384 x i8], ptr %t{d}.format.scratch, i32 0, i32 0\n",
-        .{ serial, serial },
+        "  %t{d}.format.output = getelementptr [384 x i8], ptr %sx.scalar.format.scratch, i32 0, i32 0\n",
+        .{serial},
     );
     if (operand_type.isInteger()) {
         if (operand_type.bitWidth() == 64) {

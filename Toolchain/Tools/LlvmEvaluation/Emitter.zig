@@ -778,6 +778,9 @@ const FunctionEmitter = struct {
                 for (self.function.local_types, 0..) |type_value, local| {
                     try self.write("  %local{d} = alloca {s}\n", .{ local, try llvmType(self.allocator, self.program, type_value) });
                 }
+                if (self.needsScalarFormatScratch()) {
+                    try self.write("  %sx.scalar.format.scratch = alloca [384 x i8]\n", .{});
+                }
             }
             for (block.instructions, 0..) |instruction, instruction_index| {
                 self.emitInstruction(block_id, instruction_index, instruction) catch |err| {
@@ -803,6 +806,21 @@ const FunctionEmitter = struct {
             \\}
             \\
         );
+    }
+
+    fn needsScalarFormatScratch(self: *FunctionEmitter) bool {
+        for (self.function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .format_value => |value| {
+                if (value.operand < self.function.value_types.len and
+                    self.function.value_types[value.operand].isNumeric()) return true;
+            },
+            .print => |value| {
+                if (value.value < self.function.value_types.len and
+                    self.function.value_types[value.value].isFloat()) return true;
+            },
+            else => {},
+        };
+        return false;
     }
 
     fn emitInstruction(
