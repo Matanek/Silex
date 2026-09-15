@@ -1,11 +1,13 @@
 const std = @import("std");
-
 const Io = std.Io;
 
 pub const Phase = enum {
     analyze,
     prepare,
     cache,
+    optimize,
+    lower,
+    optimize_backend,
     emit,
     link,
     write,
@@ -13,219 +15,232 @@ pub const Phase = enum {
     run,
 };
 
-pub const InstallPhase = enum {
-    registry,
-    resolve,
-    download,
-    install,
-};
+pub const InstallPhase = enum { registry, resolve, download, install };
 
-pub const Build = struct {
+// std.Progress owns terminal sizing, redraws and coordination with diagnostics.
+// Initialize its process-wide root only once, lazily for interactive commands.
+var root: std.Progress.Node = .none;
+var started = false;
+var stopped = false;
+var dumb_terminal = false;
+
+pub fn configure(environ: *const std.process.Environ.Map) void {
+    dumb_terminal = if (environ.get("TERM")) |term| std.mem.eql(u8, term, "dumb") else false;
+}
+
+pub fn shutdown() void {
+    if (!started or stopped) return;
+    root.end();
+    stopped = true;
+}
+
+const Activity = struct {
     io: Io,
     enabled: bool,
-    clearable: bool,
-    line_count: usize = 0,
+    animated: bool,
+    node: std.Progress.Node = .none,
+    worker: ?Io.Future(void) = null,
+    mutex: Io.Mutex = .init,
+    label: [96]u8 = @splat(0),
+    label_len: usize = 0,
+    started_at: i96 = 0,
+
+    fn init(io: Io) Activity {
+        const enabled = Io.File.stderr().isTty(io) catch false;
+        const animated = enabled and !dumb_terminal and !stopped;
+        if (animated and !started) {
+            root = std.Progress.start(io, .{ .initial_delay_ns = .fromMilliseconds(120) });
+            started = true;
+        }
+        return .{ .io = io, .enabled = enabled, .animated = animated and root.index != .none };
+    }
+
+    // The worker starts only after the Activity has reached its final address.
+    // Copy the caller's label: package and target names often use stack buffers.
+    fn message(self: *Activity, phase: []const u8, detail: []const u8) void {
+        if (!self.enabled) return;
+        if (!self.animated) {
+            std.debug.print("silex: [{s}] {s}\n", .{ phase, detail });
+            return;
+        }
+        self.mutex.lockUncancelable(self.io);
+        var writer = Io.Writer.fixed(&self.label);
+        writer.print("[{s}] {s}", .{ phase, detail }) catch {};
+        self.label_len = writer.end;
+        // Terminal control characters in paths must not become terminal commands.
+        for (self.label[0..self.label_len]) |*byte| {
+            if (byte.* < 0x20 or byte.* == 0x7f) byte.* = ' ';
+        }
+        self.mutex.unlock(self.io);
+        if (self.worker == null) {
+            self.started_at = Io.Clock.awake.now(self.io).nanoseconds;
+            self.node = root.start("", 0);
+            self.redraw(0);
+            self.worker = self.io.concurrent(tick, .{self}) catch {
+                // A failed activity worker must never prevent the actual work.
+                self.node.end();
+                self.node = .none;
+                self.animated = false;
+                std.debug.print("silex: [{s}] {s}\n", .{ phase, detail });
+                return;
+            };
+        } else self.redraw(0);
+    }
+
+    fn tick(self: *Activity) void {
+        var frame: usize = 0;
+        while (true) {
+            Io.sleep(self.io, .fromMilliseconds(100), .awake) catch return;
+            frame +%= 1;
+            self.redraw(frame);
+        }
+    }
+
+    fn redraw(self: *Activity, frame: usize) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        const elapsed = @max(0, Io.Clock.awake.now(self.io).nanoseconds - self.started_at);
+        var buffer: [std.Progress.Node.max_name_len]u8 = undefined;
+        const name = formatActivity(&buffer, self.label[0..self.label_len], frame, @intCast(@divTrunc(elapsed, std.time.ns_per_s)));
+        self.node.setName(name);
+    }
+
+    fn finish(self: *Activity) void {
+        if (self.worker) |*worker| worker.cancel(self.io);
+        self.worker = null;
+        self.node.end();
+        self.node = .none;
+    }
+};
+
+fn formatActivity(buffer: []u8, label: []const u8, frame: usize, seconds: u64) []const u8 {
+    var writer = Io.Writer.fixed(buffer);
+    writer.print("silex: {c} {d}s {s}", .{ "|/-\\"[frame % 4], seconds, label }) catch {};
+    // Truncation should never leave a partial UTF-8 scalar in the terminal.
+    while (!std.unicode.utf8ValidateSlice(writer.buffered()) and writer.end > 0) writer.end -= 1;
+    return writer.buffered();
+}
+
+pub const Build = struct {
+    activity: Activity,
 
     pub fn init(io: Io) Build {
-        const stderr = Io.File.stderr();
-        const enabled = stderr.isTty(io) catch false;
-        const clearable = if (enabled) enabled: {
-            stderr.enableAnsiEscapeCodes(io) catch break :enabled false;
-            break :enabled true;
-        } else false;
-        return .{
-            .io = io,
-            .enabled = enabled,
-            .clearable = clearable,
-        };
+        return .{ .activity = Activity.init(io) };
     }
 
     pub fn source(self: *Build, phase: Phase, path: []const u8) void {
-        self.message(phase, path);
+        self.activity.message(phaseName(phase), path);
     }
 
     pub fn target(self: *Build, target_name: []const u8, mode_name: []const u8) void {
         var buffer: [256]u8 = undefined;
         const detail = std.fmt.bufPrint(&buffer, "{s} ({s})", .{ target_name, mode_name }) catch return;
-        self.message(.prepare, detail);
+        self.source(.prepare, detail);
     }
 
     pub fn stage(self: *Build, phase: Phase) void {
-        self.message(phase, phaseDetail(phase));
+        self.source(phase, switch (phase) {
+            .cache => "reusing compiled executable",
+            .optimize => "Silex program",
+            .lower => "preparing code generation",
+            .optimize_backend => "LLVM program",
+            .emit => "machine code",
+            .link => "platform libraries",
+            .write => "executable",
+            else => "",
+        });
+    }
+
+    pub fn writeOutput(self: *Build, text: []const u8) !void {
+        // stdout may share the terminal with the progress row (notably --emit-ir).
+        // Clear that row and suspend redraws until the complete output is written.
+        _ = std.debug.lockStderr(&.{});
+        defer std.debug.unlockStderr();
+        try Io.File.stdout().writeStreamingAll(self.activity.io, text);
     }
 
     pub fn finish(self: *Build) void {
-        if (!self.clearable) return;
-        while (self.line_count != 0) : (self.line_count -= 1) {
-            Io.File.stderr().writeStreamingAll(self.io, clear_previous_line) catch return;
-        }
-    }
-
-    fn message(self: *Build, phase: Phase, detail: []const u8) void {
-        if (!self.enabled) return;
-        var buffer: [2048]u8 = undefined;
-        const line = std.fmt.bufPrint(&buffer, "silex: [{s}] {s}\n", .{ phaseName(phase), detail }) catch return;
-        Io.File.stderr().writeStreamingAll(self.io, line) catch return;
-        self.line_count += 1;
+        self.activity.finish();
     }
 };
 
 pub const Install = struct {
-    io: Io,
-    enabled: bool,
-    clearable: bool,
-    active: bool = false,
+    activity: Activity,
+    completed: usize = 0,
 
     pub fn init(io: Io) Install {
-        const stderr = Io.File.stderr();
-        const enabled = stderr.isTty(io) catch false;
-        const clearable = if (enabled) enabled: {
-            stderr.enableAnsiEscapeCodes(io) catch break :enabled false;
-            break :enabled true;
-        } else false;
-        return .{
-            .io = io,
-            .enabled = enabled,
-            .clearable = clearable,
-        };
+        return .{ .activity = Activity.init(io) };
+    }
+
+    pub fn isInteractive(self: *const Install) bool {
+        return self.activity.enabled;
     }
 
     pub fn source(self: *Install, phase: InstallPhase, detail: []const u8) void {
-        self.message(phase, detail);
+        self.activity.message(@tagName(phase), detail);
+        self.activity.node.setCompletedItems(self.completed);
     }
 
-    pub fn package(
-        self: *Install,
-        phase: InstallPhase,
-        name: []const u8,
-        version: ?struct { major: u32, minor: u32, patch: u32 },
-    ) void {
+    pub fn package(self: *Install, phase: InstallPhase, name: []const u8, version: ?struct { major: u32, minor: u32, patch: u32 }) void {
         if (version) |value| {
             var buffer: [512]u8 = undefined;
-            const detail = std.fmt.bufPrint(
-                &buffer,
-                "{s}@{d}.{d}.{d}",
-                .{ name, value.major, value.minor, value.patch },
-            ) catch return;
-            self.message(phase, detail);
-        } else {
-            self.message(phase, name);
-        }
+            const detail = std.fmt.bufPrint(&buffer, "{s}@{d}.{d}.{d}", .{ name, value.major, value.minor, value.patch }) catch return;
+            self.source(phase, detail);
+        } else self.source(phase, name);
     }
 
     pub fn finish(self: *Install) void {
-        self.clearActive();
+        self.activity.finish();
     }
 
-    pub fn complete(
-        self: *Install,
-        name: []const u8,
-        version: struct { major: u32, minor: u32, patch: u32 },
-        installed: bool,
-    ) void {
-        if (!self.enabled) return;
-        self.clearActive();
-        var buffer: [2048]u8 = undefined;
-        const line = std.fmt.bufPrint(
-            &buffer,
-            "silex: [ready] {s}@{d}.{d}.{d} ({s})\n",
-            .{
-                name,
-                version.major,
-                version.minor,
-                version.patch,
-                if (installed) "installed" else "already installed",
-            },
-        ) catch return;
-        Io.File.stderr().writeStreamingAll(self.io, line) catch return;
+    pub fn complete(self: *Install, name: []const u8, version: struct { major: u32, minor: u32, patch: u32 }, installed: bool) void {
+        self.completed += 1;
+        self.activity.node.setCompletedItems(self.completed);
+        if (!self.activity.enabled) return;
+        std.debug.print("silex: [ready] {s}@{d}.{d}.{d} ({s})\n", .{
+            name,                                                version.major, version.minor, version.patch,
+            if (installed) "installed" else "already installed",
+        });
     }
 
-    pub fn failed(
-        self: *Install,
-        name: []const u8,
-        version: ?struct { major: u32, minor: u32, patch: u32 },
-        diagnostic: []const u8,
-    ) void {
-        if (!self.enabled) return;
-        self.clearActive();
-        var buffer: [4096]u8 = undefined;
-        const line = if (version) |value|
-            std.fmt.bufPrint(
-                &buffer,
-                "silex: [failed] {s}@{d}.{d}.{d}: {s}\n",
-                .{ name, value.major, value.minor, value.patch, diagnostic },
-            ) catch return
-        else
-            std.fmt.bufPrint(&buffer, "silex: [failed] {s}: {s}\n", .{ name, diagnostic }) catch return;
-        Io.File.stderr().writeStreamingAll(self.io, line) catch return;
-    }
-
-    fn message(self: *Install, phase: InstallPhase, detail: []const u8) void {
-        if (!self.enabled) return;
-        self.clearActive();
-        var buffer: [2048]u8 = undefined;
-        const line = std.fmt.bufPrint(&buffer, "silex: [{s}] {s}\n", .{ installPhaseName(phase), detail }) catch return;
-        Io.File.stderr().writeStreamingAll(self.io, line) catch return;
-        self.active = true;
-    }
-
-    fn clearActive(self: *Install) void {
-        if (!self.clearable or !self.active) return;
-        Io.File.stderr().writeStreamingAll(self.io, clear_previous_line) catch return;
-        self.active = false;
+    pub fn failed(self: *Install, name: []const u8, version: ?struct { major: u32, minor: u32, patch: u32 }, diagnostic: []const u8) void {
+        self.finish();
+        if (!self.activity.enabled) return;
+        if (version) |value| {
+            std.debug.print("silex: [failed] {s}@{d}.{d}.{d}: {s}\n", .{ name, value.major, value.minor, value.patch, diagnostic });
+        } else std.debug.print("silex: [failed] {s}: {s}\n", .{ name, diagnostic });
     }
 };
 
-const clear_previous_line = "\x1b[1A\r\x1b[2K";
-
 pub fn phaseName(phase: Phase) []const u8 {
     return switch (phase) {
-        .analyze => "analyze",
-        .prepare => "prepare",
-        .cache => "cache",
+        .optimize_backend => "optimize",
         .emit => "build",
-        .link => "link",
-        .write => "write",
-        .ready => "ready",
-        .run => "run",
+        else => @tagName(phase),
     };
 }
 
-pub fn installPhaseName(phase: InstallPhase) []const u8 {
-    return switch (phase) {
-        .registry => "registry",
-        .resolve => "resolve",
-        .download => "download",
-        .install => "install",
-    };
+test "activity remains visibly alive during an unchanged phase" {
+    var first: [120]u8 = undefined;
+    var later: [120]u8 = undefined;
+    const a = formatActivity(&first, "[optimize] Silex program", 0, 0);
+    const b = formatActivity(&later, "[optimize] Silex program", 1, 3);
+    try std.testing.expect(!std.mem.eql(u8, a, b));
+    try std.testing.expect(std.mem.indexOf(u8, b, "3s [optimize] Silex program") != null);
 }
 
-fn phaseDetail(phase: Phase) []const u8 {
-    return switch (phase) {
-        .cache => "reusing compiled executable",
-        .emit => "executable",
-        .link => "platform libraries",
-        .write => "executable",
-        else => "",
-    };
+test "long activity labels retain valid UTF-8 and elapsed time" {
+    var buffer: [16]u8 = undefined;
+    const label = formatActivity(&buffer, "ééééééééééé", 0, 12);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(label));
+    try std.testing.expect(std.mem.indexOf(u8, label, "12s") != null);
 }
 
-test "progress phases use developer-facing build language" {
-    try std.testing.expectEqualStrings("analyze", phaseName(.analyze));
-    try std.testing.expectEqualStrings("prepare", phaseName(.prepare));
-    try std.testing.expectEqualStrings("build", phaseName(.emit));
-    try std.testing.expectEqualStrings("link", phaseName(.link));
-    try std.testing.expectEqualStrings("ready", phaseName(.ready));
-    try std.testing.expectEqualStrings("run", phaseName(.run));
-}
-
-test "successful progress clears one complete terminal line at a time" {
-    try std.testing.expectEqualStrings("\x1b[1A\r\x1b[2K", clear_previous_line);
-}
-
-test "installation progress uses package-facing language" {
-    try std.testing.expectEqualStrings("registry", installPhaseName(.registry));
-    try std.testing.expectEqualStrings("resolve", installPhaseName(.resolve));
-    try std.testing.expectEqualStrings("download", installPhaseName(.download));
-    try std.testing.expectEqualStrings("install", installPhaseName(.install));
+test "disabled activity neither starts a worker nor retains caller storage" {
+    var activity: Activity = .{ .io = std.testing.io, .enabled = false, .animated = false };
+    activity.message("build", "program");
+    try std.testing.expect(activity.worker == null);
+    try std.testing.expect(activity.node.index == .none);
+    activity.finish();
+    activity.finish();
 }

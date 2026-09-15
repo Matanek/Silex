@@ -1,6 +1,7 @@
 const std = @import("std");
 const Boundary = @import("Boundary.zig");
 const Cli = @import("Cli.zig");
+const CliProgress = @import("CliProgress.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const CompilationTrace = @import("CompilationTrace.zig");
 const Emitter = @import("../Tools/LlvmEvaluation/Emitter.zig");
@@ -33,6 +34,7 @@ pub const BuildOptions = struct {
     output_path: []const u8,
     entry_function: ?Ir.FunctionId = null,
     trace: ?*CompilationTrace.Reporter = null,
+    progress: ?*CliProgress.Build = null,
 };
 
 pub fn resolveTools(
@@ -125,6 +127,7 @@ pub fn buildExecutable(
     allocator: Allocator,
     options: BuildOptions,
 ) !bool {
+    if (options.progress) |progress| progress.stage(.lower);
     const llvm_text = llvm_text: {
         var span = if (options.trace) |trace| trace.span(.lowering) else CompilationTrace.Span{};
         defer span.finish();
@@ -152,9 +155,11 @@ pub fn buildExecutable(
     {
         var span = if (options.trace) |trace| trace.span(.emission) else CompilationTrace.Span{};
         defer span.finish();
+        if (options.progress) |progress| progress.stage(.optimize_backend);
         if (!try runStage(init, "opt", &.{ options.tools.opt, "-S", passes, raw_path, "-o", optimized_path })) return false;
         const level = try std.fmt.allocPrint(allocator, "-O={s}", .{optimization});
         const cpu = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{options.tools.cpu});
+        if (options.progress) |progress| progress.stage(.emit);
         if (!try runStage(init, "llc", &.{
             options.tools.llc,
             "-filetype=obj",
@@ -176,6 +181,7 @@ pub fn buildExecutable(
     {
         var span = if (options.trace) |trace| trace.span(.linking) else CompilationTrace.Span{};
         defer span.finish();
+        if (options.progress) |progress| progress.stage(.link);
         MacOSLink.executableObjects(
             allocator,
             init.io,

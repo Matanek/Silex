@@ -107,19 +107,33 @@ package ABI or a public precompiled-interface format.
 
 ## Report interactive progress
 
-In an interactive terminal, compilation reports intention-level
-progress through analysis, target preparation, executable construction,
-platform linkage, output publication, and launch. The progress channel is
-disabled when standard error is not a terminal, preserving quiet successful
-execution for scripts and CI. An ANSI-capable terminal clears successful
-progress when the operation completes but retains it when compilation fails.
+In an interactive terminal, compilation and package installation show a live
+activity indicator and elapsed seconds. Compilation distinguishes source
+analysis, Silex optimization, backend optimization, machine code generation,
+linkage, and output publication. Installation reports its current package and
+the number of completed packages; unknown totals have no percentage.
+
+`CliProgress` uses the terminal renderer from `std.Progress`, with a cancellable
+activity worker that continues updating during CPU work and blocking child
+processes. Labels are copied before returning to callers. Deferred cleanup
+joins the worker on success and failure, and stops the renderer before the
+application starts. Diagnostics and completed-package messages use the shared
+stderr lock so subsequent redraws preserve them. IR writes to stdout also hold
+that lock when sharing the terminal.
+
+Progress starts after a short delay to avoid flashing on cache hits. Redirected
+stderr remains quiet; `TERM=dumb` uses static stage messages. The renderer clips
+to terminal width and clears transient activity when the operation ends.
+`zig build test-cli-progress` uses Python 3 and POSIX pseudo-terminals to verify
+animation, elapsed time, narrow terminals, diagnostic preservation, package
+counts, cleanup before application output, and redirected stderr.
 
 ## Trace compiler phases for benchmarks
 
 Compiler benchmarks can set the private `SILEX_COMPILATION_TRACE` environment
 variable to an output JSON path. `run` and `compile` then write one structured
 report for their compilation stage. Normal invocations do not allocate a
-trace payload, create a report, or print timing data.
+trace payload, create a report, or print a phase timing report.
 
 The report identifies the command, selected backend, source, target, mode, compiler version,
 selected compiler worker count, cache result, success state, total elapsed

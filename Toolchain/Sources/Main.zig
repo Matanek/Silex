@@ -94,6 +94,8 @@ test {
 }
 
 pub fn main(init: std.process.Init) u8 {
+    CliProgress.configure(init.environ_map);
+    defer CliProgress.shutdown();
     return runCli(init) catch |err| {
         std.debug.print("silex: error: {t}\n", .{err});
         return 1;
@@ -296,6 +298,7 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
     };
     var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
     var progress = CliProgress.Install.init(init.io);
+    defer progress.finish();
     const result = try installPackageOperand(
         init,
         allocator,
@@ -406,7 +409,7 @@ fn installPackageOperand(
         .{ .development = development, .suite = suite },
     ) catch |err| switch (err) {
         error.IncompleteSuite => {
-            if (!progress.enabled) {
+            if (!progress.isInteractive()) {
                 std.debug.print("silex: cannot install package: {s}\n", .{registry.diagnostic orelse "incomplete package suite"});
             }
             return null;
@@ -1225,8 +1228,10 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
     };
     if (status != 0) return status;
     var progress = CliProgress.Build.init(init.io);
+    defer progress.finish();
     progress.source(.run, source_path);
     progress.finish();
+    CliProgress.shutdown();
     return executeCompiled(init, allocator, output_path, source_path, options.mode, options.backend);
 }
 
@@ -1349,6 +1354,9 @@ fn compileLlvmOptions(
         );
         return 1;
     }
+    var progress = CliProgress.Build.init(init.io);
+    defer progress.finish();
+    progress.source(.prepare, "LLVM toolchain");
     const tools = try LlvmBackend.resolveTools(init, allocator) orelse return 1;
     var trace = CompilationTrace.Reporter.init(init.io, init.environ_map, .{
         .command = command,
@@ -1368,8 +1376,6 @@ fn compileLlvmOptions(
         trace.metrics.cache_bytes_written = statistics.bytes_written;
     };
 
-    var progress = CliProgress.Build.init(init.io);
-    progress.source(.analyze, options.source_path);
     // Dependency discovery is shared with the native backend. Rehash those
     // inputs before doing frontend or Release work, exactly as for native.
     // An IR request still needs compilation even when the executable exists.
@@ -1400,6 +1406,7 @@ fn compileLlvmOptions(
     }
     defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
 
+    progress.source(.analyze, options.source_path);
     var compiler = Project.Compiler.initWithPackagesAndCache(
         allocator,
         init.io,
@@ -1478,6 +1485,7 @@ fn compileLlvmOptions(
     trace.workers(worker_count);
     const optimized_program = optimized: {
         if (options.mode == .debug) break :optimized scoped_program;
+        progress.stage(.optimize);
         var optimize_span = trace.span(.optimization);
         defer optimize_span.finish();
         break :optimized ReleaseOptimizer.optimizeWithOptions(
@@ -1495,7 +1503,7 @@ fn compileLlvmOptions(
     };
     if (emit_ir) {
         const text = try Ir.writeText(allocator, optimized_program);
-        try Io.File.stdout().writeStreamingAll(init.io, text);
+        try progress.writeOutput(text);
     }
 
     const cache_key = if (options.cache)
@@ -1532,7 +1540,6 @@ fn compileLlvmOptions(
     };
 
     progress.target(target.name(), try std.fmt.allocPrint(allocator, "llvm/{s}", .{@tagName(options.mode)}));
-    progress.stage(.emit);
     const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
     if (!try LlvmBackend.buildExecutable(init, allocator, .{
         .tools = tools,
@@ -1544,6 +1551,7 @@ fn compileLlvmOptions(
         .mode = options.mode,
         .output_path = options.output_path,
         .trace = &trace,
+        .progress = &progress,
     })) return 1;
     recordOutputSize(&trace, init.io, options.output_path);
     if (cache_key) |digest| {
@@ -1599,6 +1607,7 @@ fn compileNativeOptions(
         trace.metrics.cache_bytes_written = statistics.bytes_written;
     };
     var progress = CliProgress.Build.init(init.io);
+    defer progress.finish();
     progress.source(.analyze, options.source_path);
     const executable_kind = target.executableKind();
     const native_variant = try std.fmt.allocPrint(
@@ -1709,7 +1718,7 @@ fn compileNativeOptions(
 
     if (emit_ir) {
         const text = try Ir.writeText(allocator, program);
-        try Io.File.stdout().writeStreamingAll(init.io, text);
+        try progress.writeOutput(text);
     }
 
     if (!target.hasNativeEmitter()) {
@@ -1770,6 +1779,7 @@ fn compileNativeOptions(
     };
     const worker_count = compilationWorkerCount(init.environ_map, scoped_program.functions.len);
     trace.workers(worker_count);
+    if (options.mode == .release) progress.stage(.optimize);
     const native_ir = native_ir: {
         var optimize_span = trace.span(.optimization);
         defer optimize_span.finish();
@@ -1786,6 +1796,7 @@ fn compileNativeOptions(
         };
     };
     const lower_mode = lowerModeForTarget(options.mode, target);
+    progress.stage(.lower);
     var machine = machine: {
         var lower_span = trace.span(.lowering);
         defer lower_span.finish();

@@ -479,6 +479,25 @@ pub fn build(b: *std.Build) void {
     optimizer_robustness_soak_step.dependOn(&optimizer_oracle_test_command.step);
     optimizer_robustness_soak_step.dependOn(&optimizer_robustness_soak_command.step);
 
+    const progress_probe = b.addExecutable(.{
+        .name = "silex-progress-probe",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("Tools/CliProgressProbe.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+            .imports = &.{.{ .name = "cli_progress", .module = b.createModule(.{
+                .root_source_file = b.path("Sources/CliProgress.zig"),
+                .target = b.graph.host,
+                .optimize = .ReleaseSafe,
+            }) }},
+        }),
+    });
+    const progress_test_command = b.addSystemCommand(&.{"python3"});
+    progress_test_command.addFileArg(b.path("Tools/VerifyCliProgress.py"));
+    progress_test_command.addArtifactArg(progress_probe);
+    const progress_test_step = b.step("test-cli-progress", "Verify progress animation and diagnostics in POSIX terminals");
+    progress_test_step.dependOn(&progress_test_command.step);
+
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
