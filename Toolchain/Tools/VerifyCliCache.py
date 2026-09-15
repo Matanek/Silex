@@ -31,7 +31,8 @@ def main():
             result = subprocess.run([str(compiler), "compile", str(source),
                                      "--backend", backend, "--" + mode,
                                      "-o", str(executable), *extra],
-                                    env=env, capture_output=True, text=True, check=True)
+                                    env=env, capture_output=True, text=True)
+            assert result.returncode == 0, (label, result.stderr)
             assert not result.stdout and not result.stderr, result
             report = json.loads(trace.read_text())
             assert report["cache_result"] == expected, (label, report)
@@ -77,6 +78,45 @@ def main():
             assert next(p for p in report["phases"] if p["name"] == "frontend_total")["invocations"] > 0, report
             assert "func @main(" in result.stdout and result.stdout.endswith("43\n"), result
         print("cached run preserves --emit-ir", flush=True)
+
+        # Changing a package link leaves the former checkout's bytes untouched.
+        # It must nevertheless invalidate an executable that used that checkout.
+        with tempfile.TemporaryDirectory(prefix="silex-cache-package-") as packages:
+            links = root / ".silex" / "links"
+            links.mkdir(parents=True)
+            for name, number in (("First", 61), ("Second", 62)):
+                package = Path(packages) / name
+                (package / "Module").mkdir(parents=True)
+                (package / "Package.json").write_text('{"name":"CacheDependency","version":"1.0.0","requires":{"silex":">=0.44.1"}}\n')
+                (package / "Module" / "Api.sx").write_text(f"public func answer() int {{ return {number} }}\n")
+            link = links / "CacheDependency.json"
+            link.write_text(json.dumps({"path": str(Path(packages) / "First")}))
+            source.write_text('use CacheDependency.Api.answer\nfunc main() { print(answer()) }\n')
+            (root / "Package.json").write_text('{"sources":".","dependencies":{"CacheDependency":"^1.0.0"}}\n')
+            value = 61
+            compile_case("linked package", "miss")
+            compile_case("unchanged linked package", "hit_before_frontend")
+            link.write_text(json.dumps({"path": str(Path(packages) / "Second")}))
+            value = 62
+            compile_case("relinked package invalidates", "miss")
+            compile_case("relinked package now cached", "hit_before_frontend")
+            compile_case("native linked package", "miss", backend="native")
+            link.write_text(json.dumps({"path": str(Path(packages) / "First")}))
+            value = 61
+            compile_case("native relink invalidates", "miss", backend="native")
+            compile_case("native relink now cached", "hit_before_frontend", backend="native")
+            link.write_text(json.dumps({"path": str(Path(packages) / "Second")}))
+            value = 62
+            compile_case("LLVM state survives native relink", "hit_before_frontend")
+            extra_module = Path(packages) / "Second" / "Module" / "Extra.sx"
+            extra_module.write_text("public func number() int { return 1 }\n")
+            compile_case("added module invalidates discovery", "miss")
+            compile_case("added module now cached", "hit_before_frontend")
+            extra_module.write_text("public func number() int { return 2 }\n")
+            compile_case("changed indexed source invalidates", "miss")
+            extra_module.unlink()
+            compile_case("removed module restores prior executable", "hit_after_frontend")
+            compile_case("restored discovery now cached", "hit_before_frontend")
 
 
 if __name__ == "__main__":

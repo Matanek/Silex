@@ -31,6 +31,7 @@ const ReleaseOptimizer = @import("Optimize/Release.zig");
 const ReleaseVerifier = @import("Optimize/Verifier.zig");
 const Project = @import("Project.zig");
 const ProjectPaths = @import("Project/Paths.zig");
+const ProjectLookup = @import("Project/Lookup.zig");
 const RunEntryDiscovery = @import("RunEntryDiscovery.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
@@ -1334,6 +1335,31 @@ fn compileSource(init: std.process.Init, allocator: std.mem.Allocator, args: []c
     };
 }
 
+fn validatedBackendState(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    options: Cli.CompileOptions,
+    target: TargetModule.Target,
+    backend: []const u8,
+) ?CompilationCache.BackendState {
+    const state = CompilationCache.loadBackendState(allocator, init.io, options.source_path, target.name(), backend) orelse return null;
+    // Source bytes alone cannot detect a package being relinked, installed,
+    // removed or excluded by the package-discovery configuration.
+    const packages_root = globalPackagesRoot(allocator, init.environ_map) catch return null;
+    var resolver = Packages.Resolver.initForTarget(allocator, init.io, packages_root, target);
+    if (init.environ_map.get("SILEX_USER_PACKAGE_ALLOWLIST")) |allowlist| resolver.restrictUserPackages(allowlist);
+    resolver.enableDevelopmentDependencies();
+    const source_root = ProjectPaths.findRoot(allocator, init.io, options.source_path) catch return null;
+    const graph = resolver.resolve(source_root) catch return null;
+    var compiler = Project.Compiler.initWithPackagesAndCache(allocator, init.io, packages_root, false);
+    compiler.target = target;
+    compiler.packages = graph;
+    const index = ProjectLookup.discoverProviders(&compiler, options.source_path) catch return null;
+    const digest = CompilationCache.discoveryKey(allocator, graph, index) catch return null;
+    if (!std.mem.eql(u8, &state.discovery, &digest)) return null;
+    return state;
+}
+
 fn compileLlvmOptions(
     init: std.process.Init,
     allocator: std.mem.Allocator,
@@ -1388,7 +1414,7 @@ fn compileLlvmOptions(
     if (options.cache and !emit_ir) {
         var cache_span = trace.span(.cache_validation);
         defer cache_span.finish();
-        if (CompilationCache.loadBackendState(allocator, init.io, options.source_path, target.name(), "llvm")) |state| {
+        if (validatedBackendState(init, allocator, options, target, "llvm")) |state| {
             const key = CompilationCache.backendKey(allocator, init.io, state.files, state.providers, "llvm-compile-v1", variant) catch null;
             if (key) |digest| if (CompilationCache.executableExists(allocator, init.io, digest, executable_kind)) {
                 progress.stage(.cache);
@@ -1447,7 +1473,7 @@ fn compileLlvmOptions(
     trace.metrics.package_functions_stored = compilation.metrics.package_functions_stored;
     trace.metrics.boundaries = compilation.boundaries.len;
     trace.metrics.boundary_providers = boundary_providers.len;
-    trace.metrics.dependency_files = compilation.cache_files.len;
+    trace.metrics.dependency_files = compilation.files.len;
     if (options.cache and compilation.boundaries.len == 0) {
         var cache_span = trace.span(.cache_update);
         defer cache_span.finish();
@@ -1467,8 +1493,10 @@ fn compileLlvmOptions(
         options.source_path,
         target.name(),
         "llvm",
-        compilation.cache_files,
+        compilation.files,
         boundary_providers,
+        compilation.packages,
+        compiler.index,
     );
 
     const scoped_program = scoped: {
@@ -1510,7 +1538,7 @@ fn compileLlvmOptions(
         CompilationCache.backendKey(
             allocator,
             init.io,
-            compilation.cache_files,
+            compilation.files,
             boundary_providers,
             "llvm-compile-v1",
             variant,
@@ -1618,7 +1646,7 @@ fn compileNativeOptions(
     {
         var cache_span = trace.span(.cache_validation);
         defer cache_span.finish();
-        if (options.cache) if (CompilationCache.loadBackendState(allocator, init.io, options.source_path, target.name(), "native")) |state| {
+        if (options.cache) if (validatedBackendState(init, allocator, options, target, "native")) |state| {
             const digest = CompilationCache.nativeKey(
                 allocator,
                 init.io,
@@ -1674,7 +1702,9 @@ fn compileNativeOptions(
         };
         boundaries = compilation.boundaries;
         boundary_providers = try requiredBoundaryProviders(allocator, boundaries, compilation.packages);
-        dependency_files = compilation.cache_files;
+        // Reused semantic fragments can omit modules from cache_files. The
+        // executable depends on their bytes as well as newly analyzed modules.
+        dependency_files = compilation.files;
         trace.metrics.packages = compilation.metrics.packages;
         trace.metrics.discovered_modules = compilation.metrics.discovered_modules;
         trace.metrics.loaded_modules = compilation.metrics.loaded_modules;
@@ -1702,8 +1732,10 @@ fn compileNativeOptions(
                 options.source_path,
                 target.name(),
                 "native",
-                compilation.cache_files,
+                compilation.files,
                 boundary_providers,
+                compilation.packages,
+                compiler.index,
             );
         }
         break :program compilation.ir;

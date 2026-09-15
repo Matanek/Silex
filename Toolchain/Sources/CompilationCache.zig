@@ -6,6 +6,7 @@ const Blake3 = std.crypto.hash.Blake3;
 const Ir = @import("Ir.zig");
 const Ast = @import("Ast.zig");
 const Packages = @import("Packages.zig");
+const Modules = @import("Modules.zig");
 
 // This identity describes the on-disk schema only. Compiler implementation
 // changes are covered automatically by the digest of the running executable.
@@ -44,6 +45,7 @@ pub fn statistics() Statistics {
 }
 
 pub const BackendState = struct {
+    discovery: [Blake3.digest_length]u8,
     files: []const []const u8,
     providers: []const Packages.BoundaryProvider,
 };
@@ -291,6 +293,14 @@ pub fn storeIr(allocator: Allocator, io: Io, source_path: []const u8, target_nam
     store(allocator, io, artifactKey("frontend-state", &.{ source_path, target_name }), "state", state_payload);
 }
 
+pub fn discoveryKey(allocator: Allocator, graph: Packages.Graph, index: Modules.Index) ![Blake3.digest_length]u8 {
+    const payload = try std.json.Stringify.valueAlloc(allocator, .{ .packages = graph, .modules = index }, .{});
+    defer allocator.free(payload);
+    var digest: [Blake3.digest_length]u8 = undefined;
+    Blake3.hash(payload, &digest, .{});
+    return digest;
+}
+
 pub fn loadBackendState(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8, backend: []const u8) ?BackendState {
     const state_digest = artifactKey("backend-input-state", &.{ source_path, target_name, backend });
     const state_bytes = load(allocator, io, state_digest, "state") orelse return null;
@@ -305,8 +315,11 @@ pub fn storeBackendState(
     backend: []const u8,
     files: []const []const u8,
     providers: []const Packages.BoundaryProvider,
+    graph: Packages.Graph,
+    index: Modules.Index,
 ) void {
     const state_payload = std.json.Stringify.valueAlloc(allocator, BackendState{
+        .discovery = discoveryKey(allocator, graph, index) catch return,
         .files = files,
         .providers = providers,
     }, .{}) catch return;
@@ -802,7 +815,7 @@ test "compact native state serialization retains linked boundary providers" {
         .frameworks = &.{"Metal"},
         .libraries = &.{},
     }};
-    const state = BackendState{ .files = files, .providers = providers };
+    const state = BackendState{ .discovery = @splat(0), .files = files, .providers = providers };
     const payload = try std.json.Stringify.valueAlloc(allocator, state, .{});
     const loaded = try std.json.parseFromSliceLeaky(BackendState, allocator, payload, .{});
 

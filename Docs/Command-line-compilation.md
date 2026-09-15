@@ -89,7 +89,12 @@ failure may prevent publication but does not invalidate a successful
 compilation. `--nocache` performs no reusable cache reads or writes.
 
 LLVM and native compilation both revalidate the saved source and provider list
-before frontend work. An unchanged executable skips analysis, Release
+before parsing or semantic analysis. They also resolve the current package
+graph and compare its identity and module inventory. Changes to package links, installed package
+selection, or module membership cannot reuse a stale executable. The executable
+key covers all indexed sources, including those used through cached semantic
+fragments, and embedded assets. This validation discovers modules without
+parsing or analyzing them. An unchanged executable skips analysis, Release
 optimization, emission, and linkage. LLVM `--emit-ir` still runs the frontend
 and optimizer to produce the requested IR. The executable-cache regression is
 `python3 Silex/Toolchain/Tools/VerifyCliCache.py Silex/Toolchain/zig-out/bin/silex`,
