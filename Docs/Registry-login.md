@@ -2,8 +2,9 @@
 
 `Toolchain/Sources/RegistryLogin.zig` owns the experimental identity client;
 `Main.zig` only dispatches `login` and `logout`. Public usage documentation belongs
-to `Silex-Documentation/FR/Tools/Registry-login.md` (English translation pending
-French editorial approval). This is not a deployed service or an OAuth proof.
+to the mirrored `Silex-Documentation/{FR,EN}/Tools/Registry-login.md` pages.
+This is not a deployed service. A real GitHub device flow and registry revocation
+have been exercised locally; offline fixtures are separate evidence.
 
 ## Trust boundaries
 
@@ -26,9 +27,18 @@ single-link checks, a nonblocking process lock and an exclusive random temporary
 file. A successful save synchronizes the file, renames it and synchronizes the
 directory. Logout revokes before deleting and synchronizing. The store protects
 against other ordinary local users, not a compromised user account or privileged
-process. Windows refuses before creating state: POSIX modes do not provide a
-Windows ACL guarantee. macOS is the tested host; Linux and Windows qualification
-remain explicit work, not implied portability claims.
+process.
+
+Windows uses current-user DPAPI in `%USERPROFILE%\.silex\auth\registry.dpapi`,
+never machine-wide protection or a plaintext fallback. Authentication and
+decryption happen before JSON parsing. Native file attributes use their Windows
+defaults, not numeric POSIX modes; DPAPI provides credential confidentiality, not
+an assertion about inherited ACLs. Regular-file/single-link checks and process
+locking remain mandatory. File contents are flushed before atomic rename; the
+read-only directory handle is not flushed, so no power-loss durability guarantee
+is claimed on Windows. Browser launch uses `ShellExecuteW` with a fixed URL.
+macOS ARM64 is the tested host; other native executions remain explicit work,
+not implied portability claims.
 
 ## Offline end-to-end bank
 
@@ -57,5 +67,26 @@ denial, expiry, provider failure, process interruption and competing mutations,
 private paths, test isolation, redirect refusal, payload limits, browser URL
 validation, network cancellation and redacted traces. It is separate from
 `zig build check` and `zig build test`, because it needs the sibling service and
-loopback sockets. Real GitHub consent must still be qualified with the dedicated
+loopback sockets. It does not replace real GitHub consent with the dedicated
 minimal-identity application and the user's own action.
+
+## Portable storage and session bank
+
+```sh
+node Silex/Toolchain/Tools/VerifyRegistrySession.mjs /absolute/candidate/silex
+```
+
+This complementary bank needs only Node and the candidate CLI. A loopback mock
+registry exercises native storage across two processes, corruption and hard-link
+rejection, revocation failure retention, denied/expired/consumed attempts,
+competing commands, interrupted-process lock release and output redaction.
+Windows must persist encrypted bytes and restore them in a second process; POSIX
+must enforce 0700/0600 modes. The bank neither overrides user-home variables nor
+makes GitHub requests. Its state stays below `TestState/registry-session`.
+
+The existing `native-portability.yml` workflow has a targeted `registry-login`
+campaign and a `registry_target` selector. It cross-builds the exact workflow SHA
+and executes its artifacts on native macOS x64, Linux ARM64/x64 and Windows
+ARM64/x64 runners. Cross-building is not native execution evidence: record the
+run and SHA only after successful execution. Branch publication and dispatch
+require separate authorization; this campaign creates no release or tag.

@@ -2,9 +2,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;
+const WindowsCredential = @import("Windows/RegistryCredential.zig");
+const is_windows = builtin.os.tag == .windows;
 const verification_uri = "https://github.com/login/device";
 const production_origin = "https://registry.silex-lang.org";
-const credential_name = "registry.json";
+const credential_name = if (is_windows) "registry.dpapi" else "registry.json";
+const file_permissions: Io.File.Permissions = if (is_windows) .default_file else @enumFromInt(0o600);
+const directory_permissions: Io.File.Permissions = if (is_windows) .default_dir else @enumFromInt(0o700);
 
 const Credential = struct {
     token: []const u8,
@@ -109,10 +113,13 @@ fn parse(comptime T: type, allocator: std.mem.Allocator, bytes: []const u8) !T {
     return parsed.value;
 }
 fn private(stat: Io.File.Stat, kind: Io.File.Kind) !void {
-    if (stat.kind != kind or (@intFromEnum(stat.permissions) & 0o077) != 0 or (kind == .file and stat.nlink != 1))
+    if (stat.kind != kind or (!is_windows and (@intFromEnum(stat.permissions) & 0o077) != 0) or (kind == .file and stat.nlink != 1))
         return error.RegistryCredentialStorageNotPrivate;
 }
 fn syncDirectory(dir: Io.Dir, io: Io) !void {
+    // Windows has no equivalent directory fsync on this read-only directory
+    // handle. File contents are flushed before rename; no power-loss claim.
+    if (is_windows) return;
     const file: Io.File = .{ .handle = dir.handle, .flags = .{ .nonblocking = false } };
     try file.sync(io);
 }
@@ -123,10 +130,11 @@ fn load(dir: Io.Dir, io: Io, allocator: std.mem.Allocator) !?Credential {
     };
     defer file.close(io);
     try private(try file.stat(io), .file);
-    var bytes: [4097]u8 = undefined;
+    var bytes: [16385]u8 = undefined;
     const len = try file.readPositionalAll(io, &bytes, 0);
-    if (len > 4096) return error.InvalidRegistryCredential;
-    const credential = try parse(Credential, allocator, bytes[0..len]);
+    if (len > (if (is_windows) @as(usize, 16384) else 4096)) return error.InvalidRegistryCredential;
+    const plain = if (is_windows) try WindowsCredential.unprotect(allocator, bytes[0..len]) else bytes[0..len];
+    const credential = try parse(Credential, allocator, plain);
     try checkCredential(credential);
     return credential;
 }
@@ -134,10 +142,11 @@ fn save(dir: Io.Dir, io: Io, allocator: std.mem.Allocator, credential: Credentia
     var random: [16]u8 = undefined;
     try io.randomSecure(&random);
     const name = try std.fmt.allocPrint(allocator, ".registry-{s}.tmp", .{std.fmt.bytesToHex(random, .lower)});
-    const file = try dir.createFile(io, name, .{ .exclusive = true, .permissions = @enumFromInt(0o600) });
+    const file = try dir.createFile(io, name, .{ .exclusive = true, .permissions = file_permissions });
     defer file.close(io);
     defer dir.deleteFile(io, name) catch {};
-    const bytes = try std.json.Stringify.valueAlloc(allocator, credential, .{});
+    const plain = try std.json.Stringify.valueAlloc(allocator, credential, .{});
+    const bytes = if (is_windows) try WindowsCredential.protect(allocator, plain) else plain;
     try file.writeStreamingAll(io, bytes);
     try file.sync(io);
     try dir.rename(name, dir, credential_name, io);
@@ -159,8 +168,6 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
         std.debug.print("silex: usage: silex {s}\n", .{if (logout) "logout" else "login [--no-browser]"});
         return 1;
     }
-    // POSIX permissions do not secure Windows files. Refuse this prototype there.
-    if (builtin.os.tag == .windows) return error.RegistryPrivateStorageNotYetSupportedOnWindows;
     const allocator = init.arena.allocator();
     const io = init.io;
     const test_url = init.environ_map.get("SILEX_REGISTRY_TEST_URL");
@@ -174,16 +181,16 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
         if (!std.mem.startsWith(u8, real, prefix)) return error.RegistryTestRootMustBeInsideTestState;
         break :blk try std.fs.path.join(allocator, &.{ real, "auth" });
     } else blk: {
-        const home = init.environ_map.get("HOME") orelse return error.UserHomeUnavailable;
+        const home = (if (is_windows) init.environ_map.get("USERPROFILE") else init.environ_map.get("HOME")) orelse return error.UserHomeUnavailable;
         if (!std.fs.path.isAbsolute(home)) return error.UserHomeUnavailable;
         break :blk try std.fs.path.join(allocator, &.{ home, ".silex", "auth" });
     };
-    _ = try Io.Dir.cwd().createDirPathStatus(io, root, @enumFromInt(0o700));
+    _ = try Io.Dir.cwd().createDirPathStatus(io, root, directory_permissions);
     const dir = try Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false });
     defer dir.close(io);
     try private(try dir.stat(io), .directory);
     // Never truncate an existing lock or follow a pre-existing symbolic link.
-    const lock = dir.createFile(io, "registry.lock", .{ .exclusive = true, .permissions = @enumFromInt(0o600) }) catch |err| switch (err) {
+    const lock = dir.createFile(io, "registry.lock", .{ .exclusive = true, .permissions = file_permissions }) catch |err| switch (err) {
         error.PathAlreadyExists => try dir.openFile(io, "registry.lock", .{ .mode = .read_write, .follow_symlinks = false }),
         else => return err,
     };
@@ -258,6 +265,10 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
 }
 
 fn openBrowser(init: std.process.Init) void {
+    if (is_windows) {
+        if (!WindowsCredential.openBrowser()) std.debug.print("silex: open the URL above manually\n", .{});
+        return;
+    }
     const command = if (builtin.os.tag == .macos) "/usr/bin/open" else "xdg-open";
     const result = std.process.run(init.gpa, init.io, .{ .argv = &.{ command, verification_uri }, .stdout_limit = .limited(4096), .stderr_limit = .limited(4096), .timeout = .{ .duration = .{ .raw = .fromSeconds(5), .clock = .boot } } }) catch {
         std.debug.print("silex: browser unavailable; open the URL above manually\n", .{});
@@ -269,6 +280,7 @@ fn openBrowser(init: std.process.Init) void {
 }
 
 test "registry identity rejects injectable identifiers and non-loopback test origins" {
+    _ = WindowsCredential;
     try std.testing.expect(validIdentity("1001", "a-renamed-user"));
     try std.testing.expect(!validIdentity("0", "user"));
     try std.testing.expect(!validIdentity("1001", "user\nsecret"));

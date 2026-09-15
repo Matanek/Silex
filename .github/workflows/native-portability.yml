@@ -19,6 +19,20 @@ on:
           - linux-x64
           - windows-arm64
           - windows-x64
+          - registry-login
+
+      registry_target:
+        description: Platform for the offline registry-login bank
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - macos-x64
+          - linux-arm64
+          - linux-x64
+          - windows-arm64
+          - windows-x64
 
       baseline_ref:
         description: Optional full Silex SHA for a paired optimizer-x64 baseline
@@ -39,10 +53,76 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-portability-${{ github.ref }}-${{ inputs.target }}
+  group: native-portability-${{ github.ref }}-${{ inputs.target }}-${{ inputs.registry_target }}
   cancel-in-progress: true
 
 jobs:
+  registry-login-build:
+    if: inputs.target == 'registry-login'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.registry_target == 'all' && '["macos-x64","linux-arm64","linux-x64","windows-arm64","windows-x64"]' || format('["{0}"]', inputs.registry_target)) }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Zig and cross-build the candidate only
+        shell: bash
+        env:
+          REGISTRY_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/registry-zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          case "$REGISTRY_TARGET" in
+            macos-x64) triple=x86_64-macos ;;
+            linux-arm64) triple=aarch64-linux ;;
+            linux-x64) triple=x86_64-linux ;;
+            windows-arm64) triple=aarch64-windows ;;
+            windows-x64) triple=x86_64-windows ;;
+            *) exit 2 ;;
+          esac
+          "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" build \
+            --build-file Toolchain/build.zig -Dtarget="$triple" -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/registry-candidate"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: registry-login-${{ matrix.target }}-${{ github.sha }}
+          path: ${{ runner.temp }}/registry-candidate/bin/
+          retention-days: 3
+          if-no-files-found: error
+
+  registry-login:
+    if: inputs.target == 'registry-login'
+    needs: registry-login-build
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.registry_target == 'all' && '["macos-x64","linux-arm64","linux-x64","windows-arm64","windows-x64"]' || format('["{0}"]', inputs.registry_target)) }}
+    runs-on: ${{ fromJSON('{"macos-x64":"macos-15-intel","linux-arm64":"ubuntu-24.04-arm","linux-x64":"ubuntu-24.04","windows-arm64":"windows-11-arm","windows-x64":"windows-2025"}')[matrix.target] }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: registry-login-${{ matrix.target }}-${{ github.sha }}
+          path: candidate-bin
+      - name: Verify architecture and execute the isolated CLI bank
+        shell: bash
+        env:
+          REGISTRY_TARGET: ${{ matrix.target }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          node -e 'const a=process.env.REGISTRY_TARGET.endsWith("arm64")?"arm64":"x64";if(process.arch!==a)throw Error("Wrong runner architecture");console.log(process.platform,process.arch)'
+          candidate=$(node -e 'console.log(require("node:path").resolve("candidate-bin", process.platform === "win32" ? "silex.exe" : "silex"))')
+          chmod +x "$candidate"
+          node Toolchain/Tools/VerifyRegistrySession.mjs "$candidate"
+
   optimizer-x64-calibration:
     if: inputs.target == 'optimizer-x64-calibration'
     runs-on: macos-15-intel
