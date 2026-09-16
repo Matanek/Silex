@@ -1,0 +1,51 @@
+static struct Counts { var dropped:int = 0 }
+
+struct Decision {
+    let allowed:bool
+    let value:int
+}
+
+class Counter {
+    var value:int
+    drop { Counts.dropped++ }
+    func advance(amount:int = 2) Decision {
+        self.value += amount
+        return Decision(allowed:self.value > 0, value:self.value)
+    }
+    func read() int { return self.value }
+}
+
+class Runner {
+    let callback:func(int) Decision
+    func run(amount:int) Decision { return self.callback(amount) }
+}
+
+func make_runner() Runner {
+    var counter = Counter(value:0)
+    return Runner(callback:counter.advance)
+}
+
+func exercise() {
+    var counter = Counter(value:3)
+    let read:func() int = counter.read
+    let advance:func() Decision = counter.advance
+    counter = Counter(value:100)
+    assert(read() == 3)
+    assert(advance().value == 5)
+    assert(read() == 5 && counter.value == 100)
+    var runner = make_runner()
+    var index = 0
+    while index < 32 {
+        let result = runner.run(3)
+        assert(result.allowed && result.value == (index + 1) * 3)
+        index++
+    }
+    var copied = Runner(callback:runner.callback)
+    assert(copied.run(1).value == 97)
+}
+
+func main() {
+    exercise()
+    assert(Counts.dropped == 3)
+    print("monomorphic-bound-callback-ok")
+}

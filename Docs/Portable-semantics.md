@@ -56,6 +56,18 @@ released. Built-in `count()` and `is_empty()` reads release an owned temporary
 receiver after producing their scalar result; `str.count()` does likewise.
 Stored receivers retain their original lifetime.
 
+Bound class methods follow the same dispatch selection as ordinary method calls.
+When no override or derived receiver requires dispatch, the generated wrapper
+uses a direct call. Mutating base methods with descendants retain dynamic
+receiver preservation even when the override table is empty. This keeps derived
+fields intact while avoiding unnecessary dynamic calls for monomorphic classes.
+
+LLVM monomorphic bound class callbacks use the same code/environment/owner
+representation as the native backends. The receiver itself is the environment.
+Copying or storing a callback retains its owner, and dropping the last owner
+runs the applicable class finalizers. Borrowed lexical captures keep their non-owning stack
+representation and cannot escape their source lifetime.
+
 Indirect callback calls follow the ownership contract of direct calls: a
 temporary value argument transfers its existing owner, while a stored argument
 is retained for the callee. An owned callback result carries its transfer flag

@@ -1,0 +1,26 @@
+class Counter {
+    var value:int = 0
+    func advance(amount:int) int { self.value += amount; return self.value }
+}
+
+class ExtendedCounter:Counter {
+    let marker:str = "preserved"
+}
+
+class OverridingCounter:Counter {
+    override func advance(amount:int) int { self.value += amount * 2; return self.value }
+}
+
+func bind(counter:Counter) func(int) int { return counter.advance }
+
+func main() {
+    var extended = ExtendedCounter()
+    let inherited = bind(extended)
+    assert(inherited(3) == 3 && inherited(4) == 7)
+    assert(extended.value == 7 && extended.marker == "preserved")
+    var overridden = OverridingCounter()
+    let dynamic = bind(overridden)
+    assert(dynamic(3) == 6 && dynamic(4) == 14)
+    assert(overridden.value == 14)
+    print("inherited-bound-callback-ok")
+}

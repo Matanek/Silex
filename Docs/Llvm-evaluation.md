@@ -149,9 +149,9 @@ same rule for dynamic lists of resource-free elements: they allocate exact new
 storage, preserve the retained prefix when applicable, then consume the input
 root. This intentionally has no spare-capacity optimization in the experiment.
 Other edit kinds and resource-bearing elements remain conditional refusals. The same private allocation
-foundation now covers exact, non-inherited classes whose fields are only numeric
-or boolean: class values stay opaque pointers while a separate private storage
-type drives allocation, field loads and field stores. A store mutates that private
+foundation covers exact, non-inherited classes whose fields have supported LLVM
+storage representations: class values stay opaque pointers while a separate
+private storage type drives allocation, field loads and field stores. A store mutates that private
 storage and returns the same opaque class pointer, while the retain/drop operations
 already present around the instruction retain responsibility for ownership. Their
 root count starts at zero, matching the native IR contract, and explicit root
@@ -162,11 +162,11 @@ bounds, clamp both ends and allocate an exact independent owning copy. Inverted
 ranges produce an empty owning list. Slices whose elements carry resources and
 slice results that remain borrowed views are still refused.
 
-This class subset accepts a drop only when its exact static plan contains solely
-provably empty finalizers. Effective finalizers, resource fields, inheritance,
-edge ownership and cycles remain explicit refusals; this is not a substitute for
-the native object graph collector. String literals use the native-style
-mono-pointer descriptor: an explicit byte length followed by the exact bytes,
+Class drops use the typed IR finalization plans, including user finalizers and
+resource-field cleanup, with explicit root and edge counts. Inheritance and
+dynamic dispatch remain outside this subset, and reference counting is not a
+substitute for the native object graph cycle collector. String literals use the
+native-style mono-pointer descriptor: an explicit byte length followed by the exact bytes,
 without using a trailing zero as value data. Their descriptors are private and
 static, so string retain/drop recognize them without allocating or freeing.
 Content equality, Unicode scalar count, calls, returns and output preserve empty,
@@ -184,9 +184,15 @@ Byte length masks the descriptor's dynamic
 flag, byte access checks the index before reading, and the explicit interop pointer
 addresses the first byte after the descriptor header. These byte projections stay
 distinct from Unicode scalar count. Capture-free function references can expose
-their internal symbol address through the explicit `C.function_address` bridge;
-capturing closures and indirect calls remain refused. Other non-integer globals, package
-providers, and mutable views requiring owning storage detachment are also still
+their internal symbol address through the explicit `C.function_address` bridge.
+Lexical address captures and indirect Silex calls are supported. Monomorphic
+bound class methods use the receiver as both environment and owner; their third
+callback slot carries that owner through copies, fields, calls and cleanup.
+`MonomorphicBoundCallback.sx` checks retained lifetime and exact destruction;
+`OwnedBoundCallback.sx` is the former refusal witness, now admitted. True
+inherited dispatch remains a refusal, witnessed by `InheritedBoundCallback.sx`.
+Capturing callbacks cannot expose a capture-free C function address. Other
+non-integer globals, package providers, and mutable views requiring owning storage detachment are also still
 rejected. Typed raw numeric loads and stores accept either an opaque interop
 address or explicit address bits, add their offset in bytes, and use alignment
 one so LLVM cannot infer an ABI alignment that the interop contract does not

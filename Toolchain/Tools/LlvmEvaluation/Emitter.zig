@@ -747,7 +747,9 @@ const FunctionEmitter = struct {
         for (self.function.blocks, 0..) |block, block_id| {
             try self.write("b{d}:\n", .{block_id});
             if (block_id == 0) {
-                if (self.function.capture_types.len != 0) {
+                if (ownsReceiver(self.program, self.function)) {
+                    try self.write("  %v0 = getelementptr i8, ptr %sx.environment, i64 0\n", .{});
+                } else if (self.function.capture_types.len != 0) {
                     const environment_type = try closureEnvironmentType(
                         self.allocator,
                         self.program,
@@ -1301,12 +1303,15 @@ const FunctionEmitter = struct {
         {
             return error.InvalidProgram;
         }
+        const owns_receiver = ownsReceiver(self.program, target);
         for (value.captures, target.capture_types) |capture, capture_type| {
-            if (capture_type != .address or try self.valueType(capture) != capture_type)
+            if ((!owns_receiver and capture_type != .address) or try self.valueType(capture) != capture_type)
                 return error.UnsupportedInstruction;
         }
         const serial = self.nextTemporary();
-        const environment = if (value.captures.len == 0)
+        const environment = if (owns_receiver)
+            try std.fmt.allocPrint(self.allocator, "%v{d}", .{value.captures[0]})
+        else if (value.captures.len == 0)
             "null"
         else environment: {
             const environment_type = try closureEnvironmentType(self.allocator, self.program, target.capture_types);
@@ -1332,10 +1337,15 @@ const FunctionEmitter = struct {
             serial,
             value.function,
         });
-        try self.write("  %v{d} = insertvalue {{ ptr, ptr, ptr }} %t{d}.closure.code, ptr {s}, 1\n", .{
-            value.result,
+        try self.write("  %t{d}.closure.value = insertvalue {{ ptr, ptr, ptr }} %t{d}.closure.code, ptr {s}, 1\n", .{
+            serial,
             serial,
             environment,
+        });
+        try self.write("  %v{d} = insertvalue {{ ptr, ptr, ptr }} %t{d}.closure.value, ptr {s}, 2\n", .{
+            value.result,
+            serial,
+            if (owns_receiver) environment else "null",
         });
     }
 
@@ -1657,8 +1667,16 @@ const FunctionEmitter = struct {
         const type_value = try self.valueType(value.operand);
         if (type_value.functionIndex()) |signature| {
             if (signature >= self.program.function_types.len) return error.InvalidProgram;
-            // The LLVM subset rejects every captured function reference, so
-            // its remaining callback value is only a non-owning code pointer.
+            const serial = self.nextTemporary();
+            try self.write("  %t{d}.closure.owner = extractvalue {{ ptr, ptr, ptr }} %v{d}, 2\n", .{ serial, value.operand });
+            try self.write("  %t{d}.closure.owned = icmp ne ptr %t{d}.closure.owner, null\n", .{ serial, serial });
+            try self.write("  br i1 %t{d}.closure.owned, label %closure.retain{d}, label %closure.retained{d}\n", .{ serial, serial, serial });
+            try self.write("closure.retain{d}:\n", .{serial});
+            try self.write("  call fastcc void @sx_typed_class_retain(ptr %t{d}.closure.owner, i64 {d})\n", .{
+                serial,
+                if (value.ownership == .root) @as(u8, 8) else 16,
+            });
+            try self.write("  br label %closure.retained{d}\nclosure.retained{d}:\n", .{ serial, serial });
             return;
         }
         const structure = type_value.structureIndex() orelse return error.InvalidProgram;
@@ -1672,15 +1690,15 @@ const FunctionEmitter = struct {
 
     fn emitClassDrop(self: *FunctionEmitter, value: Ir.Instruction.ClassDrop) Error!void {
         const type_value = try self.valueType(value.operand);
-        if (type_value.functionIndex()) |signature| {
+        const callback = type_value.functionIndex();
+        if (callback) |signature| {
             if (signature >= self.program.function_types.len) return error.InvalidProgram;
-            // See emitClassRetain: capture-free code pointers own no runtime
-            // environment and therefore have no lifetime action to emit.
-            return;
+            if (value.plans.len == 0) return;
+        } else {
+            const structure = type_value.structureIndex() orelse return error.InvalidProgram;
+            if (structure != value.static_type or !materialClassStorage(self.program, structure) or value.plans.len == 0)
+                return error.UnsupportedInstruction;
         }
-        const structure = type_value.structureIndex() orelse return error.InvalidProgram;
-        if (structure != value.static_type or !materialClassStorage(self.program, structure) or value.plans.len == 0)
-            return error.UnsupportedInstruction;
         for (value.plans) |plan| {
             if (plan.structure >= self.program.structures.len or
                 !materialClassStorage(self.program, plan.structure)) return error.UnsupportedInstruction;
@@ -1694,9 +1712,16 @@ const FunctionEmitter = struct {
             }
         }
         const serial = self.nextTemporary();
-        try self.write("  %t{d}.class.finalize = call fastcc i1 @sx_typed_class_release(ptr %v{d}, i64 {d})\n", .{
+        const operand = if (callback != null) owner: {
+            try self.write("  %t{d}.closure.owner = extractvalue {{ ptr, ptr, ptr }} %v{d}, 2\n", .{ serial, value.operand });
+            try self.write("  %t{d}.closure.owned = icmp ne ptr %t{d}.closure.owner, null\n", .{ serial, serial });
+            try self.write("  br i1 %t{d}.closure.owned, label %closure.release{d}, label %class.done{d}\n", .{ serial, serial, serial });
+            try self.write("closure.release{d}:\n", .{serial});
+            break :owner try std.fmt.allocPrint(self.allocator, "%t{d}.closure.owner", .{serial});
+        } else try std.fmt.allocPrint(self.allocator, "%v{d}", .{value.operand});
+        try self.write("  %t{d}.class.finalize = call fastcc i1 @sx_typed_class_release(ptr {s}, i64 {d})\n", .{
             serial,
-            value.operand,
+            operand,
             if (value.ownership == .root) @as(u8, 8) else 16,
         });
         try self.write("  br i1 %t{d}.class.finalize, label %class.finalize{d}, label %class.done{d}\n", .{
@@ -1705,7 +1730,7 @@ const FunctionEmitter = struct {
             serial,
         });
         try self.write("class.finalize{d}:\n", .{serial});
-        try self.write("  %t{d}.class.type = load i64, ptr %v{d}\n", .{ serial, value.operand });
+        try self.write("  %t{d}.class.type = load i64, ptr {s}\n", .{ serial, operand });
         try self.write("  switch i64 %t{d}.class.type, label %trap [\n", .{serial});
         for (value.plans, 0..) |plan, plan_index|
             try self.write("    i64 {d}, label %class.plan{d}.{d}\n", .{ self.typeTag(plan.structure), serial, plan_index });
@@ -1713,8 +1738,8 @@ const FunctionEmitter = struct {
         for (value.plans, 0..) |plan, plan_index| {
             try self.write("class.plan{d}.{d}:\n", .{ serial, plan_index });
             for (plan.functions) |finalizer|
-                try self.write("  call fastcc void @sx_{d}(ptr null, ptr %v{d})\n", .{ finalizer.function, value.operand });
-            try self.write("  call fastcc void @sx_typed_class_free(ptr %v{d})\n", .{value.operand});
+                try self.write("  call fastcc void @sx_{d}(ptr null, ptr {s})\n", .{ finalizer.function, operand });
+            try self.write("  call fastcc void @sx_typed_class_free(ptr {s})\n", .{operand});
             try self.write("  br label %class.done{d}\n", .{serial});
         }
         try self.write("class.done{d}:\n", .{serial});
@@ -3653,6 +3678,14 @@ fn optionalPayloadType(program: Ir.Program, type_value: Ir.Type, depth: usize) b
         return optionalPayloadType(program, child, depth + 1);
     if (type_value.isNumeric() or type_value == .bool or type_value == .address) return true;
     return classType(program, type_value);
+}
+
+// Bound class methods use the receiver itself as environment and owner, matching
+// the portable three-slot callback representation used by the native backends.
+fn ownsReceiver(program: Ir.Program, function: Ir.Function) bool {
+    if (function.capture_types.len != 1) return false;
+    const index = function.capture_types[0].structureIndex() orelse return false;
+    return index < program.structures.len and materialClassStorage(program, index);
 }
 
 fn closureEnvironmentType(

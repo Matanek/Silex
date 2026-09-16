@@ -333,3 +333,52 @@ test "bound methods through borrowed classes retain lexical restrictions" {
         \\func main() {}
     , "capturing function value cannot be returned from its lexical scope");
 }
+
+test "monomorphic class callbacks use direct calls and preserve receiver lifetime" {
+    const source = @embedFile("../Benchmarks/Optimizer/LlvmEvaluation/MonomorphicBoundCallback.sx");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    const program = (try frontend.compile(source)).ir;
+    var wrappers: usize = 0;
+    for (program.functions) |function| {
+        if (std.mem.indexOf(u8, function.name, "#bound") == null) continue;
+        wrappers += 1;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            try std.testing.expect(instruction != .dynamic_call);
+        };
+    }
+    try std.testing.expect(wrappers >= 3);
+    const output = try Interpreter.runCapture(arena.allocator(), program);
+    try std.testing.expectEqualStrings("monomorphic-bound-callback-ok\n", output.stdout);
+}
+
+test "bound mutating base methods retain dynamic receiver preservation without overrides" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    const program = (try frontend.compile(
+        \\class Base { var value:int = 0; func add() { self.value++ } }
+        \\class Child:Base { let marker:int = 42 }
+        \\func bind(value:Base) func() { return value.add }
+        \\func main() { var value = Child(); let callback = bind(value); callback(); assert(value.value == 1 && value.marker == 42) }
+    )).ir;
+    var found = false;
+    for (program.functions) |function| {
+        if (std.mem.indexOf(u8, function.name, "#bound") == null) continue;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            if (instruction == .dynamic_call) {
+                found = true;
+                try std.testing.expectEqual(@as(usize, 0), instruction.dynamic_call.implementations.len);
+            }
+        };
+    }
+    try std.testing.expect(found);
+    _ = try Interpreter.runCapture(arena.allocator(), program);
+}
+
+test "bound methods preserve inherited state and overriding behavior" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/InheritedBoundCallback.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("inherited-bound-callback-ok\n", output);
+}

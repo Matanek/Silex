@@ -43,13 +43,18 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
     const call_result: ?Ir.ValueId = if (lowered_result == .void) null else try self.newValue(&builder, lowered_result);
     const call_arguments = try arguments.toOwnedSlice(self.allocator);
     const dispatchable = self.structures[bound.owner].is_class and !method.is_private and method.extension == null;
-    if (dispatchable) {
+    const implementations = if (dispatchable)
+        try Inheritance.implementations(self, self.allocator, bound.owner, bound.method_index)
+    else
+        &.{};
+    const requires_dynamic_receiver = dispatchable and mutating and Inheritance.hasStrictDescendant(self, bound.owner);
+    if (implementations.len != 0 or requires_dynamic_receiver) {
         try self.emit(&builder, .{ .dynamic_call = .{
             .result = call_result,
             .function = methodFunctionId(self.program, bound.owner, bound.method_index),
             .receiver = receiver,
             .arguments = call_arguments,
-            .implementations = try Inheritance.implementations(self, self.allocator, bound.owner, bound.method_index),
+            .implementations = implementations,
         } });
     } else try self.emit(&builder, .{ .call = .{
         .result = call_result,
