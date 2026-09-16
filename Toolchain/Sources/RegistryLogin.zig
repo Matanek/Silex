@@ -10,6 +10,13 @@ const credential_name = if (is_windows) "registry.dpapi" else "registry.json";
 const file_permissions: Io.File.Permissions = if (is_windows) .default_file else @enumFromInt(0o600);
 const directory_permissions: Io.File.Permissions = if (is_windows) .default_dir else @enumFromInt(0o700);
 
+pub const Access = struct {
+    origin: []const u8,
+    token: []const u8,
+    login: []const u8,
+    expires_at: i64,
+};
+
 const Credential = struct {
     token: []const u8,
     github_id: []const u8,
@@ -170,6 +177,44 @@ fn testOrigin(value: []const u8) bool {
     if (port.len == 0 or port.len > 5) return false;
     for (port) |byte| if (!std.ascii.isDigit(byte)) return false;
     return (std.fmt.parseInt(u16, port, 10) catch return false) != 0;
+}
+
+/// Load the registry access established by `silex login` without contacting
+/// GitHub or exposing its OAuth token. Publication still lets the registry
+/// authorize every request and treats revocation as authoritative.
+pub fn current(init: std.process.Init) !Access {
+    const allocator = init.arena.allocator();
+    const io = init.io;
+    const test_url = init.environ_map.get("SILEX_REGISTRY_TEST_URL");
+    const test_root = init.environ_map.get("SILEX_REGISTRY_TEST_ROOT");
+    if ((test_url == null) != (test_root == null)) return error.RegistryTestConfigurationRequiresURLAndRoot;
+    const root = if (test_root) |path| blk: {
+        if (!testOrigin(test_url.?) or !std.fs.path.isAbsolute(path)) return error.InvalidRegistryTestConfiguration;
+        const real = Io.Dir.cwd().realPathFileAlloc(io, path, allocator) catch return error.RegistryLoginRequired;
+        const state = Io.Dir.cwd().realPathFileAlloc(io, "TestState", allocator) catch return error.RegistryLoginRequired;
+        const prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ state, std.fs.path.sep_str });
+        if (!std.mem.startsWith(u8, real, prefix)) return error.RegistryTestRootMustBeInsideTestState;
+        break :blk try std.fs.path.join(allocator, &.{ real, "auth" });
+    } else blk: {
+        const home = (if (is_windows) init.environ_map.get("USERPROFILE") else init.environ_map.get("HOME")) orelse return error.UserHomeUnavailable;
+        if (!std.fs.path.isAbsolute(home)) return error.UserHomeUnavailable;
+        break :blk try std.fs.path.join(allocator, &.{ home, ".silex", "auth" });
+    };
+    const dir = Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false }) catch |err| switch (err) {
+        error.FileNotFound => return error.RegistryLoginRequired,
+        else => return storageError("directory open", err),
+    };
+    defer dir.close(io);
+    const dir_stat = dir.stat(io) catch |err| return storageError("directory metadata", err);
+    try private(dir_stat, .directory);
+    const credential = (try load(dir, io, allocator)) orelse return error.RegistryLoginRequired;
+    if (credential.expires_at <= Io.Timestamp.now(io, .real).toSeconds()) return error.RegistryLoginExpired;
+    return .{
+        .origin = test_url orelse production_origin,
+        .token = credential.token,
+        .login = credential.login,
+        .expires_at = credential.expires_at,
+    };
 }
 
 pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {

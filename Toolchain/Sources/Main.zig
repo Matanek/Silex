@@ -36,6 +36,8 @@ const RunEntryDiscovery = @import("RunEntryDiscovery.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
 const PackageRegistration = @import("PackageRegistration.zig");
+const PackagePublication = @import("PackagePublication.zig");
+const PackagePublishClient = @import("PackagePublishClient.zig");
 const GitHubRegistration = @import("GitHubRegistration.zig");
 const RegistryLogin = @import("RegistryLogin.zig");
 const PackageStore = @import("PackageStore.zig");
@@ -57,6 +59,7 @@ const usage =
     \\       silex install <package|package-directory> [--suite] [--dev] [--target <target>]
     \\       silex check <package-directory>
     \\       silex register <package-directory>
+    \\       silex publish <package-directory> [--dry-run]
     \\       silex login [--no-browser]
     \\       silex logout
     \\       silex link <package-directory> [--workspace <directory>] [--target <target>]
@@ -92,6 +95,8 @@ test {
     _ = PackageStore;
     _ = PackageRegistry;
     _ = PackageRegistration;
+    _ = PackagePublication;
+    _ = PackagePublishClient;
     _ = GitHubRegistration;
     _ = RegistryLogin;
     _ = SelfUpdate;
@@ -122,6 +127,7 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "check")) return checkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "register")) return registerPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "publish")) return publishPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "login")) return RegistryLogin.run(init, args[2..], false);
     if (std.mem.eql(u8, args[1], "logout")) return RegistryLogin.run(init, args[2..], true);
     if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
@@ -235,6 +241,75 @@ fn registerPackage(init: std.process.Init, allocator: std.mem.Allocator, args: [
     std.debug.print(
         "silex: submitted registration of {s} for registry review at {s}\n",
         .{ prepared.name, submitted.pull_request_url },
+    );
+    return 0;
+}
+
+fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parsePublish(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("publish", diagnostic);
+            return 1;
+        },
+    };
+    var publication = PackagePublication.Manager.init(allocator, init.io, try globalPackagesRoot(allocator, init.environ_map));
+    const prepared = publication.prepare(options.package) catch |err| switch (err) {
+        error.InvalidPackagePublication => {
+            std.debug.print("silex: cannot prepare package publication: {s}\n", .{publication.diagnostic orelse "invalid package publication"});
+            return 1;
+        },
+        else => return err,
+    };
+    if (options.dry_run) {
+        std.debug.print(
+            "silex: publication preview for {s}@{d}.{d}.{d}\n",
+            .{ prepared.name, prepared.version.major, prepared.version.minor, prepared.version.patch },
+        );
+        for (prepared.files) |file| {
+            var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+            std.crypto.hash.sha2.Sha256.hash(file.bytes, &digest, .{});
+            std.debug.print("silex: include {s} ({d} bytes, sha256 {s})\n", .{ file.path, file.bytes.len, std.fmt.bytesToHex(digest, .lower) });
+        }
+        std.debug.print("silex: exclude .git/, .silex/, unreferenced files and declared artifacts from the source archive\n", .{});
+        std.debug.print("silex: source archive {d} bytes, sha256 {s}\n", .{ prepared.source.len, prepared.descriptor.source_digest });
+        std.debug.print("silex: publication sha256 {s}\n", .{prepared.descriptor.digest});
+        std.debug.print("silex: dry run complete; no authentication or network request was used\n", .{});
+        return 0;
+    }
+
+    const access = RegistryLogin.current(init) catch |err| switch (err) {
+        error.RegistryLoginRequired, error.RegistryLoginExpired => {
+            std.debug.print("silex: publishing requires a current registry access; run 'silex login'\n", .{});
+            return 1;
+        },
+        else => return err,
+    };
+    var client: PackagePublishClient.Client = .{
+        .allocator = allocator,
+        .network_allocator = init.gpa,
+        .io = init.io,
+        .origin = access.origin,
+        .token = access.token,
+    };
+    const published = client.publish(prepared) catch |err| switch (err) {
+        error.InvalidPackagePublication => {
+            std.debug.print("silex: cannot publish package: {s}\n", .{client.diagnostic orelse "registry rejected the publication"});
+            return 1;
+        },
+        else => return err,
+    };
+    std.debug.print(
+        "silex: {s} {s}@{d}.{d}.{d} (publication {s}, sha256 {s})\n",
+        .{
+            if (published.already_published) "already published" else "published",
+            prepared.name,
+            prepared.version.major,
+            prepared.version.minor,
+            prepared.version.patch,
+            published.id,
+            published.digest,
+        },
     );
     return 0;
 }
@@ -2576,6 +2651,7 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
         .duplicate_workspace => std.debug.print("silex: workspace is specified more than once\n", .{}),
         .duplicate_dev => std.debug.print("silex: development dependencies are requested more than once\n", .{}),
         .duplicate_suite => std.debug.print("silex: package suite is requested more than once\n", .{}),
+        .duplicate_dry_run => std.debug.print("silex: dry run is requested more than once\n", .{}),
         .unknown_action => std.debug.print("silex: unknown '{s}' action '{s}'; expected 'resolve' or no action\n", .{ command, diagnostic.argument.? }),
         .conflicting_modes => std.debug.print("silex: Debug and Release modes are mutually exclusive near '{s}'\n", .{diagnostic.argument.?}),
         .option_unavailable => std.debug.print("silex: option '{s}' is unavailable for '{s}'\n", .{ diagnostic.argument.?, command }),
