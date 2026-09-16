@@ -16,6 +16,12 @@ pub const Prepared = struct {
     files: []const Archive.File,
     source: []const u8,
     descriptor: Descriptor.Result,
+    exclusions: []const Exclusion,
+};
+
+pub const Exclusion = struct {
+    path: []const u8,
+    reason: []const u8,
 };
 
 pub const Manager = struct {
@@ -65,6 +71,10 @@ pub const Manager = struct {
         for ([_][]const u8{ "README.md", "README", "LICENSE", "LICENSE.md", "NOTICE" }) |name| {
             if (try optionalRegularFile(self.allocator, self.io, package_root, name)) try appendUnique(self.allocator, &selected, name);
         }
+        const exclusions = collectExclusions(self.allocator, self.io, package_root, selected.items) catch |err| switch (err) {
+            error.UnsafeEntry => return self.fail("package contains a symbolic link, hard link or special entry outside excluded infrastructure"),
+            else => |other| return other,
+        };
         const files = Snapshot.captureSelected(self.allocator, self.io, package_root, selected.items) catch |err| switch (err) {
             error.MissingFile => return self.fail("a selected package file disappeared during preparation"),
             error.FileChanged => return self.fail("a selected package file changed during preparation"),
@@ -73,7 +83,7 @@ pub const Manager = struct {
         };
         const source = try Archive.encode(self.allocator, files);
         const descriptor = try Descriptor.render(self.allocator, files, source, &.{});
-        return .{ .name = manifest.name, .version = manifest.version, .files = files, .source = source, .descriptor = descriptor };
+        return .{ .name = manifest.name, .version = manifest.version, .files = files, .source = source, .descriptor = descriptor, .exclusions = exclusions };
     }
 
     fn fail(self: *Manager, message: []const u8) error{InvalidPackagePublication} {
@@ -94,6 +104,60 @@ fn targetForSource(relative: []const u8, fallback: TargetModule.Target) !TargetM
 fn appendUnique(allocator: std.mem.Allocator, paths: *std.ArrayList([]const u8), path: []const u8) !void {
     for (paths.items) |existing| if (std.mem.eql(u8, existing, path)) return;
     try paths.append(allocator, path);
+}
+
+fn collectExclusions(allocator: std.mem.Allocator, io: Io, root_path: []const u8, selected: []const []const u8) ![]const Exclusion {
+    var root = Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true, .follow_symlinks = false }) catch return error.UnsafeEntry;
+    defer root.close(io);
+    var walker = try root.walk(allocator);
+    defer walker.deinit();
+    var result: std.ArrayList(Exclusion) = .empty;
+    while (try walker.next(io)) |entry| {
+        const path = try portablePath(allocator, entry.path);
+        if (entry.kind == .directory and excludedInfrastructure(entry.basename)) {
+            walker.leave(io);
+            const shown = try std.fmt.allocPrint(allocator, "{s}/", .{path});
+            allocator.free(path);
+            try result.append(allocator, .{ .path = shown, .reason = "infrastructure directory" });
+            continue;
+        }
+        if (entry.kind == .directory) {
+            allocator.free(path);
+            continue;
+        }
+        if (entry.kind != .file) return error.UnsafeEntry;
+        const stat = entry.dir.statFile(io, entry.basename, .{ .follow_symlinks = false }) catch return error.UnsafeEntry;
+        if (stat.kind != .file or stat.nlink != 1) return error.UnsafeEntry;
+        if (contains(selected, path)) {
+            allocator.free(path);
+            continue;
+        }
+        try result.append(allocator, .{ .path = path, .reason = "not selected by the manifest or source analysis" });
+    }
+    std.mem.sort(Exclusion, result.items, {}, exclusionLessThan);
+    return result.toOwnedSlice(allocator);
+}
+
+fn portablePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const result = try allocator.dupe(u8, path);
+    for (result) |*byte| if (byte.* == '\\') {
+        byte.* = '/';
+    };
+    return result;
+}
+
+fn contains(paths: []const []const u8, path: []const u8) bool {
+    for (paths) |candidate| if (std.mem.eql(u8, candidate, path)) return true;
+    return false;
+}
+
+fn excludedInfrastructure(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, ".git") or std.ascii.eqlIgnoreCase(name, ".silex") or
+        std.ascii.eqlIgnoreCase(name, ".zig-cache") or std.ascii.eqlIgnoreCase(name, "zig-out");
+}
+
+fn exclusionLessThan(_: void, left: Exclusion, right: Exclusion) bool {
+    return std.mem.lessThan(u8, left.path, right.path);
 }
 
 fn componentAfter(path: []const u8, prefix: []const u8) ?[]const u8 {
@@ -133,12 +197,16 @@ test "prepare a modified local package without Git or cache files" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Module/Message.txt", .data = "modified before publication\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/README.md", .data = "Local package\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/.silex/cache/secret", .data = "excluded" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Notes.tmp", .data = "not selected" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "LocalDemo" });
     var manager = Manager.init(allocator, std.testing.io, null);
     const prepared = try manager.prepare(root);
     try std.testing.expectEqualStrings("LocalDemo", prepared.name);
     try std.testing.expectEqual(@as(usize, 4), prepared.files.len);
     try std.testing.expect(std.mem.indexOf(u8, prepared.descriptor.json, ".silex") == null);
+    try std.testing.expectEqual(@as(usize, 2), prepared.exclusions.len);
+    try std.testing.expectEqualStrings(".silex/", prepared.exclusions[0].path);
+    try std.testing.expectEqualStrings("Notes.tmp", prepared.exclusions[1].path);
     const resource = for (prepared.files) |file| {
         if (std.mem.eql(u8, file.path, "Module/Message.txt")) break file;
     } else return error.TestExpectedEqual;
