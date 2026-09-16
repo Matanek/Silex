@@ -96,8 +96,13 @@ fn copyFileObserved(
     if (observation) |present| try present.run(present.context);
 
     var buffer: [16 * 1024]u8 = undefined;
-    var reader = file.reader(io, &buffer);
-    const bytes = try reader.interface.allocRemaining(allocator, .limited(maximum_size));
+    // This handle is private to the snapshot. A streaming reader avoids
+    // requiring positional reads from a Windows handle opened by Io.Dir.
+    var reader = file.readerStreaming(io, &buffer);
+    const bytes = reader.interface.allocRemaining(allocator, .limited(maximum_size)) catch |err| switch (err) {
+        error.ReadFailed => return reader.err.?,
+        else => |other| return other,
+    };
     errdefer allocator.free(bytes);
     const after = try file.stat(io);
     if (!sameFile(opened, after) or bytes.len != after.size) return error.FileChanged;

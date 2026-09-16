@@ -57,6 +57,7 @@ pub const Manager = struct {
             compiler.target = targetForSource(relative, host) catch return self.fail("package source uses an unsupported Platform or Target variant");
             const compilation = compiler.compileTests(source_path) catch |err| switch (err) {
                 error.InvalidSource, error.InvalidPackageGraph => return self.fail(compiler.diagnosticMessage() orelse "package source does not compile"),
+                error.ReadFailed => return self.fail("cannot read a package source during publication"),
                 else => |other| return other,
             };
             try uses.appendSlice(self.allocator, compilation.embedded_file_uses);
@@ -85,6 +86,7 @@ pub const Manager = struct {
             error.FileLimit => return self.fail("a declared artifact exceeds the registry object limit"),
             error.ArtifactDigestMismatch => return self.fail("a declared artifact does not match its sha256"),
             error.ArtifactPathCollision => return self.fail("declared artifact destinations collide for one target"),
+            error.ReadFailed => return self.fail("cannot read a declared artifact"),
             else => |other| return other,
         };
         const exclusions = collectExclusions(self.allocator, self.io, package_root, selected.items, manifest.artifacts) catch |err| switch (err) {
@@ -96,6 +98,7 @@ pub const Manager = struct {
             error.MissingFile => return self.fail("a selected package file disappeared during preparation"),
             error.FileChanged => return self.fail("a selected package file changed during preparation"),
             error.UnsafeEntry => return self.fail("a selected package entry is a link or is not a regular file"),
+            error.ReadFailed => return self.fail("cannot read a selected package file"),
             else => |other| return other,
         };
         const source = try Archive.encode(self.allocator, files);
