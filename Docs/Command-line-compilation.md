@@ -186,3 +186,16 @@ LLVM trace metrics include `llvm_units_reused`, `llvm_units_compiled`,
 optional C boundary callback; runtime helpers, mutable globals, and the process
 entry have separate units. Cache hits require no LLVM subprocess. Misses run
 through bounded workers, with completed-unit progress in interactive terminals.
+
+## LLVM test-runner allocation lifetime
+
+The LLVM test command composes each source file once, then closes and emits
+one executable per test. A per-test arena owns that case's scoped IR, LLVM
+text, object staging and process output. It is released after success, failure
+or a rejected case; the shared composition remains alive for the file.
+
+`Tools/VerifyLlvmTestMemory.py` exercises one and 64 tests of the same generated
+helper on macOS ARM64, without packages or native providers. It checks all
+results and bounds peak-memory growth to three times the single-test peak;
+it makes no timing claim. Run it from the workspace or Spec group root with
+`--compiler Silex/Toolchain/zig-out/bin/silex --report <report.json>`.

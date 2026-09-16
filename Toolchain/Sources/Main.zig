@@ -1012,38 +1012,43 @@ fn testSourceLlvm(
         );
         const display_path = if (directory_input) relativeTestPath(options.source_path, source_path) else source_path;
         for (compilation.tests) |case| {
-            const case_name = case.name orelse try std.fmt.allocPrint(source_allocator, "test at line {d}", .{case.position.line});
+            // The composed source outlives every case; scoped IR, LLVM emission
+            // and process output belong only to the current test invocation.
+            var case_arena = std.heap.ArenaAllocator.init(init.gpa);
+            defer case_arena.deinit();
+            const case_allocator = case_arena.allocator();
+            const case_name = case.name orelse try std.fmt.allocPrint(case_allocator, "test at line {d}", .{case.position.line});
             const label = if (directory_input)
-                try std.fmt.allocPrint(source_allocator, "{s} :: {s}", .{ display_path, case_name })
+                try std.fmt.allocPrint(case_allocator, "{s} :: {s}", .{ display_path, case_name })
             else
                 case_name;
-            const scope = ProgramScope.close(source_allocator, compilation.ir, &.{case.function}) catch |err| {
+            const scope = ProgramScope.close(case_allocator, compilation.ir, &.{case.function}) catch |err| {
                 failed += 1;
                 std.debug.print("silex: LLVM test backend cannot close '{s}': {t}\n", .{ label, err });
-                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(case_allocator, "FAILED - {s}\n", .{label}));
                 continue;
             };
             const entry = scope.function(case.function) orelse {
                 failed += 1;
                 std.debug.print("silex: LLVM test entry '{s}' was not retained\n", .{label});
-                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(case_allocator, "FAILED - {s}\n", .{label}));
                 continue;
             };
-            ReleaseVerifier.verify(source_allocator, scope.program) catch |err| {
+            ReleaseVerifier.verify(case_allocator, scope.program) catch |err| {
                 failed += 1;
                 std.debug.print("silex: LLVM test backend rejected '{s}': {t}\n", .{ label, err });
-                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(case_allocator, "FAILED - {s}\n", .{label}));
                 continue;
             };
-            const function_text = try std.fmt.allocPrint(source_allocator, "{d}", .{case.function});
+            const function_text = try std.fmt.allocPrint(case_allocator, "{d}", .{case.function});
             const variant = try std.fmt.allocPrint(
-                source_allocator,
+                case_allocator,
                 "llvm:{s}:{s}:{s}:{s}:{s}:{s}:debug:{s}:{s}",
                 .{ build_options.version, LlvmBackend.version, tools.opt, tools.llc, tools.cpu, target.name(), source_path, function_text },
             );
             const digest = if (options.cache)
                 CompilationCache.backendKey(
-                    source_allocator,
+                    case_allocator,
                     init.io,
                     compilation.cache_files,
                     boundary_providers,
@@ -1052,11 +1057,11 @@ fn testSourceLlvm(
                 ) catch CompilationCache.artifactKey("llvm-test", &.{ variant, label })
             else
                 CompilationCache.artifactKey("llvm-test", &.{ variant, label });
-            const executable = try llvmTestArtifactPath(source_allocator, source_path, target, digest);
+            const executable = try llvmTestArtifactPath(case_allocator, source_path, target, digest);
             if (!fileExists(init.io, executable)) {
                 const built = try LlvmBackend.buildExecutable(
                     init,
-                    source_allocator,
+                    case_allocator,
                     .{
                         .tools = tools,
                         .target = target,
@@ -1072,14 +1077,14 @@ fn testSourceLlvm(
                 );
                 if (!built) {
                     failed += 1;
-                    try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                    try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(case_allocator, "FAILED - {s}\n", .{label}));
                     continue;
                 }
             }
-            const result = std.process.run(source_allocator, init.io, .{ .argv = &.{executable} }) catch |err| {
+            const result = std.process.run(case_allocator, init.io, .{ .argv = &.{executable} }) catch |err| {
                 failed += 1;
                 std.debug.print("silex: cannot execute LLVM test '{s}': {t}\n", .{ label, err });
-                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(case_allocator, "FAILED - {s}\n", .{label}));
                 continue;
             };
             try Io.File.stdout().writeStreamingAll(init.io, result.stdout);
@@ -1094,7 +1099,7 @@ fn testSourceLlvm(
                 failed += 1;
                 break :status "FAILED";
             };
-            try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "{s} - {s}\n", .{ status, label }));
+            try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(case_allocator, "{s} - {s}\n", .{ status, label }));
         }
     }
     const summary = if (directory_input)
