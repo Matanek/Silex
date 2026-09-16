@@ -1,13 +1,14 @@
 // Portable client proof against an independent in-memory protocol fixture.
 // Not a server-security, OAuth, provider-ABI or deployed-service qualification.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { gunzipSync } from 'node:zlib';
 import { access, mkdir, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const group = dirname(repository), cli = process.argv[2];
@@ -29,6 +30,15 @@ const missing = path => assert.rejects(access(path), { code: 'ENOENT' });
 let loginTicket, revoked = false, disconnect = true, dropped = false, resumed = false;
 let corrupt = '', fault, log = '', checks = 0, publicReads = 0, artifactUploads = 0;
 const pass = text => console.log(`ok ${++checks} - ${text}`);
+const execFileAsync = promisify(execFile);
+async function reportNativeProcesses(command) {
+  try {
+    const { stdout } = await execFileAsync('pwsh', ['-NoProfile', '-NonInteractive', '-Command',
+      'Get-Process -Name silex,zig -ErrorAction SilentlyContinue | Select-Object ProcessName,Id,CPU | ConvertTo-Json -Compress'],
+      { timeout: 10000 });
+    console.log(`probe windows-arm64 ${command} processes: ${stdout.trim() || 'none'}`);
+  } catch (error) { console.log(`probe windows-arm64 ${command} process inspection failed: ${error.code || error.message}`); }
+}
 const artifact = Buffer.alloc(10000, 0x5a), artifactDigest = sha(artifact);
 const message = 'portable registry resource';
 
@@ -162,11 +172,14 @@ function run(path, args, executable = cli) {
     // the separate compile/run probes reveal which consumer phase stalls.
     const command = executable === cli ? args[0] : 'native executable';
     const deadlineMs = target === 'windows-arm64' && (command === 'compile' || command === 'run') ? 240000 : 60000;
-    const timer = setTimeout(() => { child.kill(); no(new Error(`Publishing bank exceeded ${deadlineMs} ms during ${command}`)); }, deadlineMs);
+    const diagnosticTimer = target === 'windows-arm64' && (command === 'compile' || command === 'run')
+      ? setInterval(() => { void reportNativeProcesses(command); }, 60000) : null;
+    const clearDiagnostics = () => { if (diagnosticTimer) clearInterval(diagnosticTimer); };
+    const timer = setTimeout(() => { clearDiagnostics(); child.kill(); no(new Error(`Publishing bank exceeded ${deadlineMs} ms during ${command}`)); }, deadlineMs);
     const capture = bytes => { output += bytes; log += bytes; };
     child.stdout.on('data', capture); child.stderr.on('data', capture);
-    child.once('error', error => { clearTimeout(timer); children.delete(child); no(error); });
-    child.once('exit', (code, signal) => { clearTimeout(timer); children.delete(child);
+    child.once('error', error => { clearTimeout(timer); clearDiagnostics(); children.delete(child); no(error); });
+    child.once('exit', (code, signal) => { clearTimeout(timer); clearDiagnostics(); children.delete(child);
       if (fault) no(fault); else yes({ code, signal, output }); });
   });
 }
