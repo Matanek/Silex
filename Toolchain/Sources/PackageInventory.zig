@@ -77,11 +77,11 @@ test "collect portable and inactive variant sources without cache entries" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "Package/Module");
-    try temporary.dir.createDirPath(std.testing.io, "Package/Platform/linux/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Package/Platform/Linux/Module");
     try temporary.dir.createDirPath(std.testing.io, "Package/Target/windows-x64/Module");
     try temporary.dir.createDirPath(std.testing.io, "Package/.silex/cache");
     for ([_][]const u8{
-        "Package/Module/Core.sx",                       "Package/Platform/linux/Module/Linux.sx",
+        "Package/Module/Core.sx",                       "Package/Platform/Linux/Module/Linux.sx",
         "Package/Target/windows-x64/Module/Windows.sx", "Package/.silex/cache/Hidden.sx",
     }) |path| try temporary.dir.writeFile(std.testing.io, .{ .sub_path = path, .data = "public func answer() int { return 42 }\n" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Package" });
@@ -93,7 +93,7 @@ test "collect portable and inactive variant sources without cache entries" {
     }
     try std.testing.expectEqual(@as(usize, 3), sources.len);
     try std.testing.expectEqualStrings("Module/Core.sx", sources[0]);
-    try std.testing.expectEqualStrings("Platform/linux/Module/Linux.sx", sources[1]);
+    try std.testing.expectEqualStrings("Platform/Linux/Module/Linux.sx", sources[1]);
     try std.testing.expectEqualStrings("Target/windows-x64/Module/Windows.sx", sources[2]);
 }
 
@@ -101,9 +101,9 @@ test "sources dot does not count variant files twice" {
     const allocator = std.testing.allocator;
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.createDirPath(std.testing.io, "Package/Platform/linux");
+    try temporary.dir.createDirPath(std.testing.io, "Package/Platform/Linux");
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package/Core.sx", .data = "func main() {}" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package/Platform/linux/Linux.sx", .data = "func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package/Platform/Linux/Linux.sx", .data = "func main() {}" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Package" });
     defer allocator.free(root);
     const sources = try collectSources(allocator, std.testing.io, root, ".");
@@ -113,5 +113,5 @@ test "sources dot does not count variant files twice" {
     }
     try std.testing.expectEqual(@as(usize, 2), sources.len);
     try std.testing.expectEqualStrings("Core.sx", sources[0]);
-    try std.testing.expectEqualStrings("Platform/linux/Linux.sx", sources[1]);
+    try std.testing.expectEqualStrings("Platform/Linux/Linux.sx", sources[1]);
 }

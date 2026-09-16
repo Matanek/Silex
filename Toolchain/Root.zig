@@ -7,6 +7,7 @@ test {
     _ = @import("Sources/PackageResources.zig");
     _ = @import("Sources/PackageSnapshot.zig");
     _ = @import("Sources/PackageInventory.zig");
+    _ = @import("Sources/PackagePublication.zig");
     _ = @import("Sources/MacOS/Link.zig");
     _ = @import("Sources/Llvm/Units.zig");
     _ = @import("Sources/Llvm/Store.zig");

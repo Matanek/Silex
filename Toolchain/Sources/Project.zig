@@ -169,6 +169,10 @@ pub const Compiler = struct {
         self.user_package_allowlist = allowlist;
     }
 
+    pub fn diagnosticMessage(self: *const Compiler) ?[]const u8 {
+        return if (self.diagnostic) |diagnostic| diagnostic.message else null;
+    }
+
     fn compileConfigured(self: *Compiler, input_path: []const u8) Error!Compilation {
         self.diagnostic = null;
         self.parsed_modules = 0;
