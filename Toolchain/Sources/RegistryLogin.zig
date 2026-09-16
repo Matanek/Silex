@@ -133,13 +133,18 @@ fn load(dir: Io.Dir, io: Io, allocator: std.mem.Allocator) !?Credential {
         error.FileNotFound => return null,
         error.Unexpected => {
             // Zig 0.16 can report an absent Windows file as Unexpected when
-            // opening it without following reparse points. Confirm absence
-            // separately; never reinterpret an existing file's failure.
+            // opening it without following reparse points. Enumerate the
+            // already-checked directory; never reinterpret an existing file's
+            // failure or an unsuccessful enumeration as an absent credential.
             if (is_windows) {
-                dir.access(io, credential_name, .{}) catch |probe_err| switch (probe_err) {
-                    error.FileNotFound => return null,
-                    else => return err,
-                };
+                var entries = dir.iterate();
+                var count: usize = 0;
+                while (entries.next(io) catch |list_err| return storageError("credential listing", list_err)) |entry| {
+                    if (equal(entry.name, credential_name)) return err;
+                    count += 1;
+                    if (count > 128) return error.RegistryCredentialStorageTooManyEntries;
+                }
+                return null;
             }
             return err;
         },
@@ -204,8 +209,9 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
     };
     _ = Io.Dir.cwd().createDirPathStatus(io, root, directory_permissions) catch |err| return storageError("directory creation", err);
     // Linux opens non-iterable directories with O_PATH, which cannot be fsynced.
-    // Windows does not fsync directories and does not need listing access.
-    const dir = Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false, .iterate = !is_windows }) catch |err| return storageError("directory open", err);
+    // Windows also needs enumeration to verify an absent credential when its
+    // no-follow open returns an unexpected status.
+    const dir = Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false, .iterate = true }) catch |err| return storageError("directory open", err);
     defer dir.close(io);
     const dir_stat = dir.stat(io) catch |err| return storageError("directory metadata", err);
     try private(dir_stat, .directory);
