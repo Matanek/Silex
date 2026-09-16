@@ -123,6 +123,11 @@ fn syncDirectory(dir: Io.Dir, io: Io) !void {
     const file: Io.File = .{ .handle = dir.handle, .flags = .{ .nonblocking = false } };
     try file.sync(io);
 }
+fn storageError(comptime step: []const u8, err: anyerror) anyerror {
+    // Identify the failing operation without printing paths or credentials.
+    std.debug.print("silex: registry storage {s} failed: {s}\n", .{ step, @errorName(err) });
+    return err;
+}
 fn load(dir: Io.Dir, io: Io, allocator: std.mem.Allocator) !?Credential {
     const file = dir.openFile(io, credential_name, .{ .follow_symlinks = false }) catch |err| switch (err) {
         error.FileNotFound => return null,
@@ -175,8 +180,8 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
     if ((test_url == null) != (test_root == null)) return error.RegistryTestConfigurationRequiresURLAndRoot;
     const root = if (test_root) |path| blk: {
         if (!testOrigin(test_url.?) or !std.fs.path.isAbsolute(path)) return error.InvalidRegistryTestConfiguration;
-        const real = try Io.Dir.cwd().realPathFileAlloc(io, path, allocator);
-        const state = try Io.Dir.cwd().realPathFileAlloc(io, "TestState", allocator);
+        const real = Io.Dir.cwd().realPathFileAlloc(io, path, allocator) catch |err| return storageError("test root resolution", err);
+        const state = Io.Dir.cwd().realPathFileAlloc(io, "TestState", allocator) catch |err| return storageError("test state resolution", err);
         const prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ state, std.fs.path.sep_str });
         if (!std.mem.startsWith(u8, real, prefix)) return error.RegistryTestRootMustBeInsideTestState;
         break :blk try std.fs.path.join(allocator, &.{ real, "auth" });
@@ -185,23 +190,28 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
         if (!std.fs.path.isAbsolute(home)) return error.UserHomeUnavailable;
         break :blk try std.fs.path.join(allocator, &.{ home, ".silex", "auth" });
     };
-    _ = try Io.Dir.cwd().createDirPathStatus(io, root, directory_permissions);
+    _ = Io.Dir.cwd().createDirPathStatus(io, root, directory_permissions) catch |err| return storageError("directory creation", err);
     // Linux opens non-iterable directories with O_PATH, which cannot be fsynced.
-    const dir = try Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false, .iterate = true });
+    // Windows does not fsync directories and does not need listing access.
+    const dir = Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false, .iterate = !is_windows }) catch |err| return storageError("directory open", err);
     defer dir.close(io);
-    try private(try dir.stat(io), .directory);
+    const dir_stat = dir.stat(io) catch |err| return storageError("directory metadata", err);
+    try private(dir_stat, .directory);
     // Never truncate an existing lock or follow a pre-existing symbolic link.
     // The metadata check requires a readable Windows handle.
     const lock = dir.createFile(io, "registry.lock", .{ .exclusive = true, .read = true, .permissions = file_permissions }) catch |err| switch (err) {
-        error.PathAlreadyExists => try dir.openFile(io, "registry.lock", .{ .mode = .read_write, .follow_symlinks = false }),
-        else => return err,
+        error.PathAlreadyExists => dir.openFile(io, "registry.lock", .{ .mode = .read_write, .follow_symlinks = false }) catch |open_err| return storageError("lock reopen", open_err),
+        else => return storageError("lock creation", err),
     };
     defer lock.close(io);
-    try private(try lock.stat(io), .file);
-    if (!try lock.tryLock(io, .exclusive)) return error.RegistryLoginAlreadyRunning;
+    const lock_stat = lock.stat(io) catch |err| return storageError("lock metadata", err);
+    try private(lock_stat, .file);
+    const acquired = lock.tryLock(io, .exclusive) catch |err| return storageError("lock acquisition", err);
+    if (!acquired) return error.RegistryLoginAlreadyRunning;
     defer lock.unlock(io);
     const client: Client = .{ .io = io, .allocator = allocator, .network_allocator = init.gpa, .origin = test_url orelse production_origin };
-    if (try load(dir, io, allocator)) |credential| {
+    const stored = load(dir, io, allocator) catch |err| return storageError("credential load", err);
+    if (stored) |credential| {
         const response = try client.request(if (logout) .DELETE else .GET, "/v2/session", "Bearer", credential.token);
         if (logout) {
             try checkStatus(response.status);
