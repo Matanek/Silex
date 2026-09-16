@@ -42,6 +42,7 @@ const EmbeddedFiles = @import("../EmbeddedFiles.zig");
 const Reflection = @import("Reflection.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const StaticInitialization = @import("StaticInitialization.zig");
+const StaticFinalization = @import("StaticFinalization.zig");
 const Protocols = @import("Protocols.zig");
 const Conversions = @import("Conversions.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
@@ -321,6 +322,7 @@ pub const Analyzer = struct {
                 try functions.append(self.allocator, initializer);
                 try StaticInitialization.attachToEntries(self, &functions, initializer_id);
             }
+            try StaticFinalization.attachToEntries(self, &functions);
             if (package_cache) |*cache| {
                 {
                     var cache_span = self.traceSpan(.package_cache_write);

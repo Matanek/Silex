@@ -53,6 +53,7 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/StaticRoots.sx": "body\ndrop 3\ndrop 2\ndrop 1\n",
         "LlvmEvaluation/BorrowedView.sx": "42\n2\n",
         "LlvmEvaluation/BorrowedResource/GFX/Smokes/Main.sx": "clear\nitem 2\nitem 1\ndone\n",
         "LlvmEvaluation/BorrowedCallback.sx": "done\nitem 2\nitem 2\n",

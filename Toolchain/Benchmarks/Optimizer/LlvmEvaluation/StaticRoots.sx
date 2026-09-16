@@ -1,0 +1,30 @@
+class Item {
+    var id:int
+    var values:int[]
+
+    init(id:int) {
+        self.id = id
+        self.values = [id, id + 1]
+    }
+
+    drop { print("drop $(self.id)") }
+}
+
+static struct Roots {
+    var first:Item? = null
+    var alias:Item? = null
+    var second:Item? = null
+    var empty:Item? = null
+}
+
+func main() {
+    var first = Item(1)
+    Roots.first = first
+    Roots.alias = first
+    Roots.second = Item(2)
+    var transient = Item(3)
+    assert(first.values.count() == 2)
+    print("body")
+    if transient.values.count() == 2 { return }
+    panic("unexpected local state")
+}

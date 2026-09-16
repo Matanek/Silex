@@ -55,6 +55,18 @@ module interface or ordinary executable. On a macos-arm64 host, test
 compilation lowers each selected source once and emits an isolated native
 process entry for every block, including the active system boundaries.
 
+## Release static roots at normal entry completion
+
+Semantic analysis synthesizes static initialization and finalization in portable
+IR. Every normal return from `main` or an isolated test entry calls the static
+finalizer after local cleanup. It releases owned fields in reverse declaration
+order with the same typed destruction plans as local values. Mutable optional
+roots are cleared before releasing their previous value, so a destructor cannot
+read that value back from its own cache. Shared class references retain their
+ordinary ownership semantics; the finalizer does not bypass reference counts.
+The LLVM allocation balance check therefore runs after both local and static
+ownership has ended. Abnormal termination does not take this return path.
+
 ## Injected system callback lifetime
 
 Generated system adapters consume their host argument with the same ownership
