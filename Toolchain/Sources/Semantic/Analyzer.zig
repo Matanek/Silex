@@ -20,6 +20,7 @@ const Borrowing = @import("Borrowing.zig");
 const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
+const FieldOwnership = @import("FieldOwnership.zig");
 const Optionals = @import("Optionals.zig");
 const Operators = @import("Operators.zig");
 const Constructors = @import("Constructors.zig");
@@ -1302,7 +1303,7 @@ pub const Analyzer = struct {
                 if (!std.mem.eql(u8, field.name, access.name)) continue;
                 const result = try self.newValue(builder, field.type);
                 try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
-                return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode };
+                return FieldOwnership.finishLoad(self, builder, base, .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode });
             }
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no member named '{s}'", .{ self.typeName(base.type), access.name });
             return self.fail(access.name_position, message);
@@ -1378,7 +1379,7 @@ pub const Analyzer = struct {
                 } });
                 break :reference field_reference;
             } else null;
-            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode, .reference = reference, .lexical_captures = base.lexical_captures, .lexical_borrows = base.lexical_borrows };
+            return FieldOwnership.finishLoad(self, builder, base, .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode, .reference = reference, .lexical_captures = base.lexical_captures, .lexical_borrows = base.lexical_borrows });
         }
         const message = try std.fmt.allocPrint(
             self.allocator,
@@ -1517,10 +1518,11 @@ pub const Analyzer = struct {
             .structure = structure_index,
             .fields = try field_values.toOwnedSlice(self.allocator),
         } });
+        if (declaration.is_class) try Resources.retainValue(self, builder, result_type, result);
         return .{
             .type = result_type,
             .value = result,
-            .transferred = Resources.ownsValue(self, result_type) and !declaration.is_class,
+            .transferred = Resources.ownsValue(self, result_type),
             .lexical_captures = lexical_captures,
             .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
         };

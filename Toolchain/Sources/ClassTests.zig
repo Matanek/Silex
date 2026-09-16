@@ -753,6 +753,12 @@ test "static list fields initialize before entry and var lists remain mutable" {
     try std.testing.expectEqual(@import("Arm64/Machine.zig").Status.success, native.status);
 }
 
+test "temporary field projections retain selected values and release their owners" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/TemporaryField.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("owner dropped\nitem 42\ntemporary-fields-ok\nitem dropped\n", output);
+}
+
 test "static roots release aliases after entry locals on an early return" {
     const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/StaticRoots.sx"));
     defer std.testing.allocator.free(output);

@@ -64,6 +64,9 @@ pub fn analyzeLiteral(
             return self.fail(element.value.position, message);
         }
         try Borrowing.requireOwned(self, value, element.value.position, "stored in a tuple");
+        if (!value.transferred and Resources.requiresRetain(self, value.type)) {
+            try Resources.retainValue(self, builder, value.type, value.value);
+        }
         try values.append(self.allocator, value.value);
         lexical_captures = lexical_captures or value.lexical_captures;
         try lexical_borrows.appendSlice(self.allocator, value.lexical_borrows);
@@ -91,7 +94,7 @@ pub fn analyzeLiteral(
         .structure = result_type.structureIndex().?,
         .fields = try values.toOwnedSlice(self.allocator),
     } });
-    return .{ .type = result_type, .value = result, .lexical_captures = lexical_captures, .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator) };
+    return .{ .type = result_type, .value = result, .transferred = Resources.ownsValue(self, result_type), .lexical_captures = lexical_captures, .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator) };
 }
 
 fn tupleName(self: anytype, named: bool, fields: []const Ir.StructureField) ![]const u8 {
@@ -135,6 +138,9 @@ pub fn analyzeDestructuring(self: anytype, builder: anytype, declaration: Ast.Va
         }
         const value = try self.newValue(builder, field.type);
         try self.emit(builder, .{ .field_load = .{ .result = value, .base = initializer.value, .field = index } });
+        if (!initializer.transferred and Resources.requiresRetain(self, field.type)) {
+            try Resources.retainValue(self, builder, field.type, value);
+        }
         if (declaration.mutable) {
             const local = builder.local_types.items.len;
             try builder.local_types.append(self.allocator, field.type);

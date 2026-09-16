@@ -42,6 +42,21 @@ representation, unique-finalization guard, cycle handling and target layout
 remain private to the interpreter and target lowering; source code observes
 only shared identity and the specified `drop` order.
 
+Aggregate class construction acquires an initial root, just as a declared
+constructor does, and returns an owned temporary.
+
+Reading a stored field from an owned temporary retains the selected value
+before dropping the complete owner, including sibling resources and its
+finalizer. The resulting value carries its own cleanup obligation. This also
+applies to named tuple projections and the present branch of optional access;
+reading a scalar still releases its temporary owner. A reference into that
+released owner is not propagated.
+
+Tuple construction retains borrowed resource elements and transfers owned
+ones. The completed tuple is an owned value. Destructuring a stored tuple
+retains the selected fields; destructuring an owned temporary transfers them
+into the new bindings without abandoning or double-retaining the tuple.
+
 ## Generics, protocols, and extensions
 
 Generic nominal declarations are specialized before semantic lowering. One

@@ -122,6 +122,14 @@ fn needsDropInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
         };
         return false;
     };
+    // Inferred tuple names differ from their parser placeholder declarations.
+    // Their resolved fields, not nominal declaration lookup, own the cleanup.
+    if (self.structures[index].is_tuple) {
+        for (self.structures[index].fields) |field| {
+            if (needsDropInner(self, field.type, depth + 1)) return true;
+        }
+        return false;
+    }
     const name = self.structures[index].name;
     for (self.program.structures) |structure| {
         if (!std.mem.eql(u8, structure.name, name)) continue;
