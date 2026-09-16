@@ -43,6 +43,10 @@ await new Promise(yes => server.listen(0, '127.0.0.1', yes));
 const url = `http://127.0.0.1:${server.address().port}`;
 async function clientRoot(name) { const path = `${root}/${name}`; await mkdir(path); return path; }
 async function missing(path) { await assert.rejects(access(path), { code: 'ENOENT' }); }
+async function fileMetadata(path) {
+  try { const value = await stat(path); return { exists: true, size: value.size, regular: value.isFile() }; }
+  catch (error) { return { exists: false, code: error.code }; }
+}
 function run(path, args, onCode) {
   return new Promise((yes, no) => {
     const child = spawn(cli, args, { env: { ...process.env, SILEX_REGISTRY_TEST_URL: url, SILEX_REGISTRY_TEST_ROOT: path },
@@ -62,7 +66,12 @@ function run(path, args, onCode) {
 try {
   console.log(JSON.stringify({ cli, root, platform: process.platform, architecture: process.arch, provider: 'offline registry response fixture, not OAuth proof' }));
   const first = await clientRoot('first'), file = `${first}/auth/${savedName}`;
-  let result = await run(first, ['login', '--no-browser']); assert.equal(result.code, 0, result.output);
+  let result = await run(first, ['login', '--no-browser']);
+  if (result.code !== 0) console.error(JSON.stringify({ initialStorage: {
+    lock: await fileMetadata(`${first}/auth/registry.lock`),
+    credential: await fileMetadata(file),
+  } }));
+  assert.equal(result.code, 0, result.output);
   const bytes = await readFile(file);
   if (windows) {
     assert(!bytes.includes(Buffer.from(token))); assert(!bytes.includes(Buffer.from('fixture-user')));
