@@ -99,7 +99,7 @@ jobs:
   registry-login:
     if: inputs.target == 'registry-login' || inputs.target == 'registry-publishing'
     needs: registry-login-build
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

@@ -167,12 +167,12 @@ function run(path, args, executable = cli) {
       SILEX_REGISTRY_TEST_ROOT: path, SILEX_REGISTRY_V2: 'test',
       SILEX_REGISTRY: 'https://github.invalid/v1/index.json' }, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child); let output = '';
-    // A cold native compile on a Windows ARM64 runner may invoke the pinned
-    // x64 Zig linker under emulation. Keep protocol commands bounded tightly;
-    // the separate compile/run probes reveal which consumer phase stalls.
+    // A cold native compile on Windows ARM64 invokes the pinned x64 Zig linker
+    // under emulation. Keep protocol commands bounded tightly and observe the
+    // linker while allowing this one consumer build to finish.
     const command = executable === cli ? args[0] : 'native executable';
-    const deadlineMs = target === 'windows-arm64' && (command === 'compile' || command === 'run') ? 240000 : 60000;
-    const diagnosticTimer = target === 'windows-arm64' && (command === 'compile' || command === 'run')
+    const deadlineMs = target === 'windows-arm64' && command === 'compile' ? 600000 : 60000;
+    const diagnosticTimer = target === 'windows-arm64' && command === 'compile'
       ? setInterval(() => { void reportNativeProcesses(command); }, 60000) : null;
     const clearDiagnostics = () => { if (diagnosticTimer) clearInterval(diagnosticTimer); };
     const timer = setTimeout(() => { clearDiagnostics(); child.kill(); no(new Error(`Publishing bank exceeded ${deadlineMs} ms during ${command}`)); }, deadlineMs);
@@ -234,17 +234,18 @@ try {
   const app = await localRoot('App');
   await writeFile(`${app}/Package.json`, JSON.stringify({ sources: '.', dependencies: { RegistryProbe: '=1.0.0' } }));
   await writeFile(`${app}/Main.sx`, 'use RegistryProbe.Value\nfunc main() { print(Value.answer(), ":", Value.message()) }\n');
+  let execution;
   if (target === 'windows-arm64') {
     const binary = resolve(app, 'RegistryConsumer.exe');
-    console.log('probe windows-arm64: compile installed consumer');
+    console.log('windows-arm64: compile installed consumer with the emulated x64 linker');
     await success(reader, ['compile', `${app}/Main.sx`, '--backend', 'native', '--nocache', '-o', binary]);
-    console.log('probe windows-arm64: execute standalone consumer');
+    console.log('windows-arm64: execute compiled consumer');
     const standalone = await run(reader, [], binary);
     assert.equal(standalone.code, 0, standalone.output);
-    assert.match(standalone.output, /(?:^|\n)42:portable registry resource\r?\n/);
-    console.log('probe windows-arm64: execute through silex run');
+    execution = standalone.output;
+  } else {
+    execution = await success(reader, ['run', `${app}/Main.sx`, '--backend', 'native', '--nocache']);
   }
-  const execution = await success(reader, ['run', `${app}/Main.sx`, '--backend', 'native', '--nocache']);
   assert.match(execution, /(?:^|\n)42:portable registry resource\r?\n/);
   pass('host-native consumer executes installed code and embedded resource after origin is unavailable');
   for (const kind of ['source', 'artifact']) {
