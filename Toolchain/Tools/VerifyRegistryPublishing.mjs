@@ -150,18 +150,19 @@ async function serve(request, response) {
 await new Promise((yes, no) => { server.once('error', no); server.listen(0, '127.0.0.1', yes); });
 const url = `http://127.0.0.1:${server.address().port}`;
 async function localRoot(name) { const path = resolve(root, name); await mkdir(path, { mode: 0o700 }); return path; }
-function run(path, args) {
+function run(path, args, executable = cli) {
   return new Promise((yes, no) => {
-    const child = spawn(cli, args, { cwd: group, env: { ...process.env,
+    const child = spawn(executable, args, { cwd: group, env: { ...process.env,
       SILEX_DATA_ROOT: resolve(path, 'data'), SILEX_REGISTRY_TEST_URL: url,
       SILEX_REGISTRY_TEST_ROOT: path, SILEX_REGISTRY_V2: 'test',
       SILEX_REGISTRY: 'https://github.invalid/v1/index.json' }, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child); let output = '';
     // A cold native compile on a Windows ARM64 runner may invoke the pinned
-    // x64 Zig linker under emulation. Keep protocol commands bounded tightly,
-    // but allow that one consumer proof to complete before calling it stuck.
-    const deadlineMs = args[0] === 'run' && target === 'windows-arm64' ? 240000 : 60000;
-    const timer = setTimeout(() => { child.kill(); no(new Error(`Publishing bank exceeded ${deadlineMs} ms during ${args[0]}`)); }, deadlineMs);
+    // x64 Zig linker under emulation. Keep protocol commands bounded tightly;
+    // the separate compile/run probes reveal which consumer phase stalls.
+    const command = executable === cli ? args[0] : 'native executable';
+    const deadlineMs = target === 'windows-arm64' && (command === 'compile' || command === 'run') ? 240000 : 60000;
+    const timer = setTimeout(() => { child.kill(); no(new Error(`Publishing bank exceeded ${deadlineMs} ms during ${command}`)); }, deadlineMs);
     const capture = bytes => { output += bytes; log += bytes; };
     child.stdout.on('data', capture); child.stderr.on('data', capture);
     child.once('error', error => { clearTimeout(timer); children.delete(child); no(error); });
@@ -220,6 +221,16 @@ try {
   const app = await localRoot('App');
   await writeFile(`${app}/Package.json`, JSON.stringify({ sources: '.', dependencies: { RegistryProbe: '=1.0.0' } }));
   await writeFile(`${app}/Main.sx`, 'use RegistryProbe.Value\nfunc main() { print(Value.answer(), ":", Value.message()) }\n');
+  if (target === 'windows-arm64') {
+    const binary = resolve(app, 'RegistryConsumer.exe');
+    console.log('probe windows-arm64: compile installed consumer');
+    await success(reader, ['compile', `${app}/Main.sx`, '--backend', 'native', '--nocache', '-o', binary]);
+    console.log('probe windows-arm64: execute standalone consumer');
+    const standalone = await run(reader, [], binary);
+    assert.equal(standalone.code, 0, standalone.output);
+    assert.match(standalone.output, /(?:^|\n)42:portable registry resource\r?\n/);
+    console.log('probe windows-arm64: execute through silex run');
+  }
   const execution = await success(reader, ['run', `${app}/Main.sx`, '--backend', 'native', '--nocache']);
   assert.match(execution, /(?:^|\n)42:portable registry resource\r?\n/);
   pass('host-native consumer executes installed code and embedded resource after origin is unavailable');
