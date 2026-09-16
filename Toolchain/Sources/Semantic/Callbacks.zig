@@ -316,7 +316,7 @@ pub fn call(self: anytype, builder: anytype, call_value: Ast.Expression.Call) !?
         } else {
             if (parameter.mode == .value) try Borrowing.requireOwned(self, argument, expression.position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, expression.position);
-            if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
+            if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
                 try Resources.retainValue(self, builder, parameter.type, converted.value);
             }
             if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
@@ -330,7 +330,11 @@ pub fn call(self: anytype, builder: anytype, call_value: Ast.Expression.Call) !?
     try self.emit(builder, .{ .indirect_call = .{ .result = result, .callee = callee.value, .arguments = try arguments.toOwnedSlice(self.allocator) } });
     for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
     try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
-    return .{ .value = if (result) |value| .{ .type = signature.return_type, .value = value } else null };
+    return .{ .value = if (result) |value| .{
+        .type = signature.return_type,
+        .value = value,
+        .transferred = Resources.ownsValue(self, signature.return_type),
+    } else null };
 }
 
 const MutableArgument = struct { prepared: MutableReferences.Prepared };

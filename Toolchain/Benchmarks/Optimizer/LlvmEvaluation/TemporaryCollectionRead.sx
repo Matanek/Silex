@@ -1,0 +1,48 @@
+static struct Counts { var dropped:int = 0 }
+
+class Item {
+    let value:int
+    init(value:int) { self.value = value }
+    drop { Counts.dropped++ }
+}
+
+func numbers() int[] { return [1, 2] }
+func empty_numbers() int[] { return [] }
+func names(index:int) str[] { return ["name $(index)", "sibling $(index)"] }
+func label(index:int) str { return "item $(index)" }
+func items() Item[] { return [Item(1), Item(2)] }
+func nested() int[][] { return [[1, 2], [3, 4]] }
+func fixed() int[2] { return [5, 6] }
+
+func inspect_item() {
+    let before = Counts.dropped
+    var selected = items()[1]
+    assert(Counts.dropped == before + 1)
+    assert(selected.value == 2)
+}
+
+func main() {
+    var index = 0
+    while index < 32 {
+        assert(numbers().count() == 2)
+        assert(!numbers().is_empty())
+        assert(empty_numbers().is_empty())
+        assert(numbers()[0] == 1)
+        let name = names(index)[0]
+        assert(name == "name $(index)")
+        assert(label(42).count() == 7)
+        assert(nested()[1].count() == 2)
+        assert(fixed().count() == 2 && fixed()[1] == 6)
+        inspect_item()
+        assert(Counts.dropped == (index + 1) * 2)
+        index++
+    }
+    var borrowed = items()
+    assert(borrowed.count() == 2)
+    assert(!borrowed.is_empty())
+    assert(borrowed[0].value == 1)
+    assert(Counts.dropped == 64)
+    borrowed.clear()
+    assert(Counts.dropped == 66)
+    print("temporary-collection-read-ok")
+}

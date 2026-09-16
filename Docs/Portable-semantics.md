@@ -50,7 +50,16 @@ before dropping the complete owner, including sibling resources and its
 finalizer. The resulting value carries its own cleanup obligation. This also
 applies to named tuple projections and the present branch of optional access;
 reading a scalar still releases its temporary owner. A reference into that
-released owner is not propagated.
+released owner is not propagated. Collection indexing follows the same rule:
+the selected element gains its own lifetime before the temporary collection is
+released. Built-in `count()` and `is_empty()` reads release an owned temporary
+receiver after producing their scalar result; `str.count()` does likewise.
+Stored receivers retain their original lifetime.
+
+Indirect callback calls follow the ownership contract of direct calls: a
+temporary value argument transfers its existing owner, while a stored argument
+is retained for the callee. An owned callback result carries its transfer flag
+so binding, projection and discarded-result cleanup preserve that obligation.
 
 Tuple construction retains borrowed resource elements and transfers owned
 ones. The completed tuple is an owned value. Destructuring a stored tuple

@@ -8,6 +8,7 @@ const Support = @import("Support.zig");
 const Borrowing = @import("Borrowing.zig");
 const StorageOwnership = @import("StorageOwnership.zig");
 const Resources = @import("Resources.zig");
+const ProjectionOwnership = @import("ProjectionOwnership.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
 
@@ -401,14 +402,14 @@ pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.Inde
         .position = access.bracket_position,
     } });
     const aliases_source = Resources.needsDrop(self, collection.element) or Resources.containsClass(self, collection.element);
-    return .{
+    return ProjectionOwnership.finishLoad(self, builder, source, .{
         .type = collection.element,
         .value = result,
         .borrowed_root = if (aliases_source) source.borrowed_root else null,
         .borrowed_mode = if (aliases_source) source.borrowed_mode else .value,
         .lexical_captures = source.lexical_captures,
         .lexical_borrows = source.lexical_borrows,
-    };
+    });
 }
 
 pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.SliceAccess, expected: ?Ast.Type) !Model.TypedValue {
@@ -559,7 +560,7 @@ fn analyzeReadCall(self: anytype, builder: anytype, call: Ast.Expression.Call, s
             try self.emit(builder, .{ .constant_int = .{ .result = result, .bits = count } })
         else
             try self.emit(builder, .{ .collection_count = .{ .result = result, .collection = source.value } });
-        return .{ .type = .int, .value = result };
+        return try ProjectionOwnership.finishLoad(self, builder, source, .{ .type = .int, .value = result });
     }
     if (std.mem.eql(u8, call.name, "is_empty")) {
         const count_value = try self.newValue(builder, .int);
@@ -571,7 +572,7 @@ fn analyzeReadCall(self: anytype, builder: anytype, call: Ast.Expression.Call, s
         try self.emit(builder, .{ .constant_int = .{ .result = zero, .bits = 0 } });
         const result = try self.newValue(builder, .bool);
         try self.emit(builder, .{ .binary = .{ .result = result, .operator = .equal, .left = count_value, .right = zero } });
-        return .{ .type = .bool, .value = result };
+        return try ProjectionOwnership.finishLoad(self, builder, source, .{ .type = .bool, .value = result });
     }
     return null;
 }

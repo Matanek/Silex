@@ -12,6 +12,7 @@ const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
 const Collections = @import("Collections.zig");
+const ProjectionOwnership = @import("ProjectionOwnership.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
 const ProtocolValues = @import("ProtocolValues.zig");
@@ -398,7 +399,8 @@ pub fn analyzeCallWithReceiver(
         resolved_receiver = try self.coerce(builder, receiver, .structure(base_index), receiver_expression.position);
     }
     if (resolved_receiver.type == .str and std.mem.eql(u8, call.name, "count") and call.arguments.len == 0 and call.named_arguments.len == 0) {
-        return try self.emitStringCount(builder, receiver.value);
+        const result = try self.emitStringCount(builder, resolved_receiver.value);
+        return try ProjectionOwnership.finishLoad(self, builder, resolved_receiver, result);
     }
     if (try Collections.analyzeCallWithValue(self, builder, call, resolved_receiver)) |value| return value;
     const receiver_structure_index = resolved_receiver.type.structureIndex() orelse {

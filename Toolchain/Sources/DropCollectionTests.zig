@@ -158,3 +158,15 @@ test "whole drop collections transfer explicitly through calls and returns" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("moved\n2\n1\n", output);
 }
+
+test "temporary collection reads release owners and preserve selected elements" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/TemporaryCollectionRead.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("temporary-collection-read-ok\n", output);
+}
+
+test "callbacks transfer temporary arguments and owned return values" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/CallbackOwnership.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("callback-ownership-ok\n", output);
+}

@@ -20,7 +20,7 @@ const Borrowing = @import("Borrowing.zig");
 const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
-const FieldOwnership = @import("FieldOwnership.zig");
+const ProjectionOwnership = @import("ProjectionOwnership.zig");
 const Optionals = @import("Optionals.zig");
 const Operators = @import("Operators.zig");
 const Constructors = @import("Constructors.zig");
@@ -1303,7 +1303,7 @@ pub const Analyzer = struct {
                 if (!std.mem.eql(u8, field.name, access.name)) continue;
                 const result = try self.newValue(builder, field.type);
                 try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
-                return FieldOwnership.finishLoad(self, builder, base, .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode });
+                return ProjectionOwnership.finishLoad(self, builder, base, .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode });
             }
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no member named '{s}'", .{ self.typeName(base.type), access.name });
             return self.fail(access.name_position, message);
@@ -1379,7 +1379,7 @@ pub const Analyzer = struct {
                 } });
                 break :reference field_reference;
             } else null;
-            return FieldOwnership.finishLoad(self, builder, base, .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode, .reference = reference, .lexical_captures = base.lexical_captures, .lexical_borrows = base.lexical_borrows });
+            return ProjectionOwnership.finishLoad(self, builder, base, .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode, .reference = reference, .lexical_captures = base.lexical_captures, .lexical_borrows = base.lexical_borrows });
         }
         const message = try std.fmt.allocPrint(
             self.allocator,

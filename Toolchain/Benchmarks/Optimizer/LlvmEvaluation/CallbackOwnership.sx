@@ -1,0 +1,58 @@
+static struct Counts { var dropped:int = 0 }
+
+class Item {
+    let value:int
+    init(value:int) { self.value = value }
+    drop { Counts.dropped++ }
+}
+
+struct Input {
+    var item:Item
+    let values:int[]
+    init(item:Item, values:int[]) {
+        self.item = item
+        self.values = values
+    }
+}
+
+func inspect(input:Input) int { return input.values.count() + input.item.value }
+func make() Item { return Item(7) }
+func make_values() int[] { return [3, 4] }
+
+class Runner {
+    var callback:func(Input) int
+    init() { self.callback = inspect }
+    func run() {
+        assert(self.callback(Input(Item(5), [1, 2])) == 7)
+    }
+}
+
+func inspect_return() {
+    let callback:func() Item = make
+    var result = callback()
+    assert(result.value == 7)
+}
+
+func inspect_stored() {
+    let callback:func(Input) int = inspect
+    var input = Input(Item(8), [1, 2, 3])
+    let before = Counts.dropped
+    assert(callback(input) == 11)
+    assert(input.item.value == 8 && input.values.count() == 3)
+    assert(Counts.dropped == before)
+}
+
+func main() {
+    var runner = Runner()
+    let produce:func() int[] = make_values
+    var index = 0
+    while index < 32 {
+        runner.run()
+        inspect_return()
+        inspect_stored()
+        assert(produce().count() == 2 && produce()[1] == 4)
+        assert(Counts.dropped == (index + 1) * 3)
+        index++
+    }
+    print("callback-ownership-ok")
+}
