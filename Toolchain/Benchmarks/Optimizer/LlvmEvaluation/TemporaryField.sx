@@ -1,0 +1,54 @@
+struct Label {
+    var text:str
+    var sibling:int[]
+    var number:int
+}
+
+func make_label(index:int) Label {
+    return Label(text:"body $(index)", sibling:[index, index + 1], number:index)
+}
+
+func make_pair(index:int) (text:str, sibling:int[]) {
+    return (text:"body $(index)", sibling:[index])
+}
+
+func maybe_label(present:bool) Label? {
+    if present { return make_label(42) }
+    return null
+}
+
+class Item {
+    var text:str
+    init() { self.text = "item $(42)" }
+    drop { print("item dropped") }
+}
+
+class Owner {
+    var item:Item
+    var sibling:int[]
+    drop { print("owner dropped") }
+}
+
+func main() {
+    var index = 0
+    while index < 16 {
+        assert(make_label(index).text == "body $(index)")
+        assert(make_label(index).number == index)
+        let values = make_label(index).sibling
+        assert(values.count() == 2 && values[0] == index)
+        assert(make_pair(index).text == "body $(index)")
+        index++
+    }
+    assert(maybe_label(true)?.text == "body 42")
+    assert(maybe_label(false)?.text == null)
+    let source = make_pair(3)
+    let (text, values) = source
+    assert(text == "body 3" && values[0] == 3)
+    let copied = (text:text, values:values)
+    assert(copied.text == source.text)
+    let (temporary_text, temporary_values) = make_pair(4)
+    assert(temporary_text == "body 4" && temporary_values[0] == 4)
+    var item = Owner(item:Item(), sibling:[1, 2]).item
+    print(item.text)
+    print("temporary-fields-ok")
+}

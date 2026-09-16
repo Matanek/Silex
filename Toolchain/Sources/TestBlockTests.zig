@@ -110,3 +110,25 @@ test "activate tests only for the explicit project source" {
     );
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
 }
+
+test "isolated test entries release their static roots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.init(allocator);
+    const compilation = try frontend.compileTests(
+        \\class Item { var values:int[] = [1, 2]; drop { print("released") } }
+        \\static struct Cache { var retained:Item? = null }
+        \\test "first" { Cache.retained = Item() }
+        \\test "second" { assert(Cache.retained == null); Cache.retained = Item() }
+    );
+    var count: usize = 0;
+    for (compilation.ast.functions, 0..) |function, function_id| {
+        if (!function.is_test_entry) continue;
+        count += 1;
+        const result = try Interpreter.runFunctionCaptureWithBoundaries(allocator, null, compilation.ir, function_id, &.{});
+        try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+        try std.testing.expectEqualStrings("released\n", result.stdout);
+    }
+    try std.testing.expectEqual(@as(usize, 2), count);
+}

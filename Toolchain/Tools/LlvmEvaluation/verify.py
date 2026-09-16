@@ -53,6 +53,8 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/TemporaryField.sx": "owner dropped\nitem 42\ntemporary-fields-ok\nitem dropped\n",
+        "LlvmEvaluation/StaticRoots.sx": "body\ndrop 3\ndrop 2\ndrop 1\n",
         "LlvmEvaluation/BorrowedView.sx": "42\n2\n",
         "LlvmEvaluation/BorrowedResource/GFX/Smokes/Main.sx": "clear\nitem 2\nitem 1\ndone\n",
         "LlvmEvaluation/BorrowedCallback.sx": "done\nitem 2\nitem 2\n",
@@ -76,6 +78,9 @@ def main():
         "LlvmEvaluation/MixedAggregateCallAbi.sx": "0\n0.9\n1\n0\n0.9\n1\n",
         "Regressions/DenseBlockLiveOut.sx": "42\n",
         "LlvmEvaluation/PrintFloats.sx": "1.5|-0.0|1.2345678806304932\n0.0|-0.0|inf|-inf|nan\n",
+        "LlvmEvaluation/LoopedScalarFormatting.sx": (
+            "".join(f"{iteration}.0|{iteration}\n" * 2 for iteration in range(20_000)) + "done\n"
+        ),
         "LlvmEvaluation/MutableOwningView.sx": "24.0\n11.0\n24.0\n1.0\n4.0\n21.0\n44.0\n0\n",
         "LlvmEvaluation/MergedRawMemory.sx": "1\n2\n3\n4\n9\n9\n9\n9\n",
         "LlvmEvaluation/Rounding.sx": "true\n",
@@ -469,7 +474,7 @@ def main():
         "call i64 @silex_format_signed",
         "call i64 @silex_format_unsigned",
         "call i64 @silex_format_float",
-        ".format.scratch = alloca [384 x i8]",
+        "%sx.scalar.format.scratch = alloca [384 x i8]",
         "@sx.format.true = private constant",
         "@sx.format.false = private constant",
     ]:
