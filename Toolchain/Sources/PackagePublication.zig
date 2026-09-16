@@ -7,6 +7,7 @@ const Project = @import("Project.zig");
 const Resources = @import("PackageResources.zig");
 const Snapshot = @import("PackageSnapshot.zig");
 const TargetModule = @import("Target.zig");
+const Unicode = @import("PackageUnicode.zig");
 
 const Io = std.Io;
 
@@ -72,6 +73,11 @@ pub const Manager = struct {
         for ([_][]const u8{ "README.md", "README", "LICENSE", "LICENSE.md", "NOTICE" }) |name| {
             if (try optionalRegularFile(self.allocator, self.io, package_root, name)) try appendUnique(self.allocator, &selected, name);
         }
+        validatePortablePaths(self.allocator, selected.items, manifest.artifacts) catch |err| switch (err) {
+            error.NonNormalizedPath => return self.fail("package publication paths must use Unicode NFC"),
+            error.PathCollision => return self.fail("package publication paths collide after Unicode lowercase comparison"),
+            else => |other| return other,
+        };
         const artifacts = captureArtifacts(self.allocator, self.io, package_root, manifest.artifacts) catch |err| switch (err) {
             error.MissingFile => return self.fail("a declared artifact is missing; run 'silex install <package-directory>'"),
             error.FileChanged => return self.fail("a declared artifact changed during preparation"),
@@ -209,6 +215,55 @@ fn pathsCollide(left: []const u8, right: []const u8) bool {
         (right.len < left.len and std.mem.startsWith(u8, left, right) and left[right.len] == '/');
 }
 
+const PortablePath = struct {
+    key: []const u8,
+    target: ?[]const u8,
+};
+
+fn validatePortablePaths(
+    allocator: std.mem.Allocator,
+    sources: []const []const u8,
+    artifacts: []const Packages.ManifestArtifact,
+) !void {
+    var paths: std.ArrayList(PortablePath) = .empty;
+    defer {
+        for (paths.items) |path| allocator.free(path.key);
+        paths.deinit(allocator);
+    }
+    for (sources) |source| {
+        const normalized = Unicode.isNfc(allocator, source) catch |err| switch (err) {
+            error.InvalidUtf8 => return error.NonNormalizedPath,
+            else => |other| return other,
+        };
+        if (!normalized) return error.NonNormalizedPath;
+        const key = Unicode.lowercase(allocator, source) catch |err| switch (err) {
+            error.InvalidUtf8 => return error.NonNormalizedPath,
+            else => |other| return other,
+        };
+        errdefer allocator.free(key);
+        for (paths.items) |previous| if (pathsCollide(previous.key, key)) return error.PathCollision;
+        try paths.append(allocator, .{ .key = key, .target = null });
+    }
+    for (artifacts) |artifact| {
+        const normalized = Unicode.isNfc(allocator, artifact.path) catch |err| switch (err) {
+            error.InvalidUtf8 => return error.NonNormalizedPath,
+            else => |other| return other,
+        };
+        if (!normalized) return error.NonNormalizedPath;
+        const key = Unicode.lowercase(allocator, artifact.path) catch |err| switch (err) {
+            error.InvalidUtf8 => return error.NonNormalizedPath,
+            else => |other| return other,
+        };
+        errdefer allocator.free(key);
+        for (paths.items) |previous| {
+            if (previous.target == null or std.mem.eql(u8, previous.target.?, artifact.target)) {
+                if (pathsCollide(previous.key, key)) return error.PathCollision;
+            }
+        }
+        try paths.append(allocator, .{ .key = key, .target = artifact.target });
+    }
+}
+
 fn portablePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const result = try allocator.dupe(u8, path);
     for (result) |*byte| if (byte.* == '\\') {
@@ -296,4 +351,20 @@ test "prepare a modified local package without Git or cache files" {
     manager = Manager.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackagePublication, manager.prepare(root));
     try std.testing.expectEqualStrings("a declared artifact does not match its sha256", manager.diagnostic.?);
+}
+
+test "reject non-NFC and Unicode lowercase publication collisions" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.NonNormalizedPath, validatePortablePaths(allocator, &.{"Module/Re\u{301}sume\u{301}.sx"}, &.{}));
+    try std.testing.expectError(error.PathCollision, validatePortablePaths(allocator, &.{ "Module/Data.sx", "module/data.sx" }, &.{}));
+    try std.testing.expectError(error.PathCollision, validatePortablePaths(allocator, &.{"Module/École.sx"}, &.{.{
+        .target = "linux-x64",
+        .name = "Runtime",
+        .path = "module/école.sx",
+        .sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }}));
+    try validatePortablePaths(allocator, &.{"Module/Content.sx"}, &.{
+        .{ .target = "linux-x64", .name = "Runtime", .path = "Boundary/Runtime.a", .sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        .{ .target = "windows-x64", .name = "Runtime", .path = "boundary/runtime.a", .sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+    });
 }
