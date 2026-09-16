@@ -42,13 +42,29 @@ fn pathLessThan(_: void, left: []const u8, right: []const u8) bool {
 /// package root. Neither an ancestor symlink nor a leaf symlink is followed.
 /// The returned bytes are the only bytes later archive/descriptor stages use.
 pub fn copyFile(allocator: std.mem.Allocator, io: Io, package_root: []const u8, relative_path: []const u8) ![]u8 {
-    return copyFileLimited(allocator, io, package_root, relative_path, 16 * 1024 * 1024);
+    return copyFileObserved(allocator, io, package_root, relative_path, 16 * 1024 * 1024, null);
 }
 
 /// Copy a regular package file with a caller-selected bound. Publication uses
 /// the larger registry object bound for native artifacts while source files
 /// retain their stricter per-file limit.
 pub fn copyFileLimited(allocator: std.mem.Allocator, io: Io, package_root: []const u8, relative_path: []const u8, maximum_size: usize) ![]u8 {
+    return copyFileObserved(allocator, io, package_root, relative_path, maximum_size, null);
+}
+
+const Observation = struct {
+    context: *anyopaque,
+    run: *const fn (*anyopaque) anyerror!void,
+};
+
+fn copyFileObserved(
+    allocator: std.mem.Allocator,
+    io: Io,
+    package_root: []const u8,
+    relative_path: []const u8,
+    maximum_size: usize,
+    observation: ?Observation,
+) ![]u8 {
     if (!Archive.safeArchivePath(relative_path)) return error.InvalidPath;
 
     const root = Io.Dir.cwd().openDir(io, package_root, .{ .follow_symlinks = false }) catch return error.InvalidPackageRoot;
@@ -77,6 +93,7 @@ pub fn copyFileLimited(allocator: std.mem.Allocator, io: Io, package_root: []con
     defer file.close(io);
     const opened = try file.stat(io);
     if (!sameFile(before, opened)) return error.FileChanged;
+    if (observation) |present| try present.run(present.context);
 
     var buffer: [16 * 1024]u8 = undefined;
     var reader = file.reader(io, &buffer);
@@ -113,6 +130,34 @@ test "copy package bytes without following file or directory links" {
     try std.testing.expectError(error.UnsafeEntry, copyFile(allocator, std.testing.io, root, "LinkedModule/Content.sx"));
     try temporary.dir.hardLink("Package/Module/Content.sx", temporary.dir, "Package/Module/Hard.sx", std.testing.io, .{});
     try std.testing.expectError(error.UnsafeEntry, copyFile(allocator, std.testing.io, root, "Module/Hard.sx"));
+}
+
+test "reject a selected file modified after it is opened" {
+    const allocator = std.testing.allocator;
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Package/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package/Module/Content.sx", .data = "first bytes\n" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Package" });
+    defer allocator.free(root);
+
+    const Mutation = struct {
+        directory: *Io.Dir,
+
+        fn run(context_pointer: *anyopaque) !void {
+            const self: *@This() = @ptrCast(@alignCast(context_pointer));
+            try self.directory.writeFile(std.testing.io, .{ .sub_path = "Package/Module/Content.sx", .data = "changed while captured\n" });
+        }
+    };
+    var mutation: Mutation = .{ .directory = &temporary.dir };
+    try std.testing.expectError(error.FileChanged, copyFileObserved(
+        allocator,
+        std.testing.io,
+        root,
+        "Module/Content.sx",
+        16 * 1024 * 1024,
+        .{ .context = &mutation, .run = Mutation.run },
+    ));
 }
 
 test "freeze a selected no-Git inventory for source and descriptor" {
