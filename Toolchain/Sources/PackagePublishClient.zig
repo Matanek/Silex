@@ -50,7 +50,8 @@ pub const Client = struct {
 
         for (status.objects) |object| {
             if (object.available) continue;
-            const bytes = if (std.mem.eql(u8, object.sha256, prepared.descriptor.source_digest)) prepared.source else return self.fail("registry requested an object absent from the prepared publication");
+            const bytes = objectBytes(prepared, object.sha256) orelse
+                return self.fail("registry requested an object absent from the prepared publication");
             if (object.size != bytes.len or object.offset > bytes.len) return self.fail("registry returned invalid object progress");
             var offset = object.offset;
             while (offset < bytes.len) {
@@ -142,6 +143,17 @@ pub const Client = struct {
         return error.InvalidPackagePublication;
     }
 };
+
+fn objectBytes(prepared: Publication.Prepared, digest: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, digest, prepared.descriptor.source_digest)) return prepared.source;
+    for (prepared.artifacts) |artifact| {
+        var actual: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(artifact.bytes, &actual, .{});
+        const encoded = std.fmt.bytesToHex(actual, .lower);
+        if (std.mem.eql(u8, digest, encoded[0..])) return artifact.bytes;
+    }
+    return null;
+}
 
 fn result(status: Status, already_published: bool) Result {
     return .{ .id = status.id, .digest = status.publication_sha256, .already_published = already_published };

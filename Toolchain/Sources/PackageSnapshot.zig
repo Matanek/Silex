@@ -42,6 +42,13 @@ fn pathLessThan(_: void, left: []const u8, right: []const u8) bool {
 /// package root. Neither an ancestor symlink nor a leaf symlink is followed.
 /// The returned bytes are the only bytes later archive/descriptor stages use.
 pub fn copyFile(allocator: std.mem.Allocator, io: Io, package_root: []const u8, relative_path: []const u8) ![]u8 {
+    return copyFileLimited(allocator, io, package_root, relative_path, 16 * 1024 * 1024);
+}
+
+/// Copy a regular package file with a caller-selected bound. Publication uses
+/// the larger registry object bound for native artifacts while source files
+/// retain their stricter per-file limit.
+pub fn copyFileLimited(allocator: std.mem.Allocator, io: Io, package_root: []const u8, relative_path: []const u8, maximum_size: usize) ![]u8 {
     if (!Archive.safeArchivePath(relative_path)) return error.InvalidPath;
 
     const root = Io.Dir.cwd().openDir(io, package_root, .{ .follow_symlinks = false }) catch return error.InvalidPackageRoot;
@@ -65,7 +72,7 @@ pub fn copyFile(allocator: std.mem.Allocator, io: Io, package_root: []const u8, 
         else => return error.UnsafeEntry,
     };
     if (before.kind != .file or before.nlink != 1) return error.UnsafeEntry;
-    if (before.size > 16 * 1024 * 1024) return error.FileLimit;
+    if (before.size > maximum_size) return error.FileLimit;
     const file = directory.openFile(io, name, .{ .allow_directory = false, .follow_symlinks = false }) catch return error.UnsafeEntry;
     defer file.close(io);
     const opened = try file.stat(io);
@@ -73,7 +80,7 @@ pub fn copyFile(allocator: std.mem.Allocator, io: Io, package_root: []const u8, 
 
     var buffer: [16 * 1024]u8 = undefined;
     var reader = file.reader(io, &buffer);
-    const bytes = try reader.interface.allocRemaining(allocator, .limited(16 * 1024 * 1024));
+    const bytes = try reader.interface.allocRemaining(allocator, .limited(maximum_size));
     errdefer allocator.free(bytes);
     const after = try file.stat(io);
     if (!sameFile(opened, after) or bytes.len != after.size) return error.FileChanged;

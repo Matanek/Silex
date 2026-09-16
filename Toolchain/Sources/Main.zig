@@ -274,6 +274,14 @@ fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         for (prepared.exclusions) |exclusion| {
             std.debug.print("silex: exclude {s} ({s})\n", .{ exclusion.path, exclusion.reason });
         }
+        for (prepared.artifacts) |artifact| {
+            var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+            std.crypto.hash.sha2.Sha256.hash(artifact.bytes, &digest, .{});
+            std.debug.print(
+                "silex: artifact {s}/{s} -> {s} ({d} bytes, sha256 {s})\n",
+                .{ artifact.target, artifact.name, artifact.path, artifact.bytes.len, std.fmt.bytesToHex(digest, .lower) },
+            );
+        }
         std.debug.print("silex: source archive {d} bytes, sha256 {s}\n", .{ prepared.source.len, prepared.descriptor.source_digest });
         std.debug.print("silex: publication sha256 {s}\n", .{prepared.descriptor.digest});
         std.debug.print("silex: dry run complete; no authentication or network request was used\n", .{});

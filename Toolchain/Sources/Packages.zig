@@ -313,6 +313,14 @@ pub const ManifestInfo = struct {
     catalogs: []const []const u8,
     dependencies: []const ManifestDependency,
     dev_dependencies: []const ManifestDependency,
+    artifacts: []const ManifestArtifact = &.{},
+};
+
+pub const ManifestArtifact = struct {
+    target: []const u8,
+    name: []const u8,
+    path: []const u8,
+    sha256: []const u8,
 };
 
 pub const ManifestDescription = union(enum) {
@@ -496,6 +504,7 @@ pub const Resolver = struct {
             .{ name, version.major, version.minor, version.patch },
         ));
         try self.validateToolchain(manifest);
+        const artifacts = try self.parsePublicationArtifacts(raw.artifacts);
         return .{
             .name = name,
             .version = version,
@@ -507,7 +516,52 @@ pub const Resolver = struct {
             .catalogs = manifest.catalogs,
             .dependencies = manifest.dependencies,
             .dev_dependencies = manifest.dev_dependencies,
+            .artifacts = artifacts,
         };
+    }
+
+    fn parsePublicationArtifacts(self: *Resolver, value: ?std.json.Value) ![]const ManifestArtifact {
+        const targets = switch (value orelse return &.{}) {
+            .object => |object| object,
+            else => return self.fail("artifacts must be an object keyed by target"),
+        };
+        var artifacts: std.ArrayList(ManifestArtifact) = .empty;
+        var target_iterator = targets.iterator();
+        while (target_iterator.next()) |target_entry| {
+            _ = TargetModule.Target.parse(target_entry.key_ptr.*) catch
+                return self.fail("artifact target is not supported");
+            const entries = switch (target_entry.value_ptr.*) {
+                .object => |object| object,
+                else => return self.fail("an artifact target must contain an object of named artifacts"),
+            };
+            if (entries.count() == 0) return self.fail("an artifact target must contain at least one artifact");
+            var artifact_iterator = entries.iterator();
+            while (artifact_iterator.next()) |artifact_entry| {
+                if (!Modules.validName(artifact_entry.key_ptr.*)) return self.fail("invalid artifact name");
+                const artifact = switch (artifact_entry.value_ptr.*) {
+                    .object => |object| object,
+                    else => return self.fail("an artifact declaration must be an object"),
+                };
+                const path = switch (artifact.get("path") orelse return self.fail("an artifact requires path and sha256")) {
+                    .string => |text| text,
+                    else => return self.fail("artifact path must be a string"),
+                };
+                if (!validRelativePath(path)) return self.fail("artifact path must stay inside its package");
+                const sha256 = switch (artifact.get("sha256") orelse return self.fail("an artifact requires path and sha256")) {
+                    .string => |text| text,
+                    else => return self.fail("artifact sha256 must be a lowercase hexadecimal digest"),
+                };
+                if (!validSha256(sha256)) return self.fail("artifact sha256 must be a lowercase hexadecimal digest");
+                try artifacts.append(self.allocator, .{
+                    .target = target_entry.key_ptr.*,
+                    .name = artifact_entry.key_ptr.*,
+                    .path = path,
+                    .sha256 = sha256,
+                });
+            }
+        }
+        std.mem.sort(ManifestArtifact, artifacts.items, {}, manifestArtifactLessThan);
+        return artifacts.toOwnedSlice(self.allocator);
     }
 
     fn findWorkspaceLinksRoot(self: *Resolver, project_root: []const u8) !?[]const u8 {
@@ -1669,6 +1723,12 @@ fn artifactSha256(artifacts: ?std.json.Value, target_name: []const u8, relative_
     return null;
 }
 
+fn manifestArtifactLessThan(_: void, left: ManifestArtifact, right: ManifestArtifact) bool {
+    const target_order = std.mem.order(u8, left.target, right.target);
+    if (target_order != .eq) return target_order == .lt;
+    return std.mem.lessThan(u8, left.name, right.name);
+}
+
 fn belongsTo(module_name: []const u8, package_name: []const u8) bool {
     return std.mem.eql(u8, module_name, package_name) or
         (module_name.len > package_name.len and std.mem.startsWith(u8, module_name, package_name) and
@@ -1904,6 +1964,39 @@ fn writeTestArchive(directory: Io.Dir, io: Io, path: []const u8, target: TargetM
         std.mem.writeInt(u16, archive[70..72], 1, .little);
     }
     try directory.writeFile(io, .{ .sub_path = path, .data = &archive });
+}
+
+test "inspect and canonically order declared publication artifacts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Native/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Native/Package.json",
+        .data =
+        \\{"name":"Native","version":"1.0.0","requires":{"silex":">=0.0.0"},"artifacts":{
+        \\  "windows-x64":{"Runtime":{"path":"Boundary/windows-x64/Runtime.lib","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+        \\  "linux-arm64":{"Runtime":{"path":"Boundary/linux-arm64/libRuntime.a","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+        \\}}
+        ,
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Native" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const manifest = try resolver.inspectPackage(base);
+    try std.testing.expectEqual(@as(usize, 2), manifest.artifacts.len);
+    try std.testing.expectEqualStrings("linux-arm64", manifest.artifacts[0].target);
+    try std.testing.expectEqualStrings("Boundary/linux-arm64/libRuntime.a", manifest.artifacts[0].path);
+    try std.testing.expectEqualStrings("windows-x64", manifest.artifacts[1].target);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Native/Package.json",
+        .data = "{\"name\":\"Native\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.0.0\"},\"artifacts\":{\"linux-x64\":{\"Runtime\":{\"path\":\"Boundary/libRuntime.a\",\"sha256\":\"ABC\"}}}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.inspectPackage(base));
+    try std.testing.expectEqualStrings("artifact sha256 must be a lowercase hexadecimal digest", resolver.diagnostic.?);
 }
 
 test "inspect optional package description and authors" {

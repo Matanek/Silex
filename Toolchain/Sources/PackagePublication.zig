@@ -16,6 +16,7 @@ pub const Prepared = struct {
     files: []const Archive.File,
     source: []const u8,
     descriptor: Descriptor.Result,
+    artifacts: []const Descriptor.Artifact,
     exclusions: []const Exclusion,
 };
 
@@ -71,8 +72,18 @@ pub const Manager = struct {
         for ([_][]const u8{ "README.md", "README", "LICENSE", "LICENSE.md", "NOTICE" }) |name| {
             if (try optionalRegularFile(self.allocator, self.io, package_root, name)) try appendUnique(self.allocator, &selected, name);
         }
-        const exclusions = collectExclusions(self.allocator, self.io, package_root, selected.items) catch |err| switch (err) {
+        const artifacts = captureArtifacts(self.allocator, self.io, package_root, manifest.artifacts) catch |err| switch (err) {
+            error.MissingFile => return self.fail("a declared artifact is missing; run 'silex install <package-directory>'"),
+            error.FileChanged => return self.fail("a declared artifact changed during preparation"),
+            error.InvalidPath, error.UnsafeEntry => return self.fail("a declared artifact path is unsafe or is not a regular file"),
+            error.FileLimit => return self.fail("a declared artifact exceeds the registry object limit"),
+            error.ArtifactDigestMismatch => return self.fail("a declared artifact does not match its sha256"),
+            error.ArtifactPathCollision => return self.fail("declared artifact destinations collide for one target"),
+            else => |other| return other,
+        };
+        const exclusions = collectExclusions(self.allocator, self.io, package_root, selected.items, manifest.artifacts) catch |err| switch (err) {
             error.UnsafeEntry => return self.fail("package contains a symbolic link, hard link or special entry outside excluded infrastructure"),
+            error.ArtifactPathCollision => return self.fail("a declared artifact path collides with a source file"),
             else => |other| return other,
         };
         const files = Snapshot.captureSelected(self.allocator, self.io, package_root, selected.items) catch |err| switch (err) {
@@ -82,8 +93,8 @@ pub const Manager = struct {
             else => |other| return other,
         };
         const source = try Archive.encode(self.allocator, files);
-        const descriptor = try Descriptor.render(self.allocator, files, source, &.{});
-        return .{ .name = manifest.name, .version = manifest.version, .files = files, .source = source, .descriptor = descriptor, .exclusions = exclusions };
+        const descriptor = try Descriptor.render(self.allocator, files, source, artifacts);
+        return .{ .name = manifest.name, .version = manifest.version, .files = files, .source = source, .descriptor = descriptor, .artifacts = artifacts, .exclusions = exclusions };
     }
 
     fn fail(self: *Manager, message: []const u8) error{InvalidPackagePublication} {
@@ -106,7 +117,13 @@ fn appendUnique(allocator: std.mem.Allocator, paths: *std.ArrayList([]const u8),
     try paths.append(allocator, path);
 }
 
-fn collectExclusions(allocator: std.mem.Allocator, io: Io, root_path: []const u8, selected: []const []const u8) ![]const Exclusion {
+fn collectExclusions(
+    allocator: std.mem.Allocator,
+    io: Io,
+    root_path: []const u8,
+    selected: []const []const u8,
+    artifacts: []const Packages.ManifestArtifact,
+) ![]const Exclusion {
     var root = Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true, .follow_symlinks = false }) catch return error.UnsafeEntry;
     defer root.close(io);
     var walker = try root.walk(allocator);
@@ -129,13 +146,67 @@ fn collectExclusions(allocator: std.mem.Allocator, io: Io, root_path: []const u8
         const stat = entry.dir.statFile(io, entry.basename, .{ .follow_symlinks = false }) catch return error.UnsafeEntry;
         if (stat.kind != .file or stat.nlink != 1) return error.UnsafeEntry;
         if (contains(selected, path)) {
+            if (artifactAt(artifacts, path)) return error.ArtifactPathCollision;
             allocator.free(path);
             continue;
         }
-        try result.append(allocator, .{ .path = path, .reason = "not selected by the manifest or source analysis" });
+        try result.append(allocator, .{
+            .path = path,
+            .reason = if (artifactAt(artifacts, path))
+                "declared artifact sent as a separate object"
+            else
+                "not selected by the manifest or source analysis",
+        });
     }
     std.mem.sort(Exclusion, result.items, {}, exclusionLessThan);
     return result.toOwnedSlice(allocator);
+}
+
+fn captureArtifacts(
+    allocator: std.mem.Allocator,
+    io: Io,
+    package_root: []const u8,
+    declarations: []const Packages.ManifestArtifact,
+) ![]const Descriptor.Artifact {
+    const result = try allocator.alloc(Descriptor.Artifact, declarations.len);
+    var copied: usize = 0;
+    errdefer {
+        for (result[0..copied]) |artifact| allocator.free(artifact.bytes);
+        allocator.free(result);
+    }
+    for (declarations, result, 0..) |declaration, *artifact, index| {
+        for (declarations[0..index]) |previous| {
+            if (!std.mem.eql(u8, previous.target, declaration.target)) continue;
+            if (pathsCollide(previous.path, declaration.path)) return error.ArtifactPathCollision;
+        }
+        const bytes = try Snapshot.copyFileLimited(allocator, io, package_root, declaration.path, 1024 * 1024 * 1024);
+        var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+        const actual = std.fmt.bytesToHex(digest, .lower);
+        if (!std.mem.eql(u8, &actual, declaration.sha256)) {
+            allocator.free(bytes);
+            return error.ArtifactDigestMismatch;
+        }
+        artifact.* = .{
+            .target = declaration.target,
+            .name = declaration.name,
+            .path = declaration.path,
+            .bytes = bytes,
+        };
+        copied += 1;
+    }
+    return result;
+}
+
+fn artifactAt(artifacts: []const Packages.ManifestArtifact, path: []const u8) bool {
+    for (artifacts) |artifact| if (std.mem.eql(u8, artifact.path, path)) return true;
+    return false;
+}
+
+fn pathsCollide(left: []const u8, right: []const u8) bool {
+    return std.mem.eql(u8, left, right) or
+        (left.len < right.len and std.mem.startsWith(u8, right, left) and right[left.len] == '/') or
+        (right.len < left.len and std.mem.startsWith(u8, left, right) and left[right.len] == '/');
 }
 
 fn portablePath(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
@@ -186,7 +257,8 @@ test "prepare a modified local package without Git or cache files" {
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "LocalDemo/Module");
     try temporary.dir.createDirPath(std.testing.io, "LocalDemo/.silex/cache");
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Package.json", .data = "{\"name\":\"LocalDemo\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.44.0\"}}\n" });
+    try temporary.dir.createDirPath(std.testing.io, "LocalDemo/Boundary/macos-arm64");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Package.json", .data = "{\"name\":\"LocalDemo\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.44.0\"},\"artifacts\":{\"macos-arm64\":{\"Demo\":{\"path\":\"Boundary/macos-arm64/libDemo.a\",\"sha256\":\"6c227048ddc712dcb6b6519e44011b8c3e13e4307bd6c12ffbf5e8539405e4fd\"}}}}\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Module/Content.sx", .data =
         \\public func answer() int { return 42 }
         \\func main() {
@@ -197,6 +269,7 @@ test "prepare a modified local package without Git or cache files" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Module/Message.txt", .data = "modified before publication\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/README.md", .data = "Local package\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/.silex/cache/secret", .data = "excluded" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Boundary/macos-arm64/libDemo.a", .data = "native artifact\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Notes.tmp", .data = "not selected" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "LocalDemo" });
     var manager = Manager.init(allocator, std.testing.io, null);
@@ -204,11 +277,23 @@ test "prepare a modified local package without Git or cache files" {
     try std.testing.expectEqualStrings("LocalDemo", prepared.name);
     try std.testing.expectEqual(@as(usize, 4), prepared.files.len);
     try std.testing.expect(std.mem.indexOf(u8, prepared.descriptor.json, ".silex") == null);
-    try std.testing.expectEqual(@as(usize, 2), prepared.exclusions.len);
+    try std.testing.expectEqual(@as(usize, 3), prepared.exclusions.len);
     try std.testing.expectEqualStrings(".silex/", prepared.exclusions[0].path);
-    try std.testing.expectEqualStrings("Notes.tmp", prepared.exclusions[1].path);
+    try std.testing.expectEqualStrings("Boundary/macos-arm64/libDemo.a", prepared.exclusions[1].path);
+    try std.testing.expectEqualStrings("declared artifact sent as a separate object", prepared.exclusions[1].reason);
+    try std.testing.expectEqualStrings("Notes.tmp", prepared.exclusions[2].path);
+    try std.testing.expectEqual(@as(usize, 1), prepared.artifacts.len);
+    try std.testing.expectEqualStrings("macos-arm64", prepared.artifacts[0].target);
+    try std.testing.expectEqualStrings("Demo", prepared.artifacts[0].name);
+    try std.testing.expectEqualStrings("native artifact\n", prepared.artifacts[0].bytes);
+    try std.testing.expect(std.mem.indexOf(u8, prepared.descriptor.json, "\"target\":\"macos-arm64\"") != null);
     const resource = for (prepared.files) |file| {
         if (std.mem.eql(u8, file.path, "Module/Message.txt")) break file;
     } else return error.TestExpectedEqual;
     try std.testing.expectEqualStrings("modified before publication\n", resource.bytes);
+
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "LocalDemo/Boundary/macos-arm64/libDemo.a", .data = "tampered artifact\n" });
+    manager = Manager.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackagePublication, manager.prepare(root));
+    try std.testing.expectEqualStrings("a declared artifact does not match its sha256", manager.diagnostic.?);
 }
