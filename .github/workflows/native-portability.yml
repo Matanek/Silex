@@ -20,9 +20,10 @@ on:
           - windows-arm64
           - windows-x64
           - registry-login
+          - registry-publishing
 
       registry_target:
-        description: Platform for the offline registry-login bank
+        description: Platform for the offline registry CLI banks
         required: false
         type: choice
         default: all
@@ -58,7 +59,7 @@ concurrency:
 
 jobs:
   registry-login-build:
-    if: inputs.target == 'registry-login'
+    if: inputs.target == 'registry-login' || inputs.target == 'registry-publishing'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -96,7 +97,7 @@ jobs:
           if-no-files-found: error
 
   registry-login:
-    if: inputs.target == 'registry-login'
+    if: inputs.target == 'registry-login' || inputs.target == 'registry-publishing'
     needs: registry-login-build
     timeout-minutes: 10
     strategy:
@@ -115,6 +116,7 @@ jobs:
         env:
           REGISTRY_TARGET: ${{ matrix.target }}
           EXPECTED_COMMIT: ${{ github.sha }}
+          REGISTRY_BANK: ${{ inputs.target }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
@@ -122,6 +124,12 @@ jobs:
           candidate=$(node -e 'console.log(require("node:path").resolve("candidate-bin", process.platform === "win32" ? "silex.exe" : "silex"))')
           chmod +x "$candidate"
           node Toolchain/Tools/VerifyRegistrySession.mjs "$candidate"
+          if [ "$REGISTRY_BANK" = registry-publishing ]; then
+            # Compile only from the common workspace group above the checkout.
+            publishing_bank="$GITHUB_WORKSPACE/Toolchain/Tools/VerifyRegistryPublishing.mjs"
+            cd ..
+            node "$publishing_bank" "$candidate"
+          fi
 
   optimizer-x64-calibration:
     if: inputs.target == 'optimizer-x64-calibration'
