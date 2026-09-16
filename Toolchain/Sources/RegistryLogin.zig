@@ -131,6 +131,18 @@ fn storageError(comptime step: []const u8, err: anyerror) anyerror {
 fn load(dir: Io.Dir, io: Io, allocator: std.mem.Allocator) !?Credential {
     const file = dir.openFile(io, credential_name, .{ .follow_symlinks = false }) catch |err| switch (err) {
         error.FileNotFound => return null,
+        error.Unexpected => {
+            // Zig 0.16 can report an absent Windows file as Unexpected when
+            // opening it without following reparse points. Confirm absence
+            // separately; never reinterpret an existing file's failure.
+            if (is_windows) {
+                dir.access(io, credential_name, .{}) catch |probe_err| switch (probe_err) {
+                    error.FileNotFound => return null,
+                    else => return err,
+                };
+            }
+            return err;
+        },
         else => return err,
     };
     defer file.close(io);
