@@ -140,22 +140,23 @@ fn load(dir: Io.Dir, io: Io, allocator: std.mem.Allocator) !?Credential {
                 var entries = dir.iterate();
                 var count: usize = 0;
                 while (entries.next(io) catch |list_err| return storageError("credential listing", list_err)) |entry| {
-                    if (equal(entry.name, credential_name)) return err;
+                    if (equal(entry.name, credential_name)) return storageError("credential open (entry listed)", err);
                     count += 1;
                     if (count > 128) return error.RegistryCredentialStorageTooManyEntries;
                 }
                 return null;
             }
-            return err;
+            return storageError("credential open", err);
         },
-        else => return err,
+        else => return storageError("credential open", err),
     };
     defer file.close(io);
-    try private(try file.stat(io), .file);
+    const credential_stat = file.stat(io) catch |err| return storageError("credential metadata", err);
+    try private(credential_stat, .file);
     var bytes: [16385]u8 = undefined;
-    const len = try file.readPositionalAll(io, &bytes, 0);
+    const len = file.readPositionalAll(io, &bytes, 0) catch |err| return storageError("credential read", err);
     if (len > (if (is_windows) @as(usize, 16384) else 4096)) return error.InvalidRegistryCredential;
-    const plain = if (is_windows) try WindowsCredential.unprotect(allocator, bytes[0..len]) else bytes[0..len];
+    const plain = if (is_windows) WindowsCredential.unprotect(allocator, bytes[0..len]) catch |err| return storageError("credential decryption", err) else bytes[0..len];
     const credential = try parse(Credential, allocator, plain);
     try checkCredential(credential);
     return credential;
