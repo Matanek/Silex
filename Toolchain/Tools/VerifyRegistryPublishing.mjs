@@ -157,7 +157,11 @@ function run(path, args) {
       SILEX_REGISTRY_TEST_ROOT: path, SILEX_REGISTRY_V2: 'test',
       SILEX_REGISTRY: 'https://github.invalid/v1/index.json' }, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child); let output = '';
-    const timer = setTimeout(() => { child.kill(); no(new Error('Publishing bank exceeded command deadline')); }, 60000);
+    // A cold native compile on a Windows ARM64 runner may invoke the pinned
+    // x64 Zig linker under emulation. Keep protocol commands bounded tightly,
+    // but allow that one consumer proof to complete before calling it stuck.
+    const deadlineMs = args[0] === 'run' && target === 'windows-arm64' ? 240000 : 60000;
+    const timer = setTimeout(() => { child.kill(); no(new Error(`Publishing bank exceeded ${deadlineMs} ms during ${args[0]}`)); }, deadlineMs);
     const capture = bytes => { output += bytes; log += bytes; };
     child.stdout.on('data', capture); child.stderr.on('data', capture);
     child.once('error', error => { clearTimeout(timer); children.delete(child); no(error); });
