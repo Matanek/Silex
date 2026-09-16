@@ -88,6 +88,7 @@ pub const Analyzer = struct {
     shadercross_path: ?[]const u8 = null,
     shader_files: std.ArrayList([]const u8) = .empty,
     embedded_files: std.ArrayList([]const u8) = .empty,
+    embedded_file_uses: std.ArrayList(EmbeddedFiles.Use) = .empty,
     package_cache_digest: ?[std.crypto.hash.Blake3.digest_length]u8 = null,
     trace: ?*CompilationTrace.Reporter = null,
     package_functions_reused: usize = 0,

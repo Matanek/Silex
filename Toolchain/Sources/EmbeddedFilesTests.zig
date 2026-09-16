@@ -4,6 +4,7 @@ const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const Project = @import("Project.zig");
+const PackageResources = @import("PackageResources.zig");
 
 fn expectCompileError(source: []const u8, message: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -29,7 +30,8 @@ test "embed UTF-8 text and track its source as a cache dependency" {
         .sub_path = "Main.sx",
         .data =
         \\func main() {
-        \\    let page = embed_text("Web/index.html")
+        \\    let asset = "Web/index.html"
+        \\    let page = embed_text(asset)
         \\    print(page)
         \\}
         ,
@@ -46,6 +48,12 @@ test "embed UTF-8 text and track its source as a cache dependency" {
     var tracked = false;
     for (compilation.files) |path| tracked = tracked or std.mem.eql(u8, path, asset_path);
     try std.testing.expect(tracked);
+    try std.testing.expectEqual(@as(usize, 1), compilation.embedded_file_uses.len);
+    try std.testing.expectEqualStrings(input, compilation.embedded_file_uses[0].owner);
+    try std.testing.expectEqualStrings(asset_path, compilation.embedded_file_uses[0].path);
+    const resources = try PackageResources.select(allocator, root, compilation.embedded_file_uses);
+    try std.testing.expectEqual(@as(usize, 1), resources.len);
+    try std.testing.expectEqualStrings("Web/index.html", resources[0]);
 }
 
 test "require the embedded text path at compile time" {
