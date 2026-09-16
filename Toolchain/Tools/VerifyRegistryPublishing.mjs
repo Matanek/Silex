@@ -188,8 +188,9 @@ try {
     expectations.set(version, files);
     for (const [path, bytes] of files) await writeFile(`${packageRoot}/${path}`, bytes);
     if (version === '1.0.0') {
+      await success(author, ['publish', packageRoot, '--dry-run']);
       const failed = await run(author, ['publish', packageRoot]); assert.equal(failed.code, 1, failed.output);
-      assert(dropped); assert.match(failed.output, /cannot contact the package registry/);
+      assert(dropped, failed.output); assert.match(failed.output, /cannot contact the package registry/);
       assert(!publications.get(version).published);
     }
     const uploads = artifactUploads;
