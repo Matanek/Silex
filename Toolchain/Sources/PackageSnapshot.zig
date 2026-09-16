@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Archive = @import("PackageArchive.zig");
 const Descriptor = @import("PackageDescriptor.zig");
 
 const Io = std.Io;
+const is_windows = builtin.os.tag == .windows;
 
 /// Capture only a previously selected inventory, in canonical path order.
 /// Callers must supply all source modules, embedded resources and selected
@@ -91,14 +93,16 @@ fn copyFileObserved(
     if (before.size > maximum_size) return error.FileLimit;
     const file = directory.openFile(io, name, .{ .allow_directory = false, .follow_symlinks = false }) catch return error.UnsafeEntry;
     defer file.close(io);
+    // Zig 0.16 opens Windows no-follow files asynchronously but reports a
+    // synchronous File flag. Match the actual handle mode while retaining the
+    // no-follow guarantee, as the registry credential reader already does.
+    const readable: Io.File = if (is_windows) .{ .handle = file.handle, .flags = .{ .nonblocking = true } } else file;
     const opened = try file.stat(io);
     if (!sameFile(before, opened)) return error.FileChanged;
     if (observation) |present| try present.run(present.context);
 
     var buffer: [16 * 1024]u8 = undefined;
-    // This handle is private to the snapshot. A streaming reader avoids
-    // requiring positional reads from a Windows handle opened by Io.Dir.
-    var reader = file.readerStreaming(io, &buffer);
+    var reader = readable.reader(io, &buffer);
     const bytes = reader.interface.allocRemaining(allocator, .limited(maximum_size)) catch |err| switch (err) {
         error.ReadFailed => return reader.err.?,
         else => |other| return other,
