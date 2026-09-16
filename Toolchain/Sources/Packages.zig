@@ -323,6 +323,27 @@ pub const ManifestArtifact = struct {
     sha256: []const u8,
 };
 
+pub const LockedDependency = struct {
+    name: []const u8,
+    version: []const u8,
+};
+
+pub const LockedPackage = struct {
+    name: []const u8,
+    version: []const u8,
+    publication_sha256: []const u8,
+    source_sha256: []const u8,
+    manifest_sha256: []const u8,
+    dependencies: []const LockedDependency,
+    artifacts: []const ManifestArtifact,
+};
+
+pub const ProjectLock = struct {
+    schema: u8 = 1,
+    manifest_sha256: []const u8,
+    packages: []const LockedPackage,
+};
+
 pub const ManifestDescription = union(enum) {
     plain: []const u8,
     localized: []const Translation,
@@ -420,6 +441,9 @@ pub const Resolver = struct {
     include_dev_dependencies: bool = false,
     resolving_root_dev_dependency: bool = false,
     user_package_allowlist: ?[]const u8 = null,
+    project_lock: ?ProjectLock = null,
+    ignore_project_lock: bool = false,
+    explicit_pin: ?LockedDependency = null,
 
     pub fn init(allocator: Allocator, io: Io, global_root: ?[]const u8) Resolver {
         return initForTarget(allocator, io, global_root, TargetModule.Target.host() orelse .macos_arm64);
@@ -442,6 +466,8 @@ pub const Resolver = struct {
         try self.rejectLegacy(project_root);
         const manifest_path = try std.fs.path.join(self.allocator, &.{ project_root, "Package.json" });
         const root_manifest = try self.loadOptional(manifest_path);
+        self.project_lock = null;
+        if (!self.ignore_project_lock) try self.loadProjectLock(project_root, manifest_path, root_manifest != null);
         if (root_manifest) |manifest| {
             try self.validateToolchain(manifest);
             try self.validateRootIdentity(manifest, project_root);
@@ -486,8 +512,77 @@ pub const Resolver = struct {
             packages[index] = builder.package;
         }
         const graph: Graph = .{ .packages = packages, .explicit = root_manifest != null };
+        try self.checkLockedGraph(graph);
         try self.validateBoundaryRequirements(graph);
         return graph;
+    }
+
+    fn checkLockedGraph(self: *Resolver, graph: Graph) !void {
+        const lock = self.project_lock orelse return;
+        if (graph.packages.len != lock.packages.len + 1) return self.fail("Silex.lock.json does not describe the complete project closure");
+        for (lock.packages) |item| {
+            var found: ?Package = null;
+            for (graph.packages[1..]) |package| {
+                if (package.name != null and std.mem.eql(u8, item.name, package.name.?)) {
+                    found = package;
+                    break;
+                }
+            }
+            const package = found orelse return self.fail("Silex.lock.json contains a package absent from the project graph");
+            if (package.origin == .workspace_link or package.origin == .user_link) continue;
+            if (package.origin != .installed or !package.version.?.eql(Version.parse(item.version) catch unreachable) or
+                package.dependencies.len != item.dependencies.len)
+                return self.fail("Silex.lock.json does not match the selected package graph");
+            for (package.dependencies) |dependency| {
+                var edge_found = false;
+                for (item.dependencies) |edge| {
+                    if (!std.mem.eql(u8, edge.name, dependency.name)) continue;
+                    const selected = graph.packages[dependency.package];
+                    if (selected.origin == .workspace_link or selected.origin == .user_link or
+                        std.mem.eql(u8, edge.version, try std.fmt.allocPrint(self.allocator, "{d}.{d}.{d}",
+                            .{ selected.version.?.major, selected.version.?.minor, selected.version.?.patch })))
+                        edge_found = true;
+                }
+                if (!edge_found) return self.fail("Silex.lock.json has an inconsistent dependency edge");
+            }
+        }
+    }
+
+    fn loadProjectLock(self: *Resolver, root: []const u8, manifest_path: []const u8, has_manifest: bool) !void {
+        const path = try std.fs.path.join(self.allocator, &.{ root, "Silex.lock.json" });
+        const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return,
+            else => return self.fail("project lock cannot be read"),
+        };
+        const lock = std.json.parseFromSliceLeaky(ProjectLock, self.allocator, source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch return self.fail("invalid Silex.lock.json; reinstall from the project to refresh it");
+        const manifest_digest = fileSha256(self.allocator, self.io, manifest_path) catch
+            return self.fail("project manifest cannot be checked against its lock");
+        if (!has_manifest or lock.schema != 1 or lock.packages.len > 4096 or
+            !std.mem.eql(u8, lock.manifest_sha256, manifest_digest))
+            return self.fail("project manifest does not match Silex.lock.json; reinstall from the project to refresh it");
+        for (lock.packages, 0..) |item, index| {
+            _ = Version.parse(item.version) catch return self.fail("invalid Silex.lock.json package version");
+            if (!Modules.validName(item.name) or !validSha256(item.publication_sha256) or !validSha256(item.source_sha256) or
+                !validSha256(item.manifest_sha256)) return self.fail("invalid Silex.lock.json package entry");
+            for (item.dependencies) |edge| {
+                if (!Modules.validName(edge.name)) return self.fail("invalid Silex.lock.json dependency");
+                _ = Version.parse(edge.version) catch return self.fail("invalid Silex.lock.json dependency version");
+            }
+            for (item.artifacts) |artifact| if (!validSha256(artifact.sha256))
+                return self.fail("invalid Silex.lock.json artifact digest");
+            for (lock.packages[0..index]) |previous| if (std.mem.eql(u8, previous.name, item.name))
+                return self.fail("duplicate package in Silex.lock.json");
+        }
+        self.project_lock = lock;
+    }
+
+    fn lockedPackage(self: *Resolver, name: []const u8) ?LockedPackage {
+        const lock = self.project_lock orelse return null;
+        for (lock.packages) |item| if (std.mem.eql(u8, item.name, name)) return item;
+        return null;
     }
 
     pub fn inspectPackage(self: *Resolver, package_root: []const u8) !ManifestInfo {
@@ -819,6 +914,14 @@ pub const Resolver = struct {
 
     fn bestGlobal(self: *Resolver, request: ManifestDependency, available: *?Version) !?Selected {
         if (!self.userPackageAllowed(request.name)) return null;
+        const locked = self.lockedPackage(request.name);
+        if (self.project_lock != null and locked == null) return self.fail(try std.fmt.allocPrint(
+            self.allocator, "package '{s}' is absent from Silex.lock.json; reinstall from the project", .{request.name}));
+        const locked_version = if (locked) |item| Version.parse(item.version) catch unreachable else null;
+        var requested_version: ?Version = null;
+        if (self.explicit_pin) |pin| {
+            if (std.mem.eql(u8, pin.name, request.name)) requested_version = Version.parse(pin.version) catch unreachable;
+        }
         const global_root = self.global_root orelse return null;
         var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,
@@ -833,10 +936,42 @@ pub const Resolver = struct {
             if (entry.kind != .directory or !std.mem.startsWith(u8, entry.name, prefix)) continue;
             const suffix = entry.name[prefix.len..];
             const folder_version = Version.parse(suffix) catch return self.fail("global package folder has an invalid version");
+            if (locked_version) |pinned| if (!folder_version.eql(pinned)) continue;
+            if (requested_version) |pinned| if (!folder_version.eql(pinned)) continue;
             const root = try std.fs.path.join(self.allocator, &.{ global_root, entry.name });
             var manifest = try self.loadRequired(root);
             const version = try self.validateSelected(manifest, request.name, root, true);
             manifest = try self.trustGlobalPolicy(root, manifest, request.name, version);
+            if (locked) |item| {
+                const inspected = try self.inspectPackage(root);
+                if (inspected.artifacts.len != item.artifacts.len) return self.fail("Silex.lock.json has an inconsistent artifact inventory");
+                for (inspected.artifacts, item.artifacts) |actual, expected| {
+                    if (!std.mem.eql(u8, actual.target, expected.target) or !std.mem.eql(u8, actual.name, expected.name) or
+                        !std.mem.eql(u8, actual.path, expected.path) or !std.mem.eql(u8, actual.sha256, expected.sha256))
+                        return self.fail("Silex.lock.json has an inconsistent artifact inventory");
+                }
+                const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
+                const receipt_source = Io.Dir.cwd().readFileAlloc(self.io, receipt_path, self.allocator, .limited(1024 * 1024)) catch
+                    return self.fail("locked package source proof cannot be read");
+                const receipt = std.json.parseFromSliceLeaky(struct {
+                    schema: u8,
+                    publication_sha256: []const u8,
+                    source_sha256: []const u8,
+                    manifest_sha256: []const u8,
+                    dependencies: []const LockedDependency,
+                }, self.allocator, receipt_source, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch
+                    return self.fail("locked package source proof is invalid");
+                if (receipt.schema != 4 or !std.mem.eql(u8, receipt.publication_sha256, item.publication_sha256) or
+                    !std.mem.eql(u8, receipt.source_sha256, item.source_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, item.manifest_sha256) or
+                    receipt.dependencies.len != item.dependencies.len)
+                    return self.fail("installed package does not match Silex.lock.json");
+                for (receipt.dependencies, item.dependencies) |actual, expected| {
+                    if (!std.mem.eql(u8, actual.name, expected.name) or
+                        !std.mem.eql(u8, actual.version, expected.version))
+                        return self.fail("installed package dependencies do not match Silex.lock.json");
+                }
+            }
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
             available.* = newest(available.*, version);
             if (!request.constraint.accepts(version)) continue;
@@ -851,6 +986,7 @@ pub const Resolver = struct {
             }
         }
         if (best == null) {
+            if (locked != null) return self.fail("locked package version is not installed; reinstall from the project");
             if (toolchain_incompatible) |selected| try self.validateToolchain(selected.manifest);
         }
         return best;
@@ -917,6 +1053,8 @@ pub const Resolver = struct {
             publication_sha256: []const u8,
             source_sha256: []const u8,
             manifest_sha256: []const u8,
+            dependencies: []const LockedDependency,
+            artifacts: []const ManifestArtifact,
             extensions: []const ExtensionPolicy,
             catalogs: []const []const u8 = &.{},
         };
@@ -968,6 +1106,23 @@ pub const Resolver = struct {
                     !equalStrings(receipt.catalogs, manifest.catalogs))
                 {
                     return self.fail("installed package does not match its source proof; remove it and reinstall");
+                }
+                if (receipt.dependencies.len != manifest.dependencies.len) return self.fail("installed package has inconsistent dependency proof");
+                for (receipt.dependencies, manifest.dependencies) |selected, declared| {
+                    const selected_version = Version.parse(selected.version) catch return self.fail("installed package has invalid dependency proof");
+                    if (!std.mem.eql(u8, selected.name, declared.name) or !declared.constraint.accepts(selected_version))
+                        return self.fail("installed package has inconsistent dependency proof");
+                }
+                const declared_artifacts = (try self.inspectPackage(root)).artifacts;
+                for (receipt.artifacts) |acquired| {
+                    var found = false;
+                    for (declared_artifacts) |item| {
+                        if (std.mem.eql(u8, acquired.target, item.target) and
+                            std.mem.eql(u8, acquired.name, item.name) and
+                            std.mem.eql(u8, acquired.path, item.path) and
+                            std.mem.eql(u8, acquired.sha256, item.sha256)) found = true;
+                    }
+                    if (!found) return self.fail("installed package has inconsistent artifact proof");
                 }
                 receipt_extensions = receipt.extensions;
                 receipt_catalogs = receipt.catalogs;

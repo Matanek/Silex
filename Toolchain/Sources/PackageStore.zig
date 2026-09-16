@@ -32,6 +32,8 @@ pub const RegistryPublicationProof = struct {
     origin: []const u8,
     publication_sha256: []const u8,
     source_sha256: []const u8,
+    dependencies: []const Packages.LockedDependency = &.{},
+    artifacts: []const Packages.ManifestArtifact = &.{},
     extensions: []const Packages.ExtensionPolicy,
     catalogs: []const []const u8 = &.{},
 };
@@ -61,6 +63,8 @@ const RegistryReceipt = struct {
     publication_sha256: []const u8,
     source_sha256: []const u8,
     manifest_sha256: []const u8,
+    dependencies: []const Packages.LockedDependency,
+    artifacts: []const Packages.ManifestArtifact,
     extensions: []const Packages.ExtensionPolicy,
     catalogs: []const []const u8 = &.{},
 };
@@ -187,6 +191,8 @@ pub const Manager = struct {
                 .publication_sha256 = publication.publication_sha256,
                 .source_sha256 = publication.source_sha256,
                 .manifest_sha256 = manifest_sha256,
+                .dependencies = publication.dependencies,
+                .artifacts = publication.artifacts,
                 .extensions = publication.extensions,
                 .catalogs = publication.catalogs,
             }, .{ .whitespace = .indent_2 }),
@@ -240,6 +246,8 @@ pub const Manager = struct {
                     !std.mem.eql(u8, receipt.publication_sha256, publication.publication_sha256) or
                     !std.mem.eql(u8, receipt.source_sha256, publication.source_sha256) or
                     !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+                    !equalLockedDependencies(receipt.dependencies, publication.dependencies) or
+                    !equalManifestArtifacts(receipt.artifacts, publication.artifacts) or
                     !equalExtensionPolicies(receipt.extensions, publication.extensions) or
                     !equalStrings(receipt.catalogs, publication.catalogs))
                 {
@@ -416,6 +424,21 @@ fn optionalStringEqual(left: ?[]const u8, right: ?[]const u8) bool {
 fn equalStrings(left: []const []const u8, right: []const []const u8) bool {
     if (left.len != right.len) return false;
     for (left, right) |left_value, right_value| if (!std.mem.eql(u8, left_value, right_value)) return false;
+    return true;
+}
+
+fn equalLockedDependencies(left: []const Packages.LockedDependency, right: []const Packages.LockedDependency) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |a, b| if (!std.mem.eql(u8, a.name, b.name) or
+        !std.mem.eql(u8, a.version, b.version)) return false;
+    return true;
+}
+
+fn equalManifestArtifacts(left: []const Packages.ManifestArtifact, right: []const Packages.ManifestArtifact) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |a, b| if (!std.mem.eql(u8, a.target, b.target) or
+        !std.mem.eql(u8, a.name, b.name) or !std.mem.eql(u8, a.path, b.path) or
+        !std.mem.eql(u8, a.sha256, b.sha256)) return false;
     return true;
 }
 

@@ -2,6 +2,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;
+const DataRoot = @import("DataRoot.zig");
 const WindowsCredential = @import("Windows/RegistryCredential.zig");
 const is_windows = builtin.os.tag == .windows;
 const verification_uri = "https://github.com/login/device";
@@ -179,6 +180,28 @@ fn testOrigin(value: []const u8) bool {
     return (std.fmt.parseInt(u16, port, 10) catch return false) != 0;
 }
 
+/// The anonymous installer may use the loopback qualification server without
+/// reading the account credential stored beneath the same test root.
+pub fn publicTestOrigin(init: std.process.Init) ![]const u8 {
+    const url = init.environ_map.get("SILEX_REGISTRY_TEST_URL") orelse return error.RegistryTestConfigurationRequiresURLAndRoot;
+    const path = init.environ_map.get("SILEX_REGISTRY_TEST_ROOT") orelse return error.RegistryTestConfigurationRequiresURLAndRoot;
+    if (!testOrigin(url) or !std.fs.path.isAbsolute(path)) return error.InvalidRegistryTestConfiguration;
+    const allocator = init.arena.allocator();
+    const real = Io.Dir.cwd().realPathFileAlloc(init.io, path, allocator) catch return error.InvalidRegistryTestConfiguration;
+    var directory: []const u8 = try Io.Dir.cwd().realPathFileAlloc(init.io, ".", allocator);
+    while (true) {
+        const candidate = try std.fs.path.join(allocator, &.{ directory, "TestState" });
+        if (Io.Dir.cwd().realPathFileAlloc(init.io, candidate, allocator)) |state| {
+            const prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ state, std.fs.path.sep_str });
+            if (std.mem.startsWith(u8, real, prefix)) return url;
+        } else |_| {}
+        const parent = std.fs.path.dirname(directory) orelse break;
+        if (std.mem.eql(u8, parent, directory)) break;
+        directory = parent;
+    }
+    return error.RegistryTestRootMustBeInsideTestState;
+}
+
 /// Load the registry access established by `silex login` without contacting
 /// GitHub or exposing its OAuth token. Publication still lets the registry
 /// authorize every request and treats revocation as authoritative.
@@ -196,9 +219,8 @@ pub fn current(init: std.process.Init) !Access {
         if (!std.mem.startsWith(u8, real, prefix)) return error.RegistryTestRootMustBeInsideTestState;
         break :blk try std.fs.path.join(allocator, &.{ real, "auth" });
     } else blk: {
-        const home = (if (is_windows) init.environ_map.get("USERPROFILE") else init.environ_map.get("HOME")) orelse return error.UserHomeUnavailable;
-        if (!std.fs.path.isAbsolute(home)) return error.UserHomeUnavailable;
-        break :blk try std.fs.path.join(allocator, &.{ home, ".silex", "auth" });
+        const data_root = try DataRoot.get(allocator, init.environ_map) orelse return error.UserHomeUnavailable;
+        break :blk try std.fs.path.join(allocator, &.{ data_root, "auth" });
     };
     const dir = Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false }) catch |err| switch (err) {
         error.FileNotFound => return error.RegistryLoginRequired,
@@ -236,9 +258,8 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
         if (!std.mem.startsWith(u8, real, prefix)) return error.RegistryTestRootMustBeInsideTestState;
         break :blk try std.fs.path.join(allocator, &.{ real, "auth" });
     } else blk: {
-        const home = (if (is_windows) init.environ_map.get("USERPROFILE") else init.environ_map.get("HOME")) orelse return error.UserHomeUnavailable;
-        if (!std.fs.path.isAbsolute(home)) return error.UserHomeUnavailable;
-        break :blk try std.fs.path.join(allocator, &.{ home, ".silex", "auth" });
+        const data_root = try DataRoot.get(allocator, init.environ_map) orelse return error.UserHomeUnavailable;
+        break :blk try std.fs.path.join(allocator, &.{ data_root, "auth" });
     };
     _ = Io.Dir.cwd().createDirPathStatus(io, root, directory_permissions) catch |err| return storageError("directory creation", err);
     // Linux opens non-iterable directories with O_PATH, which cannot be fsynced.

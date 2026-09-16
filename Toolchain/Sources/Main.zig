@@ -6,6 +6,7 @@ const Cli = @import("Cli.zig");
 const CliProgress = @import("CliProgress.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const CompilationTrace = @import("CompilationTrace.zig");
+const DataRoot = @import("DataRoot.zig");
 const ProgramScope = @import("ProgramScope.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Arm64Encoder = @import("Arm64/Encoder.zig");
@@ -35,6 +36,8 @@ const ProjectLookup = @import("Project/Lookup.zig");
 const RunEntryDiscovery = @import("RunEntryDiscovery.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
+const PackageRegistryV2 = @import("PackageRegistryV2.zig");
+const PackageLock = @import("PackageLock.zig");
 const PackageRegistration = @import("PackageRegistration.zig");
 const PackagePublication = @import("PackagePublication.zig");
 const PackagePublishClient = @import("PackagePublishClient.zig");
@@ -94,6 +97,8 @@ test {
     _ = CompilationTrace;
     _ = PackageStore;
     _ = PackageRegistry;
+    _ = PackageRegistryV2;
+    _ = PackageLock;
     _ = PackageRegistration;
     _ = PackagePublication;
     _ = PackagePublishClient;
@@ -402,6 +407,16 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         options.suite,
         &progress,
     ) orelse return 1;
+    if (init.environ_map.get("SILEX_REGISTRY_V2") != null) {
+        const project_root = try Io.Dir.cwd().realPathFileAlloc(init.io, ".", allocator);
+        const requested_version = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}",
+            .{ result.package.version.major, result.package.version.minor, result.package.version.patch });
+        _ = PackageLock.writeProject(allocator, init.io, project_root, packages_root,
+            .{ .name = result.package.name, .version = requested_version }) catch |err| {
+            std.debug.print("silex: package installed, but its project lock could not be written: {t}\n", .{err});
+            return 1;
+        };
+    }
     progress.finish();
     std.debug.print("silex: {s} {s}@{d}.{d}.{d} in {s}\n", .{
         if (result.installed) "installed" else "already installed",
@@ -447,6 +462,29 @@ fn installPackageOperand(
             else => return err,
         };
         if (development and result.package.dev_dependencies.len != 0) {
+            if (try publicRegistryOrigin(init)) |origin| {
+                var public_registry: PackageRegistryV2.Client = .{
+                    .allocator = allocator,
+                    .network_allocator = init.gpa,
+                    .io = init.io,
+                    .origin = origin,
+                };
+                public_registry.installDevelopmentDependencies(
+                    result.package.dev_dependencies,
+                    Packages.Version.parse(build_options.version) catch unreachable,
+                    target,
+                    try packageRegistryCacheRoot(allocator, packages_root),
+                    store,
+                ) catch |err| switch (err) {
+                    error.InvalidRegistry => {
+                        std.debug.print("silex: cannot install development dependencies: {s}\n",
+                            .{public_registry.diagnostic orelse "invalid v2 registry package"});
+                        return null;
+                    },
+                    else => return err,
+                };
+                return result;
+            }
             const registry_index = try loadPackageRegistry(init, allocator, packages_root, progress) orelse return null;
             var registry = PackageRegistry.Client.init(
                 allocator,
@@ -481,6 +519,33 @@ fn installPackageOperand(
         return null;
     };
     const cache_root = try packageRegistryCacheRoot(allocator, packages_root);
+    const v2_origin = publicRegistryOrigin(init) catch |err| {
+        std.debug.print("silex: invalid v2 registry configuration: {t}\n", .{err});
+        return null;
+    };
+    if (v2_origin) |origin| {
+        progress.source(.registry, origin);
+        var public_registry: PackageRegistryV2.Client = .{
+            .allocator = allocator,
+            .network_allocator = init.gpa,
+            .io = init.io,
+            .origin = origin,
+        };
+        return public_registry.install(
+            request,
+            Packages.Version.parse(build_options.version) catch unreachable,
+            target,
+            cache_root,
+            store,
+            .{ .development = development, .suite = suite },
+        ) catch |err| switch (err) {
+            error.InvalidRegistry => {
+                std.debug.print("silex: cannot install package: {s}\n", .{public_registry.diagnostic orelse "invalid v2 registry package"});
+                return null;
+            },
+            else => return err,
+        };
+    }
     var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
     registry.setProgress(packageProgressReporter(progress));
     const location = init.environ_map.get("SILEX_REGISTRY") orelse PackageRegistry.default_location;
@@ -512,6 +577,13 @@ fn installPackageOperand(
         },
         else => return err,
     };
+}
+
+fn publicRegistryOrigin(init: std.process.Init) !?[]const u8 {
+    const mode = init.environ_map.get("SILEX_REGISTRY_V2") orelse return null;
+    if (std.mem.eql(u8, mode, "public")) return PackageRegistryV2.public_origin;
+    if (std.mem.eql(u8, mode, "test")) return try RegistryLogin.publicTestOrigin(init);
+    return error.InvalidRegistryV2Mode;
 }
 
 fn packageRegistryCacheRoot(allocator: std.mem.Allocator, packages_root: []const u8) ![]const u8 {
@@ -2688,32 +2760,32 @@ fn globalPackagesRoot(
     allocator: std.mem.Allocator,
     environment: *const std.process.Environ.Map,
 ) !?[]const u8 {
-    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
-    return try std.fs.path.join(allocator, &.{ home, ".silex", "packages" });
+    const root = try DataRoot.get(allocator, environment) orelse return null;
+    return try std.fs.path.join(allocator, &.{ root, "packages" });
 }
 
 fn globalToolchainRoot(
     allocator: std.mem.Allocator,
     environment: *const std.process.Environ.Map,
 ) !?[]const u8 {
-    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
-    return try std.fs.path.join(allocator, &.{ home, ".silex", "toolchain" });
+    const root = try DataRoot.get(allocator, environment) orelse return null;
+    return try std.fs.path.join(allocator, &.{ root, "toolchain" });
 }
 
 fn globalRegistryRoot(
     allocator: std.mem.Allocator,
     environment: *const std.process.Environ.Map,
 ) !?[]const u8 {
-    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
-    return try std.fs.path.join(allocator, &.{ home, ".silex", "registry" });
+    const root = try DataRoot.get(allocator, environment) orelse return null;
+    return try std.fs.path.join(allocator, &.{ root, "registry" });
 }
 
 fn globalGitHubAuthorizationPath(
     allocator: std.mem.Allocator,
     environment: *const std.process.Environ.Map,
 ) !?[]const u8 {
-    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
-    return try std.fs.path.join(allocator, &.{ home, ".silex", "auth", "github.json" });
+    const root = try DataRoot.get(allocator, environment) orelse return null;
+    return try std.fs.path.join(allocator, &.{ root, "auth", "github.json" });
 }
 
 fn nativeLinkerPath(
