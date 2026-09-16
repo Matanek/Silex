@@ -52,38 +52,46 @@ pub fn render(
     source: []const u8,
     artifacts: []const Artifact,
 ) !Result {
+    var temporary_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temporary_arena.deinit();
+    const temporary = temporary_arena.allocator();
     var manifest: ?[]const u8 = null;
-    const file_views = try allocator.alloc(FileView, files.len);
+    const file_views = try temporary.alloc(FileView, files.len);
     for (files, file_views) |file, *view| {
         if (std.mem.eql(u8, file.path, "Package.json")) manifest = file.bytes;
         view.* = .{
             .path = file.path,
-            .sha256 = try sha256Hex(allocator, file.bytes),
+            .sha256 = try sha256Hex(temporary, file.bytes),
             .size = file.bytes.len,
         };
     }
     if (manifest == null or !std.unicode.utf8ValidateSlice(manifest.?)) return error.InvalidManifest;
 
-    const artifact_views = try allocator.alloc(ArtifactView, artifacts.len);
+    const artifact_views = try temporary.alloc(ArtifactView, artifacts.len);
     for (artifacts, artifact_views) |artifact, *view| {
         view.* = .{
             .name = artifact.name,
             .path = artifact.path,
-            .sha256 = try sha256Hex(allocator, artifact.bytes),
+            .sha256 = try sha256Hex(temporary, artifact.bytes),
             .size = artifact.bytes.len,
             .target = artifact.target,
         };
     }
-    const source_digest = try sha256Hex(allocator, source);
-    const json = try std.json.Stringify.valueAlloc(allocator, Canonical{
+    const transient_source_digest = try sha256Hex(temporary, source);
+    const transient_json = try std.json.Stringify.valueAlloc(temporary, Canonical{
         .artifacts = artifact_views,
         .files = file_views,
         .manifest = manifest.?,
-        .source = .{ .sha256 = source_digest, .size = source.len },
+        .source = .{ .sha256 = transient_source_digest, .size = source.len },
     }, .{});
+    const json = try allocator.dupe(u8, transient_json);
+    errdefer allocator.free(json);
+    const digest = try sha256Hex(allocator, json);
+    errdefer allocator.free(digest);
+    const source_digest = try allocator.dupe(u8, transient_source_digest);
     return .{
         .json = json,
-        .digest = try sha256Hex(allocator, json),
+        .digest = digest,
         .source_digest = source_digest,
     };
 }

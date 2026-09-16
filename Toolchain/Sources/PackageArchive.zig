@@ -51,7 +51,7 @@ pub fn encode(allocator: std.mem.Allocator, files: []const File) ![]u8 {
     return gzip_bytes;
 }
 
-fn safeArchivePath(path: []const u8) bool {
+pub fn safeArchivePath(path: []const u8) bool {
     if (path.len == 0 or path.len > 240 or !std.unicode.utf8ValidateSlice(path)) return false;
     var parts = std.mem.splitScalar(u8, path, '/');
     while (parts.next()) |part| {
