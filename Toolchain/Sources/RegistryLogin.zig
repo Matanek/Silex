@@ -186,11 +186,13 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
         break :blk try std.fs.path.join(allocator, &.{ home, ".silex", "auth" });
     };
     _ = try Io.Dir.cwd().createDirPathStatus(io, root, directory_permissions);
-    const dir = try Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false });
+    // Linux opens non-iterable directories with O_PATH, which cannot be fsynced.
+    const dir = try Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false, .iterate = true });
     defer dir.close(io);
     try private(try dir.stat(io), .directory);
     // Never truncate an existing lock or follow a pre-existing symbolic link.
-    const lock = dir.createFile(io, "registry.lock", .{ .exclusive = true, .permissions = file_permissions }) catch |err| switch (err) {
+    // The metadata check requires a readable Windows handle.
+    const lock = dir.createFile(io, "registry.lock", .{ .exclusive = true, .read = true, .permissions = file_permissions }) catch |err| switch (err) {
         error.PathAlreadyExists => try dir.openFile(io, "registry.lock", .{ .mode = .read_write, .follow_symlinks = false }),
         else => return err,
     };
