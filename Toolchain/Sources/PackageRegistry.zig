@@ -472,13 +472,13 @@ pub const Client = struct {
             _ = try self.installRelease(registry, dependency_release, toolchain, target, store, stack, installed, suite_parent);
         }
         self.report(.{ .install = .{ .name = release.name, .version = release.version } });
-        const result = store.installPublished(acquired.source, target, .{
+        const result = store.installPublished(acquired.source, target, .{ .git = .{
             .repository = release.repository,
             .commit = release.commit,
             .archive_sha256 = acquired.sha256,
             .extensions = manifest.extensions,
             .catalogs = manifest.catalogs,
-        }) catch |err| switch (err) {
+        } }) catch |err| switch (err) {
             error.InvalidPackageStore => return self.failFmt(
                 "cannot install package '{s}': {s}",
                 .{ release.name, store.diagnostic orelse "invalid package" },

@@ -20,7 +20,7 @@ pub const LinkResult = struct {
     artifacts: Artifacts.Summary,
 };
 
-pub const PublicationProof = struct {
+pub const GitPublicationProof = struct {
     repository: []const u8,
     commit: []const u8,
     archive_sha256: []const u8,
@@ -28,13 +28,38 @@ pub const PublicationProof = struct {
     catalogs: []const []const u8 = &.{},
 };
 
-const Receipt = struct {
+pub const RegistryPublicationProof = struct {
+    origin: []const u8,
+    publication_sha256: []const u8,
+    source_sha256: []const u8,
+    extensions: []const Packages.ExtensionPolicy,
+    catalogs: []const []const u8 = &.{},
+};
+
+pub const PublicationProof = union(enum) {
+    git: GitPublicationProof,
+    registry: RegistryPublicationProof,
+};
+
+const GitReceipt = struct {
     schema: u8 = 3,
     name: []const u8,
     version: []const u8,
     repository: []const u8,
     commit: []const u8,
     archive_sha256: []const u8,
+    manifest_sha256: []const u8,
+    extensions: []const Packages.ExtensionPolicy,
+    catalogs: []const []const u8 = &.{},
+};
+
+const RegistryReceipt = struct {
+    schema: u8 = 4,
+    name: []const u8,
+    version: []const u8,
+    origin: []const u8,
+    publication_sha256: []const u8,
+    source_sha256: []const u8,
     manifest_sha256: []const u8,
     extensions: []const Packages.ExtensionPolicy,
     catalogs: []const []const u8 = &.{},
@@ -83,10 +108,10 @@ pub const Manager = struct {
         self.diagnostic = null;
         const package = try self.inspect(source);
         if (proof) |publication| {
-            if (!equalExtensionPolicies(package.extensions, publication.extensions)) {
+            if (!equalExtensionPolicies(package.extensions, proofExtensions(publication))) {
                 return self.failFmt("package '{s}' extensions do not match its source proof", .{package.name});
             }
-            if (!equalStrings(package.catalogs, publication.catalogs)) {
+            if (!equalStrings(package.catalogs, proofCatalogs(publication))) {
                 return self.failFmt("package '{s}' catalogs do not match its source proof", .{package.name});
             }
         }
@@ -144,16 +169,28 @@ pub const Manager = struct {
             "{d}.{d}.{d}",
             .{ package.version.major, package.version.minor, package.version.patch },
         );
-        const source = try std.json.Stringify.valueAlloc(self.allocator, Receipt{
-            .name = package.name,
-            .version = version,
-            .repository = proof.repository,
-            .commit = proof.commit,
-            .archive_sha256 = proof.archive_sha256,
-            .manifest_sha256 = manifest_sha256,
-            .extensions = proof.extensions,
-            .catalogs = proof.catalogs,
-        }, .{ .whitespace = .indent_2 });
+        const source = switch (proof) {
+            .git => |publication| try std.json.Stringify.valueAlloc(self.allocator, GitReceipt{
+                .name = package.name,
+                .version = version,
+                .repository = publication.repository,
+                .commit = publication.commit,
+                .archive_sha256 = publication.archive_sha256,
+                .manifest_sha256 = manifest_sha256,
+                .extensions = publication.extensions,
+                .catalogs = publication.catalogs,
+            }, .{ .whitespace = .indent_2 }),
+            .registry => |publication| try std.json.Stringify.valueAlloc(self.allocator, RegistryReceipt{
+                .name = package.name,
+                .version = version,
+                .origin = publication.origin,
+                .publication_sha256 = publication.publication_sha256,
+                .source_sha256 = publication.source_sha256,
+                .manifest_sha256 = manifest_sha256,
+                .extensions = publication.extensions,
+                .catalogs = publication.catalogs,
+            }, .{ .whitespace = .indent_2 }),
+        };
         try Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = source });
     }
 
@@ -161,9 +198,9 @@ pub const Manager = struct {
         const path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
         const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch
             return self.failFmt("installed package '{s}' has no source proof; remove it and reinstall", .{package.name});
-        const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
+        const header = std.json.parseFromSliceLeaky(struct { schema: u8 }, self.allocator, source, .{
             .allocate = .alloc_always,
-            .ignore_unknown_fields = false,
+            .ignore_unknown_fields = true,
         }) catch return self.failFmt("installed package '{s}' has an invalid source proof", .{package.name});
         const version = try std.fmt.allocPrint(
             self.allocator,
@@ -172,17 +209,43 @@ pub const Manager = struct {
         );
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
-        if (receipt.schema != 3 or
-            !std.mem.eql(u8, receipt.name, package.name) or
-            !std.mem.eql(u8, receipt.version, version) or
-            !std.mem.eql(u8, receipt.repository, proof.repository) or
-            !std.mem.eql(u8, receipt.commit, proof.commit) or
-            !std.mem.eql(u8, receipt.archive_sha256, proof.archive_sha256) or
-            !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
-            !equalExtensionPolicies(receipt.extensions, proof.extensions) or
-            !equalStrings(receipt.catalogs, proof.catalogs))
-        {
-            return self.failFmt("installed package '{s}' does not match its source proof; remove it and reinstall", .{package.name});
+        switch (proof) {
+            .git => |publication| {
+                const receipt = std.json.parseFromSliceLeaky(GitReceipt, self.allocator, source, .{
+                    .allocate = .alloc_always,
+                    .ignore_unknown_fields = false,
+                }) catch return self.failFmt("installed package '{s}' has an invalid source proof", .{package.name});
+                if (header.schema != 3 or
+                    !std.mem.eql(u8, receipt.name, package.name) or
+                    !std.mem.eql(u8, receipt.version, version) or
+                    !std.mem.eql(u8, receipt.repository, publication.repository) or
+                    !std.mem.eql(u8, receipt.commit, publication.commit) or
+                    !std.mem.eql(u8, receipt.archive_sha256, publication.archive_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+                    !equalExtensionPolicies(receipt.extensions, publication.extensions) or
+                    !equalStrings(receipt.catalogs, publication.catalogs))
+                {
+                    return self.failFmt("installed package '{s}' does not match its source proof; remove it and reinstall", .{package.name});
+                }
+            },
+            .registry => |publication| {
+                const receipt = std.json.parseFromSliceLeaky(RegistryReceipt, self.allocator, source, .{
+                    .allocate = .alloc_always,
+                    .ignore_unknown_fields = false,
+                }) catch return self.failFmt("installed package '{s}' has an invalid source proof", .{package.name});
+                if (header.schema != 4 or
+                    !std.mem.eql(u8, receipt.name, package.name) or
+                    !std.mem.eql(u8, receipt.version, version) or
+                    !std.mem.eql(u8, receipt.origin, publication.origin) or
+                    !std.mem.eql(u8, receipt.publication_sha256, publication.publication_sha256) or
+                    !std.mem.eql(u8, receipt.source_sha256, publication.source_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+                    !equalExtensionPolicies(receipt.extensions, publication.extensions) or
+                    !equalStrings(receipt.catalogs, publication.catalogs))
+                {
+                    return self.failFmt("installed package '{s}' does not match its source proof; remove it and reinstall", .{package.name});
+                }
+            },
         }
     }
 
@@ -367,6 +430,20 @@ fn equalExtensionPolicies(left: []const Packages.ExtensionPolicy, right: []const
     return true;
 }
 
+fn proofExtensions(proof: PublicationProof) []const Packages.ExtensionPolicy {
+    return switch (proof) {
+        .git => |publication| publication.extensions,
+        .registry => |publication| publication.extensions,
+    };
+}
+
+fn proofCatalogs(proof: PublicationProof) []const []const u8 {
+    return switch (proof) {
+        .git => |publication| publication.catalogs,
+        .registry => |publication| publication.catalogs,
+    };
+}
+
 test "install copies an immutable package without repository state" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -423,19 +500,19 @@ test "published package extension permissions and catalogs require an intact sou
     const app = try std.fs.path.join(allocator, &.{ base, "App" });
     const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     var manager = Manager.init(allocator, std.testing.allocator, std.testing.io, packages_root);
-    const gfx_result = try manager.installPublished(gfx, .macos_arm64, .{
+    const gfx_result = try manager.installPublished(gfx, .macos_arm64, .{ .git = .{
         .repository = "Matanek/Silex-Lib-GFX",
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true, .merge = true }},
         .catalogs = &.{"GFX.Plugins"},
-    });
-    _ = try manager.installPublished(ui, .macos_arm64, .{
+    } });
+    _ = try manager.installPublished(ui, .macos_arm64, .{ .git = .{
         .repository = "Matanek/Silex-Lib-GFX-UI",
         .commit = "1123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{},
-    });
+    } });
     var resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
     const graph = try resolver.resolve(app);
     try std.testing.expectEqual(@as(usize, 3), graph.packages.len);
@@ -451,13 +528,60 @@ test "published package extension permissions and catalogs require an intact sou
         "installed package does not match its source proof; remove it and reinstall",
         resolver.diagnostic.?,
     );
-    try std.testing.expectError(error.InvalidPackageStore, manager.installPublished(gfx, .macos_arm64, .{
+    try std.testing.expectError(error.InvalidPackageStore, manager.installPublished(gfx, .macos_arm64, .{ .git = .{
         .repository = "Matanek/Silex-Lib-GFX",
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true, .merge = true }},
         .catalogs = &.{"GFX.Plugins"},
-    }));
+    } }));
+}
+
+test "registry publication receipt preserves provenance and rejects source changes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Source/Module");
+    try temporary.dir.createDirPath(std.testing.io, "App");
+    const manifest =
+        \\{"name":"Runtime","version":"1.0.0","requires":{"silex":">=0.38.0"},"catalogs":["Runtime.Tools"]}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Source/Package.json", .data = manifest });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Source/Module/Main.sx", .data = "public module Main {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "App/Package.json", .data = "{\"dependencies\":{\"Runtime\":\"=1.0.0\"}}" });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root = try std.fs.path.join(allocator, &.{ base, "Home", ".silex", "packages" });
+    const source = try std.fs.path.join(allocator, &.{ base, "Source" });
+    const app = try std.fs.path.join(allocator, &.{ base, "App" });
+    const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const proof: PublicationProof = .{ .registry = .{
+        .origin = "https://registry.silex-lang.org",
+        .publication_sha256 = digest,
+        .source_sha256 = digest,
+        .extensions = &.{},
+        .catalogs = &.{"Runtime.Tools"},
+    } };
+    var manager = Manager.init(allocator, std.testing.allocator, std.testing.io, root);
+    const first = try manager.installPublished(source, .macos_arm64, proof);
+    try std.testing.expect(first.installed);
+    const second = try manager.installPublished(source, .macos_arm64, proof);
+    try std.testing.expect(!second.installed);
+    var resolver = Packages.Resolver.init(allocator, std.testing.io, root);
+    const graph = try resolver.resolve(app);
+    try std.testing.expectEqual(@as(usize, 2), graph.packages.len);
+    const receipt_path = try std.fs.path.join(allocator, &.{ first.destination, ".silex", "source.json" });
+    const receipt = try Io.Dir.cwd().readFileAlloc(std.testing.io, receipt_path, allocator, .limited(1024 * 1024));
+    try std.testing.expect(std.mem.indexOf(u8, receipt, "\"schema\": 4") != null);
+
+    try Io.Dir.cwd().writeFile(std.testing.io, .{
+        .sub_path = try std.fs.path.join(allocator, &.{ first.destination, "Package.json" }),
+        .data = "{\"name\":\"Runtime\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"}}",
+    });
+    resolver = Packages.Resolver.init(allocator, std.testing.io, root);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
+    try std.testing.expectError(error.InvalidPackageStore, manager.installPublished(source, .macos_arm64, proof));
 }
 
 test "link exposes live package sources and unlink removes the override" {

@@ -8,6 +8,12 @@ pub const File = struct {
     bytes: []const u8,
 };
 
+pub const ExpectedFile = struct {
+    path: []const u8,
+    size: usize,
+    sha256: []const u8,
+};
+
 const maximum_source_size = 16 * 1024 * 1024;
 const maximum_expanded_size = 64 * 1024 * 1024;
 const maximum_files = 10_000;
@@ -49,6 +55,52 @@ pub fn encode(allocator: std.mem.Allocator, files: []const File) ![]u8 {
     errdefer allocator.free(gzip_bytes);
     if (gzip_bytes.len > maximum_source_size) return error.SourceLimit;
     return gzip_bytes;
+}
+
+/// Read a published source as untrusted data. Every regular entry must match
+/// the descriptor in order, size and digest; no extra entry can be extracted.
+pub fn decode(allocator: std.mem.Allocator, archive: []const u8, expected: []const ExpectedFile) ![]const File {
+    if (archive.len > maximum_source_size or expected.len == 0 or expected.len > maximum_files)
+        return error.InvalidPublishedSource;
+    var compressed: Io.Reader = .fixed(archive);
+    var decompress_buffer: [flate.max_window_len]u8 = undefined;
+    var decoder: flate.Decompress = .init(&compressed, .gzip, &decompress_buffer);
+    var name_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var iterator = std.tar.Iterator.init(&decoder.reader, .{
+        .file_name_buffer = &name_buffer,
+        .link_name_buffer = &link_buffer,
+    });
+    const files = try allocator.alloc(File, expected.len);
+    var populated: usize = 0;
+    errdefer {
+        for (files[0..populated]) |file| {
+            allocator.free(file.path);
+            allocator.free(file.bytes);
+        }
+        allocator.free(files);
+    }
+    var expanded: usize = 0;
+    for (expected, 0..) |item, index| {
+        const entry = (iterator.next() catch return error.InvalidPublishedSource) orelse return error.InvalidPublishedSource;
+        if (entry.kind != .file or !safeArchivePath(entry.name) or
+            !std.mem.eql(u8, entry.name, item.path) or entry.size != item.size or
+            item.size > maximum_expanded_size - expanded or item.sha256.len != 64)
+            return error.InvalidPublishedSource;
+        expanded += item.size;
+        const bytes = try allocator.alloc(u8, item.size);
+        errdefer allocator.free(bytes);
+        var writer: Io.Writer = .fixed(bytes);
+        iterator.streamRemaining(entry, &writer) catch return error.InvalidPublishedSource;
+        var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+        const hex = std.fmt.bytesToHex(digest, .lower);
+        if (!std.mem.eql(u8, item.sha256, &hex)) return error.InvalidPublishedSource;
+        files[index] = .{ .path = try allocator.dupe(u8, entry.name), .bytes = bytes };
+        populated += 1;
+    }
+    if ((iterator.next() catch return error.InvalidPublishedSource) != null) return error.InvalidPublishedSource;
+    return files;
 }
 
 pub fn safeArchivePath(path: []const u8) bool {
@@ -116,4 +168,40 @@ test "reject unsafe, duplicate and unrepresentable source paths" {
     }));
     const long_name = "a" ** 101;
     try std.testing.expectError(error.InvalidPath, encode(allocator, &.{.{ .path = long_name, .bytes = "x" }}));
+}
+
+test "published source decoder rejects mismatched files and extra archive entries" {
+    const allocator = std.testing.allocator;
+    const input: []const File = &.{
+        .{ .path = "Module/Content.sx", .bytes = "public module Content {}" },
+        .{ .path = "Package.json", .bytes = "{}" },
+    };
+    const source = try encode(allocator, input);
+    defer allocator.free(source);
+    const expected: []const ExpectedFile = &.{
+        .{ .path = "Module/Content.sx", .size = input[0].bytes.len, .sha256 = "dec3b6ce16f5048ee756764e5ad131ee6b7c00f9f7cd9532b3766237e8f11699" },
+        .{ .path = "Package.json", .size = input[1].bytes.len, .sha256 = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" },
+    };
+    var actual_digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(input[0].bytes, &actual_digest, .{});
+    const first_digest = std.fmt.bytesToHex(actual_digest, .lower);
+    const correct: []const ExpectedFile = &.{
+        .{ .path = expected[0].path, .size = expected[0].size, .sha256 = &first_digest },
+        expected[1],
+    };
+    const files = try decode(allocator, source, correct);
+    defer {
+        for (files) |file| {
+            allocator.free(file.path);
+            allocator.free(file.bytes);
+        }
+        allocator.free(files);
+    }
+    try std.testing.expectEqualStrings(input[0].bytes, files[0].bytes);
+    try std.testing.expectError(error.InvalidPublishedSource, decode(allocator, source, expected));
+    try std.testing.expectError(error.InvalidPublishedSource, decode(allocator, source, correct[0..1]));
+    try std.testing.expectError(error.InvalidPublishedSource, decode(allocator, source, &.{
+        .{ .path = "../outside", .size = input[0].bytes.len, .sha256 = &first_digest },
+        expected[1],
+    }));
 }

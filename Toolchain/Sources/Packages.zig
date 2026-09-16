@@ -494,7 +494,18 @@ pub const Resolver = struct {
         self.diagnostic = null;
         try self.rejectLegacy(package_root);
         const path = try std.fs.path.join(self.allocator, &.{ package_root, "Package.json" });
-        const raw = try self.readManifest(path);
+        const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch {
+            return self.fail("package manifest cannot be read");
+        };
+        return self.inspectManifestSource(source);
+    }
+
+    pub fn inspectManifestSource(self: *Resolver, source: []const u8) !ManifestInfo {
+        self.diagnostic = null;
+        const raw = std.json.parseFromSliceLeaky(RawManifest, self.allocator, source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch return self.fail("invalid package manifest or unsupported field");
         const manifest = try self.parseManifestCore(raw);
         const name = manifest.name orelse return self.fail("an installable package requires name and version");
         const version = manifest.version orelse return self.fail("an installable package requires name and version");
@@ -887,7 +898,7 @@ pub const Resolver = struct {
             error.FileNotFound, error.NotDir => return trusted,
             else => return self.fail("installed package source proof cannot be read"),
         };
-        const Receipt = struct {
+        const GitReceipt = struct {
             schema: u8,
             name: []const u8,
             version: []const u8,
@@ -898,9 +909,20 @@ pub const Resolver = struct {
             extensions: []const ExtensionPolicy,
             catalogs: []const []const u8 = &.{},
         };
-        const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
+        const RegistryReceipt = struct {
+            schema: u8,
+            name: []const u8,
+            version: []const u8,
+            origin: []const u8,
+            publication_sha256: []const u8,
+            source_sha256: []const u8,
+            manifest_sha256: []const u8,
+            extensions: []const ExtensionPolicy,
+            catalogs: []const []const u8 = &.{},
+        };
+        const header = std.json.parseFromSliceLeaky(struct { schema: u8 }, self.allocator, source, .{
             .allocate = .alloc_always,
-            .ignore_unknown_fields = false,
+            .ignore_unknown_fields = true,
         }) catch return self.fail("installed package has an invalid source proof; remove it and reinstall");
         const version_text = try std.fmt.allocPrint(
             self.allocator,
@@ -909,20 +931,51 @@ pub const Resolver = struct {
         );
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
-        if (receipt.schema != 3 or
-            !std.mem.eql(u8, receipt.name, name) or
-            !std.mem.eql(u8, receipt.version, version_text) or
-            receipt.repository.len == 0 or
-            !validObjectId(receipt.commit) or
-            !validSha256(receipt.archive_sha256) or
-            !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
-            !equalExtensionPolicies(receipt.extensions, manifest.extensions) or
-            !equalStrings(receipt.catalogs, manifest.catalogs))
-        {
-            return self.fail("installed package does not match its source proof; remove it and reinstall");
+        var receipt_extensions: []const ExtensionPolicy = &.{};
+        var receipt_catalogs: []const []const u8 = &.{};
+        switch (header.schema) {
+            3 => {
+                const receipt = std.json.parseFromSliceLeaky(GitReceipt, self.allocator, source, .{
+                    .allocate = .alloc_always,
+                    .ignore_unknown_fields = false,
+                }) catch return self.fail("installed package has an invalid source proof; remove it and reinstall");
+                if (!std.mem.eql(u8, receipt.name, name) or
+                    !std.mem.eql(u8, receipt.version, version_text) or
+                    receipt.repository.len == 0 or
+                    !validObjectId(receipt.commit) or
+                    !validSha256(receipt.archive_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+                    !equalExtensionPolicies(receipt.extensions, manifest.extensions) or
+                    !equalStrings(receipt.catalogs, manifest.catalogs))
+                {
+                    return self.fail("installed package does not match its source proof; remove it and reinstall");
+                }
+                receipt_extensions = receipt.extensions;
+                receipt_catalogs = receipt.catalogs;
+            },
+            4 => {
+                const receipt = std.json.parseFromSliceLeaky(RegistryReceipt, self.allocator, source, .{
+                    .allocate = .alloc_always,
+                    .ignore_unknown_fields = false,
+                }) catch return self.fail("installed package has an invalid source proof; remove it and reinstall");
+                if (!std.mem.eql(u8, receipt.name, name) or
+                    !std.mem.eql(u8, receipt.version, version_text) or
+                    !validRegistryOrigin(receipt.origin) or
+                    !validSha256(receipt.publication_sha256) or
+                    !validSha256(receipt.source_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+                    !equalExtensionPolicies(receipt.extensions, manifest.extensions) or
+                    !equalStrings(receipt.catalogs, manifest.catalogs))
+                {
+                    return self.fail("installed package does not match its source proof; remove it and reinstall");
+                }
+                receipt_extensions = receipt.extensions;
+                receipt_catalogs = receipt.catalogs;
+            },
+            else => return self.fail("installed package has an invalid source proof; remove it and reinstall"),
         }
-        trusted.extensions = receipt.extensions;
-        trusted.catalogs = receipt.catalogs;
+        trusted.extensions = receipt_extensions;
+        trusted.catalogs = receipt_catalogs;
         return trusted;
     }
 
@@ -1812,6 +1865,23 @@ fn validSha256(text: []const u8) bool {
     if (text.len != 64) return false;
     for (text) |character| if (!std.ascii.isDigit(character) and !(character >= 'a' and character <= 'f')) return false;
     return true;
+}
+
+fn validRegistryOrigin(text: []const u8) bool {
+    if (std.mem.startsWith(u8, text, "https://")) {
+        const authority = text["https://".len..];
+        if (authority.len == 0 or authority.len > 253 or authority[0] == '.' or authority[authority.len - 1] == '.') return false;
+        for (authority) |byte| {
+            if (!std.ascii.isAlphanumeric(byte) and byte != '.' and byte != '-') return false;
+        }
+        return true;
+    }
+    const prefix = "http://127.0.0.1:";
+    if (!std.mem.startsWith(u8, text, prefix)) return false;
+    const port = text[prefix.len..];
+    if (port.len == 0 or port.len > 5) return false;
+    for (port) |byte| if (!std.ascii.isDigit(byte)) return false;
+    return (std.fmt.parseInt(u16, port, 10) catch return false) != 0;
 }
 
 fn validObjectId(text: []const u8) bool {
