@@ -1305,6 +1305,9 @@ pub const Compiler = struct {
                         continue;
                     },
                     .structure => |structure_target| {
+                        // Catalog discovery can parse a contributor without
+                        // activating it. Typed interfaces cover loaded modules.
+                        if (self.units[structure_target.module].state != .loaded) continue;
                         const source = interfaces.items[interface_by_module[structure_target.module].?];
                         for (source.structures) |structure| {
                             if (!std.mem.eql(u8, structure.id.name, structure_target.declaration)) continue;
@@ -1318,6 +1321,7 @@ pub const Compiler = struct {
                         continue;
                     },
                     .enumeration => |enum_target| {
+                        if (self.units[enum_target.module].state != .loaded) continue;
                         const source = interfaces.items[interface_by_module[enum_target.module].?];
                         for (source.enums) |enumeration| {
                             if (!std.mem.eql(u8, enumeration.id.name, enum_target.declaration)) continue;
@@ -1338,6 +1342,7 @@ pub const Compiler = struct {
                     try self.allocator.alloc(bool, self.units.len),
                 );
                 if (function_target) |target| {
+                    if (self.units[target.module].state != .loaded) continue;
                     const source = interfaces.items[interface_by_module[target.module].?];
                     for (source.functions) |function| {
                         if (!std.mem.eql(u8, function.id.name, target.declaration)) continue;
@@ -1356,6 +1361,7 @@ pub const Compiler = struct {
                     try self.allocator.alloc(bool, self.units.len),
                 );
                 if (structure_target) |target| {
+                    if (self.units[target.module].state != .loaded) continue;
                     const source = interfaces.items[interface_by_module[target.module].?];
                     for (source.structures) |structure| {
                         if (!std.mem.eql(u8, structure.id.name, target.declaration)) continue;
@@ -1374,6 +1380,7 @@ pub const Compiler = struct {
                     try self.allocator.alloc(bool, self.units.len),
                 );
                 if (enum_target) |target| {
+                    if (self.units[target.module].state != .loaded) continue;
                     const source = interfaces.items[interface_by_module[target.module].?];
                     for (source.enums) |enumeration| {
                         if (!std.mem.eql(u8, enumeration.id.name, target.declaration)) continue;

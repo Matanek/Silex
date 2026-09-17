@@ -2,6 +2,119 @@ const std = @import("std");
 const Compiler = @import("../Project.zig").Compiler;
 const Types = @import("../Types.zig");
 
+test "catalog interfaces distinguish parsed contributors from active exports" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Addon/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"GFX\":\"=1.0.0\",\"Addon\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[\"GFX.Plugins\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public struct Core { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Addon/Package.json",
+        .data = "{\"name\":\"Addon\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Addon/Module/@Module.sx",
+        .data =
+        \\public struct Plugin { let value:int }
+        \\public enum Mode { fast; slow }
+        \\public func value() int { return 6 }
+        \\contribute GFX.Plugins {
+        \\    public use Addon.Plugin as Agents
+        \\    public use Addon.Mode as AgentsMode
+        \\    public use Addon.value as extra
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Plugins\nfunc main() { print(Plugins.Core(value:42).value) }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const inactive = try compiler.compile(input);
+    const inactive_result = try @import("../Interpreter.zig").runCapture(allocator, inactive.ir);
+    try std.testing.expectEqualStrings("42\n", inactive_result.stdout);
+    var parsed_contributors: usize = 0;
+    var catalog_bindings: usize = 0;
+    for (compiler.index.providers, compiler.units) |provider, unit| {
+        if (std.mem.eql(u8, provider.name, "Addon")) {
+            try std.testing.expect(unit.program != null);
+            try std.testing.expect(unit.state == .fresh);
+            parsed_contributors += 1;
+        }
+        if (std.mem.eql(u8, provider.name, "GFX.Plugins")) {
+            for (unit.bindings) |binding| if (binding.is_public) {
+                catalog_bindings += 1;
+            };
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), parsed_contributors);
+    try std.testing.expectEqual(@as(usize, 3), catalog_bindings);
+    for (inactive.interfaces) |interface| {
+        try std.testing.expect(!std.mem.eql(u8, interface.name, "Addon"));
+        if (!std.mem.eql(u8, interface.name, "GFX.Plugins")) continue;
+        try std.testing.expectEqual(@as(usize, 1), interface.structures.len);
+        try std.testing.expectEqual(@as(usize, 0), interface.enums.len);
+        try std.testing.expectEqual(@as(usize, 0), interface.functions.len);
+    }
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Plugins
+        \\func main() {
+        \\    let mode = Plugins.AgentsMode.fast
+        \\    assert(mode == Plugins.AgentsMode.fast)
+        \\    print(Plugins.Agents(value:7).value + Plugins.extra())
+        \\}
+        ,
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    const active = try compiler.compile(input);
+    const active_result = try @import("../Interpreter.zig").runCapture(allocator, active.ir);
+    try std.testing.expectEqualStrings("13\n", active_result.stdout);
+    var exports: u8 = 0;
+    for (active.interfaces) |interface| {
+        if (!std.mem.eql(u8, interface.name, "GFX.Plugins")) continue;
+        for (interface.structures) |structure| {
+            if (!std.mem.eql(u8, structure.export_name, "Agents")) continue;
+            try std.testing.expectEqualStrings("Addon", structure.id.owner.package);
+            try std.testing.expectEqualStrings("Addon", structure.id.module);
+            try std.testing.expectEqualStrings("Plugin", structure.id.name);
+            exports |= 1;
+        }
+        for (interface.enums) |enumeration| {
+            if (!std.mem.eql(u8, enumeration.export_name, "AgentsMode")) continue;
+            try std.testing.expectEqualStrings("Addon", enumeration.id.owner.package);
+            try std.testing.expectEqualStrings("Addon", enumeration.id.module);
+            try std.testing.expectEqualStrings("Mode", enumeration.id.name);
+            exports |= 2;
+        }
+        for (interface.functions) |function| {
+            if (!std.mem.eql(u8, function.export_name, "extra")) continue;
+            try std.testing.expectEqualStrings("Addon", function.id.owner.package);
+            try std.testing.expectEqualStrings("Addon", function.id.module);
+            try std.testing.expectEqualStrings("value", function.id.name);
+            exports |= 4;
+        }
+    }
+    try std.testing.expectEqual(@as(u8, 7), exports);
+}
+
 test "resolve enum variants reexported by a sibling source atom" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -81,7 +81,7 @@ direct dependency. Composition accepts only public reexports whose declaration
 provider is owned by the contributor. Ownership follows the exact source
 provider, including when a child adds a declaration to a parent-owned principal
 module through an authorized `merge`. Conflicting aliases or child namespaces
-are rejected deterministically. Contributions become ordinary typed reexport
+are rejected deterministically. Contributions become ordinary reexport
 bindings before semantic lowering; they inject no declarations, executable
 code, runtime registry, namespace permission or backend concept into the
 target module.
@@ -101,6 +101,14 @@ It loads the complete provider when an active type, call, field access or
 qualified path crosses that binding. Ambiguous surfaces, chained reexports and
 invalid targets also load enough of the chain to preserve the established
 diagnostic and its source position.
+
+Discovering a catalog contribution may already parse its principal source file
+while leaving that provider outside the active closure. A parsed `Unit.program`
+therefore does not imply `Unit.state == .loaded`. Typed module interfaces project
+only the active closure: unused contributions remain discoverable bindings,
+without requiring an interface for their inactive provider. Once referenced,
+their structure, enum or function exports retain the original declaration
+identity in the catalog interface.
 
 The surface index lives only for the current compilation. If a provider later
 enters the active closure, its already-read source text is reused by the full
