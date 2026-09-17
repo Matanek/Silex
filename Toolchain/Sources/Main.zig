@@ -189,8 +189,8 @@ fn checkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []co
         else => return err,
     };
     std.debug.print(
-        "silex: package {s}@{d}.{d}.{d} is valid; its release tag is {s}\n",
-        .{ result.name, result.version.major, result.version.minor, result.version.patch, result.expected_tag },
+        "silex: package {s}@{d}.{d}.{d} is valid\n",
+        .{ result.name, result.version.major, result.version.minor, result.version.patch },
     );
     return 0;
 }
