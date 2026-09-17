@@ -1071,10 +1071,10 @@ pub const Analyzer = struct {
             .left = left.value,
             .right = right.value,
         } });
-        if (left.transferred and Resources.needsDrop(self, left.type)) {
+        if (left.transferred and Resources.ownsValue(self, left.type)) {
             try Resources.emitDrop(self, builder, left.type, left.value);
         }
-        if (right.transferred and Resources.needsDrop(self, right.type)) {
+        if (right.transferred and Resources.ownsValue(self, right.type)) {
             try Resources.emitDrop(self, builder, right.type, right.value);
         }
         return .{ .type = result_type, .value = result };
@@ -1454,12 +1454,14 @@ pub const Analyzer = struct {
         var field_transfers: std.ArrayList(bool) = .empty;
         var lexical_captures = false;
         var lexical_borrows: std.ArrayList(Model.LexicalBorrow) = .empty;
+        var constructed_base: ?Model.TypedValue = null;
         if (structure.base) |base_index| {
             const base = try self.analyzeStructureInitializer(builder, .{
                 .name = self.structures[base_index].name,
                 .name_position = call.name_position,
                 .arguments = &.{},
             }, base_index);
+            constructed_base = base;
             for (self.structures[base_index].fields, 0..) |field, field_index| {
                 const value = try self.newValue(builder, field.type);
                 try self.emit(builder, .{ .field_load = .{ .result = value, .base = base.value, .field = field_index } });
@@ -1518,7 +1520,11 @@ pub const Analyzer = struct {
             .structure = structure_index,
             .fields = try field_values.toOwnedSlice(self.allocator),
         } });
-        if (declaration.is_class) try Resources.retainValue(self, builder, result_type, result);
+        if (declaration.is_class) {
+            try Resources.retainValue(self, builder, result_type, result);
+            if (constructed_base) |base|
+                try Resources.releaseConstructedBase(self, builder, base.type, base.value);
+        }
         return .{
             .type = result_type,
             .value = result,

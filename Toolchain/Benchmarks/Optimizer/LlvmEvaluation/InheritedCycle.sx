@@ -1,0 +1,30 @@
+static class Counts { static var drops:int = 0 }
+class Base {
+    var other:Base? = null
+    drop { Counts.drops++ }
+}
+class Derived:Base {}
+class Parent {
+    var child:Entry? = null
+    drop { Counts.drops++ }
+}
+class Entry { drop { Counts.drops++ } }
+class Child:Entry { var parent:Parent? = null }
+
+func main() {
+    {
+        var first = Derived()
+        var second = Derived()
+        first.other = second
+        second.other = first
+    }
+    assert(Counts.drops == 2)
+    {
+        var parent = Parent()
+        var child = Child()
+        parent.child = child
+        child.parent = parent
+    }
+    assert(Counts.drops == 4)
+    print("inherited-cycles-ok")
+}

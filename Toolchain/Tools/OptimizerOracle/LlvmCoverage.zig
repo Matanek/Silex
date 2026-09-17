@@ -9,7 +9,8 @@ pub fn classify(tag: std.meta.Tag(Silex.Ir.Instruction)) Support {
     return switch (tag) {
         .constant_int, .constant_bool, .constant_str, .constant_bytes, .constant_float32, .constant_float64, .optional_null, .optional_some, .optional_unwrap, .copy, .deep_copy, .structure_init, .storage_init, .class_retain, .class_drop, .string_retain, .string_drop, .list_init, .list_edit, .protocol_init, .protocol_test, .protocol_extract, .enum_init, .enum_test, .enum_payload, .enum_raw, .field_load, .field_store, .collection_load, .collection_reference, .collection_replace, .collection_count, .collection_slice, .collection_view, .function_reference, .local_load, .local_store, .global_load, .global_store, .local_address, .reference_load, .address_load, .address_store, .reference_store, .reference_field, .reference_optional, .string_address, .string_byte_count, .string_byte_at, .string_from_bytes, .string_count, .string_concat, .format_value, .unary, .binary, .convert, .call, .indirect_call, .boundary_call, .print, .assert, .mutex_lock, .mutex_unlock => .conditional,
         .list_retain, .list_drop => .abstract_lifetime,
-        .class_cast, .class_test, .boundary_indirect_call, .dynamic_call => .unsupported,
+        .class_cast, .class_test, .dynamic_call => .conditional,
+        .boundary_indirect_call => .unsupported,
     };
 }
 

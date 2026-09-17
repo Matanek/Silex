@@ -89,6 +89,7 @@ pub fn analyze(self: anytype, builder: anytype, call: Ast.Expression.Call) !Mode
     const metadata = try fields.toOwnedSlice(self.allocator);
     @constCast(&self.structures[result_index]).fields = metadata;
     @constCast(&self.structures[result_index]).name = try tupleName(self, metadata);
+    @constCast(&self.structures[result_index]).tuple_placeholder = false;
     const result = try self.newValue(builder, result_type);
     try self.emit(builder, .{ .structure_init = .{
         .result = result,

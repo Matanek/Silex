@@ -197,6 +197,11 @@ fn cloneFields(context: Context, source: [*]const u64, destination: [*]u64, fiel
 fn cloneClass(context: Context, source: [*]const u64, destination: [*]u64, data: [*]const u64, edge: bool) bool {
     const original: [*]u64 = @ptrFromInt(source[0]);
     if (context.entry(structure_base + original[0])[3] & (@as(u64, 1) << 63) != 0) return false;
+    // The collector shares this word: 1..3 are active claims and 4 is a
+    // cached rejection. Only an aligned forwarding address belongs to us.
+    // Invalidating the cache is safe; a collector claim must stay untouched.
+    if (original[3] == 4) original[3] = 0;
+    if (original[3] != 0 and original[3] <= 4) return false;
     if (original[3] != 0) {
         destination[0] = original[3];
         const clone: [*]u64 = @ptrFromInt(destination[0]);
@@ -414,7 +419,7 @@ fn rollbackFields(context: Context, source: [*]const u64, destination: [*]u64, f
 fn rollbackClass(context: Context, source: [*]const u64, data: [*]const u64) void {
     if (source[0] == 0) return;
     const original: [*]u64 = @ptrFromInt(source[0]);
-    if (original[3] == 0) return;
+    if (original[3] <= 4) return;
     const clone: [*]u64 = @ptrFromInt(original[3]);
     original[3] = 0;
     clone[3] = 0;
@@ -630,5 +635,46 @@ test "successful root clones own exactly one releasable root" {
     try std.testing.expectEqual(@as(u64, 1), class_clone[1]);
     try std.testing.expectEqual(@as(u64, 0), class_clone[2]);
     systemRelease(@ptrCast(class_clone), 4 * @sizeOf(u64));
+    try std.testing.expectEqual(@as(usize, 0), TestState.live_allocations);
+}
+
+test "class copying distinguishes collector states from forwarding addresses" {
+    const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 0, 1, 1, 4 };
+    for (0..5) |state| {
+        var original = [_]u64{ 0, 1, 0, state, 73 };
+        var source = [_]u64{@intFromPtr(&original)};
+        var destination = [_]u64{0};
+        TestState.live_allocations = 0;
+        const status = silex_deep_copy(&source, &destination, &model, structure_base);
+        if (state == 0 or state == 4) {
+            try std.testing.expectEqual(@as(u64, 0), status);
+            const clone: [*]u64 = @ptrFromInt(destination[0]);
+            try std.testing.expectEqual(@as(u64, 73), clone[4]);
+            try std.testing.expectEqual(@as(u64, 0), clone[3]);
+            try std.testing.expectEqual(@as(u64, 0), original[3]);
+            systemRelease(@ptrCast(clone), original.len * @sizeOf(u64));
+        } else {
+            try std.testing.expectEqual(@as(u64, 1), status);
+            try std.testing.expectEqual(@as(u64, 0), destination[0]);
+            try std.testing.expectEqual(@as(u64, state), original[3]);
+        }
+        try std.testing.expectEqual(@as(usize, 0), TestState.live_allocations);
+    }
+}
+
+test "failed class graph copy rolls back after a cached collector rejection" {
+    const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 0, 1, 1, structure_base };
+    var child = [_]u64{ 0, 0, 1, 4, 0 };
+    child[4] = @intFromPtr(&child);
+    var original = [_]u64{ 0, 1, 0, 4, @intFromPtr(&child) };
+    var source = [_]u64{@intFromPtr(&original)};
+    var destination = [_]u64{0};
+    TestState.allocation_budget = 1;
+    TestState.live_allocations = 0;
+    defer TestState.allocation_budget = null;
+    try std.testing.expectEqual(@as(u64, 1), silex_deep_copy(&source, &destination, &model, structure_base));
+    try std.testing.expectEqual(@as(u64, 0), destination[0]);
+    try std.testing.expectEqual(@as(u64, 0), original[3]);
+    try std.testing.expectEqual(@as(u64, 0), child[3]);
     try std.testing.expectEqual(@as(usize, 0), TestState.live_allocations);
 }

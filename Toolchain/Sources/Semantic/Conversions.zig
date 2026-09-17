@@ -20,7 +20,18 @@ pub fn coerce(self: anytype, builder: anytype, value: Model.TypedValue, target: 
     if (Inheritance.canUpcast(self, value.type, target)) {
         const result = try self.newValue(builder, target);
         try self.emit(builder, .{ .class_cast = .{ .result = result, .operand = value.value } });
-        return .{ .type = target, .value = result };
+        // An upcast changes the static view, not the lifetime obligation or
+        // borrow provenance of the instance. It does not expose a writable
+        // reference to the original derived-typed storage slot.
+        return .{
+            .type = target,
+            .value = result,
+            .transferred = value.transferred,
+            .borrowed_root = value.borrowed_root,
+            .borrowed_mode = value.borrowed_mode,
+            .lexical_captures = value.lexical_captures,
+            .lexical_borrows = value.lexical_borrows,
+        };
     }
     if (!Numeric.canWiden(value.type, target)) {
         const message = try std.fmt.allocPrint(self.allocator, "cannot implicitly convert '{s}' to '{s}'", .{ self.typeName(value.type), self.typeName(target) });
@@ -34,7 +45,8 @@ pub fn canImplicitlyConvert(self: anytype, source: Types.Type, target: Types.Typ
         Inheritance.canUpcast(self, source, target) or ProtocolValues.canErase(self, source, target)) return true;
     return if (target.optionalChild()) |child|
         Inheritance.canUpcast(self, source, child) or ProtocolValues.canErase(self, source, child)
-    else false;
+    else
+        false;
 }
 
 pub fn cost(self: anytype, source: Types.Type, target: Types.Type) ?u8 {

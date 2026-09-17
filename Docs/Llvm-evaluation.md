@@ -149,7 +149,7 @@ same rule for dynamic lists of resource-free elements: they allocate exact new
 storage, preserve the retained prefix when applicable, then consume the input
 root. This intentionally has no spare-capacity optimization in the experiment.
 Other edit kinds and resource-bearing elements remain conditional refusals. The same private allocation
-foundation covers exact, non-inherited classes whose fields have supported LLVM
+foundation covers classes, including inherited classes, whose fields have supported LLVM
 storage representations: class values stay opaque pointers while a separate
 private storage type drives allocation, field loads and field stores. A store mutates that private
 storage and returns the same opaque class pointer, while the retain/drop operations
@@ -163,9 +163,12 @@ ranges produce an empty owning list. Slices whose elements carry resources and
 slice results that remain borrowed views are still refused.
 
 Class drops use the typed IR finalization plans, including user finalizers and
-resource-field cleanup, with explicit root and edge counts. Inheritance and
-dynamic dispatch remain outside this subset. When a class loses its last root,
-a type-directed graph visitor can collect its unreachable cyclic component.
+resource-field cleanup, with explicit root and edge counts. Inherited plans
+invoke derived and base finalizers with their declared receiver types. When a
+class loses its last root, a type-directed graph visitor can collect its
+unreachable cyclic component. Reachability includes possible derived instances
+behind base-typed fields, including back edges introduced only by a subtype
+(`InheritedCycle.sx`).
 Visitors use LLVM field and aggregate layouts, including optional values,
 protocol and enum payloads, fixed arrays, lists and bound callback owners.
 Rooted descendants and objects reached from outside the candidate graph retain
@@ -197,8 +200,19 @@ Lexical address captures and indirect Silex calls are supported. Monomorphic
 bound class methods use the receiver as both environment and owner; their third
 callback slot carries that owner through copies, fields, calls and cleanup.
 `MonomorphicBoundCallback.sx` checks retained lifetime and exact destruction;
-`OwnedBoundCallback.sx` is the former refusal witness, now admitted. True
-inherited dispatch remains a refusal, witnessed by `InheritedBoundCallback.sx`.
+`OwnedBoundCallback.sx` and `InheritedBoundCallback.sx` are former refusal
+witnesses, now admitted. Class casts preserve the allocation and its dynamic tag;
+upcasts also preserve temporary ownership (`UpcastLifetime.sx`). Virtual calls
+select the implementation from that tag. Synthetic mutable-method
+results are rebuilt with the declared result type, preserving the exact LLVM call
+signature. `ClassInheritance.sx` covers inherited fields, dynamic reflection,
+aggregate calls, aliases and derived/base finalization. Deep copying values that
+contain classes remains unsupported and is explicitly refused; it must never
+produce an alias in place of an independent graph (`RefuseClassCopy.sx`).
+Implicit derived construction releases its temporary base allocation after
+transferring the retained fields, without calling the base user finalizer early.
+Identity comparisons release owned temporary class and optional results after
+reading them (`ComparisonLifetime.sx`).
 Capturing callbacks cannot expose a capture-free C function address. Other
 non-integer globals, package providers, and mutable views requiring owning storage detachment are also still
 rejected. Typed raw numeric loads and stores accept either an opaque interop

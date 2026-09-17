@@ -1117,3 +1117,27 @@ test "fixed array literals transfer their element ownership" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("fixed class storage passed\n", output);
 }
+
+test "implicit derived construction transfers fields and releases its temporary bases" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/ClassInheritance.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("class-inheritance-ok\n", output);
+}
+
+test "inherited cycles follow base fields and edges introduced by subtypes" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/InheritedCycle.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("inherited-cycles-ok\n", output);
+}
+
+test "identity comparisons release temporary class and optional results" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/ComparisonLifetime.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("comparison-lifetime-ok\n", output);
+}
+
+test "upcasts preserve ownership of temporary derived instances" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/UpcastLifetime.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("upcast-lifetime-ok\n", output);
+}

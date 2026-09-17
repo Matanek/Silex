@@ -33,12 +33,20 @@ const counter_source =
     \\func main() { print(calculate(0)); print(calculate(4)); print(calculate(5)) }
 ;
 
+fn directCounterSource(allocator: std.mem.Allocator) ![]const u8 {
+    // Method receiver lifetimes introduce nonterminal drops. The positive
+    // admission fixture must stay inside this pass's drop-free loop contract.
+    const counter = try std.mem.replaceOwned(u8, allocator, counter_source, "counter.add(3)", "counter.value += 3");
+    defer allocator.free(counter);
+    return std.mem.replaceOwned(u8, allocator, counter, "observer.add(-1)", "observer.value -= 1");
+}
+
 test "private class state keeps stores and ownership while forwarding a shared loop recurrence" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     var frontend = Frontend.Frontend.init(a);
-    const compilation = try frontend.compile(counter_source);
+    const compilation = try frontend.compile(try directCounterSource(a));
     const before = try Release.optimizeWithOptions(a, compilation.ir, .{
         .disabled = .reference_memory_elision,
         .stop_after = .reference_memory_elision,
@@ -70,6 +78,38 @@ test "private class state keeps stores and ownership while forwarding a shared l
     const full = try Release.optimizeWithOptions(a, compilation.ir, .{ .verify_each_pass = true });
     const released = try Interpreter.runCapture(a, full);
     try std.testing.expectEqualStrings(raw.stdout, released.stdout);
+}
+
+test "private class state preserves method receiver lifetime barriers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var frontend = Frontend.Frontend.init(a);
+    const compilation = try frontend.compile(counter_source);
+    const before = try Release.optimizeWithOptions(a, compilation.ir, .{
+        .disabled = .reference_memory_elision,
+        .stop_after = .reference_memory_elision,
+        .verify_each_pass = true,
+    });
+    var after = before;
+    const functions = try a.dupe(Ir.Function, before.functions);
+    var checked = false;
+    for (functions) |*function| {
+        if (!std.mem.eql(u8, function.name, "calculate")) continue;
+        checked = true;
+        const old = function.*;
+        function.* = try State.optimize(a, before, old);
+        try std.testing.expect(count(old, .field_load) >= 2);
+        try std.testing.expect(count(old, .class_drop) > 2);
+        for ([_]std.meta.Tag(Ir.Instruction){ .field_load, .field_store, .class_retain, .class_drop }) |tag|
+            try std.testing.expectEqual(count(old, tag), count(function.*, tag));
+    }
+    try std.testing.expect(checked);
+    after.functions = functions;
+    try Verifier.verify(a, after);
+    const result = try Interpreter.runCapture(a, after);
+    try std.testing.expectEqualStrings("4\n12\n18\n", result.stdout);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
 }
 
 fn fixture() Ir.Program {
@@ -161,7 +201,7 @@ test "private class state cost policy follows the requested target architecture"
     const a = arena.allocator();
     const Target = @import("../Target.zig").Target;
     var frontend = Frontend.Frontend.init(a);
-    const compilation = try frontend.compile(counter_source);
+    const compilation = try frontend.compile(try directCounterSource(a));
     for ([_]Target{ .macos_arm64, .linux_arm64, .windows_arm64, .macos_x64, .linux_x64, .windows_x64 }) |target| {
         var options = Release.Options.forTarget(target, 2);
         try std.testing.expectEqual(@as(u16, 2), options.worker_count);

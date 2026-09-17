@@ -64,6 +64,11 @@ def main():
         "LlvmEvaluation/FixedClassStorage.sx": "fixed class storage passed\n",
         "LlvmEvaluation/MethodReceiverLifetime.sx": "method receiver lifetime passed\n",
         "LlvmEvaluation/MonomorphicBoundCallback.sx": "monomorphic-bound-callback-ok\n",
+        "LlvmEvaluation/InheritedBoundCallback.sx": "inherited-bound-callback-ok\n",
+        "LlvmEvaluation/ClassInheritance.sx": "class-inheritance-ok\n",
+        "LlvmEvaluation/InheritedCycle.sx": "inherited-cycles-ok\n",
+        "LlvmEvaluation/ComparisonLifetime.sx": "comparison-lifetime-ok\n",
+        "LlvmEvaluation/UpcastLifetime.sx": "upcast-lifetime-ok\n",
         "LlvmEvaluation/OwnedBoundCallback.sx": "3\n",
         "LlvmEvaluation/StaticRoots.sx": "body\ndrop 3\ndrop 2\ndrop 1\n",
         "LlvmEvaluation/BorrowedView.sx": "42\n2\n",
@@ -207,6 +212,17 @@ def main():
             print(source.stem, mode, "PASS", flush=True)
 
     verify_counts(output, corpus, call)
+
+    class_copy = corpus/"LlvmEvaluation/RefuseClassCopy.sx"
+    for mode in ["debug", "release"]:
+        checked = call("ClassCopy-native-"+mode, [args.native, "run", class_copy, "--backend", "native", "--"+mode, "--nocache"])
+        assert checked["returncode"] == 0 and checked["stdout"] == "class-copy-ok\n", checked
+    for mode in ["O0", "O3"]:
+        target = output/("ClassCopy-"+mode)
+        target.write_bytes(b"existing output must survive refusal")
+        rejected = call("ClassCopy-llvm-refusal-"+mode, llvm_command(class_copy, mode, target))
+        assert rejected["returncode"] != 0 and "UnsupportedType" in rejected["stderr"], rejected
+        assert target.read_bytes() == b"existing output must survive refusal"
 
     minmax_metadata = json.loads(Path(str(output/"ScalarMinMax-O3")+".json").read_text())
     minmax_llvm = (Path(minmax_metadata["artifact_directory"])/"raw.ll").read_text()
@@ -955,18 +971,6 @@ def main():
     assert "define internal i64 @sx.c.callback." in c_callback_llvm
     assert "call fastcc i64 @sx_" in c_callback_llvm
     print("C FUNCTION ADDRESS CALLBACK PASS", flush=True)
-
-    # The ordinary compiler must accept the refusal witness first.
-    for name in ["InheritedBoundCallback"]:
-        source = (corpus/"LlvmEvaluation"/(name+".sx")).resolve()
-        native = output/(name+"-native")
-        assert call(name+"-native", [args.native, "compile", source, "--debug", "--nocache", "--output", native])["returncode"] == 0
-        target = output/(name+"-refused")
-        target.write_bytes(b"existing output must survive refusal")
-        rejected = call(name+"-llvm", llvm_command(source, "O3", target))
-        assert rejected["returncode"] != 0 and "Unsupported" in rejected["stderr"], rejected
-        assert target.read_bytes() == b"existing output must survive refusal"
-        print(name, "REFUSED before output", flush=True)
 
     source = (corpus/"LlvmEvaluation/Rounding.sx").resolve()
     native = output/"Rounding-debug"

@@ -702,3 +702,57 @@ test "mutable owning borrows preserve field ownership across callbacks and retur
     }
     assert(NativeReplacementToken.drops == 3)
 }
+
+class NativeInheritedCopyItem { var value:int = 7 }
+class NativeInheritedCopyBase { var item:NativeInheritedCopyItem = NativeInheritedCopyItem() }
+class NativeInheritedCopyDerived:NativeInheritedCopyBase {}
+
+test "deep copy clones inherited class fields after construction cleanup" {
+    var derived = NativeInheritedCopyDerived()
+    var base:NativeInheritedCopyBase = derived
+    var cloned = copy base
+    assert(cloned != base && cloned.item != base.item)
+    cloned.item.value = 42
+    assert(base.item.value == 7)
+}
+
+class NativeComparisonOwner {
+    var item:NativeReplacementToken = NativeReplacementToken()
+    func get() NativeReplacementToken { return self.item }
+    func maybe() NativeReplacementToken? { return self.item }
+}
+
+test "identity comparisons release temporary class and optional results" {
+    NativeReplacementToken.drops = 0
+    {
+        var owner = NativeComparisonOwner()
+        assert(owner.get() == owner.item)
+        assert(owner.item == owner.get())
+        assert(owner.get() == owner.get())
+        assert(owner.maybe() != null)
+        assert(null != owner.maybe())
+        assert(owner.maybe() == owner.item)
+        assert(owner.item == owner.maybe())
+    }
+    assert(NativeReplacementToken.drops == 1)
+}
+
+class NativeUpcastBase { drop { NativeReplacementToken.drops++ } }
+class NativeUpcastDerived:NativeUpcastBase {}
+func consume_native_upcast(value:NativeUpcastBase) {}
+func consume_native_optional_upcast(value:NativeUpcastBase?) {}
+func make_native_upcast() NativeUpcastBase { return NativeUpcastDerived() }
+
+test "upcasts preserve ownership of temporary derived instances" {
+    NativeReplacementToken.drops = 0
+    consume_native_upcast(NativeUpcastDerived())
+    assert(NativeReplacementToken.drops == 1)
+    consume_native_optional_upcast(NativeUpcastDerived())
+    assert(NativeReplacementToken.drops == 2)
+    {
+        var value:NativeUpcastBase = NativeUpcastDerived()
+        var optional:NativeUpcastBase? = NativeUpcastDerived()
+        var returned = make_native_upcast()
+    }
+    assert(NativeReplacementToken.drops == 5)
+}

@@ -52,6 +52,16 @@ fn reaches(program: Ir.Program, value: Ir.Type, target: usize, initial: bool, vi
     visited[index] = true;
     const structure = program.structures[index];
     if (structure.is_protocol) return true;
+    if (structure.is_class) {
+        // A field declared as a base class can point to any derived instance,
+        // including the candidate itself or a subtype that adds a back edge.
+        for (program.structures, 0..) |candidate, candidate_index| {
+            if (!candidate.is_class or !@import("ClassDispatch.zig").isAncestor(program, index, candidate_index)) continue;
+            if (!initial and candidate_index == target) return true;
+            for (candidate.fields) |field| if (reaches(program, field.type, target, false, visited)) return true;
+        }
+        return false;
+    }
     if (structure.collection) |collection| return !collection.view and reaches(program, collection.element, target, false, visited);
     if (E.enumIndexForStructure(program, index)) |enumeration| {
         for (program.enums[enumeration].variants) |variant| for (variant.associated_types) |child| {
@@ -62,7 +72,7 @@ fn reaches(program: Ir.Program, value: Ir.Type, target: usize, initial: bool, vi
     return false;
 }
 
-fn containsClass(program: Ir.Program, value: Ir.Type, depth: usize) bool {
+pub fn containsClass(program: Ir.Program, value: Ir.Type, depth: usize) bool {
     if (depth > program.structures.len + program.enums.len + 8) return false;
     if (value.optionalChild()) |child| return containsClass(program, child, depth + 1);
     if (value.functionIndex() != null) return true;

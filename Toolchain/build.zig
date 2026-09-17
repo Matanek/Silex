@@ -13,6 +13,10 @@ pub fn build(b: *std.Build) void {
         .off, .any => .ReleaseFast,
     };
 
+    // Unoptimized interpreter frames exceed 16 MiB at the 512-call guard.
+    // Give the Debug bootstrap and its tests room to reach that same guard.
+    const bootstrap_stack_size: ?u64 = if (optimize == .Debug) 32 * 1024 * 1024 else null;
+
     const package_version = manifestVersion();
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", package_version);
@@ -303,6 +307,7 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
         .version = std.SemanticVersion.parse(package_version) catch unreachable,
     });
+    executable.stack_size = bootstrap_stack_size;
     b.installArtifact(executable);
 
     const run_command = b.addRunArtifact(executable);
@@ -507,6 +512,7 @@ pub fn build(b: *std.Build) void {
     progress_test_step.dependOn(&progress_test_command.step);
 
     const tests = b.addTest(.{ .root_module = module });
+    tests.stack_size = bootstrap_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
     const deep_copy_tests = b.addTest(.{

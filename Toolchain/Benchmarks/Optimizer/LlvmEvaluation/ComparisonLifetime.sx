@@ -1,0 +1,21 @@
+static class Counts { static var drops:int = 0 }
+class Item { drop { Counts.drops++ } }
+class Holder {
+    var item:Item = Item()
+    func get() Item { return self.item }
+    func maybe() Item? { return self.item }
+}
+func main() {
+    {
+        var holder = Holder()
+        assert(holder.get() == holder.item)
+        assert(holder.item == holder.get())
+        assert(holder.get() == holder.get())
+        assert(holder.maybe() != null)
+        assert(null != holder.maybe())
+        assert(holder.maybe() == holder.item)
+        assert(holder.item == holder.maybe())
+    }
+    assert(Counts.drops == 1)
+    print("comparison-lifetime-ok")
+}

@@ -1,0 +1,19 @@
+static class Counts { static var drops:int = 0 }
+class Base { drop { Counts.drops++ } }
+class Derived:Base {}
+func consume(value:Base) {}
+func consume_optional(value:Base?) {}
+func make() Base { return Derived() }
+func main() {
+    consume(Derived())
+    assert(Counts.drops == 1)
+    consume_optional(Derived())
+    assert(Counts.drops == 2)
+    {
+        var value:Base = Derived()
+        var optional:Base? = Derived()
+        var returned = make()
+    }
+    assert(Counts.drops == 5)
+    print("upcast-lifetime-ok")
+}

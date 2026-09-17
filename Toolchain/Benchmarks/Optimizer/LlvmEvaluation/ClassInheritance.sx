@@ -1,0 +1,70 @@
+static class Counts {
+    static var base:int = 0
+    static var leaf:int = 0
+    static var items:int = 0
+    static var order:int = 0
+}
+
+struct Packet {
+    var a:float
+    var b:int
+    var c:float
+    var d:int
+    var e:float
+}
+
+class Item {
+    var value:int = 7
+    drop { Counts.items++; Counts.order = Counts.order * 10 + 3 }
+}
+
+class Base {
+    var item:Item = Item()
+    var value:int = 3
+    func transform(input:Packet) Packet { return input }
+    func advance(amount:int) { self.value += amount }
+    drop { Counts.base++; Counts.order = Counts.order * 10 + 1 }
+}
+
+class Middle:Base { var extra:int = 17 }
+class Leaf:Middle {
+    var samples:float[] = [1.0, 2.0]
+    override func transform(input:Packet) Packet {
+        var result = input
+        result.a += self.samples[0]
+        result.b += self.value
+        result.c *= 2.0
+        result.d += self.extra
+        result.e -= self.samples[1]
+        return result
+    }
+    override func advance(amount:int) { self.value += amount * 2 }
+    drop { Counts.leaf++; Counts.order = Counts.order * 10 + 2 }
+}
+
+func exercise(base:Base, leaf:Leaf) {
+    base.advance(4)
+    assert(leaf.value == 11 && leaf.extra == 17)
+    var alias:Base = leaf
+    assert(base == alias)
+    let info = reflect(base)
+    assert(info.type == "Leaf" && info.types.count() == 3)
+    let output = base.transform(Packet(a:0.25, b:5, c:-1.5, d:7, e:4.0))
+    assert(output.a == 1.25 && output.b == 16 && output.c == -3.0)
+    assert(output.d == 24 && output.e == 2.0)
+    var plain = Base()
+    assert(reflect(plain).type == "Base")
+    let unchanged = plain.transform(output)
+    assert(unchanged.a == output.a && unchanged.e == output.e)
+}
+
+func main() {
+    {
+        var leaf = Leaf()
+        var base:Base = leaf
+        exercise(base, leaf)
+        assert(Counts.leaf == 0 && Counts.base == 1 && Counts.order == 13)
+    }
+    assert(Counts.leaf == 1 && Counts.base == 2 && Counts.items == 2 && Counts.order == 13213)
+    print("class-inheritance-ok")
+}

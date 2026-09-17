@@ -262,6 +262,7 @@ fn emitInternal(allocator: Allocator, program: Ir.Program, boundaries: []const S
         try output.appendSlice(allocator, " }\n");
     }
     if (program.structures.len != 0) try output.append(allocator, '\n');
+    try @import("ClassDispatch.zig").emitAdapters(&output, allocator, program, lowered_functions);
 
     for (program.functions, 0..) |function, function_id| {
         if (!reachable[function_id]) continue;
@@ -921,7 +922,10 @@ const FunctionEmitter = struct {
             .unary => |value| try self.emitNegate(block_id, value),
             .binary => |value| try self.emitBinary(block_id, value),
             .convert => |value| try self.emitConvert(block_id, value),
-            .call => |value| try self.emitCall(block_id, instruction_index, value),
+            .call => |value| try self.emitCallTo(block_id, instruction_index, value, null),
+            .dynamic_call => |value| try @import("ClassDispatch.zig").emitCall(self, block_id, instruction_index, value),
+            .class_cast => |value| try @import("ClassDispatch.zig").emitCast(self, value),
+            .class_test => |value| try @import("ClassDispatch.zig").emitTest(self, value),
             .indirect_call => |value| try self.emitIndirectCall(block_id, instruction_index, value),
             .boundary_call => |value| try self.emitBoundaryCall(value),
             .print => |value| try self.emitPrint(value),
@@ -1506,6 +1510,7 @@ const FunctionEmitter = struct {
     fn emitDeepCopy(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
         const type_value = try self.valueType(result);
         if (type_value != try self.valueType(operand)) return error.InvalidProgram;
+        if (@import("CycleTrace.zig").containsClass(self.program, type_value, 0)) return error.UnsupportedType;
         const collection = self.collectionInfo(type_value) catch return self.copyValue(result, operand);
         if (collection.view or !plainValue(self.program, collection.element, 0))
             return error.UnsupportedType;
@@ -1704,11 +1709,11 @@ const FunctionEmitter = struct {
             if (plan.structure >= self.program.structures.len or
                 !materialClassStorage(self.program, plan.structure)) return error.UnsupportedInstruction;
             for (plan.functions) |finalizer| {
-                if (finalizer.structure != plan.structure or finalizer.function >= self.program.functions.len)
+                if (!@import("ClassDispatch.zig").isAncestor(self.program, finalizer.structure, plan.structure) or finalizer.function >= self.program.functions.len)
                     return error.InvalidProgram;
                 const function = self.program.functions[finalizer.function];
                 if (function.capture_types.len != 0 or function.parameter_types.len != 1 or
-                    function.parameter_types[0] != Ir.Type.structure(plan.structure) or
+                    function.parameter_types[0] != Ir.Type.structure(finalizer.structure) or
                     function.return_type != .void) return error.InvalidProgram;
             }
         }
@@ -3151,7 +3156,7 @@ const FunctionEmitter = struct {
 
     fn emitCallArgumentAllocas(self: *FunctionEmitter) Error!void {
         for (self.function.blocks, 0..) |block, block_id| for (block.instructions, 0..) |instruction, instruction_index| switch (instruction) {
-            .call => |value| {
+            inline .call, .dynamic_call => |value| {
                 if (value.function >= self.program.functions.len) return error.InvalidProgram;
                 const callee = self.program.functions[value.function];
                 if (callee.parameter_types.len != value.arguments.len) return error.InvalidProgram;
@@ -3185,11 +3190,12 @@ const FunctionEmitter = struct {
         };
     }
 
-    fn emitCall(
+    pub fn emitCallTo(
         self: *FunctionEmitter,
         block_id: usize,
         instruction_index: usize,
         value: Ir.Instruction.Call,
+        selected: ?[]const u8,
     ) Error!void {
         if (value.function >= self.program.functions.len) return error.InvalidProgram;
         const callee = self.program.functions[value.function];
@@ -3209,7 +3215,8 @@ const FunctionEmitter = struct {
         }
         try self.output.appendSlice(self.allocator, "  ");
         if (value.result) |result| try self.write("%v{d} = ", .{result});
-        try self.write("call fastcc {s} @sx_{d}(ptr null", .{ try llvmType(self.allocator, self.program, callee.return_type), value.function });
+        const target = selected orelse try std.fmt.allocPrint(self.allocator, "@sx_{d}", .{value.function});
+        try self.write("call fastcc {s} {s}(ptr null", .{ try llvmType(self.allocator, self.program, callee.return_type), target });
         for (value.arguments, 0..) |argument, index| {
             const parameter_type = callee.parameter_types[index];
             if (try indirectSilexParameter(self.program, parameter_type))
@@ -3379,18 +3386,18 @@ const FunctionEmitter = struct {
         }
     }
 
-    fn valueType(self: *FunctionEmitter, value: Ir.ValueId) Error!Ir.Type {
+    pub fn valueType(self: *FunctionEmitter, value: Ir.ValueId) Error!Ir.Type {
         if (value >= self.function.value_types.len) return error.InvalidProgram;
         return self.function.value_types[value];
     }
 
-    fn nextTemporary(self: *FunctionEmitter) usize {
+    pub fn nextTemporary(self: *FunctionEmitter) usize {
         const temporary = self.temporary;
         self.temporary += 1;
         return temporary;
     }
 
-    fn typeTag(self: *FunctionEmitter, index: usize) u64 {
+    pub fn typeTag(self: *FunctionEmitter, index: usize) u64 {
         return if (self.stable_tags) Identity.typeTag(self.program, index) else index;
     }
 
@@ -3496,7 +3503,7 @@ fn pointerRepresentation(program: Ir.Program, type_value: Ir.Type) bool {
 // classification. LLVM aggregate arguments containing i1 fields can otherwise
 // be assigned incompatible register/stack layouts at a caller and its callee
 // when an unrelated instruction changes register pressure.
-fn indirectSilexParameter(program: Ir.Program, type_value: Ir.Type) Error!bool {
+pub fn indirectSilexParameter(program: Ir.Program, type_value: Ir.Type) Error!bool {
     if (type_value.optionalChild() != null or type_value.functionIndex() != null) return true;
     const structure_index = type_value.structureIndex() orelse return false;
     if (structure_index >= program.structures.len) return error.InvalidProgram;
@@ -3656,7 +3663,7 @@ pub fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) 
 pub fn materialClassStorage(program: Ir.Program, structure_index: usize) bool {
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
-    if (!structure.is_class or structure.base != null) return false;
+    if (!structure.is_class) return false;
     for (structure.fields) |field| {
         _ = llvmStorageSlots(program, field.type, 0) catch return false;
     }
@@ -3666,7 +3673,7 @@ pub fn materialClassStorage(program: Ir.Program, structure_index: usize) bool {
 fn classStorageSlots(program: Ir.Program, structure_index: usize) Error!usize {
     if (structure_index >= program.structures.len) return error.InvalidProgram;
     const structure = program.structures[structure_index];
-    if (!structure.is_class or structure.base != null) return error.UnsupportedType;
+    if (!structure.is_class) return error.UnsupportedType;
     var slots: usize = 0;
     for (structure.fields) |field|
         slots = std.math.add(usize, slots, try llvmStorageSlots(program, field.type, 0)) catch

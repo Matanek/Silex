@@ -58,6 +58,10 @@ test "reflect values through category-specific metadata" {
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
+    for (compilation.ir.functions) |function| for (function.blocks) |block| for (block.instructions) |instruction| {
+        if (instruction == .structure_init)
+            try std.testing.expect(!compilation.ir.structures[instruction.structure_init.structure].tuple_placeholder);
+    };
     try std.testing.expectEqualStrings(
         \\Easing
         \\Easing.constant

@@ -10,7 +10,7 @@ const Error = Allocator.Error || error{ InvalidProgram, UnsupportedInstruction }
 pub fn lower(allocator: Allocator, original: Ir.Function) Error!Ir.Function {
     const definitions = try allocator.alloc(usize, original.value_types.len);
     @memset(definitions, 0);
-    for (0..original.parameter_types.len) |index| definitions[index] = 1;
+    for (0..original.capture_types.len + original.parameter_types.len) |index| definitions[index] = 1;
     for (original.blocks, 0..) |block, block_index| for (block.instructions, 0..) |instruction, instruction_index| {
         if (Coverage.classify(std.meta.activeTag(instruction)) == .unsupported) {
             std.debug.print(
@@ -38,7 +38,7 @@ pub fn lower(allocator: Allocator, original: Ir.Function) Error!Ir.Function {
     const blocks = try allocator.dupe(Ir.Block, original.blocks);
     for (blocks, 0..) |*block, index| {
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
-        if (index == 0) for (0..original.parameter_types.len) |parameter| {
+        if (index == 0) for (0..original.capture_types.len + original.parameter_types.len) |parameter| {
             if (state.homes[parameter]) |local| try instructions.append(allocator, .{
                 .local_store = .{ .local = local, .operand = parameter },
             });
@@ -118,7 +118,7 @@ const State = struct {
 };
 
 fn operandField(comptime name: []const u8) bool {
-    inline for (.{ "operand", "left", "right", "value", "base", "address", "byte_offset", "index", "collection", "reference", "replacement", "argument", "start", "end", "condition" }) |candidate|
+    inline for (.{ "operand", "receiver", "left", "right", "value", "base", "address", "byte_offset", "index", "collection", "reference", "replacement", "argument", "start", "end", "condition" }) |candidate|
         if (std.mem.eql(u8, name, candidate)) return true;
     return false;
 }
