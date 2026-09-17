@@ -399,6 +399,9 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
     var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
     var progress = CliProgress.Install.init(init.io);
     defer progress.finish();
+    const local_source = if (Io.Dir.cwd().statFile(init.io, options.package_path, .{})) |found|
+        found.kind == .directory
+    else |_| false;
     const result = try installPackageOperand(
         init,
         allocator,
@@ -410,7 +413,9 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         options.suite,
         &progress,
     ) orelse return 1;
-    if (registryMode(init.environ_map) == .public or registryMode(init.environ_map) == .staging) {
+    if (!local_source and (registryMode(init.environ_map) == .public or
+        registryMode(init.environ_map) == .staging))
+    {
         const project_root = try Io.Dir.cwd().realPathFileAlloc(init.io, ".", allocator);
         const requested_version = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}",
             .{ result.package.version.major, result.package.version.minor, result.package.version.patch });

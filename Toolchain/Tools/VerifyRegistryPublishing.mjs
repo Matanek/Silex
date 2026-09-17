@@ -39,7 +39,7 @@ async function reportNativeProcesses(command) {
     console.log(`probe windows-arm64 ${command} processes: ${stdout.trim() || 'none'}`);
   } catch (error) { console.log(`probe windows-arm64 ${command} process inspection failed: ${error.code || error.message}`); }
 }
-const artifact = Buffer.alloc(10000, 0x5a), artifactDigest = sha(artifact);
+const artifact = Buffer.alloc(150000, 0x5a), artifactDigest = sha(artifact);
 const message = 'portable registry resource';
 
 function verifyArchive(publication) {
@@ -135,7 +135,7 @@ async function serve(request, response) {
     assert.equal(request.method, 'PATCH');
     const previous = objects.get(match[2]) ?? Buffer.alloc(0);
     assert.equal(Number(request.headers['upload-offset']), previous.length);
-    assert(payload.length > 0 && payload.length <= 4096);
+    assert(payload.length > 0 && payload.length <= 64 * 1024);
     objects.set(match[2], Buffer.concat([previous, payload]));
     if (match[2] === artifactDigest) {
       artifactUploads++;
