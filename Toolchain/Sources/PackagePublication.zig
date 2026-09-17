@@ -195,7 +195,7 @@ fn captureArtifacts(
             if (!std.mem.eql(u8, previous.target, declaration.target)) continue;
             if (pathsCollide(previous.path, declaration.path)) return error.ArtifactPathCollision;
         }
-        const bytes = try Snapshot.copyFileLimited(allocator, io, package_root, declaration.path, 32 * 1024 * 1024);
+        const bytes = try Snapshot.copyFileLimited(allocator, io, package_root, declaration.path, 64 * 1024 * 1024);
         var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
         const actual = std.fmt.bytesToHex(digest, .lower);

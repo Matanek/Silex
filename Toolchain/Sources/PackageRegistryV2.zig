@@ -324,7 +324,7 @@ pub const Client = struct {
     }
 
     fn downloadBlob(self: *Client, path: []const u8, output: []const u8, blob: Blob) !void {
-        if (!hexSha(blob.sha256) or blob.size > 32 * 1024 * 1024) return self.fail("invalid registry artifact limit");
+        if (!hexSha(blob.sha256) or blob.size > 64 * 1024 * 1024) return self.fail("invalid registry artifact limit");
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.origin, path });
         const Event = union(enum) { response: anyerror!void, timeout: Io.Cancelable!void };
         var buffer: [2]Event = undefined;
@@ -515,7 +515,7 @@ pub fn parsePublication(
     if (reply.descriptor.artifacts.len != package.artifacts.len) return error.InvalidRegistryResponse;
     for (reply.descriptor.artifacts, 0..) |artifact, index| {
         if (!Modules.validName(artifact.name) or !Archive.safeArchivePath(artifact.path) or
-            !hexSha(artifact.sha256) or artifact.size > 32 * 1024 * 1024 or
+            !hexSha(artifact.sha256) or artifact.size > 64 * 1024 * 1024 or
             !validTarget(artifact.target)) return error.InvalidRegistryResponse;
         var declared = false;
         for (package.artifacts) |item| {
