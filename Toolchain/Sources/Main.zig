@@ -76,7 +76,7 @@ const usage =
     \\       silex lsp
     \\
     \\Builds and runs Silex programs with LLVM by default on macOS ARM64 and the native backend elsewhere.
-    \\Use --backend native or --backend llvm to select a backend explicitly. The command also validates and registers
+    \\Use --backend native or --backend llvm to select a backend explicitly. The command also validates and publishes
     \\packages, executes portable IR through the reference interpreter, or serves editor requests.
     \\
 ;
@@ -410,7 +410,7 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         options.suite,
         &progress,
     ) orelse return 1;
-    if (init.environ_map.get("SILEX_REGISTRY_V2") != null) {
+    if (registryMode(init.environ_map) == .public or registryMode(init.environ_map) == .staging) {
         const project_root = try Io.Dir.cwd().realPathFileAlloc(init.io, ".", allocator);
         const requested_version = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}",
             .{ result.package.version.major, result.package.version.minor, result.package.version.patch });
@@ -582,11 +582,37 @@ fn installPackageOperand(
     };
 }
 
+const RegistryMode = enum { public, staging, legacy, invalid };
+
+fn registryMode(environment: *const std.process.Environ.Map) RegistryMode {
+    const mode = environment.get("SILEX_REGISTRY_V2") orelse
+        return if (environment.get("SILEX_REGISTRY") == null) .public else .legacy;
+    if (std.mem.eql(u8, mode, "public")) return .public;
+    if (std.mem.eql(u8, mode, "test")) return .staging;
+    return .invalid;
+}
+
 fn publicRegistryOrigin(init: std.process.Init) !?[]const u8 {
-    const mode = init.environ_map.get("SILEX_REGISTRY_V2") orelse return null;
-    if (std.mem.eql(u8, mode, "public")) return PackageRegistryV2.public_origin;
-    if (std.mem.eql(u8, mode, "test")) return try RegistryLogin.publicTestOrigin(init);
-    return error.InvalidRegistryV2Mode;
+    return switch (registryMode(init.environ_map)) {
+        .public => PackageRegistryV2.public_origin,
+        .staging => try RegistryLogin.publicTestOrigin(init),
+        .legacy => null,
+        .invalid => error.InvalidRegistryV2Mode,
+    };
+}
+
+test "Cloudflare registry is the default and legacy access requires an explicit index" {
+    var environment = std.process.Environ.Map.init(std.testing.allocator);
+    defer environment.deinit();
+    try std.testing.expectEqual(RegistryMode.public, registryMode(&environment));
+    try environment.put("SILEX_REGISTRY", "https://example.invalid/v1/index.json");
+    try std.testing.expectEqual(RegistryMode.legacy, registryMode(&environment));
+    try environment.put("SILEX_REGISTRY_V2", "test");
+    try std.testing.expectEqual(RegistryMode.staging, registryMode(&environment));
+    try environment.put("SILEX_REGISTRY_V2", "public");
+    try std.testing.expectEqual(RegistryMode.public, registryMode(&environment));
+    try environment.put("SILEX_REGISTRY_V2", "other");
+    try std.testing.expectEqual(RegistryMode.invalid, registryMode(&environment));
 }
 
 fn packageRegistryCacheRoot(allocator: std.mem.Allocator, packages_root: []const u8) ![]const u8 {
