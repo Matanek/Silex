@@ -2009,7 +2009,7 @@ fn appendMembers(
     }
     const structure = findStructure(program, nominalReceiverName(type_name)) orelse return;
     if (structure.collection) |collection| {
-        try appendCollectionMembers(allocator, candidates, source, cursor, context, collection);
+        try appendCollectionMembers(allocator, candidates, source, cursor, context, collection, try collectionPathMutable(allocator, source, program, cursor, trimmed_receiver));
         return;
     }
     if (structure.is_tuple and !structure.tuple_named) return;
@@ -2387,6 +2387,7 @@ fn appendCollectionMembers(
     cursor: usize,
     context: Context,
     collection: Ast.Collection,
+    mutable: bool,
 ) !void {
     try appendCandidate(allocator, candidates, context, .{
         .label = "count",
@@ -2398,13 +2399,33 @@ fn appendCollectionMembers(
         .kind = CompletionKind.method,
         .detail = "is_empty() bool",
     }, 0, true);
-    if (!collection.view) {
+    if (mutable) {
+        try appendCandidate(allocator, candidates, context, .{
+            .label = "swap",
+            .kind = CompletionKind.method,
+            .detail = "swap(first, second)",
+        }, 0, true);
+    }
+    if (mutable and !collection.view) {
+        const mutations = [_]struct { label: []const u8, detail: []const u8 }{
+            .{ .label = "replace", .detail = "replace(index, value)" },
+            .{ .label = "reverse", .detail = "reverse()" },
+        };
+        for (mutations) |mutation| try appendCandidate(allocator, candidates, context, .{
+            .label = mutation.label,
+            .kind = CompletionKind.method,
+            .detail = mutation.detail,
+        }, 0, true);
+    }
+    if (mutable and !collection.view and collection.length == null) {
         const mutations = [_]struct { label: []const u8, detail: []const u8 }{
             .{ .label = "append", .detail = "append(value)" },
             .{ .label = "prepend", .detail = "prepend(value)" },
             .{ .label = "insert", .detail = "insert(index, value)" },
-            .{ .label = "replace", .detail = "replace(index, value)" },
             .{ .label = "clear", .detail = "clear()" },
+            .{ .label = "take", .detail = "take(index)" },
+            .{ .label = "take_first", .detail = "take_first()" },
+            .{ .label = "take_last", .detail = "take_last()" },
         };
         for (mutations) |mutation| try appendCandidate(allocator, candidates, context, .{
             .label = mutation.label,
@@ -2937,11 +2958,55 @@ fn bodyContainsCursor(source: []const u8, start: usize, cursor: usize) bool {
     }
 }
 
+fn collectionPathMutable(allocator: Allocator, source: []const u8, program: Ast.Program, cursor: usize, receiver: []const u8) !bool {
+    // This path mirrors stored-field mutation. Other expression forms retain
+    // their existing completion policy (for example a borrowed call result).
+    if (std.mem.indexOfAny(u8, receiver, "()[]?!") != null) return true;
+    var names = std.mem.splitScalar(u8, receiver, '.');
+    const root = names.next() orelse return true;
+    const callable = containingCallable(source, program, cursor);
+    var static_root = false;
+    var known = std.mem.eql(u8, root, "self");
+    if (!known) if (callable) |owner| {
+        const locals = try visibleLocals(allocator, source, program, owner.position, cursor);
+        defer allocator.free(locals);
+        var index = locals.len;
+        while (index != 0) {
+            index -= 1;
+            if (!std.mem.eql(u8, locals[index].name, root)) continue;
+            if (!locals[index].mutable) return false;
+            known = true;
+            break;
+        }
+        if (!known) for (owner.parameters) |parameter| {
+            if (!std.mem.eql(u8, parameter.name, root)) continue;
+            if (parameter.mode != .mutable) return false;
+            known = true;
+            break;
+        };
+    };
+    if (!known) static_root = findStructure(program, root) != null;
+    var end = root.len;
+    while (names.next()) |name| {
+        const type_name = if (static_root) root else resolveReceiverTypeForAccess(allocator, source, program, cursor, receiver[0..end], false) orelse return true;
+        const structure = findStructure(program, nominalReceiverName(type_name)) orelse return true;
+        const fields = if (static_root) structure.static_fields else structure.fields;
+        for (fields) |field| if (std.mem.eql(u8, field.name, name)) {
+            if (!field.mutable) return false;
+            break;
+        };
+        static_root = false;
+        end += 1 + name.len;
+    }
+    return true;
+}
+
 const Local = struct {
     name: []const u8,
     type_name: ?[]const u8,
     type_value: ?Ast.Type = null,
     depth: usize,
+    mutable: bool = true,
     initializer: ?LocalInitializer = null,
 };
 
@@ -3040,6 +3105,7 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                             .type_name = memberTypeName(program, tuple.fields[field_index].type),
                             .type_value = tuple.fields[field_index].type,
                             .depth = depth,
+                            .mutable = token.tag == .keyword_var,
                         });
                         field_index += 1;
                     }
@@ -3049,6 +3115,7 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 const name = tokens[index + 1].lexeme;
                 try locals.append(allocator, .{
                     .name = name,
+                    .mutable = token.tag == .keyword_var,
                     .initializer = if (index + 3 < end and tokens[index + 2].tag == .equal)
                         declarationInitializer(source, tokens[index + 3 ..])
                     else
@@ -7603,4 +7670,55 @@ test "recover a control condition written on the callable line" {
     const recovery = try recoveryAt(arena.allocator(), source, cursor);
     try std.testing.expect(contains(items, "input"));
     try std.testing.expectEqual(Recovery.completion_site, recovery);
+}
+
+test "complete nested collection mutations through mutable paths" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for ([_][]const u8{ "var", "let" }) |mode| {
+        const source = try std.fmt.allocPrint(arena.allocator(), "class Values {{ var items:int[] = [] }}\nclass Owner {{ {s} values:Values = Values()\nfunc edit() {{ self.values.items. }} }}", .{mode});
+        const cursor = std.mem.indexOf(u8, source, "items.").? + "items.".len;
+        const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+        try std.testing.expect(contains(items, "count"));
+        try std.testing.expect(contains(items, "is_empty"));
+        try std.testing.expectEqual(std.mem.eql(u8, mode, "var"), contains(items, "clear"));
+        try std.testing.expectEqual(std.mem.eql(u8, mode, "var"), contains(items, "append"));
+        try std.testing.expect(!contains(items, "values"));
+        const repeated = try itemsAt(arena.allocator(), source, cursor, .invoked);
+        try std.testing.expectEqual(items.len, repeated.len);
+        for (items, repeated) |item, again| {
+            try std.testing.expectEqualStrings(item.label, again.label);
+            try std.testing.expectEqualStrings(item.insertText.?, again.insertText.?);
+        }
+    }
+}
+
+test "filter collection mutations for bindings parameters and fixed arrays" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cases = [_]struct { body: []const u8, declaration: []const u8 = "var items:int[] = []", mutable: bool, fixed: bool = false }{
+        .{ .body = "func demo() { var owner = Owner()\n owner.values.items.\n }", .mutable = true },
+        .{ .body = "func demo() { let owner = Owner()\n owner.values.items.\n }", .mutable = false },
+        .{ .body = "func demo(owner:@Owner) { owner.values.items.\n }", .mutable = false },
+        .{ .body = "func demo(owner:&Owner) { owner.values.items.\n }", .mutable = true },
+        .{ .body = "func demo() { var owner = Owner()\n owner.values.items.\n }", .declaration = "let items:int[] = []", .mutable = false },
+        .{ .body = "func demo() { var owner = Owner()\n owner.values.items.\n }", .declaration = "var items:int[3] = [1,2,3]", .mutable = true, .fixed = true },
+    };
+    for (cases) |case| {
+        const source = try std.fmt.allocPrint(arena.allocator(), "class Values {{ {s} }}\nclass Owner {{ var values:Values = Values() }}\n{s}", .{ case.declaration, case.body });
+        const cursor = std.mem.indexOf(u8, source, "items.").? + "items.".len;
+        const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+        try std.testing.expectEqual(@as(usize, if (!case.mutable) 2 else if (case.fixed) 5 else 12), items.len);
+        for ([_][]const u8{ "count", "is_empty" }) |name| try std.testing.expect(contains(items, name));
+        for ([_][]const u8{ "swap", "reverse", "replace" }) |name| try std.testing.expectEqual(case.mutable, contains(items, name));
+        for ([_][]const u8{ "append", "prepend", "insert", "clear", "take", "take_first", "take_last" }) |name|
+            try std.testing.expectEqual(case.mutable and !case.fixed, contains(items, name));
+    }
+    const source = "class Values { var items:int[] = [] }\nclass Owner { var values:Values = Values()\nfunc edit() { self.values.items.cl } }";
+    const cursor = std.mem.indexOf(u8, source, "items.cl").? + "items.cl".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    try std.testing.expectEqualStrings("clear", items[0].label);
+    try std.testing.expectEqualStrings("clear()", items[0].detail);
+    try std.testing.expectEqual(CompletionKind.method, items[0].kind);
 }

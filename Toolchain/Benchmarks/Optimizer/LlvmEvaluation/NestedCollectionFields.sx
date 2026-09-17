@@ -1,0 +1,29 @@
+struct Storage {
+    var list:int[] = [1,2,3]
+    var fixed:int[3] = [1,2,3]
+}
+class Box { var storage:Storage = Storage() }
+class Owner {
+    var box:Box = Box()
+    func clear() { self.box.storage.list.clear() }
+}
+func main() {
+    var owner = Owner()
+    let original = owner.box.storage.list
+    owner.box.storage.list.append(4)
+    owner.box.storage.list.insert(1,7)
+    assert(owner.box.storage.list.replace(2,8) == 2)
+    owner.box.storage.list.swap(0,-1)
+    assert(owner.box.storage.list.take(2) == 8)
+    assert(owner.box.storage.list.take_last() == 1)
+    assert(owner.box.storage.list.count() == 3)
+    assert(owner.box.storage.list[0] == 4 && owner.box.storage.list[1] == 7 && owner.box.storage.list[2] == 3)
+    assert(original.count() == 3 && original[1] == 2)
+    assert(owner.box.storage.fixed.replace(1,8) == 2)
+    owner.box.storage.fixed.swap(0,-1)
+    owner.box.storage.fixed.reverse()
+    assert(owner.box.storage.fixed[0] == 1 && owner.box.storage.fixed[1] == 8 && owner.box.storage.fixed[2] == 3)
+    owner.clear()
+    assert(owner.box.storage.list.is_empty())
+    print("nested collection fields passed")
+}

@@ -1,0 +1,33 @@
+class Counts { var drops:int = 0; var total:int = 0 }
+class Values {
+    var items:int[] = [1,2]
+    var counts:Counts
+    init(counts:Counts) { self.counts = counts }
+    drop {
+        self.counts.drops++
+        for value in self.items { self.counts.total += value }
+    }
+}
+class Owner {
+    var values:Values
+    var counts:Counts
+    init(counts:Counts) { self.counts = counts; self.values = Values(counts) }
+    func append_inner() int { self.values.items.append(7); return 8 }
+    func replace_index() int { self.values = Values(self.counts); return 0 }
+    func replace() int { self.values = Values(self.counts); return 9 }
+}
+func main() {
+    var counts = Counts()
+    var owner = Owner(counts)
+    owner.values.items.append(owner.replace())
+    assert(counts.drops == 1)
+    assert(counts.total == 12)
+    assert(owner.values.items.count() == 2)
+    owner.values.items.append(owner.append_inner())
+    assert(owner.values.items.count() == 4)
+    assert(owner.values.items[2] == 7 && owner.values.items[3] == 8)
+    assert(owner.values.items.take(owner.replace_index()) == 1)
+    assert(counts.drops == 2 && counts.total == 29)
+    assert(owner.values.items.count() == 2)
+    print("nested collection reentry passed")
+}

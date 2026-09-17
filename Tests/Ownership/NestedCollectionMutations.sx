@@ -1,0 +1,37 @@
+struct Storage {
+    var list:int[] = [1,2,3]
+    var fixed:int[3] = [1,2,3]
+}
+class Box { var storage:Storage = Storage() }
+class Owner {
+    var box:Box = Box()
+    func clear() { self.box.storage.list.clear() }
+}
+func verify_nested_mutations() {
+    var owner = Owner()
+    let original = owner.box.storage.list
+    owner.box.storage.list.append(4)
+    owner.box.storage.list.append([5,6])
+    owner.box.storage.list.prepend(0)
+    owner.box.storage.list.insert(2,7)
+    assert(owner.box.storage.list.replace(3,8) == 2)
+    owner.box.storage.list.swap(0,-1)
+    owner.box.storage.list.reverse()
+    assert(owner.box.storage.list.take(4) == 8)
+    assert(owner.box.storage.list.take_first() == 0)
+    assert(owner.box.storage.list.take_last() == 6)
+    assert(owner.box.storage.list.count() == 5)
+    assert(owner.box.storage.list[0] == 5 && owner.box.storage.list[-1] == 1)
+    assert(original.count() == 3 && original[1] == 2)
+    assert(owner.box.storage.fixed.replace(1,8) == 2)
+    owner.box.storage.fixed.swap(0,-1)
+    owner.box.storage.fixed.reverse()
+    assert(owner.box.storage.fixed[0] == 1 && owner.box.storage.fixed[1] == 8 && owner.box.storage.fixed[2] == 3)
+    owner.clear()
+    assert(owner.box.storage.list.is_empty())
+    print("nested collection mutations passed")
+}
+
+test "mutate nested stored collections through class and struct fields" { verify_nested_mutations() }
+
+func main() { verify_nested_mutations() }

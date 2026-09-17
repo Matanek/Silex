@@ -173,3 +173,19 @@ test "mutate fields of collection elements in place" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("7 5\n", result.stdout);
 }
+
+test "reject nested collection mutations through immutable paths" {
+    const sources = [_][]const u8{
+        "class Inner { var items:int[] = [] } class Outer { var inner:Inner = Inner() } func main() { let owner = Outer(); owner.inner.items.clear() }",
+        "class Inner { var items:int[] = [] } class Outer { let inner:Inner = Inner() } func main() { var owner = Outer(); owner.inner.items.clear() }",
+        "class Inner { let items:int[] = [] } class Outer { var inner:Inner = Inner() } func main() { var owner = Outer(); owner.inner.items.clear() }",
+        "class Inner { var items:int[] = [] } class Outer { var inner:Inner = Inner() } func change(owner:@Outer) { owner.inner.items.clear() } func main() {}",
+    };
+    for (sources) |source| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var frontend = Frontend.Frontend.init(arena.allocator());
+        try std.testing.expectError(error.InvalidSource, frontend.compile(source));
+        try std.testing.expect(frontend.diagnostic != null);
+    }
+}

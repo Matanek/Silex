@@ -70,6 +70,13 @@ pub fn analyzeQualifiedStaticCall(self: anytype, builder: anytype, call: Ast.Exp
 }
 
 pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
+    var owner: ?Model.TypedValue = null;
+    const result = try analyzeMutationBody(self, builder, call, &owner);
+    if (owner) |value| try Resources.emitDrop(self, builder, value.type, value.value);
+    return result;
+}
+
+fn analyzeMutationBody(self: anytype, builder: anytype, call: Ast.Expression.Call, pinned_owner: *?Model.TypedValue) !?Model.TypedValue {
     const receiver_expression = call.receiver.?;
     var source: Model.TypedValue = undefined;
     var ownership: StorageOwnership.Domain = .root;
@@ -136,6 +143,9 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
                         .structure = structure_index,
                         .field = field_index orelse return self.fail(access.name_position, "unknown structure field"),
                     } });
+                } else if (storedFieldPath(receiver_expression)) {
+                    const prepared = try @import("MutableReferences.zig").prepare(self, builder, receiver_expression, source.type);
+                    reference = prepared.reference;
                 }
             }
             const stable_reference = reference orelse return self.fail(receiver_expression.position, "collection mutation requires a mutable field receiver");
@@ -143,7 +153,13 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         },
         else => return null,
     };
-    if (binding.reference) |reference| ownership = try StorageOwnership.reference(self, builder, reference);
+    if (binding.reference) |reference| {
+        ownership = try StorageOwnership.reference(self, builder, reference);
+        const direct_self = receiver_expression.value == .field_access and
+            receiver_expression.value.field_access.base.value == .identifier and
+            std.mem.eql(u8, receiver_expression.value.field_access.base.value.identifier, "self");
+        if (!direct_self) pinned_owner.* = try retainReferenceOwner(self, builder, reference);
+    }
     const collection = collectionForType(self.structures, binding.type) orelse return self.fail(receiver_expression.position, "collection mutation requires an array or list");
     if (call.safe or call.named_arguments.len != 0 or call.type_arguments.len != 0) return self.fail(call.name_position, "collection mutations use positional arguments");
     if (collection.view and binding.borrowed_mode != .mutable and binding.parameter_mode != .mutable) {
@@ -156,6 +172,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try requireArity(self, call, 2);
         const index = try requireIndex(self, builder, call.arguments[0]);
         const replacement = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
+        source.value = try loadBinding(self, builder, binding);
         if (Resources.requiresRetain(self, collection.element)) {
             if (!replacement.transferred) {
                 try StorageOwnership.apply(self, builder, ownership, .retain, collection.element, replacement.value);
@@ -177,6 +194,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try requireArity(self, call, 2);
         const left_index = try requireIndex(self, builder, call.arguments[0]);
         const right_index = try requireIndex(self, builder, call.arguments[1]);
+        source.value = try loadBinding(self, builder, binding);
         const left = try self.newValue(builder, collection.element);
         const right = try self.newValue(builder, collection.element);
         try self.emit(builder, .{ .collection_load = .{ .result = left, .collection = source.value, .index = left_index.value, .position = call.name_position } });
@@ -277,6 +295,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             kind = .take_last;
         }
     }
+    if (call.arguments.len != 0) source.value = try loadBinding(self, builder, binding);
     if (argument) |value| {
         if (kind == .append_sequence) {
             if (Resources.requiresRetain(self, collection.element)) {
@@ -303,6 +322,45 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         return .{ .type = return_type, .value = value, .transferred = Resources.ownsValue(self, return_type) };
     }
     return null;
+}
+
+fn storedFieldPath(expression: *const Ast.Expression) bool {
+    return switch (expression.value) {
+        .identifier => true,
+        .field_access => |access| !access.safe and storedFieldPath(access.base),
+        else => false,
+    };
+}
+
+// A field address keeps its original object identity even if argument
+// evaluation replaces a parent reference. Hold the innermost class owner
+// until the mutation and extraction have completed.
+fn retainReferenceOwner(self: anytype, builder: anytype, reference: Ir.ValueId) error{ InvalidSource, OutOfMemory }!?Model.TypedValue {
+    for (builder.blocks.items) |block| for (block.instructions.items) |instruction| switch (instruction) {
+        .reference_field => |field| if (field.result == reference) {
+            if (!self.structures[field.structure].is_class)
+                return retainReferenceOwner(self, builder, field.reference);
+            const type_value = Ast.Type.structure(field.structure);
+            const value = try self.newValue(builder, type_value);
+            try self.emit(builder, .{ .reference_load = .{ .result = value, .reference = field.reference } });
+            try Resources.retainValue(self, builder, type_value, value);
+            return .{ .type = type_value, .value = value };
+        },
+        else => {},
+    };
+    return null;
+}
+
+fn loadBinding(self: anytype, builder: anytype, binding: Model.Binding) !Ir.ValueId {
+    const value = try self.newValue(builder, binding.type);
+    if (binding.local) |local| {
+        try self.emit(builder, .{ .local_load = .{ .result = value, .local = local } });
+    } else if (binding.global) |global| {
+        try self.emit(builder, .{ .global_load = .{ .result = value, .global = global } });
+    } else {
+        try self.emit(builder, .{ .reference_load = .{ .result = value, .reference = binding.reference.? } });
+    }
+    return value;
 }
 
 fn storeBinding(self: anytype, builder: anytype, binding: anytype, value: Ir.ValueId) !void {
