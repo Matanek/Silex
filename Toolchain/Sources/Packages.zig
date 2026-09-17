@@ -17,7 +17,7 @@ pub const Version = struct {
         var iterator = std.mem.splitScalar(u8, text, '.');
         for (&parts) |*part| {
             const component = iterator.next() orelse return error.InvalidVersion;
-            if (component.len == 0) return error.InvalidVersion;
+            if (component.len == 0 or (component.len > 1 and component[0] == '0')) return error.InvalidVersion;
             for (component) |character| if (!std.ascii.isDigit(character)) return error.InvalidVersion;
             part.* = std.fmt.parseInt(u32, component, 10) catch return error.InvalidVersion;
         }
@@ -61,7 +61,7 @@ pub const SilexRequirement = struct {
     maximum_exclusive: ?Version,
 
     pub fn parse(text: []const u8) error{InvalidRequirement}!SilexRequirement {
-        var clauses = std.mem.tokenizeScalar(u8, text, ' ');
+        var clauses = std.mem.splitScalar(u8, text, ' ');
         const minimum_clause = clauses.next() orelse return error.InvalidRequirement;
         if (!std.mem.startsWith(u8, minimum_clause, ">=") or minimum_clause.len == 2) {
             return error.InvalidRequirement;
@@ -2448,6 +2448,8 @@ test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
     try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
+    try std.testing.expectError(error.InvalidVersion, Version.parse("01.2.3"));
+    try std.testing.expectError(error.InvalidConstraint, Constraint.parse("^1.02.3"));
 }
 
 test "development dependencies belong only to the root development graph" {
@@ -2676,6 +2678,9 @@ test "parse and apply Silex toolchain requirements before package sources" {
     try std.testing.expect((try SilexRequirement.parse(">=0.38.0")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse("^0.38.0"));
     try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(">=0.41.0 <0.38.0"));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(">=0.38.0  <0.41.0"));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(" >=0.38.0"));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(">=0.38.0 "));
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
