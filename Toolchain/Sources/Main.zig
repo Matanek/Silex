@@ -274,34 +274,35 @@ fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
     );
     if (options.dry_run) {
         std.debug.print(
-            "silex: publication preview for {s}@{d}.{d}.{d}\n",
+            "silex: dry run for {s}@{d}.{d}.{d} (nothing uploaded)\n",
             .{ prepared.name, prepared.version.major, prepared.version.minor, prepared.version.patch },
         );
+        std.debug.print("silex: would publish this local snapshot: source files {d}, separate artifacts {d}\n",
+            .{ prepared.files.len, prepared.artifacts.len });
+        std.debug.print("silex: source files:\n", .{});
         for (prepared.files) |file| {
-            var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
-            std.crypto.hash.sha2.Sha256.hash(file.bytes, &digest, .{});
-            std.debug.print("silex: include {s} ({d} bytes, sha256 {s})\n", .{ file.path, file.bytes.len, std.fmt.bytesToHex(digest, .lower) });
+            std.debug.print("silex:   + {s} ({d} bytes)\n", .{ file.path, file.bytes.len });
         }
-        for (prepared.exclusions) |exclusion| {
-            std.debug.print("silex: exclude {s} ({s})\n", .{ exclusion.path, exclusion.reason });
-        }
+        if (prepared.artifacts.len > 0) std.debug.print("silex: separate artifacts:\n", .{});
         for (prepared.artifacts) |artifact| {
-            var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
-            std.crypto.hash.sha2.Sha256.hash(artifact.bytes, &digest, .{});
             std.debug.print(
-                "silex: artifact {s}/{s} -> {s} ({d} bytes, sha256 {s})\n",
-                .{ artifact.target, artifact.name, artifact.path, artifact.bytes.len, std.fmt.bytesToHex(digest, .lower) },
+                "silex:   + {s}/{s} <- {s} ({d} bytes)\n",
+                .{ artifact.target, artifact.name, artifact.path, artifact.bytes.len },
             );
         }
-        std.debug.print("silex: source archive {d} bytes, sha256 {s}\n", .{ prepared.source.len, prepared.descriptor.source_digest });
-        std.debug.print("silex: publication sha256 {s}\n", .{prepared.descriptor.digest});
-        if (provenance) |value| {
-            std.debug.print("silex: provenance {s} at {s}; local snapshot may differ from the commit\n",
-                .{ value.repository, value.commit });
-        } else {
-            std.debug.print("silex: provenance unavailable; publishing requires a package GitHub origin and a HEAD commit\n", .{});
+        if (prepared.exclusions.len > 0) std.debug.print("silex: excluded:\n", .{});
+        for (prepared.exclusions) |exclusion| {
+            std.debug.print("silex:   - {s} ({s})\n", .{ exclusion.path, exclusion.reason });
         }
-        std.debug.print("silex: dry run complete; no authentication or network request was used\n", .{});
+        if (provenance) |value| {
+            std.debug.print("silex: GitHub reference: {s} at {s}\n",
+                .{ value.repository, value.commit });
+            std.debug.print("silex: published bytes come from the local snapshot, not this GitHub commit\n", .{});
+        } else {
+            std.debug.print("silex: publishing will require a package GitHub origin and a HEAD commit\n", .{});
+        }
+        std.debug.print("silex: publication sha256 {s} (identifies this exact snapshot)\n", .{prepared.descriptor.digest});
+        std.debug.print("silex: no authentication, network request or publication was performed\n", .{});
         return 0;
     }
 
