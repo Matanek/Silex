@@ -162,9 +162,20 @@ pub const text =
     \\  br i1 %unowned, label %claim, label %done
     \\claim:
     \\  %state = getelementptr i8, ptr %data, i64 24
-    \\  %claimed = cmpxchg ptr %state, i64 0, i64 1 acq_rel acquire
+    \\  br label %retry
+    \\retry:
+    \\  %observed = load atomic i64, ptr %state acquire, align 8
+    \\  %tracing = icmp eq i64 %observed, 2
+    \\  br i1 %tracing, label %retry, label %inspect
+    \\inspect:
+    \\  %finalized = icmp eq i64 %observed, 1
+    \\  br i1 %finalized, label %done, label %commit
+    \\commit:
+    \\  %claimed = cmpxchg ptr %state, i64 %observed, i64 1 acq_rel acquire
     \\  %won = extractvalue { i64, i1 } %claimed, 1
-    \\  ret i1 %won
+    \\  br i1 %won, label %ready, label %retry
+    \\ready:
+    \\  ret i1 true
     \\done:
     \\  ret i1 false
     \\}

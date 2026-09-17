@@ -1105,3 +1105,15 @@ test "unreachable cycles preserve live descendants and follow their back edges" 
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("cycle external descendant passed\n", output);
 }
+
+test "cycles count edges carried by copied value containers" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/CycleValueEdges.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("cycle value edges passed\n", output);
+}
+
+test "fixed array literals transfer their element ownership" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/FixedClassStorage.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("fixed class storage passed\n", output);
+}

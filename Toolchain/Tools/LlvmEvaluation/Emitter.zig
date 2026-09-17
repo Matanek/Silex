@@ -126,6 +126,7 @@ fn emitInternal(allocator: Allocator, program: Ir.Program, boundaries: []const S
         \\
     );
     try output.appendSlice(allocator, @import("Runtime.zig").text);
+    try @import("CycleTrace.zig").emit(allocator, &output, program, stable_tags);
     if (reachableUsesMutex(program, reachable)) try output.appendSlice(allocator,
         \\@sx.mutex = private global [8 x i64] zeroinitializer, align 8
         \\declare void @os_unfair_recursive_lock_lock_with_options(ptr, i64)
@@ -1724,11 +1725,18 @@ const FunctionEmitter = struct {
             operand,
             if (value.ownership == .root) @as(u8, 8) else 16,
         });
-        try self.write("  br i1 %t{d}.class.finalize, label %class.finalize{d}, label %class.done{d}\n", .{
-            serial,
-            serial,
-            serial,
-        });
+        const may_cycle = !value.skip_cycle and for (value.plans) |plan| {
+            if (try @import("CycleTrace.zig").mayCycle(self.allocator, self.program, plan.structure)) break true;
+        } else false;
+        if (may_cycle) {
+            try self.write("  br i1 %t{d}.class.finalize, label %class.finalize{d}, label %class.cycle{d}\n", .{ serial, serial, serial });
+            try self.write("class.cycle{d}:\n", .{serial});
+            try self.write("  %t{d}.cycle.result = call i32 @silex_llvm_cycle_collect(ptr {s}, ptr @sx.cycle.trace)\n", .{ serial, operand });
+            try self.write("  %t{d}.cycle.collect = icmp ne i32 %t{d}.cycle.result, 0\n", .{ serial, serial });
+            try self.write("  br i1 %t{d}.cycle.collect, label %class.finalize{d}, label %class.done{d}\n", .{ serial, serial, serial });
+        } else {
+            try self.write("  br i1 %t{d}.class.finalize, label %class.finalize{d}, label %class.done{d}\n", .{ serial, serial, serial });
+        }
         try self.write("class.finalize{d}:\n", .{serial});
         try self.write("  %t{d}.class.type = load i64, ptr {s}\n", .{ serial, operand });
         try self.write("  switch i64 %t{d}.class.type, label %trap [\n", .{serial});
@@ -3499,7 +3507,7 @@ fn indirectSilexParameter(program: Ir.Program, type_value: Ir.Type) Error!bool {
     return !structure.is_class;
 }
 
-fn enumIndexForStructure(program: Ir.Program, structure_index: usize) ?usize {
+pub fn enumIndexForStructure(program: Ir.Program, structure_index: usize) ?usize {
     for (program.enums, 0..) |enumeration, index| {
         if (enumeration.type_index == structure_index) return index;
     }
@@ -3574,7 +3582,7 @@ fn protocolPayloadStorageSlots(program: Ir.Program, protocol_index: usize, depth
     return maximum;
 }
 
-fn irConforms(program: Ir.Program, structure_index: usize, protocol_index: usize) bool {
+pub fn irConforms(program: Ir.Program, structure_index: usize, protocol_index: usize) bool {
     if (structure_index >= program.structures.len or protocol_index >= program.structures.len)
         return false;
     var current: ?usize = structure_index;
@@ -3588,7 +3596,7 @@ fn irConforms(program: Ir.Program, structure_index: usize, protocol_index: usize
     return false;
 }
 
-fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Error!usize {
+pub fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Error!usize {
     if (depth >= program.structures.len + program.enums.len + 8) return error.UnsupportedType;
     if (type_value.optionalChild()) |child|
         return 1 + try llvmStorageSlots(program, child, depth + 1);
@@ -3608,7 +3616,11 @@ fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Erro
         if (structure.is_protocol)
             return 1 + try protocolPayloadStorageSlots(program, structure_index, depth + 1);
         if (structure.is_static) return error.UnsupportedType;
-        if (structure.collection != null) return 2;
+        if (structure.collection) |collection| {
+            if (collection.length) |length|
+                return std.math.mul(usize, length, try llvmStorageSlots(program, collection.element, depth + 1)) catch error.UnsupportedType;
+            return 2;
+        }
         var result: usize = 0;
         for (structure.fields) |field| {
             result += llvmStorageSlots(program, field.type, depth + 1) catch |err| {
@@ -3641,7 +3653,7 @@ fn llvmStorageSlots(program: Ir.Program, type_value: Ir.Type, depth: usize) Erro
     };
 }
 
-fn materialClassStorage(program: Ir.Program, structure_index: usize) bool {
+pub fn materialClassStorage(program: Ir.Program, structure_index: usize) bool {
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
     if (!structure.is_class or structure.base != null) return false;
@@ -3662,7 +3674,7 @@ fn classStorageSlots(program: Ir.Program, structure_index: usize) Error!usize {
     return slots;
 }
 
-fn classFieldStorageOffset(program: Ir.Program, structure_index: usize, field_index: usize) Error!usize {
+pub fn classFieldStorageOffset(program: Ir.Program, structure_index: usize, field_index: usize) Error!usize {
     if (structure_index >= program.structures.len or field_index >= program.structures[structure_index].fields.len)
         return error.InvalidProgram;
     var slots: usize = 0;
@@ -3704,7 +3716,7 @@ fn closureEnvironmentType(
     return output.toOwnedSlice(allocator);
 }
 
-fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
+pub fn llvmType(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Error![]const u8 {
     if (type_value.optionalChild()) |child| {
         if (child == .void) return error.UnsupportedType;
         return std.fmt.allocPrint(allocator, "{{ i1, {s} }}", .{try llvmType(allocator, program, child)});

@@ -25,12 +25,10 @@ const Kind = enum(u64) { value, class, protocol, list, array, enumeration };
 const Node = struct {
     address: [*]u64,
     type_value: u64,
-    byte_count: usize,
     internal: usize,
     feedback_internal: usize,
     active: bool,
     live: bool,
-    kind: Kind,
 };
 
 const Context = struct {
@@ -71,7 +69,7 @@ const AddResult = enum { added, existing, failed };
 
 pub fn main() void {}
 
-/// Operation 0 proves that the candidate belongs to a closed unreachable
+/// Operation 0 proves that the candidate belongs to an unreachable
 /// component and claims it as the component's finalization entry point.
 /// Operation 1 releases the temporary tracing context after ordinary generated
 /// finalizers have cascaded through the component.
@@ -172,10 +170,7 @@ fn prepare(
         }
         if (root_count != 0 or edge_count > node.internal) {
             context.marking = true;
-            const marked = if (node.kind == .class)
-                traceClassEdge(context, node.address, node.type_value)
-            else
-                traceListEdge(context, node.address, node.type_value, context.data(context.entry(node.type_value))[0]);
+            const marked = traceClassEdge(context, node.address, node.type_value);
             if (!marked) {
                 releaseClaims(context);
                 discard(context);
@@ -190,19 +185,19 @@ fn prepare(
     }
     // The entry object is finalized by the generated drop that requested the
     // trace. Other classes become cycle members (3): their cascading edge drop
-    // may claim ordinary finalization once their count reaches zero. Lists are
-    // released back to state 0 so their normal cascading drop can unmap them.
+    // may claim ordinary finalization once their count reaches zero. Value
+    // containers keep their ordinary ownership counts during this cascade.
     for (context.nodes[0..context.count]) |node| {
         if (node.live) {
-            @atomicStore(u64, statePointer(node.address, node.kind), 0, .release);
+            @atomicStore(u64, statePointer(node.address), 0, .release);
             continue;
         }
         if (node.feedback_internal != 0) {
             const edges: *u64 = @ptrCast(node.address + 2);
             _ = @atomicRmw(u64, edges, .Sub, node.feedback_internal, .acq_rel);
         }
-        const node_state = statePointer(node.address, node.kind);
-        const committed: u64 = if (node.address == candidate) 1 else if (node.kind == .class) 3 else 0;
+        const node_state = statePointer(node.address);
+        const committed: u64 = if (node.address == candidate) 1 else 3;
         @atomicStore(u64, node_state, committed, .release);
     }
     return context;
@@ -357,30 +352,21 @@ fn addNode(context: *Context, address: [*]u64, type_value: u64, incoming: bool) 
     if (context.marking) return .failed;
     const entry_value = context.entry(type_value);
     const kind: Kind = @enumFromInt(entry_value[0]);
-    if (kind != .class and kind != .list) return .failed;
-    const state = statePointer(address, kind);
-    const already_claimed_candidate = context.count == 0 and kind == .class;
+    if (kind != .class) return .failed;
+    const state = statePointer(address);
+    const already_claimed_candidate = context.count == 0;
     if (!already_claimed_candidate and !claimMember(state)) return .failed;
     if (context.count == context.capacity and !grow(context)) {
         if (!already_claimed_candidate) @atomicStore(u64, state, 0, .release);
         return .failed;
     }
-    const byte_count = if (kind == .class)
-        classBytes(address, context.data(entry_value)) orelse {
-            if (!already_claimed_candidate) @atomicStore(u64, state, 0, .release);
-            return .failed;
-        }
-    else
-        @as(usize, @intCast(address[3]));
     const node = &context.nodes[context.count];
     node.address = address;
     node.type_value = type_value;
-    node.byte_count = byte_count;
     node.internal = @intFromBool(incoming);
     node.feedback_internal = 0;
     node.active = false;
     node.live = false;
-    node.kind = kind;
     context.count += 1;
     return .added;
 }
@@ -394,14 +380,13 @@ fn claimMember(state: *u64) bool {
     }
 }
 
-fn statePointer(address: [*]u64, kind: Kind) *u64 {
-    const offset: usize = if (kind == .class) 3 else 4;
-    return @ptrCast(address + offset);
+fn statePointer(address: [*]u64) *u64 {
+    return @ptrCast(address + 3);
 }
 
 fn releaseClaims(context: *Context) void {
     for (context.nodes[0..context.count]) |node| {
-        const state = statePointer(node.address, node.kind);
+        const state = statePointer(node.address);
         if (@atomicLoad(u64, state, .acquire) == 2) @atomicStore(u64, state, 0, .release);
     }
 }
@@ -422,12 +407,10 @@ fn grow(context: *Context) bool {
 fn copyNode(destination: *Node, source: Node) void {
     destination.address = source.address;
     destination.type_value = source.type_value;
-    destination.byte_count = source.byte_count;
     destination.internal = source.internal;
     destination.feedback_internal = source.feedback_internal;
     destination.active = source.active;
     destination.live = source.live;
-    destination.kind = source.kind;
 }
 
 fn traceValue(context: *Context, value: [*]u64, type_value: u64) bool {
@@ -492,22 +475,13 @@ fn traceClass(context: *Context, object: [*]u64, type_value: u64) bool {
 }
 
 fn traceListEdge(context: *Context, list: [*]u64, type_value: u64, element_type: u64) bool {
-    switch (addNode(context, list, type_value, true)) {
-        .existing => return true,
-        .failed => return false,
-        .added => {},
-    }
-    const node = findNode(context, list) orelse return false;
-    node.active = true;
-    // traceValue() can discover enough nodes to grow and relocate the mapping.
-    defer {
-        if (findNode(context, list)) |current| current.active = false;
-    }
-    const width = context.width(element_type);
-    for (0..@as(usize, @intCast(list[0]))) |index| {
-        if (!traceValue(context, list + list_header_words + index * width, element_type)) return false;
-    }
-    return true;
+    _ = type_value;
+    // Portable ownership retains every element once per list value, including
+    // copies sharing their backing storage. The list allocation does not own
+    // an additional class edge. Trace each value's elements; deduplicating the
+    // storage would undercount edges and cutting its counts could free storage
+    // while another finalizer is still iterating it.
+    return traceArray(context, list + list_header_words, element_type, @intCast(list[0]));
 }
 
 fn traceFields(context: *Context, value: [*]u64, fields: [*]const u64, count: usize) bool {
@@ -550,19 +524,6 @@ fn traceEnumeration(context: *Context, value: [*]u64, data: [*]const u64) bool {
         cursor += count;
     }
     return false;
-}
-
-fn classBytes(object: [*]u64, data: [*]const u64) ?usize {
-    var cursor: usize = 1;
-    for (0..@as(usize, @intCast(data[0]))) |_| {
-        const structure = data[cursor];
-        const width: usize = @intCast(data[cursor + 1]);
-        const field_count: usize = @intCast(data[cursor + 2]);
-        cursor += 3;
-        if (structure == object[0]) return (class_header_words + width) * @sizeOf(u64);
-        cursor += field_count;
-    }
-    return null;
 }
 
 fn systemAllocate(byte_count: usize) callconv(.c) ?[*]u64 {

@@ -377,7 +377,7 @@ pub fn analyzeLiteral(
     return .{
         .type = type_value,
         .value = result,
-        .transferred = collection.length == null,
+        .transferred = Resources.ownsValue(self, type_value),
         .lexical_captures = lexical_captures,
         .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
     };

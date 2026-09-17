@@ -1,0 +1,47 @@
+class Counts { var drops:int = 0 }
+protocol Link { func value() int }
+struct Packed {
+    var flag:bool
+    var fraction:float
+    var node:Node?
+}
+struct Wrapper:Link {
+    var packed:Packed
+    func value() int { return 1 }
+}
+enum Edge { empty; linked(bool, Packed) }
+class Node:Link {
+    var counts:Counts
+    var packed:Packed = Packed(flag:true, fraction:0.5, node:null)
+    var erased:Link? = null
+    var edge:Edge = Edge.empty
+    var list:Node[] = []
+    var duplicate:Node[] = []
+    var fixed:Node?[2] = [null, null]
+    init(counts:Counts) { self.counts = counts }
+    drop { self.counts.drops += 1 }
+    func value() int { return 2 }
+    func connect(other:Node, kind:int) {
+        if kind == 0 { self.packed = Packed(flag:true, fraction:0.5, node:other) }
+        if kind == 1 { self.edge = Edge.linked(true, Packed(flag:false, fraction:0.25, node:other)) }
+        if kind == 2 { self.erased = other }
+        if kind == 3 { self.erased = Wrapper(packed:Packed(flag:true, fraction:0.5, node:other)) }
+        if kind == 4 { self.fixed = [other, other] }
+        if kind == 5 { self.list = [other, other]; self.duplicate = self.list }
+    }
+}
+func cycle(counts:Counts, kind:int) {
+    var first = Node(counts)
+    var second = Node(counts)
+    first.connect(second, kind)
+    second.connect(first, kind)
+}
+func main() {
+    var counts = Counts()
+    for kind in 0...6 {
+        counts.drops = 0
+        cycle(counts, kind)
+        assert(counts.drops == 2)
+    }
+    print("cycle value edges passed")
+}

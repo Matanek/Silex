@@ -1,0 +1,27 @@
+class Counts { var drops:int = 0 }
+class Child {
+    var counts:Counts
+    init(counts:Counts) { self.counts = counts }
+    drop { self.counts.drops += 1 }
+}
+class Owner {
+    var before:int = 17
+    var values:int[8] = [1, 2, 3, 4, 5, 6, 7, 8]
+    var children:Child?[2]
+    var after:int = 91
+    init(counts:Counts) { self.children = [Child(counts), Child(counts)] }
+}
+func main() {
+    var counts = Counts()
+    {
+        var owner = Owner(counts)
+        assert(owner.before == 17 && owner.after == 91)
+        for index in 0...8 { assert(owner.values[index] == index + 1) }
+        var duplicate = owner.children
+        owner.children = [null, null]
+        assert(counts.drops == 0)
+        assert(duplicate[0] != null && duplicate[1] != null)
+    }
+    assert(counts.drops == 2)
+    print("fixed class storage passed")
+}

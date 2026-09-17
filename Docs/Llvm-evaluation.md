@@ -164,8 +164,16 @@ slice results that remain borrowed views are still refused.
 
 Class drops use the typed IR finalization plans, including user finalizers and
 resource-field cleanup, with explicit root and edge counts. Inheritance and
-dynamic dispatch remain outside this subset, and reference counting is not a
-substitute for the native object graph cycle collector. String literals use the
+dynamic dispatch remain outside this subset. When a class loses its last root,
+a type-directed graph visitor can collect its unreachable cyclic component.
+Visitors use LLVM field and aggregate layouts, including optional values,
+protocol and enum payloads, fixed arrays, lists and bound callback owners.
+Rooted descendants and objects reached from outside the candidate graph retain
+their ordinary counts and keep everything they reach alive. List copies carry
+one set of element edges per value even when their backing storage is shared.
+The collector cuts feedback edges and lets the existing typed finalization plans
+perform cleanup; it does not invoke finalizers itself. Temporary ownership
+transfers marked `skip_cycle` keep their existing semantics. String literals use the
 native-style mono-pointer descriptor: an explicit byte length followed by the exact bytes,
 without using a trailing zero as value data. Their descriptors are private and
 static, so string retain/drop recognize them without allocating or freeing.
