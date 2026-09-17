@@ -203,6 +203,13 @@ Class mutation updates the shared identity in place; it does not write the old
 receiver back over a replacement made during the call. `self` and `super`
 reuse the invocation's lifetime, including calls from finalizers.
 
+Cycle reachability follows incoming ownership: a rooted descendant or a
+reference from outside the candidate graph keeps that descendant and everything
+it reaches alive. It does not keep otherwise unreachable ancestors alive.
+The interpreter and native collector preserve these live boundaries while
+finalizing the unreachable component. Removing the last external edge can
+trigger collection just as releasing the last root can.
+
 ## Ownership carried by mutable references
 
 An internal mutable reference identifies both a storage address and the

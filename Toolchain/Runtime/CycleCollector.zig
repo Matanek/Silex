@@ -29,6 +29,7 @@ const Node = struct {
     internal: usize,
     feedback_internal: usize,
     active: bool,
+    live: bool,
     kind: Kind,
 };
 
@@ -38,6 +39,7 @@ const Context = struct {
     count: usize,
     capacity: usize,
     node_byte_count: usize,
+    marking: bool,
     allocate_function: AllocateFunction,
     release_function: ReleaseFunction,
 
@@ -148,6 +150,7 @@ fn prepare(
     context.count = 0;
     context.capacity = page_bytes / @sizeOf(Node);
     context.node_byte_count = page_bytes;
+    context.marking = false;
     context.allocate_function = allocate_function;
     context.release_function = release_function;
     if (addNode(context, candidate, type_value, false) != .added or !traceClass(context, candidate, type_value)) {
@@ -160,19 +163,40 @@ fn prepare(
         const edges: *u64 = @ptrCast(node.address + 2);
         const root_count: usize = @intCast(@atomicLoad(u64, roots, .acquire));
         const edge_count: usize = @intCast(@atomicLoad(u64, edges, .acquire));
-        if (root_count != 0 or edge_count != node.internal) {
+        if (edge_count < node.internal) {
             releaseClaims(context);
             discard(context);
             // A concurrent retain or topology mutation invalidates the proof.
             // Cache the rejection until an edge retain/drop marks it dirty.
             return reject(candidate, null, 4);
         }
+        if (root_count != 0 or edge_count > node.internal) {
+            context.marking = true;
+            const marked = if (node.kind == .class)
+                traceClassEdge(context, node.address, node.type_value)
+            else
+                traceListEdge(context, node.address, node.type_value, context.data(context.entry(node.type_value))[0]);
+            if (!marked) {
+                releaseClaims(context);
+                discard(context);
+                return reject(candidate, null, 0);
+            }
+        }
+    }
+    if (context.nodes[0].live) {
+        releaseClaims(context);
+        discard(context);
+        return reject(candidate, null, 4);
     }
     // The entry object is finalized by the generated drop that requested the
     // trace. Other classes become cycle members (3): their cascading edge drop
     // may claim ordinary finalization once their count reaches zero. Lists are
     // released back to state 0 so their normal cascading drop can unmap them.
     for (context.nodes[0..context.count]) |node| {
+        if (node.live) {
+            @atomicStore(u64, statePointer(node.address, node.kind), 0, .release);
+            continue;
+        }
         if (node.feedback_internal != 0) {
             const edges: *u64 = @ptrCast(node.address + 2);
             _ = @atomicRmw(u64, edges, .Sub, node.feedback_internal, .acq_rel);
@@ -318,6 +342,11 @@ fn discard(context: *Context) void {
 fn addNode(context: *Context, address: [*]u64, type_value: u64, incoming: bool) AddResult {
     for (context.nodes[0..context.count]) |*node| {
         if (node.address == address) {
+            if (context.marking) {
+                if (node.live) return .existing;
+                node.live = true;
+                return .added;
+            }
             if (incoming) {
                 node.internal += 1;
                 if (node.active) node.feedback_internal += 1;
@@ -325,6 +354,7 @@ fn addNode(context: *Context, address: [*]u64, type_value: u64, incoming: bool) 
             return .existing;
         }
     }
+    if (context.marking) return .failed;
     const entry_value = context.entry(type_value);
     const kind: Kind = @enumFromInt(entry_value[0]);
     if (kind != .class and kind != .list) return .failed;
@@ -349,6 +379,7 @@ fn addNode(context: *Context, address: [*]u64, type_value: u64, incoming: bool) 
     node.internal = @intFromBool(incoming);
     node.feedback_internal = 0;
     node.active = false;
+    node.live = false;
     node.kind = kind;
     context.count += 1;
     return .added;
@@ -395,6 +426,7 @@ fn copyNode(destination: *Node, source: Node) void {
     destination.internal = source.internal;
     destination.feedback_internal = source.feedback_internal;
     destination.active = source.active;
+    destination.live = source.live;
     destination.kind = source.kind;
 }
 
@@ -756,4 +788,52 @@ test "X64 callbacks cache a negative proof for an externally reached cycle" {
     ));
     try std.testing.expectEqual(@as(u64, 4), first[3]);
     try std.testing.expectEqual(@as(u64, 0), second[3]);
+}
+
+fn checkLiveBoundary(root_count: u64, edge_count: u64, back_edge: bool) !void {
+    const class_type = structure_base;
+    const optional_class = (@as(u64, 1) << optional_depth_shift) | class_type;
+    const tag: u64 = 42;
+    const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, tag, 4, 2, optional_class, optional_class };
+    var first = [_]u64{ tag, 0, if (back_edge) 2 else 1, 0, 1, 0, 1, 0 };
+    var second = [_]u64{ tag, 0, 1, 0, 1, 0, 1, 0 };
+    var leaf = [_]u64{ tag, root_count, edge_count, 0, @intFromBool(back_edge), 0, 0, 0 };
+    first[5] = @intFromPtr(&second);
+    first[7] = @intFromPtr(&leaf);
+    second[5] = @intFromPtr(&first);
+    second[7] = @intFromPtr(&leaf);
+    leaf[5] = @intFromPtr(&first);
+    const context = silex_cycle_x64(0, @intFromPtr(&first), &model, class_type, testAllocate, testRelease);
+    if (back_edge) {
+        try std.testing.expectEqual(@as(u64, 0), context);
+        try std.testing.expectEqual(@as(u64, 4), first[3]);
+        try std.testing.expectEqual(@as(u64, 0), second[3]);
+        try std.testing.expectEqual(@as(u64, 2), first[2]);
+    } else {
+        try std.testing.expect(context != 0);
+        defer _ = silex_cycle_x64(1, context, &model, class_type, testAllocate, testRelease);
+        try std.testing.expectEqual(@as(u64, 1), first[3]);
+        try std.testing.expectEqual(@as(u64, 3), second[3]);
+        try std.testing.expectEqual(@as(u64, 0), first[2]);
+    }
+    try std.testing.expectEqual(@as(u64, 1), second[2]);
+    try std.testing.expectEqual(@as(u64, 0), leaf[3]);
+    try std.testing.expectEqual(root_count, leaf[1]);
+    try std.testing.expectEqual(edge_count, leaf[2]);
+}
+
+test "unreachable cycle preserves an externally rooted descendant" {
+    try checkLiveBoundary(1, 2, false);
+}
+
+test "unreachable cycle preserves a descendant with an external incoming edge" {
+    try checkLiveBoundary(0, 3, false);
+}
+
+test "a rooted descendant pointing back preserves the whole cycle" {
+    try checkLiveBoundary(1, 2, true);
+}
+
+test "an externally owned descendant pointing back preserves the whole cycle" {
+    try checkLiveBoundary(0, 3, true);
 }

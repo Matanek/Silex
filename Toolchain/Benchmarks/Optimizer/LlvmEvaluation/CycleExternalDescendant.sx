@@ -1,0 +1,62 @@
+class Counts { var owners:int = 0; var worlds:int = 0 }
+func noop() {}
+class World {
+    var counts:Counts
+    var callback:func()
+    init(counts:Counts) { self.counts = counts; self.callback = noop }
+    drop { self.counts.worlds += 1 }
+    func set_callback(callback:func()) { self.callback = callback }
+}
+class Owner {
+    var counts:Counts
+    var world:World
+    init(counts:Counts) { self.counts = counts; self.world = World(counts) }
+    drop { self.counts.owners += 1 }
+    func observe() { assert(self.counts.worlds == 0) }
+}
+func cycle(counts:Counts) {
+    var owner = Owner(counts)
+    owner.world.set_callback(owner.observe)
+}
+class Node {
+    var counts:Counts
+    var next:Node? = null
+    var leaf:Node? = null
+    init(counts:Counts) { self.counts = counts }
+    drop { self.counts.owners += 1 }
+    func set_next(next:Node?) { self.next = next }
+    func set_leaf(leaf:Node?) { self.leaf = leaf }
+}
+func returning_leaf(counts:Counts, back:bool) Node {
+    var first = Node(counts)
+    var second = Node(counts)
+    var leaf = Node(counts)
+    first.set_next(second)
+    second.set_next(first)
+    first.set_leaf(leaf)
+    second.set_leaf(leaf)
+    if back { leaf.set_next(first) }
+    return leaf
+}
+func main() {
+    var counts = Counts()
+    cycle(counts)
+    assert(counts.owners == 1 && counts.worlds == 1)
+    counts.owners = 0
+    {
+        var leaf = returning_leaf(counts, false)
+        assert(counts.owners == 2)
+        assert(leaf.next == null)
+    }
+    assert(counts.owners == 3)
+    counts.owners = 0
+    {
+        var leaf = returning_leaf(counts, true)
+        assert(counts.owners == 0)
+        // Removing an edge, with no root on the cyclic nodes, must also collect.
+        leaf.set_next(null)
+        assert(counts.owners == 2)
+    }
+    assert(counts.owners == 3)
+    print("cycle external descendant passed")
+}

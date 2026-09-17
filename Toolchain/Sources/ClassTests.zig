@@ -1099,3 +1099,9 @@ test "class method receiver survives reentrant owner release and replacement" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("method receiver lifetime passed\n", output);
 }
+
+test "unreachable cycles preserve live descendants and follow their back edges" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/CycleExternalDescendant.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("cycle external descendant passed\n", output);
+}

@@ -35,7 +35,7 @@ pub fn release(allocator: std.mem.Allocator, heap: []Entry, instance: *Value.Str
         },
     }
     if (entry.roots != 0 or entry.edges != 0) {
-        if (collect_cycle and ownership == .root and entry.roots == 0 and try collectCycle(allocator, heap, entry)) return true;
+        if (collect_cycle and entry.roots == 0 and try collectCycle(allocator, heap, entry)) return true;
         return false;
     }
     entry.dropped = true;
@@ -45,17 +45,23 @@ pub fn release(allocator: std.mem.Allocator, heap: []Entry, instance: *Value.Str
 const Candidate = struct {
     entry: *Entry,
     incoming: usize,
+    live: bool = false,
 };
 
 fn collectCycle(allocator: std.mem.Allocator, heap: []Entry, root: *Entry) TraceError!bool {
     var candidates: std.ArrayList(Candidate) = .empty;
     defer candidates.deinit(allocator);
     try candidates.append(allocator, .{ .entry = root, .incoming = 0 });
-    try traceStructure(allocator, heap, &candidates, root.instance);
+    try traceStructure(allocator, heap, &candidates, root.instance, false);
     for (candidates.items) |candidate| {
-        if (candidate.entry.roots != 0 or candidate.entry.edges > candidate.incoming) return false;
+        if (candidate.entry.edges < candidate.incoming) return false;
+        if (candidate.entry.roots != 0 or candidate.entry.edges > candidate.incoming) {
+            try markLive(allocator, heap, &candidates, candidate.entry);
+        }
     }
+    if (candidates.items[0].live) return false;
     for (candidates.items) |candidate| {
+        if (candidate.live) continue;
         candidate.entry.roots = 0;
         candidate.entry.edges = 0;
     }
@@ -63,29 +69,40 @@ fn collectCycle(allocator: std.mem.Allocator, heap: []Entry, root: *Entry) Trace
     return true;
 }
 
-fn traceStructure(allocator: std.mem.Allocator, heap: []Entry, candidates: *std.ArrayList(Candidate), structure: *const Value.Structure) TraceError!void {
-    for (structure.fields) |*field| try traceValue(allocator, heap, candidates, field);
+fn traceStructure(allocator: std.mem.Allocator, heap: []Entry, candidates: *std.ArrayList(Candidate), structure: *const Value.Structure, marking: bool) TraceError!void {
+    for (structure.fields) |*field| try traceValue(allocator, heap, candidates, field, marking);
 }
 
-fn traceValue(allocator: std.mem.Allocator, heap: []Entry, candidates: *std.ArrayList(Candidate), value: *const Value) TraceError!void {
+fn traceValue(allocator: std.mem.Allocator, heap: []Entry, candidates: *std.ArrayList(Candidate), value: *const Value, marking: bool) TraceError!void {
     switch (value.*) {
         .class => |class| {
             const entry = find(heap, class.instance) orelse return error.InvalidProgram;
+            if (marking) return markLive(allocator, heap, candidates, entry);
             for (candidates.items) |*candidate| if (candidate.entry == entry) {
                 candidate.incoming += 1;
                 return;
             };
             try candidates.append(allocator, .{ .entry = entry, .incoming = 1 });
-            try traceStructure(allocator, heap, candidates, entry.instance);
+            try traceStructure(allocator, heap, candidates, entry.instance, false);
         },
-        .structure => |structure| for (structure.fields) |*field| try traceValue(allocator, heap, candidates, field),
-        .view => |view| for (view.fields) |*field| try traceValue(allocator, heap, candidates, field),
-        .protocol => |protocol| try traceValue(allocator, heap, candidates, protocol.concrete),
-        .enumeration => |enumeration| for (enumeration.values) |*field| try traceValue(allocator, heap, candidates, field),
-        .optional => |optional| if (optional.value) |present| try traceValue(allocator, heap, candidates, present),
-        .function => |function| for (function.captures) |*capture| try traceValue(allocator, heap, candidates, capture),
+        .structure => |structure| for (structure.fields) |*field| try traceValue(allocator, heap, candidates, field, marking),
+        .view => |view| for (view.fields) |*field| try traceValue(allocator, heap, candidates, field, marking),
+        .protocol => |protocol| try traceValue(allocator, heap, candidates, protocol.concrete, marking),
+        .enumeration => |enumeration| for (enumeration.values) |*field| try traceValue(allocator, heap, candidates, field, marking),
+        .optional => |optional| if (optional.value) |present| try traceValue(allocator, heap, candidates, present, marking),
+        .function => |function| for (function.captures) |*capture| try traceValue(allocator, heap, candidates, capture, marking),
         else => {},
     }
+}
+
+fn markLive(allocator: std.mem.Allocator, heap: []Entry, candidates: *std.ArrayList(Candidate), entry: *Entry) TraceError!void {
+    for (candidates.items) |*candidate| {
+        if (candidate.entry != entry) continue;
+        if (candidate.live) return;
+        candidate.live = true;
+        return traceStructure(allocator, heap, candidates, entry.instance, true);
+    }
+    return error.InvalidProgram;
 }
 
 fn find(heap: []Entry, instance: *Value.Structure) ?*Entry {
