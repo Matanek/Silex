@@ -55,7 +55,7 @@ pub const Client = struct {
             if (object.size != bytes.len or object.offset > bytes.len) return self.fail("registry returned invalid object progress");
             var offset = object.offset;
             while (offset < bytes.len) {
-                const end = @min(offset + 4096, bytes.len);
+                const end = @min(offset + 64 * 1024, bytes.len);
                 const path = try std.fmt.allocPrint(self.allocator, "/v2/publications/{s}/objects/{s}", .{ status.id, object.sha256 });
                 const reply = try self.request(.PATCH, path, bytes[offset..end], offset);
                 try self.expectSuccess(reply);

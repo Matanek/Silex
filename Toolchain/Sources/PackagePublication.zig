@@ -105,7 +105,10 @@ pub const Manager = struct {
             error.ReadFailed => return self.fail("cannot read a selected package file"),
             else => |other| return other,
         };
-        const source = try Archive.encode(self.allocator, files);
+        const source = Archive.encode(self.allocator, files) catch |err| switch (err) {
+            error.SourceLimit => return self.fail("source snapshot exceeds registry size or file-count limits"),
+            else => |other| return other,
+        };
         const descriptor = try Descriptor.render(self.allocator, files, source, artifacts);
         return .{ .name = manifest.name, .version = manifest.version, .files = files, .source = source, .descriptor = descriptor, .repository = manifest.repository, .artifacts = artifacts, .exclusions = exclusions };
     }
@@ -192,7 +195,7 @@ fn captureArtifacts(
             if (!std.mem.eql(u8, previous.target, declaration.target)) continue;
             if (pathsCollide(previous.path, declaration.path)) return error.ArtifactPathCollision;
         }
-        const bytes = try Snapshot.copyFileLimited(allocator, io, package_root, declaration.path, 1024 * 1024 * 1024);
+        const bytes = try Snapshot.copyFileLimited(allocator, io, package_root, declaration.path, 32 * 1024 * 1024);
         var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
         const actual = std.fmt.bytesToHex(digest, .lower);

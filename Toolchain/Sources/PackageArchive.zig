@@ -14,9 +14,10 @@ pub const ExpectedFile = struct {
     sha256: []const u8,
 };
 
-const maximum_source_size = 16 * 1024 * 1024;
-const maximum_expanded_size = 64 * 1024 * 1024;
-const maximum_files = 10_000;
+pub const maximum_source_size = 32 * 1024 * 1024;
+pub const maximum_expanded_size = 48 * 1024 * 1024;
+pub const maximum_file_size = 16 * 1024 * 1024;
+pub const maximum_files = 4096;
 
 /// Encodes already-copied, validated bytes. No source path is read after this call.
 /// The server accepts only USTAR regular files and two terminating zero blocks.
@@ -34,6 +35,7 @@ pub fn encode(allocator: std.mem.Allocator, files: []const File) ![]u8 {
             if (std.mem.eql(u8, previous.path, file.path)) return error.DuplicatePath;
         }
         expanded = std.math.add(usize, expanded, file.bytes.len) catch return error.SourceLimit;
+        if (file.bytes.len > maximum_file_size) return error.SourceLimit;
         if (expanded > maximum_expanded_size) return error.SourceLimit;
     }
 
@@ -85,7 +87,7 @@ pub fn decode(allocator: std.mem.Allocator, archive: []const u8, expected: []con
         const entry = (iterator.next() catch return error.InvalidPublishedSource) orelse return error.InvalidPublishedSource;
         if (entry.kind != .file or !safeArchivePath(entry.name) or
             !std.mem.eql(u8, entry.name, item.path) or entry.size != item.size or
-            item.size > maximum_expanded_size - expanded or item.sha256.len != 64)
+            item.size > maximum_file_size or item.size > maximum_expanded_size - expanded or item.sha256.len != 64)
             return error.InvalidPublishedSource;
         expanded += item.size;
         const bytes = try allocator.alloc(u8, item.size);
@@ -168,6 +170,14 @@ test "reject unsafe, duplicate and unrepresentable source paths" {
     }));
     const long_name = "a" ** 101;
     try std.testing.expectError(error.InvalidPath, encode(allocator, &.{.{ .path = long_name, .bytes = "x" }}));
+}
+
+test "reject a source file above the registry per-file bound" {
+    const allocator = std.testing.allocator;
+    const oversized = try allocator.alloc(u8, maximum_file_size + 1);
+    defer allocator.free(oversized);
+    @memset(oversized, 'x');
+    try std.testing.expectError(error.SourceLimit, encode(allocator, &.{.{ .path = "Module/Oversized.sx", .bytes = oversized }}));
 }
 
 test "published source decoder rejects mismatched files and extra archive entries" {

@@ -324,7 +324,7 @@ pub const Client = struct {
     }
 
     fn downloadBlob(self: *Client, path: []const u8, output: []const u8, blob: Blob) !void {
-        if (!hexSha(blob.sha256) or blob.size > 1024 * 1024 * 1024) return self.fail("invalid registry artifact limit");
+        if (!hexSha(blob.sha256) or blob.size > 32 * 1024 * 1024) return self.fail("invalid registry artifact limit");
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.origin, path });
         const Event = union(enum) { response: anyerror!void, timeout: Io.Cancelable!void };
         var buffer: [2]Event = undefined;
@@ -375,7 +375,7 @@ pub const Client = struct {
     }
 
     fn get(self: *Client, path: []const u8, limit: usize) ![]const u8 {
-        if (limit > 16 * 1024 * 1024) return self.fail("registry response exceeds source limit");
+        if (limit > Archive.maximum_source_size) return self.fail("registry response exceeds source limit");
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.origin, path });
         const output = try self.allocator.alloc(u8, limit + 1);
         const Event = union(enum) { response: anyerror!usize, timeout: Io.Cancelable!void };
@@ -466,8 +466,8 @@ pub fn parsePublication(
     }) catch return error.InvalidRegistryResponse;
     if (reply.descriptor.schema != 1 or !std.mem.eql(u8, reply.publication_sha256, expected_digest) or
         reply.descriptor.manifest.len > 262144 or !hexSha(reply.descriptor.source.sha256) or
-        reply.descriptor.source.size > 16 * 1024 * 1024 or
-        reply.descriptor.files.len == 0 or reply.descriptor.files.len > 10000 or
+        reply.descriptor.source.size > Archive.maximum_source_size or
+        reply.descriptor.files.len == 0 or reply.descriptor.files.len > Archive.maximum_files or
         reply.descriptor.artifacts.len > 256)
         return error.InvalidRegistryResponse;
 
@@ -501,7 +501,7 @@ pub fn parsePublication(
     for (reply.descriptor.files) |file| {
         if (!Archive.safeArchivePath(file.path) or !hexSha(file.sha256) or
             std.mem.order(u8, previous_path, file.path) != .lt or
-            file.size > 64 * 1024 * 1024 - expanded)
+            file.size > Archive.maximum_file_size or file.size > Archive.maximum_expanded_size - expanded)
             return error.InvalidRegistryResponse;
         expanded += file.size;
         previous_path = file.path;
@@ -515,7 +515,7 @@ pub fn parsePublication(
     if (reply.descriptor.artifacts.len != package.artifacts.len) return error.InvalidRegistryResponse;
     for (reply.descriptor.artifacts, 0..) |artifact, index| {
         if (!Modules.validName(artifact.name) or !Archive.safeArchivePath(artifact.path) or
-            !hexSha(artifact.sha256) or artifact.size > 1024 * 1024 * 1024 or
+            !hexSha(artifact.sha256) or artifact.size > 32 * 1024 * 1024 or
             !validTarget(artifact.target)) return error.InvalidRegistryResponse;
         var declared = false;
         for (package.artifacts) |item| {
