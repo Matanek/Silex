@@ -420,7 +420,9 @@ pub fn countTerminatorUses(terminator: Ir.Terminator, uses: []usize) void {
 }
 
 fn useValue(uses: []usize, value: Ir.ValueId) void {
-    uses[value] += 1;
+    // The interpreter also counts uses before executing user-supplied IR. An
+    // invalid descriptor must remain a runtime error, not an indexing trap.
+    if (value < uses.len) uses[value] += 1;
 }
 
 fn useValues(uses: []usize, values: []const Ir.ValueId) void {

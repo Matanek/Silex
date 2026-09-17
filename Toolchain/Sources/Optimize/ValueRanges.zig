@@ -91,25 +91,29 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function) !Ir.Function {
 // blocks in the same order and keeps the same widening iterations.
 fn solveFunction(allocator: Allocator, function: Ir.Function, comptime incremental: bool, evaluations: ?*usize) !Ir.Function {
     if (function.blocks.len == 0 or function.value_types.len == 0) return function;
+    // The caller may retain its program arena for the entire compilation.
+    // Analysis tables must release their pages after this function, independently
+    // of the rewritten IR allocated below through the caller's allocator.
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const temporary = scratch.allocator();
     const value_count = function.value_types.len;
-    const active_values = try activeValues(allocator, function, incremental);
-    defer allocator.free(active_values);
+    const active_values = try activeValues(temporary, function, incremental);
     const block_count = function.blocks.len;
-    const predecessors = try buildPredecessors(allocator, function.blocks);
-    const comparisons = try comparisonDefinitions(allocator, function);
-    const entry = try allocator.alloc(Fact, block_count * value_count);
-    const exit = try allocator.alloc(Fact, block_count * value_count);
+    const predecessors = try buildPredecessors(temporary, function.blocks);
+    const comparisons = try comparisonDefinitions(temporary, function);
+    const entry = try temporary.alloc(Fact, block_count * value_count);
+    const exit = try temporary.alloc(Fact, block_count * value_count);
     @memset(entry, .absent);
     @memset(exit, .absent);
-    const entry_reachable = try allocator.alloc(bool, block_count);
-    const exit_reachable = try allocator.alloc(bool, block_count);
+    const entry_reachable = try temporary.alloc(bool, block_count);
+    const exit_reachable = try temporary.alloc(bool, block_count);
     @memset(entry_reachable, false);
     @memset(exit_reachable, false);
-    const incoming = try allocator.alloc(Fact, value_count);
-    const working = try allocator.alloc(Fact, value_count);
+    const incoming = try temporary.alloc(Fact, value_count);
+    const working = try temporary.alloc(Fact, value_count);
 
-    const pending = try allocator.alloc(bool, block_count);
-    defer allocator.free(pending);
+    const pending = try temporary.alloc(bool, block_count);
     @memset(pending, false);
     pending[0] = true;
     var converged = false;
@@ -187,23 +191,24 @@ fn solveFunction(allocator: Allocator, function: Ir.Function, comptime increment
     }
     if (!converged) return function;
 
-    const blocks = try allocator.alloc(Ir.Block, block_count);
-    const facts = try allocator.alloc(Fact, value_count);
+    var blocks: ?[]Ir.Block = null;
+    const facts = try temporary.alloc(Fact, value_count);
     for (function.blocks, 0..) |block, block_id| {
         @memcpy(facts, entry[block_id * value_count ..][0..value_count]);
-        var instructions: std.ArrayList(Ir.Instruction) = .empty;
-        for (block.instructions) |original| {
+        var instructions: ?[]Ir.Instruction = null;
+        for (block.instructions, 0..) |original, instruction_id| {
             const rewritten = rewriteInstruction(function, facts, original);
-            try instructions.append(allocator, rewritten);
-            transfer(function, facts, rewritten);
+            if (rewritten) |replacement| {
+                if (blocks == null) blocks = try allocator.dupe(Ir.Block, function.blocks);
+                if (instructions == null) instructions = try allocator.dupe(Ir.Instruction, block.instructions);
+                instructions.?[instruction_id] = replacement;
+            }
+            transfer(function, facts, rewritten orelse original);
         }
-        blocks[block_id] = .{
-            .instructions = try instructions.toOwnedSlice(allocator),
-            .terminator = block.terminator,
-        };
+        if (instructions) |changed| blocks.?[block_id].instructions = changed;
     }
     var result = function;
-    result.blocks = blocks;
+    result.blocks = blocks orelse return function;
     return result;
 }
 
@@ -354,7 +359,7 @@ fn refineComparison(left: Fact, right: Fact, operator: Ir.BinaryOperator, truth:
     return if (result.minimum <= result.maximum) .{ .interval = result } else .absent;
 }
 
-fn rewriteInstruction(function: Ir.Function, facts: []const Fact, instruction: Ir.Instruction) Ir.Instruction {
+fn rewriteInstruction(function: Ir.Function, facts: []const Fact, instruction: Ir.Instruction) ?Ir.Instruction {
     return switch (instruction) {
         .binary => |binary| rewrite: {
             if (isComparison(binary.operator)) {
@@ -378,18 +383,19 @@ fn rewriteInstruction(function: Ir.Function, facts: []const Fact, instruction: I
             {
                 rewritten.left_non_negative = true;
             }
+            if (std.meta.eql(binary, rewritten)) break :rewrite null;
             break :rewrite .{ .binary = rewritten };
         },
         .convert => |conversion| rewrite: {
-            if (!conversion.checked or !conversion.target.isInteger()) break :rewrite instruction;
+            if (!conversion.checked or !conversion.target.isInteger()) break :rewrite null;
             const operand = facts[conversion.operand];
             if (operand != .interval or !contains(typeInterval(conversion.target), operand.interval))
-                break :rewrite instruction;
+                break :rewrite null;
             var unchecked = conversion;
             unchecked.checked = false;
             break :rewrite .{ .convert = unchecked };
         },
-        else => instruction,
+        else => null,
     };
 }
 
@@ -983,4 +989,49 @@ test "range decisions survive consumer symbol relocation and invalidate numeric 
     const changed = try optimizeCachedFunction(a, function, context);
     try std.testing.expectEqual(@as(usize, 2), counters.misses.load(.monotonic));
     try std.testing.expect(!changed.blocks[0].instructions[4].constant_bool.value);
+}
+
+test "range analysis retains only rewritten IR between passes" {
+    const block_count = 64;
+    var blocks: [block_count]Ir.Block = undefined;
+    blocks[0] = .{ .instructions = &.{
+        .{ .constant_int = .{ .result = 0, .bits = 40 } },
+        .{ .constant_int = .{ .result = 1, .bits = 2 } },
+        .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1, .checked = true } },
+    }, .terminator = .{ .jump = 1 } };
+    for (1..block_count - 1) |index| blocks[index] = .{
+        .instructions = &.{},
+        .terminator = .{ .jump = index + 1 },
+    };
+    blocks[block_count - 1] = .{
+        .instructions = &.{.{ .print = .{ .value = 2, .newline = true } }},
+        .terminator = .return_void,
+    };
+    const value_types = [_]Ir.Type{.int} ** 64;
+    const function: Ir.Function = .{
+        .name = "main",
+        .parameter_types = &.{},
+        .return_type = .void,
+        .value_types = &value_types,
+        .blocks = &blocks,
+    };
+    const functions = [_]Ir.Function{function} ** 32;
+    // The retained IR fits here, but the 32 pairs of analysis matrices do not.
+    // The output budget must not grow with completed functions' scratch data.
+    var storage: [1024 * 1024]u8 = undefined;
+    var retained = std.heap.FixedBufferAllocator.init(&storage);
+    const optimized = try optimize(retained.allocator(), .{ .functions = &functions });
+    try std.testing.expect(blocks[0].instructions[2].binary.checked);
+    // An idempotent replay needs only its function table, not another copy of
+    // the unchanged IR from the previous analysis.
+    var replay_storage: [@sizeOf(Ir.Function) * functions.len]u8 align(@alignOf(Ir.Function)) = undefined;
+    var replay_allocator = std.heap.FixedBufferAllocator.init(&replay_storage);
+    const replay = try optimize(replay_allocator.allocator(), optimized);
+    for (replay.functions) |result| {
+        try std.testing.expect(!result.blocks[0].instructions[2].binary.checked);
+        var execution = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer execution.deinit();
+        const observed = try @import("../Interpreter.zig").runCapture(execution.allocator(), .{ .functions = &.{result} });
+        try std.testing.expectEqualStrings("42\n", observed.stdout);
+    }
 }

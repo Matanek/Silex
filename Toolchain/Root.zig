@@ -8,6 +8,8 @@ test {
     _ = @import("Sources/ReflectionTests.zig");
     _ = @import("Sources/TypedResourceTests.zig");
     _ = @import("Sources/Project/CoreTests.zig");
+    _ = @import("Sources/Interpreter.zig");
+    _ = @import("Sources/Optimize/ValueRanges.zig");
     _ = @import("Sources/MacOS/Link.zig");
     _ = @import("Sources/Llvm/Units.zig");
     _ = @import("Sources/Llvm/Store.zig");

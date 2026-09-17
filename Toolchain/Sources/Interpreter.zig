@@ -4,6 +4,7 @@ const Ir = @import("Ir.zig");
 const MainBoundary = @import("MainBoundary.zig");
 const Numeric = @import("Numeric.zig");
 const RuntimeValue = @import("Interpreter/Value.zig");
+const ValueOperands = @import("Optimize/ValueOperands.zig");
 const Dispatch = @import("Interpreter/Dispatch.zig");
 const Globals = @import("Interpreter/Globals.zig");
 const Classes = @import("Interpreter/Classes.zig");
@@ -192,6 +193,25 @@ fn invokeClosureDepth(
         return error.InvalidProgram;
     }
 
+    // A field read used only by the following collection read can borrow the
+    // collection across scalar index preparation. No intervening instruction
+    // can mutate it, and no other use can observe the borrowed descriptor. Keep the
+    // use table on the stack for ordinary functions so repeated calls retain no
+    // analysis data in the interpreter's program arena.
+    var use_storage: [512]u8 align(@alignOf(usize)) = undefined;
+    var local_uses = std.heap.FixedBufferAllocator.init(&use_storage);
+    var heap_uses = false;
+    const uses = local_uses.allocator().alloc(usize, function.value_types.len) catch uses: {
+        heap_uses = true;
+        break :uses try std.heap.page_allocator.alloc(usize, function.value_types.len);
+    };
+    defer if (heap_uses) std.heap.page_allocator.free(uses);
+    @memset(uses, 0);
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| ValueOperands.countUses(instruction, uses);
+        ValueOperands.countTerminatorUses(block.terminator, uses);
+    }
+
     const values = try allocator.alloc(?Value, function.value_types.len);
     defer allocator.free(values);
     @memset(values, null);
@@ -211,8 +231,12 @@ fn invokeClosureDepth(
     while (true) {
         if (block_id >= function.blocks.len) return error.InvalidProgram;
         const block = function.blocks[block_id];
-        for (block.instructions) |*instruction| {
-            if (try executeInstruction(allocator, program, function, values, locals, instruction, depth, session)) |result| return result;
+        for (block.instructions, 0..) |*instruction, index| {
+            const borrow_field = if (instruction.* == .field_load)
+                borrowsFieldForRead(instruction.field_load.result, uses, block.instructions[index + 1 ..])
+            else
+                false;
+            if (try executeInstruction(allocator, program, function, values, locals, instruction, borrow_field, depth, session)) |result| return result;
         }
         switch (block.terminator) {
             .jump => |target| block_id = target,
@@ -236,6 +260,17 @@ fn invokeClosureDepth(
     }
 }
 
+fn borrowsFieldForRead(result: Ir.ValueId, uses: []const usize, following: []const Ir.Instruction) bool {
+    if (result >= uses.len or uses[result] != 1) return false;
+    for (following) |instruction| switch (instruction) {
+        .constant_int, .local_load => {},
+        .collection_load => |read| return read.collection == result,
+        .collection_count => |read| return read.collection == result,
+        else => return false,
+    };
+    return false;
+}
+
 fn executeInstruction(
     allocator: Allocator,
     program: Ir.Program,
@@ -243,6 +278,7 @@ fn executeInstruction(
     values: []?Value,
     locals: []?Value,
     instruction: *const Ir.Instruction,
+    borrow_field: bool,
     depth: usize,
     session: *Session,
 ) Error!?Value {
@@ -501,7 +537,10 @@ fn executeInstruction(
                 else => return error.InvalidProgram,
             };
             if (field.field >= aggregate.fields.len) return error.InvalidProgram;
-            try store(function, values, field.result, try cloneValue(allocator, aggregate.fields[field.field]));
+            try store(function, values, field.result, if (borrow_field)
+                aggregate.fields[field.field]
+            else
+                try cloneValue(allocator, aggregate.fields[field.field]));
         },
         .field_store => |field| {
             const guard = session.snapshot_gate.mutation();
@@ -1362,6 +1401,39 @@ fn checkedRemainder(left: i64, right: i64) Error!i64 {
 fn compile(source: []const u8, allocator: Allocator) !Ir.Program {
     var frontend = @import("Frontend.zig").Frontend.init(allocator);
     return (try frontend.compile(source)).ir;
+}
+
+test "transient collection projections fit a bounded interpreter arena" {
+    var source_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer source_arena.deinit();
+    const program = try compile(
+        \\class Samples {
+        \\    var items:int[]
+        \\    init() { self.items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] }
+        \\}
+        \\func sum(samples:Samples) int {
+        \\    var total = 0
+        \\    var index = 0
+        \\    while index < 10000 {
+        \\        total += samples.items[0]
+        \\        total += samples.items.count()
+        \\        index++
+        \\    }
+        \\    return total
+        \\}
+        \\func main() {
+        \\    var samples = Samples()
+        \\    let snapshot = samples.items
+        \\    print(sum(samples))
+        \\    samples.items[0] = 9
+        \\    print(snapshot[0])
+        \\    print(samples.items[0])
+        \\}
+    , source_arena.allocator());
+    var storage: [2 * 1024 * 1024]u8 = undefined;
+    var output_arena = std.heap.FixedBufferAllocator.init(&storage);
+    const result = try runCapture(output_arena.allocator(), program);
+    try std.testing.expectEqualStrings("170000\n1\n9\n", result.stdout);
 }
 
 test "interpret answer as 42 and run main successfully" {

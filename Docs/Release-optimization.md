@@ -98,9 +98,15 @@ revisits a block only when a predecessor gains reachability or its outgoing
 facts change. It preserves block order and widening iterations; a dense
 schedule remains a test oracle for identical optimization decisions. Only
 integer parameters and integer instruction results participate in fact merging;
-non-integer values and unused descriptor slots remain absent. Remainders
-by a proven constant nonzero divisor contribute their signed or unsigned result
-interval without removing the divisor check. Release removes an integer add,
+non-integer values and unused descriptor slots remain absent. The solver keeps
+its fact matrices and other analysis tables in a function-local page arena,
+released on every return independently of the caller's retained program arena.
+Only changed blocks and instructions are materialized through the result
+allocator; unchanged IR remains shared with the input. Processing more functions
+therefore retains neither their completed analysis tables nor redundant copies
+of an unchanged analysis result.
+Remainders by a proven constant nonzero divisor contribute their signed or
+unsigned result interval without removing the divisor check. Release removes an integer add,
 subtract, multiply, or conversion check only when the complete mathematical
 interval fits its result type. Unproved operations keep their observable
 overflow or conversion failure. ARM64 lowering consumes the resulting checked
