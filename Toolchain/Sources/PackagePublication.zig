@@ -72,6 +72,9 @@ pub const Manager = struct {
         try appendUnique(self.allocator, &selected, "Package.json");
         for (sources) |path| try appendUnique(self.allocator, &selected, path);
         for (resources) |path| try appendUnique(self.allocator, &selected, path);
+        for (manifest.boundary_archives) |path| {
+            if (!artifactAt(manifest.artifacts, path)) try appendUnique(self.allocator, &selected, path);
+        }
         for ([_][]const u8{ "README.md", "README", "LICENSE", "LICENSE.md", "NOTICE" }) |name| {
             if (try optionalRegularFile(self.allocator, self.io, package_root, name)) try appendUnique(self.allocator, &selected, name);
         }
@@ -355,6 +358,37 @@ test "prepare a modified local package without Git or cache files" {
     manager = Manager.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackagePublication, manager.prepare(root));
     try std.testing.expectEqualStrings("a declared artifact does not match its sha256", manager.diagnostic.?);
+}
+
+test "publish native boundary archives for every declared target" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Portable/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Portable/Boundary/macos-x64");
+    try temporary.dir.createDirPath(std.testing.io, "Portable/Boundary/linux-x64");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Package.json", .data =
+        "{\"name\":\"Portable\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.44.0\"}," ++
+        "\"boundary\":{\"macos-x64\":{\"providers\":{\"Native\":{\"archive\":\"Boundary/macos-x64/libNative.a\"}}}," ++
+        "\"linux-x64\":{\"providers\":{\"Native\":{\"archive\":\"Boundary/linux-x64/libNative.a\"}}}}}\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Module/Value.sx", .data =
+        "public func answer() int { return 42 }\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Boundary/macos-x64/libNative.a", .data = "macOS bytes" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Boundary/linux-x64/libNative.a", .data = "Linux bytes" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Portable" });
+    var manager = Manager.init(allocator, std.testing.io, null);
+    const prepared = try manager.prepare(root);
+    try std.testing.expectEqual(@as(usize, 4), prepared.files.len);
+    try std.testing.expect(containsFile(prepared.files, "Boundary/macos-x64/libNative.a"));
+    try std.testing.expect(containsFile(prepared.files, "Boundary/linux-x64/libNative.a"));
+}
+
+fn containsFile(files: []const Archive.File, path: []const u8) bool {
+    for (files) |file| if (std.mem.eql(u8, file.path, path)) return true;
+    return false;
 }
 
 test "reject non-NFC and Unicode lowercase publication collisions" {

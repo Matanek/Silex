@@ -315,6 +315,7 @@ pub const ManifestInfo = struct {
     dependencies: []const ManifestDependency,
     dev_dependencies: []const ManifestDependency,
     artifacts: []const ManifestArtifact = &.{},
+    boundary_archives: []const []const u8 = &.{},
 };
 
 pub const ManifestArtifact = struct {
@@ -614,6 +615,7 @@ pub const Resolver = struct {
         ));
         try self.validateToolchain(manifest);
         const artifacts = try self.parsePublicationArtifacts(raw.artifacts);
+        const boundary_archives = try self.parsePublicationBoundaryArchives(raw.boundary);
         return .{
             .name = name,
             .version = version,
@@ -627,7 +629,53 @@ pub const Resolver = struct {
             .dependencies = manifest.dependencies,
             .dev_dependencies = manifest.dev_dependencies,
             .artifacts = artifacts,
+            .boundary_archives = boundary_archives,
         };
+    }
+
+    fn parsePublicationBoundaryArchives(self: *Resolver, value: ?std.json.Value) ![]const []const u8 {
+        const targets = switch (value orelse return &.{}) {
+            .object => |object| object,
+            else => return self.fail("boundary must be an object keyed by target"),
+        };
+        var archives: std.ArrayList([]const u8) = .empty;
+        var target_iterator = targets.iterator();
+        while (target_iterator.next()) |target_entry| {
+            _ = TargetModule.Target.parse(target_entry.key_ptr.*) catch
+                return self.fail("boundary target is not supported");
+            const declaration = switch (target_entry.value_ptr.*) {
+                .object => |object| object,
+                else => return self.fail("a boundary target must be an object"),
+            };
+            if (declaration.count() != 1) return self.fail("a boundary target accepts only providers");
+            const providers = switch (declaration.get("providers") orelse
+                return self.fail("a boundary target accepts only providers"))
+            {
+                .object => |object| object,
+                else => return self.fail("boundary providers must be an object"),
+            };
+            var provider_iterator = providers.iterator();
+            while (provider_iterator.next()) |provider_entry| {
+                const provider = switch (provider_entry.value_ptr.*) {
+                    .object => |object| object,
+                    else => return self.fail("a boundary provider must be an object"),
+                };
+                if (provider.get("archive")) |archive_value| {
+                    const path = switch (archive_value) {
+                        .string => |text| text,
+                        else => return self.fail("boundary archive must be a relative path string"),
+                    };
+                    if (!validRelativePath(path)) return self.fail("boundary archive must stay inside its package");
+                    var duplicate = false;
+                    for (archives.items) |existing| if (std.mem.eql(u8, existing, path)) {
+                        duplicate = true;
+                        break;
+                    };
+                    if (!duplicate) try archives.append(self.allocator, path);
+                }
+            }
+        }
+        return archives.toOwnedSlice(self.allocator);
     }
 
     fn parsePublicationArtifacts(self: *Resolver, value: ?std.json.Value) ![]const ManifestArtifact {
