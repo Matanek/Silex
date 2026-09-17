@@ -1,0 +1,45 @@
+class Counts { var drops:int = 0 }
+class Node {
+    var counts:Counts
+    var children:Node[] = []
+    init(counts:Counts) { self.counts = counts }
+    drop { self.counts.drops += 1 }
+    func add(node:Node) { self.children.append(node) }
+    func size() int { return self.children.count() }
+}
+class Owner {
+    var graph:Node
+    init(graph:Node) { self.graph = graph }
+}
+func retain_leaf(counts:Counts) Node {
+    let initial_drops = counts.drops + 0
+    var graph = Node(counts)
+    graph.add(graph)
+    var survivor = Node(counts)
+    graph.add(survivor)
+    // Repeated identities and several index growth boundaries must preserve
+    // edge multiplicity and the externally rooted descendant.
+    for i in 0...4096 {
+        var leaf = Node(counts)
+        graph.add(leaf)
+        graph.add(leaf)
+    }
+    {
+        var owner = Owner(graph)
+        for i in 0...4 { assert(owner.graph.size() == 8194) }
+        assert(counts.drops == initial_drops)
+    }
+    return survivor
+}
+func main() {
+    var counts = Counts()
+    for repetition in 0...3 {
+        {
+            var survivor = retain_leaf(counts)
+            assert(survivor.size() == 0)
+            assert(counts.drops == repetition*4098+4097)
+        }
+        assert(counts.drops == (repetition+1)*4098)
+    }
+    print("cycle wide graph passed")
+}

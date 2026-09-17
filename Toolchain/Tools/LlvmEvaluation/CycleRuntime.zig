@@ -9,6 +9,7 @@ const Visitor = *const fn (*Context, *Header) callconv(.c) void;
 const Node = struct {
     object: *Header,
     next: ?*Node,
+    bucket_next: ?*Node = null,
     incoming: u64 = 0,
     feedback: u64 = 0,
     active: bool = false,
@@ -17,13 +18,40 @@ const Node = struct {
 const Context = struct {
     visitor: Visitor,
     nodes: ?*Node = null,
+    buckets: []?*Node = &.{},
+    count: usize = 0,
     marking: bool = false,
     failed: bool = false,
 
     fn find(self: *Context, object: *Header) ?*Node {
-        var current = self.nodes;
-        while (current) |node| : (current = node.next) if (node.object == object) return node;
+        if (self.buckets.len == 0) return null;
+        var current = self.buckets[bucket(object, self.buckets.len)];
+        while (current) |node| : (current = node.bucket_next) if (node.object == object) return node;
         return null;
+    }
+
+    fn bucket(object: *Header, capacity: usize) usize {
+        const hash = (@as(u64, @intFromPtr(object)) >> 4) *% 0x9e3779b97f4a7c15;
+        return @intCast((hash ^ (hash >> 32)) & (capacity - 1));
+    }
+
+    // Keep the traversal list stable: the index only accelerates identity lookup.
+    fn reserve(self: *Context) bool {
+        if (self.count < self.buckets.len) return true;
+        const capacity = if (self.buckets.len == 0) 64 else std.math.mul(usize, self.buckets.len, 2) catch return false;
+        const bytes = std.math.mul(usize, capacity, @sizeOf(?*Node)) catch return false;
+        const memory = malloc(bytes) orelse return false;
+        const buckets = @as([*]?*Node, @ptrCast(@alignCast(memory)))[0..capacity];
+        @memset(buckets, null);
+        var current = self.nodes;
+        while (current) |node| : (current = node.next) {
+            const slot = bucket(node.object, capacity);
+            node.bucket_next = buckets[slot];
+            buckets[slot] = node;
+        }
+        if (self.buckets.len != 0) free(@ptrCast(self.buckets.ptr));
+        self.buckets = buckets;
+        return true;
     }
 
     fn add(self: *Context, object: *Header, incoming: bool) void {
@@ -43,6 +71,11 @@ const Context = struct {
             self.failed = true;
             return;
         }
+        if (!self.reserve()) {
+            @atomicStore(u64, &object.state, 0, .release);
+            self.failed = true;
+            return;
+        }
         const memory = malloc(@sizeOf(Node)) orelse {
             @atomicStore(u64, &object.state, 0, .release);
             self.failed = true;
@@ -51,6 +84,10 @@ const Context = struct {
         const node: *Node = @ptrCast(@alignCast(memory));
         node.* = .{ .object = object, .next = self.nodes, .incoming = @intFromBool(incoming), .active = true };
         self.nodes = node;
+        const slot = bucket(object, self.buckets.len);
+        node.bucket_next = self.buckets[slot];
+        self.buckets[slot] = node;
+        self.count += 1;
         self.visitor(self, object);
         node.active = false;
     }
@@ -63,6 +100,7 @@ const Context = struct {
                 @atomicStore(u64, &node.object.state, 0, .release);
             free(node);
         }
+        if (self.buckets.len != 0) free(@ptrCast(self.buckets.ptr));
     }
 };
 

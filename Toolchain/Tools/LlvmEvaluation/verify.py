@@ -58,6 +58,7 @@ def main():
         "LlvmEvaluation/CallbackOwnership.sx": "callback-ownership-ok\n",
         "LlvmEvaluation/CycleExternalDescendant.sx": "cycle external descendant passed\n",
         "LlvmEvaluation/CycleValueEdges.sx": "cycle value edges passed\n",
+        "LlvmEvaluation/CycleWideGraph.sx": "cycle wide graph passed\n",
         "LlvmEvaluation/FixedClassStorage.sx": "fixed class storage passed\n",
         "LlvmEvaluation/MethodReceiverLifetime.sx": "method receiver lifetime passed\n",
         "LlvmEvaluation/MonomorphicBoundCallback.sx": "monomorphic-bound-callback-ok\n",
