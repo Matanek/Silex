@@ -2,6 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const Artifacts = @import("Artifacts.zig");
 const Boundary = @import("Boundary.zig");
+const BackendTransfer = @import("BackendTransfer.zig");
 const Cli = @import("Cli.zig");
 const CliProgress = @import("CliProgress.zig");
 const CompilationCache = @import("CompilationCache.zig");
@@ -1439,8 +1440,12 @@ fn compileLlvmOptions(
     defer if (options.cache) CompilationCache.maintainAfterMutation(allocator, init.io);
 
     progress.source(.analyze, options.source_path);
+    var frontend_arena = std.heap.ArenaAllocator.init(init.gpa);
+    var frontend_live = true;
+    defer if (frontend_live) frontend_arena.deinit();
+    const frontend_allocator = frontend_arena.allocator();
     var compiler = Project.Compiler.initWithPackagesAndCache(
-        allocator,
+        frontend_allocator,
         init.io,
         try globalPackagesRoot(allocator, init.environ_map),
         options.cache,
@@ -1461,7 +1466,7 @@ fn compileLlvmOptions(
         };
     };
     const boundary_providers = try requiredBoundaryProviders(
-        allocator,
+        frontend_allocator,
         compilation.boundaries,
         compilation.packages,
     );
@@ -1505,10 +1510,19 @@ fn compileLlvmOptions(
         compiler.index,
     );
 
+    const backend_input = try BackendTransfer.transfer(allocator, init.gpa, .{
+        .ir = compilation.ir,
+        .boundaries = compilation.boundaries,
+        .providers = boundary_providers,
+        .files = compilation.files,
+    });
+    frontend_arena.deinit();
+    frontend_live = false;
+
     const scoped_program = scoped: {
         var closure_span = trace.span(.program_closure);
         defer closure_span.finish();
-        const scope = ProgramScope.executable(allocator, compilation.ir) catch |err| {
+        const scope = ProgramScope.executable(allocator, backend_input.ir) catch |err| {
             std.debug.print("silex: cannot close the LLVM program from its entry: {t}\n", .{err});
             return 1;
         };
@@ -1552,8 +1566,8 @@ fn compileLlvmOptions(
         CompilationCache.backendKey(
             allocator,
             init.io,
-            compilation.files,
-            boundary_providers,
+            backend_input.files,
+            backend_input.providers,
             "llvm-compile-v1",
             variant,
         ) catch null
@@ -1589,8 +1603,8 @@ fn compileLlvmOptions(
         .linker_path = linker_path,
         .program = optimized_program,
         .worker_count = worker_count,
-        .boundaries = compilation.boundaries,
-        .providers = boundary_providers,
+        .boundaries = backend_input.boundaries,
+        .providers = backend_input.providers,
         .mode = options.mode,
         .output_path = options.output_path,
         .trace = &trace,
@@ -1691,12 +1705,16 @@ fn compileNativeOptions(
             };
         };
     }
+    var frontend_arena = std.heap.ArenaAllocator.init(init.gpa);
+    var frontend_live = true;
+    defer if (frontend_live) frontend_arena.deinit();
+    const frontend_allocator = frontend_arena.allocator();
     var boundaries: []const Boundary.Function = &.{};
     var boundary_providers: []const Packages.BoundaryProvider = &.{};
     var dependency_files: []const []const u8 = &.{};
     const program = program: {
         var compiler = Project.Compiler.initWithPackagesAndCache(
-            allocator,
+            frontend_allocator,
             init.io,
             try globalPackagesRoot(allocator, init.environ_map),
             options.cache,
@@ -1717,7 +1735,7 @@ fn compileNativeOptions(
             };
         };
         boundaries = compilation.boundaries;
-        boundary_providers = try requiredBoundaryProviders(allocator, boundaries, compilation.packages);
+        boundary_providers = try requiredBoundaryProviders(frontend_allocator, boundaries, compilation.packages);
         // Reused semantic fragments can omit modules from cache_files. The
         // executable depends on their bytes as well as newly analyzed modules.
         dependency_files = compilation.files;
@@ -1754,7 +1772,18 @@ fn compileNativeOptions(
                 compiler.index,
             );
         }
-        break :program compilation.ir;
+        const backend_input = try BackendTransfer.transfer(allocator, init.gpa, .{
+            .ir = compilation.ir,
+            .boundaries = boundaries,
+            .providers = boundary_providers,
+            .files = dependency_files,
+        });
+        boundaries = backend_input.boundaries;
+        boundary_providers = backend_input.providers;
+        dependency_files = backend_input.files;
+        frontend_arena.deinit();
+        frontend_live = false;
+        break :program backend_input.ir;
     };
 
     // A cache miss may write frontend, machine and executable entries. Keep

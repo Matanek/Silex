@@ -4,6 +4,7 @@ pub const main = @import("Sources/Main.zig").main;
 test {
     // The exported main is lazy in test builds. Keep these semantic
     // regression suites reachable from the actual build root.
+    _ = @import("Sources/BackendTransfer.zig");
     _ = @import("Sources/ClassTests.zig");
     _ = @import("Sources/ReflectionTests.zig");
     _ = @import("Sources/TypedResourceTests.zig");
