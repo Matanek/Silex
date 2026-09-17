@@ -48,8 +48,8 @@ pub const Manager = struct {
             error.InvalidPackageGraph => return self.fail(resolver.diagnostic orelse "invalid package manifest"),
             else => |other| return other,
         };
-        const sources = Inventory.collectSources(self.allocator, self.io, package_root, manifest.sources) catch {
-            return self.fail("package source inventory is unsafe or cannot be read");
+        const sources = Inventory.collectSources(self.allocator, self.io, package_root, manifest.sources, manifest.name) catch |err| {
+            return self.fail(try std.fmt.allocPrint(self.allocator, "package source inventory failed: {s}", .{@errorName(err)}));
         };
         var uses: std.ArrayList(@import("EmbeddedFiles.zig").Use) = .empty;
         for (sources) |relative| {

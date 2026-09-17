@@ -6,7 +6,7 @@ const Io = std.Io;
 /// Enumerate the package's portable and every declared Platform/Target source
 /// tree using the same module discovery rules as the compiler. Paths are
 /// relative to the package root and use archive separators.
-pub fn collectSources(allocator: std.mem.Allocator, io: Io, package_root: []const u8, sources: []const u8) ![]const []const u8 {
+pub fn collectSources(allocator: std.mem.Allocator, io: Io, package_root: []const u8, sources: []const u8, package_name: []const u8) ![]const []const u8 {
     const root = try std.fs.path.resolve(allocator, &.{package_root});
     defer allocator.free(root);
     var paths: std.ArrayList([]const u8) = .empty;
@@ -21,14 +21,14 @@ pub fn collectSources(allocator: std.mem.Allocator, io: Io, package_root: []cons
     const target = try std.fs.path.join(allocator, &.{ root, "Target" });
     defer allocator.free(target);
     const excluded: []const []const u8 = if (std.mem.eql(u8, sources, ".")) &.{ platform, target } else &.{};
-    try appendSourceTree(allocator, io, root, portable, excluded, &paths);
-    try appendVariants(allocator, io, root, platform, sources, &paths);
-    try appendVariants(allocator, io, root, target, sources, &paths);
+    try appendSourceTree(allocator, io, root, portable, excluded, package_name, &paths);
+    try appendVariants(allocator, io, root, platform, sources, package_name, &paths);
+    try appendVariants(allocator, io, root, target, sources, package_name, &paths);
     std.mem.sort([]const u8, paths.items, {}, lessThan);
     return paths.toOwnedSlice(allocator);
 }
 
-fn appendVariants(allocator: std.mem.Allocator, io: Io, root: []const u8, category: []const u8, sources: []const u8, paths: *std.ArrayList([]const u8)) !void {
+fn appendVariants(allocator: std.mem.Allocator, io: Io, root: []const u8, category: []const u8, sources: []const u8, package_name: []const u8, paths: *std.ArrayList([]const u8)) !void {
     var directory = Io.Dir.cwd().openDir(io, category, .{ .iterate = true, .follow_symlinks = false }) catch |err| switch (err) {
         error.FileNotFound => return,
         else => return error.UnsafeEntry,
@@ -49,14 +49,14 @@ fn appendVariants(allocator: std.mem.Allocator, io: Io, root: []const u8, catego
             else => return error.UnsafeEntry,
         };
         probe.close(io);
-        try appendSourceTree(allocator, io, root, source_root, &.{}, paths);
+        try appendSourceTree(allocator, io, root, source_root, &.{}, package_name, paths);
     }
 }
 
-fn appendSourceTree(allocator: std.mem.Allocator, io: Io, root: []const u8, source_root: []const u8, excluded: []const []const u8, paths: *std.ArrayList([]const u8)) !void {
+fn appendSourceTree(allocator: std.mem.Allocator, io: Io, root: []const u8, source_root: []const u8, excluded: []const []const u8, package_name: []const u8, paths: *std.ArrayList([]const u8)) !void {
     var temporary_arena = std.heap.ArenaAllocator.init(allocator);
     defer temporary_arena.deinit();
-    const index = try Modules.discoverOwnedExcluding(temporary_arena.allocator(), io, source_root, null, 0, excluded);
+    const index = try Modules.discoverOwnedExcluding(temporary_arena.allocator(), io, source_root, package_name, 0, excluded);
     for (index.providers) |provider| {
         if (!std.mem.startsWith(u8, provider.path, root) or provider.path.len <= root.len or provider.path[root.len] != std.fs.path.sep) return error.UnsafeEntry;
         const relative = provider.path[root.len + 1 ..];
@@ -86,7 +86,7 @@ test "collect portable and inactive variant sources without cache entries" {
     }) |path| try temporary.dir.writeFile(std.testing.io, .{ .sub_path = path, .data = "public func answer() int { return 42 }\n" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Package" });
     defer allocator.free(root);
-    const sources = try collectSources(allocator, std.testing.io, root, "Module");
+    const sources = try collectSources(allocator, std.testing.io, root, "Module", "Package");
     defer {
         for (sources) |path| allocator.free(path);
         allocator.free(sources);
@@ -106,7 +106,7 @@ test "sources dot does not count variant files twice" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package/Platform/Linux/Linux.sx", .data = "func main() {}" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Package" });
     defer allocator.free(root);
-    const sources = try collectSources(allocator, std.testing.io, root, ".");
+    const sources = try collectSources(allocator, std.testing.io, root, ".", "Package");
     defer {
         for (sources) |path| allocator.free(path);
         allocator.free(sources);
@@ -114,4 +114,24 @@ test "sources dot does not count variant files twice" {
     try std.testing.expectEqual(@as(usize, 2), sources.len);
     try std.testing.expectEqualStrings("Core.sx", sources[0]);
     try std.testing.expectEqualStrings("Platform/Linux/Linux.sx", sources[1]);
+}
+
+test "package root module atoms are discovered for portable and variant sources" {
+    const allocator = std.testing.allocator;
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Package/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Package/Platform/Linux/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package/Module/@Module.sx", .data = "public func answer() int { return 42 }\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package/Platform/Linux/Module/@Module.sx", .data = "public func other() int { return 43 }\n" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Package" });
+    defer allocator.free(root);
+    const sources = try collectSources(allocator, std.testing.io, root, "Module", "Package");
+    defer {
+        for (sources) |path| allocator.free(path);
+        allocator.free(sources);
+    }
+    try std.testing.expectEqual(@as(usize, 2), sources.len);
+    try std.testing.expectEqualStrings("Module/@Module.sx", sources[0]);
+    try std.testing.expectEqualStrings("Platform/Linux/Module/@Module.sx", sources[1]);
 }
