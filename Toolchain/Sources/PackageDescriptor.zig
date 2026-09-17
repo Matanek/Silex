@@ -16,6 +16,11 @@ pub const Result = struct {
     source_digest: []const u8,
 };
 
+pub const Provenance = struct {
+    commit: []const u8,
+    repository: []const u8,
+};
+
 const BlobView = struct {
     sha256: []const u8,
     size: usize,
@@ -44,6 +49,15 @@ const Canonical = struct {
     source: BlobView,
 };
 
+const CanonicalWithProvenance = struct {
+    artifacts: []const ArtifactView,
+    files: []const FileView,
+    manifest: []const u8,
+    provenance: Provenance,
+    schema: u8 = 1,
+    source: BlobView,
+};
+
 /// Describes the exact manifest and copied bytes that were used for `source`.
 /// A later HTTP retry can send the same JSON without re-reading the author tree.
 pub fn render(
@@ -51,6 +65,16 @@ pub fn render(
     files: []const Archive.File,
     source: []const u8,
     artifacts: []const Artifact,
+) !Result {
+    return renderWithProvenance(allocator, files, source, artifacts, null);
+}
+
+pub fn renderWithProvenance(
+    allocator: Allocator,
+    files: []const Archive.File,
+    source: []const u8,
+    artifacts: []const Artifact,
+    provenance: ?Provenance,
 ) !Result {
     var temporary_arena = std.heap.ArenaAllocator.init(allocator);
     defer temporary_arena.deinit();
@@ -78,12 +102,22 @@ pub fn render(
         };
     }
     const transient_source_digest = try sha256Hex(temporary, source);
-    const transient_json = try std.json.Stringify.valueAlloc(temporary, Canonical{
+    const common = Canonical{
         .artifacts = artifact_views,
         .files = file_views,
         .manifest = manifest.?,
         .source = .{ .sha256 = transient_source_digest, .size = source.len },
-    }, .{});
+    };
+    const transient_json = if (provenance) |value|
+        try std.json.Stringify.valueAlloc(temporary, CanonicalWithProvenance{
+            .artifacts = common.artifacts,
+            .files = common.files,
+            .manifest = common.manifest,
+            .provenance = value,
+            .source = common.source,
+        }, .{})
+    else
+        try std.json.Stringify.valueAlloc(temporary, common, .{});
     const json = try allocator.dupe(u8, transient_json);
     errdefer allocator.free(json);
     const digest = try sha256Hex(allocator, json);
@@ -124,6 +158,13 @@ test "descriptor is canonical for the exact manifest and source archive" {
     try std.testing.expectEqual(@as(usize, 2), entries.len);
     try std.testing.expectEqualStrings("Package.json", entries[0].object.get("path").?.string);
     try std.testing.expectEqualStrings(try sha256Hex(allocator, files[0].bytes), entries[0].object.get("sha256").?.string);
+
+    const with_provenance = try renderWithProvenance(allocator, files, source, &.{}, .{
+        .commit = "1234567890123456789012345678901234567890",
+        .repository = "https://github.com/Matanek/Silex-Registry.git",
+    });
+    try std.testing.expect(std.mem.indexOf(u8, with_provenance.json, "\"provenance\":{") != null);
+    try std.testing.expect(!std.mem.eql(u8, result.digest, with_provenance.digest));
 }
 
 test "descriptor requires a copied manifest" {

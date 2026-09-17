@@ -1,5 +1,6 @@
 const std = @import("std");
 const Archive = @import("PackageArchive.zig");
+const DescriptorWriter = @import("PackageDescriptor.zig");
 const Modules = @import("Modules.zig");
 const Packages = @import("Packages.zig");
 const PackageStore = @import("PackageStore.zig");
@@ -32,6 +33,15 @@ pub const Artifact = struct {
 /// These fields deliberately follow the server's recursively sorted canonical
 /// representation; serializing this struct reproduces its publication digest.
 pub const Descriptor = struct {
+    artifacts: []const Artifact,
+    files: []const File,
+    manifest: []const u8,
+    provenance: ?DescriptorWriter.Provenance = null,
+    schema: u8,
+    source: Blob,
+};
+
+const LegacyDescriptor = struct {
     artifacts: []const Artifact,
     files: []const File,
     manifest: []const u8,
@@ -461,7 +471,16 @@ pub fn parsePublication(
         reply.descriptor.artifacts.len > 256)
         return error.InvalidRegistryResponse;
 
-    const canonical = try std.json.Stringify.valueAlloc(allocator, reply.descriptor, .{});
+    const canonical = if (reply.descriptor.provenance != null)
+        try std.json.Stringify.valueAlloc(allocator, reply.descriptor, .{})
+    else
+        try std.json.Stringify.valueAlloc(allocator, LegacyDescriptor{
+            .artifacts = reply.descriptor.artifacts,
+            .files = reply.descriptor.files,
+            .manifest = reply.descriptor.manifest,
+            .schema = reply.descriptor.schema,
+            .source = reply.descriptor.source,
+        }, .{});
     if (!matches(canonical, expected_digest)) return error.InvalidRegistryResponse;
     const requirement_data = std.json.parseFromSliceLeaky(struct {
         requires: struct { silex: []const u8 },
@@ -547,7 +566,6 @@ test "public version metadata binds exact manifest and source inventory to diges
         .{ .path = "Package.json", .bytes = manifest },
     };
     const source = try Archive.encode(allocator, files);
-    const DescriptorWriter = @import("PackageDescriptor.zig");
     const rendered = try DescriptorWriter.render(allocator, files, source, &.{});
     const response = try std.fmt.allocPrint(allocator,
         "{{\"publication_sha256\":\"{s}\",\"descriptor\":{s}}}",
@@ -556,6 +574,17 @@ test "public version metadata binds exact manifest and source inventory to diges
     const selected = try parsePublication(allocator, std.testing.io, response, "Runtime", try Packages.Version.parse("1.0.0"), rendered.digest, toolchain);
     try std.testing.expectEqualStrings(rendered.source_digest, selected.descriptor.source.sha256);
     try std.testing.expectEqual(@as(usize, 2), selected.descriptor.files.len);
+    const attributed = try DescriptorWriter.renderWithProvenance(allocator, files, source, &.{}, .{
+        .commit = "1234567890123456789012345678901234567890",
+        .repository = "https://github.com/Matanek/Silex-Registry.git",
+    });
+    const attributed_response = try std.fmt.allocPrint(allocator,
+        "{{\"publication_sha256\":\"{s}\",\"descriptor\":{s}}}",
+        .{ attributed.digest, attributed.json });
+    const attributed_selected = try parsePublication(allocator, std.testing.io, attributed_response,
+        "Runtime", try Packages.Version.parse("1.0.0"), attributed.digest, toolchain);
+    try std.testing.expectEqualStrings("https://github.com/Matanek/Silex-Registry.git",
+        attributed_selected.descriptor.provenance.?.repository);
     try std.testing.expectError(error.InvalidRegistryResponse, parsePublication(
         allocator, std.testing.io, response, "Other", try Packages.Version.parse("1.0.0"), rendered.digest, toolchain,
     ));
