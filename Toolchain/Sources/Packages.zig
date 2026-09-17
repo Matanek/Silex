@@ -305,6 +305,7 @@ pub const Graph = struct {
 pub const ManifestInfo = struct {
     name: []const u8,
     version: Version,
+    repository: ?[]const u8,
     sources: []const u8,
     description: ?ManifestDescription,
     authors: []const []const u8,
@@ -394,6 +395,7 @@ pub const Result = struct {
 const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
+    repository: ?[]const u8 = null,
     sources: ?[]const u8 = null,
     description: ?std.json.Value = null,
     authors: ?std.json.Value = null,
@@ -410,6 +412,7 @@ const RawManifest = struct {
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
+    repository: ?[]const u8,
     sources: []const u8,
     description: ?ManifestDescription,
     authors: []const []const u8,
@@ -614,6 +617,7 @@ pub const Resolver = struct {
         return .{
             .name = name,
             .version = version,
+            .repository = manifest.repository,
             .sources = manifest.sources,
             .description = manifest.description,
             .authors = manifest.authors,
@@ -1462,6 +1466,9 @@ pub const Resolver = struct {
             Version.parse(text) catch return self.fail("invalid package version")
         else
             null;
+        if (raw.repository) |repository| {
+            if (!validDevelopmentRepository(repository)) return self.fail("repository must be a GitHub HTTPS repository URL");
+        }
         if (raw.name) |name| {
             if (!Modules.validName(name)) return self.fail("invalid package identity");
             if (reservedContextualRoot(name)) return self.fail("Package and Module are reserved package-name roots");
@@ -1605,6 +1612,7 @@ pub const Resolver = struct {
         return .{
             .name = raw.name,
             .version = version,
+            .repository = raw.repository,
             .sources = sources,
             .description = description,
             .authors = try authors.toOwnedSlice(self.allocator),
@@ -1953,6 +1961,27 @@ fn validMetadataLine(text: []const u8) bool {
     return text.len != 0 and
         std.mem.trim(u8, text, " \t\r\n").len == text.len and
         std.mem.indexOfAny(u8, text, "\r\n") == null;
+}
+
+fn validDevelopmentRepository(url: []const u8) bool {
+    const prefix = "https://github.com/";
+    if (url.len > 200 or !std.mem.startsWith(u8, url, prefix)) return false;
+    const path = url[prefix.len..];
+    const slash = std.mem.indexOfScalar(u8, path, '/') orelse return false;
+    const owner = path[0..slash];
+    const repo = path[slash + 1 ..];
+    if (owner.len < 1 or owner.len > 39 or repo.len < 1 or repo.len > 100 or
+        std.mem.eql(u8, repo, ".") or std.mem.eql(u8, repo, "..")) return false;
+    for (owner) |character| if (!std.ascii.isAlphanumeric(character) and character != '-') return false;
+    for (repo) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and
+        character != '_' and character != '.') return false;
+    return true;
+}
+
+test "development repository is an optional GitHub link, not a publication source" {
+    try std.testing.expect(validDevelopmentRepository("https://github.com/Silex-Test/Fixture"));
+    try std.testing.expect(!validDevelopmentRepository("https://github.com/Silex-Test/Fixture/issues"));
+    try std.testing.expect(!validDevelopmentRepository("https://example.com/Silex-Test/Fixture"));
 }
 
 fn validLanguageTag(text: []const u8) bool {

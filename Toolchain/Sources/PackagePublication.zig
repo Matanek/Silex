@@ -17,6 +17,7 @@ pub const Prepared = struct {
     files: []const Archive.File,
     source: []const u8,
     descriptor: Descriptor.Result,
+    repository: ?[]const u8,
     artifacts: []const Descriptor.Artifact,
     exclusions: []const Exclusion,
 };
@@ -103,7 +104,7 @@ pub const Manager = struct {
         };
         const source = try Archive.encode(self.allocator, files);
         const descriptor = try Descriptor.render(self.allocator, files, source, artifacts);
-        return .{ .name = manifest.name, .version = manifest.version, .files = files, .source = source, .descriptor = descriptor, .artifacts = artifacts, .exclusions = exclusions };
+        return .{ .name = manifest.name, .version = manifest.version, .files = files, .source = source, .descriptor = descriptor, .repository = manifest.repository, .artifacts = artifacts, .exclusions = exclusions };
     }
 
     fn fail(self: *Manager, message: []const u8) error{InvalidPackagePublication} {

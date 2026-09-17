@@ -41,8 +41,6 @@ const PackageLock = @import("PackageLock.zig");
 const PackageRegistration = @import("PackageRegistration.zig");
 const PackagePublication = @import("PackagePublication.zig");
 const PackagePublishClient = @import("PackagePublishClient.zig");
-const PackageDescriptor = @import("PackageDescriptor.zig");
-const PackageProvenance = @import("PackageProvenance.zig");
 const GitHubRegistration = @import("GitHubRegistration.zig");
 const RegistryLogin = @import("RegistryLogin.zig");
 const PackageStore = @import("PackageStore.zig");
@@ -261,24 +259,19 @@ fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         },
     };
     var publication = PackagePublication.Manager.init(allocator, init.io, try globalPackagesRoot(allocator, init.environ_map));
-    var prepared = publication.prepare(options.package) catch |err| switch (err) {
+    const prepared = publication.prepare(options.package) catch |err| switch (err) {
         error.InvalidPackagePublication => {
             std.debug.print("silex: cannot prepare package publication: {s}\n", .{publication.diagnostic orelse "invalid package publication"});
             return 1;
         },
         else => return err,
     };
-    const provenance = PackageProvenance.inspect(allocator, init.io, options.package) catch null;
-    if (provenance) |value| prepared.descriptor = try PackageDescriptor.renderWithProvenance(
-        allocator, prepared.files, prepared.source, prepared.artifacts, value,
-    );
     if (options.dry_run) {
         std.debug.print(
             "silex: dry run for {s}@{d}.{d}.{d} (nothing uploaded)\n",
             .{ prepared.name, prepared.version.major, prepared.version.minor, prepared.version.patch },
         );
-        std.debug.print("silex: would publish this local snapshot: source files {d}, separate artifacts {d}\n",
-            .{ prepared.files.len, prepared.artifacts.len });
+        std.debug.print("silex: would publish this local snapshot: source files {d}, separate artifacts {d}\n", .{ prepared.files.len, prepared.artifacts.len });
         std.debug.print("silex: source files:\n", .{});
         for (prepared.files) |file| {
             std.debug.print("silex:   + {s} ({d} bytes)\n", .{ file.path, file.bytes.len });
@@ -294,13 +287,10 @@ fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         for (prepared.exclusions) |exclusion| {
             std.debug.print("silex:   - {s} ({s})\n", .{ exclusion.path, exclusion.reason });
         }
-        if (provenance) |value| {
-            std.debug.print("silex: GitHub reference: {s} at {s}\n",
-                .{ value.repository, value.commit });
-            std.debug.print("silex: published bytes come from the local snapshot, not this GitHub commit\n", .{});
-        } else {
-            std.debug.print("silex: publishing will require a package GitHub origin and a HEAD commit\n", .{});
-        }
+        if (prepared.repository) |repository| std.debug.print(
+            "silex: development repository (author-provided link): {s}\n",
+            .{repository},
+        );
         std.debug.print("silex: publication sha256 {s} (identifies this exact snapshot)\n", .{prepared.descriptor.digest});
         std.debug.print("silex: no authentication, network request or publication was performed\n", .{});
         return 0;
@@ -313,10 +303,6 @@ fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         },
         else => return err,
     };
-    if (provenance == null) {
-        std.debug.print("silex: publishing requires a package GitHub origin and a HEAD commit; local files remain the published snapshot\n", .{});
-        return 1;
-    }
     var client: PackagePublishClient.Client = .{
         .allocator = allocator,
         .network_allocator = init.gpa,
