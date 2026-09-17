@@ -169,6 +169,13 @@ class loses its last root, a type-directed graph visitor can collect its
 unreachable cyclic component. Reachability includes possible derived instances
 behind base-typed fields, including back edges introduced only by a subtype
 (`InheritedCycle.sx`).
+Scoped resource stores return an owned child and release their retained parent
+edge when invalidated. `BorrowedResource/GFX/Smokes/ScopeOwned.sx` and
+`ScopeInvalidation.sx` check child aliases, sibling independence and a parent
+kept alive only by an escaped child, through a real package boundary.
+The semantic package cache distinguishes generated cleanup helpers from public
+methods at the same source position; invalidated scopes also have a warm-cache
+regression in `TypedResourceTests.zig`.
 Visitors use LLVM field and aggregate layouts, including optional values,
 protocol and enum payloads, fixed arrays, lists and bound callback owners.
 Rooted descendants and objects reached from outside the candidate graph retain

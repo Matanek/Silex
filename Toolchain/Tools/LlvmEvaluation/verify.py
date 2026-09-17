@@ -73,6 +73,8 @@ def main():
         "LlvmEvaluation/StaticRoots.sx": "body\ndrop 3\ndrop 2\ndrop 1\n",
         "LlvmEvaluation/BorrowedView.sx": "42\n2\n",
         "LlvmEvaluation/BorrowedResource/GFX/Smokes/Main.sx": "clear\nitem 2\nitem 1\ndone\n",
+        "LlvmEvaluation/BorrowedResource/GFX/Smokes/ScopeOwned.sx": "scope-owned-ok\n",
+        "LlvmEvaluation/BorrowedResource/GFX/Smokes/ScopeInvalidation.sx": "scope-invalidation-ok\n",
         "LlvmEvaluation/BorrowedCallback.sx": "done\nitem 2\nitem 2\n",
         "LlvmEvaluation/BorrowedReturn.sx": "done\nitem 2\n",
         "LlvmEvaluation/BorrowedCAddress.sx": "42\n42\n",

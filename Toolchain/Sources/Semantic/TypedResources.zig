@@ -81,6 +81,8 @@ fn emitScope(self: anytype, builder: anytype, structure: usize) !void {
     try Ownership.retainValueOwned(self, builder, .structure(structure), 0, .edge);
     const child = try self.newValue(builder, .structure(structure));
     try self.emit(builder, .{ .structure_init = .{ .result = child, .structure = structure, .fields = values } });
+    // Like ordinary construction, scope transfers one owned root to its caller.
+    try Ownership.retainValue(self, builder, .structure(structure), child);
     self.terminate(builder, .{ .return_value = child });
 }
 
@@ -328,6 +330,7 @@ fn emitClear(self: anytype, builder: anytype, structure: usize, invalidate: bool
     if (invalidate) {
         const parent_field = parentField(self, structure) orelse return error.InvalidSource;
         const parent_type = self.structures[structure].fields[parent_field].type;
+        const previous_parent = try loadField(self, builder, structure, parent_field, parent_type, order_result);
         const null_parent = try self.newValue(builder, parent_type);
         try self.emit(builder, .{ .optional_null = .{ .result = null_parent } });
         const detached = try self.newValue(builder, .structure(structure));
@@ -340,6 +343,9 @@ fn emitClear(self: anytype, builder: anytype, structure: usize, invalidate: bool
         try self.emit(builder, .{ .optional_some = .{ .result = marked, .operand = truth } });
         const result = try self.newValue(builder, .structure(structure));
         try self.emit(builder, .{ .field_store = .{ .result = result, .base = detached, .field = invalid_field, .replacement = marked } });
+        // scope retained this link as an edge. Detach and mark first so any
+        // finalization caused by its release sees the invalidated store.
+        try Ownership.emitDropOwned(self, builder, parent_type, previous_parent, .edge);
         self.terminate(builder, .{ .return_value = result });
     } else self.terminate(builder, .{ .return_value = order_result });
 }

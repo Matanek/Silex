@@ -11,3 +11,5 @@ public intrinsic class Resources {
     func clear()
     module func invalidate()
 }
+
+public func invalidate_scope(store:Resources) { store.invalidate() }

@@ -1,0 +1,18 @@
+use GFX.Application.Resources
+static class Counts { static var drops:int = 0 }
+class Item { drop { Counts.drops++ } }
+func main() {
+    {
+        var parent = Resources()
+        var child = parent.scope()
+        child.insert(Item())
+        assert(Counts.drops == 0)
+        assert(child.has<Item>())
+        var alias = child
+        child = parent.scope()
+        assert(Counts.drops == 0)
+        assert(!child.has<Item>() && alias.has<Item>())
+    }
+    assert(Counts.drops == 1)
+    print("scope-owned-ok")
+}

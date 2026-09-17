@@ -22,6 +22,81 @@ const resources_source =
     \\}
 ;
 
+test "cached resource cleanup remains distinct from guarded public clear" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data = @embedFile("../Benchmarks/Optimizer/LlvmEvaluation/BorrowedResource/GFX/Module/Application.sx"),
+    });
+    try temporary.dir.createDirPath(std.testing.io, "Consumer/Sources");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Consumer/Package.json",
+        .data = "{\"sources\":\"Sources\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Consumer/Sources/Main.sx",
+        .data =
+        \\use GFX.Application.Resources
+        \\use GFX.Application.invalidate_scope
+        \\func main() {
+        \\    var parent = Resources()
+        \\    parent.insert(42)
+        \\    {
+        \\        var child = parent.scope()
+        \\        invalidate_scope(child)
+        \\    }
+        \\    assert(parent.get<int>() == 42)
+        \\    print("cached-scope-ok")
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Consumer", "Sources", "Main.sx" });
+    for (0..2) |pass| {
+        var compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+        const compilation = try compiler.compile(input);
+        if (pass == 0) {
+            try std.testing.expect(compilation.metrics.package_functions_stored != 0);
+        } else {
+            try std.testing.expect(compilation.metrics.package_functions_reused != 0);
+        }
+        const result = try Interpreter.runCapture(allocator, compilation.ir);
+        try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+        try std.testing.expectEqualStrings("cached-scope-ok\n", result.stdout);
+        _ = try Lower.lower(allocator, compilation.ir);
+    }
+}
+
+test "scoped typed resources preserve child roots and release detached parents" {
+    const fixtures = .{
+        .{ @embedFile("../Benchmarks/Optimizer/LlvmEvaluation/BorrowedResource/GFX/Smokes/ScopeOwned.sx"), "scope-owned-ok\n" },
+        .{ @embedFile("../Benchmarks/Optimizer/LlvmEvaluation/BorrowedResource/GFX/Smokes/ScopeInvalidation.sx"), "scope-invalidation-ok\n" },
+    };
+    inline for (fixtures) |fixture| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try prepare(&temporary);
+        try temporary.dir.writeFile(std.testing.io, .{
+            .sub_path = "GFX/Module/Application.sx",
+            .data = @embedFile("../Benchmarks/Optimizer/LlvmEvaluation/BorrowedResource/GFX/Module/Application.sx"),
+        });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Smokes/Main.sx", .data = fixture[0] });
+        var compiler = Project.Compiler.init(allocator, std.testing.io);
+        const compilation = try compiler.compile(try inputPath(allocator, temporary));
+        const result = try Interpreter.runCapture(allocator, compilation.ir);
+        try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+        try std.testing.expectEqualStrings(fixture[1], result.stdout);
+        _ = try Lower.lower(allocator, compilation.ir);
+    }
+}
+
 test "scoped typed resources shadow and fall back without mutating their parent" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

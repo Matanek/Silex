@@ -6,6 +6,7 @@ test {
     // regression suites reachable from the actual build root.
     _ = @import("Sources/ClassTests.zig");
     _ = @import("Sources/ReflectionTests.zig");
+    _ = @import("Sources/TypedResourceTests.zig");
     _ = @import("Sources/MacOS/Link.zig");
     _ = @import("Sources/Llvm/Units.zig");
     _ = @import("Sources/Llvm/Store.zig");

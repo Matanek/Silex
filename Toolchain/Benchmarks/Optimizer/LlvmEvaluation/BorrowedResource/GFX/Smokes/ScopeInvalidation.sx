@@ -1,0 +1,31 @@
+use GFX.Application.Resources
+use GFX.Application.invalidate_scope
+static class Counts { static var drops:int = 0 }
+class Item { drop { Counts.drops++ } }
+func orphan_scope() Resources {
+    var parent = Resources()
+    parent.insert(Item())
+    return parent.scope()
+}
+func main() {
+    {
+        var parent = Resources()
+        parent.insert(Item())
+        var sibling = parent.scope()
+        {
+            var child = parent.scope()
+            invalidate_scope(child)
+        }
+        assert(Counts.drops == 0)
+        assert(parent.has<Item>() && sibling.has<Item>())
+    }
+    assert(Counts.drops == 1)
+    {
+        var child = orphan_scope()
+        assert(Counts.drops == 1 && child.has<Item>())
+        invalidate_scope(child)
+        assert(Counts.drops == 2)
+    }
+    assert(Counts.drops == 2)
+    print("scope-invalidation-ok")
+}

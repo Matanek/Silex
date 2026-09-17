@@ -154,7 +154,9 @@ pub const Analyzer = struct {
             if (structure.is_protocol) continue;
             for (structure.methods) |method| {
                 const key = if (package_cache_enabled and structure.owner != 0 and method.specialization_file == null)
-                    PackageCache.generatedKey(self.allocator, self.packages.?, self.source_files, method.owner, method.position, "method", structure.name)
+                    // Generated helpers may share a source position with the
+                    // public method they were derived from, but not its body.
+                    PackageCache.generatedKey(self.allocator, self.packages.?, self.source_files, method.owner, method.position, "method", try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ structure.name, method.name }))
                 else
                     null;
                 try generated_keys.append(self.allocator, key);
