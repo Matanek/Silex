@@ -196,6 +196,13 @@ owner disappears. Positional, named, optional and protocol calls use the same
 write-back rule. Explicit mutable-reference calls retain their separate location
 semantics.
 
+Class method receivers keep a temporary root from receiver evaluation through
+argument evaluation, dispatch and result extraction. Reentrant callbacks may
+release or replace the caller's field without finalizing an active receiver.
+Class mutation updates the shared identity in place; it does not write the old
+receiver back over a replacement made during the call. `self` and `super`
+reuse the invocation's lifetime, including calls from finalizers.
+
 ## Ownership carried by mutable references
 
 An internal mutable reference identifies both a storage address and the

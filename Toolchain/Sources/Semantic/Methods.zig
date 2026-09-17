@@ -390,6 +390,28 @@ pub fn analyzeCallWithReceiver(
     receiver: Model.TypedValue,
     safe_receiver_type: ?Ast.Type,
 ) !?Model.TypedValue {
+    // A stored receiver may lose its owner in an argument or reentrant callback.
+    // Hold its identity through dispatch, result extraction and receiver writeback.
+    const expression = call.receiver.?;
+    const self_call = expression.value == .identifier and
+        (std.mem.eql(u8, expression.value.identifier, "self") or std.mem.eql(u8, expression.value.identifier, "super"));
+    const rooted = if (receiver.type.structureIndex()) |index|
+        index < self.structures.len and self.structures[index].is_class and !receiver.transferred and !self_call
+    else
+        false;
+    if (rooted) try Resources.retainValue(self, builder, receiver.type, receiver.value);
+    const result = try analyzeReceiverCall(self, builder, call, receiver, safe_receiver_type);
+    if (rooted) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
+    return result;
+}
+
+fn analyzeReceiverCall(
+    self: anytype,
+    builder: anytype,
+    call: Ast.Expression.Call,
+    receiver: Model.TypedValue,
+    safe_receiver_type: ?Ast.Type,
+) AnalyzeError!?Model.TypedValue {
     const receiver_expression = call.receiver.?;
     const super_call = receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "super");
     var resolved_receiver = receiver;
@@ -559,11 +581,10 @@ pub fn analyzeCallWithReceiver(
         const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
         return self.fail(call.name_position, message);
     }
-    var place = if (mutating and !borrowed_mutable)
-        if (class_receiver and receiver.borrowed_mode != .mutable)
-            try findMutablePlace(self, builder, receiver_expression)
-        else
-            try requireMutablePlace(self, builder, receiver_expression, call.name)
+    // Class mutations update their shared identity in place. Writing the
+    // receiver back could overwrite a replacement made by a reentrant call.
+    var place = if (mutating and !borrowed_mutable and !class_receiver)
+        try requireMutablePlace(self, builder, receiver_expression, call.name)
     else
         null;
     if (place) |target| if (!class_receiver) {
@@ -805,11 +826,10 @@ fn analyzeNamedCall(
         const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
         return self.fail(call.name_position, message);
     }
-    var place = if (mutating and !borrowed_mutable)
-        if (class_receiver and receiver.borrowed_mode != .mutable)
-            try findMutablePlace(self, builder, receiver_expression)
-        else
-            try requireMutablePlace(self, builder, receiver_expression, call.name)
+    // Class mutations update their shared identity in place. Writing the
+    // receiver back could overwrite a replacement made by a reentrant call.
+    var place = if (mutating and !borrowed_mutable and !class_receiver)
+        try requireMutablePlace(self, builder, receiver_expression, call.name)
     else
         null;
     if (place) |target| if (!class_receiver) {

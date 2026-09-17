@@ -1,0 +1,55 @@
+class State { var alive:bool = true; var calls:int = 0 }
+func noop() {}
+class Receiver {
+    var state:State
+    var callback:func()
+    init() { self.state = State(); self.callback = noop }
+    drop { self.state.alive = false }
+    func set_callback(callback:func()) { self.callback = callback }
+    func read() bool { self.callback(); return self.state.alive }
+    func mutate(value:int) int {
+        self.state.calls += value
+        self.callback()
+        assert(self.state.alive)
+        return self.state.calls
+    }
+}
+class Owner {
+    var receiver:Receiver?
+    var state:State
+    init() { self.receiver = Receiver(); self.state = self.receiver!.state }
+    func release() { self.receiver = null; assert(self.state.alive) }
+    func argument() int { self.release(); return 3 }
+}
+class Replacement {
+    var receiver:Receiver
+    var initial:State
+    init() { self.receiver = Receiver(); self.initial = self.receiver.state }
+    func argument() int { self.receiver = Receiver(); assert(self.initial.alive); return 4 }
+}
+func main() {
+    {
+        var owner = Owner()
+        owner.receiver!.set_callback(owner.release)
+        assert(owner.receiver!.read())
+        assert(!owner.state.alive)
+    }
+    {
+        var owner = Owner()
+        owner.receiver!.set_callback(owner.release)
+        assert(owner.receiver!.mutate(2) == 2)
+        assert(!owner.state.alive && owner.receiver == null)
+    }
+    {
+        var owner = Owner()
+        assert(owner.receiver!.mutate(value:owner.argument()) == 3)
+        assert(!owner.state.alive && owner.receiver == null)
+    }
+    {
+        var owner = Replacement()
+        assert(owner.receiver.mutate(value:owner.argument()) == 4)
+        assert(!owner.initial.alive)
+        assert(owner.receiver.state.calls == 0)
+    }
+    print("method receiver lifetime passed")
+}

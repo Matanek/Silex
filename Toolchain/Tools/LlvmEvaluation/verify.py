@@ -56,6 +56,7 @@ def main():
         "LlvmEvaluation/TemporaryField.sx": "owner dropped\nitem 42\ntemporary-fields-ok\nitem dropped\n",
         "LlvmEvaluation/TemporaryCollectionRead.sx": "temporary-collection-read-ok\n",
         "LlvmEvaluation/CallbackOwnership.sx": "callback-ownership-ok\n",
+        "LlvmEvaluation/MethodReceiverLifetime.sx": "method receiver lifetime passed\n",
         "LlvmEvaluation/MonomorphicBoundCallback.sx": "monomorphic-bound-callback-ok\n",
         "LlvmEvaluation/OwnedBoundCallback.sx": "3\n",
         "LlvmEvaluation/StaticRoots.sx": "body\ndrop 3\ndrop 2\ndrop 1\n",

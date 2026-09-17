@@ -1093,3 +1093,9 @@ test "unreachable cycles crossing protocol values finalize every class once" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("drop first\ndrop second\n", output);
 }
+
+test "class method receiver survives reentrant owner release and replacement" {
+    const output = try run(@embedFile("../Benchmarks/Optimizer/LlvmEvaluation/MethodReceiverLifetime.sx"));
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("method receiver lifetime passed\n", output);
+}
