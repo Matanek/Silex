@@ -10,6 +10,8 @@ const production_origin = "https://registry.silex-lang.org";
 const credential_name = if (is_windows) "registry.dpapi" else "registry.json";
 const file_permissions: Io.File.Permissions = if (is_windows) .default_file else @enumFromInt(0o600);
 const directory_permissions: Io.File.Permissions = if (is_windows) .default_dir else @enumFromInt(0o700);
+const renewal_threshold_seconds: i64 = 7 * 24 * 60 * 60;
+const renewed_lifetime_seconds: i64 = 30 * 24 * 60 * 60;
 
 pub const Access = struct {
     origin: []const u8,
@@ -171,6 +173,25 @@ fn save(dir: Io.Dir, io: Io, allocator: std.mem.Allocator, credential: Credentia
     try syncDirectory(dir, io);
 }
 
+fn renew(init: std.process.Init, dir: Io.Dir, origin: []const u8, credential: Credential) Credential {
+    const allocator = init.arena.allocator();
+    const now = Io.Timestamp.now(init.io, .real).toSeconds();
+    if (credential.expires_at > now + renewal_threshold_seconds) return credential;
+    const client: Client = .{ .io = init.io, .allocator = allocator, .network_allocator = init.gpa, .origin = origin };
+    const response = client.request(.POST, "/v2/session/renew", "Bearer", credential.token) catch return credential;
+    if (response.status != .ok) return credential;
+    const session = parse(struct { github_id: []const u8, login: []const u8, expires_at: i64 },
+        allocator, response.body()) catch return credential;
+    if (!equal(session.github_id, credential.github_id) or !validIdentity(session.github_id, session.login) or
+        session.expires_at < credential.expires_at or session.expires_at > now + renewed_lifetime_seconds + 60)
+        return credential;
+    if (session.expires_at == credential.expires_at and equal(session.login, credential.login)) return credential;
+    const updated: Credential = .{ .token = credential.token, .github_id = credential.github_id,
+        .login = session.login, .expires_at = session.expires_at };
+    save(dir, init.io, allocator, updated) catch return credential;
+    return updated;
+}
+
 fn testOrigin(value: []const u8) bool {
     const prefix = "http://127.0.0.1:";
     if (!std.mem.startsWith(u8, value, prefix)) return false;
@@ -231,11 +252,12 @@ pub fn current(init: std.process.Init) !Access {
     try private(dir_stat, .directory);
     const credential = (try load(dir, io, allocator)) orelse return error.RegistryLoginRequired;
     if (credential.expires_at <= Io.Timestamp.now(io, .real).toSeconds()) return error.RegistryLoginExpired;
+    const active = renew(init, dir, test_url orelse production_origin, credential);
     return .{
         .origin = test_url orelse production_origin,
-        .token = credential.token,
-        .login = credential.login,
-        .expires_at = credential.expires_at,
+        .token = active.token,
+        .login = active.login,
+        .expires_at = active.expires_at,
     };
 }
 
@@ -292,6 +314,7 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
             try checkStatus(response.status);
             const session = try parse(struct { github_id: []const u8, login: []const u8, expires_at: i64 }, allocator, response.body());
             if (!equal(session.github_id, credential.github_id) or !validIdentity(session.github_id, session.login)) return error.InvalidRegistryResponse;
+            _ = renew(init, dir, test_url orelse production_origin, credential);
             std.debug.print("silex: already connected as {s}; use 'silex logout' before changing accounts\n", .{session.login});
             return 0;
         }
@@ -342,7 +365,9 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
             _ = client.request(.DELETE, "/v2/session", "Bearer", credential.token) catch {};
             return err;
         };
-        std.debug.print("silex: connected as {s}; registry access expires within 24 hours\n", .{credential.login});
+        const active = renew(init, dir, test_url orelse production_origin, credential);
+        std.debug.print("silex: connected as {s}; registry access expires within {s}\n",
+            .{ active.login, if (active.expires_at > now + 86460) "30 days" else "24 hours" });
         return 0;
     }
 }

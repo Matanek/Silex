@@ -4,6 +4,30 @@ Ce journal aide à décider s'il faut mettre Silex à jour et à préparer les
 adaptations nécessaires. Chaque candidat de release ajoute d'abord son entrée
 française, puis sa traduction anglaise dans `CHANGELOG.md`.
 
+## [0.46.0] - 2026-09-18
+
+### Pourquoi mettre à jour ?
+
+Les auteurs qui publient régulièrement des packages peuvent conserver leur
+connexion au registre Cloudflare sans réautoriser GitHub chaque jour.
+
+### Changements
+
+- `silex login` conserve désormais un accès de 30 jours. Une publication ou
+  une nouvelle invocation de `silex login` le renouvelle automatiquement
+  lorsqu'il reste au plus sept jours, jusqu'à 90 jours après l'autorisation
+  GitHub initiale.
+- `silex logout` continue de révoquer l'accès côté registre et de retirer
+  la copie locale lorsque le service est accessible.
+
+### Impact et migration
+
+Le registre officiel conserve le parcours de 24 heures des clients 0.45.0.
+Mettez Silex à jour pour bénéficier de la connexion prolongée. Une
+réautorisation GitHub reste nécessaire après 30 jours d'inactivité ou au
+plus tard après 90 jours ; aucun dépôt Git ni droit supplémentaire n'est
+demandé. Les installations publiques restent anonymes.
+
 ## [0.45.0] - 2026-09-18
 
 ### Pourquoi mettre à jour ?

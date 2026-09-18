@@ -4,6 +4,29 @@ This log helps developers decide whether to upgrade Silex and prepare any
 required changes. Each release candidate adds its French entry first in
 `CHANGELOG.fr.md`, then the matching English translation here.
 
+## [0.46.0] - 2026-09-18
+
+### Why upgrade?
+
+Authors who publish packages regularly can remain signed in to the Cloudflare
+registry without reauthorizing GitHub every day.
+
+### Changes
+
+- `silex login` now keeps access for 30 days. Publishing or running
+  `silex login` renews it automatically when seven days or less remain,
+  for up to 90 days after the initial GitHub authorization.
+- `silex logout` still revokes registry access and removes the local copy
+  when the service is reachable.
+
+### Impact and migration
+
+The official registry preserves the 24-hour flow for Silex 0.45.0 clients.
+Update Silex to use the longer connection. GitHub authorization is required
+again after 30 days of inactivity or after 90 days at the latest; no Git
+repository or additional permission is required. Public installs remain
+anonymous.
+
 ## [0.45.0] - 2026-09-18
 
 ### Why upgrade?
