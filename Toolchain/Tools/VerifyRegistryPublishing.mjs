@@ -28,6 +28,7 @@ const canonical = value => Array.isArray(value) ? value.map(canonical) : value &
 const digest = value => sha(JSON.stringify(canonical(value)));
 const missing = path => assert.rejects(access(path), { code: 'ENOENT' });
 let loginTicket, revoked = false, disconnect = true, dropped = false, resumed = false;
+let accessExpiresAt = Math.floor(Date.now() / 1000) + 3600, renewals = 0;
 let corrupt = '', fault, log = '', checks = 0, publicReads = 0, artifactUploads = 0;
 const pass = text => console.log(`ok ${++checks} - ${text}`);
 const execFileAsync = promisify(execFile);
@@ -84,7 +85,14 @@ async function serve(request, response) {
   if (request.url === '/v2/session') {
     if (authorization !== `Bearer ${token}` || revoked) return send(401, {});
     if (request.method === 'DELETE') { revoked = true; return send(200, { revoked: true }); }
-    return send(200, { github_id: '1001', login: 'fixture-user', expires_at: Math.floor(Date.now() / 1000) + 3600 });
+    return send(200, { github_id: '1001', login: 'fixture-user', expires_at: accessExpiresAt });
+  }
+  if (request.url === '/v2/session/renew') {
+    if (authorization !== `Bearer ${token}` || revoked) return send(401, {});
+    assert.equal(request.method, 'POST');
+    renewals++;
+    accessExpiresAt = Math.floor(Date.now() / 1000) + 30 * 86400;
+    return send(200, { github_id: '1001', login: 'fixture-user', expires_at: accessExpiresAt });
   }
   if (request.url.startsWith('/v2/logins')) {
     assert.equal(request.method, 'POST'); assert.match(authorization, /^Login [a-f0-9]{64}$/);
@@ -95,7 +103,7 @@ async function serve(request, response) {
     }
     assert.equal(request.url, `/v2/logins/${attempt}`); assert.equal(authorization, loginTicket);
     return send(200, { id: attempt, state: 'authorized', token, github_id: '1001', login: 'fixture-user',
-      expires_at: Math.floor(Date.now() / 1000) + 3600 });
+      expires_at: accessExpiresAt });
   }
   if (request.url.startsWith('/v2/publications')) {
     assert.equal(authorization, `Bearer ${token}`); assert(!revoked);
@@ -188,6 +196,9 @@ try {
   console.log(JSON.stringify({ cli, root, target, provider: 'offline protocol fixture; no OAuth proof' }));
   const author = await localRoot('author'), reader = await localRoot('anonymous');
   await success(author, ['login', '--no-browser']);
+  assert.equal(renewals, 1, 'New author access should be prolonged after login.');
+  const credential = JSON.parse(await readFile(resolve(author, 'auth/registry.json'), 'utf8'));
+  assert(credential.expires_at > Math.floor(Date.now() / 1000) + 29 * 86400);
   const packageRoot = resolve(root, 'RegistryProbe');
   await mkdir(`${packageRoot}/Module`, { recursive: true });
   await mkdir(`${packageRoot}/Boundary/${target}`, { recursive: true });
@@ -217,6 +228,7 @@ try {
     assert.match(await success(author, ['publish', packageRoot]), /already published/);
   }
   assert(resumed); assert.equal(artifactUploads, 3);
+  assert.equal(renewals, 1, 'Publication should keep a credential with 30 days remaining.');
   pass('publication resumes after a lost acknowledgement; two immutable versions share one artifact');
   pass('independent archive reader verifies exact manifest, NFC resource and exclusion of cache/private data');
   await success(author, ['logout']); assert(revoked);
