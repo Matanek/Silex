@@ -1,0 +1,76 @@
+struct Point {
+    var marked:bool
+    var value:float
+}
+
+func transfer(
+    output:&float[..], other:&float[..], flags:&bool[..],
+    a:@float[..], b:@float[..], c:@float[..], points:@Point[..], empty:@int[..],
+    first:int, second:int, enabled:bool, scale:float
+) float {
+    assert(output.count() == 2 && other.count() == 3 && flags.count() == 4)
+    assert(a.count() == 5 && b.count() == 6 && c.count() == 7)
+    assert(points.count() == 8 && empty.count() == 0)
+    var result = 0.0
+    var iteration = 0
+    while iteration < 3 {
+        if enabled && points[first].marked {
+            output[first] += (a[first] + b[second]) * scale
+            other[second] -= c[first] + points[second].value
+            flags[second] = !flags[second]
+        }
+        result += output[first] + other[second]
+        iteration++
+    }
+    return result
+}
+
+class Runner {
+    func call(
+        output:&float[..], other:&float[..], flags:&bool[..],
+        a:@float[..], b:@float[..], c:@float[..], points:@Point[..], empty:@int[..]
+    ) float {
+        return transfer(output, other, flags, a, b, c, points, empty, 0, -1, true, 0.5)
+    }
+}
+
+func main() {
+    var output:float[] = [0.0, 10.0]
+    var other:float[] = [20.0, 0.0, 30.0]
+    var flags:bool[] = [false, false, false, true]
+    let snapshot = output
+    let a:float[] = [1.0, 2.0, 0.0, 0.0, 0.0]
+    let b:float[] = [3.0, 0.0, 0.0, 0.0, 0.0, 4.0]
+    let c:float[] = [0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    let points:Point[] = [
+        Point(marked:true, value:2.0), Point(marked:false, value:0.0),
+        Point(marked:false, value:0.0), Point(marked:false, value:0.0),
+        Point(marked:false, value:0.0), Point(marked:false, value:0.0),
+        Point(marked:false, value:0.0), Point(marked:false, value:3.0)
+    ]
+    let empty:int[] = []
+    {
+        var output_view = &output[0:2]
+        var other_view = &other[0:3]
+        var flag_view = &flags[0:4]
+        let a_view = @a[0:5]
+        let b_view = @b[0:6]
+        let c_view = @c[0:7]
+        let point_view = @points[0:8]
+        let empty_view = @empty[0:0]
+        assert(transfer(output_view, other_view, flag_view,
+            a_view, b_view, c_view, point_view, empty_view,
+            0, -1, true, 0.5) == 84.0)
+        assert(output_view[0] == 7.5 && other_view[-1] == 19.5 && !flag_view[-1])
+        assert(snapshot[0] == 0.0)
+        var runner = Runner()
+        assert(runner.call(output_view, other_view, flag_view,
+            a_view, b_view, c_view, point_view, empty_view) == 75.0)
+        assert(output_view[0] == 15.0 && other_view[-1] == 9.0 && flag_view[-1])
+        assert(transfer(output_view, other_view, flag_view,
+            a_view, b_view, c_view, point_view, empty_view,
+            0, -1, false, 0.5) == 72.0)
+    }
+    assert(output[1] == 10.0 && other[0] == 20.0 && !flags[0])
+    print("view-call-abi-ok")
+}

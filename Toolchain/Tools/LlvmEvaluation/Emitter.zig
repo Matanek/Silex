@@ -3511,6 +3511,12 @@ pub fn indirectSilexParameter(program: Ir.Program, type_value: Ir.Type) Error!bo
         return !plainTagEnum(program, enumeration_index);
     const structure = program.structures[structure_index];
     if (structure.is_static) return error.UnsupportedType;
+    // A borrowed view is exactly { ptr, i64 }, independent of its element.
+    // Pass this descriptor directly; it has no narrow aggregate fields and
+    // needs neither an addressable copy nor ownership transfer at the call.
+    if (structure.collection) |collection| {
+        if (collection.view) return false;
+    }
     return !structure.is_class;
 }
 

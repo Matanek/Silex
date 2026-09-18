@@ -241,6 +241,22 @@ measured interval; they must not be reported as independently measured costs.
 Python process monitoring adds overhead to each stage and is included explicitly.
 No timing assertion belongs to the correctness tests.
 
+## Internal view arguments
+
+Borrowed collection views use a two-word `{ ptr, i64 }` descriptor. Internal
+LLVM calls pass that descriptor directly, including views whose elements are
+booleans or structures. The element layout does not become part of the
+argument layout. This removes the addressable descriptor copy at every call;
+borrowing, bounds checks, copy-on-write detachment and element mutation retain
+their existing semantics.
+
+Other value aggregates keep indirect parameter passing, including mixed
+aggregates with narrow boolean fields. `ViewCallAbi.sx` exercises eight views
+alongside scalar arguments, direct free-function and method calls, negative
+indices, empty views and snapshot isolation. `MixedAggregateCallAbi.sx` guards
+the separate mixed-aggregate convention. These are internal backend choices,
+not a public package ABI.
+
 ## Mutable views of owning plain collections
 
 A view borrowed from a dynamic owning collection detaches shared storage before
