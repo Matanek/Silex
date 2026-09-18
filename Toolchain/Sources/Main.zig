@@ -402,7 +402,7 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
     const local_source = if (Io.Dir.cwd().statFile(init.io, options.package_path, .{})) |found|
         found.kind == .directory
     else |_| false;
-    const result = try installPackageOperand(
+    const selected = try installPackageOperand(
         init,
         allocator,
         &store,
@@ -413,9 +413,8 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         options.suite,
         &progress,
     ) orelse return 1;
-    if (!local_source and (registryMode(init.environ_map) == .public or
-        registryMode(init.environ_map) == .staging))
-    {
+    const result = selected.result;
+    if (!local_source and selected.v2) {
         const project_root = try Io.Dir.cwd().realPathFileAlloc(init.io, ".", allocator);
         const requested_version = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}",
             .{ result.package.version.major, result.package.version.minor, result.package.version.patch });
@@ -437,6 +436,8 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
     return 0;
 }
 
+const InstalledOperand = struct { result: PackageStore.InstallResult, v2: bool };
+
 fn installPackageOperand(
     init: std.process.Init,
     allocator: std.mem.Allocator,
@@ -447,7 +448,7 @@ fn installPackageOperand(
     development: bool,
     suite: bool,
     progress: *CliProgress.Install,
-) !?PackageStore.InstallResult {
+) !?InstalledOperand {
     const status = Io.Dir.cwd().statFile(init.io, operand, .{}) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => null,
         else => return err,
@@ -491,7 +492,7 @@ fn installPackageOperand(
                     },
                     else => return err,
                 };
-                return result;
+                return .{ .result = result, .v2 = false };
             }
             const registry_index = try loadPackageRegistry(init, allocator, packages_root, progress) orelse return null;
             var registry = PackageRegistry.Client.init(
@@ -515,7 +516,7 @@ fn installPackageOperand(
                 else => return err,
             };
         }
-        return result;
+        return .{ .result = result, .v2 = false };
     }
     if (looksLikePath(operand)) {
         std.debug.print("silex: cannot locate package directory '{s}'\n", .{operand});
@@ -528,7 +529,7 @@ fn installPackageOperand(
     };
     const cache_root = try packageRegistryCacheRoot(allocator, packages_root);
     const v2_origin = publicRegistryOrigin(init) catch |err| {
-        std.debug.print("silex: invalid v2 registry configuration: {t}\n", .{err});
+        std.debug.print("silex: cannot select public registry protocol: {t}\n", .{err});
         return null;
     };
     if (v2_origin) |origin| {
@@ -539,7 +540,7 @@ fn installPackageOperand(
             .io = init.io,
             .origin = origin,
         };
-        return public_registry.install(
+        const installed = public_registry.install(
             request,
             Packages.Version.parse(build_options.version) catch unreachable,
             target,
@@ -553,6 +554,7 @@ fn installPackageOperand(
             },
             else => return err,
         };
+        return .{ .result = installed, .v2 = true };
     }
     var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
     registry.setProgress(packageProgressReporter(progress));
@@ -565,7 +567,7 @@ fn installPackageOperand(
         },
         else => return err,
     };
-    return registry.install(
+    const installed = registry.install(
         registry_index,
         request,
         Packages.Version.parse(build_options.version) catch unreachable,
@@ -585,13 +587,14 @@ fn installPackageOperand(
         },
         else => return err,
     };
+    return .{ .result = installed, .v2 = false };
 }
 
-const RegistryMode = enum { public, staging, legacy, invalid };
+const RegistryMode = enum { automatic, public, staging, legacy, invalid };
 
 fn registryMode(environment: *const std.process.Environ.Map) RegistryMode {
     const mode = environment.get("SILEX_REGISTRY_V2") orelse
-        return if (environment.get("SILEX_REGISTRY") == null) .public else .legacy;
+        return if (environment.get("SILEX_REGISTRY") == null) .automatic else .legacy;
     if (std.mem.eql(u8, mode, "public")) return .public;
     if (std.mem.eql(u8, mode, "test")) return .staging;
     return .invalid;
@@ -599,6 +602,8 @@ fn registryMode(environment: *const std.process.Environ.Map) RegistryMode {
 
 fn publicRegistryOrigin(init: std.process.Init) !?[]const u8 {
     return switch (registryMode(init.environ_map)) {
+        .automatic => if (try PackageRegistryV2.available(init.gpa, init.io))
+            PackageRegistryV2.public_origin else null,
         .public => PackageRegistryV2.public_origin,
         .staging => try RegistryLogin.publicTestOrigin(init),
         .legacy => null,
@@ -606,10 +611,10 @@ fn publicRegistryOrigin(init: std.process.Init) !?[]const u8 {
     };
 }
 
-test "Cloudflare registry is the default and legacy access requires an explicit index" {
+test "default registry discovers the cutover and explicit modes remain available" {
     var environment = std.process.Environ.Map.init(std.testing.allocator);
     defer environment.deinit();
-    try std.testing.expectEqual(RegistryMode.public, registryMode(&environment));
+    try std.testing.expectEqual(RegistryMode.automatic, registryMode(&environment));
     try environment.put("SILEX_REGISTRY", "https://example.invalid/v1/index.json");
     try std.testing.expectEqual(RegistryMode.legacy, registryMode(&environment));
     try environment.put("SILEX_REGISTRY_V2", "test");

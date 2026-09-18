@@ -11,6 +11,71 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 pub const public_origin = "https://registry.silex-lang.org";
 
+/// The same public name serves the historical index until the Cloudflare cutover.
+/// Only an absent discovery route selects that index; network or protocol failures
+/// must not silently downgrade an active v2 registry.
+pub fn available(network_allocator: Allocator, io: Io) !bool {
+    const Event = union(enum) { response: anyerror!bool, timeout: Io.Cancelable!void };
+    var buffer: [2]Event = undefined;
+    var race = Io.Select(Event).init(io, &buffer);
+    defer race.cancelDiscard();
+    try race.concurrent(.response, probe, .{ network_allocator, io });
+    try race.concurrent(.timeout, Io.sleep, .{ io, Io.Duration.fromSeconds(10), .boot });
+    return switch (try race.await()) {
+        .response => |response| response catch error.RegistryUnavailable,
+        .timeout => error.RegistryUnavailable,
+    };
+}
+
+fn probe(network_allocator: Allocator, io: Io) !bool {
+    var client: std.http.Client = .{ .allocator = network_allocator, .io = io };
+    defer client.deinit();
+    var request = try client.request(.GET, try std.Uri.parse(public_origin ++ "/v2/capabilities"), .{
+        .redirect_behavior = .unhandled,
+        .headers = .{ .user_agent = .{ .override = "Silex package installer" } },
+    });
+    defer request.deinit();
+    try request.sendBodiless();
+    var head_buffer: [8192]u8 = undefined;
+    var response = try request.receiveHead(&head_buffer);
+    if (response.head.status != .ok) return interpretCapability(network_allocator, response.head.status, "");
+    if (response.head.content_encoding != .identity or
+        (response.head.content_length != null and response.head.content_length.? > 128))
+        return error.InvalidRegistryCapability;
+    var transfer_buffer: [64]u8 = undefined;
+    const reader = response.reader(&transfer_buffer);
+    var data: [128]u8 = undefined;
+    var length: usize = 0;
+    while (length < data.len) {
+        const read = try reader.readSliceShort(data[length..]);
+        if (read == 0) break;
+        length += read;
+    }
+    if (length == data.len) return error.InvalidRegistryCapability;
+    return interpretCapability(network_allocator, .ok, data[0..length]);
+}
+
+fn interpretCapability(allocator: Allocator, status: std.http.Status, body: []const u8) !bool {
+    if (status == .not_found) return false;
+    if (status != .ok) return error.InvalidRegistryCapability;
+    var parsed = std.json.parseFromSlice(struct { protocol: []const u8 },
+        allocator, body, .{ .ignore_unknown_fields = false }) catch
+        return error.InvalidRegistryCapability;
+    defer parsed.deinit();
+    if (!std.mem.eql(u8, parsed.value.protocol, "silex-registry-v2")) return error.InvalidRegistryCapability;
+    return true;
+}
+
+test "only an absent capability selects the historical registry" {
+    const allocator = std.testing.allocator;
+    try std.testing.expect(!try interpretCapability(allocator, .not_found, ""));
+    try std.testing.expect(try interpretCapability(allocator, .ok, "{\"protocol\":\"silex-registry-v2\"}"));
+    try std.testing.expectError(error.InvalidRegistryCapability,
+        interpretCapability(allocator, .service_unavailable, ""));
+    try std.testing.expectError(error.InvalidRegistryCapability,
+        interpretCapability(allocator, .ok, "{\"protocol\":\"other\"}"));
+}
+
 pub const Blob = struct {
     sha256: []const u8,
     size: usize,
