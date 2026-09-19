@@ -18,6 +18,7 @@ pub const Options = struct {
     opt: []const u8,
     llc: []const u8,
     passes: []const u8,
+    inline_threshold: ?[]const u8 = null,
     level: []const u8,
     cpu: []const u8,
     workers: u16,
@@ -72,7 +73,11 @@ const Worker = struct {
         try std.Io.Dir.cwd().writeFile(o.io, .{ .sub_path = job.raw_path, .data = job.text });
         defer std.Io.Dir.cwd().deleteFile(o.io, job.raw_path) catch {};
         defer std.Io.Dir.cwd().deleteFile(o.io, job.optimized_path) catch {};
-        try stage(o, "opt", &.{ o.opt, "-S", o.passes, job.raw_path, "-o", job.optimized_path });
+        if (o.inline_threshold) |threshold| {
+            try stage(o, "opt", &.{ o.opt, "-S", o.passes, threshold, job.raw_path, "-o", job.optimized_path });
+        } else {
+            try stage(o, "opt", &.{ o.opt, "-S", o.passes, job.raw_path, "-o", job.optimized_path });
+        }
         try stage(o, "llc", &.{
             o.llc,           "-filetype=obj",    o.level,            "-mtriple=arm64-apple-macosx26.0.0",
             o.cpu,           "-fp-contract=off", job.optimized_path, "-o",

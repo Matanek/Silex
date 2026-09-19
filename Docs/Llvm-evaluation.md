@@ -6,6 +6,16 @@ described below. LLVM is the default backend on the qualified macOS ARM64 host;
 `silex setup` installs its pinned LLVM 21.1.8 tools. Other hosts retain the
 direct native default until their LLVM path has been executed and qualified.
 
+The integrated Release path raises LLVM's inlining cost threshold to 2000.
+Checked collection access can make short numerical helpers look expensive before
+inlining exposes repeated reads and bounds checks to simplification. Function
+imports remain bounded by the existing unit depth and byte budgets; this does
+not force every call to inline. Debug keeps LLVM's default policy. The effective
+threshold participates in the compiled-unit cache key, so objects built under a
+different policy cannot be reused. This policy currently applies only to the
+integrated macOS ARM64 LLVM path, not to the historical evaluation driver or the
+independent optimizer oracle.
+
 The `llvm-evaluation` Zig build step installs a separate development executable,
 `silex-llvm-evaluation`, and its exact scalar-formatting object,
 `lib/silex-llvm-format.o`, into the explicitly chosen prefix. These remain the

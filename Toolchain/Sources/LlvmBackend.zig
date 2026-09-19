@@ -150,6 +150,10 @@ pub fn buildExecutable(
     try writeFile(init.io, format_path, format_runtime.object_bytes);
 
     const units = try Units.split(allocator, options.program, llvm_text, options.mode == .release);
+    // Checked collection accesses inflate the cost of numerical helpers before
+    // inlining exposes repeated reads and bounds to LLVM's simplification.
+    // Unit import depth and byte budgets still bound the available callees.
+    const inline_threshold: ?[]const u8 = if (options.mode == .release) "-inline-threshold=2000" else null;
     const cache = if (options.cache) try Store.init(init, allocator) else null;
     var objects: std.ArrayList([]const u8) = .empty;
     try objects.append(allocator, format_path);
@@ -158,7 +162,7 @@ pub fn buildExecutable(
     for (units, 0..) |unit, index| {
         const object_path = try std.fmt.allocPrint(allocator, "{s}/unit-{d}.o", .{ staging, index });
         try objects.append(allocator, object_path);
-        const digest = Store.key("llvm-unit-v2", &.{ version, options.tools.cpu, options.target.name(), @tagName(options.mode), unit.text });
+        const digest = Store.key("llvm-unit-v2", &.{ version, options.tools.cpu, options.target.name(), @tagName(options.mode), inline_threshold orelse "default-inlining", unit.text });
         if (cache) |store| if (store.load(digest)) |bytes| {
             try writeFile(init.io, object_path, bytes);
             if (options.trace) |trace| {
@@ -187,6 +191,7 @@ pub fn buildExecutable(
             .opt = options.tools.opt,
             .llc = options.tools.llc,
             .passes = try std.fmt.allocPrint(allocator, "-passes=verify,default<O{s}>", .{optimization}),
+            .inline_threshold = inline_threshold,
             .level = try std.fmt.allocPrint(allocator, "-O={s}", .{optimization}),
             .cpu = try std.fmt.allocPrint(allocator, "-mcpu={s}", .{options.tools.cpu}),
             .workers = options.worker_count,
