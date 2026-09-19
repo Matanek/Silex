@@ -4,6 +4,26 @@ This log helps developers decide whether to upgrade Silex and prepare any
 required changes. Each release candidate adds its French entry first in
 `CHANGELOG.fr.md`, then the matching English translation here.
 
+## [0.46.1] - 2026-09-19
+
+### Why upgrade?
+
+This release prevents an older Silex installation from blocking `silex login`
+when its authentication directory still has overly broad permissions.
+
+### Changes
+
+- The client automatically tightens a legacy storage directory to `0700` when
+  it does not contain a registry credential yet.
+- It continues to reject symbolic links and any credential found in a
+  directory that another local user may have been able to read.
+
+### Impact and migration
+
+No manual action is required when the directory does not contain a registry
+credential yet. A credential already present under permissive directory modes
+remains rejected and must be revoked before signing in again.
+
 ## [0.46.0] - 2026-09-18
 
 ### Why upgrade?

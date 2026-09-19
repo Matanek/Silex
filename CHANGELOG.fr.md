@@ -4,6 +4,28 @@ Ce journal aide à décider s'il faut mettre Silex à jour et à préparer les
 adaptations nécessaires. Chaque candidat de release ajoute d'abord son entrée
 française, puis sa traduction anglaise dans `CHANGELOG.md`.
 
+## [0.46.1] - 2026-09-19
+
+### Pourquoi mettre à jour ?
+
+Cette version évite qu'une ancienne installation de Silex bloque
+`silex login` lorsque son dossier d'authentification possède encore des
+permissions trop larges.
+
+### Changements
+
+- Le client resserre automatiquement à `0700` un ancien dossier de stockage
+  qui ne contient pas encore de credential du registre.
+- Il continue de refuser les liens symboliques et tout credential trouvé dans
+  un dossier qui aurait pu être lu par un autre utilisateur local.
+
+### Impact et migration
+
+Aucune intervention manuelle n'est nécessaire lorsque le dossier ne contient
+pas encore de credential du registre. Un credential déjà présent sous des
+permissions permissives reste refusé et doit être révoqué avant une nouvelle
+connexion.
+
 ## [0.46.0] - 2026-09-18
 
 ### Pourquoi mettre à jour ?
