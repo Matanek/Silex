@@ -126,6 +126,27 @@ fn private(stat: Io.File.Stat, kind: Io.File.Kind) !void {
     if (stat.kind != kind or (!is_windows and (@intFromEnum(stat.permissions) & 0o077) != 0) or (kind == .file and stat.nlink != 1))
         return error.RegistryCredentialStorageNotPrivate;
 }
+fn prepareDirectory(dir: Io.Dir, io: Io) !void {
+    const stat = dir.stat(io) catch |err| return storageError("directory metadata", err);
+    if (stat.kind != .directory) return error.RegistryCredentialStorageNotPrivate;
+    if (is_windows or (@intFromEnum(stat.permissions) & 0o077) == 0) return;
+
+    // Older Silex versions could leave the shared auth directory at 0755.
+    // Tighten an unused store through the already opened no-follow handle,
+    // but never bless a registry credential that may already have been exposed.
+    const existing = dir.openFile(io, credential_name, .{ .follow_symlinks = false }) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return storageError("credential privacy probe", err),
+    };
+    if (existing) |file| {
+        file.close(io);
+        return error.RegistryCredentialStorageNotPrivate;
+    }
+    const file: Io.File = .{ .handle = dir.handle, .flags = .{ .nonblocking = false } };
+    file.setPermissions(io, directory_permissions) catch |err| return storageError("directory privacy repair", err);
+    const secured = dir.stat(io) catch |err| return storageError("directory metadata", err);
+    try private(secured, .directory);
+}
 fn syncDirectory(dir: Io.Dir, io: Io) !void {
     // Windows has no equivalent directory fsync on this read-only directory
     // handle. File contents are flushed before rename; no power-loss claim.
@@ -248,8 +269,7 @@ pub fn current(init: std.process.Init) !Access {
         else => return storageError("directory open", err),
     };
     defer dir.close(io);
-    const dir_stat = dir.stat(io) catch |err| return storageError("directory metadata", err);
-    try private(dir_stat, .directory);
+    try prepareDirectory(dir, io);
     const credential = (try load(dir, io, allocator)) orelse return error.RegistryLoginRequired;
     if (credential.expires_at <= Io.Timestamp.now(io, .real).toSeconds()) return error.RegistryLoginExpired;
     const active = renew(init, dir, test_url orelse production_origin, credential);
@@ -288,8 +308,7 @@ pub fn run(init: std.process.Init, args: []const []const u8, logout: bool) !u8 {
     // Windows does not fsync directories and does not need listing access.
     const dir = Io.Dir.cwd().openDir(io, root, .{ .follow_symlinks = false, .iterate = !is_windows }) catch |err| return storageError("directory open", err);
     defer dir.close(io);
-    const dir_stat = dir.stat(io) catch |err| return storageError("directory metadata", err);
-    try private(dir_stat, .directory);
+    try prepareDirectory(dir, io);
     // Never truncate an existing lock or follow a pre-existing symbolic link.
     // The metadata check requires a readable Windows handle.
     const lock = dir.createFile(io, "registry.lock", .{ .exclusive = true, .read = true, .permissions = file_permissions }) catch |err| switch (err) {

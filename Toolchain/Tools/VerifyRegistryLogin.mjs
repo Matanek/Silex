@@ -2,7 +2,7 @@
 // The sibling registry supplies an offline GitHub fixture, never a real consent.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile, stat, chmod, symlink, access } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, stat, symlink, access } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createServer as createSocket } from 'node:net';
 import { resolve } from 'node:path';
@@ -117,12 +117,18 @@ try {
   pass('concurrent mutation is refused; process interruption releases the lock without saving a ticket');
 
   const unsafe = await localRoot('unsafe'); await mkdir(`${unsafe}/auth`, { mode: 0o755 });
-  result = await command(unsafe, ['logout']); assert.equal(result.code, 1); assert.match(result.text, /StorageNotPrivate/);
+  result = await command(unsafe, ['logout']); assert.equal(result.code, 0, result.text);
+  assert.equal((await stat(`${unsafe}/auth`)).mode & 0o777, 0o700);
+  const exposed = await localRoot('exposed'); await mkdir(`${exposed}/auth`, { mode: 0o755 });
+  await writeFile(`${exposed}/auth/registry.json`, JSON.stringify(credential), { mode: 0o600 });
+  result = await command(exposed, ['logout']); assert.equal(result.code, 1); assert.match(result.text, /StorageNotPrivate/);
+  assert.equal(JSON.parse(await readFile(`${exposed}/auth/registry.json`)).token, credential.token);
   const linked = await localRoot('symlink'); await symlink(`${first}/auth`, `${linked}/auth`);
   assert.equal((await command(linked, ['logout'])).code, 1);
-  await chmod(`${unsafe}/auth`, 0o700); await symlink(credentialPath, `${unsafe}/auth/registry.lock`);
-  assert.equal((await command(unsafe, ['logout'])).code, 1); await missing(credentialPath);
-  pass('public credential directories and symbolic links are refused without touching their targets');
+  const linkedLock = await localRoot('symlink-lock'); await mkdir(`${linkedLock}/auth`, { mode: 0o700 });
+  await symlink(credentialPath, `${linkedLock}/auth/registry.lock`);
+  assert.equal((await command(linkedLock, ['logout'])).code, 1); await missing(credentialPath);
+  pass('legacy empty credential directories are tightened while exposed credentials and symbolic links are refused');
 
   const isolated = await localRoot('isolation');
   assert.equal((await command(isolated, ['login', '--no-browser'], { env: { SILEX_REGISTRY_TEST_ROOT: '' } })).code, 1);

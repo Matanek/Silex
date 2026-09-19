@@ -25,7 +25,9 @@ the newly issued bearer; if that request also fails, the bearer expires server-s
 POSIX storage uses a 0700 directory, 0600 files, no-follow opens, regular-file and
 single-link checks, a nonblocking process lock and an exclusive random temporary
 file. A successful save synchronizes the file, renames it and synchronizes the
-directory. Logout revokes before deleting and synchronizing. The store protects
+directory. The client tightens an empty legacy registry store to 0700, but
+refuses to trust a credential already found beneath permissive directory modes.
+Logout revokes before deleting and synchronizing. The store protects
 against other ordinary local users, not a compromised user account or privileged
 process.
 
