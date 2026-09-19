@@ -233,3 +233,51 @@ test "narrow aggregate memory preserves floating point payloads natively" {
         }
     }
 }
+
+test "narrow nested plain stores preserve adjacent fields and stale nested snapshots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Point { var x:float; var y:float }
+        \\struct Pair { var a:Point; var b:Point; var enabled:bool; var impulse:float }
+        \\func change(state:&Pair, values:&Pair[..], index:int, positive:bool) {
+        \\    if positive { state.impulse += 2.0 } else { state.impulse -= 2.0 }
+        \\    values[index].impulse = state.impulse
+        \\}
+        \\func restore(state:&Pair) {
+        \\    let before = copy state
+        \\    state.a.x = 90.0
+        \\    state = Pair(a:before.a, b:before.b, enabled:before.enabled, impulse:7.0)
+        \\}
+        \\func main() {
+        \\    var state = Pair(a:Point(x:3.0,y:5.0), b:Point(x:7.0,y:11.0), enabled:true, impulse:13.0)
+        \\    var values:Pair[] = [state]
+        \\    change(state, &values[0:1], -1, true)
+        \\    assert(state.impulse == 15.0 && values[0].impulse == 15.0)
+        \\    assert(state.a.x == 3.0 && state.a.y == 5.0 && state.b.x == 7.0 && state.b.y == 11.0 && state.enabled)
+        \\    assert(values[0].a.x == 3.0 && values[0].a.y == 5.0 && values[0].b.x == 7.0 && values[0].b.y == 11.0 && values[0].enabled)
+        \\    restore(state)
+        \\    assert(state.a.x == 3.0 && state.a.y == 5.0 && state.impulse == 7.0)
+        \\    print("nested stores preserve untouched fields and snapshots")
+        \\}
+    );
+    const optimized = try Release.optimize(allocator, compilation.ir);
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(@as(u8, 0), reference.exit_code);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+    var found = false;
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "change")) continue;
+        found = true;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .structure_init, .collection_replace => return error.TestUnexpectedResult,
+            .reference_store => |store| try std.testing.expect(function.value_types[store.operand].structureIndex() == null),
+            else => {},
+        };
+    }
+    try std.testing.expect(found);
+}

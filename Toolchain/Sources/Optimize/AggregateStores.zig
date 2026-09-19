@@ -167,10 +167,19 @@ const Context = struct {
 };
 
 fn plainStructure(program: Ir.Program, index: usize) bool {
-    if (index >= program.structures.len) return false;
+    return plainStructureDepth(program, index, program.structures.len);
+}
+
+fn plainStructureDepth(program: Ir.Program, index: usize, remaining: usize) bool {
+    if (remaining == 0 or index >= program.structures.len) return false;
+    for (program.enums) |enumeration| if (enumeration.type_index == index) return false;
     const structure = program.structures[index];
     if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null) return false;
-    for (structure.fields) |field| if (!field.type.isNumeric() and field.type != .bool) return false;
+    for (structure.fields) |field| {
+        if (field.type.isNumeric() or field.type == .bool) continue;
+        const child = field.type.structureIndex() orelse return false;
+        if (!plainStructureDepth(program, child, remaining - 1)) return false;
+    }
     return true;
 }
 

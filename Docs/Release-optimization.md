@@ -213,11 +213,19 @@ showed a slowdown with the current X64 lowering. The requested target selects
 this cost policy, including cross-compilation; the portable oracle can still
 exercise the transformation independently of native profitability.
 
-For flat numeric or boolean value structures, a reconstructed reference or
+For value structures containing only numeric, boolean, or recursively plain
+value fields, a reconstructed reference or
 mutable-view store writes only the changed fields when the other fields come
 from a still-current snapshot of that exact destination. Calls, unknown
 effects, and block boundaries end this proof. Owning collection replacement,
 stale snapshots, and structures with owned fields keep their value semantics.
+After inlining, Release also removes a matching root retain/drop pair for the
+same class value inside one block when only reads and scalar calculations lie
+between them. Calls, writes, other resource operations, value redefinitions,
+and block boundaries prevent this elimination. The object's original owner
+remains live, so these pairs cannot trigger destruction or publish an alias.
+Edge ownership and unbalanced lifetime operations remain explicit.
+
 An owning scalar collection replacement remains explicit so its copy-on-write
 detach and lifetime effects are preserved. Its bounds failure also remains
 unless a fixed length or traced list literal and a normalized constant index

@@ -1,0 +1,21 @@
+class Samples {
+    let values:float[]
+    init() { self.values = [3.0, 5.0, 7.0, 11.0] }
+    func at(index:int) float { return self.values[index] * 2.0 + 1.0 }
+}
+func read_twice(samples:@Samples, index:int) float {
+    return samples.at(index) + samples.at(index + 1)
+}
+func verify() {
+    var sum = 0.0
+    var iteration = 0
+    while iteration < 1000 {
+        var samples = Samples()
+        sum += read_twice(samples, 0) + read_twice(samples, 2)
+        iteration++
+    }
+    assert(sum == 56000.0)
+    print("balanced class readers preserve values and lifetimes")
+}
+test "balanced class readers" { verify() }
+func main() { verify() }

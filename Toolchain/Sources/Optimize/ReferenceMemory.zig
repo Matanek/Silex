@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const BalancedClassBorrows = @import("BalancedClassBorrows.zig");
 const KnownCollections = @import("KnownCollections.zig");
 
 const Definition = struct {
@@ -16,8 +17,9 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program) !Ir.Program {
 }
 
 fn optimizeFunction(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
-    const definitions = try collectDefinitions(allocator, function);
-    const pruned = try removeOverwrittenStores(allocator, function, definitions);
+    const borrowed = try BalancedClassBorrows.optimize(allocator, function);
+    const definitions = try collectDefinitions(allocator, borrowed);
+    const pruned = try removeOverwrittenStores(allocator, borrowed, definitions);
     const forwarded = try forwardStoredValues(allocator, pruned, definitions);
     const views = try simplifyExactViewStores(allocator, program, forwarded);
     return KnownCollections.optimize(allocator, program, views);
