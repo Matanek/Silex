@@ -56,6 +56,12 @@ const Context = struct {
 
     fn add(self: *Context, object: *Header, incoming: bool) void {
         if (self.failed) return;
+        // A rooted object and everything reached through it are live. Leave
+        // this boundary outside the trial graph: its outgoing edges remain
+        // external counts on any nodes reached by another path. This also
+        // preserves a candidate reached back through the rooted boundary,
+        // without walking an application's entire retained scene on a drop.
+        if (@atomicLoad(u64, &object.roots, .acquire) != 0 and self.find(object) == null) return;
         if (self.find(object)) |node| {
             if (self.marking) {
                 if (node.live) return;
@@ -141,4 +147,125 @@ pub export fn silex_llvm_cycle_collect(object: *Header, visitor: Visitor) callco
         @atomicStore(u64, &node.object.state, if (node == root) 1 else 3, .release);
     }
     return 1;
+}
+
+const TestObject = extern struct {
+    header: Header,
+    children: [3]?*TestObject = .{ null, null, null },
+    visits: usize = 0,
+
+    fn init(roots: u64, edges: u64) TestObject {
+        return .{ .header = .{ .tag = 0, .roots = roots, .edges = edges, .state = 0 } };
+    }
+
+    fn visit(context: *Context, header: *Header) callconv(.c) void {
+        const object: *TestObject = @fieldParentPtr("header", header);
+        object.visits += 1;
+        for (object.children) |child| if (child) |value| silex_llvm_cycle_edge(context, &value.header);
+    }
+};
+
+test "rooted scene is a constant-work boundary of an unreachable cycle" {
+    var candidate = TestObject.init(0, 1);
+    var scene = TestObject.init(1, 1);
+    var branch = TestObject.init(0, 1);
+    candidate.children = .{ &candidate, &scene, null };
+    scene.children[0] = &branch;
+    try std.testing.expectEqual(@as(u32, 1), silex_llvm_cycle_collect(&candidate.header, TestObject.visit));
+    try std.testing.expectEqual(@as(usize, 1), candidate.visits);
+    try std.testing.expectEqual(@as(usize, 0), scene.visits);
+    try std.testing.expectEqual(@as(usize, 0), branch.visits);
+    try std.testing.expectEqual(@as(u64, 1), candidate.header.state);
+    try std.testing.expectEqual(@as(u64, 0), candidate.header.edges);
+    try std.testing.expectEqual(@as(u64, 0), scene.header.state);
+    try std.testing.expectEqual(@as(u64, 1), scene.header.edges);
+}
+
+test "a back edge from the rooted boundary preserves the candidate until root removal" {
+    var candidate = TestObject.init(0, 2);
+    var scene = TestObject.init(1, 1);
+    candidate.children = .{ &candidate, &scene, null };
+    scene.children[0] = &candidate;
+    try std.testing.expectEqual(@as(u32, 0), silex_llvm_cycle_collect(&candidate.header, TestObject.visit));
+    try std.testing.expectEqual(@as(usize, 0), scene.visits);
+    try std.testing.expectEqual(@as(u64, 0), candidate.header.state);
+    try std.testing.expectEqual(@as(u64, 2), candidate.header.edges);
+    scene.header.roots = 0;
+    try std.testing.expectEqual(@as(u32, 1), silex_llvm_cycle_collect(&candidate.header, TestObject.visit));
+    try std.testing.expectEqual(@as(u64, 1), candidate.header.state);
+    try std.testing.expectEqual(@as(u64, 3), scene.header.state);
+    try std.testing.expectEqual(@as(u64, 0), candidate.header.edges);
+}
+
+test "an external edge preserves an unrooted descendant beside a rooted boundary" {
+    var candidate = TestObject.init(0, 1);
+    var live = TestObject.init(0, 2);
+    var scene = TestObject.init(1, 1);
+    candidate.children = .{ &candidate, &live, null };
+    live.children[0] = &scene;
+    try std.testing.expectEqual(@as(u32, 1), silex_llvm_cycle_collect(&candidate.header, TestObject.visit));
+    try std.testing.expectEqual(@as(u64, 1), candidate.header.state);
+    try std.testing.expectEqual(@as(u64, 0), live.header.state);
+    try std.testing.expectEqual(@as(u64, 2), live.header.edges);
+    try std.testing.expectEqual(@as(usize, 0), scene.visits);
+}
+
+test "root boundary pruning agrees with independent reachability on small graphs" {
+    var random: u64 = 0x511e202d;
+    for (0..256) |_| {
+        var objects: [8]TestObject = undefined;
+        var live: [8]bool = @splat(false);
+        for (&objects, 0..) |*object, index| {
+            random = random *% 6364136223846793005 +% 1;
+            const roots: u64 = if (index != 0 and random >> 61 == 0) 1 else 0;
+            object.* = TestObject.init(roots, 0);
+            live[index] = roots != 0;
+        }
+        for (&objects) |*object| {
+            for (&object.children) |*child| {
+                random = random *% 6364136223846793005 +% 1;
+                const target: usize = @intCast(random >> 60);
+                if (target >= objects.len) continue;
+                child.* = &objects[target];
+                objects[target].header.edges += 1;
+            }
+        }
+        // Root objects outside the candidate's reachable component. A local
+        // trial collector conservatively treats their edges as external even
+        // if an unrelated unreachable component could own them in a full GC.
+        var reachable: [8]bool = @splat(false);
+        reachable[0] = true;
+        for (0..objects.len) |_| {
+            for (&objects, 0..) |*object, index| {
+                if (!reachable[index]) continue;
+                for (object.children) |child| if (child) |value| {
+                    for (&objects, 0..) |*target, target_index| {
+                        if (value == target) reachable[target_index] = true;
+                    }
+                };
+            }
+        }
+        for (&objects, 0..) |*object, index| {
+            if (!reachable[index]) {
+                object.header.roots = 1;
+                live[index] = true;
+            }
+        }
+        // An independent fixed-point oracle starts from all external roots.
+        for (0..objects.len) |_| {
+            for (&objects, 0..) |*object, index| {
+                if (!live[index]) continue;
+                for (object.children) |child| if (child) |value| {
+                    for (&objects, 0..) |*target, target_index| {
+                        if (value == target) live[target_index] = true;
+                    }
+                };
+            }
+        }
+        const result = silex_llvm_cycle_collect(&objects[0].header, TestObject.visit);
+        try std.testing.expectEqual(@as(u32, @intFromBool(!live[0])), result);
+        for (objects, 0..) |object, index| {
+            if (live[index]) try std.testing.expectEqual(@as(u64, 0), object.header.state);
+        }
+    }
 }

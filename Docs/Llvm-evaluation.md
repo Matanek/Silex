@@ -191,6 +191,12 @@ protocol and enum payloads, fixed arrays, lists and bound callback owners.
 Rooted descendants and objects reached from outside the candidate graph retain
 their ordinary counts and keep everything they reach alive. List copies carry
 one set of element edges per value even when their backing storage is shared.
+The trial graph stops at externally rooted objects. Their outgoing references
+remain external edge counts on any nodes reached through another path, so a
+back edge still protects the candidate. This avoids repeatedly traversing a
+live retained scene when a temporary loses its last root. Runtime tests compare
+this boundary with an independent reachability oracle and check that collection
+resumes when the protecting root disappears.
 The collector cuts feedback edges and lets the existing typed finalization plans
 perform cleanup; it does not invoke finalizers itself. Temporary ownership
 transfers marked `skip_cycle` keep their existing semantics. String literals use the

@@ -535,6 +535,15 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const cycle_test_command = b.addRunArtifact(cycle_tests);
+    const llvm_cycle_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("Tools/LlvmEvaluation/CycleRuntime.zig"),
+            .target = runtime_target,
+            .optimize = .Debug,
+            .link_libc = true,
+        }),
+    });
+    const llvm_cycle_test_command = b.addRunArtifact(llvm_cycle_tests);
     const language_test_command = b.addRunArtifact(executable);
     // Toolchain-owned language tests are hermetic: a user's live package links
     // must not extend their package graph or make the same commit nondeterministic.
@@ -553,6 +562,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&test_command.step);
     test_step.dependOn(&deep_copy_test_command.step);
     test_step.dependOn(&cycle_test_command.step);
+    test_step.dependOn(&llvm_cycle_test_command.step);
     test_step.dependOn(&language_test_command.step);
 
     var native_math_validation: ?*std.Build.Step = null;
@@ -668,6 +678,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&test_command.step);
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&cycle_test_command.step);
+    check_step.dependOn(&llvm_cycle_test_command.step);
     check_step.dependOn(&language_test_command.step);
     check_step.dependOn(lsp_completion_gate_step);
     check_step.dependOn(optimizer_admission_quick_step);
