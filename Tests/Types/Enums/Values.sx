@@ -14,6 +14,27 @@ enum Outcome<T,E> {
     failure(E)
 }
 
+enum Button {
+    left
+    right
+    middle
+    other(uint8)
+}
+
+func contains_button(values:Button[], button:Button) bool {
+    for value in values { if value == button { return true } }
+    return false
+}
+
+test "mixed enums distinguish payloadless variants in collections" {
+    let pressed:Button[] = [Button.left]
+    assert(contains_button(pressed, Button.left))
+    assert(!contains_button(pressed, Button.right))
+    assert(!contains_button(pressed, Button.middle))
+    assert(!contains_button(pressed, Button.other(1)))
+    assert(Button.other(1) != Button.other(2))
+}
+
 func describe(connection:Connection) str {
     return match connection {
         waiting => "waiting"

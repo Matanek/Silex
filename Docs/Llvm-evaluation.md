@@ -117,6 +117,7 @@ cases, unsupported source forms, cache reuse/repair, and native/LLVM/native runs
 Numeric operations, branches, calls, plain aggregates, scalar/aggregate references,
 plain-value collections, resource-free optionals, and immutable string literals
 cover the selected corpus.
+
 Enumerations without raw values use a private tagged-union representation.
 Payload-free enums keep a direct integer tag. Enums with associated values use a
 tag followed by an aligned word reserve sized for the widest variant from the
@@ -127,7 +128,17 @@ and drops stay explicit in the composed Silex IR. Raw enumerations with `int` or
 `str` backing use a two-field representation containing the stable variant tag
 and the declared raw value. Raw projection reads the second field; matching and
 equality compare the tag, while string raw values point to private static
-descriptors. Equality for associated-value enums remains an explicit refusal.
+descriptors.
+
+Equality compares the variant tag first, then only that variant's typed payload.
+Payload-free variants remain distinct in mixed enums (for example mouse buttons
+with an `other(uint8)` case). Strings compare by content and floating-point
+payloads keep ordinary numeric equality, including signed zero and NaN; inactive
+payload storage and padding are never compared. Enum fields inside plain
+structures follow the same rule. Payload comparison supports scalars, strings,
+class identity, structures, nested enums and optionals; unsupported payload
+types remain explicit refusals.
+
 Dynamic protocol values likewise use a private tagged reserve: the first word is
 the concrete structure index and the aligned payload is sized for the widest
 conformer in the composed program. Construction zeroes the reserve, protocol

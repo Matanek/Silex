@@ -2612,6 +2612,7 @@ const FunctionEmitter = struct {
                         serial,
                     });
                 }
+                return @import("EnumEquality.zig").emit(self, value, left_type);
             }
             if (structure_index >= self.program.structures.len) return error.InvalidProgram;
             if (self.program.structures[structure_index].is_class) {
@@ -2750,6 +2751,17 @@ const FunctionEmitter = struct {
         accumulator: *?usize,
         depth: usize,
     ) Error!void {
+        if (type_value.structureIndex()) |index| if (enumIndexForStructure(self.program, index) != null) {
+            const leaf = try @import("EnumEquality.zig").equal(self, type_value, left, right, depth);
+            const serial = self.nextTemporary();
+            if (accumulator.*) |previous| {
+                try self.write("  %t{d}.aggregate.equal = and i1 %t{d}.aggregate.equal, {s}\n", .{ serial, previous, leaf });
+            } else {
+                try self.write("  %t{d}.aggregate.equal = xor i1 {s}, false\n", .{ serial, leaf });
+            }
+            accumulator.* = serial;
+            return;
+        };
         if (type_value.isNumeric() or type_value == .bool) {
             const serial = self.nextTemporary();
             const type_name = try llvmType(self.allocator, self.program, type_value);

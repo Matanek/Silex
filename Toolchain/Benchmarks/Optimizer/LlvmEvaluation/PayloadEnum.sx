@@ -9,6 +9,62 @@ enum Outcome {
     failure
 }
 
+enum Button {
+    left
+    right
+    other(uint8)
+}
+
+enum Tag { first; second }
+enum Raw:int { first = 1; second = 2 }
+struct Tagged { let button:Button; let tag:Tag; let raw:Raw }
+class Marker { init() {} }
+enum Message {
+    empty
+    text(str)
+    number(float)
+    nested(Button, Tagged)
+    optional(str?)
+    object(Marker)
+}
+
+func verify_equality() {
+    let buttons:Button[] = [Button.left, Button.right, Button.other(7)]
+    for left_index in 0...buttons.count() {
+        for right_index in 0...buttons.count() {
+            assert((buttons[left_index] == buttons[right_index]) == (left_index == right_index))
+            assert((buttons[left_index] != buttons[right_index]) == (left_index != right_index))
+        }
+    }
+    assert(Button.other(7) != Button.other(8))
+    assert(Outcome.measured(1, 6) == Outcome.measured(1, 6))
+    assert(Outcome.measured(1, 6) != Outcome.measured(2, 6))
+    assert(Outcome.measured(1, 6) != Outcome.measured(1, 7))
+    assert(Outcome.success(Pair(value:41, ready:true)) != Outcome.success(Pair(value:41, ready:false)))
+    let tagged = Tagged(button:Button.left, tag:Tag.first, raw:Raw.first)
+    assert(tagged == Tagged(button:Button.left, tag:Tag.first, raw:Raw.first))
+    assert(tagged != Tagged(button:Button.right, tag:Tag.first, raw:Raw.first))
+    assert(tagged != Tagged(button:Button.left, tag:Tag.second, raw:Raw.first))
+    assert(tagged != Tagged(button:Button.left, tag:Tag.first, raw:Raw.second))
+    assert(Message.nested(Button.left, tagged) == Message.nested(Button.left, tagged))
+    assert(Message.nested(Button.left, tagged) != Message.nested(Button.right, tagged))
+    let built = "hello" + " world"
+    assert(Message.text(built) == Message.text("hello world"))
+    assert(Message.text(built) != Message.text("different"))
+    assert(Message.text(built) != Message.empty)
+    assert(Message.empty != Message.text(built))
+    assert(Message.number(0.0) == Message.number(-0.0))
+    let nan = 0.0 / 0.0
+    assert(Message.number(nan) != Message.number(nan))
+    assert(Message.optional(null) == Message.optional(null))
+    assert(Message.optional(null) != Message.optional("value"))
+    assert(Message.optional("value") == Message.optional("value"))
+    assert(Message.optional("value") != Message.optional("other"))
+    var marker = Marker()
+    assert(Message.object(marker) == Message.object(marker))
+    assert(Message.object(marker) != Message.object(Marker()))
+}
+
 func score(outcome:Outcome) int {
     return match outcome {
         success(pair) => match pair.ready { true => pair.value; false => -1 }
@@ -18,6 +74,7 @@ func score(outcome:Outcome) int {
 }
 
 func main() {
+    verify_equality()
     print(score(Outcome.success(Pair(value:41, ready:true))))
     print(score(Outcome.measured(1, 6)))
     print(score(Outcome.failure))
