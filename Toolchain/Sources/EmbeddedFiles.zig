@@ -5,6 +5,11 @@ const Source = @import("Source.zig");
 
 const maximum_file_size = 16 * 1024 * 1024;
 
+pub const Use = struct {
+    owner: []const u8,
+    path: []const u8,
+};
+
 const Kind = enum { text, bytes };
 
 pub fn analyze(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
@@ -37,7 +42,7 @@ pub fn analyze(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Mod
     if (kind == .text and !std.unicode.utf8ValidateSlice(content)) {
         return self.fail(file_expression.position, "embed_text requires valid UTF-8 text");
     }
-    try rememberFile(self, file_path);
+    try rememberFile(self, owner_path, file_path);
 
     if (kind == .text) {
         const result = try self.newValue(builder, .str);
@@ -105,7 +110,14 @@ fn byteListType(self: anytype) ?Ast.Type {
     return null;
 }
 
-fn rememberFile(self: anytype, path: []const u8) !void {
-    for (self.embedded_files.items) |existing| if (std.mem.eql(u8, existing, path)) return;
-    try self.embedded_files.append(self.allocator, path);
+fn rememberFile(self: anytype, owner: []const u8, path: []const u8) !void {
+    var known_path = false;
+    for (self.embedded_files.items) |existing| {
+        known_path = known_path or std.mem.eql(u8, existing, path);
+    }
+    if (!known_path) try self.embedded_files.append(self.allocator, path);
+    for (self.embedded_file_uses.items) |existing| {
+        if (std.mem.eql(u8, existing.owner, owner) and std.mem.eql(u8, existing.path, path)) return;
+    }
+    try self.embedded_file_uses.append(self.allocator, .{ .owner = owner, .path = path });
 }

@@ -27,6 +27,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     module.addOptions("build_options", build_options);
+    if (target.result.os.tag == .windows) {
+        module.linkSystemLibrary("crypt32", .{});
+        module.linkSystemLibrary("shell32", .{});
+    }
     // These Mach-O payloads are embedded by both ARM64 backends. Keep their
     // instructions and ABI inside the common macOS/Windows baseline.
     const runtime_target = b.resolveTargetQuery(.{

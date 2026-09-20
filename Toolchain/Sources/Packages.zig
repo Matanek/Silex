@@ -17,7 +17,7 @@ pub const Version = struct {
         var iterator = std.mem.splitScalar(u8, text, '.');
         for (&parts) |*part| {
             const component = iterator.next() orelse return error.InvalidVersion;
-            if (component.len == 0) return error.InvalidVersion;
+            if (component.len == 0 or (component.len > 1 and component[0] == '0')) return error.InvalidVersion;
             for (component) |character| if (!std.ascii.isDigit(character)) return error.InvalidVersion;
             part.* = std.fmt.parseInt(u32, component, 10) catch return error.InvalidVersion;
         }
@@ -61,7 +61,7 @@ pub const SilexRequirement = struct {
     maximum_exclusive: ?Version,
 
     pub fn parse(text: []const u8) error{InvalidRequirement}!SilexRequirement {
-        var clauses = std.mem.tokenizeScalar(u8, text, ' ');
+        var clauses = std.mem.splitScalar(u8, text, ' ');
         const minimum_clause = clauses.next() orelse return error.InvalidRequirement;
         if (!std.mem.startsWith(u8, minimum_clause, ">=") or minimum_clause.len == 2) {
             return error.InvalidRequirement;
@@ -305,6 +305,7 @@ pub const Graph = struct {
 pub const ManifestInfo = struct {
     name: []const u8,
     version: Version,
+    repository: ?[]const u8,
     sources: []const u8,
     description: ?ManifestDescription,
     authors: []const []const u8,
@@ -313,6 +314,36 @@ pub const ManifestInfo = struct {
     catalogs: []const []const u8,
     dependencies: []const ManifestDependency,
     dev_dependencies: []const ManifestDependency,
+    artifacts: []const ManifestArtifact = &.{},
+    boundary_archives: []const []const u8 = &.{},
+};
+
+pub const ManifestArtifact = struct {
+    target: []const u8,
+    name: []const u8,
+    path: []const u8,
+    sha256: []const u8,
+};
+
+pub const LockedDependency = struct {
+    name: []const u8,
+    version: []const u8,
+};
+
+pub const LockedPackage = struct {
+    name: []const u8,
+    version: []const u8,
+    publication_sha256: []const u8,
+    source_sha256: []const u8,
+    manifest_sha256: []const u8,
+    dependencies: []const LockedDependency,
+    artifacts: []const ManifestArtifact,
+};
+
+pub const ProjectLock = struct {
+    schema: u8 = 1,
+    manifest_sha256: []const u8,
+    packages: []const LockedPackage,
 };
 
 pub const ManifestDescription = union(enum) {
@@ -365,6 +396,7 @@ pub const Result = struct {
 const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
+    repository: ?[]const u8 = null,
     sources: ?[]const u8 = null,
     description: ?std.json.Value = null,
     authors: ?std.json.Value = null,
@@ -381,6 +413,7 @@ const RawManifest = struct {
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
+    repository: ?[]const u8,
     sources: []const u8,
     description: ?ManifestDescription,
     authors: []const []const u8,
@@ -412,6 +445,9 @@ pub const Resolver = struct {
     include_dev_dependencies: bool = false,
     resolving_root_dev_dependency: bool = false,
     user_package_allowlist: ?[]const u8 = null,
+    project_lock: ?ProjectLock = null,
+    ignore_project_lock: bool = false,
+    explicit_pin: ?LockedDependency = null,
 
     pub fn init(allocator: Allocator, io: Io, global_root: ?[]const u8) Resolver {
         return initForTarget(allocator, io, global_root, TargetModule.Target.host() orelse .macos_arm64);
@@ -434,6 +470,8 @@ pub const Resolver = struct {
         try self.rejectLegacy(project_root);
         const manifest_path = try std.fs.path.join(self.allocator, &.{ project_root, "Package.json" });
         const root_manifest = try self.loadOptional(manifest_path);
+        self.project_lock = null;
+        if (!self.ignore_project_lock) try self.loadProjectLock(project_root, manifest_path, root_manifest != null);
         if (root_manifest) |manifest| {
             try self.validateToolchain(manifest);
             try self.validateRootIdentity(manifest, project_root);
@@ -478,15 +516,95 @@ pub const Resolver = struct {
             packages[index] = builder.package;
         }
         const graph: Graph = .{ .packages = packages, .explicit = root_manifest != null };
+        try self.checkLockedGraph(graph);
         try self.validateBoundaryRequirements(graph);
         return graph;
+    }
+
+    fn checkLockedGraph(self: *Resolver, graph: Graph) !void {
+        const lock = self.project_lock orelse return;
+        if (graph.packages.len != lock.packages.len + 1) return self.fail("Silex.lock.json does not describe the complete project closure");
+        for (lock.packages) |item| {
+            var found: ?Package = null;
+            for (graph.packages[1..]) |package| {
+                if (package.name != null and std.mem.eql(u8, item.name, package.name.?)) {
+                    found = package;
+                    break;
+                }
+            }
+            const package = found orelse return self.fail("Silex.lock.json contains a package absent from the project graph");
+            if (package.origin == .workspace_link or package.origin == .user_link) continue;
+            if (package.origin != .installed or !package.version.?.eql(Version.parse(item.version) catch unreachable) or
+                package.dependencies.len != item.dependencies.len)
+                return self.fail("Silex.lock.json does not match the selected package graph");
+            for (package.dependencies) |dependency| {
+                var edge_found = false;
+                for (item.dependencies) |edge| {
+                    if (!std.mem.eql(u8, edge.name, dependency.name)) continue;
+                    const selected = graph.packages[dependency.package];
+                    if (selected.origin == .workspace_link or selected.origin == .user_link or
+                        std.mem.eql(u8, edge.version, try std.fmt.allocPrint(self.allocator, "{d}.{d}.{d}",
+                            .{ selected.version.?.major, selected.version.?.minor, selected.version.?.patch })))
+                        edge_found = true;
+                }
+                if (!edge_found) return self.fail("Silex.lock.json has an inconsistent dependency edge");
+            }
+        }
+    }
+
+    fn loadProjectLock(self: *Resolver, root: []const u8, manifest_path: []const u8, has_manifest: bool) !void {
+        const path = try std.fs.path.join(self.allocator, &.{ root, "Silex.lock.json" });
+        const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return,
+            else => return self.fail("project lock cannot be read"),
+        };
+        const lock = std.json.parseFromSliceLeaky(ProjectLock, self.allocator, source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch return self.fail("invalid Silex.lock.json; reinstall from the project to refresh it");
+        const manifest_digest = fileSha256(self.allocator, self.io, manifest_path) catch
+            return self.fail("project manifest cannot be checked against its lock");
+        if (!has_manifest or lock.schema != 1 or lock.packages.len > 4096 or
+            !std.mem.eql(u8, lock.manifest_sha256, manifest_digest))
+            return self.fail("project manifest does not match Silex.lock.json; reinstall from the project to refresh it");
+        for (lock.packages, 0..) |item, index| {
+            _ = Version.parse(item.version) catch return self.fail("invalid Silex.lock.json package version");
+            if (!Modules.validName(item.name) or !validSha256(item.publication_sha256) or !validSha256(item.source_sha256) or
+                !validSha256(item.manifest_sha256)) return self.fail("invalid Silex.lock.json package entry");
+            for (item.dependencies) |edge| {
+                if (!Modules.validName(edge.name)) return self.fail("invalid Silex.lock.json dependency");
+                _ = Version.parse(edge.version) catch return self.fail("invalid Silex.lock.json dependency version");
+            }
+            for (item.artifacts) |artifact| if (!validSha256(artifact.sha256))
+                return self.fail("invalid Silex.lock.json artifact digest");
+            for (lock.packages[0..index]) |previous| if (std.mem.eql(u8, previous.name, item.name))
+                return self.fail("duplicate package in Silex.lock.json");
+        }
+        self.project_lock = lock;
+    }
+
+    fn lockedPackage(self: *Resolver, name: []const u8) ?LockedPackage {
+        const lock = self.project_lock orelse return null;
+        for (lock.packages) |item| if (std.mem.eql(u8, item.name, name)) return item;
+        return null;
     }
 
     pub fn inspectPackage(self: *Resolver, package_root: []const u8) !ManifestInfo {
         self.diagnostic = null;
         try self.rejectLegacy(package_root);
         const path = try std.fs.path.join(self.allocator, &.{ package_root, "Package.json" });
-        const raw = try self.readManifest(path);
+        const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch {
+            return self.fail("package manifest cannot be read");
+        };
+        return self.inspectManifestSource(source);
+    }
+
+    pub fn inspectManifestSource(self: *Resolver, source: []const u8) !ManifestInfo {
+        self.diagnostic = null;
+        const raw = std.json.parseFromSliceLeaky(RawManifest, self.allocator, source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch return self.fail("invalid package manifest or unsupported field");
         const manifest = try self.parseManifestCore(raw);
         const name = manifest.name orelse return self.fail("an installable package requires name and version");
         const version = manifest.version orelse return self.fail("an installable package requires name and version");
@@ -496,9 +614,12 @@ pub const Resolver = struct {
             .{ name, version.major, version.minor, version.patch },
         ));
         try self.validateToolchain(manifest);
+        const artifacts = try self.parsePublicationArtifacts(raw.artifacts);
+        const boundary_archives = try self.parsePublicationBoundaryArchives(raw.boundary);
         return .{
             .name = name,
             .version = version,
+            .repository = manifest.repository,
             .sources = manifest.sources,
             .description = manifest.description,
             .authors = manifest.authors,
@@ -507,7 +628,98 @@ pub const Resolver = struct {
             .catalogs = manifest.catalogs,
             .dependencies = manifest.dependencies,
             .dev_dependencies = manifest.dev_dependencies,
+            .artifacts = artifacts,
+            .boundary_archives = boundary_archives,
         };
+    }
+
+    fn parsePublicationBoundaryArchives(self: *Resolver, value: ?std.json.Value) ![]const []const u8 {
+        const targets = switch (value orelse return &.{}) {
+            .object => |object| object,
+            else => return self.fail("boundary must be an object keyed by target"),
+        };
+        var archives: std.ArrayList([]const u8) = .empty;
+        var target_iterator = targets.iterator();
+        while (target_iterator.next()) |target_entry| {
+            _ = TargetModule.Target.parse(target_entry.key_ptr.*) catch
+                return self.fail("boundary target is not supported");
+            const declaration = switch (target_entry.value_ptr.*) {
+                .object => |object| object,
+                else => return self.fail("a boundary target must be an object"),
+            };
+            if (declaration.count() != 1) return self.fail("a boundary target accepts only providers");
+            const providers = switch (declaration.get("providers") orelse
+                return self.fail("a boundary target accepts only providers"))
+            {
+                .object => |object| object,
+                else => return self.fail("boundary providers must be an object"),
+            };
+            var provider_iterator = providers.iterator();
+            while (provider_iterator.next()) |provider_entry| {
+                const provider = switch (provider_entry.value_ptr.*) {
+                    .object => |object| object,
+                    else => return self.fail("a boundary provider must be an object"),
+                };
+                if (provider.get("archive")) |archive_value| {
+                    const path = switch (archive_value) {
+                        .string => |text| text,
+                        else => return self.fail("boundary archive must be a relative path string"),
+                    };
+                    if (!validRelativePath(path)) return self.fail("boundary archive must stay inside its package");
+                    var duplicate = false;
+                    for (archives.items) |existing| if (std.mem.eql(u8, existing, path)) {
+                        duplicate = true;
+                        break;
+                    };
+                    if (!duplicate) try archives.append(self.allocator, path);
+                }
+            }
+        }
+        return archives.toOwnedSlice(self.allocator);
+    }
+
+    fn parsePublicationArtifacts(self: *Resolver, value: ?std.json.Value) ![]const ManifestArtifact {
+        const targets = switch (value orelse return &.{}) {
+            .object => |object| object,
+            else => return self.fail("artifacts must be an object keyed by target"),
+        };
+        var artifacts: std.ArrayList(ManifestArtifact) = .empty;
+        var target_iterator = targets.iterator();
+        while (target_iterator.next()) |target_entry| {
+            _ = TargetModule.Target.parse(target_entry.key_ptr.*) catch
+                return self.fail("artifact target is not supported");
+            const entries = switch (target_entry.value_ptr.*) {
+                .object => |object| object,
+                else => return self.fail("an artifact target must contain an object of named artifacts"),
+            };
+            if (entries.count() == 0) return self.fail("an artifact target must contain at least one artifact");
+            var artifact_iterator = entries.iterator();
+            while (artifact_iterator.next()) |artifact_entry| {
+                if (!Modules.validName(artifact_entry.key_ptr.*)) return self.fail("invalid artifact name");
+                const artifact = switch (artifact_entry.value_ptr.*) {
+                    .object => |object| object,
+                    else => return self.fail("an artifact declaration must be an object"),
+                };
+                const path = switch (artifact.get("path") orelse return self.fail("an artifact requires path and sha256")) {
+                    .string => |text| text,
+                    else => return self.fail("artifact path must be a string"),
+                };
+                if (!validRelativePath(path)) return self.fail("artifact path must stay inside its package");
+                const sha256 = switch (artifact.get("sha256") orelse return self.fail("an artifact requires path and sha256")) {
+                    .string => |text| text,
+                    else => return self.fail("artifact sha256 must be a lowercase hexadecimal digest"),
+                };
+                if (!validSha256(sha256)) return self.fail("artifact sha256 must be a lowercase hexadecimal digest");
+                try artifacts.append(self.allocator, .{
+                    .target = target_entry.key_ptr.*,
+                    .name = artifact_entry.key_ptr.*,
+                    .path = path,
+                    .sha256 = sha256,
+                });
+            }
+        }
+        std.mem.sort(ManifestArtifact, artifacts.items, {}, manifestArtifactLessThan);
+        return artifacts.toOwnedSlice(self.allocator);
     }
 
     fn findWorkspaceLinksRoot(self: *Resolver, project_root: []const u8) !?[]const u8 {
@@ -754,6 +966,14 @@ pub const Resolver = struct {
 
     fn bestGlobal(self: *Resolver, request: ManifestDependency, available: *?Version) !?Selected {
         if (!self.userPackageAllowed(request.name)) return null;
+        const locked = self.lockedPackage(request.name);
+        if (self.project_lock != null and locked == null) return self.fail(try std.fmt.allocPrint(
+            self.allocator, "package '{s}' is absent from Silex.lock.json; reinstall from the project", .{request.name}));
+        const locked_version = if (locked) |item| Version.parse(item.version) catch unreachable else null;
+        var requested_version: ?Version = null;
+        if (self.explicit_pin) |pin| {
+            if (std.mem.eql(u8, pin.name, request.name)) requested_version = Version.parse(pin.version) catch unreachable;
+        }
         const global_root = self.global_root orelse return null;
         var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,
@@ -768,10 +988,42 @@ pub const Resolver = struct {
             if (entry.kind != .directory or !std.mem.startsWith(u8, entry.name, prefix)) continue;
             const suffix = entry.name[prefix.len..];
             const folder_version = Version.parse(suffix) catch return self.fail("global package folder has an invalid version");
+            if (locked_version) |pinned| if (!folder_version.eql(pinned)) continue;
+            if (requested_version) |pinned| if (!folder_version.eql(pinned)) continue;
             const root = try std.fs.path.join(self.allocator, &.{ global_root, entry.name });
             var manifest = try self.loadRequired(root);
             const version = try self.validateSelected(manifest, request.name, root, true);
             manifest = try self.trustGlobalPolicy(root, manifest, request.name, version);
+            if (locked) |item| {
+                const inspected = try self.inspectPackage(root);
+                if (inspected.artifacts.len != item.artifacts.len) return self.fail("Silex.lock.json has an inconsistent artifact inventory");
+                for (inspected.artifacts, item.artifacts) |actual, expected| {
+                    if (!std.mem.eql(u8, actual.target, expected.target) or !std.mem.eql(u8, actual.name, expected.name) or
+                        !std.mem.eql(u8, actual.path, expected.path) or !std.mem.eql(u8, actual.sha256, expected.sha256))
+                        return self.fail("Silex.lock.json has an inconsistent artifact inventory");
+                }
+                const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
+                const receipt_source = Io.Dir.cwd().readFileAlloc(self.io, receipt_path, self.allocator, .limited(1024 * 1024)) catch
+                    return self.fail("locked package source proof cannot be read");
+                const receipt = std.json.parseFromSliceLeaky(struct {
+                    schema: u8,
+                    publication_sha256: []const u8,
+                    source_sha256: []const u8,
+                    manifest_sha256: []const u8,
+                    dependencies: []const LockedDependency,
+                }, self.allocator, receipt_source, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch
+                    return self.fail("locked package source proof is invalid");
+                if (receipt.schema != 4 or !std.mem.eql(u8, receipt.publication_sha256, item.publication_sha256) or
+                    !std.mem.eql(u8, receipt.source_sha256, item.source_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, item.manifest_sha256) or
+                    receipt.dependencies.len != item.dependencies.len)
+                    return self.fail("installed package does not match Silex.lock.json");
+                for (receipt.dependencies, item.dependencies) |actual, expected| {
+                    if (!std.mem.eql(u8, actual.name, expected.name) or
+                        !std.mem.eql(u8, actual.version, expected.version))
+                        return self.fail("installed package dependencies do not match Silex.lock.json");
+                }
+            }
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
             available.* = newest(available.*, version);
             if (!request.constraint.accepts(version)) continue;
@@ -786,6 +1038,7 @@ pub const Resolver = struct {
             }
         }
         if (best == null) {
+            if (locked != null) return self.fail("locked package version is not installed; reinstall from the project");
             if (toolchain_incompatible) |selected| try self.validateToolchain(selected.manifest);
         }
         return best;
@@ -833,7 +1086,7 @@ pub const Resolver = struct {
             error.FileNotFound, error.NotDir => return trusted,
             else => return self.fail("installed package source proof cannot be read"),
         };
-        const Receipt = struct {
+        const GitReceipt = struct {
             schema: u8,
             name: []const u8,
             version: []const u8,
@@ -844,9 +1097,22 @@ pub const Resolver = struct {
             extensions: []const ExtensionPolicy,
             catalogs: []const []const u8 = &.{},
         };
-        const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
+        const RegistryReceipt = struct {
+            schema: u8,
+            name: []const u8,
+            version: []const u8,
+            origin: []const u8,
+            publication_sha256: []const u8,
+            source_sha256: []const u8,
+            manifest_sha256: []const u8,
+            dependencies: []const LockedDependency,
+            artifacts: []const ManifestArtifact,
+            extensions: []const ExtensionPolicy,
+            catalogs: []const []const u8 = &.{},
+        };
+        const header = std.json.parseFromSliceLeaky(struct { schema: u8 }, self.allocator, source, .{
             .allocate = .alloc_always,
-            .ignore_unknown_fields = false,
+            .ignore_unknown_fields = true,
         }) catch return self.fail("installed package has an invalid source proof; remove it and reinstall");
         const version_text = try std.fmt.allocPrint(
             self.allocator,
@@ -855,20 +1121,68 @@ pub const Resolver = struct {
         );
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
-        if (receipt.schema != 3 or
-            !std.mem.eql(u8, receipt.name, name) or
-            !std.mem.eql(u8, receipt.version, version_text) or
-            receipt.repository.len == 0 or
-            !validObjectId(receipt.commit) or
-            !validSha256(receipt.archive_sha256) or
-            !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
-            !equalExtensionPolicies(receipt.extensions, manifest.extensions) or
-            !equalStrings(receipt.catalogs, manifest.catalogs))
-        {
-            return self.fail("installed package does not match its source proof; remove it and reinstall");
+        var receipt_extensions: []const ExtensionPolicy = &.{};
+        var receipt_catalogs: []const []const u8 = &.{};
+        switch (header.schema) {
+            3 => {
+                const receipt = std.json.parseFromSliceLeaky(GitReceipt, self.allocator, source, .{
+                    .allocate = .alloc_always,
+                    .ignore_unknown_fields = false,
+                }) catch return self.fail("installed package has an invalid source proof; remove it and reinstall");
+                if (!std.mem.eql(u8, receipt.name, name) or
+                    !std.mem.eql(u8, receipt.version, version_text) or
+                    receipt.repository.len == 0 or
+                    !validObjectId(receipt.commit) or
+                    !validSha256(receipt.archive_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+                    !equalExtensionPolicies(receipt.extensions, manifest.extensions) or
+                    !equalStrings(receipt.catalogs, manifest.catalogs))
+                {
+                    return self.fail("installed package does not match its source proof; remove it and reinstall");
+                }
+                receipt_extensions = receipt.extensions;
+                receipt_catalogs = receipt.catalogs;
+            },
+            4 => {
+                const receipt = std.json.parseFromSliceLeaky(RegistryReceipt, self.allocator, source, .{
+                    .allocate = .alloc_always,
+                    .ignore_unknown_fields = false,
+                }) catch return self.fail("installed package has an invalid source proof; remove it and reinstall");
+                if (!std.mem.eql(u8, receipt.name, name) or
+                    !std.mem.eql(u8, receipt.version, version_text) or
+                    !validRegistryOrigin(receipt.origin) or
+                    !validSha256(receipt.publication_sha256) or
+                    !validSha256(receipt.source_sha256) or
+                    !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+                    !equalExtensionPolicies(receipt.extensions, manifest.extensions) or
+                    !equalStrings(receipt.catalogs, manifest.catalogs))
+                {
+                    return self.fail("installed package does not match its source proof; remove it and reinstall");
+                }
+                if (receipt.dependencies.len != manifest.dependencies.len) return self.fail("installed package has inconsistent dependency proof");
+                for (receipt.dependencies, manifest.dependencies) |selected, declared| {
+                    const selected_version = Version.parse(selected.version) catch return self.fail("installed package has invalid dependency proof");
+                    if (!std.mem.eql(u8, selected.name, declared.name) or !declared.constraint.accepts(selected_version))
+                        return self.fail("installed package has inconsistent dependency proof");
+                }
+                const declared_artifacts = (try self.inspectPackage(root)).artifacts;
+                for (receipt.artifacts) |acquired| {
+                    var found = false;
+                    for (declared_artifacts) |item| {
+                        if (std.mem.eql(u8, acquired.target, item.target) and
+                            std.mem.eql(u8, acquired.name, item.name) and
+                            std.mem.eql(u8, acquired.path, item.path) and
+                            std.mem.eql(u8, acquired.sha256, item.sha256)) found = true;
+                    }
+                    if (!found) return self.fail("installed package has inconsistent artifact proof");
+                }
+                receipt_extensions = receipt.extensions;
+                receipt_catalogs = receipt.catalogs;
+            },
+            else => return self.fail("installed package has an invalid source proof; remove it and reinstall"),
         }
-        trusted.extensions = receipt.extensions;
-        trusted.catalogs = receipt.catalogs;
+        trusted.extensions = receipt_extensions;
+        trusted.catalogs = receipt_catalogs;
         return trusted;
     }
 
@@ -1200,6 +1514,9 @@ pub const Resolver = struct {
             Version.parse(text) catch return self.fail("invalid package version")
         else
             null;
+        if (raw.repository) |repository| {
+            if (!validDevelopmentRepository(repository)) return self.fail("repository must be a GitHub HTTPS repository URL");
+        }
         if (raw.name) |name| {
             if (!Modules.validName(name)) return self.fail("invalid package identity");
             if (reservedContextualRoot(name)) return self.fail("Package and Module are reserved package-name roots");
@@ -1343,6 +1660,7 @@ pub const Resolver = struct {
         return .{
             .name = raw.name,
             .version = version,
+            .repository = raw.repository,
             .sources = sources,
             .description = description,
             .authors = try authors.toOwnedSlice(self.allocator),
@@ -1669,6 +1987,12 @@ fn artifactSha256(artifacts: ?std.json.Value, target_name: []const u8, relative_
     return null;
 }
 
+fn manifestArtifactLessThan(_: void, left: ManifestArtifact, right: ManifestArtifact) bool {
+    const target_order = std.mem.order(u8, left.target, right.target);
+    if (target_order != .eq) return target_order == .lt;
+    return std.mem.lessThan(u8, left.name, right.name);
+}
+
 fn belongsTo(module_name: []const u8, package_name: []const u8) bool {
     return std.mem.eql(u8, module_name, package_name) or
         (module_name.len > package_name.len and std.mem.startsWith(u8, module_name, package_name) and
@@ -1685,6 +2009,27 @@ fn validMetadataLine(text: []const u8) bool {
     return text.len != 0 and
         std.mem.trim(u8, text, " \t\r\n").len == text.len and
         std.mem.indexOfAny(u8, text, "\r\n") == null;
+}
+
+fn validDevelopmentRepository(url: []const u8) bool {
+    const prefix = "https://github.com/";
+    if (url.len > 200 or !std.mem.startsWith(u8, url, prefix)) return false;
+    const path = url[prefix.len..];
+    const slash = std.mem.indexOfScalar(u8, path, '/') orelse return false;
+    const owner = path[0..slash];
+    const repo = path[slash + 1 ..];
+    if (owner.len < 1 or owner.len > 39 or repo.len < 1 or repo.len > 100 or
+        std.mem.eql(u8, repo, ".") or std.mem.eql(u8, repo, "..")) return false;
+    for (owner) |character| if (!std.ascii.isAlphanumeric(character) and character != '-') return false;
+    for (repo) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and
+        character != '_' and character != '.') return false;
+    return true;
+}
+
+test "development repository is an optional GitHub link, not a publication source" {
+    try std.testing.expect(validDevelopmentRepository("https://github.com/Silex-Test/Fixture"));
+    try std.testing.expect(!validDevelopmentRepository("https://github.com/Silex-Test/Fixture/issues"));
+    try std.testing.expect(!validDevelopmentRepository("https://example.com/Silex-Test/Fixture"));
 }
 
 fn validLanguageTag(text: []const u8) bool {
@@ -1752,6 +2097,23 @@ fn validSha256(text: []const u8) bool {
     if (text.len != 64) return false;
     for (text) |character| if (!std.ascii.isDigit(character) and !(character >= 'a' and character <= 'f')) return false;
     return true;
+}
+
+fn validRegistryOrigin(text: []const u8) bool {
+    if (std.mem.startsWith(u8, text, "https://")) {
+        const authority = text["https://".len..];
+        if (authority.len == 0 or authority.len > 253 or authority[0] == '.' or authority[authority.len - 1] == '.') return false;
+        for (authority) |byte| {
+            if (!std.ascii.isAlphanumeric(byte) and byte != '.' and byte != '-') return false;
+        }
+        return true;
+    }
+    const prefix = "http://127.0.0.1:";
+    if (!std.mem.startsWith(u8, text, prefix)) return false;
+    const port = text[prefix.len..];
+    if (port.len == 0 or port.len > 5) return false;
+    for (port) |byte| if (!std.ascii.isDigit(byte)) return false;
+    return (std.fmt.parseInt(u16, port, 10) catch return false) != 0;
 }
 
 fn validObjectId(text: []const u8) bool {
@@ -1904,6 +2266,39 @@ fn writeTestArchive(directory: Io.Dir, io: Io, path: []const u8, target: TargetM
         std.mem.writeInt(u16, archive[70..72], 1, .little);
     }
     try directory.writeFile(io, .{ .sub_path = path, .data = &archive });
+}
+
+test "inspect and canonically order declared publication artifacts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Native/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Native/Package.json",
+        .data =
+        \\{"name":"Native","version":"1.0.0","requires":{"silex":">=0.0.0"},"artifacts":{
+        \\  "windows-x64":{"Runtime":{"path":"Boundary/windows-x64/Runtime.lib","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+        \\  "linux-arm64":{"Runtime":{"path":"Boundary/linux-arm64/libRuntime.a","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+        \\}}
+        ,
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Native" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const manifest = try resolver.inspectPackage(base);
+    try std.testing.expectEqual(@as(usize, 2), manifest.artifacts.len);
+    try std.testing.expectEqualStrings("linux-arm64", manifest.artifacts[0].target);
+    try std.testing.expectEqualStrings("Boundary/linux-arm64/libRuntime.a", manifest.artifacts[0].path);
+    try std.testing.expectEqualStrings("windows-x64", manifest.artifacts[1].target);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Native/Package.json",
+        .data = "{\"name\":\"Native\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.0.0\"},\"artifacts\":{\"linux-x64\":{\"Runtime\":{\"path\":\"Boundary/libRuntime.a\",\"sha256\":\"ABC\"}}}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.inspectPackage(base));
+    try std.testing.expectEqualStrings("artifact sha256 must be a lowercase hexadecimal digest", resolver.diagnostic.?);
 }
 
 test "inspect optional package description and authors" {
@@ -2101,6 +2496,8 @@ test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
     try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
+    try std.testing.expectError(error.InvalidVersion, Version.parse("01.2.3"));
+    try std.testing.expectError(error.InvalidConstraint, Constraint.parse("^1.02.3"));
 }
 
 test "development dependencies belong only to the root development graph" {
@@ -2329,6 +2726,9 @@ test "parse and apply Silex toolchain requirements before package sources" {
     try std.testing.expect((try SilexRequirement.parse(">=0.38.0")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse("^0.38.0"));
     try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(">=0.41.0 <0.38.0"));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(">=0.38.0  <0.41.0"));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(" >=0.38.0"));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(">=0.38.0 "));
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

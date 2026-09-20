@@ -11,6 +11,13 @@ test {
     _ = @import("Sources/Project/CoreTests.zig");
     _ = @import("Sources/Interpreter.zig");
     _ = @import("Sources/Optimize/ValueRanges.zig");
+    _ = @import("Sources/PackageArchive.zig");
+    _ = @import("Sources/PackageDescriptor.zig");
+    _ = @import("Sources/PackageResources.zig");
+    _ = @import("Sources/PackageSnapshot.zig");
+    _ = @import("Sources/PackageInventory.zig");
+    _ = @import("Sources/PackagePublication.zig");
+    _ = @import("Sources/PackagePublishClient.zig");
     _ = @import("Sources/MacOS/Link.zig");
     _ = @import("Sources/Llvm/Units.zig");
     _ = @import("Sources/Llvm/Store.zig");

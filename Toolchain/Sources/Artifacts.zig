@@ -12,7 +12,7 @@ pub const Summary = struct {
 const Artifact = struct {
     name: []const u8,
     path: []const u8,
-    url: []const u8,
+    url: ?[]const u8,
     sha256: [32]u8,
     extraction: ?Archive = null,
 };
@@ -105,6 +105,10 @@ pub const Installer = struct {
             }
             return;
         }
+        if (artifact.url == null) return self.failFmt(
+            "artifact '{s}' is absent and has no download URL",
+            .{artifact.name},
+        );
         try self.download(artifact, destination);
         if (artifact.extraction) |extraction| try self.extract(artifact, destination, root, extraction);
         summary.installed += 1;
@@ -157,12 +161,15 @@ pub const Installer = struct {
                 else => return self.failFmt("artifact '{s}' must be an object", .{entry.key_ptr.*}),
             };
             const path = try self.requiredString(object, entry.key_ptr.*, "path");
-            const url = try self.requiredString(object, entry.key_ptr.*, "url");
+            const url = if (object.get("url") != null)
+                try self.requiredString(object, entry.key_ptr.*, "url")
+            else
+                null;
             const checksum = try self.requiredString(object, entry.key_ptr.*, "sha256");
             if (!safeRelativePath(path)) {
                 return self.failFmt("artifact '{s}' has an unsafe destination path", .{entry.key_ptr.*});
             }
-            if (!std.mem.startsWith(u8, url, "https://")) {
+            if (url != null and !std.mem.startsWith(u8, url.?, "https://")) {
                 return self.failFmt("artifact '{s}' must use an HTTPS URL", .{entry.key_ptr.*});
             }
             if (checksum.len != 64) {
@@ -231,7 +238,7 @@ pub const Installer = struct {
         var client: std.http.Client = .{ .allocator = self.download_allocator, .io = self.io };
         defer client.deinit();
         const response = client.fetch(.{
-            .location = .{ .url = artifact.url },
+            .location = .{ .url = artifact.url.? },
             .response_writer = &file_writer.interface,
             .headers = .{ .user_agent = .{ .override = "Silex artifact installer" } },
         }) catch |err| {
@@ -418,6 +425,36 @@ test "artifact manifest expresses one verified target-specific destination" {
     try std.testing.expectEqual(@as(usize, 1), artifacts.len);
     try std.testing.expectEqualStrings("SDL3", artifacts[0].name);
     try std.testing.expectEqualStrings("Boundary/linux-x64/libSDL3.a", artifacts[0].path);
+}
+
+test "registry artifact without URL must already exist with its declared digest" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const manifest =
+        \\{"artifacts":{"linux-x64":{"Runtime":{"path":"Boundary/linux-x64/runtime.a","sha256":"307863a80e696052ba4944d62533598889a08068badeec7e2729f096f4f2eada"}}}}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = manifest });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    var installer = Installer.init(allocator, std.testing.allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidManifest, installer.install(root, .linux_x64));
+    try std.testing.expectEqualStrings("artifact 'Runtime' is absent and has no download URL", installer.diagnostic.?);
+
+    try temporary.dir.createDirPath(std.testing.io, "Boundary/linux-x64");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Boundary/linux-x64/runtime.a", .data = "wrong" });
+    try std.testing.expectError(error.InvalidManifest, installer.install(root, .linux_x64));
+    try std.testing.expectEqualStrings("artifact 'Runtime' is absent and has no download URL", installer.diagnostic.?);
+
+    // The digest of the empty file is written here to prove the positive path.
+    const verified_manifest =
+        \\{"artifacts":{"linux-x64":{"Runtime":{"path":"Boundary/linux-x64/runtime.a","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}}}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = verified_manifest });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Boundary/linux-x64/runtime.a", .data = "" });
+    const summary = try installer.install(root, .linux_x64);
+    try std.testing.expectEqual(@as(usize, 1), summary.available);
 }
 
 test "artifact destinations cannot escape their package" {

@@ -28,6 +28,7 @@ const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 const TargetModule = @import("Target.zig");
 const Extensions = @import("Extensions.zig");
+const EmbeddedFiles = @import("EmbeddedFiles.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const canonicalName = Names.canonical;
@@ -49,6 +50,7 @@ pub const Compilation = struct {
     interfaces: []const Interface.Module,
     packages: Packages.Graph,
     files: []const []const u8,
+    embedded_file_uses: []const EmbeddedFiles.Use = &.{},
     cache_files: []const []const u8,
     metrics: Metrics,
     tests: []const TestCase = &.{},
@@ -165,6 +167,10 @@ pub const Compiler = struct {
 
     pub fn restrictUserPackages(self: *Compiler, allowlist: []const u8) void {
         self.user_package_allowlist = allowlist;
+    }
+
+    pub fn diagnosticMessage(self: *const Compiler) ?[]const u8 {
+        return if (self.diagnostic) |diagnostic| diagnostic.message else null;
     }
 
     fn compileConfigured(self: *Compiler, input_path: []const u8) Error!Compilation {
@@ -350,6 +356,7 @@ pub const Compiler = struct {
             .interfaces = interfaces,
             .packages = self.packages,
             .files = self.files,
+            .embedded_file_uses = try analyzer.embedded_file_uses.toOwnedSlice(self.allocator),
             .cache_files = try dependency_files.toOwnedSlice(self.allocator),
             .metrics = .{
                 .packages = self.packages.packages.len,

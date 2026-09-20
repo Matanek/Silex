@@ -46,6 +46,7 @@ pub const Diagnostic = struct {
         duplicate_workspace,
         duplicate_dev,
         duplicate_suite,
+        duplicate_dry_run,
         unknown_action,
         conflicting_modes,
         option_unavailable,
@@ -114,6 +115,11 @@ pub const PackageOptions = struct {
     package: []const u8,
 };
 
+pub const PublishOptions = struct {
+    package: []const u8,
+    dry_run: bool,
+};
+
 pub const RunResult = union(enum) {
     options: RunOptions,
     diagnostic: Diagnostic,
@@ -156,6 +162,11 @@ pub const PackagesResult = union(enum) {
 
 pub const PackageResult = union(enum) {
     options: PackageOptions,
+    diagnostic: Diagnostic,
+};
+
+pub const PublishResult = union(enum) {
+    options: PublishOptions,
     diagnostic: Diagnostic,
 };
 
@@ -473,6 +484,27 @@ pub fn parsePackage(args: []const []const u8) PackageResult {
     } };
 }
 
+pub fn parsePublish(args: []const []const u8) PublishResult {
+    var package: ?[]const u8 = null;
+    var dry_run = false;
+    for (args) |argument| {
+        if (std.mem.eql(u8, argument, "--dry-run")) {
+            if (dry_run) return failure(PublishResult, .duplicate_dry_run, argument);
+            dry_run = true;
+        } else if (std.mem.startsWith(u8, argument, "-")) {
+            return failure(PublishResult, .unknown_option, argument);
+        } else if (package != null) {
+            return failure(PublishResult, .multiple_packages, argument);
+        } else {
+            package = argument;
+        }
+    }
+    return .{ .options = .{
+        .package = package orelse return failure(PublishResult, .missing_package, null),
+        .dry_run = dry_run,
+    } };
+}
+
 fn failure(comptime Result: type, kind: Diagnostic.Kind, argument: ?[]const u8) Result {
     return .{ .diagnostic = .{ .kind = kind, .argument = argument } };
 }
@@ -578,6 +610,17 @@ test "register accepts exactly one package directory" {
     try expectPackageDiagnostic(parsePackage(&.{}), .missing_package, null);
     try expectPackageDiagnostic(parsePackage(&.{ "Packages/GFX", "Packages/STD" }), .multiple_packages, "Packages/STD");
     try expectPackageDiagnostic(parsePackage(&.{"--draft"}), .unknown_option, "--draft");
+}
+
+test "publish accepts one package directory and an optional dry run" {
+    const live = parsePublish(&.{"Packages/GFX"}).options;
+    try std.testing.expectEqualStrings("Packages/GFX", live.package);
+    try std.testing.expect(!live.dry_run);
+    const dry = parsePublish(&.{ "--dry-run", "Packages/GFX" }).options;
+    try std.testing.expect(dry.dry_run);
+    try expectPublishDiagnostic(parsePublish(&.{}), .missing_package, null);
+    try expectPublishDiagnostic(parsePublish(&.{ "A", "B" }), .multiple_packages, "B");
+    try expectPublishDiagnostic(parsePublish(&.{ "A", "--dry-run", "--dry-run" }), .duplicate_dry_run, "--dry-run");
 }
 
 test "compile accepts recognized targets and diagnoses invalid selections" {
@@ -724,6 +767,12 @@ fn expectPackagesDiagnostic(result: PackagesResult, kind: Diagnostic.Kind, argum
 }
 
 fn expectPackageDiagnostic(result: PackageResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectPublishDiagnostic(result: PublishResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
     const diagnostic = result.diagnostic;
     try std.testing.expectEqual(kind, diagnostic.kind);
     if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
