@@ -2439,6 +2439,9 @@ fn functionUsesFloatRegister(function: Machine.Function, register: Register) boo
     for (function.float_register_slots) |residence| {
         if (residence != null and residence.? == @intFromEnum(register)) return true;
     }
+    for (function.float_lane_slots) |residence| {
+        if (residence != null and residence.?.register == @intFromEnum(register)) return true;
+    }
     return false;
 }
 

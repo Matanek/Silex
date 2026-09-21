@@ -43,7 +43,7 @@ pub fn allocateFloatLanePairsFor(
     defer allocator.free(float_slots);
     @memset(float_slots, false);
     inferFloatSlots(function, float_slots);
-    try FloatPairs.allocate(allocator, function, target, float_slots, residences, registers);
+    try FloatPairs.allocate(allocator, function, target, float_slots, residences, registers, null);
     return residences;
 }
 
@@ -219,10 +219,6 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         14, 15,
     };
     const lane_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
-    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, lane_registers);
-    var cursor_probe = function;
-    cursor_probe.float_lane_slots = float_lane_residences;
-    const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
     const reference_cursors = try LoopCursor.findReferenceCursors(allocator, function, false);
     defer allocator.free(reference_cursors);
     const checked_reference_cursors = try LoopCursor.findReferenceCursors(allocator, function, true);
@@ -264,7 +260,12 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             forceSpan(parameter, forced);
         } else touch(parameter.start, 0, first, last, weights, 1);
     }
+    const lane_forced = try allocator.dupe(bool, forced);
+    defer allocator.free(lane_forced);
     for (function.instructions, 0..) |instruction, index| {
+        // Aggregate returns explicitly extract SIMD lanes; direct calls do
+        // not. Keep only this emitter-supported exception to stack pinning.
+        if (instruction != .return_value) forceStackOperands(function, instruction, lane_forced, externals);
         visit(instruction, index, first, last, weights, instruction_weights[index]);
         if (!isResidenceCompatibleInstruction(instruction, externals)) {
             visitBarrier(instruction, index, first, last, weights, instruction_weights[index]);
@@ -289,6 +290,13 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
             }
         }
     }
+
+    // The SIMD allocator must honor the same stack homes as scalar coloring:
+    // aggregate parameters and call operands are read through the internal ABI.
+    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, lane_registers, lane_forced);
+    var cursor_probe = function;
+    cursor_probe.float_lane_slots = float_lane_residences;
+    const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
 
     var integer_intervals: std.ArrayList(Interval) = .empty;
     defer integer_intervals.deinit(allocator);

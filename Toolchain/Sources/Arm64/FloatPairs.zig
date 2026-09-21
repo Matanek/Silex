@@ -17,13 +17,14 @@ pub fn allocate(
     float_slots: []const bool,
     residences: []?Machine.FloatLaneResidence,
     registers: []const u5,
+    stack_slots: ?[]const bool,
 ) Allocator.Error!void {
     const partners = try allocator.alloc(?Machine.Slot, function.slot_count);
     defer allocator.free(partners);
     @memset(partners, null);
     const memory_slots = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(memory_slots);
-    @memset(memory_slots, false);
+    if (stack_slots) |slots| @memcpy(memory_slots, slots) else @memset(memory_slots, false);
     for (function.instructions) |instruction| MemoryResidence.pinFloatLanes(instruction, memory_slots);
     for (memory_slots, 0..) |pinned, slot| if (pinned) {
         partners[slot] = @intCast(slot);

@@ -1,3 +1,5 @@
+use Module.AggregateCallCoordinates
+
 func total(a:int, b:int, c:int, d:int, e:int, f:int, g:int, h:int, i:int, j:int) int {
     return a + b + c + d + e + f + g + h + i + j
 }
@@ -245,10 +247,10 @@ test "dynamic protocol dispatch returns updated structures and shared classes" {
 func verify_embedded_bytes() {
     let source = embed_bytes("NativePortability.sx")
     assert(source.count() > 300)
-    assert(source[0] == 102 as uint8)
-    assert(source[1] == 117 as uint8)
-    assert(source[2] == 110 as uint8)
-    assert(source[3] == 99 as uint8)
+    assert(source[0] == 117 as uint8)
+    assert(source[1] == 115 as uint8)
+    assert(source[2] == 101 as uint8)
+    assert(source[3] == 32 as uint8)
 }
 
 func verify_deep_copy() {
@@ -642,6 +644,7 @@ test "native bound callbacks own and release their receiver graph" {
 }
 
 func main() {
+    AggregateCallCoordinates.exercise()
     verify_owned_callbacks()
     assert(total(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
     assert(callback_total() == 55)
@@ -755,4 +758,8 @@ test "upcasts preserve ownership of temporary derived instances" {
         var returned = make_native_upcast()
     }
     assert(NativeReplacementToken.drops == 5)
+}
+
+test "native aggregate calls preserve loop-carried coordinates" {
+    AggregateCallCoordinates.exercise()
 }

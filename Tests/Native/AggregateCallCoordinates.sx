@@ -1,0 +1,120 @@
+// Reduced from Canvas path caps: preserve the aggregate argument layout and
+// the loop-carried coordinate snapshots across nested color/mesh calls.
+func append_path_end(
+    vertices:&Mesh, center:Point, start:Point,
+    outward:Point, half:float, brush:Brush
+) {
+    var previous = start
+    var previous_fringe = center
+    var index = 1
+    while index <= 8 {
+        let current = center.add(Point(index as float, index as float))
+        let current_fringe = current.add(Point(1.0, 1.0))
+        triangle(vertices, center, previous, current, brush)
+        colored(
+            vertices, previous, brush.color_at(previous),
+            previous_fringe, fade(brush, previous_fringe),
+            current_fringe, fade(brush, current_fringe)
+        )
+        colored(
+            vertices, previous, brush.color_at(previous),
+            current_fringe, fade(brush, current_fringe), current, brush.color_at(current)
+        )
+        previous = current
+        previous_fringe = current_fringe
+        index++
+    }
+}
+
+public func exercise() {
+    var vertices = Mesh()
+    append_path_end(
+        vertices, Point(100.0, 100.0), Point(100.0, 103.5),
+        Point(-1.0, 0.0), 3.5, Brush.solid(Color.white())
+    )
+    assert(vertices.vertices.count() == 72)
+    assert(vertices.indices.count() == 72)
+    for vertex in vertices.vertices {
+        let point = vertex.position
+        assert(point.x >= 100.0 && point.x <= 109.0)
+        assert(point.y >= 100.0 && point.y <= 109.0)
+        assert(point.z == -1.0)
+    }
+}
+
+func triangle(vertices:&Mesh, a:Point, b:Point, c:Point, brush:Brush) {
+    colored(vertices, a, brush.color_at(a), b, brush.color_at(b), c, brush.color_at(c))
+}
+
+func fade(brush:Brush, point:Point) Color {
+    let color = brush.color_at(point)
+    return Color(r:color.r, g:color.g, b:color.b, a:0.0)
+}
+
+func colored(vertices:&Mesh, a:Point, ca:Color, b:Point, cb:Color, c:Point, cc:Color) {
+    let base = vertices.vertices.count() as uint32
+    vertices.append_vertex(Vertex(position:Point3(a.x, a.y, -1.0), color:ca))
+    vertices.append_vertex(Vertex(position:Point3(b.x, b.y, -1.0), color:cb))
+    vertices.append_vertex(Vertex(position:Point3(c.x, c.y, -1.0), color:cc))
+    vertices.append_index(base)
+    vertices.append_index(base + 1)
+    vertices.append_index(base + 2)
+}
+
+struct Vertex {
+    var position:Point3
+    var normal:Point3 = Point3(0.0, 0.0, -1.0)
+    var uv:Point = Point()
+    var color:Color
+}
+
+struct Mesh {
+    var vertices:Vertex[] = []
+    var indices:uint32[] = []
+    func append_vertex(v:Vertex) { self.vertices.append(v) }
+    func append_index(i:uint32) { self.indices.append(i) }
+}
+
+struct Point {
+    var x:float
+    var y:float
+    init(x:float = 0.0, y:float = 0.0) { self.x = x; self.y = y }
+    func add(other:Point) Point { return Point(self.x + other.x, self.y + other.y) }
+}
+
+struct Point3 {
+    var x:float
+    var y:float
+    var z:float
+    init(x:float, y:float, z:float) { self.x = x; self.y = y; self.z = z }
+}
+
+struct Color {
+    var r:float
+    var g:float
+    var b:float
+    var a:float
+    static func white() Color { return Color(r:1.0, g:1.0, b:1.0, a:1.0) }
+}
+
+struct Brush {
+    var gradient:bool
+    var start:Point
+    var end:Point
+    var start_color:Color
+    var end_color:Color
+    static func solid(color:Color) Brush { return Brush(gradient:false, start:Point(), end:Point(), start_color:color, end_color:color) }
+    func color_at(position:Point) Color {
+        if !self.gradient { return self.start_color }
+        return Color(r:position.x, g:position.y, b:self.end.x, a:self.end.y)
+    }
+}
+
+test "preserve aggregate coordinates across nested calls in a loop" {
+    exercise()
+}
+
+func main() {
+    exercise()
+    print("aggregate call coordinates preserved")
+}
