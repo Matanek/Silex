@@ -1,0 +1,69 @@
+protocol Link { func read() int }
+struct Packed { var flag:bool; var fraction:float; var node:Node? }
+struct Erased:Link {
+    var packed:Packed
+    func read() int { return self.packed.node!.value }
+}
+enum Edge { empty; linked(bool, Packed) }
+class Node:Link {
+    var value:int = 7
+    var text:str = ""
+    var packed:Packed = Packed(flag:true, fraction:0.5, node:null)
+    var erased:Link? = null
+    var edge:Edge = Edge.empty
+    var list:Node[] = []
+    var duplicate:Node[] = []
+    var fixed:Node?[2] = [null, null]
+    var callback:func() int
+    init() { self.callback = self.read }
+    func read() int { return self.value }
+}
+struct Roots { var first:Node; var second:Node; var nested:int[][] }
+func graph() {
+    var node = Node()
+    node.text = "dynamic $(node.value)"
+    node.packed = Packed(flag:false, fraction:0.25, node:node)
+    node.erased = Erased(packed:node.packed)
+    node.edge = Edge.linked(true, node.packed)
+    node.list = [node, node]
+    node.duplicate = node.list
+    node.fixed = [node, node]
+    var roots = Roots(first:node, second:node, nested:[[1, 2], [3]])
+    var cloned = copy roots
+    assert(cloned.first != node && cloned.first == cloned.second)
+    var detached = cloned.first
+    assert(detached.packed.node! == detached)
+    assert(!detached.packed.flag && detached.packed.fraction == 0.25)
+    assert(detached.list[0] == detached && detached.list[1] == detached)
+    assert(detached.duplicate[0] == detached && detached.fixed[1]! == detached)
+    assert(detached.text == "dynamic 7")
+    detached.value = 42
+    assert(node.value == 7 && detached.callback() == 42 && node.callback() == 7)
+    var cloned_erased = detached.erased!
+    var source_erased = node.erased!
+    assert(cloned_erased.read() == 42 && source_erased.read() == 7)
+    match detached.edge {
+        linked(flag, packed) => { assert(flag && packed.node! == detached) }
+        empty => { assert(false) }
+    }
+    cloned.nested[0][0] = 99
+    assert(roots.nested[0][0] == 1)
+    var copied_list = copy node.list
+    assert(copied_list[0] != node && copied_list[0] == copied_list[1])
+    var copied_fixed = copy node.fixed
+    assert(copied_fixed[0]! != node && copied_fixed[0]! == copied_fixed[1]!)
+    var erased:Link = node
+    var copied_erased = copy erased
+    var copied_callback = copy node.callback
+    node.value = 11
+    assert(copied_erased.read() == 7 && copied_callback() == 7)
+    var absent:Node? = null
+    var copied_absent = copy absent
+    assert(copied_absent == null)
+    var copied_optional = copy node.packed.node
+    assert(copied_optional! != node && copied_optional!.packed.node! == copied_optional!)
+}
+func main() {
+    for _ in 0...10 { graph() }
+    print("deep-copy-graph-ok")
+}

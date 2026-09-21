@@ -1,0 +1,24 @@
+static class Counts { static var constructed:int = 0 }
+class Item {
+    var value:int = 7
+    init() { Counts.constructed++ }
+}
+class Base {
+    var item:Item = Item()
+    func read() int { return 0 }
+}
+class Derived:Base {
+    var extra:int = 19
+    override func read() int { return self.extra }
+}
+func main() {
+    var derived = Derived()
+    var base:Base = derived
+    let before = Counts.constructed
+    var cloned = copy base
+    assert(cloned != base && cloned.item != base.item)
+    assert(Counts.constructed == before && cloned.read() == 19)
+    cloned.item.value = 42
+    assert(base.item.value == 7)
+    print("class-copy-ok")
+}

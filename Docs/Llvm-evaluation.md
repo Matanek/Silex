@@ -240,9 +240,14 @@ upcasts also preserve temporary ownership (`UpcastLifetime.sx`). Virtual calls
 select the implementation from that tag. Synthetic mutable-method
 results are rebuilt with the declared result type, preserving the exact LLVM call
 signature. `ClassInheritance.sx` covers inherited fields, dynamic reflection,
-aggregate calls, aliases and derived/base finalization. Deep copying values that
-contain classes remains unsupported and is explicitly refused; it must never
-produce an alias in place of an independent graph (`RefuseClassCopy.sx`).
+aggregate calls, aliases and derived/base finalization. Deep copying clones the
+reachable class graph without invoking constructors. A per-copy identity map
+preserves repeated references, cycles and dynamic derived types; source headers
+remain unchanged. Type-directed visitors follow fields, optional and enum
+payloads, protocol values, fixed arrays, owning collections and bound callback
+receivers. Immutable strings retain their storage. `ClassCopy.sx` checks inherited
+fields and independent mutation; `DeepCopyGraph.sx` checks graph identity through
+these containers, callback rebinding and cleanup at normal exit.
 Implicit derived construction releases its temporary base allocation after
 transferring the retained fields, without calling the base user finalizer early.
 Identity comparisons release owned temporary class and optional results after

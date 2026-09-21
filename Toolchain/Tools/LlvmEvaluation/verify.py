@@ -53,6 +53,8 @@ def main():
                 "--opt", mode, "--output", binary]
 
     cases = {
+        "LlvmEvaluation/ClassCopy.sx": "class-copy-ok\n",
+        "LlvmEvaluation/DeepCopyGraph.sx": "deep-copy-graph-ok\n",
         "LlvmEvaluation/TemporaryField.sx": "owner dropped\nitem 42\ntemporary-fields-ok\nitem dropped\n",
         "LlvmEvaluation/TemporaryCollectionRead.sx": "temporary-collection-read-ok\n",
         "LlvmEvaluation/CallbackOwnership.sx": "callback-ownership-ok\n",
@@ -192,7 +194,7 @@ def main():
         expected = None
         for mode in ["debug", "release", "O0", "O3"]:
             binary = output/(source.stem+"-"+mode)
-            command = ([args.native, "compile", source, "--"+mode, "--nocache", "--output", binary]
+            command = ([args.native, "compile", "--backend", "native", source, "--"+mode, "--nocache", "--output", binary]
                        if mode in ["debug", "release"] else llvm_command(source, mode, binary))
             built = call(source.stem+"-compile-"+mode, command)
             assert built["returncode"] == 0, built
@@ -215,17 +217,6 @@ def main():
             print(source.stem, mode, "PASS", flush=True)
 
     verify_counts(output, corpus, call)
-
-    class_copy = corpus/"LlvmEvaluation/RefuseClassCopy.sx"
-    for mode in ["debug", "release"]:
-        checked = call("ClassCopy-native-"+mode, [args.native, "run", class_copy, "--backend", "native", "--"+mode, "--nocache"])
-        assert checked["returncode"] == 0 and checked["stdout"] == "class-copy-ok\n", checked
-    for mode in ["O0", "O3"]:
-        target = output/("ClassCopy-"+mode)
-        target.write_bytes(b"existing output must survive refusal")
-        rejected = call("ClassCopy-llvm-refusal-"+mode, llvm_command(class_copy, mode, target))
-        assert rejected["returncode"] != 0 and "UnsupportedType" in rejected["stderr"], rejected
-        assert target.read_bytes() == b"existing output must survive refusal"
 
     minmax_metadata = json.loads(Path(str(output/"ScalarMinMax-O3")+".json").read_text())
     minmax_llvm = (Path(minmax_metadata["artifact_directory"])/"raw.ll").read_text()
@@ -261,7 +252,7 @@ def main():
     failed_observable = None
     for mode in ["debug", "release", "O0", "O3"]:
         binary = output/("AssertFailure-"+mode)
-        command = ([args.native, "compile", assert_failure, "--"+mode, "--nocache", "--output", binary]
+        command = ([args.native, "compile", "--backend", "native", assert_failure, "--"+mode, "--nocache", "--output", binary]
                    if mode in ["debug", "release"] else llvm_command(assert_failure, mode, binary))
         built = call("AssertFailure-compile-"+mode, command)
         assert built["returncode"] == 0, built
@@ -281,7 +272,7 @@ def main():
     panic_observable = None
     for mode in ["debug", "release", "O0", "O3"]:
         binary = output/("PanicFailure-"+mode)
-        command = ([args.native, "compile", panic_failure, "--"+mode, "--nocache", "--output", binary]
+        command = ([args.native, "compile", "--backend", "native", panic_failure, "--"+mode, "--nocache", "--output", binary]
                    if mode in ["debug", "release"] else llvm_command(panic_failure, mode, binary))
         built = call("PanicFailure-compile-"+mode, command)
         assert built["returncode"] == 0, built
@@ -302,7 +293,7 @@ def main():
     for mode in ["debug", "release"]:
         binary = output/("CommandsDominance-"+mode)
         built = call("CommandsDominance-compile-"+mode,
-                     [args.native, "compile", dominance, "--"+mode, "--nocache", "--output", binary])
+                     [args.native, "compile", "--backend", "native", dominance, "--"+mode, "--nocache", "--output", binary])
         assert built["returncode"] == 0, built
         run = call("CommandsDominance-run-"+mode, [binary])
         observable = {key: run[key] for key in ["returncode", "stdout", "stderr"]}
@@ -861,7 +852,7 @@ def main():
     llvm_bounds = None
     for mode in ["debug", "release", "O0", "O3"]:
         binary = output/("RichCollectionReadReferenceBounds-"+mode)
-        command = ([args.native, "compile", rich_bounds_source, "--"+mode, "--nocache", "--output", binary]
+        command = ([args.native, "compile", "--backend", "native", rich_bounds_source, "--"+mode, "--nocache", "--output", binary]
                    if mode in ["debug", "release"] else llvm_command(rich_bounds_source, mode, binary))
         built = call("RichCollectionReadReferenceBounds-compile-"+mode, command)
         assert built["returncode"] == 0, built

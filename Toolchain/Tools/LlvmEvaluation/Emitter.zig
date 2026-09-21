@@ -283,6 +283,7 @@ fn emitInternal(allocator: Allocator, program: Ir.Program, boundaries: []const S
             return err;
         };
     }
+    try @import("DeepCopy.zig").emit(allocator, &output, program, lowered_functions, stable_tags);
     const callback_targets = try inspectCallbackTargets(allocator, program, lowered_functions, reachable);
     defer allocator.free(callback_targets);
     try emitCallbackWrappers(&output, allocator, program, callback_targets);
@@ -1510,31 +1511,9 @@ const FunctionEmitter = struct {
     fn emitDeepCopy(self: *FunctionEmitter, result: Ir.ValueId, operand: Ir.ValueId) Error!void {
         const type_value = try self.valueType(result);
         if (type_value != try self.valueType(operand)) return error.InvalidProgram;
-        if (@import("CycleTrace.zig").containsClass(self.program, type_value, 0)) return error.UnsupportedType;
-        const collection = self.collectionInfo(type_value) catch return self.copyValue(result, operand);
-        if (collection.view or !plainValue(self.program, collection.element, 0))
-            return error.UnsupportedType;
-
-        const serial = self.nextTemporary();
-        const type_name = try llvmType(self.allocator, self.program, type_value);
-        try self.write("  %t{d}.source = extractvalue {s} %v{d}, 0\n", .{ serial, type_name, operand });
-        try self.write("  %t{d}.count = extractvalue {s} %v{d}, 1\n", .{ serial, type_name, operand });
-        try self.emitCollectionBytes(serial, collection.element);
-        try self.write("  %t{d}.storage = call fastcc ptr @sx_alloc(i64 %t{d}.bytes)\n", .{ serial, serial });
-        try self.write(
-            "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.storage, ptr %t{d}.source, i64 %t{d}.bytes, i1 false)\n",
-            .{ serial, serial, serial },
-        );
-        try self.write("  %t{d}.collection = insertvalue {s} poison, ptr %t{d}.storage, 0\n", .{
-            serial,
-            type_name,
-            serial,
-        });
-        try self.write("  %v{d} = insertvalue {s} %t{d}.collection, i64 %t{d}.count, 1\n", .{
-            result,
-            type_name,
-            serial,
-            serial,
+        const name = try llvmType(self.allocator, self.program, type_value);
+        try self.write("  %v{d} = call fastcc {s} @sx.copy.root.{d}({s} %v{d})\n", .{
+            result, name, @intFromEnum(type_value), name, operand,
         });
     }
 
@@ -3688,7 +3667,7 @@ pub fn materialClassStorage(program: Ir.Program, structure_index: usize) bool {
     return true;
 }
 
-fn classStorageSlots(program: Ir.Program, structure_index: usize) Error!usize {
+pub fn classStorageSlots(program: Ir.Program, structure_index: usize) Error!usize {
     if (structure_index >= program.structures.len) return error.InvalidProgram;
     const structure = program.structures[structure_index];
     if (!structure.is_class) return error.UnsupportedType;
