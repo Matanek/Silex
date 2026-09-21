@@ -1261,7 +1261,7 @@ fn testSourceLlvm(
             else
                 CompilationCache.artifactKey("llvm-test", &.{ variant, label });
             const executable = try llvmTestArtifactPath(case_allocator, source_path, target, digest);
-            if (!fileExists(init.io, executable)) {
+            if (shouldBuildLlvmTest(options.cache, fileExists(init.io, executable))) {
                 const built = try LlvmBackend.buildExecutable(
                     init,
                     case_allocator,
@@ -1334,6 +1334,17 @@ fn llvmTestArtifactPath(
 fn fileExists(io: Io, path: []const u8) bool {
     _ = Io.Dir.cwd().statFile(io, path, .{}) catch return false;
     return true;
+}
+
+fn shouldBuildLlvmTest(cache_enabled: bool, artifact_exists: bool) bool {
+    return !cache_enabled or !artifact_exists;
+}
+
+test "LLVM tests rebuild existing artifacts when the cache is disabled" {
+    try std.testing.expect(shouldBuildLlvmTest(false, true));
+    try std.testing.expect(shouldBuildLlvmTest(false, false));
+    try std.testing.expect(!shouldBuildLlvmTest(true, true));
+    try std.testing.expect(shouldBuildLlvmTest(true, false));
 }
 
 fn relativeTestPath(root: []const u8, path: []const u8) []const u8 {

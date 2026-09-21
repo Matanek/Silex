@@ -60,6 +60,9 @@ fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary, require
         .variant = source_failure,
         .index = 0,
     } });
+    if (!operand.transferred and Resources.requiresRetain(self, error_type)) {
+        try Resources.retainValue(self, builder, error_type, error_value);
+    }
 
     if (alternative.?.message) |message_expression| {
         try analyzeMessagePropagation(
@@ -136,6 +139,9 @@ fn propagate(
         .variant = source_failure,
         .index = 0,
     } });
+    if (!operand.transferred and Resources.requiresRetain(self, source_error)) {
+        try Resources.retainValue(self, builder, source_error, error_value);
+    }
     const propagated = try self.newValue(builder, return_type);
     try self.emit(builder, .{ .enum_init = .{
         .result = propagated,
@@ -240,7 +246,11 @@ fn extractSuccess(
         .variant = variantIndex(source, "success").?,
         .index = 0,
     } });
-    return .{ .type = success_type, .value = value };
+    return .{
+        .type = success_type,
+        .value = value,
+        .transferred = operand.transferred and Resources.ownsValue(self, success_type),
+    };
 }
 
 fn findResult(enums: []const Ir.Enum, type_value: Ast.Type) ?usize {

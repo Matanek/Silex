@@ -804,6 +804,40 @@ test "native try propagation matches the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native try transfers resource payloads without leaking or borrowing local results" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Box { let value:int }
+        \\class Failure { let code:int }
+        \\func create_box() Result<Box,Failure> {
+        \\    return Result<Box,Failure>.success(Box(value:42))
+        \\}
+        \\func read_local_failure() Result<int,Failure> {
+        \\    var result = Result<int,Failure>.failure(Failure(code:7))
+        \\    let value = try result
+        \\    return Result<int,Failure>.success(value)
+        \\}
+        \\func read_box() Result<int,Failure> {
+        \\    var box = try create_box()
+        \\    return Result<int,Failure>.success(box.value)
+        \\}
+        \\func main() {
+        \\    match read_box() { success(value) => { print(value) }; failure(error) => { print(error.code) } }
+        \\    match read_local_failure() { success(value) => { print(value) }; failure(error) => { print(error.code) } }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(@as(u8, 0), exitCode(native));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native map_error transformation matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

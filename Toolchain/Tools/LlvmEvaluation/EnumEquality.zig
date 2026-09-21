@@ -25,7 +25,7 @@ pub fn equal(self: anytype, value_type: Ir.Type, left: []const u8, right: []cons
         return result;
     }
     if (value_type.optionalChild()) |child| {
-        try self.write("  %t{d}.equal.slot = alloca i1\n", .{serial});
+        try self.writeEntryAlloca("  %t{d}.equal.slot = alloca i1\n", .{serial});
         try self.write("  %t{d}.equal.lp = extractvalue {s} {s}, 0\n", .{ serial, name, left });
         try self.write("  %t{d}.equal.rp = extractvalue {s} {s}, 0\n", .{ serial, name, right });
         try self.write("  %t{d}.equal.presence = icmp eq i1 %t{d}.equal.lp, %t{d}.equal.rp\n", .{ serial, serial, serial });
@@ -60,9 +60,12 @@ pub fn equal(self: anytype, value_type: Ir.Type, left: []const u8, right: []cons
             try self.write("  {s} = icmp eq i64 {s}, {s}\n", .{ result, ltag, rtag });
             return result;
         }
-        try self.write("  %t{d}.equal.slot = alloca i1\n  store i1 false, ptr %t{d}.equal.slot\n", .{ serial, serial });
-        try self.write("  %t{d}.equal.left = alloca {s}\n  store {s} {s}, ptr %t{d}.equal.left\n", .{ serial, name, name, left, serial });
-        try self.write("  %t{d}.equal.right = alloca {s}\n  store {s} {s}, ptr %t{d}.equal.right\n", .{ serial, name, name, right, serial });
+        try self.writeEntryAlloca("  %t{d}.equal.slot = alloca i1\n", .{serial});
+        try self.write("  store i1 false, ptr %t{d}.equal.slot\n", .{serial});
+        try self.writeEntryAlloca("  %t{d}.equal.left = alloca {s}\n", .{ serial, name });
+        try self.write("  store {s} {s}, ptr %t{d}.equal.left\n", .{ name, left, serial });
+        try self.writeEntryAlloca("  %t{d}.equal.right = alloca {s}\n", .{ serial, name });
+        try self.write("  store {s} {s}, ptr %t{d}.equal.right\n", .{ name, right, serial });
         try self.write("  %t{d}.equal.tags = icmp eq i64 {s}, {s}\n", .{ serial, ltag, rtag });
         try self.write("  br i1 %t{d}.equal.tags, label %equal.variant{d}, label %equal.done{d}\nequal.variant{d}:\n", .{ serial, serial, serial, serial });
         try self.write("  switch i64 {s}, label %equal.done{d} [\n", .{ ltag, serial });
@@ -89,7 +92,27 @@ pub fn equal(self: anytype, value_type: Ir.Type, left: []const u8, right: []cons
         try self.write("equal.done{d}:\n  {s} = load i1, ptr %t{d}.equal.slot\n", .{ serial, result, serial });
         return result;
     }
-    if (structure.is_static or structure.is_protocol or structure.collection != null) return error.UnsupportedType;
+    if (structure.is_static or structure.is_protocol) return error.UnsupportedType;
+    if (structure.collection) |collection| {
+        if (collection.length) |length| {
+            var matched: []const u8 = "true";
+            for (0..length) |element_index| {
+                const l = try extract(self, name, left, element_index);
+                const r = try extract(self, name, right, element_index);
+                matched = try combine(self, matched, try equal(self, collection.element, l, r, depth + 1));
+            }
+            return matched;
+        }
+        const left_data = try extract(self, name, left, 0);
+        const right_data = try extract(self, name, right, 0);
+        try self.write("  {s} = icmp eq ptr {s}, {s}\n", .{ result, left_data, right_data });
+        if (!collection.view) return result;
+        const left_count = try extract(self, name, left, 1);
+        const right_count = try extract(self, name, right, 1);
+        const count_result = try std.fmt.allocPrint(self.allocator, "%t{d}.equal.count", .{self.nextTemporary()});
+        try self.write("  {s} = icmp eq i64 {s}, {s}\n", .{ count_result, left_count, right_count });
+        return combine(self, result, count_result);
+    }
     var matched: []const u8 = "true";
     for (structure.fields, 0..) |field, field_index| {
         const l = try extract(self, name, left, field_index);

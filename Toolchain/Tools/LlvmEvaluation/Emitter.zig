@@ -107,8 +107,8 @@ fn emitInternal(allocator: Allocator, program: Ir.Program, boundaries: []const S
         \\@.fmt.boolean.inline = private constant [3 x i8] c"%s\00"
         \\@.true = private constant [5 x i8] c"true\00"
         \\@.false = private constant [6 x i8] c"false\00"
-        \\@sx.format.true = private constant { i64, [4 x i8] } { i64 4, [4 x i8] c"true" }
-        \\@sx.format.false = private constant { i64, [5 x i8] } { i64 5, [5 x i8] c"false" }
+        \\@sx.format.true = private constant { i64, [5 x i8] } { i64 4, [5 x i8] c"true\00" }
+        \\@sx.format.false = private constant { i64, [6 x i8] } { i64 5, [6 x i8] c"false\00" }
         \\@.newline = private constant [1 x i8] c"\0A"
         \\
         \\declare i32 @dprintf(i32, ptr, ...)
@@ -733,8 +733,11 @@ const FunctionEmitter = struct {
     function_id: usize,
     stable_tags: bool = false,
     temporary: usize = 0,
+    entry_allocas: std.ArrayList(u8) = .empty,
 
     fn emit(self: *FunctionEmitter) Error!void {
+        defer self.entry_allocas.deinit(self.allocator);
+        var entry_alloca_offset: ?usize = null;
         try self.write("; Silex function: {s}\n", .{self.function.name});
         try self.write("define internal fastcc {s} @sx_{d}(ptr %sx.environment", .{ try llvmType(self.allocator, self.program, self.function.return_type), self.function_id });
         for (self.function.parameter_types, 0..) |type_value, index| {
@@ -750,6 +753,7 @@ const FunctionEmitter = struct {
         for (self.function.blocks, 0..) |block, block_id| {
             try self.write("b{d}:\n", .{block_id});
             if (block_id == 0) {
+                entry_alloca_offset = self.output.items.len;
                 if (ownsReceiver(self.program, self.function)) {
                     try self.write("  %v0 = getelementptr i8, ptr %sx.environment, i64 0\n", .{});
                 } else if (self.function.capture_types.len != 0) {
@@ -811,6 +815,13 @@ const FunctionEmitter = struct {
             \\}
             \\
         );
+        if (self.entry_allocas.items.len != 0) {
+            try self.output.insertSlice(
+                self.allocator,
+                entry_alloca_offset orelse return error.InvalidProgram,
+                self.entry_allocas.items,
+            );
+        }
     }
 
     fn needsScalarFormatScratch(self: *FunctionEmitter) bool {
@@ -967,7 +978,7 @@ const FunctionEmitter = struct {
         if (try self.valueType(value.result) != .str) return error.InvalidProgram;
         try self.write(
             "  %v{d} = getelementptr {{ i64, [{d} x i8] }}, ptr @sx.string.{d}.{d}.{d}, i32 0, i32 0\n",
-            .{ value.result, value.value.len, self.function_id, block_id, instruction_index },
+            .{ value.result, value.value.len + 1, self.function_id, block_id, instruction_index },
         );
     }
 
@@ -1063,7 +1074,7 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.from_bytes.data = extractvalue {s} %v{d}, 0\n", .{ serial, bytes_name, value.bytes });
         try self.write("  %t{d}.from_bytes.count = extractvalue {s} %v{d}, 1\n", .{ serial, bytes_name, value.bytes });
         try self.write("  %t{d}.from_bytes.count.invalid = icmp slt i64 %t{d}.from_bytes.count, 0\n", .{ serial, serial });
-        try self.write("  %t{d}.from_bytes.allocation.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.from_bytes.count, i64 8)\n", .{ serial, serial });
+        try self.write("  %t{d}.from_bytes.allocation.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.from_bytes.count, i64 9)\n", .{ serial, serial });
         try self.write("  %t{d}.from_bytes.allocation = extractvalue {{ i64, i1 }} %t{d}.from_bytes.allocation.checked, 0\n", .{ serial, serial });
         try self.write("  %t{d}.from_bytes.allocation.overflow = extractvalue {{ i64, i1 }} %t{d}.from_bytes.allocation.checked, 1\n", .{ serial, serial });
         try self.write("  %t{d}.from_bytes.invalid = or i1 %t{d}.from_bytes.count.invalid, %t{d}.from_bytes.allocation.overflow\n", .{ serial, serial, serial });
@@ -1077,6 +1088,8 @@ const FunctionEmitter = struct {
             "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.from_bytes.destination, ptr %t{d}.from_bytes.data, i64 %t{d}.from_bytes.count, i1 false)\n",
             .{ serial, serial, serial },
         );
+        try self.write("  %t{d}.from_bytes.terminator = getelementptr i8, ptr %t{d}.from_bytes.destination, i64 %t{d}.from_bytes.count\n", .{ serial, serial, serial });
+        try self.write("  store i8 0, ptr %t{d}.from_bytes.terminator\n", .{serial});
         try self.write("  %v{d} = getelementptr i8, ptr %t{d}.from_bytes.descriptor, i64 0\n", .{ value.result, serial });
     }
 
@@ -1093,7 +1106,7 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.length.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.left.length, i64 %t{d}.right.length)\n", .{ serial, serial, serial });
         try self.write("  %t{d}.length = extractvalue {{ i64, i1 }} %t{d}.length.checked, 0\n", .{ serial, serial });
         try self.write("  %t{d}.length.overflow = extractvalue {{ i64, i1 }} %t{d}.length.checked, 1\n", .{ serial, serial });
-        try self.write("  %t{d}.allocation.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.length, i64 8)\n", .{ serial, serial });
+        try self.write("  %t{d}.allocation.checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %t{d}.length, i64 9)\n", .{ serial, serial });
         try self.write("  %t{d}.allocation = extractvalue {{ i64, i1 }} %t{d}.allocation.checked, 0\n", .{ serial, serial });
         try self.write("  %t{d}.allocation.overflow = extractvalue {{ i64, i1 }} %t{d}.allocation.checked, 1\n", .{ serial, serial });
         try self.write("  %t{d}.overflow = or i1 %t{d}.length.overflow, %t{d}.allocation.overflow\n", .{ serial, serial, serial });
@@ -1108,6 +1121,8 @@ const FunctionEmitter = struct {
         try self.write("  %t{d}.right.destination = getelementptr i8, ptr %t{d}.data, i64 %t{d}.left.length\n", .{ serial, serial, serial });
         try self.write("  %t{d}.right.data = getelementptr i8, ptr %v{d}, i64 8\n", .{ serial, value.right });
         try self.write("  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.right.destination, ptr %t{d}.right.data, i64 %t{d}.right.length, i1 false)\n", .{ serial, serial, serial });
+        try self.write("  %t{d}.terminator = getelementptr i8, ptr %t{d}.data, i64 %t{d}.length\n", .{ serial, serial, serial });
+        try self.write("  store i8 0, ptr %t{d}.terminator\n", .{serial});
         try self.write("  %v{d} = getelementptr i8, ptr %t{d}.descriptor, i64 0\n", .{ value.result, serial });
     }
 
@@ -1129,7 +1144,7 @@ const FunctionEmitter = struct {
 
         const serial = self.nextTemporary();
         try @import("ScalarFormat.zig").emit(self, serial, operand_type, value.operand);
-        try self.write("  %t{d}.format.allocation = add i64 %t{d}.format.length, 8\n", .{ serial, serial });
+        try self.write("  %t{d}.format.allocation = add i64 %t{d}.format.length, 9\n", .{ serial, serial });
         try self.write("  %t{d}.format.descriptor = call fastcc ptr @sx_alloc(i64 %t{d}.format.allocation)\n", .{ serial, serial });
         try self.write("  %t{d}.format.tagged = or i64 %t{d}.format.length, -9223372036854775808\n", .{ serial, serial });
         try self.write("  store i64 %t{d}.format.tagged, ptr %t{d}.format.descriptor\n", .{ serial, serial });
@@ -1138,6 +1153,8 @@ const FunctionEmitter = struct {
             "  call void @llvm.memcpy.p0.p0.i64(ptr %t{d}.format.data, ptr %t{d}.format.output, i64 %t{d}.format.length, i1 false)\n",
             .{ serial, serial, serial },
         );
+        try self.write("  %t{d}.format.terminator = getelementptr i8, ptr %t{d}.format.data, i64 %t{d}.format.length\n", .{ serial, serial, serial });
+        try self.write("  store i8 0, ptr %t{d}.format.terminator\n", .{serial});
         try self.write("  %v{d} = getelementptr i8, ptr %t{d}.format.descriptor, i64 0\n", .{ value.result, serial });
     }
 
@@ -1385,7 +1402,7 @@ const FunctionEmitter = struct {
                     if (raw_type != .str) return error.InvalidProgram;
                     try self.write(
                         "  %t{d}.enum.raw = getelementptr {{ i64, [{d} x i8] }}, ptr @sx.enum.raw.{d}.{d}, i32 0, i32 0\n",
-                        .{ serial, string.len, value.enumeration, value.variant },
+                        .{ serial, string.len + 1, value.enumeration, value.variant },
                     );
                     return self.write("  %v{d} = insertvalue {s} %t{d}.enum.tagged, ptr %t{d}.enum.raw, 1\n", .{ value.result, type_name, serial, serial });
                 },
@@ -1394,7 +1411,7 @@ const FunctionEmitter = struct {
         _ = try enumPayloadStorageSlots(self.program, value.enumeration, 0);
         const serial = self.nextTemporary();
         const type_name = try llvmType(self.allocator, self.program, try self.valueType(value.result));
-        try self.write("  %t{d}.enum = alloca {s}\n", .{ serial, type_name });
+        try self.writeEntryAlloca("  %t{d}.enum = alloca {s}\n", .{ serial, type_name });
         try self.write("  store {s} zeroinitializer, ptr %t{d}.enum\n", .{ type_name, serial });
         try self.write("  store i64 {d}, ptr %t{d}.enum\n", .{ value.variant, serial });
         var offset: usize = 8;
@@ -1452,7 +1469,7 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         const enum_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
         const payload_type = try llvmType(self.allocator, self.program, try self.valueType(value.result));
-        try self.write("  %t{d}.enum = alloca {s}\n", .{ serial, enum_type });
+        try self.writeEntryAlloca("  %t{d}.enum = alloca {s}\n", .{ serial, enum_type });
         try self.write("  store {s} %v{d}, ptr %t{d}.enum\n", .{ enum_type, value.operand, serial });
         try self.write("  %t{d}.enum.payload = getelementptr i8, ptr %t{d}.enum, i64 {d}\n", .{ serial, serial, offset });
         try self.write("  %v{d} = load {s}, ptr %t{d}.enum.payload\n", .{ value.result, payload_type, serial });
@@ -1569,7 +1586,7 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         const protocol_type = try llvmType(self.allocator, self.program, try self.valueType(value.result));
         const concrete_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
-        try self.write("  %t{d}.protocol = alloca {s}\n", .{ serial, protocol_type });
+        try self.writeEntryAlloca("  %t{d}.protocol = alloca {s}\n", .{ serial, protocol_type });
         try self.write("  store {s} zeroinitializer, ptr %t{d}.protocol\n", .{ protocol_type, serial });
         if (self.program.structures[value.structure].is_class) {
             try self.write("  %t{d}.protocol.class.tag = load i64, ptr %v{d}\n", .{ serial, value.operand });
@@ -1610,7 +1627,7 @@ const FunctionEmitter = struct {
         const serial = self.nextTemporary();
         const protocol_type = try llvmType(self.allocator, self.program, try self.valueType(value.operand));
         const concrete_type = try llvmType(self.allocator, self.program, try self.valueType(value.result));
-        try self.write("  %t{d}.protocol = alloca {s}\n", .{ serial, protocol_type });
+        try self.writeEntryAlloca("  %t{d}.protocol = alloca {s}\n", .{ serial, protocol_type });
         try self.write("  store {s} %v{d}, ptr %t{d}.protocol\n", .{ protocol_type, value.operand, serial });
         try self.write("  %t{d}.protocol.payload = getelementptr i8, ptr %t{d}.protocol, i64 8\n", .{ serial, serial });
         try self.write("  %v{d} = load {s}, ptr %t{d}.protocol.payload\n", .{ value.result, concrete_type, serial });
@@ -2051,7 +2068,7 @@ const FunctionEmitter = struct {
         const type_name = try llvmType(self.allocator, self.program, collection_type);
         const element_name = try llvmType(self.allocator, self.program, collection.element);
         if (collection.length) |length| {
-            try self.write("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
+            try self.writeEntryAlloca("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
             try self.write("  store {s} %v{d}, ptr %t{d}.storage\n", .{ type_name, value.collection, serial });
             try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
         } else {
@@ -2091,7 +2108,7 @@ const FunctionEmitter = struct {
                 if (try self.valueType(reference) != .address) return error.InvalidProgram;
                 break :fixed try std.fmt.allocPrint(self.allocator, "%v{d}", .{reference});
             } else fixed: {
-                try self.write("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
+                try self.writeEntryAlloca("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
                 try self.write("  store {s} %v{d}, ptr %t{d}.storage\n", .{ type_name, value.collection, serial });
                 break :fixed try std.fmt.allocPrint(self.allocator, "%t{d}.storage", .{serial});
             };
@@ -2176,7 +2193,7 @@ const FunctionEmitter = struct {
         const type_name = try llvmType(self.allocator, self.program, collection_type);
         const element_name = try llvmType(self.allocator, self.program, collection.element);
         if (collection.length) |length| {
-            try self.write("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
+            try self.writeEntryAlloca("  %t{d}.storage = alloca {s}\n", .{ serial, type_name });
             try self.write("  store {s} %v{d}, ptr %t{d}.storage\n", .{ type_name, value.collection, serial });
             try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
             try self.emitNormalizedIndex(serial, "index", value.index);
@@ -2280,7 +2297,7 @@ const FunctionEmitter = struct {
                 const pointer = try self.referencePointer(reference);
                 try self.write("  %t{d}.data = getelementptr {s}, ptr {s}, i32 0, i32 0\n", .{ serial, source_name, pointer });
             } else {
-                try self.write("  %t{d}.source = alloca {s}\n", .{ serial, source_name });
+                try self.writeEntryAlloca("  %t{d}.source = alloca {s}\n", .{ serial, source_name });
                 try self.write("  store {s} %v{d}, ptr %t{d}.source\n", .{ source_name, value.collection, serial });
                 try self.write("  %t{d}.data = getelementptr {s}, ptr %t{d}.source, i32 0, i32 0\n", .{ serial, source_name, serial });
             }
@@ -2337,7 +2354,7 @@ const FunctionEmitter = struct {
         const result_name = try llvmType(self.allocator, self.program, result_type);
         const element_name = try llvmType(self.allocator, self.program, source.element);
         if (source.length) |length| {
-            try self.write("  %t{d}.source = alloca {s}\n", .{ serial, source_name });
+            try self.writeEntryAlloca("  %t{d}.source = alloca {s}\n", .{ serial, source_name });
             try self.write("  store {s} %v{d}, ptr %t{d}.source\n", .{ source_name, value.collection, serial });
             try self.write("  %t{d}.data = getelementptr {s}, ptr %t{d}.source, i32 0, i32 0\n", .{ serial, source_name, serial });
             try self.write("  %t{d}.count = add i64 0, {d}\n", .{ serial, length });
@@ -2551,7 +2568,11 @@ const FunctionEmitter = struct {
         if ((value.operator == .equal or value.operator == .not_equal) and
             try self.valueType(value.result) != .bool)
             return error.InvalidProgram;
-        if (left_type.optionalChild() != null) return self.emitOptionalEquality(block_id, value, left_type);
+        if (left_type.optionalChild() != null) {
+            if (self.isOptionalNull(value.left) or self.isOptionalNull(value.right))
+                return self.emitOptionalEquality(block_id, value, left_type);
+            return @import("EnumEquality.zig").emit(self, value, left_type);
+        }
         if (left_type == .str) {
             if (value.operator != .equal and value.operator != .not_equal)
                 return error.UnsupportedInstruction;
@@ -2604,8 +2625,9 @@ const FunctionEmitter = struct {
                     value.right,
                 });
             }
-            if (plainValue(self.program, left_type, 0))
-                return self.emitPlainAggregateEquality(value, left_type);
+            const structure = self.program.structures[structure_index];
+            if (!structure.is_static and !structure.is_protocol)
+                return @import("EnumEquality.zig").emit(self, value, left_type);
         }
         const type_name = try llvmType(self.allocator, self.program, left_type);
         switch (value.operator) {
@@ -3395,6 +3417,10 @@ const FunctionEmitter = struct {
     pub fn write(self: *FunctionEmitter, comptime format: []const u8, arguments: anytype) Allocator.Error!void {
         return appendFmt(self.output, self.allocator, format, arguments);
     }
+
+    pub fn writeEntryAlloca(self: *FunctionEmitter, comptime format: []const u8, arguments: anytype) Allocator.Error!void {
+        return appendFmt(&self.entry_allocas, self.allocator, format, arguments);
+    }
 };
 
 fn emitBoundaryDeclarations(
@@ -3411,9 +3437,11 @@ fn emitBoundaryDeclarations(
         if (!supportsDirectBoundary(function)) return error.UnsupportedType;
         for (boundaries[0..index], direct_sites_by_function[0..index]) |previous, previous_sites| {
             if (previous_sites == 0 or !std.mem.eql(u8, previous.source_name, function.source_name)) continue;
-            if (!std.mem.eql(u8, previous.provider, function.provider) or
-                previous.return_type != function.return_type or
-                !std.mem.eql(Ir.Type, previous.parameters, function.parameters))
+            const same_provider = std.mem.eql(u8, previous.provider, function.provider);
+            const same_signature = previous.return_type == function.return_type and
+                std.mem.eql(Ir.Type, previous.parameters, function.parameters);
+            const typed_objc_dispatch = objcMessageBoundary(previous) and objcMessageBoundary(function);
+            if (!same_provider or (!same_signature and !typed_objc_dispatch))
             {
                 std.debug.print(
                     "silex LLVM evaluation: boundary symbol '{s}' has conflicting providers or signatures\n",
@@ -3435,6 +3463,13 @@ fn emitBoundaryDeclarations(
         emitted = true;
     }
     if (emitted) try output.append(allocator, '\n');
+}
+
+fn objcMessageBoundary(function: Silex.Boundary.Function) bool {
+    return std.mem.eql(u8, function.source_name, "objc_msgSend") and
+        function.parameters.len >= 2 and
+        function.parameters[0] == .address and
+        function.parameters[1] == .address;
 }
 
 fn supportsDirectBoundary(function: Silex.Boundary.Function) bool {
@@ -3815,17 +3850,15 @@ fn emitStringLiterals(
             try appendFmt(output, allocator, "@sx.enum.raw.{d}.{d} = private constant {{ i64, [{d} x i8] }} {{ i64 {d}, [{d} x i8] ", .{
                 enumeration_index,
                 variant_index,
+                value.len + 1,
                 value.len,
-                value.len,
-                value.len,
+                value.len + 1,
             });
-            if (value.len == 0) {
-                try output.appendSlice(allocator, "zeroinitializer");
-            } else {
-                try output.appendSlice(allocator, "c\"");
+            try output.appendSlice(allocator, "c\"");
+            if (value.len != 0) {
                 try appendEscapedBytes(output, allocator, value);
-                try output.append(allocator, '"');
             }
+            try output.appendSlice(allocator, "\\00\"");
             try output.appendSlice(allocator, " }\n");
             emitted = true;
         }
@@ -3838,17 +3871,15 @@ fn emitStringLiterals(
                     function_id,
                     block_id,
                     instruction_index,
+                    value.value.len + 1,
                     value.value.len,
-                    value.value.len,
-                    value.value.len,
+                    value.value.len + 1,
                 });
-                if (value.value.len == 0) {
-                    try output.appendSlice(allocator, "zeroinitializer");
-                } else {
-                    try output.appendSlice(allocator, "c\"");
+                try output.appendSlice(allocator, "c\"");
+                if (value.value.len != 0) {
                     try appendEscapedBytes(output, allocator, value.value);
-                    try output.append(allocator, '"');
                 }
+                try output.appendSlice(allocator, "\\00\"");
                 try output.appendSlice(allocator, " }\n");
                 emitted = true;
             },
@@ -3968,6 +3999,247 @@ test "optional reference projection follows the typed LLVM layout" {
         llvm,
         "%v3 = getelementptr { i1, i64 }, ptr %v2, i32 0, i32 1",
     ) != null);
+}
+
+test "structure equality compares nested class identity and scalar fields" {
+    const node_type = Ir.Type.structure(0);
+    const snapshot_type = Ir.Type.structure(1);
+    const optional_snapshot_type = Ir.Type.optional(snapshot_type);
+    const program: Ir.Program = .{
+        .structures = &.{
+            .{ .name = "Node", .fields = &.{}, .is_class = true },
+            .{
+                .name = "Snapshot",
+                .fields = &.{
+                    .{ .name = "node", .type = node_type, .mutable = false },
+                    .{ .name = "count", .type = .int, .mutable = false },
+                },
+            },
+        },
+        .functions = &.{
+            .{
+                .name = "equal_snapshots",
+                .parameter_types = &.{ snapshot_type, snapshot_type },
+                .return_type = .bool,
+                .value_types = &.{ snapshot_type, snapshot_type, .bool },
+                .blocks = &.{.{
+                    .instructions = &.{.{ .binary = .{
+                        .result = 2,
+                        .operator = .equal,
+                        .left = 0,
+                        .right = 1,
+                    } }},
+                    .terminator = .{ .return_value = 2 },
+                }},
+            },
+            .{
+                .name = "main",
+                .parameter_types = &.{},
+                .return_type = .void,
+                .value_types = &.{},
+                .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+            },
+            .{
+                .name = "equal_optional_snapshots",
+                .parameter_types = &.{ optional_snapshot_type, optional_snapshot_type },
+                .return_type = .bool,
+                .value_types = &.{ optional_snapshot_type, optional_snapshot_type, .bool },
+                .blocks = &.{.{
+                    .instructions = &.{.{ .binary = .{
+                        .result = 2,
+                        .operator = .equal,
+                        .left = 0,
+                        .right = 1,
+                    } }},
+                    .terminator = .{ .return_value = 2 },
+                }},
+            },
+        },
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "icmp eq ptr") != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "icmp eq i64") != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "equal.payload") != null);
+}
+
+test "collection equality follows the native identity and element rules" {
+    const dynamic_type = Ir.Type.structure(0);
+    const view_type = Ir.Type.structure(1);
+    const fixed_type = Ir.Type.structure(2);
+    const program: Ir.Program = .{
+        .structures = &.{
+            .{
+                .name = "Dynamic",
+                .fields = &.{},
+                .collection = .{ .element = .int, .length = null },
+            },
+            .{
+                .name = "View",
+                .fields = &.{},
+                .collection = .{ .element = .int, .length = null, .view = true },
+            },
+            .{
+                .name = "Fixed",
+                .fields = &.{},
+                .collection = .{ .element = .int, .length = 2 },
+            },
+        },
+        .functions = &.{
+            equalityFunction("equal_dynamic", dynamic_type),
+            equalityFunction("equal_view", view_type),
+            equalityFunction("equal_fixed", fixed_type),
+            .{
+                .name = "main",
+                .parameter_types = &.{},
+                .return_type = .void,
+                .value_types = &.{},
+                .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+            },
+        },
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, llvm, "icmp eq ptr"));
+    try std.testing.expect(std.mem.count(u8, llvm, "icmp eq i64") >= 3);
+}
+
+test "temporary aggregate storage is hoisted out of control-flow blocks" {
+    const fixed_type = Ir.Type.structure(0);
+    const program: Ir.Program = .{
+        .structures = &.{.{
+            .name = "Fixed",
+            .fields = &.{},
+            .collection = .{ .element = .int, .length = 2 },
+        }},
+        .functions = &.{
+            .{
+                .name = "load_fixed",
+                .parameter_types = &.{fixed_type},
+                .return_type = .int,
+                .value_types = &.{ fixed_type, .int, .int },
+                .blocks = &.{
+                    .{
+                        .instructions = &.{.{ .constant_int = .{ .result = 1, .bits = 0 } }},
+                        .terminator = .{ .jump = 1 },
+                    },
+                    .{
+                        .instructions = &.{.{ .collection_load = .{
+                            .result = 2,
+                            .collection = 0,
+                            .index = 1,
+                            .checked = false,
+                            .position = .{ .offset = 0, .line = 1, .column = 1 },
+                        } }},
+                        .terminator = .{ .return_value = 2 },
+                    },
+                },
+            },
+            .{
+                .name = "main",
+                .parameter_types = &.{},
+                .return_type = .void,
+                .value_types = &.{},
+                .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
+            },
+        },
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    const entry = std.mem.indexOf(u8, llvm, "b0:\n") orelse return error.TestUnexpectedResult;
+    const storage = std.mem.indexOf(u8, llvm, ".storage = alloca %sx.type.0") orelse
+        return error.TestUnexpectedResult;
+    const second_block = std.mem.indexOfPos(u8, llvm, entry, "b1:\n") orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(entry < storage);
+    try std.testing.expect(storage < second_block);
+}
+
+test "typed Objective-C messages share one external LLVM symbol" {
+    const program: Ir.Program = .{
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{ .address, .address, .address, .address },
+            .blocks = &.{.{
+                .instructions = &.{
+                    .{ .storage_init = .{ .result = 0 } },
+                    .{ .storage_init = .{ .result = 1 } },
+                    .{ .storage_init = .{ .result = 2 } },
+                    .{ .boundary_call = .{ .result = 3, .function = 0, .arguments = &.{ 0, 1 } } },
+                    .{ .boundary_call = .{ .result = null, .function = 1, .arguments = &.{ 0, 1, 2 } } },
+                },
+                .terminator = .return_void,
+            }},
+        }},
+    };
+    const boundaries: []const Silex.Boundary.Function = &.{
+        .{
+            .name = "object_message",
+            .provider = "MacOS.web_kit",
+            .source_name = "objc_msgSend",
+            .parameters = &.{ .address, .address },
+            .return_type = .address,
+        },
+        .{
+            .name = "void_object_message",
+            .provider = "MacOS.web_kit",
+            .source_name = "objc_msgSend",
+            .parameters = &.{ .address, .address, .address },
+            .return_type = .void,
+        },
+    };
+    const llvm = try emitWithBoundaries(std.testing.allocator, program, boundaries);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, llvm, "declare ptr @objc_msgSend"));
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "call ptr @objc_msgSend(ptr %v0, ptr %v1)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "call void @objc_msgSend(ptr %v0, ptr %v1, ptr %v2)") != null);
+}
+
+test "LLVM strings keep an uncounted C terminator" {
+    const program: Ir.Program = .{
+        .functions = &.{.{
+            .name = "main",
+            .parameter_types = &.{},
+            .return_type = .void,
+            .value_types = &.{ .str, .str, .str },
+            .blocks = &.{.{
+                .instructions = &.{
+                    .{ .constant_str = .{ .result = 0, .value = "api" } },
+                    .{ .constant_str = .{ .result = 1, .value = "x" } },
+                    .{ .string_concat = .{ .result = 2, .left = 0, .right = 1 } },
+                },
+                .terminator = .return_void,
+            }},
+        }},
+    };
+    const llvm = try emit(std.testing.allocator, program);
+    defer std.testing.allocator.free(llvm);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        llvm,
+        "private constant { i64, [4 x i8] } { i64 3, [4 x i8] c\"api\\00\" }",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, llvm, "store i8 0, ptr %t0.terminator") != null);
+}
+
+fn equalityFunction(comptime name: []const u8, comptime value_type: Ir.Type) Ir.Function {
+    return .{
+        .name = name,
+        .parameter_types = &.{ value_type, value_type },
+        .return_type = .bool,
+        .value_types = &.{ value_type, value_type, .bool },
+        .blocks = &.{.{
+            .instructions = &.{.{ .binary = .{
+                .result = 2,
+                .operator = .equal,
+                .left = 0,
+                .right = 1,
+            } }},
+            .terminator = .{ .return_value = 2 },
+        }},
+    };
 }
 
 test "capture-free function references use typed indirect calls" {
