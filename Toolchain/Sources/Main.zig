@@ -76,8 +76,8 @@ const usage =
     \\       silex version
     \\       silex lsp
     \\
-    \\Builds and runs Silex programs with LLVM by default on macOS ARM64 and the native backend elsewhere.
-    \\Use --backend native or --backend llvm to select a backend explicitly. The command also validates and publishes
+    \\Builds and runs Silex programs with the native backend by default on every supported host.
+    \\Use --backend llvm to select the qualified LLVM path explicitly. The command also validates and publishes
     \\packages, executes portable IR through the reference interpreter, or serves editor requests.
     \\
 ;

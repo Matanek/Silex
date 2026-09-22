@@ -89,9 +89,9 @@ Silex toolchain, not package dependencies. The user does not need system
 installations of LLVM or Zig.
 
 `run` builds a private executable under `.silex/run/`, executes it with the
-current terminal streams and returns its exit code. LLVM is the default backend
-on macOS ARM64; the direct native backend remains the default on other hosts.
-Select either one explicitly with `--backend llvm` or `--backend native`.
+current terminal streams and returns its exit code. The direct native backend
+is the default on every supported host. Select LLVM explicitly on a qualified
+host with `--backend llvm`; `--backend native` keeps the default choice explicit.
 Debug is the default mode for `run`; pass `--release` to enable optimization
 for the selected backend. Add `--emit-ir` to inspect the portable typed
 IR before backend lowering:

@@ -2,9 +2,9 @@
 
 `silex compile|run|test --backend llvm` is now the integrated candidate path.
 It reuses the compiler's portable IR directly and never calls the Python driver
-described below. LLVM is the default backend on the qualified macOS ARM64 host;
-`silex setup` installs its pinned LLVM 21.1.8 tools. Other hosts retain the
-direct native default until their LLVM path has been executed and qualified.
+described below. LLVM is an explicit backend on the qualified macOS ARM64 host;
+`silex setup` installs its pinned LLVM 21.1.8 tools. The direct native backend
+is the default on every supported host.
 
 The integrated Release path raises LLVM's inlining cost threshold to 2000.
 Checked collection access can make short numerical helpers look expensive before

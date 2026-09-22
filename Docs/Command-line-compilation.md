@@ -43,15 +43,14 @@ is not a compilation backend. `silex compile <source.sx>
 -o|--output <executable>` emits at a caller-selected path without running it.
 
 `silex test <source.sx|directory> [--backend native|llvm]` compiles each test
-entry with the selected backend. On a `macos-arm64` host, the omitted backend is
-`llvm`; it remains `native` on the other distributed hosts until LLVM has been
-executed and qualified there. An explicit selection never falls back to the
-other backend: unsupported targets, missing tools, or unsupported IR fail with
-the selected backend named in the diagnostic.
+entry with the selected backend. An omitted backend selects `native` on every
+supported host. An explicit selection never falls back to the other backend:
+unsupported targets, missing tools, or unsupported IR fail with the selected
+backend named in the diagnostic.
 
-The LLVM backend is currently bounded to a `macos-arm64` host running macOS 14
-or later and requires LLVM 21.1.8. `silex setup` installs the verified toolchain
-under the user toolchain root; the CLI verifies `opt`, `llc`, their LLVM version
+The explicit LLVM backend is currently bounded to a `macos-arm64` host running
+macOS 14 or later and requires LLVM 21.1.8. `silex setup` installs the verified
+toolchain under the user toolchain root; the CLI verifies `opt`, `llc`, their LLVM version
 and reported host CPU before compilation. `SILEX_LLVM_DIR` may override that
 managed installation for compiler development. Building `silex` and using
 `--backend native` do not load or execute LLVM.

@@ -12,9 +12,7 @@ pub const Backend = enum {
     }
 
     pub fn defaultFor(host: ?TargetModule.Target) Backend {
-        if (host) |target| {
-            if (target.eql(.macos_arm64)) return .llvm;
-        }
+        _ = host;
         return .native;
     }
 
@@ -672,8 +670,8 @@ test "run defaults to debug and accepts explicit release and debug" {
     try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--debug", "--release" }), .conflicting_modes, "--release");
 }
 
-test "compile run and test select a backend explicitly and use the qualified host default" {
-    try std.testing.expectEqual(Backend.llvm, Backend.defaultFor(.macos_arm64));
+test "compile run and test default to native on every host and preserve explicit selection" {
+    try std.testing.expectEqual(Backend.native, Backend.defaultFor(.macos_arm64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(.macos_x64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(.linux_x64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(.linux_arm64));
@@ -681,10 +679,13 @@ test "compile run and test select a backend explicitly and use the qualified hos
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(.windows_arm64));
     try std.testing.expectEqual(Backend.native, Backend.defaultFor(null));
     try std.testing.expectEqual(Backend.default(), parseCompile(&.{ "Main.sx", "-o", "App" }).options.backend);
+    try std.testing.expectEqual(Backend.native, parseCompile(&.{ "Main.sx", "--backend", "native", "-o", "App" }).options.backend);
     try std.testing.expectEqual(Backend.llvm, parseCompile(&.{ "--backend", "llvm", "Main.sx", "-o", "App" }).options.backend);
     try std.testing.expectEqual(Backend.default(), parseRun(&.{"Main.sx"}).options.backend);
+    try std.testing.expectEqual(Backend.native, parseRun(&.{ "Main.sx", "--backend", "native" }).options.backend);
     try std.testing.expectEqual(Backend.llvm, parseRun(&.{ "Main.sx", "--backend", "llvm" }).options.backend);
     try std.testing.expectEqual(Backend.default(), parseTest(&.{"Tests"}).options.backend);
+    try std.testing.expectEqual(Backend.native, parseTest(&.{ "Tests", "--backend", "native" }).options.backend);
     try std.testing.expectEqual(Backend.llvm, parseTest(&.{ "--backend", "llvm", "Tests" }).options.backend);
 }
 
