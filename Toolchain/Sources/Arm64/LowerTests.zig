@@ -97,6 +97,62 @@ test "lower trivial aggregate copies without the deep-copy runtime" {
     try std.testing.expect(found_deep);
 }
 
+test "lower marks only statically acyclic class drops to skip cycle tracing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const structures = [_]Ir.Structure{
+        .{
+            .name = "Acyclic",
+            .fields = &.{.{ .name = "value", .type = .int, .mutable = true }},
+            .is_class = true,
+        },
+        .{
+            .name = "Cyclic",
+            .fields = &.{.{ .name = "next", .type = .structure(1), .mutable = true }},
+            .is_class = true,
+        },
+    };
+    const functions = [_]Ir.Function{
+        .{
+            .name = "drop_acyclic",
+            .parameter_types = &.{.structure(0)},
+            .return_type = .void,
+            .value_types = &.{.structure(0)},
+            .blocks = &.{.{
+                .instructions = &.{.{ .class_drop = .{
+                    .operand = 0,
+                    .static_type = 0,
+                    .plans = &.{.{ .structure = 0, .functions = &.{} }},
+                } }},
+                .terminator = .return_void,
+            }},
+        },
+        .{
+            .name = "drop_cyclic",
+            .parameter_types = &.{.structure(1)},
+            .return_type = .void,
+            .value_types = &.{.structure(1)},
+            .blocks = &.{.{
+                .instructions = &.{.{ .class_drop = .{
+                    .operand = 0,
+                    .static_type = 1,
+                    .plans = &.{.{ .structure = 1, .functions = &.{} }},
+                } }},
+                .terminator = .return_void,
+            }},
+        },
+    };
+    const program: Ir.Program = .{ .structures = &structures, .functions = &functions };
+    for ([_]Lower.Mode{ .debug, .release }) |mode| {
+        const lowered = try Lower.lowerWithMode(allocator, program, mode);
+        try std.testing.expect(lowered.functions[0].instructions[0].class_drop.skip_cycle);
+        try std.testing.expect(!lowered.functions[0].instructions[0].class_drop.cycle_prechecked);
+        try std.testing.expect(!lowered.functions[1].instructions[0].class_drop.skip_cycle);
+        try std.testing.expect(lowered.functions[1].instructions[0].class_drop.cycle_prechecked);
+    }
+}
+
 test "bound lowering workers keep small programs direct" {
     try std.testing.expectEqual(@as(u16, 1), Lower.selectedWorkerCount(Lower.parallel_function_threshold - 1, 4));
     try std.testing.expectEqual(@as(u16, 2), Lower.selectedWorkerCount(Lower.parallel_function_threshold, 2));

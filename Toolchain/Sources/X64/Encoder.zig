@@ -1672,7 +1672,7 @@ fn emitClassDrop(
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
     const cycle_claimed = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
-    try emitImmediate(allocator, bytes, .rdi, 0);
+    try emitImmediate(allocator, bytes, .rdi, if (value.cycle_prechecked) 2 else 0);
     try emitLoadStack(allocator, bytes, .rsi, value.operand);
     const model_at = try emitRipAddress(allocator, bytes, .rdx);
     if (value.nullable) {

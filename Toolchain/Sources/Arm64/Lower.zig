@@ -1,6 +1,7 @@
 const std = @import("std");
 const Boundary = @import("../Boundary.zig");
 const Ir = @import("../Ir.zig");
+const CycleAnalysis = @import("../CycleAnalysis.zig");
 const CompilationCache = @import("../CompilationCache.zig");
 const MainBoundary = @import("../MainBoundary.zig");
 const Machine = @import("Machine.zig");
@@ -104,6 +105,8 @@ fn lowerInternal(
     _ = try strings.intern("false");
     _ = try strings.intern("error: ");
     try collectStrings(allocator, program, &strings);
+    const cycle_capabilities = try CycleAnalysis.analyze(allocator, program);
+    defer allocator.free(cycle_capabilities);
 
     const functions = try allocator.alloc(Machine.Function, program.functions.len);
     const pending = try allocator.alloc(bool, program.functions.len);
@@ -124,9 +127,9 @@ fn lowerInternal(
 
     const worker_count = boundedWorkerCount(requested_worker_count, program.functions.len);
     if (worker_count == 1) {
-        try lowerRange(allocator, program, &strings, program.functions, functions, pending, mode, 0, program.functions.len);
+        try lowerRange(allocator, program, cycle_capabilities, &strings, program.functions, functions, pending, mode, 0, program.functions.len);
     } else {
-        try lowerParallel(allocator, program, &strings, program.functions, functions, pending, mode, worker_count);
+        try lowerParallel(allocator, program, cycle_capabilities, &strings, program.functions, functions, pending, mode, worker_count);
     }
 
     if (io) |cache_io| for (program.functions, 0..) |function, index| if (pending[index] and cacheSafe(function)) {
@@ -209,6 +212,7 @@ fn boundedWorkerCount(requested: u16, function_count: usize) u16 {
 fn lowerRange(
     allocator: Allocator,
     program: Ir.Program,
+    cycle_capabilities: []const bool,
     strings: *const StringTable,
     source_functions: []const Ir.Function,
     functions: []Machine.Function,
@@ -219,7 +223,7 @@ fn lowerRange(
 ) Machine.Error!void {
     for (start..end) |index| {
         if (!pending[index]) continue;
-        var value = try lowerFunction(allocator, program, strings, source_functions[index]);
+        var value = try lowerFunction(allocator, program, cycle_capabilities, strings, source_functions[index]);
         if (mode == .release) {
             value = try AggregateResultStores.optimize(allocator, program, source_functions[index], value);
             value = try allocateRegisters(allocator, value);
@@ -231,6 +235,7 @@ fn lowerRange(
 const LowerWorker = struct {
     allocator: Allocator,
     program: Ir.Program,
+    cycle_capabilities: []const bool,
     strings: *const StringTable,
     source_functions: []const Ir.Function,
     functions: []Machine.Function,
@@ -244,6 +249,7 @@ const LowerWorker = struct {
         lowerRange(
             self.allocator,
             self.program,
+            self.cycle_capabilities,
             self.strings,
             self.source_functions,
             self.functions,
@@ -260,6 +266,7 @@ const LowerWorker = struct {
 fn lowerParallel(
     allocator: Allocator,
     program: Ir.Program,
+    cycle_capabilities: []const bool,
     strings: *const StringTable,
     source_functions: []const Ir.Function,
     functions: []Machine.Function,
@@ -273,6 +280,7 @@ fn lowerParallel(
     for (0..count) |index| workers[index] = .{
         .allocator = allocator,
         .program = program,
+        .cycle_capabilities = cycle_capabilities,
         .strings = strings,
         .source_functions = source_functions,
         .functions = functions,
@@ -412,6 +420,7 @@ fn scalarType(type_value: Ir.Type) bool {
 fn lowerFunction(
     allocator: Allocator,
     program: Ir.Program,
+    cycle_capabilities: []const bool,
     strings: *const StringTable,
     function: Ir.Function,
 ) Machine.Error!Machine.Function {
@@ -430,7 +439,7 @@ fn lowerFunction(
     }
     for (function.blocks) |block| {
         for (block.instructions, 0..) |instruction, instruction_index| {
-            try instructions.append(allocator, try lowerInstruction(allocator, program, strings, function, layout, instruction));
+            try instructions.append(allocator, try lowerInstruction(allocator, program, cycle_capabilities, strings, function, layout, instruction));
             try instruction_positions.append(allocator, if (instruction_index < block.instruction_positions.len) block.instruction_positions[instruction_index] else function.source_position);
         }
         try instructions.append(allocator, try lowerTerminator(allocator, program, strings, layout, block.terminator, starts));
@@ -495,6 +504,7 @@ fn lowerSlpGroups(allocator: Allocator, layout: Layout, plan: Slp.Plan) Allocato
 fn lowerInstruction(
     allocator: Allocator,
     program: Ir.Program,
+    cycle_capabilities: []const bool,
     strings: *const StringTable,
     function: Ir.Function,
     layout: Layout,
@@ -581,6 +591,13 @@ fn lowerInstruction(
         } },
         .class_drop => |drop| finalize: {
             const plans = try allocator.alloc(Machine.Instruction.ClassDrop.Plan, drop.plans.len);
+            var may_cycle = false;
+            var all_may_cycle = drop.plans.len != 0;
+            for (drop.plans) |plan| {
+                if (plan.structure >= cycle_capabilities.len) return error.InvalidMachineProgram;
+                may_cycle = may_cycle or cycle_capabilities[plan.structure];
+                all_may_cycle = all_may_cycle and cycle_capabilities[plan.structure];
+            }
             for (drop.plans, 0..) |plan, plan_index| {
                 const functions = try allocator.alloc(usize, plan.functions.len);
                 for (plan.functions, 0..) |finalizer, index| functions[index] = finalizer.function;
@@ -594,7 +611,8 @@ fn lowerInstruction(
                 .operand = layout.values[drop.operand].start + @as(Machine.Slot, if (function.value_types[drop.operand].functionIndex() != null) 2 else 0),
                 .nullable = function.value_types[drop.operand].functionIndex() != null,
                 .ownership = drop.ownership,
-                .skip_cycle = drop.skip_cycle,
+                .skip_cycle = drop.skip_cycle or !may_cycle,
+                .cycle_prechecked = !drop.skip_cycle and all_may_cycle,
                 .static_type = drop.static_type,
                 .plans = plans,
             } };

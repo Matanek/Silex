@@ -33,45 +33,6 @@ pub fn emit(allocator: std.mem.Allocator, output: *std.ArrayList(u8), program: I
     while (cursor < writer.types.items.len) : (cursor += 1) try writer.value(writer.types.items[cursor]);
 }
 
-pub fn mayCycle(allocator: std.mem.Allocator, program: Ir.Program, index: usize) E.Error!bool {
-    // Class identity is the only cyclic storage. Value containers merely carry
-    // edges; their copied elements retain once per owner in portable IR.
-    const visited = try allocator.alloc(bool, program.structures.len);
-    defer allocator.free(visited);
-    @memset(visited, false);
-    return reaches(program, .structure(index), index, true, visited);
-}
-
-fn reaches(program: Ir.Program, value: Ir.Type, target: usize, initial: bool, visited: []bool) bool {
-    if (value.optionalChild()) |child| return reaches(program, child, target, false, visited);
-    if (value.functionIndex() != null) return true;
-    const index = value.structureIndex() orelse return false;
-    if (index >= program.structures.len) return false;
-    if (!initial and index == target) return true;
-    if (visited[index]) return false;
-    visited[index] = true;
-    const structure = program.structures[index];
-    if (structure.is_protocol) return true;
-    if (structure.is_class) {
-        // A field declared as a base class can point to any derived instance,
-        // including the candidate itself or a subtype that adds a back edge.
-        for (program.structures, 0..) |candidate, candidate_index| {
-            if (!candidate.is_class or !@import("ClassDispatch.zig").isAncestor(program, index, candidate_index)) continue;
-            if (!initial and candidate_index == target) return true;
-            for (candidate.fields) |field| if (reaches(program, field.type, target, false, visited)) return true;
-        }
-        return false;
-    }
-    if (structure.collection) |collection| return !collection.view and reaches(program, collection.element, target, false, visited);
-    if (E.enumIndexForStructure(program, index)) |enumeration| {
-        for (program.enums[enumeration].variants) |variant| for (variant.associated_types) |child| {
-            if (reaches(program, child, target, false, visited)) return true;
-        };
-    }
-    for (structure.fields) |field| if (reaches(program, field.type, target, false, visited)) return true;
-    return false;
-}
-
 pub fn containsClass(program: Ir.Program, value: Ir.Type, depth: usize) bool {
     if (depth > program.structures.len + program.enums.len + 8) return false;
     if (value.optionalChild()) |child| return containsClass(program, child, depth + 1);

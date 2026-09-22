@@ -1392,7 +1392,7 @@ fn encodeFunction(
                     try words.append(allocator, load64(.x9, .x10, 3 * Machine.slot_size));
                     cycle_claimed = words.items.len;
                     try words.append(allocator, compareBranchNonZero(.x9));
-                    try words.append(allocator, moveWideZero32(.x0, 0));
+                    try words.append(allocator, moveWideZero32(.x0, if (drop.cycle_prechecked) 2 else 0));
                     try words.append(allocator, loadStack(.x1, drop.operand));
                     const data_at = words.items.len;
                     try appendRelocatableAddress(allocator, words, .x2);

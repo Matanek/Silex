@@ -69,8 +69,10 @@ const AddResult = enum { added, existing, failed };
 
 pub fn main() void {}
 
-/// Operation 0 proves that the candidate belongs to an unreachable
-/// component and claims it as the component's finalization entry point.
+/// Operation 0 proves that the candidate's type may cycle and then proves that
+/// the candidate belongs to an unreachable component. Operation 2 reuses the
+/// compiler's conservative type proof and performs only the reachability
+/// trial. Both claim the candidate as the component's finalization entry point.
 /// Operation 1 releases the temporary tracing context after ordinary generated
 /// finalizers have cascaded through the component.
 export fn silex_cycle(operation: u64, value: u64, model: [*]const u64, type_value: u64) callconv(.c) u64 {
@@ -107,17 +109,18 @@ fn cycle(
     allocate_function: AllocateFunction,
     release_function: ReleaseFunction,
 ) u64 {
-    if (operation != 0) {
+    if (operation == 1) {
         finish(@ptrFromInt(value));
         return 0;
     }
-    return @intFromPtr(prepare(@ptrFromInt(value), model, type_value, allocate_function, release_function) orelse return 0);
+    return @intFromPtr(prepare(@ptrFromInt(value), model, type_value, operation == 2, allocate_function, release_function) orelse return 0);
 }
 
 fn prepare(
     candidate: [*]u64,
     model: [*]const u64,
     type_value: u64,
+    cycle_prechecked: bool,
     allocate_function: AllocateFunction,
     release_function: ReleaseFunction,
 ) ?*Context {
@@ -127,16 +130,18 @@ fn prepare(
     // A retain may race the drop that selected this candidate. Reject it
     // before tracing so pooled objects can safely mutate after retaining a root.
     if (@atomicLoad(u64, candidate_roots, .acquire) != 0) return reject(candidate, null, 4);
-    var probe: Context = undefined;
-    probe.model = model;
-    probe.nodes = undefined;
-    probe.count = 0;
-    probe.capacity = 0;
-    probe.node_byte_count = 0;
-    probe.allocate_function = allocate_function;
-    probe.release_function = release_function;
-    const graph_kind = classGraphKind(&probe, candidate, type_value, 0);
-    if (graph_kind != .class_graph) return reject(candidate, null, if (graph_kind == .none) 4 else 0);
+    if (!cycle_prechecked) {
+        var probe: Context = undefined;
+        probe.model = model;
+        probe.nodes = undefined;
+        probe.count = 0;
+        probe.capacity = 0;
+        probe.node_byte_count = 0;
+        probe.allocate_function = allocate_function;
+        probe.release_function = release_function;
+        const graph_kind = classGraphKind(&probe, candidate, type_value, 0);
+        if (graph_kind != .class_graph) return reject(candidate, null, if (graph_kind == .none) 4 else 0);
+    }
     const context_mapping: [*]u8 = @ptrCast(allocate_function(page_bytes) orelse return reject(candidate, null, 0));
     const context: *Context = @ptrCast(@alignCast(context_mapping));
     const node_mapping: [*]u8 = @ptrCast(allocate_function(page_bytes) orelse {
@@ -349,6 +354,11 @@ fn addNode(context: *Context, address: [*]u64, type_value: u64, incoming: bool) 
             return .existing;
         }
     }
+    // A rooted boundary and everything beyond it are live. Keep it outside
+    // the trial graph, matching the generated-visitor LLVM collector, so a
+    // local drop never walks the application's entire retained scene.
+    const roots: *u64 = @ptrCast(address + 1);
+    if (@atomicLoad(u64, roots, .acquire) != 0) return .existing;
     if (context.marking) return .failed;
     const entry_value = context.entry(type_value);
     const kind: Kind = @enumFromInt(entry_value[0]);
@@ -716,6 +726,41 @@ test "X64 callbacks reject an edge removed during tracing" {
     ));
     try std.testing.expectEqual(@as(u64, 4), candidate[3]);
     try std.testing.expectEqual(@as(u64, 0), detached[3]);
+}
+
+test "a compiler-prechecked class cycle skips only the type proof" {
+    const class_type = structure_base;
+    const optional_class_type = (@as(u64, 1) << optional_depth_shift) | class_type;
+    const structure: u64 = 42;
+    const model = [_]u64{
+        1,
+        @intFromEnum(Kind.class),
+        1,
+        5,
+        0,
+        1,
+        structure,
+        2,
+        1,
+        optional_class_type,
+    };
+    var first = [_]u64{ structure, 0, 1, 0, 1, 0 };
+    var second = [_]u64{ structure, 0, 1, 0, 1, 0 };
+    first[5] = @intFromPtr(&second);
+    second[5] = @intFromPtr(&first);
+
+    const context = silex_cycle_x64(
+        2,
+        @intFromPtr(&first),
+        &model,
+        class_type,
+        testAllocate,
+        testRelease,
+    );
+    try std.testing.expect(context != 0);
+    try std.testing.expectEqual(@as(u64, 1), first[3]);
+    try std.testing.expectEqual(@as(u64, 3), second[3]);
+    _ = silex_cycle_x64(1, context, &model, class_type, testAllocate, testRelease);
 }
 
 test "X64 callbacks cache a negative proof for an externally reached cycle" {

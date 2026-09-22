@@ -1,5 +1,6 @@
 // Experimental backend forked from the audited optimizer emitter; oracle guards stay unchanged.
 const std = @import("std");
+const CycleAnalysis = @import("../../Sources/CycleAnalysis.zig");
 const Silex = @import("root").silex_compiler_api;
 const Coverage = @import("../OptimizerOracle/LlvmCoverage.zig");
 const IrStats = @import("../OptimizerOracle/IrStats.zig");
@@ -1727,7 +1728,7 @@ const FunctionEmitter = struct {
             if (value.ownership == .root) @as(u8, 8) else 16,
         });
         const may_cycle = !value.skip_cycle and for (value.plans) |plan| {
-            if (try @import("CycleTrace.zig").mayCycle(self.allocator, self.program, plan.structure)) break true;
+            if (try CycleAnalysis.mayCycle(self.allocator, self.program, plan.structure)) break true;
         } else false;
         if (may_cycle) {
             try self.write("  br i1 %t{d}.class.finalize, label %class.finalize{d}, label %class.cycle{d}\n", .{ serial, serial, serial });

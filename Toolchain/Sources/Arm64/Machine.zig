@@ -311,6 +311,7 @@ pub const Instruction = union(enum) {
         nullable: bool = false,
         ownership: Ir.Ownership = .root,
         skip_cycle: bool = false,
+        cycle_prechecked: bool = false,
         static_type: usize,
         plans: []const Plan,
 
