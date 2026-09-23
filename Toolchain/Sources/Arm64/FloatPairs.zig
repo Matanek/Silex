@@ -373,6 +373,10 @@ fn allocatePairGraph(
     slot_count: usize,
     regional_colors: bool,
 ) Allocator.Error!void {
+    // No pair can be colored without an interval. In particular, avoid the
+    // instruction-by-slot liveness matrix for functions with no usable pair.
+    if (intervals.len == 0) return;
+
     const components = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(components);
     for (components, 0..) |*component, slot| component.* = @intCast(slot);
@@ -410,6 +414,9 @@ fn allocatePairGraph(
         while (reverse != 0) {
             reverse -= 1;
             for (0..slot_count) |slot| {
+                // Only paired slots can contribute to a pair component or its
+                // call-preservation decision. Other lanes stay false in live.
+                if (partners[slot] == null) continue;
                 const out = successorLive(instructions, live, slot_count, reverse, slot);
                 const value = instructionUses(instructions[reverse], slot) or
                     (out and !instructionDefines(instructions[reverse], slot));
@@ -440,6 +447,15 @@ fn allocatePairGraph(
         }
     }
 
+    // Conflict queries revisit each instruction for every candidate color.
+    // Gather component activity once instead of rescanning every slot inside
+    // each query.
+    const component_live = try allocator.alloc(bool, instructions.len * slot_count);
+    defer allocator.free(component_live);
+    const component_defined = try allocator.alloc(bool, instructions.len * slot_count);
+    defer allocator.free(component_defined);
+    gatherPairComponentActivity(components, partners, instructions, live, component_live, component_defined);
+
     const component_colors = try allocator.alloc(?u5, slot_count);
     defer allocator.free(component_colors);
     @memset(component_colors, null);
@@ -451,10 +467,8 @@ fn allocatePairGraph(
                 interval.slot,
                 register,
                 component_colors,
-                components,
-                partners,
-                live,
-                instructions,
+                component_live,
+                component_defined,
                 slot_count,
             )) continue;
             component_colors[interval.slot] = register;
@@ -464,53 +478,57 @@ fn allocatePairGraph(
     for (intervals) |interval| leaders[interval.slot] = component_colors[findPairComponent(components, interval.slot)];
 }
 
+fn gatherPairComponentActivity(
+    components: []const Machine.Slot,
+    partners: []const ?Machine.Slot,
+    instructions: []const Machine.Instruction,
+    live: []const bool,
+    component_live: []bool,
+    component_defined: []bool,
+) void {
+    const slot_count = partners.len;
+    @memset(component_live, false);
+    @memset(component_defined, false);
+    for (instructions, 0..) |instruction, index| {
+        for (partners, 0..) |maybe_partner, slot| {
+            const partner = maybe_partner orelse continue;
+            const at = index * slot_count + slot;
+            const is_live = live[at];
+            const is_defined = instructionDefines(instruction, slot);
+            if (!is_live and !is_defined) continue;
+            const first = index * slot_count + findPairComponent(components, @intCast(slot));
+            const second = index * slot_count + findPairComponent(components, partner);
+            if (is_live) {
+                component_live[first] = true;
+                component_live[second] = true;
+            }
+            if (is_defined) {
+                component_defined[first] = true;
+                component_defined[second] = true;
+            }
+        }
+    }
+}
+
 fn pairComponentColorConflicts(
     component: Machine.Slot,
     register: u5,
     colors: []const ?u5,
-    components: []const Machine.Slot,
-    partners: []const ?Machine.Slot,
-    live: []const bool,
-    instructions: []const Machine.Instruction,
+    component_live: []const bool,
+    component_defined: []const bool,
     slot_count: usize,
 ) bool {
     for (colors, 0..) |color, other| {
         if (color == null or color.? != register or other == component) continue;
-        for (instructions, 0..) |instruction, index| {
-            const left_live = pairComponentLiveAt(components, partners, live, slot_count, component, index);
-            const right_live = pairComponentLiveAt(components, partners, live, slot_count, @intCast(other), index);
+        for (0..component_live.len / slot_count) |index| {
+            const left = index * slot_count + component;
+            const right = index * slot_count + other;
+            const left_live = component_live[left];
+            const right_live = component_live[right];
             if (left_live and right_live) return true;
-            if (pairComponentDefinedBy(components, partners, component, instruction) and right_live) return true;
-            if (pairComponentDefinedBy(components, partners, @intCast(other), instruction) and left_live) return true;
+            if (component_defined[left] and right_live) return true;
+            if (component_defined[right] and left_live) return true;
         }
-    }
-    return false;
-}
-
-fn pairComponentLiveAt(
-    components: []const Machine.Slot,
-    partners: []const ?Machine.Slot,
-    live: []const bool,
-    slot_count: usize,
-    component: Machine.Slot,
-    instruction: usize,
-) bool {
-    for (0..slot_count) |slot| {
-        if (!slotBelongsToPairComponent(components, partners, @intCast(slot), component)) continue;
-        if (live[instruction * slot_count + slot]) return true;
-    }
-    return false;
-}
-
-fn pairComponentDefinedBy(
-    components: []const Machine.Slot,
-    partners: []const ?Machine.Slot,
-    component: Machine.Slot,
-    instruction: Machine.Instruction,
-) bool {
-    for (components, 0..) |_, slot| {
-        if (slotBelongsToPairComponent(components, partners, @intCast(slot), component) and
-            instructionDefines(instruction, slot)) return true;
     }
     return false;
 }
@@ -524,6 +542,41 @@ fn slotBelongsToPairComponent(
     if (findPairComponent(components, slot) == component) return true;
     const partner = partners[slot] orelse return false;
     return findPairComponent(components, partner) == component;
+}
+
+test "cached pair-component activity matches slot scans across transferred pairs" {
+    const partners = [_]?Machine.Slot{ 1, 0, 3, 2, null, 5 };
+    const instructions = [_]Machine.Instruction{
+        .{ .copy = .{ .result = 2, .operand = 0 } },
+        .{ .copy = .{ .result = 3, .operand = 1 } },
+        .{ .constant_float32 = .{ .result = 4, .bits = 0 } },
+    };
+    var components = [_]Machine.Slot{ 0, 1, 2, 3, 4, 5 };
+    buildPairComponents(&components, &partners, &instructions);
+    try std.testing.expectEqual(@as(Machine.Slot, 0), findPairComponent(&components, 2));
+    try std.testing.expectEqual(@as(Machine.Slot, 1), findPairComponent(&components, 3));
+
+    var live = [_]bool{false} ** (instructions.len * partners.len);
+    live[0 * partners.len + 0] = true;
+    live[1 * partners.len + 3] = true;
+    live[2 * partners.len + 4] = true;
+    var component_live = [_]bool{false} ** live.len;
+    var component_defined = [_]bool{false} ** live.len;
+    gatherPairComponentActivity(&components, &partners, &instructions, &live, &component_live, &component_defined);
+
+    for (instructions, 0..) |instruction, index| {
+        for ([_]Machine.Slot{ 0, 1 }) |component| {
+            var expected_live = false;
+            var expected_defined = false;
+            for (partners, 0..) |_, slot| {
+                if (!slotBelongsToPairComponent(&components, &partners, @intCast(slot), component)) continue;
+                expected_live = expected_live or live[index * partners.len + slot];
+                expected_defined = expected_defined or instructionDefines(instruction, slot);
+            }
+            try std.testing.expectEqual(expected_live, component_live[index * partners.len + component]);
+            try std.testing.expectEqual(expected_defined, component_defined[index * partners.len + component]);
+        }
+    }
 }
 
 fn buildPairComponents(
