@@ -287,3 +287,22 @@ test "the live coverage contract cannot change alongside compiler implementation
         "Toolchain/Benchmarks/Optimizer/Assurance.json",
     }));
 }
+
+test "LLVM evaluation tools select the complete optimizer evidence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const manifest = try load(arena.allocator(), std.testing.io, "Benchmarks/Optimizer");
+    try audit(manifest);
+    const selection = try plan(arena.allocator(), manifest, &.{
+        "Toolchain/Tools/LlvmEvaluation/Emitter.zig",
+    });
+
+    var selected_rule = false;
+    for (manifest.rules, selection.rules) |rule, enabled| {
+        if (enabled and std.mem.eql(u8, rule.id, "optimizer-oracle-and-corpus")) {
+            selected_rule = true;
+        }
+    }
+    try std.testing.expect(selected_rule);
+    for (selection.checks) |enabled| try std.testing.expect(enabled);
+}

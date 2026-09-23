@@ -1666,6 +1666,7 @@ fn isHelp(argument: []const u8) bool {
 }
 
 test {
+    _ = Admission;
     _ = CoverageAudit;
     _ = Advisor;
     _ = Benchmark;
