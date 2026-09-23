@@ -138,9 +138,22 @@ pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.
 }
 
 fn plainStructure(program: Ir.Program, index: usize) bool {
+    return plainStructureDepth(program, index, program.structures.len);
+}
+
+fn plainStructureDepth(program: Ir.Program, index: usize, remaining: usize) bool {
+    if (remaining == 0 or index >= program.structures.len) return false;
+    for (program.enums) |enumeration| if (enumeration.type_index == index) return false;
     const structure = program.structures[index];
     if (structure.is_class or structure.is_static or structure.is_protocol or structure.collection != null) return false;
-    for (structure.fields) |field| if (!field.type.isNumeric() and field.type != .bool) return false;
+    // A nested value has no ownership effects when all its leaves are plain.
+    // Project the complete child at the original snapshot, never at its use:
+    // an intervening alias write must not change the saved child value.
+    for (structure.fields) |field| {
+        if (field.type.isNumeric() or field.type == .bool) continue;
+        const child = field.type.structureIndex() orelse return false;
+        if (!plainStructureDepth(program, child, remaining - 1)) return false;
+    }
     return true;
 }
 
@@ -148,4 +161,33 @@ fn newValue(allocator: std.mem.Allocator, types: *std.ArrayList(Ir.Type), value_
     const result = types.items.len;
     try types.append(allocator, value_type);
     return result;
+}
+
+test "nested snapshot eligibility excludes resources references enums and cycles" {
+    const child_field = [_]Ir.StructureField{.{ .name = "child", .type = Ir.Type.structure(1), .mutable = true }};
+    const scalar_field = [_]Ir.StructureField{.{ .name = "x", .type = .float32, .mutable = true }};
+    var structures = [_]Ir.Structure{
+        .{ .name = "Parent", .fields = &child_field },
+        .{ .name = "Child", .fields = &scalar_field },
+    };
+    var program = Ir.Program{ .structures = &structures, .functions = &.{} };
+    try std.testing.expect(plainStructure(program, 0));
+    structures[1].is_class = true;
+    try std.testing.expect(!plainStructure(program, 0));
+    structures[1].is_class = false;
+    structures[1].collection = .{ .element = .int, .length = null };
+    try std.testing.expect(!plainStructure(program, 0));
+    structures[1].collection.?.view = true;
+    try std.testing.expect(!plainStructure(program, 0));
+    structures[1].collection = null;
+    structures[1].fields = &.{.{ .name = "resource", .type = .str, .mutable = true }};
+    try std.testing.expect(!plainStructure(program, 0));
+    structures[1].fields = &.{.{ .name = "reference", .type = .address, .mutable = true }};
+    try std.testing.expect(!plainStructure(program, 0));
+    structures[1].fields = &scalar_field;
+    program.enums = &.{.{ .name = "Choice", .type_index = 1, .variants = &.{} }};
+    try std.testing.expect(!plainStructure(program, 0));
+    program.enums = &.{};
+    structures[1].fields = &child_field;
+    try std.testing.expect(!plainStructure(program, 0));
 }

@@ -276,8 +276,10 @@ resource-bearing locals retain aggregate storage. Explicit deep copies of
 numeric and boolean scalars become ordinary aliases because these values have
 no identity or owned storage.
 Non-escaping reference and view snapshots can also become scalar reads,
-including explicit copies of these plain values. Each needed field is read
-at the original snapshot, before any later aliasing write or branch. Checked
+including explicit copies of recursively plain numeric/boolean structures.
+Each needed field, including a complete nested child value, is read at the
+original snapshot, before any later aliasing write or branch. Classes, enums,
+references and owned resources remain outside this projection rule. Checked
 view indices retain their diagnostics; an unused snapshot is kept when its
 read could fail. Floating-point fields are copied without arithmetic, so
 signed zeros and NaN payloads are unchanged. Large scalar projections also

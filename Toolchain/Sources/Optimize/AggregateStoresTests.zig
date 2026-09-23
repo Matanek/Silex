@@ -177,6 +177,40 @@ test "narrow aggregate reads capture scalars before alias writes and branches" {
     try std.testing.expect(found);
 }
 
+test "narrow nested aggregate reads capture children before alias writes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(@embedFile("../../Benchmarks/Optimizer/Regressions/NestedAggregateReads.sx"));
+    const optimized = try Release.optimizeWithOptions(allocator, compilation.ir, .{ .verify_each_pass = true });
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(@as(u8, 0), reference.exit_code);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+    try std.testing.expectEqualStrings(reference.stderr, result.stderr);
+    var found: usize = 0;
+    for (optimized.functions) |function| {
+        if (!std.mem.eql(u8, function.name, "project") and !std.mem.eql(u8, function.name, "project_view")) continue;
+        found += 1;
+        var reads: usize = 0;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .collection_load => return error.TestUnexpectedResult,
+            .reference_load => |load| {
+                if (function.value_types[load.result].structureIndex()) |index| {
+                    // A child snapshot is allowed; copying the complete contact is not.
+                    try std.testing.expect(!std.mem.eql(u8, optimized.structures[index].name, "Contact"));
+                }
+                reads += 1;
+            },
+            else => {},
+        };
+        try std.testing.expect(reads != 0);
+    }
+    try std.testing.expectEqual(@as(usize, 2), found);
+}
+
 test "narrow aggregate reads retain bounds failures" {
     for ([_][]const u8{ "-2", "1" }) |index| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

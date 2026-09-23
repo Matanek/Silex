@@ -118,6 +118,7 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{ .name = "Regressions/NestedAggregateReads.sx", .concern = "nested plain reference and checked-view projections preserve snapshot timing across alias writes, branches, negative indices and escaping child values" },
     .{ .name = "Regressions/ScalarClassLeaves.sx", .concern = "scalar class state and mutator leaves preserve shared identity, reassignment barriers, signed updates, NaN, signed zero, boolean fields, and resource replacement barriers" },
     .{ .name = "Regressions/IntegerMemoryRegions.sx", .concern = "integer loop regions and direct signed/unsigned operands preserve aliases, narrow normalization, cold exits and empty iterations" },
     .{ .name = "Regressions/BranchComparisons.sx", .concern = "single-use and shared comparisons preserve signed and unsigned widths, unordered floats, infinities and signed zero" },
