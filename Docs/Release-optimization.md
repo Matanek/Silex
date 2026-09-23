@@ -500,10 +500,12 @@ while values consumed or produced by the memory instructions remain scalar
 or stack-resident. Packing a scalar into a SIMD lane captures it at its
 original use, before another scalar can reuse its register.
 
-Release may also color a long scalar floating-point region inside a function
-that contains unsupported machine operations. This regional path is limited to
-functions that load a wide homogeneous aggregate and contain at least 32
-contiguous floating-point operations, so its setup is amortized. Every
+ARM64 Release may also color a long scalar floating-point region inside a
+function that contains unsupported machine operations. A region must contain
+at least 32 floating-point arithmetic or conversion operations between
+unsupported instructions, so its setup is amortized. Admission depends on the
+calculation, not the presence of a wide aggregate load: scalar class or view
+reads can feed the same region. Every
 unsupported instruction is a hard barrier: its complete uses and definitions,
 and every interval live across it, remain stack-resident. Mixed aggregate
 loads and aggregate calls inside loops retain the whole-function spill path.
@@ -515,7 +517,11 @@ of the repeated region. Unsupported emitters pin their inputs, outputs and
 values live on their actual CFG paths; numeric interval overlap alone does
 not pin values confined to another path. Values live across the effect retain
 their deterministic stack homes, and addressed spans remain pinned.
-The regional path does not use paired SIMD residences or memory scheduling.
+Regional scalar and paired SIMD allocation share these forced stack homes;
+memory scheduling still requires independently proven instruction windows.
+Scalar conflict queries skip instruction points where both values are dead
+before inspecting sharing rules: every interference case requires at least
+one live value. This avoids redundant work without changing register choices.
 Every eligible function rejects a pair when delaying its first calculation
 would cross a scalar use of that result, including pure aggregate constructors.
 Aggregate returns copy resident lanes into the

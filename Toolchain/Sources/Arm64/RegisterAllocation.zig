@@ -14,6 +14,7 @@ const spanContains = ResidenceLiveness.spanContains;
 test {
     _ = @import("MemoryResidence.zig");
     _ = @import("LoopExitResidenceTests.zig");
+    _ = @import("ScalarRegionTests.zig");
 }
 
 const Allocator = std.mem.Allocator;
@@ -784,6 +785,9 @@ fn colorConflicts(
         if (residence == null or residence.? != register or other == slot) continue;
         if (alias_roots[slot] == alias_roots[other]) continue;
         for (0..live.len / slot_count) |instruction| {
+            // Every interference case below needs at least one live input.
+            // Skip dead instruction points before inspecting their emitters.
+            if (!live[instruction * slot_count + slot] and !live[instruction * slot_count + other]) continue;
             if (instructionCanShareResidence(
                 instructions,
                 live,
@@ -893,6 +897,7 @@ fn componentsInterfere(
         for (roots, 0..) |other_root, right| {
             if (other_root != right_root) continue;
             for (instructions, 0..) |_, instruction| {
+                if (!live[instruction * slot_count + left] and !live[instruction * slot_count + right]) continue;
                 if (instructionCanShareResidence(instructions, live, slot_count, instruction, left, right)) continue;
                 if (live[instruction * slot_count + left] and live[instruction * slot_count + right]) return true;
                 if (instructionDefines(instructions[instruction], left) and live[instruction * slot_count + right]) return true;
@@ -1192,11 +1197,10 @@ fn isFullyResidenceCompatible(function: Machine.Function, externals: []const Mac
 fn hasProfitableScalarRegion(allocator: Allocator, instructions: []const Machine.Instruction, externals: []const Machine.ExternalFunction) Allocator.Error!bool {
     if (try hasProfitableLoopRegion(allocator, instructions, externals)) return true;
 
-    const has_wide_float_candidate = for (instructions) |instruction| {
-        if (instruction == .collection_load and instruction.collection_load.result.width >= 16) break true;
-    } else false;
-    if (!has_wide_float_candidate) return false;
-
+    // Amortize regional coloring by arithmetic work, not the shape of its
+    // inputs. Scalar class/view reads may feed the same long calculation as
+    // a wide aggregate. Unsupported emitters still reset this count and pin
+    // every crossing value through CFG liveness below.
     var arithmetic: usize = 0;
     for (instructions) |instruction| {
         if (!isResidenceCompatibleInstruction(instruction, externals)) {

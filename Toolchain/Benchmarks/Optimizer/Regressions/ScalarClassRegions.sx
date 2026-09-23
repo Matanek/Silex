@@ -1,0 +1,33 @@
+class State { var value:float64 }
+
+// A straight-line region fed by a scalar class read, not a wide aggregate.
+// Each addition retains its own floating-point rounding point.
+func advance(state:&State, alias:&State, increment:float64, change:bool) float64 {
+    var value = copy state.value
+    value += increment; value += increment; value += increment; value += increment
+    value += increment; value += increment; value += increment; value += increment
+    value += increment; value += increment; value += increment; value += increment
+    value += increment; value += increment; value += increment; value += increment
+    value += increment; value += increment; value += increment; value += increment
+    value += increment; value += increment; value += increment; value += increment
+    value += increment; value += increment; value += increment; value += increment
+    value += increment; value += increment; value += increment; value += increment
+    if change { alias.value = -7.0 }
+    return value + state.value
+}
+
+func main() {
+    var state = State(value:2.0)
+    var other = State(value:3.0)
+    assert(advance(state, other, 0.25, false) == 12.0)
+    assert(advance(state, other, 0.25, true) == 12.0)
+    assert(other.value == -7.0 && state.value == 2.0)
+    assert(advance(state, state, 0.25, true) == 3.0)
+    assert(state.value == -7.0)
+    state.value = -0.0
+    let zero = advance(state, other, -0.0, false)
+    assert(1.0 / zero < 0.0)
+    let nan = advance(state, other, 0.0 / 0.0, false)
+    assert(nan != nan)
+    print("scalar class regions preserve barriers and floating values")
+}
