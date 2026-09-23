@@ -1,0 +1,63 @@
+// Reduced from physics bounds: a packed pair feeds two scalar arguments of
+// a nontrivial aggregate constructor after a control-flow join.
+struct Point {
+    var x:float
+    var y:float
+    init(x:float, y:float) { self.x = x; self.y = y }
+    func subtract(other:Point) Point {
+        return Point(self.x - other.x, self.y - other.y)
+    }
+    func multiply(value:float) Point {
+        return Point(self.x * value, self.y * value)
+    }
+}
+
+struct Metrics {
+    let kind:int
+    let half_width:float
+    let half_height:float
+    let radius:float
+    let sweep:float
+    let inertia:float
+    let lower:Point
+    let upper:Point
+    init(kind:int, half_width:float, half_height:float, radius:float,
+         sweep:float, inertia:float, lower:Point, upper:Point) {
+        self.kind = kind
+        self.half_width = half_width
+        self.half_height = half_height
+        self.radius = radius
+        self.sweep = sweep
+        self.inertia = inertia
+        self.lower = lower
+        self.upper = upper
+    }
+}
+
+func bounds(lower:Point, upper:Point, sweep:float, inertia:float) Metrics {
+    let half = upper.subtract(lower).multiply(0.5)
+    var factor = inertia
+    if factor == 0.0 && sweep > 0.0 { factor = 2.0 / (sweep * sweep) }
+    return Metrics(0, half.x, half.y, 0.0, sweep * sweep, factor, lower, upper)
+}
+
+func exercise() {
+    let factors:float[] = [0.0, 1.0]
+    let points:Point[] = [Point(-2.0, -3.0), Point(2.0, 3.0)]
+    for inertia in factors {
+        let value = bounds(points[0], points[1], 2.0, inertia)
+        assert(value.half_width == 2.0)
+        assert(value.half_height == 3.0)
+        assert(value.lower.x == -2.0 && value.upper.y == 3.0)
+        assert(value.sweep == 4.0)
+        if inertia == 0.0 { assert(value.inertia == 0.5) }
+        else { assert(value.inertia == 1.0) }
+    }
+}
+
+test "packed float leaves cross scalar call arguments" { exercise() }
+
+func main() {
+    exercise()
+    print("packed scalar call arguments preserved")
+}

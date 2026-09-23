@@ -2663,7 +2663,9 @@ fn emitCallArguments(
                 if (argument.width == 0) {
                     try words.append(allocator, moveWideZero64(outgoing, 0, 0));
                 } else try emitStackAddress(allocator, words, outgoing, argument.start);
-            } else if (use_residences and floatResidence(function, argument.start) != null) {
+            } else if (use_residences and (floatResidence(function, argument.start) != null or
+                floatLaneResidence(function, argument.start) != null))
+            {
                 try loadFloatValue(allocator, words, function, .x9, argument.start, true);
                 try words.append(allocator, moveFloatToGeneral(outgoing, .x9, true));
             } else if (use_residences) {
@@ -2680,7 +2682,9 @@ fn emitCallArguments(
             if (argument.width == 0) {
                 try words.append(allocator, moveWideZero64(outgoing, 0, 0));
             } else try emitStackAddress(allocator, words, outgoing, argument.start);
-        } else if (use_residences and floatResidence(function, argument.start) != null) {
+        } else if (use_residences and (floatResidence(function, argument.start) != null or
+            floatLaneResidence(function, argument.start) != null))
+        {
             try loadFloatValue(allocator, words, function, .x9, argument.start, true);
             try words.append(allocator, moveFloatToGeneral(outgoing, .x9, true));
         } else if (use_residences) {

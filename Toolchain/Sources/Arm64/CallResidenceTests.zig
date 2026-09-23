@@ -291,6 +291,82 @@ test "direct aggregate calls materialize SIMD argument and result homes" {
     }
 }
 
+test "scalar call arguments extract both packed float lanes without integer aliases" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    // Exercise ordinary register arguments, flattened aggregate arguments,
+    // and the same two scalar leaves beyond the register-argument boundary.
+    for (0..3) |mode| {
+        const first = Machine.Span{ .start = 3, .width = 1 };
+        const second = Machine.Span{ .start = 4, .width = 1 };
+        const extra = Machine.Span{ .start = 2, .width = 1 };
+        const pair = Machine.Span{ .start = 5, .width = 2, .aggregate = true };
+        const arguments: []const Machine.Span = switch (mode) {
+            0 => &.{ first, second },
+            1 => &.{ pair, first, second },
+            else => &.{ extra, extra, extra, extra, extra, extra, extra, extra, first, second },
+        };
+        var caller: Machine.Function = .{
+            .name = "packed_scalar_arguments",
+            .parameter_count = 3,
+            .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, extra },
+            .return_type = .float32,
+            .return_width = 1,
+            .slot_count = 8,
+            .frame_size = try Machine.frameSize(8),
+            .float_lane_groups = &.{.{ .slots = .{ 3, 4, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = false }},
+            .instructions = &.{
+                .{ .binary = .{ .result = 3, .operator = .multiply, .left = 0, .right = 2, .type = .float32 } },
+                .{ .binary = .{ .result = 4, .operator = .multiply, .left = 1, .right = 2, .type = .float32 } },
+                .{ .aggregate_init = .{ .result = pair, .fields = &.{ extra, extra } } },
+                .{ .call = .{ .function = 1, .arguments = arguments, .result = .{ .start = 7, .width = 1 } } },
+                .{ .return_value = .{ .start = 7, .width = 1 } },
+            },
+        };
+        const allocation = try RegisterAllocation.allocate(allocator, caller);
+        caller.register_slots = allocation.residences;
+        caller.float_register_slots = allocation.float_residences;
+        caller.float_lane_slots = allocation.float_lane_residences;
+        caller.frame_size = allocation.frame_size;
+        for (3..5) |slot| {
+            try std.testing.expect(caller.float_lane_slots[slot] != null);
+            try std.testing.expectEqual(@as(?u5, null), caller.register_slots[slot]);
+            try std.testing.expectEqual(@as(?u5, null), caller.float_register_slots[slot]);
+        }
+        const parameters: []const Machine.Span = switch (mode) {
+            0 => &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+            1 => &.{ .{ .start = 0, .width = 2, .aggregate = true }, .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 } },
+            else => &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 }, .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 }, .{ .start = 4, .width = 1 }, .{ .start = 5, .width = 1 }, .{ .start = 6, .width = 1 }, .{ .start = 7, .width = 1 }, .{ .start = 8, .width = 1 }, .{ .start = 9, .width = 1 } },
+        };
+        const left: Machine.Slot = switch (mode) {
+            0 => 0,
+            1 => 2,
+            else => 8,
+        };
+        const callee: Machine.Function = .{
+            .name = "subtract_scalar_arguments",
+            .parameter_count = @intCast(parameters.len),
+            .parameters = parameters,
+            .return_type = .float32,
+            .return_width = 1,
+            .slot_count = 11,
+            .frame_size = try Machine.frameSize(11),
+            .instructions = &.{
+                .{ .binary = .{ .result = 10, .operator = .subtract, .left = left, .right = left + 1, .type = .float32 } },
+                .{ .return_value = .{ .start = 10, .width = 1 } },
+            },
+        };
+        if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
+            const result = try Runner.invoke(allocator, .{ .functions = &.{ caller, callee } }, 0, &.{
+                @as(u32, @bitCast(@as(f32, 4))), @as(u32, @bitCast(@as(f32, 6))), @as(u32, @bitCast(@as(f32, 0.5))),
+            });
+            try std.testing.expectEqual(Machine.Status.success, result.status);
+            try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -1))), @as(u32, @truncate(@as(u64, @bitCast(result.value)))));
+        }
+    }
+}
+
 test "SIMD-only callees preserve the complete low 64 bits of saved FP registers" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

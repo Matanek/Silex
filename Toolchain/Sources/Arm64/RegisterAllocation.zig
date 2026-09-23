@@ -312,14 +312,16 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     var float_intervals: std.ArrayList(Interval) = .empty;
     defer float_intervals.deinit(allocator);
     for (first, 0..) |start, slot| {
-        if (start == std.math.maxInt(usize) or forced[slot]) continue;
+        // A packed leaf already has its sole residence. Giving it a GPR
+        // alias leaves that register undefined when SIMD writes the value.
+        if (start == std.math.maxInt(usize) or forced[slot] or float_lane_residences[slot] != null) continue;
         const interval: Interval = .{
             .slot = @intCast(slot),
             .first = start,
             .last = last[slot],
             .weight = weights[slot],
         };
-        if (float_slots[slot] and float_lane_residences[slot] == null) {
+        if (float_slots[slot]) {
             try float_intervals.append(allocator, interval);
         } else try integer_intervals.append(allocator, interval);
     }
