@@ -30,7 +30,7 @@ pub fn optimizeWithExternals(allocator: std.mem.Allocator, function: Machine.Fun
     var pairs: std.ArrayList(Pair) = .empty;
     defer pairs.deinit(allocator);
     for (function.float_lane_groups) |group| {
-        if (group.recurrence or group.priority == 0) continue;
+        if (group.priority == 0) continue;
         var lane: usize = 0;
         while (lane + 1 < group.width) : (lane += 2) {
             const first = group.slots[lane];
@@ -156,6 +156,21 @@ fn placePair(
     }
     const leader = resultSpan(instructions[first]);
     for (0..leader.width) |leaf| if (needed[@as(usize, leader.start) + leaf]) return;
+    // A moved operand must still read the same definition. This matters for
+    // loop locals: scheduling an independent Y update ahead of an X update is
+    // safe only when no intervening instruction redefines its Y inputs.
+    const moved_operands = try allocator.alloc(bool, definitions.len);
+    defer allocator.free(moved_operands);
+    for (first + 1..second) |at| {
+        if (!moved[at - first]) continue;
+        @memset(moved_operands, false);
+        markOperands(instructions[at], moved_operands);
+        for (first..at) |before| {
+            if (before != first and moved[before - first]) continue;
+            const earlier = resultSpan(instructions[before]);
+            for (0..earlier.width) |leaf| if (moved_operands[@as(usize, earlier.start) + leaf]) return;
+        }
+    }
     var order: std.ArrayList(usize) = .empty;
     defer order.deinit(allocator);
     for (first + 1..second) |at| if (moved[at - first]) try order.append(allocator, at);
@@ -308,7 +323,7 @@ test "arithmetic schedule moves nontrapping float division dependencies" {
     try std.testing.expectEqual(Machine.BinaryOperator.divide, scheduled.instructions[3].binary.operator);
 }
 
-test "memory arithmetic schedule uses proven external metadata without moving calls" {
+test "memory arithmetic schedule proves local windows without moving external calls" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -322,12 +337,14 @@ test "memory arithmetic schedule uses proven external metadata without moving ca
     var function = fixture(&instructions);
     function.slot_count = 12;
     const unproven = try optimize(allocator, function);
-    try std.testing.expectEqualDeep(instructions[0..], unproven.instructions);
+    try std.testing.expectEqual(@as(Machine.Slot, 7), unproven.instructions[1].copy.result);
+    try std.testing.expectEqualDeep(instructions[9], unproven.instructions[9]);
     const scheduled = try optimizeWithExternals(allocator, function, &externals);
+    try std.testing.expectEqualDeep(unproven.instructions, scheduled.instructions);
     try std.testing.expectEqual(@as(Machine.Slot, 5), scheduled.instructions[2].binary.result);
     try std.testing.expectEqual(@as(Machine.Slot, 8), scheduled.instructions[3].binary.result);
     try std.testing.expectEqualDeep(instructions[9], scheduled.instructions[9]);
     instructions[2] = instructions[9];
-    const blocked = try optimizeWithExternals(allocator, function, &externals);
+    const blocked = try optimizeWithExternals(allocator, fixture(&instructions), &externals);
     try std.testing.expectEqualDeep(instructions[0..], blocked.instructions);
 }

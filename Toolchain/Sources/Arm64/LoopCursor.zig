@@ -1,10 +1,12 @@
 const std = @import("std");
 const Machine = @import("Machine.zig");
+const ResidenceLiveness = @import("ResidenceLiveness.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Cursor = struct {
     entry_jump: usize,
     load_index: usize,
+    backedge: usize,
     collection: Machine.Span,
     initial_index: Machine.Slot,
     register: u5,
@@ -62,7 +64,6 @@ const Induction = struct {
 /// live in a private volatile register. The cursor advances at the load, so
 /// every path that reaches the loop backedge observes exactly one increment.
 pub fn find(allocator: Allocator, function: Machine.Function) Allocator.Error!?Cursor {
-    if (!cursorCompatibleFunction(function)) return null;
     var result: ?Cursor = null;
     for (function.instructions, 0..) |instruction, load_index| {
         const load = switch (instruction) {
@@ -340,13 +341,22 @@ fn recognize(
             else => continue,
         };
         if (target > load_index) continue;
-        if (backedge != null) return null;
-        backedge = index;
-        header = target;
+        // Nested callers may have an outer backedge after this loop. Select
+        // the innermost loop; the dominance check below proves its entry.
+        if (backedge == null or target > header) {
+            backedge = index;
+            header = target;
+        }
     }
     const backedge_index = backedge orelse return null;
-    if (header == 0 or header >= load_index or function.instructions[header - 1] != .jump or
-        resolveJumpTarget(function.instructions, function.instructions[header - 1].jump) != header) return null;
+    if (header == 0 or header >= load_index) return null;
+    const loop_body = try naturalLoopBody(allocator, function.instructions, header, backedge_index);
+    defer allocator.free(loop_body);
+    if (!cursorCompatibleRegion(function.instructions, loop_body)) return null;
+    const entry_jump = (try dominatingEntryJump(allocator, function.instructions, header, load_index)) orelse return null;
+    for (loop_body, 0..) |inside, index| {
+        if (inside and (try reachesInstructionAvoiding(allocator, function.instructions, index, entry_jump))) return null;
+    }
     const induction: Induction = switch (function.instructions[header]) {
         .copy => |copy| .{
             .state = copy.operand,
@@ -360,13 +370,23 @@ fn recognize(
         },
     };
     if (induction.index != load.index or backedge_index < 3) return null;
+    var parameter_index = false;
+    for (function.parameters) |parameter| if (spanContainsSlot(parameter, induction.state)) {
+        parameter_index = true;
+        break;
+    };
+    if (!parameter_index) {
+        const initializer = definingInstructionBefore(function.instructions, entry_jump, induction.state) orelse return null;
+        if (try reachesInstructionAvoiding(allocator, function.instructions, entry_jump, initializer.index)) return null;
+    }
     const increment = unitIncrement(function.instructions, backedge_index, induction.state) orelse return null;
     if (!hasOnlySelectedBackedge(function.instructions, backedge_index, header, load_index)) return null;
-    if (try reachesInstructionAvoiding(allocator, function.instructions, load_index, header - 1)) return null;
     if (try reachesInstructionAvoiding(allocator, function.instructions, backedge_index, load_index)) return null;
 
-    const collection = immutableCollectionParameter(
+    const collection = stableLoopCollection(
         function,
+        entry_jump,
+        loop_body,
         load_index - 1,
         collection_copy.operand,
     ) orelse return null;
@@ -377,10 +397,16 @@ fn recognize(
         collection_copy.result,
     )) load_index - 1 else null;
 
-    const register = freeCursorRegister(function, null, header - 1, backedge_index) orelse return null;
-    const termination = if (freeCursorRegister(function, register, header - 1, backedge_index)) |end_register|
+    var loop_end = backedge_index;
+    for (loop_body, 0..) |inside, index| if (inside) {
+        loop_end = @max(loop_end, index);
+    };
+    const register = freeCursorRegister(function, null, entry_jump, loop_end) orelse return null;
+    const termination = if (freeCursorRegister(function, register, entry_jump, loop_end)) |end_register|
         pointerTermination(
             function,
+            entry_jump,
+            loop_body,
             header,
             load_index,
             backedge_index,
@@ -393,8 +419,9 @@ fn recognize(
     else
         null;
     return .{
-        .entry_jump = header - 1,
+        .entry_jump = entry_jump,
         .load_index = load_index,
+        .backedge = backedge_index,
         .collection = collection,
         .initial_index = induction.state,
         .register = register,
@@ -406,6 +433,8 @@ fn recognize(
 
 fn pointerTermination(
     function: Machine.Function,
+    entry_jump: usize,
+    loop_body: []const bool,
     header: usize,
     load_index: usize,
     backedge: usize,
@@ -416,7 +445,7 @@ fn pointerTermination(
     body: usize,
 ) ?Termination {
     if (collection.width != 2 or header + 3 >= load_index or backedge < 4 or
-        !zeroInitializedBefore(function.instructions, header - 1, induction.state))
+        !zeroInitializedBefore(function.instructions, entry_jump, induction.state))
         return null;
     var count_index: ?usize = null;
     var count: Machine.Instruction.CollectionCount = undefined;
@@ -426,7 +455,7 @@ fn pointerTermination(
             else => continue,
         };
         if (!candidate.view) continue;
-        const origin = immutableCollectionParameter(function, index, candidate.collection) orelse continue;
+        const origin = stableLoopCollection(function, entry_jump, loop_body, index, candidate.collection) orelse continue;
         if (!sameSpan(origin, collection) or count_index != null) return null;
         count_index = index;
         count = candidate;
@@ -645,55 +674,136 @@ fn unitIncrement(
     return .{ .source = source_index, .one = one_index, .addition = addition_index, .update = update_index };
 }
 
-fn cursorCompatibleFunction(function: Machine.Function) bool {
-    for (function.capture_parameters) |_| return false;
-    for (function.instructions) |instruction| switch (instruction) {
-        .constant_int,
-        .constant_bool,
-        .constant_float32,
-        .constant_float64,
-        .copy,
-        .copy_range,
-        .aggregate_init,
-        .collection_count,
-        .collection_load,
-        .convert,
-        .unary,
-        .binary,
-        .jump,
-        .branch,
-        .return_value,
-        .return_void,
-        => {},
-        else => return false,
+pub fn naturalLoopBody(
+    allocator: Allocator,
+    instructions: []const Machine.Instruction,
+    header: usize,
+    backedge: usize,
+) Allocator.Error![]bool {
+    const body = try allocator.alloc(bool, instructions.len);
+    errdefer allocator.free(body);
+    @memset(body, false);
+    var pending: std.ArrayList(usize) = .empty;
+    defer pending.deinit(allocator);
+    body[header] = true;
+    body[backedge] = true;
+    try pending.append(allocator, backedge);
+    while (pending.pop()) |target| {
+        for (instructions, 0..) |instruction, source| {
+            if (source == header or body[source] or !instructionFlowsTo(instruction, source, target)) continue;
+            body[source] = true;
+            try pending.append(allocator, source);
+        }
+    }
+    return body;
+}
+
+fn instructionFlowsTo(instruction: Machine.Instruction, source: usize, target: usize) bool {
+    return switch (instruction) {
+        .jump => |next| next == target,
+        .branch => |branch_value| branch_value.then_instruction == target or branch_value.else_instruction == target,
+        .return_value, .return_void => false,
+        else => source + 1 == target,
     };
+}
+
+fn cursorCompatibleRegion(instructions: []const Machine.Instruction, loop_body: []const bool) bool {
+    // The cursor uses a volatile integer register. Only the loop body needs
+    // this restricted emitter set; other regions may contain calls or stores.
+    for (instructions, loop_body) |instruction, inside| {
+        if (!inside) continue;
+        switch (instruction) {
+            .constant_int,
+            .constant_bool,
+            .constant_float32,
+            .constant_float64,
+            .copy,
+            .copy_range,
+            .aggregate_init,
+            .collection_count,
+            .collection_load,
+            .convert,
+            .unary,
+            .binary,
+            .jump,
+            .branch,
+            .return_value,
+            .return_void,
+            => {},
+            else => return false,
+        }
+    }
     return true;
 }
 
-fn immutableCollectionParameter(
+fn dominatingEntryJump(
+    allocator: Allocator,
+    instructions: []const Machine.Instruction,
+    header: usize,
+    load_index: usize,
+) Allocator.Error!?usize {
+    var result: ?usize = null;
+    for (instructions[0..header], 0..) |instruction, index| {
+        if (instruction != .jump or resolveJumpTarget(instructions, instruction.jump) != header) continue;
+        // Every path from function entry to this load must traverse the
+        // initialization edge. The selected inner backedge may bypass it.
+        if (try reachesInstructionAvoiding(allocator, instructions, load_index, index)) continue;
+        result = index;
+    }
+    return result;
+}
+
+fn stableLoopCollection(
     function: Machine.Function,
+    entry_jump: usize,
+    loop_body: []const bool,
     initial_before: usize,
     initial: Machine.Span,
 ) ?Machine.Span {
     var before = initial_before;
     var current = initial;
     for (0..function.instructions.len) |_| {
+        var available = true;
+        for (0..current.width) |leaf| {
+            const slot: Machine.Slot = @intCast(@as(usize, current.start) + leaf);
+            var defined = false;
+            for (function.parameters) |parameter| if (spanContainsSlot(parameter, slot)) {
+                defined = true;
+                break;
+            };
+            if (!defined) for (function.instructions[0..entry_jump]) |instruction| {
+                if (ResidenceLiveness.instructionDefines(instruction, slot)) {
+                    defined = true;
+                    break;
+                }
+            };
+            if (!defined) available = false;
+        }
+        if (available) {
+            var stable = true;
+            for (function.instructions, loop_body) |instruction, inside| {
+                if (!inside) continue;
+                for (0..current.width) |leaf| if (ResidenceLiveness.instructionDefines(instruction, @intCast(@as(usize, current.start) + leaf))) {
+                    stable = false;
+                    break;
+                };
+                if (!stable) break;
+            }
+            if (stable) return current;
+            return null;
+        }
         const definition = definingCopyRangeBefore(function.instructions, before, current) orelse break;
+        if (definition.index < entry_jump) return null;
+        for (function.instructions[entry_jump..before], entry_jump..) |instruction, index| {
+            if (index == definition.index) continue;
+            for (0..current.width) |leaf| {
+                if (ResidenceLiveness.instructionDefines(instruction, @intCast(@as(usize, current.start) + leaf))) return null;
+            }
+        }
         current = definition.copy.operand;
         before = definition.index;
     }
-    var parameter = false;
-    for (function.parameters) |candidate| {
-        if (candidate.start == current.start and candidate.width == current.width) {
-            parameter = true;
-            break;
-        }
-    }
-    if (!parameter) return null;
-    for (function.instructions) |instruction| {
-        if (definesSpan(instruction, current)) return null;
-    }
-    return current;
+    return null;
 }
 
 const CopyRangeDefinition = struct {
@@ -784,13 +894,17 @@ fn hasOnlySelectedBackedge(
         .jump => |target| if (target <= source) {
             const resolved = resolveJumpTarget(instructions, target);
             if (source == selected_source and resolved == selected_target) continue;
-            if (resolved <= load_index) return false;
+            if (resolved >= selected_target and resolved <= load_index) return false;
         },
         .branch => |branch_value| {
-            if (branch_value.then_instruction <= source and
-                resolveJumpTarget(instructions, branch_value.then_instruction) <= load_index) return false;
-            if (branch_value.else_instruction <= source and
-                resolveJumpTarget(instructions, branch_value.else_instruction) <= load_index) return false;
+            if (branch_value.then_instruction <= source) {
+                const resolved = resolveJumpTarget(instructions, branch_value.then_instruction);
+                if (resolved >= selected_target and resolved <= load_index) return false;
+            }
+            if (branch_value.else_instruction <= source) {
+                const resolved = resolveJumpTarget(instructions, branch_value.else_instruction);
+                if (resolved >= selected_target and resolved <= load_index) return false;
+            }
         },
         else => {},
     };
@@ -930,6 +1044,77 @@ test "recognize a unit-stride float32 collection cursor" {
     try std.testing.expectEqual(@as(usize, 13), termination.backedge);
     try std.testing.expectEqual(@as(?usize, 7), cursor.elided_collection_copy);
     try std.testing.expectEqual(@as(usize, 8), termination.body);
+}
+
+test "recognize an inner cursor from a stable local view across an outer loop" {
+    var instructions: [20]Machine.Instruction = undefined;
+    const inner = cursorInstructions(1);
+    instructions[0] = .{ .copy_range = .{
+        .result = .{ .start = 16, .width = 2, .aggregate = true },
+        .operand = .{ .start = 0, .width = 2, .aggregate = true },
+    } };
+    instructions[1] = inner[0];
+    instructions[2] = inner[1];
+    instructions[3] = .{ .jump = 7 };
+    instructions[4] = .{ .call = .{ .function = 0, .arguments = &.{}, .result = null } };
+    instructions[5] = .{ .constant_int = .{ .result = 15, .bits = 0 } };
+    instructions[6] = .{ .jump = 7 };
+    instructions[7] = inner[3];
+    instructions[8] = inner[4];
+    instructions[8].collection_count.collection.start = 16;
+    instructions[9] = inner[5];
+    instructions[10] = .{ .branch = .{ .condition = 5, .then_instruction = 11, .else_instruction = 18 } };
+    instructions[11] = inner[7];
+    instructions[11].copy_range.operand.start = 16;
+    instructions[12] = inner[8];
+    instructions[13] = inner[9];
+    instructions[14] = inner[10];
+    instructions[15] = inner[11];
+    instructions[16] = inner[12];
+    instructions[17] = .{ .jump = 7 };
+    instructions[18] = .return_void;
+    instructions[19] = .{ .jump = 0 };
+
+    var lanes = [_]?Machine.FloatLaneResidence{null} ** 18;
+    lanes[8] = .{ .register = 16, .lane = 0, .partner = 9 };
+    lanes[9] = .{ .register = 16, .lane = 1, .partner = 8 };
+    var function = cursorFunction(&instructions);
+    function.slot_count = lanes.len;
+    function.frame_size = try Machine.frameSize(lanes.len);
+    function.float_lane_slots = &lanes;
+
+    const cursor = (try find(std.testing.allocator, function)) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 3), cursor.entry_jump);
+    try std.testing.expectEqual(@as(usize, 12), cursor.load_index);
+    try std.testing.expectEqual(@as(Machine.Slot, 16), cursor.collection.start);
+    try std.testing.expectEqual(@as(u5, 15), cursor.register);
+    try std.testing.expect(cursor.termination != null);
+
+    instructions[7] = .{ .copy = .{ .result = 16, .operand = 0 } };
+    const body = try naturalLoopBody(std.testing.allocator, &instructions, 7, 17);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqual(@as(?Machine.Span, null), stableLoopCollection(
+        function,
+        3,
+        body,
+        11,
+        .{ .start = 16, .width = 2, .aggregate = true },
+    ));
+}
+
+test "natural cursor loop includes a call on a branch tail after its backedge" {
+    const instructions = [_]Machine.Instruction{
+        .{ .jump = 1 },
+        .{ .branch = .{ .condition = 0, .then_instruction = 2, .else_instruction = 4 } },
+        .{ .jump = 1 },
+        .return_void,
+        .{ .call = .{ .function = 0, .arguments = &.{}, .result = null } },
+        .{ .jump = 2 },
+    };
+    const body = try naturalLoopBody(std.testing.allocator, &instructions, 1, 2);
+    defer std.testing.allocator.free(body);
+    try std.testing.expectEqualSlices(bool, &.{ false, true, true, false, true, true }, body);
+    try std.testing.expect(!cursorCompatibleRegion(&instructions, body));
 }
 
 test "reuse a volatile register whose value dies before the cursor loop" {

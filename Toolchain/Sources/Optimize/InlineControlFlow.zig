@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const Source = @import("../Source.zig");
 const CallSummary = @import("CallSummary.zig");
 
 const Allocator = std.mem.Allocator;
@@ -15,9 +16,19 @@ const Info = struct {
 /// Inlines small direct callees with arbitrary control flow. Returns are
 /// lowered to copies into the call result followed by a shared continuation.
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithCollectionViews(allocator, program, false);
+}
+
+/// Extends the normal control-flow inliner to pure checked view kernels after
+/// pre-cloning aggregate scalarization has compacted their value shape.
+pub fn optimizeCollectionViews(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    return optimizeWithCollectionViews(allocator, program, true);
+}
+
+fn optimizeWithCollectionViews(allocator: Allocator, program: Ir.Program, allow_collection_views: bool) !Ir.Program {
     const information = try allocator.alloc(Info, program.functions.len);
     @memset(information, .{});
-    for (program.functions, 0..) |_, index| resolve(program, information, index);
+    for (program.functions, 0..) |_, index| resolve(program, information, index, allow_collection_views);
     const summaries = try CallSummary.analyze(allocator, program);
 
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
@@ -36,7 +47,7 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     return result;
 }
 
-fn resolve(program: Ir.Program, information: []Info, function_index: usize) void {
+fn resolve(program: Ir.Program, information: []Info, function_index: usize, allow_collection_views: bool) void {
     var info = &information[function_index];
     if (info.state != .unresolved) return;
     info.state = .visiting;
@@ -49,7 +60,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
     }
     var previously_eligible = true;
     for (function.parameter_types) |parameter_type| {
-        if (!isParameterType(program, parameter_type)) {
+        if (!isParameterType(program, parameter_type, allow_collection_views)) {
             info.state = .rejected;
             return;
         }
@@ -107,6 +118,19 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                 .address_load,
                 .address_store,
                 => cost += 1,
+                .collection_load => |load| {
+                    if (!allow_collection_views or
+                        load.collection >= function.value_types.len or
+                        !isCollectionViewType(program, function.value_types[load.collection]))
+                    {
+                        info.state = .rejected;
+                        return;
+                    }
+                    // Preserve the complete checked read at the call site. The
+                    // effect summary and hot-site budget gate this view form.
+                    previously_eligible = false;
+                    cost += 4;
+                },
                 .reference_load,
                 .reference_store,
                 .reference_field,
@@ -129,7 +153,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
                         info.state = .rejected;
                         return;
                     }
-                    resolve(program, information, call.function);
+                    resolve(program, information, call.function, allow_collection_views);
                     if (information[call.function].state == .visiting) {
                         info.state = .rejected;
                         return;
@@ -162,13 +186,23 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
     info.state = .eligible;
 }
 
-fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
+fn isParameterType(program: Ir.Program, value_type: Ir.Type, allow_collection_views: bool) bool {
     if (value_type == .address) return true;
     if (isValueType(program, value_type, 0)) return true;
     const structure_index = value_type.structureIndex() orelse return false;
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
-    return !structure.is_static and (structure.is_class or structure.collection == null);
+    // Views are borrowed descriptors: cloning their reads neither transfers
+    // storage nor introduces collection ownership operations.
+    return !structure.is_static and (structure.is_class or structure.collection == null or
+        (allow_collection_views and structure.collection.?.view));
+}
+
+fn isCollectionViewType(program: Ir.Program, value_type: Ir.Type) bool {
+    const structure_index = value_type.structureIndex() orelse return false;
+    return structure_index < program.structures.len and
+        program.structures[structure_index].collection != null and
+        program.structures[structure_index].collection.?.view;
 }
 
 fn isInlineValueType(program: Ir.Program, value_type: Ir.Type) bool {
@@ -338,6 +372,13 @@ fn mapInstruction(
         .collection_count => |value| .{ .collection_count = .{
             .result = values[value.result],
             .collection = values[value.collection],
+        } },
+        .collection_load => |value| .{ .collection_load = .{
+            .result = values[value.result],
+            .collection = values[value.collection],
+            .index = values[value.index],
+            .checked = value.checked,
+            .position = value.position,
         } },
         .structure_init => |value| .{ .structure_init = .{
             .result = values[value.result],
@@ -549,4 +590,90 @@ test "inline branching references across pure scalar boundaries only" {
     program.boundary_effects = &.{.unknown};
     const unknown = try optimize(allocator, program);
     try std.testing.expect(unknown.functions[1].blocks[0].instructions[0] == .call);
+}
+
+test "inline checked view loads with aggregate returns at hot loop sites" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const position = Source.Position{ .offset = 17, .line = 3, .column = 9 };
+    const steering_blocks = [_]Ir.Block{
+        .{
+            .instructions = &.{
+                .{ .collection_load = .{
+                    .result = 3,
+                    .collection = 0,
+                    .index = 1,
+                    .position = position,
+                } },
+                .{ .field_load = .{ .result = 4, .base = 3, .field = 0 } },
+                .{ .field_load = .{ .result = 5, .base = 3, .field = 1 } },
+            },
+            .terminator = .{ .branch = .{ .condition = 2, .then_block = 1, .else_block = 2 } },
+        },
+        .{
+            .instructions = &.{.{ .structure_init = .{ .result = 6, .structure = 2, .fields = &.{ 4, 5 } } }},
+            .terminator = .{ .return_value = 6 },
+        },
+        .{
+            .instructions = &.{.{ .structure_init = .{ .result = 7, .structure = 2, .fields = &.{ 5, 4 } } }},
+            .terminator = .{ .return_value = 7 },
+        },
+    };
+    const caller_blocks = [_]Ir.Block{
+        .{ .instructions = &.{}, .terminator = .{ .jump = 1 } },
+        .{
+            .instructions = &.{.{ .call = .{ .result = 3, .function = 0, .arguments = &.{ 0, 1, 2 } } }},
+            .terminator = .{ .branch = .{ .condition = 2, .then_block = 1, .else_block = 2 } },
+        },
+        .{ .instructions = &.{}, .terminator = .{ .return_value = 3 } },
+    };
+    const program: Ir.Program = .{
+        .structures = &.{
+            .{ .name = "Sample", .fields = &.{
+                .{ .name = "x", .type = .float32, .mutable = false },
+                .{ .name = "y", .type = .float32, .mutable = false },
+            } },
+            .{ .name = "Sample[..]", .fields = &.{}, .collection = .{
+                .element = Ir.Type.structure(0),
+                .length = null,
+                .view = true,
+            } },
+            .{ .name = "Steering", .fields = &.{
+                .{ .name = "x", .type = .float32, .mutable = false },
+                .{ .name = "y", .type = .float32, .mutable = false },
+            } },
+        },
+        .functions = &.{
+            .{
+                .name = "steering",
+                .parameter_types = &.{ Ir.Type.structure(1), .int, .bool },
+                .return_type = Ir.Type.structure(2),
+                .value_types = &.{
+                    Ir.Type.structure(1), .int,     .bool,                Ir.Type.structure(0),
+                    .float32,             .float32, Ir.Type.structure(2), Ir.Type.structure(2),
+                },
+                .blocks = &steering_blocks,
+            },
+            .{
+                .name = "move_flock",
+                .parameter_types = &.{ Ir.Type.structure(1), .int, .bool },
+                .return_type = Ir.Type.structure(2),
+                .value_types = &.{ Ir.Type.structure(1), .int, .bool, Ir.Type.structure(2) },
+                .blocks = &caller_blocks,
+            },
+        },
+    };
+    const optimized = try optimizeCollectionViews(allocator, program);
+    const text = try Ir.writeText(allocator, optimized);
+    const caller = std.mem.indexOf(u8, text, "func @move_flock") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text[caller..], 1, "call @steering"));
+    var mapped_load: ?Ir.Instruction.CollectionLoad = null;
+    for (optimized.functions[1].blocks) |block| for (block.instructions) |instruction| {
+        if (instruction == .collection_load) mapped_load = instruction.collection_load;
+    };
+    try std.testing.expect(mapped_load != null);
+    try std.testing.expect(mapped_load.?.checked);
+    try std.testing.expectEqual(position, mapped_load.?.position);
+    try std.testing.expectEqual(@as(usize, 7), optimized.functions[1].blocks.len);
 }

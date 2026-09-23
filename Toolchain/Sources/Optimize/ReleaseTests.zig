@@ -674,6 +674,62 @@ test "release inlines small value calculations and structure construction" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @calculate"));
 }
 
+test "release inlines branching collection view kernels with aggregate returns" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Sample { let x:float; let y:float }
+        \\struct Steering { let x:float; let y:float }
+        \\func steering(snapshot:@Sample[..]) Steering {
+        \\    var x = 0.0
+        \\    var y = 0.0
+        \\    for sample in snapshot {
+        \\        if sample.x > 0.0 { x += sample.x }
+        \\        else { y += sample.y }
+        \\    }
+        \\    return Steering(x:x, y:y)
+        \\}
+        \\func integrate(snapshot:@Sample[..]) float {
+        \\    var total = 0.0
+        \\    var step = 0
+        \\    while step < 4 {
+        \\        let steering = steering(snapshot)
+        \\        total += steering.x + steering.y
+        \\        step++
+        \\    }
+        \\    return total
+        \\}
+        \\func main() {
+        \\    let samples:Sample[] = [Sample(x:2.0, y:3.0), Sample(x:-1.0, y:5.0)]
+        \\    let view = @samples[0:samples.count()]
+        \\    print(integrate(view))
+        \\}
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const llvm_policy = try Release.optimizeWithOptions(allocator, compilation.ir, .{
+        .collection_view_inlining = false,
+    });
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const result = try Interpreter.runCapture(allocator, optimized);
+    const llvm_result = try Interpreter.runCapture(allocator, llvm_policy);
+    try std.testing.expectEqual(reference.exit_code, result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, result.stdout);
+    try std.testing.expectEqual(reference.exit_code, llvm_result.exit_code);
+    try std.testing.expectEqualStrings(reference.stdout, llvm_result.stdout);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @integrate") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    const body = tail[0..end];
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @steering"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "collection.load"));
+    const llvm_text = try Ir.writeText(allocator, llvm_policy);
+    const llvm_start = std.mem.indexOf(u8, llvm_text, "func @integrate") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.containsAtLeast(u8, llvm_text[llvm_start..], 1, "call @steering"));
+}
+
 test "release scalarizes local references after effectful calls inline" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

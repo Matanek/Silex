@@ -1746,6 +1746,9 @@ fn compileLlvmOptions(
     trace.workers(worker_count);
     var range_counters: @import("Optimize/RangeCache.zig").Counters = .{};
     var release_options = ReleaseOptimizer.Options.forTarget(target, worker_count);
+    // LLVM already inlines checked view kernels more profitably after lowering.
+    // Keep the shared pass available for Native without obscuring that path.
+    release_options.collection_view_inlining = false;
     if (options.cache) {
         if (try @import("Llvm/Store.zig").Store.init(init, allocator)) |store|
             release_options.range_cache = .{ .store = store, .counters = &range_counters };

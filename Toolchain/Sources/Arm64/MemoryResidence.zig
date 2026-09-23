@@ -535,6 +535,76 @@ test "checked memory kernels retain arithmetic lanes without vectorizing memory 
     try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, -6))), @as(u32, @truncate(stored[1])));
 }
 
+test "checked memory kernels retain aligned mutable float recurrences" {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    const Runner = @import("Runner.zig");
+    const builtin = @import("builtin");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const instructions = [_]Machine.Instruction{
+        .{ .collection_load = .{
+            .result = .{ .start = 4, .width = 2, .aggregate = true },
+            .collection = .{ .start = 0, .width = 2, .aggregate = true },
+            .index = 2,
+            .count = 0,
+            .dynamic = true,
+            .view = true,
+            .header = 0,
+            .tail = 0,
+        } },
+        .{ .constant_float32 = .{ .result = 8, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 9, .bits = 0 } },
+        .{ .copy = .{ .result = 6, .operand = 8 } },
+        .{ .copy = .{ .result = 7, .operand = 9 } },
+        .{ .branch = .{ .condition = 3, .then_instruction = 6, .else_instruction = 13 } },
+        .{ .constant_float32 = .{ .result = 10, .bits = 0x3f800000 } },
+        .{ .constant_float32 = .{ .result = 11, .bits = 0x3f800000 } },
+        .{ .binary = .{ .result = 12, .operator = .add, .left = 6, .right = 10, .type = .float32 } },
+        .{ .binary = .{ .result = 13, .operator = .add, .left = 7, .right = 11, .type = .float32 } },
+        .{ .copy = .{ .result = 6, .operand = 12 } },
+        .{ .copy = .{ .result = 7, .operand = 13 } },
+        .{ .jump = 5 },
+        .{ .return_value = .{ .start = 6, .width = 1 } },
+    };
+    const groups = [_]Machine.FloatLaneGroup{
+        .{ .slots = .{ 6, 7, 0, 0 }, .width = 2, .priority = 16, .recurrence = true, .in_loop = true },
+        .{ .slots = .{ 8, 9, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = false },
+        .{ .slots = .{ 10, 11, 0, 0 }, .width = 2, .priority = 8, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 12, 13, 0, 0 }, .width = 2, .priority = 16, .recurrence = true, .in_loop = true },
+    };
+    var function: Machine.Function = .{
+        .name = "checked_memory_recurrence",
+        .parameter_count = 3,
+        .parameters = &.{
+            .{ .start = 0, .width = 2, .aggregate = true },
+            .{ .start = 2, .width = 1 },
+            .{ .start = 3, .width = 1 },
+        },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 14,
+        .frame_size = try Machine.frameSize(14),
+        .instructions = &instructions,
+        .float_lane_groups = &groups,
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    for ([_]usize{ 6, 7, 12, 13 }) |slot| {
+        try std.testing.expect(allocation.float_lane_residences[slot] != null);
+    }
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var values = [_]u64{ 0, 0 };
+    var view = [_]u64{ @intFromPtr(&values), 1 };
+    const result = try Runner.invoke(allocator, .{ .functions = &.{function}, .strings = &.{""} }, 0, &.{
+        @intCast(@intFromPtr(&view)), 0, 0,
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(i64, 0), result.value);
+}
+
 test "memory kernel returns aggregate values held in SIMD lanes" {
     const builtin = @import("builtin");
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;

@@ -18,6 +18,7 @@ pub fn allocate(
     residences: []?Machine.FloatLaneResidence,
     registers: []const u5,
     stack_slots: ?[]const bool,
+    regional_colors: bool,
 ) Allocator.Error!void {
     const partners = try allocator.alloc(?Machine.Slot, function.slot_count);
     defer allocator.free(partners);
@@ -32,6 +33,7 @@ pub fn allocate(
     const planned = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(planned);
     @memset(planned, false);
+    const memory_required = MemoryResidence.required(function);
 
     const eligible_recurrence_slots = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(eligible_recurrence_slots);
@@ -55,7 +57,7 @@ pub fn allocate(
     // identity. ARM64 consumes pairs today; XYZ remains one portable group and
     // is lowered as XY plus a scalar Z until a profitable .4s realization is
     // selected by this backend.
-    const rounds: usize = if (MemoryResidence.required(function)) 2 else 1;
+    const rounds: usize = if (memory_required) 2 else 1;
     for (0..rounds) |round| {
         for (function.float_lane_groups) |group| {
             if (!VectorCost.admitsFloat32Group(target, group.priority, group.recurrence, group.in_loop)) continue;
@@ -85,7 +87,10 @@ pub fn allocate(
                             first_instruction.?.binary.type != .float32 or second_instruction.?.binary.type != .float32 or
                             first_instruction.?.binary.operator != second_instruction.?.binary.operator)) continue;
                     pairSlots(partners, first, second);
-                    if (group.in_loop and group.priority >= 8) {
+                    if (group.in_loop and group.priority >= 8 and
+                        (!memory_required or (group.recurrence and first_instruction.? == .binary and
+                            second_instruction.? == .binary)))
+                    {
                         planned[first] = true;
                         planned[second] = true;
                     }
@@ -173,11 +178,9 @@ pub fn allocate(
     // Delayed pair emission must preserve every original scalar use,
     // including in pure aggregate constructors without memory operations.
     pruneEarlyUses(function.instructions, partners, eligible_recurrence_slots);
-    if (MemoryResidence.required(function)) {
-        // Memory exclusions can break a planned arithmetic chain. Require
-        // every surviving pair to have resident operands, even in hot loops.
-        @memset(planned, false);
-    }
+    // Memory kernels plan only aligned transfer recurrences above. Exclusions
+    // have already removed operands that cannot live in a lane; surviving
+    // roots may be seeded from scalar snapshots by the encoder.
 
     var intervals: std.ArrayList(Interval) = .empty;
     defer intervals.deinit(allocator);
@@ -213,13 +216,14 @@ pub fn allocate(
         partners,
         function.instructions,
         function.slot_count,
+        regional_colors,
     );
     for (intervals.items) |interval| if (leaders[interval.slot]) |register| {
         const partner = partners[interval.slot].?;
         residences[interval.slot] = .{ .register = register, .lane = 0, .partner = partner };
         residences[partner] = .{ .register = register, .lane = 1, .partner = interval.slot };
     };
-    try pruneUnprofitableFloatPairs(allocator, function.instructions, residences, planned, MemoryResidence.required(function));
+    try pruneUnprofitableFloatPairs(allocator, function.instructions, residences, planned, memory_required);
 }
 
 fn recurrenceTransfersPairable(
@@ -285,7 +289,9 @@ fn pruneEarlyUses(
                 second = index;
             }
         }
-        if (multiple and (!eligible_recurrence_slots[slot] or !eligible_recurrence_slots[partner])) {
+        if (multiple and (!eligible_recurrence_slots[slot] or !eligible_recurrence_slots[partner] or
+            !recurrenceTransfersPairable(instructions, @intCast(slot), partner)))
+        {
             partners[slot] = null;
             partners[partner] = null;
             continue;
@@ -365,6 +371,7 @@ fn allocatePairGraph(
     partners: []const ?Machine.Slot,
     instructions: []const Machine.Instruction,
     slot_count: usize,
+    regional_colors: bool,
 ) Allocator.Error!void {
     const components = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(components);
@@ -415,12 +422,31 @@ fn allocatePairGraph(
         }
     }
 
+    // Pairs local to one region may borrow volatile SIMD colors. Pairs live
+    // across a call remain constrained to the ABI-preserved v8...v15 bank.
+    const preserved = try allocator.alloc(bool, slot_count);
+    defer allocator.free(preserved);
+    @memset(preserved, false);
+    if (regional_colors) {
+        for (instructions, 0..) |instruction, index| {
+            if (instruction != .call and instruction != .external_call) continue;
+            for (0..slot_count) |slot| {
+                const partner = partners[slot] orelse continue;
+                if (!live[index * slot_count + slot] and
+                    !successorLive(instructions, live, slot_count, index, slot)) continue;
+                const leader: Machine.Slot = @intCast(@min(slot, @as(usize, partner)));
+                preserved[findPairComponent(components, leader)] = true;
+            }
+        }
+    }
+
     const component_colors = try allocator.alloc(?u5, slot_count);
     defer allocator.free(component_colors);
     @memset(component_colors, null);
     std.mem.sort(Interval, component_intervals.items, {}, heavierThan);
     for (component_intervals.items) |interval| {
         for (registers) |register| {
+            if (preserved[interval.slot] and !(register >= 8 and register < 16)) continue;
             if (pairComponentColorConflicts(
                 interval.slot,
                 register,

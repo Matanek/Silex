@@ -70,7 +70,7 @@ pub const pass_descriptors = [_]PassDescriptor{
     .{ .id = .aggregate_scalarization_post, .precondition = "combined caller and callee graphs", .postcondition = "newly exposed aggregate copies and snapshots simplified", .preserves = "field values, ownership, aliases and aggregate layout" },
     .{ .id = .local_simplification_post, .precondition = "inlined typed portable IR", .postcondition = "combined per-function constants, blocks, checks and dead values simplified", .preserves = "types, effects, ownership, diagnostics and control targets" },
     .{ .id = .reference_memory_elision, .precondition = "dead pure reads removed and explicit same-block reference, scalar-view or collection-lineage derivations available", .postcondition = "exact memory residues and proven collection-lineage reads or checks removed", .preserves = "possible alias observations, calls, block boundaries, ownership and unproved diagnostics" },
-    .{ .id = .ssa_promotion_post, .precondition = "final simplified typed portable IR", .postcondition = "remaining profitable scalar locals promoted with complete edge transfers", .preserves = "dominance, incoming values, types and observable storage" },
+    .{ .id = .ssa_promotion_post, .precondition = "final simplified typed portable IR", .postcondition = "remaining profitable scalar locals promoted while hot paired float recurrences retain lane identity", .preserves = "dominance, incoming values, types, vector affinity and observable storage" },
     .{ .id = .value_range_analysis, .precondition = "verified typed CFG with final SSA edge definitions", .postcondition = "dominating integer intervals simplify proven comparisons, conversions and overflow checks", .preserves = "integer failures, signedness, widths, dominance, effects and control targets" },
     .{ .id = .ssa_value_simplification, .precondition = "verified SSA edge definitions and typed control flow", .postcondition = "inter-block copies, constants, branches and unreachable blocks simplified to a fixed point", .preserves = "dominance, overflow and floating-point semantics, effects and diagnostics" },
     .{ .id = .branch_snapshot_sinking, .precondition = "single-definition scalar snapshot suffix and exclusive immediate branch arms", .postcondition = "snapshot reads have separate arm-local values before every original arm effect", .preserves = "read order, checked addresses, aliases, branch conditions and observable effects" },
@@ -83,6 +83,7 @@ pub const Options = struct {
     stop_after: ?PassId = null,
     disabled: ?PassId = null,
     private_class_state: bool = true,
+    collection_view_inlining: bool = true,
 
     pub fn forTarget(target: Target, worker_count: u16) Options {
         // Semantically portable, but current X64 lowering makes this cache
@@ -169,7 +170,10 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
     if (options.stop_after == .value_inlining) return current;
 
     if (options.disabled != .control_flow_inlining) {
-        current = try InlineControlFlow.optimize(allocator, current);
+        current = if (options.collection_view_inlining)
+            try InlineControlFlow.optimizeCollectionViews(allocator, current)
+        else
+            try InlineControlFlow.optimize(allocator, current);
         try verifyAfterPass(allocator, current, options);
     }
     if (options.stop_after == .control_flow_inlining) return current;

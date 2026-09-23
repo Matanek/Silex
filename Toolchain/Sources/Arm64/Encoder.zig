@@ -794,6 +794,17 @@ fn encodeFunction(
     defer allocator.free(checked_reference_cursor_storage);
     const checked_reference_cursors = retainEncodableReferenceCursors(function, checked_reference_cursor_storage);
     const reference_reuses = try LoopCursor.findReferenceReuses(allocator, function);
+    const literal_loop_body: ?[]bool = if (collection_cursor) |cursor| if (cursor.termination != null)
+        try LoopCursor.naturalLoopBody(
+            allocator,
+            function.instructions,
+            resolveJumpTarget(function.instructions, function.instructions[cursor.backedge].jump),
+            cursor.backedge,
+        )
+    else
+        null else null;
+    defer if (literal_loop_body) |body| allocator.free(body);
+    const float_literals = cachedFloatLiterals(function, literal_loop_body);
     const runtime_frame_size: u32 = if (enable_cycle_collector and functionUsesCycleContext(function)) 16 else 0;
     const extended_frame = function.frame_size > Machine.direct_stack_slots * Machine.slot_size;
     const saved_register_count = calleeSavedRegisterCount(function, extended_frame);
@@ -909,10 +920,7 @@ fn encodeFunction(
         } else try emitLoadAtOffset(allocator, words, .x9, .x14, index * Machine.slot_size);
         try words.append(allocator, storeStack(.x9, capture.start));
     }
-    for (cachedFloatLiterals(function)) |candidate| if (candidate) |literal| {
-        try emitImmediate64(allocator, words, .x9, literal.bits);
-        try words.append(allocator, moveGeneralToFloat(literal.register, .x9, literal.double));
-    };
+    if (float_literals.region == null) try emitCachedFloatLiterals(allocator, words, float_literals);
     const hoisted_division = hoistedDivisionMultiplier(function);
     if (hoisted_division) |division| {
         try emitImmediate64(allocator, words, .x15, division.multiplier);
@@ -986,7 +994,7 @@ fn encodeFunction(
                     }
                     continue;
                 }
-                if (floatMaxDiamond(function, instruction_index, constant.result, constant.bits, false)) |diamond| {
+                if (floatMaxDiamond(function, instruction_index, constant.result, constant.bits, false, float_literals)) |diamond| {
                     const left = try prepareFloatOperand(allocator, words, function, .x9, diamond.left, false);
                     const destination = floatResultRegister(function, diamond.destination) orelse .x10;
                     try words.append(allocator, floatMaxNumber(destination, left, diamond.right, false));
@@ -1003,7 +1011,7 @@ fn encodeFunction(
                 }
                 if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
                 if (constantFeedsNextCachedFloatUse(function, instruction_index, constant.result) and
-                    cachedFloatLiteralRegister(function, constant.bits, false) != null) continue;
+                    cachedFloatLiteralRegister(float_literals, constant.bits, false, instruction_index) != null) continue;
                 if (constant.bits == 0) {
                     const destination = floatResultRegister(function, constant.result) orelse .x9;
                     try words.append(allocator, floatZero(destination));
@@ -1027,7 +1035,7 @@ fn encodeFunction(
                 }
             },
             .constant_float64 => |constant| {
-                if (floatMaxDiamond(function, instruction_index, constant.result, constant.bits, true)) |diamond| {
+                if (floatMaxDiamond(function, instruction_index, constant.result, constant.bits, true, float_literals)) |diamond| {
                     const left = try prepareFloatOperand(allocator, words, function, .x9, diamond.left, true);
                     const destination = floatResultRegister(function, diamond.destination) orelse .x10;
                     try words.append(allocator, floatMaxNumber(destination, left, diamond.right, true));
@@ -1044,7 +1052,7 @@ fn encodeFunction(
                 }
                 if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
                 if (constantFeedsNextCachedFloatUse(function, instruction_index, constant.result) and
-                    cachedFloatLiteralRegister(function, constant.bits, true) != null) continue;
+                    cachedFloatLiteralRegister(float_literals, constant.bits, true, instruction_index) != null) continue;
                 if (constant.bits == 0) {
                     const destination = floatResultRegister(function, constant.result) orelse .x9;
                     try words.append(allocator, floatZero(destination));
@@ -1807,8 +1815,8 @@ fn encodeFunction(
                 } else if (constantDivisionConstant(function, instruction_index, binary)) |constant| {
                     try encodeConstantDivision(allocator, words, function, &scalar_cache, instruction_index, binary, constant, hoisted_division);
                 } else if (comparisonBranchIndex(function, instruction_index, binary) != null) {
-                    try encodeComparisonFlags(allocator, words, function, instruction_index, binary);
-                } else try encodeBinary(allocator, words, &fixups, function, &scalar_cache, binary);
+                    try encodeComparisonFlags(allocator, words, function, instruction_index, binary, &float_literals);
+                } else try encodeBinary(allocator, words, &fixups, function, &scalar_cache, binary, &float_literals);
             },
             .function_address => |address| {
                 try function_addresses.append(allocator, .{ .at = words.items.len, .function = address.function });
@@ -1964,6 +1972,7 @@ fn encodeFunction(
             },
             .jump => |target| {
                 if (collection_cursor) |cursor| if (cursor.entry_jump == instruction_index) {
+                    if (float_literals.region != null) try emitCachedFloatLiterals(allocator, words, float_literals);
                     try ListRuntime.emitCursorAddress(
                         allocator,
                         words,
@@ -2008,6 +2017,7 @@ fn encodeFunction(
                                 function,
                                 backedge.comparison_index,
                                 backedge.comparison,
+                                &float_literals,
                             );
                         }
                         try control_fixups.append(allocator, .{
@@ -2032,7 +2042,7 @@ fn encodeFunction(
             .branch => |branch_value| {
                 const then_instruction = resolveJumpTarget(function.instructions, branch_value.then_instruction);
                 const else_instruction = resolveJumpTarget(function.instructions, branch_value.else_instruction);
-                if (fusedFloatConjunction(function, instruction_index)) |conjunction| {
+                if (fusedFloatConjunction(function, instruction_index, &float_literals)) |conjunction| {
                     const double = conjunction.second.type == .float64;
                     const left = try prepareFloatOperand(
                         allocator,
@@ -2920,7 +2930,7 @@ fn encodeAggregateEqual(
             .left = comparison.left.start + leaf.offset,
             .right = comparison.right.start + leaf.offset,
             .type = leaf.type,
-        });
+        }, null);
         try words.append(allocator, loadStack(.x9, comparison.result));
         try unequal_branches.append(allocator, words.items.len);
         try words.append(allocator, compareBranchZero(.x9));
@@ -3403,9 +3413,10 @@ fn encodeBinary(
     function: ?Machine.Function,
     scalar_cache: *ScalarCache,
     binary: Machine.Instruction.Binary,
+    float_literals: ?*const FloatLiteralCache,
 ) Error!void {
     if (binary.type == .str) return StringRuntime.emitComparison(allocator, words, binary);
-    if (binary.type.isFloat()) return encodeFloatBinary(allocator, words, function, binary);
+    if (binary.type.isFloat()) return encodeFloatBinary(allocator, words, function, binary, float_literals);
     const left = try prepareOptionalValueOperand(allocator, words, function, .x9, binary.left);
     const right = try prepareOptionalValueOperand(allocator, words, function, .x10, binary.right);
     const destination = valueOptionalResultRegister(function, binary.result) orelse .x11;
@@ -3531,6 +3542,7 @@ fn encodeComparisonFlags(
     function: Machine.Function,
     instruction_index: usize,
     binary: Machine.Instruction.Binary,
+    float_literals: *const FloatLiteralCache,
 ) Error!void {
     const zero_right = comparisonHasElidedZeroRight(function, instruction_index, binary);
     if (binary.type.isFloat()) {
@@ -3540,7 +3552,7 @@ fn encodeComparisonFlags(
             try words.append(allocator, floatCompareZero(left, double));
             return;
         }
-        if (comparisonHasElidedCachedRight(function, instruction_index, binary)) |right| {
+        if (comparisonHasElidedCachedRight(function, instruction_index, binary, float_literals)) |right| {
             try words.append(allocator, floatCompare(left, right, double));
             return;
         }
@@ -3663,11 +3675,20 @@ const CachedFloatLiteral = struct {
 
 const float_literal_cache_registers = [_]Register{ .x5, .x6, .x7 };
 
-fn cachedFloatLiterals(function: Machine.Function) [float_literal_cache_registers.len]?CachedFloatLiteral {
-    var result: [float_literal_cache_registers.len]?CachedFloatLiteral = @splat(null);
-    if (function.float_register_slots.len == 0 or functionCanClobberFloatLiteralCache(function)) return result;
-    var count: usize = 0;
+const FloatLiteralCache = struct {
+    literals: [float_literal_cache_registers.len]?CachedFloatLiteral = @splat(null),
+    region: ?[]const bool = null,
+};
+
+fn cachedFloatLiterals(function: Machine.Function, loop_body: ?[]const bool) FloatLiteralCache {
+    var result: FloatLiteralCache = .{};
+    if (function.float_register_slots.len == 0) return result;
+    if (functionCanClobberFloatLiteralCache(function)) {
+        result.region = loop_body orelse return result;
+    }
+    var next_register: usize = 0;
     for (function.instructions, 0..) |instruction, index| {
+        if (result.region) |region| if (!region[index]) continue;
         const candidate: CachedFloatLiteral = switch (instruction) {
             .constant_float32 => |constant| .{ .bits = constant.bits, .double = false, .register = undefined },
             .constant_float64 => |constant| .{ .bits = constant.bits, .double = true, .register = undefined },
@@ -3682,22 +3703,32 @@ fn cachedFloatLiterals(function: Machine.Function) [float_literal_cache_register
             !constantFeedsNextCachedFloatUse(function, index, result_slot) or
             !instructionIsInsideLoop(function.instructions, index)) continue;
         var duplicate = false;
-        for (result[0..count]) |existing| if (existing.?.bits == candidate.bits and
-            existing.?.double == candidate.double)
-        {
-            duplicate = true;
-            break;
+        for (result.literals) |existing| if (existing) |literal| {
+            if (literal.bits == candidate.bits and literal.double == candidate.double) {
+                duplicate = true;
+                break;
+            }
         };
         if (duplicate) continue;
-        result[count] = .{
+        while (next_register < float_literal_cache_registers.len and
+            functionUsesFloatRegister(function, float_literal_cache_registers[next_register])) : (next_register += 1)
+        {}
+        if (next_register == float_literal_cache_registers.len) break;
+        result.literals[next_register] = .{
             .bits = candidate.bits,
             .double = candidate.double,
-            .register = float_literal_cache_registers[count],
+            .register = float_literal_cache_registers[next_register],
         };
-        count += 1;
-        if (count == result.len) break;
+        next_register += 1;
     }
     return result;
+}
+
+fn emitCachedFloatLiterals(allocator: Allocator, words: *std.ArrayList(u32), cache: FloatLiteralCache) Error!void {
+    for (cache.literals) |candidate| if (candidate) |literal| {
+        try emitImmediate64(allocator, words, .x9, literal.bits);
+        try words.append(allocator, moveGeneralToFloat(literal.register, .x9, literal.double));
+    };
 }
 
 fn functionCanClobberFloatLiteralCache(function: Machine.Function) bool {
@@ -3708,8 +3739,9 @@ fn functionCanClobberFloatLiteralCache(function: Machine.Function) bool {
     return false;
 }
 
-fn cachedFloatLiteralRegister(function: Machine.Function, bits: u64, double: bool) ?Register {
-    for (cachedFloatLiterals(function)) |candidate| if (candidate) |literal| {
+fn cachedFloatLiteralRegister(cache: FloatLiteralCache, bits: u64, double: bool, index: usize) ?Register {
+    if (cache.region) |region| if (!region[index]) return null;
+    for (cache.literals) |candidate| if (candidate) |literal| {
         if (literal.bits == bits and literal.double == double) return literal.register;
     };
     return null;
@@ -3719,6 +3751,7 @@ fn cachedFloatBinaryOperand(
     function: Machine.Function,
     binary: Machine.Instruction.Binary,
     slot: Machine.Slot,
+    cache: FloatLiteralCache,
 ) ?Register {
     for (function.instructions[1..], 1..) |instruction, index| {
         const candidate = switch (instruction) {
@@ -3731,12 +3764,12 @@ fn cachedFloatBinaryOperand(
                 constant.result != slot or !constantFeedsNextCachedFloatUse(function, index - 1, slot))
                 null
             else
-                cachedFloatLiteralRegister(function, constant.bits, false),
+                cachedFloatLiteralRegister(cache, constant.bits, false, index - 1),
             .constant_float64 => |constant| if (binary.type != .float64 or
                 constant.result != slot or !constantFeedsNextCachedFloatUse(function, index - 1, slot))
                 null
             else
-                cachedFloatLiteralRegister(function, constant.bits, true),
+                cachedFloatLiteralRegister(cache, constant.bits, true, index - 1),
             else => null,
         };
     }
@@ -3764,11 +3797,11 @@ test "cache loop floating-point arithmetic literals outside the loop" {
         .float_register_slots = &float_residences,
         .instructions = &instructions,
     };
-    const cached = cachedFloatLiterals(function);
-    try std.testing.expectEqual(@as(?Register, .x5), if (cached[0]) |literal| literal.register else null);
-    try std.testing.expectEqual(@as(?Register, .x6), if (cached[1]) |literal| literal.register else null);
-    try std.testing.expectEqual(@as(?Register, .x5), cachedFloatBinaryOperand(function, instructions[1].binary, 1));
-    try std.testing.expectEqual(@as(?Register, .x6), cachedFloatBinaryOperand(function, instructions[3].binary, 3));
+    const cached = cachedFloatLiterals(function, null);
+    try std.testing.expectEqual(@as(?Register, .x5), if (cached.literals[0]) |literal| literal.register else null);
+    try std.testing.expectEqual(@as(?Register, .x6), if (cached.literals[1]) |literal| literal.register else null);
+    try std.testing.expectEqual(@as(?Register, .x5), cachedFloatBinaryOperand(function, instructions[1].binary, 1, cached));
+    try std.testing.expectEqual(@as(?Register, .x6), cachedFloatBinaryOperand(function, instructions[3].binary, 3, cached));
 
     const with_call = instructions ++ [_]Machine.Instruction{.{ .call = .{
         .result = null,
@@ -3776,7 +3809,45 @@ test "cache loop floating-point arithmetic literals outside the loop" {
         .arguments = &.{},
     } }};
     function.instructions = &with_call;
-    for (cachedFloatLiterals(function)) |literal| try std.testing.expectEqual(@as(?CachedFloatLiteral, null), literal);
+    for (cachedFloatLiterals(function, null).literals) |literal| try std.testing.expectEqual(@as(?CachedFloatLiteral, null), literal);
+    const loop_body = [_]bool{ true, true, true, true, true, false };
+    const local = cachedFloatLiterals(function, &loop_body);
+    try std.testing.expect(local.region != null);
+    try std.testing.expectEqual(@as(?Register, .x5), if (local.literals[0]) |literal| literal.register else null);
+    try std.testing.expectEqual(@as(?Register, .x6), if (local.literals[1]) |literal| literal.register else null);
+    try std.testing.expectEqual(@as(?Register, .x5), cachedFloatBinaryOperand(function, instructions[1].binary, 1, local));
+    try std.testing.expectEqual(@as(?Register, null), cachedFloatLiteralRegister(local, first_bits, false, 5));
+}
+
+test "fuse float conjunction with a call outside the cached loop" {
+    const threshold_bits: u32 = @bitCast(@as(f32, 5184.0));
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 1, .bits = 0 } },
+        .{ .binary = .{ .result = 2, .operator = .greater, .left = 0, .right = 1, .type = .float32 } },
+        .{ .branch = .{ .condition = 2, .then_instruction = 3, .else_instruction = 6 } },
+        .{ .constant_float32 = .{ .result = 3, .bits = threshold_bits } },
+        .{ .binary = .{ .result = 4, .operator = .less, .left = 0, .right = 3, .type = .float32 } },
+        .{ .branch = .{ .condition = 4, .then_instruction = 7, .else_instruction = 6 } },
+        .return_void,
+        .return_void,
+        .{ .call = .{ .function = 0, .arguments = &.{}, .result = null } },
+        .{ .jump = 0 },
+    };
+    const function: Machine.Function = .{
+        .name = "regional_float_conjunction",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .void,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .float_register_slots = &.{ 16, null, null, null, null },
+        .instructions = &instructions,
+    };
+    const body = [_]bool{ true, true, true, true, true, true, false, false, false, false };
+    const local = cachedFloatLiterals(function, &body);
+    try std.testing.expect(fusedFloatConjunction(function, 2, &local) != null);
+    const global = cachedFloatLiterals(function, null);
+    try std.testing.expectEqual(@as(?FusedFloatConjunction, null), fusedFloatConjunction(function, 2, &global));
 }
 
 const FloatMaxDiamond = struct {
@@ -3792,6 +3863,7 @@ fn floatMaxDiamond(
     constant_result: Machine.Slot,
     bits: u64,
     double: bool,
+    cache: FloatLiteralCache,
 ) ?FloatMaxDiamond {
     if (index + 4 >= function.instructions.len) return null;
     const initialization = switch (function.instructions[index + 1]) {
@@ -3826,7 +3898,7 @@ fn floatMaxDiamond(
         else => return null,
     };
     if (resolveJumpTarget(function.instructions, branch_value.else_instruction) != join) return null;
-    const right = cachedFloatLiteralRegister(function, bits, double) orelse return null;
+    const right = cachedFloatLiteralRegister(cache, bits, double, index) orelse return null;
     return .{
         .destination = initialization.result,
         .left = comparison.left,
@@ -3861,17 +3933,19 @@ fn comparisonHasElidedCachedRight(
     function: Machine.Function,
     index: usize,
     binary: Machine.Instruction.Binary,
+    float_literals: ?*const FloatLiteralCache,
 ) ?Register {
     if (index == 0) return null;
+    const cache = if (float_literals) |value| value.* else cachedFloatLiterals(function, null);
     return switch (function.instructions[index - 1]) {
         .constant_float32 => |constant| if (constant.result == binary.right and
             constantFeedsNextComparison(function, index - 1, constant.result))
-            cachedFloatLiteralRegister(function, constant.bits, false)
+            cachedFloatLiteralRegister(cache, constant.bits, false, index - 1)
         else
             null,
         .constant_float64 => |constant| if (constant.result == binary.right and
             constantFeedsNextComparison(function, index - 1, constant.result))
-            cachedFloatLiteralRegister(function, constant.bits, true)
+            cachedFloatLiteralRegister(cache, constant.bits, true, index - 1)
         else
             null,
         else => null,
@@ -4208,7 +4282,11 @@ const FusedFloatConjunction = struct {
     right: FusedFloatRight,
 };
 
-fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) ?FusedFloatConjunction {
+fn fusedFloatConjunction(
+    function: Machine.Function,
+    first_branch_index: usize,
+    float_literals: *const FloatLiteralCache,
+) ?FusedFloatConjunction {
     const first = comparisonForBranch(function, first_branch_index) orelse return null;
     if (!first.type.isFloat()) return null;
     const first_branch = switch (function.instructions[first_branch_index]) {
@@ -4235,7 +4313,7 @@ fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) 
     };
     if (resolveJumpTarget(function.instructions, second_branch.else_instruction) != short_circuit) return null;
     const right: FusedFloatRight = switch (function.instructions[second_start]) {
-        .constant_float32, .constant_float64 => .{ .register = comparisonHasElidedCachedRight(function, second_index, second) orelse return null },
+        .constant_float32, .constant_float64 => .{ .register = comparisonHasElidedCachedRight(function, second_index, second, float_literals) orelse return null },
         .binary => .{ .slot = second.right },
         else => unreachable,
     };
@@ -4364,15 +4442,16 @@ fn encodeFloatBinary(
     words: *std.ArrayList(u32),
     function: ?Machine.Function,
     binary: Machine.Instruction.Binary,
+    float_literals: ?*const FloatLiteralCache,
 ) Error!void {
     const double = binary.type == .float64;
     const left = if (function) |value|
-        cachedFloatBinaryOperand(value, binary, binary.left) orelse
+        (if (float_literals) |cache| cachedFloatBinaryOperand(value, binary, binary.left, cache.*) else null) orelse
             try prepareFloatOperand(allocator, words, function, .x9, binary.left, double)
     else
         try prepareFloatOperand(allocator, words, function, .x9, binary.left, double);
     const right = if (function) |value|
-        cachedFloatBinaryOperand(value, binary, binary.right) orelse
+        (if (float_literals) |cache| cachedFloatBinaryOperand(value, binary, binary.right, cache.*) else null) orelse
             try prepareFloatOperand(allocator, words, function, .x10, binary.right, double)
     else
         try prepareFloatOperand(allocator, words, function, .x10, binary.right, double);
@@ -6295,7 +6374,7 @@ test "omit ARM64 overflow work for a proven unchecked multiply" {
         .right = 1,
         .type = .int,
         .checked = false,
-    });
+    }, null);
     try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.overflow.items.len);
 
     var checked_words: std.ArrayList(u32) = .empty;
@@ -6308,7 +6387,7 @@ test "omit ARM64 overflow work for a proven unchecked multiply" {
         .right = 1,
         .type = .int,
         .checked = true,
-    });
+    }, null);
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
     try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
 }
@@ -6574,7 +6653,7 @@ test "omit ARM64 width guard for a proven unchecked shift" {
         .right = 1,
         .type = .uint32,
         .checked = false,
-    });
+    }, null);
     try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.overflow.items.len);
 
     var checked_words: std.ArrayList(u32) = .empty;
@@ -6587,7 +6666,7 @@ test "omit ARM64 width guard for a proven unchecked shift" {
         .right = 1,
         .type = .uint32,
         .checked = true,
-    });
+    }, null);
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
     try std.testing.expect(checked_words.items.len > unchecked_words.items.len);
 }
@@ -6607,7 +6686,7 @@ test "omit ARM64 failure guards for a proven unchecked remainder" {
         .right = 1,
         .type = .int,
         .checked = false,
-    });
+    }, null);
     try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.division_by_zero.items.len);
     try std.testing.expectEqual(@as(usize, 0), unchecked_fixups.overflow.items.len);
 
@@ -6621,7 +6700,7 @@ test "omit ARM64 failure guards for a proven unchecked remainder" {
         .right = 1,
         .type = .int,
         .checked = true,
-    });
+    }, null);
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.division_by_zero.items.len);
     try std.testing.expectEqual(@as(usize, 1), checked_fixups.overflow.items.len);
     try std.testing.expect(checked_words.items.len > unchecked_words.items.len);

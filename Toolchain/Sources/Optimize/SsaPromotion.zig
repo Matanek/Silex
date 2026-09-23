@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const Slp = @import("Slp.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -31,10 +32,25 @@ fn promoteFunction(allocator: Allocator, original: Ir.Function, promote_floats: 
     const function = try reachableFunction(allocator, try bypassEmptyJumpBlocks(allocator, reachable));
     const block_count = function.blocks.len;
     const local_count = function.local_types.len;
+    const lane_recurrences = try allocator.alloc(bool, local_count);
+    @memset(lane_recurrences, false);
+    if (promote_floats) {
+        const plan = try Slp.analyze(allocator, function);
+        for (plan.groups) |group| {
+            if (group.priority < 8 or !group.recurrence or !group.in_loop) continue;
+            for (0..group.width) |lane| switch (group.lanes[lane]) {
+                .local => |local| if (local < local_count) {
+                    lane_recurrences[local] = true;
+                },
+                .value => {},
+            };
+        }
+    }
     const promoted = try allocator.alloc(bool, local_count);
     for (function.local_types, 0..) |local_type, local| {
         promoted[local] = local_type.isInteger() or local_type == .bool or
-            (promote_floats and (local_type == .float32 or local_type == .float64));
+            (promote_floats and !lane_recurrences[local] and
+                (local_type == .float32 or local_type == .float64));
     }
     for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
         .local_address => |address| promoted[address.local] = false,
@@ -696,4 +712,62 @@ test "promote a scalar local across a critical edge without splitting it" {
     const text = try Ir.writeText(allocator, optimized);
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "local.load"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "local.store"));
+}
+
+test "preserve profitable paired float recurrences while promoting scalar loop state" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &.{
+            .{ .constant_float32 = .{ .result = 1, .bits = 0 } },
+            .{ .constant_float32 = .{ .result = 2, .bits = 0 } },
+            .{ .constant_int = .{ .result = 3, .bits = 0 } },
+            .{ .local_store = .{ .local = 0, .operand = 1 } },
+            .{ .local_store = .{ .local = 1, .operand = 2 } },
+            .{ .local_store = .{ .local = 2, .operand = 3 } },
+        }, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{
+            .{ .local_load = .{ .result = 4, .local = 0 } },
+            .{ .local_load = .{ .result = 5, .local = 1 } },
+            .{ .constant_float32 = .{ .result = 6, .bits = 0x3f800000 } },
+            .{ .constant_float32 = .{ .result = 7, .bits = 0x3f800000 } },
+            .{ .binary = .{ .result = 8, .operator = .add, .left = 4, .right = 6 } },
+            .{ .binary = .{ .result = 9, .operator = .add, .left = 5, .right = 7 } },
+            .{ .local_store = .{ .local = 0, .operand = 8 } },
+            .{ .local_store = .{ .local = 1, .operand = 9 } },
+            .{ .local_load = .{ .result = 10, .local = 2 } },
+            .{ .constant_int = .{ .result = 11, .bits = 1 } },
+            .{ .binary = .{ .result = 12, .operator = .add, .left = 10, .right = 11 } },
+            .{ .local_store = .{ .local = 2, .operand = 12 } },
+        }, .terminator = .{ .branch = .{ .condition = 0, .then_block = 1, .else_block = 2 } } },
+        .{ .instructions = &.{.{ .local_load = .{ .result = 13, .local = 0 } }}, .terminator = .{ .return_value = 13 } },
+    };
+    const program: Ir.Program = .{ .functions = &.{.{
+        .name = "paired_float_recurrence",
+        .parameter_types = &.{.bool},
+        .return_type = .float32,
+        .value_types = &.{
+            .bool,    .float32, .float32, .int, .float32, .float32, .float32,
+            .float32, .float32, .float32, .int, .int,     .int,     .float32,
+        },
+        .local_types = &.{ .float32, .float32, .int },
+        .blocks = &blocks,
+    }} };
+    const optimized = try optimize(allocator, program);
+    const function = optimized.functions[0];
+    try std.testing.expectEqualSlices(Ir.Type, &.{ .float32, .float32 }, function.local_types);
+    var float_local_operations: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .local_load => |load| {
+            try std.testing.expect(load.local < 2);
+            float_local_operations += 1;
+        },
+        .local_store => |store| {
+            try std.testing.expect(store.local < 2);
+            float_local_operations += 1;
+        },
+        else => {},
+    };
+    try std.testing.expect(float_local_operations >= 6);
 }

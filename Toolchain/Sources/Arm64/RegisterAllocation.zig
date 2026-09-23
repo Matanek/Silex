@@ -43,7 +43,7 @@ pub fn allocateFloatLanePairsFor(
     defer allocator.free(float_slots);
     @memset(float_slots, false);
     inferFloatSlots(function, float_slots);
-    try FloatPairs.allocate(allocator, function, target, float_slots, residences, registers, null);
+    try FloatPairs.allocate(allocator, function, target, float_slots, residences, registers, null, false);
     return residences;
 }
 
@@ -218,7 +218,6 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         0,  1,  2,  3,  4,  5,  8,  13,
         14, 15,
     };
-    const lane_registers: []const u5 = if (has_calls) &.{ 8, 13, 14, 15 } else &pair_registers;
     const reference_cursors = try LoopCursor.findReferenceCursors(allocator, function, false);
     defer allocator.free(reference_cursors);
     const checked_reference_cursors = try LoopCursor.findReferenceCursors(allocator, function, true);
@@ -287,13 +286,23 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         for (function.instructions, 0..) |instruction, index| {
             if (!isResidenceCompatibleInstruction(instruction, externals)) {
                 pinLiveAt(function.instructions, index, live, function.slot_count, forced);
+                pinLiveAt(function.instructions, index, live, function.slot_count, lane_forced);
             }
         }
     }
 
     // The SIMD allocator must honor the same stack homes as scalar coloring:
     // aggregate parameters and call operands are read through the internal ABI.
-    if (fully_compatible) try FloatPairs.allocate(allocator, function, .arm64, float_slots, float_lane_residences, lane_registers, lane_forced);
+    try FloatPairs.allocate(
+        allocator,
+        function,
+        .arm64,
+        float_slots,
+        float_lane_residences,
+        &pair_registers,
+        lane_forced,
+        has_calls,
+    );
     var cursor_probe = function;
     cursor_probe.float_lane_slots = float_lane_residences;
     const reserve_cursor_end = !has_calls and (try LoopCursor.find(allocator, cursor_probe)) != null;
@@ -598,8 +607,11 @@ fn allocateGraph(
                 !componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals))
             {
                 assignComponentResidence(root, precolored, residences, alias_roots, intervals);
+                continue;
             }
-            continue;
+            // Copy affinity is only a preference. A scalar component may be
+            // coalesced with a precolored lane whose color conflicts later;
+            // try a different color instead of spilling the entire component.
         }
         if (preferredComponentResidence(root, residences, alias_roots, instructions)) |preferred| {
             if ((!preserved[root] or (preferred >= 8 and preferred < 16)) and
@@ -1164,10 +1176,10 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
 }
 
 pub fn supportsMemoryScheduling(function: Machine.Function, externals: []const Machine.ExternalFunction) bool {
-    // Pure read-only loops need the same lane-tree adjacency as mutable memory
-    // kernels; scheduling safety comes from full residence compatibility.
-    return isCompatibleFunction(function, true, externals) and
-        isFullyResidenceCompatible(function, externals);
+    // The scheduler proves each reordered instruction window locally. An
+    // unrelated call or stack-only emitter elsewhere in the function does not
+    // make an independent arithmetic window unsafe to reorder.
+    return isCompatibleFunction(function, true, externals);
 }
 
 fn isFullyResidenceCompatible(function: Machine.Function, externals: []const Machine.ExternalFunction) bool {
@@ -2165,8 +2177,9 @@ test "profitable wide float regions stop at unsupported instructions" {
     defer std.testing.allocator.free(result.float_residences);
     defer std.testing.allocator.free(result.float_lane_residences);
 
-    try std.testing.expect(result.float_residences[20] != null);
+    try std.testing.expect(result.float_residences[20] != null or result.float_lane_residences[20] != null);
     try std.testing.expectEqual(@as(?u5, null), result.float_residences[51]);
+    try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[51]);
     try std.testing.expect(result.float_residences[53] != null);
     try std.testing.expectEqual(@as(?u5, null), result.residences[52]);
 }
@@ -2245,4 +2258,74 @@ test "floating regions borrow volatile colors without carrying them across calls
         const register = result.float_residences[slot] orelse return error.ExpectedPreservedResidence;
         try std.testing.expect(register >= 8 and register < 16);
     }
+}
+
+test "packed float regions borrow volatile colors only outside call-spanning lifetimes" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0x3f800000 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0x3f800000 } },
+        .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 0, .type = .float32 } },
+        .{ .binary = .{ .result = 3, .operator = .multiply, .left = 1, .right = 1, .type = .float32 } },
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 2, .right = 3, .type = .float32 } },
+        .{ .binary = .{ .result = 5, .operator = .add, .left = 0, .right = 0, .type = .float32 } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 1, .right = 1, .type = .float32 } },
+        .{ .call = .{ .function = 0, .arguments = &.{.{ .start = 4, .width = 1 }}, .result = null } },
+        .{ .binary = .{ .result = 7, .operator = .multiply, .left = 5, .right = 0, .type = .float32 } },
+        .{ .binary = .{ .result = 8, .operator = .multiply, .left = 6, .right = 1, .type = .float32 } },
+        .{ .return_value = .{ .start = 7, .width = 2, .aggregate = true } },
+    };
+    const groups = [_]Machine.FloatLaneGroup{
+        .{ .slots = .{ 0, 1, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 2, 3, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 5, 6, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = true },
+        .{ .slots = .{ 7, 8, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = true },
+    };
+    const function: Machine.Function = .{
+        .name = "packed_regions",
+        .parameter_count = 0,
+        .return_type = .float32,
+        .return_width = 2,
+        .return_aggregate = true,
+        .slot_count = 9,
+        .frame_size = try Machine.frameSize(9),
+        .instructions = &instructions,
+        .float_lane_groups = &groups,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    const local = result.float_lane_residences[2] orelse return error.ExpectedVolatileResidence;
+    try std.testing.expect(local.register < 8 or local.register >= 16);
+    const crossing = result.float_lane_residences[5] orelse return error.ExpectedPreservedResidence;
+    try std.testing.expect(crossing.register >= 8 and crossing.register < 16);
+    try std.testing.expectEqual(crossing.register, result.float_lane_residences[6].?.register);
+}
+
+test "scalar copy affinity falls back when a precolored lane conflicts" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = 0x3f800000 } },
+        .{ .copy = .{ .result = 1, .operand = 0 } },
+        .{ .constant_float32 = .{ .result = 2, .bits = 0x40000000 } },
+        .{ .binary = .{ .result = 3, .operator = .add, .left = 1, .right = 2, .type = .float32 } },
+        .{ .return_value = .{ .start = 3, .width = 1 } },
+    };
+    var residences = [_]?u5{ 16, null, 16, null };
+    var intervals = [_]Interval{.{ .slot = 1, .first = 1, .last = 3, .weight = 16 }};
+    const forced = [_]bool{false} ** residences.len;
+    try allocateGraph(
+        std.testing.allocator,
+        &residences,
+        &intervals,
+        &.{ 16, 17 },
+        &instructions,
+        residences.len,
+        &forced,
+        &.{},
+        &.{},
+        false,
+    );
+    try std.testing.expectEqual(@as(?u5, 17), residences[1]);
+    try std.testing.expectEqual(@as(?u5, 16), residences[0]);
 }
