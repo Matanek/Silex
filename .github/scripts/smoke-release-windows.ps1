@@ -105,6 +105,14 @@ try {
         throw "explicit native run smoke failed"
     }
     & $silex test $source --backend native
+    Push-Location (Split-Path $env:GITHUB_WORKSPACE -Parent)
+    try {
+        & node (Join-Path $env:GITHUB_WORKSPACE "Toolchain/Tools/QualifyHeap.mjs") `
+            $silex (Join-Path $env:RUNNER_TEMP "heap-qualification") $Target
+        if ($LASTEXITCODE -ne 0) { throw "native heap qualification failed" }
+    } finally {
+        Pop-Location
+    }
 } finally {
     Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
 }

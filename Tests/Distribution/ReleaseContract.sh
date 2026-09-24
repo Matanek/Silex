@@ -16,6 +16,7 @@ release_notes="$repository_root/.github/scripts/release-notes.py"
 "$repository_root/Tests/Distribution/InstallerUnixContract.sh"
 python3 "$repository_root/Tests/Distribution/ReleaseNotes.py"
 python3 "$repository_root/Tests/Distribution/WebsiteRefresh.py"
+node --test "$repository_root/Tests/Distribution/HeapQualification.mjs"
 manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' "$repository_root/Toolchain/build.zig.zon")
 python3 "$release_notes" validate "$manifest_version"
 python3 "$release_notes" extract "$manifest_version" --locale en | grep -Fq '### Impact and migration'
@@ -121,6 +122,9 @@ for script in (unix_builder, unix_smoke):
 for script in (windows_smoke, windows_public_smoke):
     if 'backend -ne "native"' not in script or '--backend native' not in script:
         raise SystemExit("Windows distribution smoke must verify the native default and explicit native backend")
+for script in (unix_builder, windows_smoke):
+    if "Toolchain/Tools/QualifyHeap.mjs" not in script:
+        raise SystemExit("Every release target must execute the heap qualification fixture")
 
 print("Release workflow contract passed")
 PYTHON

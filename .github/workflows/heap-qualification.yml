@@ -1,0 +1,78 @@
+name: Qualify published native allocation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable published compiler version to qualify
+        required: true
+        default: '0.47.0'
+        type: string
+      target:
+        description: Native target (all for the final cross-platform record)
+        required: true
+        default: all
+        type: choice
+        options: [all, macos-arm64, macos-x64, linux-arm64, linux-x64, windows-arm64, windows-x64]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heap-qualification-${{ github.ref }}-${{ inputs.target }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.target == 'all' && '["macos-arm64","macos-x64","linux-arm64","linux-x64","windows-arm64","windows-x64"]' || format('["{0}"]', inputs.target)) }}
+    runs-on: ${{ fromJSON('{"macos-arm64":"macos-15","macos-x64":"macos-15-intel","linux-arm64":"ubuntu-24.04-arm","linux-x64":"ubuntu-24.04","windows-arm64":"windows-11-arm","windows-x64":"windows-2025"}')[matrix.target] }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      NATIVE_TARGET: ${{ matrix.target }}
+      SILEX_DATA_ROOT: ${{ runner.temp }}/silex-heap-data
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download the immutable compiler and verify its checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          extension=tar.gz
+          if [[ "$NATIVE_TARGET" == windows-* ]]; then extension=zip; fi
+          archive="silex-$NATIVE_TARGET.$extension"
+          gh release download "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$archive.sha256" --dir "$RUNNER_TEMP/compiler-download"
+          node -e 'const fs=require("node:fs"),c=require("node:crypto"),p=require("node:path");const f=p.join(process.env.RUNNER_TEMP,"compiler-download",process.argv[1]);const expected=fs.readFileSync(f+".sha256","utf8").trim().split(/\s+/)[0];if(c.createHash("sha256").update(fs.readFileSync(f)).digest("hex")!==expected)throw Error("Archive checksum mismatch")' "$archive"
+      - name: Extract Unix compiler
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -xzf "$RUNNER_TEMP/compiler-download/silex-$NATIVE_TARGET.tar.gz" -C "$RUNNER_TEMP/compiler-download"
+      - name: Extract Windows compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Expand-Archive (Join-Path $env:RUNNER_TEMP "compiler-download/silex-$env:NATIVE_TARGET.zip") `
+            -DestinationPath (Join-Path $env:RUNNER_TEMP "compiler-download")
+      - name: Execute native correctness and fixed-work allocation samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler="$RUNNER_TEMP/compiler-download/silex-$NATIVE_TARGET/bin/silex"
+          if [[ "$NATIVE_TARGET" == windows-* ]]; then compiler="$compiler.exe"; fi
+          chmod +x "$compiler"
+          "$compiler" setup
+          cd "$GITHUB_WORKSPACE/.."
+          node "$GITHUB_WORKSPACE/Toolchain/Tools/QualifyHeap.mjs" \
+            "$compiler" "$RUNNER_TEMP/heap-qualification" "$NATIVE_TARGET"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heap-${{ matrix.target }}-${{ inputs.version }}-${{ github.sha }}
+          path: ${{ runner.temp }}/heap-qualification/heap-qualification.json
+          if-no-files-found: warn
+          retention-days: 30

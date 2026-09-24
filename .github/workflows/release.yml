@@ -105,6 +105,12 @@ jobs:
             silex-macos-arm64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: heap-qualification-macos-arm64
+          path: ${{ runner.temp }}/heap-qualification/heap-qualification.json
+          if-no-files-found: error
+          retention-days: 30
 
   macos-x64:
     needs: preflight
@@ -128,6 +134,12 @@ jobs:
             silex-macos-x64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: heap-qualification-macos-x64
+          path: ${{ runner.temp }}/heap-qualification/heap-qualification.json
+          if-no-files-found: error
+          retention-days: 30
 
   linux-arm64:
     needs: preflight
@@ -151,6 +163,12 @@ jobs:
             silex-linux-arm64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: heap-qualification-linux-arm64
+          path: ${{ runner.temp }}/heap-qualification/heap-qualification.json
+          if-no-files-found: error
+          retention-days: 30
 
   linux-x64:
     needs: preflight
@@ -174,6 +192,12 @@ jobs:
             silex-linux-x64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: heap-qualification-linux-x64
+          path: ${{ runner.temp }}/heap-qualification/heap-qualification.json
+          if-no-files-found: error
+          retention-days: 30
 
   windows-arm64-build:
     needs: preflight
@@ -239,6 +263,12 @@ jobs:
             silex-windows-arm64.zip.sha256
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: heap-qualification-windows-arm64
+          path: ${{ runner.temp }}/heap-qualification/heap-qualification.json
+          if-no-files-found: error
+          retention-days: 30
 
   windows-x64:
     needs: preflight
@@ -266,6 +296,12 @@ jobs:
             silex-windows-x64.zip.sha256
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: heap-qualification-windows-x64
+          path: ${{ runner.temp }}/heap-qualification/heap-qualification.json
+          if-no-files-found: error
+          retention-days: 30
 
   release-set:
     needs:

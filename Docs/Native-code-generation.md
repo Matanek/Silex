@@ -95,13 +95,31 @@ from that evidence; do not assume that importing Darwin's mechanism is portable.
 Keep semantic regression tests separate from timings and resource measurements.
 
 [HeapAllocation.sx](../Tests/Native/HeapAllocation.sx) checks repeated string and
-collection allocations and detached snapshots. At the audited revision the
-targeted portability workflows do not invoke this file explicitly, and release
-jobs run [DistributionSmoke.sx](../Tests/Native/DistributionSmoke.sx), not an
-allocator qualification campaign. Their success must not be reported as
-cross-target allocator performance parity. Wiring and executing the allocation
-regression on the affected targets is part of the next allocator slice, not
-evidence supplied by this documentation audit.
+collection allocations and detached snapshots. The release scripts now invoke
+[QualifyHeap.mjs](../Toolchain/Tools/QualifyHeap.mjs) on every native target in
+addition to [DistributionSmoke.sx](../Tests/Native/DistributionSmoke.sx). The
+allocation gate executes the fixture's test, the shared native portability
+tests (including class, deep-copy and cycle paths), and the fixed-work entry
+point in Debug and Release. Its twelve Release samples retain the observable
+checksum, compiler/executable/source hashes and host identity in a JSON report.
+Timing does not decide correctness or claim parity.
+
+From the common workspace root, a paired diagnostic accepts an optional pinned
+baseline compiler as its final argument:
+
+```sh
+node Silex/Toolchain/Tools/QualifyHeap.mjs \
+  Silex/Toolchain/zig-out/bin/silex /private/tmp/heap-candidate macos-arm64 \
+  /absolute/path/to/pinned-baseline/silex
+```
+
+Both compilers execute the same current fixture, without compilation during
+sampling, in alternating order. Compare only the same target and host; process
+startup is included and min/median/max are descriptive, not a statistical
+non-regression proof. The manual `heap-qualification.yml` workflow records the
+same proof for an immutable published compiler on any of the six native hosts.
+Neither wiring the gate nor recording the 0.47.0 baseline closes the five
+unimplemented heap paths listed above.
 
 This limitation does not narrow unrelated shared transformations. For example,
 [aggregate-load optimization](../Toolchain/Sources/Optimize/AggregateLoads.zig)

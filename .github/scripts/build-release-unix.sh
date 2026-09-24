@@ -114,6 +114,11 @@ if [ "$target" = "macos-arm64" ]; then
     "$silex" test "$source" --backend llvm
 fi
 
+# Compile from the common workspace root; this is an allocation regression
+# gate, not a claim that distribution smoke proves performance parity.
+(cd "$GITHUB_WORKSPACE/.." && node "$GITHUB_WORKSPACE/Toolchain/Tools/QualifyHeap.mjs" \
+    "$silex" "$RUNNER_TEMP/heap-qualification" "$target")
+
 kill "$server_pid"
 wait "$server_pid" 2>/dev/null || true
 trap - EXIT HUP INT TERM
