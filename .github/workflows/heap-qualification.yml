@@ -33,7 +33,6 @@ jobs:
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       NATIVE_TARGET: ${{ matrix.target }}
-      SILEX_DATA_ROOT: ${{ runner.temp }}/silex-heap-data
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
@@ -60,6 +59,8 @@ jobs:
             -DestinationPath (Join-Path $env:RUNNER_TEMP "compiler-download")
       - name: Execute native correctness and fixed-work allocation samples
         shell: bash
+        env:
+          SILEX_DATA_ROOT: ${{ runner.temp }}/silex-heap-data
         run: |
           set -euo pipefail
           compiler="$RUNNER_TEMP/compiler-download/silex-$NATIVE_TARGET/bin/silex"
