@@ -99,6 +99,7 @@ pub const Image = struct {
     entry_offset: ?u32,
     data_offset: ?u32 = null,
     external_call_sites: []const ExternalCalls.Site = &.{},
+    external_functions: []const Machine.ExternalFunction = &.{},
     address_sites: []const AddressSite = &.{},
 
     pub fn deinit(self: Image, allocator: Allocator) void {
@@ -106,6 +107,7 @@ pub const Image = struct {
         allocator.free(self.function_offsets);
         allocator.free(self.debug_locations);
         allocator.free(self.external_call_sites);
+        allocator.free(self.external_functions);
         allocator.free(self.address_sites);
     }
 };
@@ -318,6 +320,12 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         }
     }
 
+    const external_functions = if (platform == .darwin)
+        try @import("DarwinHeap.zig").append(allocator, &words, &external_call_sites, program.external_functions)
+    else
+        try allocator.dupe(Machine.ExternalFunction, program.external_functions);
+    errdefer allocator.free(external_functions);
+
     var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
         if (platform == .linux) {
@@ -462,6 +470,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         .entry_offset = entry_offset,
         .data_offset = data_offset,
         .external_call_sites = try external_call_sites.toOwnedSlice(allocator),
+        .external_functions = external_functions,
         .address_sites = try address_sites.toOwnedSlice(allocator),
     };
 }

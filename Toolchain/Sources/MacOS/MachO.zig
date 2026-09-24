@@ -27,15 +27,14 @@ pub fn emitFunction(
 ) Error![]u8 {
     var encoded = try Encoder.encode(allocator, program, .{ .executable_main = function });
     defer encoded.deinit(allocator);
-    return emitEncoded(allocator, program, &encoded);
+    return emitEncoded(allocator, &encoded);
 }
 
 fn emitEncoded(
     allocator: std.mem.Allocator,
-    program: Machine.Program,
     encoded: *Encoder.Image,
 ) Error![]u8 {
-    const dynamic = program.external_functions.len != 0;
+    const dynamic = encoded.external_functions.len != 0;
 
     const dylinker_path = "/usr/lib/dyld\x00";
     const dylinker_command_size = std.mem.alignForward(
@@ -72,11 +71,11 @@ fn emitEncoded(
     const got_size: usize = if (dynamic) page_size else 0;
     const linkedit_offset = got_offset + got_size;
     const got_segment_index: u4 = 2 + @as(u4, @intFromBool(encoded.data_offset != null));
-    const bind_info = if (dynamic) try DynamicLink.bindInfo(allocator, program.external_functions, got_segment_index) else &.{};
-    const string_table = if (dynamic) try DynamicLink.stringTable(allocator, program.external_functions) else &.{};
+    const bind_info = if (dynamic) try DynamicLink.bindInfo(allocator, encoded.external_functions, got_segment_index) else &.{};
+    const string_table = if (dynamic) try DynamicLink.stringTable(allocator, encoded.external_functions) else &.{};
     const bind_offset = linkedit_offset;
     const symbol_offset = std.mem.alignForward(usize, bind_offset + bind_info.len, @alignOf(macho.nlist_64));
-    const string_offset = symbol_offset + program.external_functions.len * @sizeOf(macho.nlist_64);
+    const string_offset = symbol_offset + encoded.external_functions.len * @sizeOf(macho.nlist_64);
     const signature_offset = if (dynamic)
         std.mem.alignForward(usize, string_offset + string_table.len, 16)
     else
@@ -197,7 +196,7 @@ fn emitEncoded(
             .sectname = name("__got"),
             .segname = name("__DATA_CONST"),
             .addr = image_base + got_offset,
-            .size = program.external_functions.len * @sizeOf(u64),
+            .size = encoded.external_functions.len * @sizeOf(u64),
             .offset = @intCast(got_offset),
             .@"align" = 3,
             .reloff = 0,
@@ -261,7 +260,7 @@ fn emitEncoded(
     var symtab: macho.symtab_command = if (dynamic)
         .{
             .symoff = @intCast(symbol_offset),
-            .nsyms = @intCast(program.external_functions.len),
+            .nsyms = @intCast(encoded.external_functions.len),
             .stroff = @intCast(string_offset),
             .strsize = @intCast(string_table.len),
         }
@@ -274,7 +273,7 @@ fn emitEncoded(
     var dysymtab: macho.dysymtab_command = if (dynamic)
         .{
             .iundefsym = 0,
-            .nundefsym = @intCast(program.external_functions.len),
+            .nundefsym = @intCast(encoded.external_functions.len),
         }
     else
         .{ .locreloff = @intCast(linkedit_offset) };
@@ -316,7 +315,7 @@ fn emitEncoded(
     if (dynamic) try DynamicLink.patchCalls(
         encoded.code,
         encoded.external_call_sites,
-        program.external_functions.len,
+        encoded.external_functions.len,
         image_base + text_offset,
         image_base + got_offset,
     );
@@ -325,7 +324,7 @@ fn emitEncoded(
     if (dynamic) {
         try bytes.appendSlice(allocator, bind_info);
         try appendZeroes(allocator, &bytes, symbol_offset - bytes.items.len);
-        try DynamicLink.appendSymbols(allocator, &bytes, program.external_functions);
+        try DynamicLink.appendSymbols(allocator, &bytes, encoded.external_functions);
         try bytes.appendSlice(allocator, string_table);
         try appendZeroes(allocator, &bytes, signature_offset - bytes.items.len);
     }

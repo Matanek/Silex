@@ -1,0 +1,32 @@
+func growing_text(seed:str, minimum:int) str {
+    var value = seed
+    while value.count() < minimum { value = value + value }
+    return value
+}
+
+func allocation_rounds(rounds:int) int {
+    var checksum = 0
+    for index in 0...rounds {
+        var bytes = growing_text("\0", 64)
+        let retained = bytes
+        bytes = bytes + "é🙂"
+        assert(bytes.count() == 66)
+        assert(retained.count() == 64)
+        var values:str[] = [bytes, retained, ""]
+        let snapshot = values
+        values.append("tail")
+        values[0] = "changed"
+        assert(snapshot.count() == 3)
+        assert(snapshot[0] == bytes)
+        assert(snapshot[1] == retained)
+        assert(values[0] == "changed")
+        checksum += snapshot[1].count()
+    }
+    return checksum
+}
+
+test "recycled allocations preserve string bytes and detached collections" {
+    assert(allocation_rounds(64) == 4096)
+}
+
+func main() { print(allocation_rounds(4000)) }

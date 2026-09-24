@@ -40,7 +40,7 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
     const content_offset = std.mem.alignForward(usize, @sizeOf(macho.mach_header_64) + load_commands_size, text_alignment);
 
     for (encoded.external_call_sites) |site| {
-        if (site.function >= program.external_functions.len or site.instruction_offset + 12 > text_size) return error.InvalidMain;
+        if (site.function >= encoded.external_functions.len or site.instruction_offset + 12 > text_size) return error.InvalidMain;
         std.mem.writeInt(u32, encoded.code[site.instruction_offset..][0..4], Instructions.branchLink(), .little);
         std.mem.writeInt(u32, encoded.code[site.instruction_offset + 4 ..][0..4], no_operation, .little);
         std.mem.writeInt(u32, encoded.code[site.instruction_offset + 8 ..][0..4], no_operation, .little);
@@ -85,7 +85,7 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
 
     const relocation_offset = std.mem.alignForward(usize, content_offset + encoded.code.len, 8);
     const symbol_offset = relocation_offset + relocations.items.len * @sizeOf(macho.relocation_info);
-    const symbol_count = first_undefined + program.external_functions.len;
+    const symbol_count = first_undefined + encoded.external_functions.len;
     const string_offset = symbol_offset + symbol_count * @sizeOf(macho.nlist_64);
 
     var string_table: std.ArrayList(u8) = .empty;
@@ -117,9 +117,9 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
             .{ function, path, location.position.line, location.position.column },
         );
     }
-    const external_names = try allocator.alloc(u32, program.external_functions.len);
+    const external_names = try allocator.alloc(u32, encoded.external_functions.len);
     defer allocator.free(external_names);
-    for (program.external_functions, 0..) |function, index| {
+    for (encoded.external_functions, 0..) |function, index| {
         external_names[index] = @intCast(string_table.items.len);
         try string_table.append(allocator, '_');
         try string_table.appendSlice(allocator, function.source_name);
@@ -208,7 +208,7 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
         .iextdefsym = @intCast(first_defined),
         .nextdefsym = @intCast(defined_function_count),
         .iundefsym = @intCast(first_undefined),
-        .nundefsym = @intCast(program.external_functions.len),
+        .nundefsym = @intCast(encoded.external_functions.len),
     };
     try appendStruct(allocator, &bytes, &dysymtab);
 

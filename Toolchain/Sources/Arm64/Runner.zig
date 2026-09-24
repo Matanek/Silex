@@ -4,10 +4,11 @@ const Encoder = @import("Encoder.zig");
 const InternalAbi = @import("InternalAbi.zig");
 const Lower = @import("Lower.zig");
 const Machine = @import("Machine.zig");
+const DynamicLink = @import("../MacOS/DynamicLink.zig");
 
 const Allocator = std.mem.Allocator;
 
-pub const Error = Encoder.Error || std.posix.MMapError || std.process.ProtectMemoryError || error{
+pub const Error = Encoder.Error || DynamicLink.Error || std.posix.MMapError || std.process.ProtectMemoryError || error{
     InvalidNativeStatus,
     UnsupportedHost,
 };
@@ -34,6 +35,8 @@ const NativeFunction = *const fn (
 ) callconv(.c) RawResult;
 
 extern "c" fn sys_icache_invalidate(start: *anyopaque, length: usize) void;
+extern "c" fn calloc(count: usize, size: usize) ?*anyopaque;
+extern "c" fn free(memory: ?*anyopaque) void;
 
 pub fn invoke(
     allocator: Allocator,
@@ -52,7 +55,8 @@ pub fn invoke(
     const image = try Encoder.encode(allocator, program, .{ .test_function = function });
     defer image.deinit(allocator);
     const entry_offset = image.entry_offset orelse return error.InvalidMachineProgram;
-    const mapped_size = std.mem.alignForward(usize, image.code.len, std.heap.page_size_min);
+    const got_offset = std.mem.alignForward(usize, image.code.len, @alignOf(u64));
+    const mapped_size = std.mem.alignForward(usize, got_offset + image.external_functions.len * 8, std.heap.page_size_min);
     const memory = try std.posix.mmap(
         null,
         mapped_size,
@@ -63,6 +67,22 @@ pub fn invoke(
     );
     defer std.posix.munmap(memory);
     @memcpy(memory[0..image.code.len], image.code);
+    for (image.external_functions, 0..) |external, index| {
+        const used = for (image.external_call_sites) |site| {
+            if (site.function == index) break true;
+        } else false;
+        if (!used) continue;
+        const address = if (std.mem.eql(u8, external.provider, "Darwin.lib_system") and
+            std.mem.eql(u8, external.source_name, "calloc"))
+            @intFromPtr(&calloc)
+        else if (std.mem.eql(u8, external.provider, "Darwin.lib_system") and
+            std.mem.eql(u8, external.source_name, "free"))
+            @intFromPtr(&free)
+        else
+            return error.InvalidMachineProgram;
+        std.mem.writeInt(u64, memory[got_offset + index * 8 ..][0..8], address, .little);
+    }
+    try DynamicLink.patchCalls(memory[0..image.code.len], image.external_call_sites, image.external_functions.len, @intFromPtr(memory.ptr), @intFromPtr(memory.ptr) + got_offset);
     if (image.data_offset) |data_offset| {
         try std.process.protectMemory(memory[0..data_offset], .{ .read = true, .execute = true });
     } else {

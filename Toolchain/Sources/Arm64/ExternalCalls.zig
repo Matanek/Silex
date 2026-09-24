@@ -12,6 +12,7 @@ pub const Site = struct {
     instruction_offset: u32,
     function: usize,
     windows_symbol: ?@import("../Windows/Imports.zig").Symbol = null,
+    heap_operation: ?enum { allocate, release } = null,
 };
 
 pub fn emit(

@@ -100,6 +100,20 @@ address space, so it does not allocate the snapshot lock used to serialize
 repeated in-memory runner invocations. Programs without mutable globals can
 therefore omit the writable data segment entirely.
 
+Dynamic storage on macOS ARM64 uses libSystem `calloc` and `free`, including
+strings, collections, classes, and the allocation callbacks passed to the
+embedded copy and cycle runtimes. Zero initialization and the existing ownership
+headers are preserved. Two private adapters preserve the generated code's
+scratch registers, Silex status register (`x8`), and full SIMD values across the C calls;
+the platform-reserved `x18` is left untouched. This avoids mapping and unmapping
+a virtual-memory region for each small allocation.
+
+These runtime imports belong to the encoded image, not portable IR. Both the
+direct Mach-O writer and the relocatable-object writer include them, and the
+in-memory native test runner resolves the same allocator. Images without
+allocation retain their original imports. Other OS and architecture allocation
+paths are unchanged.
+
 ## Emit macOS X64 programs
 
 The macOS X64 backend shares the X64 instruction encoder with Linux and
