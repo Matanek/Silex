@@ -81,6 +81,9 @@ def validate_sections(path: Path, locale: str, version: str, body: str) -> None:
 
 
 def validated_changelogs(version: str) -> dict[str, list[ReleaseNote]]:
+    for path in CHANGELOGS.values():
+        if re.search(r"^## \[Unreleased\][ \t]*$", path.read_text(encoding="utf-8"), re.MULTILINE):
+            raise ValueError(f"{path.name} still contains pending Unreleased notes; consolidate them before release")
     entries = {
         locale: read_entries(path, locale)
         for locale, path in CHANGELOGS.items()

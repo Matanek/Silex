@@ -14,6 +14,7 @@ toolchain_setup="$repository_root/Toolchain/Sources/ToolchainSetup.zig"
 release_notes="$repository_root/.github/scripts/release-notes.py"
 
 "$repository_root/Tests/Distribution/InstallerUnixContract.sh"
+python3 "$repository_root/Tests/Distribution/ReleaseNotes.py"
 manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' "$repository_root/Toolchain/build.zig.zon")
 python3 "$release_notes" validate "$manifest_version"
 python3 "$release_notes" extract "$manifest_version" --locale en | grep -Fq '### Impact and migration'
@@ -109,8 +110,11 @@ for marker in llvm_contract:
         raise SystemExit(f"missing managed LLVM setup marker: {marker}")
 
 for script in (unix_builder, unix_smoke):
-    if 'expected_backend=llvm' not in script or '--backend native' not in script:
-        raise SystemExit("Unix distribution smoke must verify the host default and explicit native backend")
+    defaults = re.findall(r'^expected_backend=(\w+)$', script, re.MULTILINE)
+    if defaults != ['native'] or 'expected_backend=llvm' in script or '--backend native' not in script:
+        raise SystemExit("Unix distribution smoke must verify the native default on every host")
+    if '--backend llvm' not in script:
+        raise SystemExit("Unix distribution smoke must retain explicit LLVM qualification on macOS ARM64")
 for script in (windows_smoke, windows_public_smoke):
     if 'backend -ne "native"' not in script or '--backend native' not in script:
         raise SystemExit("Windows distribution smoke must verify the native default and explicit native backend")

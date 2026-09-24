@@ -2,7 +2,46 @@
 
 This log helps developers decide whether to upgrade Silex and prepare any
 required changes. Each release candidate adds its French entry first in
-`CHANGELOG.fr.md`, then the matching English translation here.
+`CHANGELOG.fr.md`, then the matching English translation here. Work in progress
+is recorded under `## [Unreleased]` and consolidated when preparing a release.
+This editorial history starts with version 0.44.1.
+
+## [0.47.0] - 2026-09-24
+
+### Why upgrade?
+
+This release restores the native backend as the default on every host,
+including macOS ARM64. It reduces allocation and copying costs in native
+programs and fixes lifetime and code-generation errors in both backends.
+
+### Changes
+
+- `run`, `test`, and `compile` without `--backend` now select `native`.
+  LLVM remains explicitly available on macOS ARM64 through `--backend llvm`.
+- On macOS ARM64, small native allocations use the system heap
+  (`calloc`/`free`) instead of a memory mapping per allocation. A
+  [fixed-work CCD diagnostic](https://github.com/Matanek/Silex-Lib-GFX.Physics/blob/c9f85526488f0dbed0842a22ca484d06b1f46772/Benchmarks/Baselines/2026-09-24-native-heap.md)
+  in Release, with 16 bodies, four moving walls, and 24 steps, measures
+  16.48–17.06 ms/step before and 1.70–2.51 ms/step after this change,
+  with identical physics code and final states. These two measurement pairs
+  isolate allocator cost: they are neither a guaranteed general speedup nor
+  a complete comparison between published versions.
+- The ARM64 native backend narrows nested aggregate copies, admits more scalar
+  regions, and optimizes checked-view kernels. It correctly preserves SIMD
+  registers and floating-point components across calls.
+- LLVM fixes recursive class-graph copies, tagged-enum equality, inherited
+  calls, resources, collections, and callbacks. Both backends strengthen cycle
+  collection and preservation of descendants that are still live.
+- The compiler releases unneeded analysis data earlier and bounds temporary
+  memory used by some analyses and evaluations.
+
+### Impact and migration
+
+On macOS ARM64, add `--backend llvm` to retain the default backend used in
+0.45–0.46. Other hosts keep their existing default. Recompile your programs to
+benefit from the fixes; no syntax migration is required. The figures above
+apply only to the stated native macOS ARM64 diagnostic, not other
+architectures or application FPS.
 
 ## [0.46.1] - 2026-09-19
 

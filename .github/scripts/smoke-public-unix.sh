@@ -31,9 +31,6 @@ compiled="$RUNNER_TEMP/distribution-smoke"
 trace="$RUNNER_TEMP/distribution-default-trace.json"
 SILEX_COMPILATION_TRACE="$trace" "$silex" compile "$source" --release -o "$compiled"
 expected_backend=native
-if [ "$target" = "macos-arm64" ]; then
-    expected_backend=llvm
-fi
 grep -Fq "\"backend\": \"$expected_backend\"" "$trace"
 test "$("$compiled")" = "silex distribution ready"
 test "$("$silex" run "$source" --release)" = "silex distribution ready"
@@ -44,3 +41,10 @@ native="$RUNNER_TEMP/distribution-smoke-native"
 test "$("$native")" = "silex distribution ready"
 test "$("$silex" run "$source" --backend native --release)" = "silex distribution ready"
 "$silex" test "$source" --backend native
+
+if [ "$target" = "macos-arm64" ]; then
+    llvm="$RUNNER_TEMP/distribution-smoke-llvm"
+    "$silex" compile "$source" --backend llvm --release -o "$llvm"
+    test "$("$llvm")" = "silex distribution ready"
+    "$silex" test "$source" --backend llvm
+fi
