@@ -63,6 +63,51 @@ encoder therefore never makes another OS/architecture pair executable by
 implication. `silex targets` lists recognized composition targets; native
 commands still reject a target whose executable capability is incomplete.
 
+## Allocation scope and remaining qualification
+
+The allocation audit below describes native Silex 0.47.0
+(`65cce7f30a9f727b08706b57fc08d91cd4bbd313`). It concerns generated programs,
+not the Zig allocator used by the compiler process. The source contract stays
+common; the mechanism and performance evidence do not.
+
+| Target | Dynamic allocation mechanism | Small-allocation heap change in 0.47.0 |
+| --- | --- | --- |
+| `macos-arm64` | libSystem `calloc` / `free` | implemented; bounded local CCD diagnostic |
+| `macos-x64` | Darwin `mmap` / `munmap` | not implemented; benefit not measured |
+| `linux-arm64` | Linux `mmap` / `munmap` | not implemented; benefit not measured |
+| `linux-x64` | Linux `mmap` / `munmap` | not implemented; benefit not measured |
+| `windows-arm64` | `VirtualAlloc` / `VirtualFree` | not implemented; benefit not measured |
+| `windows-x64` | `VirtualAlloc` / `VirtualFree` | not implemented; benefit not measured |
+
+The owning paths are [ARM64 allocation](../Toolchain/Sources/Arm64/Allocation.zig),
+its [Darwin heap adapters](../Toolchain/Sources/Arm64/DarwinHeap.zig), and
+[X64 emission](../Toolchain/Sources/X64/Encoder.zig) (`emitAllocation`,
+`emitRuntimeAllocateCallback`, and `emitRuntimeReleaseCallback`). The other
+five paths still request virtual-memory regions for dynamic allocations. The
+same kind of cost is therefore a relevant hypothesis there, not an established
+speedup and not a justified non-applicable case.
+
+The next allocator slice must compare equivalent fixed work against a pinned
+baseline on each affected target, preserving zero initialization, alignment,
+allocation-failure behavior, ownership headers, copy/cycle callbacks, and ABI
+register preservation. Select the appropriate system adapter or shared policy
+from that evidence; do not assume that importing Darwin's mechanism is portable.
+Keep semantic regression tests separate from timings and resource measurements.
+
+[HeapAllocation.sx](../Tests/Native/HeapAllocation.sx) checks repeated string and
+collection allocations and detached snapshots. At the audited revision the
+targeted portability workflows do not invoke this file explicitly, and release
+jobs run [DistributionSmoke.sx](../Tests/Native/DistributionSmoke.sx), not an
+allocator qualification campaign. Their success must not be reported as
+cross-target allocator performance parity. Wiring and executing the allocation
+regression on the affected targets is part of the next allocator slice, not
+evidence supplied by this documentation audit.
+
+This limitation does not narrow unrelated shared transformations. For example,
+[aggregate-load optimization](../Toolchain/Sources/Optimize/AggregateLoads.zig)
+runs in the shared Release pipeline before target code generation; its scope
+is not determined by the host used to measure it.
+
 ## Emit macOS ARM64 programs
 
 The macOS ARM64 backend uses an internal register-and-stack ABI and reports
@@ -219,8 +264,8 @@ ephemeral workflow artifact. The `windows-11-arm` job checks their PE/COFF
 machine `0xaa64`, executes the compiler and every Debug and Release program
 natively, and verifies the declared Windows X64 setup tools under the system
 compatibility layer. The Boundary callback crosses the Windows ARM64 C ABI.
-Windows ARM64 does not become a distributed target until the release archive
-and installer are added by the distribution slice.
+The release workflow also distributes and installs the Windows ARM64 archive;
+its distribution smoke is distinct from the broader portability corpus above.
 
 ## Lower the built-in macOS boundary
 

@@ -10,38 +10,51 @@ This editorial history starts with version 0.44.1.
 
 ### Why upgrade?
 
-This release restores the native backend as the default on every host,
-including macOS ARM64. It reduces allocation and copying costs in native
-programs and fixes lifetime and code-generation errors in both backends.
+This release unifies the default backend: `native` on all six distributed
+platforms. It reduces copies in the shared optimizer and fixes lifetime and
+code-generation errors. Further improvements apply to specific architectures
+and backends, as detailed below.
 
 ### Changes
 
-- `run`, `test`, and `compile` without `--backend` now select `native`.
-  LLVM remains explicitly available on macOS ARM64 through `--backend llvm`.
-- On macOS ARM64, small native allocations use the system heap
-  (`calloc`/`free`) instead of a memory mapping per allocation. A
-  [fixed-work CCD diagnostic](https://github.com/Matanek/Silex-Lib-GFX.Physics/blob/c9f85526488f0dbed0842a22ca484d06b1f46772/Benchmarks/Baselines/2026-09-24-native-heap.md)
-  in Release, with 16 bodies, four moving walls, and 24 steps, measures
-  16.48–17.06 ms/step before and 1.70–2.51 ms/step after this change,
-  with identical physics code and final states. These two measurement pairs
-  isolate allocator cost: they are neither a guaranteed general speedup nor
-  a complete comparison between published versions.
-- The ARM64 native backend narrows nested aggregate copies, admits more scalar
-  regions, and optimizes checked-view kernels. It correctly preserves SIMD
-  registers and floating-point components across calls.
-- LLVM fixes recursive class-graph copies, tagged-enum equality, inherited
-  calls, resources, collections, and callbacks. Both backends strengthen cycle
-  collection and preservation of descendants that are still live.
+#### Shared behavior and processing
+
+- `run`, `test`, and `compile` without `--backend` select `native` on macOS,
+  Linux, and Windows, for both ARM64 and x64.
+- The shared optimizer narrows nested aggregate copies. This transformation
+  runs before target-specific code generation.
+- Both backends strengthen cycle collection and preservation of descendants
+  that are still live.
 - The compiler releases unneeded analysis data earlier and bounds temporary
   memory used by some analyses and evaluations.
+
+#### Target-specific and backend-specific changes
+
+- ARM64 native code generation admits more scalar regions and optimizes
+  checked-view kernels. It correctly preserves SIMD registers and floating-point
+  components across calls.
+- The macOS ARM64 native allocator uses the system heap (`calloc`/`free`)
+  instead of a memory mapping per small allocation. Allocation paths on the
+  other five targets are unchanged in this release.
+- LLVM fixes recursive class-graph copies, tagged-enum equality, inherited
+  calls, resources, collections, and callbacks. This backend remains explicitly
+  available on macOS ARM64 through `--backend llvm`.
+
+#### Available performance measurement
+
+The [fixed-work CCD diagnostic](https://github.com/Matanek/Silex-Lib-GFX.Physics/blob/c9f85526488f0dbed0842a22ca484d06b1f46772/Benchmarks/Baselines/2026-09-24-native-heap.md)
+compares the allocator before and after its change, using native Release on
+macOS ARM64: 16 bodies, four moving walls, and 24 steps. The two measurement
+pairs go from 16.48–17.06 to 1.70–2.51 ms/step, with identical physics code and
+final states. They isolate this cost; they measure neither the full gain
+between published versions nor other targets, and do not guarantee application
+FPS.
 
 ### Impact and migration
 
 On macOS ARM64, add `--backend llvm` to retain the default backend used in
 0.45–0.46. Other hosts keep their existing default. Recompile your programs to
-benefit from the fixes; no syntax migration is required. The figures above
-apply only to the stated native macOS ARM64 diagnostic, not other
-architectures or application FPS.
+benefit from the fixes; no syntax migration is required.
 
 ## [0.46.1] - 2026-09-19
 
