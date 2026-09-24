@@ -15,6 +15,7 @@ release_notes="$repository_root/.github/scripts/release-notes.py"
 
 "$repository_root/Tests/Distribution/InstallerUnixContract.sh"
 python3 "$repository_root/Tests/Distribution/ReleaseNotes.py"
+python3 "$repository_root/Tests/Distribution/WebsiteRefresh.py"
 manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' "$repository_root/Toolchain/build.zig.zon")
 python3 "$release_notes" validate "$manifest_version"
 python3 "$release_notes" extract "$manifest_version" --locale en | grep -Fq '### Impact and migration'
@@ -98,6 +99,8 @@ if 'release-notes.py validate "$RELEASE_VERSION"' not in workflow:
     raise SystemExit("release preflight must validate the canonical release notes")
 if '--notes-file "$RUNNER_TEMP/release-notes.md"' not in workflow or "--generate-notes" in workflow:
     raise SystemExit("GitHub releases must use the canonical release notes")
+if "uses: ./.github/workflows/website-refresh.yml" not in workflow or "::warning::" in workflow:
+    raise SystemExit("Website refresh must be a required, independently retryable release job")
 
 llvm_contract = (
     "llvm-21.1.8-silex.1",

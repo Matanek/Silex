@@ -1,0 +1,32 @@
+name: Refresh Silex website
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published Silex version to verify on the website
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      WEBSITE_DISPATCH_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Deploy and verify the canonical website snapshot
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python3 .github/scripts/refresh-website.py "$RELEASE_VERSION"
