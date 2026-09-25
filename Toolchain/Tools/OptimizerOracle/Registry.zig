@@ -163,6 +163,7 @@ const QualificationCase = struct {
     path: []const u8,
     sha256: []const u8,
     sealed: bool,
+    current: bool = true,
 };
 
 pub const Transposition = struct {
@@ -254,7 +255,7 @@ pub fn validateQualificationCorpus(
         );
         try validateQualificationRevision(allocator, io, manifest, repository_root, entry.repository, entry.revision);
         try History.source(allocator, io, repository_root, entry.revision, entry.path, entry.sha256);
-        try validateSourceHash(allocator, io, repository_root, entry.path, entry.sha256);
+        if (entry.current) try validateSourceHash(allocator, io, repository_root, entry.path, entry.sha256);
     }
     for (manifest.hot_functions) |entry| {
         if (!repositoryRequired(entry.repository, standalone)) continue;
@@ -662,8 +663,21 @@ fn auditQualification(cases: []const QualificationCase) !void {
             return error.UnsealedQualificationCase;
         try requireHex(entry.revision, 40);
         try requireHex(entry.sha256, 64);
-        for (cases[0..index]) |previous| if (std.mem.eql(u8, previous.id, entry.id))
-            return error.DuplicateRegistryEntry;
+        for (cases[0..index]) |previous| {
+            if (std.mem.eql(u8, previous.id, entry.id)) return error.DuplicateRegistryEntry;
+            if (entry.current and previous.current and
+                std.mem.eql(u8, previous.repository, entry.repository) and
+                std.mem.eql(u8, previous.path, entry.path)) return error.DuplicateCurrentQualificationSource;
+        }
+        if (!entry.current) {
+            var has_current = false;
+            for (cases) |candidate| {
+                if (candidate.current and
+                    std.mem.eql(u8, candidate.repository, entry.repository) and
+                    std.mem.eql(u8, candidate.path, entry.path)) has_current = true;
+            }
+            if (!has_current) return error.MissingCurrentQualificationSource;
+        }
     }
 }
 
@@ -812,6 +826,29 @@ test "current sealed qualification sources still reject changed bytes" {
         "Sealed.sx",
         &expected,
     ));
+}
+
+test "requalified source retains historical seal and only one current identity" {
+    const historical: QualificationCase = .{
+        .id = "historical", .repository = "Silex-Benchmarks",
+        .revision = "1111111111111111111111111111111111111111", .path = "Main.sx",
+        .sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        .sealed = true, .current = false,
+    };
+    const current: QualificationCase = .{
+        .id = "current", .repository = historical.repository,
+        .revision = "2222222222222222222222222222222222222222", .path = historical.path,
+        .sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        .sealed = true,
+    };
+    try auditQualification(&.{ historical, current });
+    try std.testing.expectError(error.MissingCurrentQualificationSource,
+        auditQualification(&.{historical}));
+    var duplicate = historical;
+    duplicate.id = "another-current";
+    duplicate.current = true;
+    try std.testing.expectError(error.DuplicateCurrentQualificationSource,
+        auditQualification(&.{ historical, current, duplicate }));
 }
 
 test "coverage audit rejects a stable entry without its cost proof" {

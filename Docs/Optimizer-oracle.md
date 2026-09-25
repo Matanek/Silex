@@ -162,7 +162,11 @@ other revisions retain the ordinary ancestry check. This is a reviewed closure
 change, not a claim that the two package trees are equivalent.
 
 Sealed corpus and hot-function sources must match their hashes both at the
-original revision and in the current working tree. Historical proofs instead
+original revision and in the current working tree. When a corpus source is
+intentionally revised, its historical entry remains sealed with `current: false`
+and a new sealed entry at the same path binds the current bytes and revision.
+The audit rejects two current entries for one path; it never replaces the old
+Git revision or its hash. Historical proofs instead
 bind their recorded source revision; their status never substitutes for running
 the current gate. The GFX.ECS reconciliation and fresh package/consumer evidence
 are recorded in
