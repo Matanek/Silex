@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "target": "windows-x64",
+  "timestamp": "2026-09-25T00:16:28.684Z",
+  "environment": {
+    "os": "win32",
+    "release": "10.0.26100",
+    "cpu": "AMD EPYC 7763 64-Core Processor                "
+  },
+  "source": {
+    "path": "D:\\a\\Silex\\Silex\\Tests\\Native\\HeapAllocation.sx",
+    "sha256": "353c9f8a7fcf37452ea6a544f520de290ac1758b0a80c224c3de750db2b890c3",
+    "expected_stdout": "256000\n"
+  },
+  "configurations": {
+    "candidate": {
+      "compiler": "D:\\a\\_temp\\heap-candidate\\silex.exe",
+      "sha256": "a12353d0d90e88dd0f666d3cdf5dc5f8a3bba9858558e19811f92c78bc026fc0",
+      "version": "silex 0.47.0",
+      "binaries": {
+        "debug": {
+          "path": "D:\\a\\_temp\\heap-qualification\\candidate-debug.exe",
+          "sha256": "32c1f92c07dd86c20c29bd30f696c114c00278a0ecc30f7e03416bd0cbc132ea"
+        },
+        "release": {
+          "path": "D:\\a\\_temp\\heap-qualification\\candidate-release.exe",
+          "sha256": "721418ba090972d1d6610a0a24c49430ba525f8e199083bdf4f928b8f9362dee"
+        }
+      },
+      "correctness": {
+        "heap_tests": "ok - recycled allocations preserve string bytes and detached collections\n1 passed; 0 failed\n",
+        "portability_tests": "ok - dynamic protocol dispatch returns updated structures and shared classes\nok - execute direct indirect and dynamic calls beyond native registers\nok - preserve paired float32 arithmetic on native\nok - mutate a class-owned native list without changing its snapshot\nok - replace class elements in a class-owned native list\nok - preserve embedded byte contents on native\nok - format native floats through the standalone runtime\nok - convert native float precision in both directions\nok - replace and preserve an aliased native list\nok - swap and reverse a native list\nok - grow a native list at every position\nok - remove native list elements from every position\nok - slice view mutate and clear native lists\nok - mutable aggregate view detaches shared native list\ncopy state drop\ncopy state drop\nok - deep-copy repeated native class roots without collections\nnative cycle drop\nnative cycle drop\nok - finalize a direct native class cycle\nnative cycle drop\nnative cycle drop\nok - finalize a native class cycle through lists\nnative cycle drop\nnative cycle drop\nok - finalize a native class cycle through protocols\nok - execute the complete native collection mutation slice\ncopy state drop\ncopy state drop\nok - execute native ownership and deep-copy runtime\nok - preserve resource aggregates across native list growth\nok - serialize native mutations with mutex\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nok - finalize native cycles across direct collection and protocol edges\nok - native bound callbacks own and release their receiver graph\nok - mutable owning borrows preserve field ownership across callbacks and returns\nok - deep copy clones inherited class fields after construction cleanup\nok - identity comparisons release temporary class and optional results\nok - upcasts preserve ownership of temporary derived instances\nok - native aggregate calls preserve loop-carried coordinates\n29 passed; 0 failed\n"
+      }
+    },
+    "baseline": {
+      "compiler": "D:\\a\\_temp\\compiler-download\\silex-windows-x64\\bin\\silex.exe",
+      "sha256": "474240dcce1ba8889c0c50503e2612d89ef19af06eb6451be6d07cb46e0e7711",
+      "version": "silex 0.47.0",
+      "binaries": {
+        "debug": {
+          "path": "D:\\a\\_temp\\heap-qualification\\baseline-debug.exe",
+          "sha256": "f58a1b4f4229ef899b56750076b7861cb65b1ef17c62f131331612c1bbbc5ec4"
+        },
+        "release": {
+          "path": "D:\\a\\_temp\\heap-qualification\\baseline-release.exe",
+          "sha256": "0c2fc318a140f2fb4e72b169ca3fc9e27c98c904c14e5bbb7fbc4bda147028e9"
+        }
+      },
+      "correctness": {
+        "heap_tests": "ok - recycled allocations preserve string bytes and detached collections\n1 passed; 0 failed\n",
+        "portability_tests": "ok - dynamic protocol dispatch returns updated structures and shared classes\nok - execute direct indirect and dynamic calls beyond native registers\nok - preserve paired float32 arithmetic on native\nok - mutate a class-owned native list without changing its snapshot\nok - replace class elements in a class-owned native list\nok - preserve embedded byte contents on native\nok - format native floats through the standalone runtime\nok - convert native float precision in both directions\nok - replace and preserve an aliased native list\nok - swap and reverse a native list\nok - grow a native list at every position\nok - remove native list elements from every position\nok - slice view mutate and clear native lists\nok - mutable aggregate view detaches shared native list\ncopy state drop\ncopy state drop\nok - deep-copy repeated native class roots without collections\nnative cycle drop\nnative cycle drop\nok - finalize a direct native class cycle\nnative cycle drop\nnative cycle drop\nok - finalize a native class cycle through lists\nnative cycle drop\nnative cycle drop\nok - finalize a native class cycle through protocols\nok - execute the complete native collection mutation slice\ncopy state drop\ncopy state drop\nok - execute native ownership and deep-copy runtime\nok - preserve resource aggregates across native list growth\nok - serialize native mutations with mutex\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nnative cycle drop\nok - finalize native cycles across direct collection and protocol edges\nok - native bound callbacks own and release their receiver graph\nok - mutable owning borrows preserve field ownership across callbacks and returns\nok - deep copy clones inherited class fields after construction cleanup\nok - identity comparisons release temporary class and optional results\nok - upcasts preserve ownership of temporary derived instances\nok - native aggregate calls preserve loop-carried coordinates\n29 passed; 0 failed\n"
+      }
+    }
+  },
+  "samples": [
+    {
+      "round": 0,
+      "configuration": "candidate",
+      "elapsed_ms": 12.25800000000163
+    },
+    {
+      "round": 0,
+      "configuration": "baseline",
+      "elapsed_ms": 150.46929999999702
+    },
+    {
+      "round": 1,
+      "configuration": "baseline",
+      "elapsed_ms": 146.30950000000303
+    },
+    {
+      "round": 1,
+      "configuration": "candidate",
+      "elapsed_ms": 11.64879999999539
+    },
+    {
+      "round": 2,
+      "configuration": "candidate",
+      "elapsed_ms": 11.30480000001262
+    },
+    {
+      "round": 2,
+      "configuration": "baseline",
+      "elapsed_ms": 144.98379999998724
+    },
+    {
+      "round": 3,
+      "configuration": "baseline",
+      "elapsed_ms": 147.30159999997704
+    },
+    {
+      "round": 3,
+      "configuration": "candidate",
+      "elapsed_ms": 11.727700000017649
+    },
+    {
+      "round": 4,
+      "configuration": "candidate",
+      "elapsed_ms": 11.422500000015134
+    },
+    {
+      "round": 4,
+      "configuration": "baseline",
+      "elapsed_ms": 144.93880000000354
+    },
+    {
+      "round": 5,
+      "configuration": "baseline",
+      "elapsed_ms": 145.69550000000163
+    },
+    {
+      "round": 5,
+      "configuration": "candidate",
+      "elapsed_ms": 11.785000000003492
+    },
+    {
+      "round": 6,
+      "configuration": "candidate",
+      "elapsed_ms": 11.203999999997905
+    },
+    {
+      "round": 6,
+      "configuration": "baseline",
+      "elapsed_ms": 144.0843000000168
+    },
+    {
+      "round": 7,
+      "configuration": "baseline",
+      "elapsed_ms": 147.56950000001234
+    },
+    {
+      "round": 7,
+      "configuration": "candidate",
+      "elapsed_ms": 12.013500000000931
+    },
+    {
+      "round": 8,
+      "configuration": "candidate",
+      "elapsed_ms": 11.597899999993388
+    },
+    {
+      "round": 8,
+      "configuration": "baseline",
+      "elapsed_ms": 146.19330000001355
+    },
+    {
+      "round": 9,
+      "configuration": "baseline",
+      "elapsed_ms": 148.5282999999763
+    },
+    {
+      "round": 9,
+      "configuration": "candidate",
+      "elapsed_ms": 11.865400000009686
+    },
+    {
+      "round": 10,
+      "configuration": "candidate",
+      "elapsed_ms": 11.344700000016019
+    },
+    {
+      "round": 10,
+      "configuration": "baseline",
+      "elapsed_ms": 147.25239999999758
+    },
+    {
+      "round": 11,
+      "configuration": "baseline",
+      "elapsed_ms": 145.37589999998454
+    },
+    {
+      "round": 11,
+      "configuration": "candidate",
+      "elapsed_ms": 17.496699999988778
+    }
+  ],
+  "summary": {
+    "candidate": {
+      "median_ms": 11.68825000000652,
+      "min_ms": 11.203999999997905,
+      "max_ms": 17.496699999988778
+    },
+    "baseline": {
+      "median_ms": 146.2514000000083,
+      "min_ms": 144.0843000000168,
+      "max_ms": 150.46929999999702
+    }
+  },
+  "qualification_commit": "3229cfd285e9356589417eeac1fa1d7c9af4cf93",
+  "published_compiler_version": "0.47.0",
+  "limitations": "Fixed-work allocation diagnostic, including process startup. No cross-host comparison, parity claim or automatic speedup verdict. Baseline and candidate must differ only in the intended compiler change."
+}

@@ -82,18 +82,20 @@ common; the mechanism and performance evidence do not.
 The owning paths are [ARM64 allocation](../Toolchain/Sources/Arm64/Allocation.zig),
 its [system heap adapters](../Toolchain/Sources/Arm64/SystemHeap.zig), and
 [X64 emission](../Toolchain/Sources/X64/Encoder.zig) (`emitAllocation`,
-`emitRuntimeAllocateCallback`, and `emitRuntimeReleaseCallback`). The other
-five paths still request virtual-memory regions for dynamic allocations. The
+`emitRuntimeAllocateCallback`, and `emitRuntimeReleaseCallback`). At that tag,
+the other five paths request virtual-memory regions for dynamic allocations. The
 same kind of cost is therefore a relevant hypothesis there, not an established
 speedup and not a justified non-applicable case.
 
-The pending Windows implementation routes both architectures through UCRT
+The Windows implementation prepared for 0.47.1 routes both architectures through UCRT
 `calloc`/`free`. ARM64 shares its preserving adapters with Darwin; X64 uses
 [Windows system heap adapters](../Toolchain/Sources/X64/SystemHeap.zig) that
 preserve scratch GPRs and all 128-bit SSE lanes around the platform call.
 Classes, strings, collections, deep-copy and cycle callbacks use the same
 allocation/free pair. This is not part of the pinned 0.47.0 table: native
-Windows qualification and paired measurements gate its publication. Linux and
+Windows qualification and paired measurements are recorded in the
+[allocation diagnostic](../Toolchain/Benchmarks/Native/Allocation/README.md).
+The complete distribution gate still owns final publication. Linux and
 macOS X64 still use their existing mapping paths.
 
 The next allocator slice must compare equivalent fixed work against a pinned
@@ -131,8 +133,9 @@ With `candidate=true`, it first cross-builds the exact workflow commit, then
 executes that candidate and the pinned public baseline on the selected native
 host. Cross-building is not the execution proof: both correctness and timing
 come from the subsequent native job.
-Neither wiring the gate nor recording the 0.47.0 baseline closes the five
-unimplemented heap paths listed above.
+Neither wiring the gate nor recording the 0.47.0 baseline implements a heap
+adapter. The subsequent Windows proofs close only the Windows slice; the two
+Linux paths and macOS X64 remain untreated.
 
 This limitation does not narrow unrelated shared transformations. For example,
 [aggregate-load optimization](../Toolchain/Sources/Optimize/AggregateLoads.zig)
@@ -187,8 +190,8 @@ a virtual-memory region for each small allocation.
 These runtime imports belong to the encoded image, not portable IR. Both the
 direct Mach-O writer and the relocatable-object writer include them, and the
 in-memory native test runner resolves the same allocator. Images without
-allocation retain their original imports. Other OS and architecture allocation
-paths are unchanged.
+allocation retain their original imports. Windows reuses the preserving ARM64
+adapter with its own imports; Linux and macOS X64 retain mapping-based allocation.
 
 ## Emit macOS X64 programs
 
@@ -278,8 +281,11 @@ Boundary calls and the clean-home setup path.
 ## Emit Windows programs
 
 The Windows emitters write PE32+ for X64 and ARM64, including deterministic
-import descriptors, lookup tables and IAT entries for `VirtualAlloc` and
-`ProcessPrng`. X64 uses the Win64 boundary registers and ARM64 shares the
+import descriptors, lookup tables and IAT entries for UCRT heap operations and
+system boundaries such as `ProcessPrng`. The direct writer's import table can
+retain virtual-memory symbols even when object allocation calls only
+`calloc`/`free`; symbol presence alone does not identify the executed allocator.
+X64 uses the Win64 boundary registers and ARM64 shares the
 instruction encoder while substituting the Windows allocation boundary. The
 Windows X64 path shares the Linux X64 list, output, stack-argument and
 baseline SSE pair instruction coverage while adapting system calls to
