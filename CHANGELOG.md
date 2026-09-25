@@ -6,14 +6,37 @@ required changes. Each release candidate adds its French entry first in
 is recorded under `## [Unreleased]` and consolidated when preparing a release.
 This editorial history starts with version 0.44.1.
 
-## [Unreleased]
+## [0.47.1] - 2026-09-25
+
+### Why upgrade?
+
+This release reduces small-allocation costs in native Windows programs on
+both ARM64 and x64. The default backend remains `native` on all six platforms;
+language and ownership semantics are unchanged.
+
+### Changes
 
 - The Windows ARM64 and x64 native backend uses the system heap for strings,
   collections, classes, and copy/collection callbacks instead of reserving
   virtual memory per allocation. Adapters preserve scratch and SIMD registers;
-  value and ownership semantics remain unchanged. Native Windows qualification
-  and measurements must finish before publication. Linux and macOS x64 remain
-  untreated; no improvement is claimed for them.
+  value and ownership semantics remain unchanged.
+- Distribution qualification now checks allocation, copying and cycles, then
+  fixed work in Debug and Release, on every native target. Measurements remain
+  separate from correctness tests.
+- The historical 0.47.0 notes distinguish shared changes, target-specific
+  mechanisms and the actual scope of measurements.
+
+The [fixed-work diagnostic](https://github.com/Matanek/Silex/blob/v0.47.1/Toolchain/Benchmarks/Native/Allocation/README.md)
+compares the Windows candidate with 0.47.0 on the same host, with twelve Release
+samples per configuration: medians move from 146.25 to 11.69 ms on x64 and from
+178.10 to 14.94 ms on ARM64. These results include process startup and do not
+predict application-level speedups. Linux and macOS x64 retain their existing
+allocation paths; their extension remains unfinished and no gain is claimed.
+
+### Impact and migration
+
+Recompile Windows programs to use the new allocator. No source migration or
+backend change is required.
 
 ## [0.47.0] - 2026-09-24
 

@@ -6,14 +6,37 @@ française, puis sa traduction anglaise dans `CHANGELOG.md`. Les changements en
 cours sont consignés sous `## [Unreleased]`, puis regroupés lors de la release.
 Cet historique éditorial commence à la version 0.44.1.
 
-## [Unreleased]
+## [0.47.1] - 2026-09-25
+
+### Pourquoi mettre à jour ?
+
+Cette version réduit le coût des petites allocations des programmes natifs
+Windows, sur ARM64 comme sur x64. Le backend par défaut reste `native` sur les
+six plateformes ; le contrat du langage et de l'ownership ne change pas.
+
+### Changements
 
 - Le backend natif Windows ARM64 et x64 utilise le tas système pour les chaînes,
   collections, classes et callbacks de copie/collecte, au lieu d'une réservation
   de mémoire virtuelle par allocation. Les adaptateurs préservent les registres
   temporaires et SIMD ; le contrat de valeurs et d'ownership ne change pas.
-  La qualification native et les mesures Windows doivent être terminées avant
-  publication. Linux et macOS x64 restent à traiter ; aucun gain n'y est annoncé.
+- La qualification des distributions vérifie désormais les allocations,
+  les copies et les cycles, puis une charge fixe en Debug et Release, sur
+  chaque cible native. Les mesures restent séparées des tests de correction.
+- Les notes historiques de 0.47.0 distinguent les changements communs, les
+  mécanismes propres aux cibles et la portée réelle des mesures.
+
+Le [diagnostic à travail fixe](https://github.com/Matanek/Silex/blob/v0.47.1/Toolchain/Benchmarks/Native/Allocation/README.md)
+compare le candidat Windows à 0.47.0 sur le même hôte, avec douze mesures Release
+par configuration : médiane de 146,25 à 11,69 ms sur x64 et de 178,10 à 14,94 ms
+sur ARM64. Ces résultats incluent le démarrage du processus et ne prédisent pas
+le gain d'une application. Linux et macOS x64 conservent leurs chemins
+d'allocation existants ; leur extension reste à faire et aucun gain n'y est annoncé.
+
+### Impact et migration
+
+Recompilez les programmes Windows pour bénéficier du nouvel allocateur.
+Aucune migration de source ni changement de backend n'est nécessaire.
 
 ## [0.47.0] - 2026-09-24
 

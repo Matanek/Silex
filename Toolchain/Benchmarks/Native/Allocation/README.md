@@ -24,12 +24,32 @@ Process startup is included. These descriptive measurements are not a general
 application speedup, a comparison between hosts, or a statistical parity gate.
 No Linux or macOS x64 allocator improvement is claimed.
 
-Both compilers passed the allocation regression, all 29 native portability
-tests (including classes, copy/cycle callbacks and ownership), and the fixed
-workload in Debug and Release before sampling. Windows ARM64's first cold
-compilation took roughly 336 seconds; the earlier 180-second harness deadline
-was insufficient. The corrected harness separates compilation deadlines from
-the short executable deadline and prints the active operation.
+The still-mapping paths were also measured with the published 0.47.0 compiler
+and the same fixed-work source (LF checkout SHA-256
+`864a20327ea06fed40828be0d1f49b707ca11562bd6614b4386789f9edad2114`).
+The Windows report hashes the CRLF checkout bytes; the fixture's work and
+expected output are the same.
+Each row has twelve Release samples on its own native host, but no changed
+allocator candidate yet. These absolute times are diagnostic baselines, not
+cross-host comparisons or measured gains:
+
+| Native host | Published 0.47.0 median [min–max], ms | Qualification run |
+| --- | --- | --- |
+| Linux ARM64, Ubuntu 24.04 ARM runner | 120.143 [115.270–131.378] | [run](https://github.com/Matanek/Silex/actions/runs/36105669215) |
+| Linux x64, AMD EPYC 9V74 | 312.081 [272.153–320.077] | [run](https://github.com/Matanek/Silex/actions/runs/36105665651) |
+| macOS x64, Intel i7-8700B | 250.090 [230.720–404.369] | [run](https://github.com/Matanek/Silex/actions/runs/36105668021) |
+
+All three runs passed the heap regression, native portability corpus, and
+Debug/Release fixed-work correctness checks. The macOS x64 range is notably
+wide; an improvement claim will need paired baseline/candidate samples on the
+same host, not a comparison with these independent runs.
+
+Both Windows compilers passed the allocation regression, all 29 native
+portability tests (including classes, copy/cycle callbacks and ownership),
+and the fixed workload in Debug and Release before sampling. Windows ARM64's
+first cold compilation took roughly 336 seconds; the earlier 180-second
+harness deadline was insufficient. The corrected harness separates compilation
+deadlines from the short executable deadline and prints the active operation.
 
 The unmodified reports retain compiler, executable and source hashes, all raw
 samples, correctness output and exact qualification commit:
