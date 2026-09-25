@@ -81,6 +81,14 @@ actual_files = [line.strip() for line in match.group(1).splitlines() if line.str
 if actual_files != expected_files:
     raise SystemExit("release set differs from the twelve target files")
 
+release_set = re.search(r"^  release-set:\n(.*?)(?=^  publish:)", workflow, re.MULTILINE | re.DOTALL)
+if release_set is None:
+    raise SystemExit("missing release-set job")
+release_downloads = release_set.group(1).count("uses: actions/download-artifact@v8")
+release_filters = re.findall(r"^          pattern: silex-\*$", release_set.group(1), re.MULTILINE)
+if release_downloads != 2 or len(release_filters) != release_downloads:
+    raise SystemExit("release-set downloads must exclude non-distribution artifacts")
+
 if 'zig build "-Dtarget=$zigTarget"' not in windows_builder:
     raise SystemExit("Windows release build target must be an interpolated PowerShell argument")
 

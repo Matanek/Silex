@@ -347,11 +347,14 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.reuse_run_id }}
+          # Exclude heap-qualification diagnostics from the exact release set.
+          pattern: silex-*
           path: release-reused
           merge-multiple: true
       - name: Collect files verified in this run
         uses: actions/download-artifact@v8
         with:
+          pattern: silex-*
           path: release-current
           merge-multiple: true
       - name: Assemble and verify the complete release set
