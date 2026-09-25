@@ -1,6 +1,9 @@
 name: Refresh Silex website
 
 on:
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md, CHANGELOG.fr.md]
   workflow_dispatch:
     inputs:
       version:
@@ -25,8 +28,23 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      - name: Resolve the published version for editorial refreshes
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$REQUESTED_VERSION"
+          if [[ -z "$version" ]]; then
+            tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+            version="${tag#v}"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       - name: Deploy and verify the canonical website snapshot
         env:
           GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.published.outputs.version }}
         run: python3 .github/scripts/refresh-website.py "$RELEASE_VERSION"
