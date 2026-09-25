@@ -4,7 +4,6 @@ const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Allocation = @import("Allocation.zig");
-const WindowsImports = @import("../Windows/Imports.zig");
 
 const Allocator = std.mem.Allocator;
 pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
@@ -21,28 +20,9 @@ pub fn emitInit(
     var width: usize = 0;
     for (value.fields) |field| width += field.width;
     try immediate(allocator, words, .x1, (width + 4) * Machine.slot_size);
-    switch (platform) {
-        .darwin, .linux => try Allocation.emit(allocator, words, external_sites, platform),
-        .windows => {
-            try immediate(allocator, words, .x0, 0);
-            try immediate(allocator, words, .x1, (width + 4) * Machine.slot_size);
-            try immediate(allocator, words, .x2, 0x3000);
-            try immediate(allocator, words, .x3, 4);
-            try external_sites.append(allocator, .{
-                .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
-                .function = 0,
-                .windows_symbol = WindowsImports.Symbol.virtual_alloc,
-            });
-            try words.append(allocator, A64.addressPage(.x16));
-            try words.append(allocator, A64.load64(.x16, .x16, 0));
-            try words.append(allocator, A64.branchLinkRegister(.x16));
-        },
-    }
+    try Allocation.emit(allocator, words, external_sites, platform);
     const failed = words.items.len;
-    try words.append(allocator, switch (platform) {
-        .darwin, .linux => Allocation.failureBranch(platform),
-        .windows => A64.compareBranchZero(.x0),
-    });
+    try words.append(allocator, Allocation.failureBranch(platform));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try immediate(allocator, words, .x9, value.structure);
     try words.append(allocator, A64.store64(.x9, .x15, 0));

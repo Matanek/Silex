@@ -320,8 +320,8 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         }
     }
 
-    const external_functions = if (platform == .darwin)
-        try @import("DarwinHeap.zig").append(allocator, &words, &external_call_sites, program.external_functions)
+    const external_functions = if (platform == .darwin or platform == .windows)
+        try @import("SystemHeap.zig").append(allocator, &words, &external_call_sites, program.external_functions, @enumFromInt(@intFromEnum(platform)))
     else
         try allocator.dupe(Machine.ExternalFunction, program.external_functions);
     errdefer allocator.free(external_functions);
@@ -5892,7 +5892,7 @@ test "form function addresses beyond the ADR range" {
     );
 }
 
-test "Windows ARM64 runtime callbacks use the platform allocator imports" {
+test "Windows ARM64 runtime callbacks use the preserving system heap adapters" {
     var words: std.ArrayList(u32) = .empty;
     defer words.deinit(std.testing.allocator);
     var sites: std.ArrayList(ExternalCalls.Site) = .empty;
@@ -5901,13 +5901,16 @@ test "Windows ARM64 runtime callbacks use the platform allocator imports" {
     try emitRuntimeAllocateCallback(std.testing.allocator, &words, &sites, .windows);
     try emitRuntimeReleaseCallback(std.testing.allocator, &words, &sites, .windows);
 
+    const functions = try @import("SystemHeap.zig").append(std.testing.allocator, &words, &sites, &.{}, .windows);
+    defer std.testing.allocator.free(functions);
+
     try std.testing.expectEqual(@as(usize, 2), sites.items.len);
     try std.testing.expectEqual(
-        @import("../Windows/Imports.zig").Symbol.virtual_alloc,
+        @import("../Windows/Imports.zig").Symbol.crt_calloc,
         sites.items[0].windows_symbol.?,
     );
     try std.testing.expectEqual(
-        @import("../Windows/Imports.zig").Symbol.virtual_free,
+        @import("../Windows/Imports.zig").Symbol.crt_free,
         sites.items[1].windows_symbol.?,
     );
 }

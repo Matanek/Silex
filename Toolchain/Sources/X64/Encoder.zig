@@ -14,6 +14,7 @@ const FloatPairs = @import("FloatPairs.zig");
 const BranchSelection = @import("BranchSelection.zig");
 const Reachability = @import("Reachability.zig");
 const TextRuntime = @import("TextRuntime.zig");
+const SystemHeap = @import("SystemHeap.zig");
 
 const Allocator = std.mem.Allocator;
 const dynamic_string_flag: u64 = 1 << 63;
@@ -2007,11 +2008,7 @@ fn emitAllocation(
             try bytes.appendSlice(allocator, &.{ 0x0f, 0x82 });
         },
         .windows => {
-            try emitImmediate(allocator, bytes, .rcx, 0);
-            try emitMoveRegister(allocator, bytes, .rdx, .rsi);
-            try emitImmediate(allocator, bytes, .r8, 0x3000);
-            try emitImmediate(allocator, bytes, .r9, 4);
-            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_alloc);
+            try SystemHeap.allocate(allocator, bytes, import_sites, Register.rsi);
             try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
         },
     }
@@ -2165,10 +2162,7 @@ fn emitDeallocation(
             try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
         },
         .windows => {
-            if (pointer != .rcx) try emitMoveRegister(allocator, bytes, .rcx, pointer);
-            try emitImmediate(allocator, bytes, .rdx, 0);
-            try emitImmediate(allocator, bytes, .r8, 0x8000);
-            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_free);
+            try SystemHeap.release(allocator, bytes, import_sites, pointer);
         },
     }
 }
@@ -2214,11 +2208,7 @@ fn emitRuntimeAllocateCallback(
         },
         .windows => {
             try bytes.append(allocator, 0x55);
-            try emitMoveRegister(allocator, bytes, .rdx, .rdi);
-            try emitImmediate(allocator, bytes, .rcx, 0);
-            try emitImmediate(allocator, bytes, .r8, 0x3000);
-            try emitImmediate(allocator, bytes, .r9, 4);
-            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_alloc);
+            try SystemHeap.allocate(allocator, bytes, import_sites, Register.rdi);
             try bytes.appendSlice(allocator, &.{ 0x5d, 0xc3 });
         },
     }
@@ -2241,10 +2231,7 @@ fn emitRuntimeReleaseCallback(
         },
         .windows => {
             try bytes.append(allocator, 0x55);
-            try emitMoveRegister(allocator, bytes, .rcx, .rdi);
-            try emitImmediate(allocator, bytes, .rdx, 0);
-            try emitImmediate(allocator, bytes, .r8, 0x8000);
-            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_free);
+            try SystemHeap.release(allocator, bytes, import_sites, Register.rdi);
             try bytes.appendSlice(allocator, &.{ 0x5d, 0xc3 });
         },
     }
@@ -3320,10 +3307,7 @@ fn emitStringDrop(
             try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
         },
         .windows => {
-            try emitMoveRegister(allocator, bytes, .rcx, .r10);
-            try emitImmediate(allocator, bytes, .rdx, 0);
-            try emitImmediate(allocator, bytes, .r8, 0x8000);
-            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_free);
+            try SystemHeap.release(allocator, bytes, import_sites, Register.r10);
         },
     }
     try patchRelative(bytes.items, retained, bytes.items.len);
@@ -4695,8 +4679,8 @@ test "encode owned strings with allocation retain and release on both X64 hosts"
     var alloc = false;
     var free = false;
     for (windows.windows_import_sites) |site| switch (site.symbol) {
-        .virtual_alloc => alloc = true,
-        .virtual_free => free = true,
+        .crt_calloc => alloc = true,
+        .crt_free => free = true,
         else => {},
     };
     try std.testing.expect(alloc);

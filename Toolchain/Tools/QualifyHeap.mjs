@@ -18,8 +18,8 @@ export function checked(result, command) {
     return result.stdout.replaceAll("\r\n", "\n");
 }
 
-function run(binary, args = []) {
-    return checked(spawnSync(binary, args, { encoding: "utf8", timeout: 180_000 }), binary);
+function run(binary, args = [], timeout = 30_000) {
+    return checked(spawnSync(binary, args, { encoding: "utf8", timeout }), [binary, ...args].join(" "));
 }
 
 export function median(values) {
@@ -54,12 +54,15 @@ export function qualify(candidate, outputDirectory, target, baseline) {
         const targets = run(compiler, ["targets"]).split("\n");
         if (!targets.includes(`${target} (host)`)) throw new Error(`Compiler is not native to ${target}`);
         const information = { compiler, sha256: hash(compiler), version: run(compiler, ["--version"]).trim(), binaries: {}, correctness: {} };
-        information.correctness.heap_tests = run(compiler, ["test", source, "--backend", "native", "--nocache"]);
-        information.correctness.portability_tests = run(compiler, ["test", join(repository, "Tests/Native/NativePortability.sx"), "--backend", "native", "--nocache"]);
+        console.log(`${name}: heap regression tests (${target})`);
+        information.correctness.heap_tests = run(compiler, ["test", source, "--backend", "native", "--nocache"], 600_000);
+        console.log(`${name}: ownership and portability tests (${target})`);
+        information.correctness.portability_tests = run(compiler, ["test", join(repository, "Tests/Native/NativePortability.sx"), "--backend", "native", "--nocache"], 600_000);
         for (const mode of ["debug", "release"]) {
             // Correctness and execution mode are independent from timing.
+            console.log(`${name}: compile and verify ${mode} (${target})`);
             const binary = join(output, `${name}-${mode}${platform() === "win32" ? ".exe" : ""}`);
-            run(compiler, ["compile", source, "--backend", "native", `--${mode}`, "--nocache", "-o", binary]);
+            run(compiler, ["compile", source, "--backend", "native", `--${mode}`, "--nocache", "-o", binary], 600_000);
             sample(binary);
             information.binaries[mode] = { path: binary, sha256: hash(binary) };
         }

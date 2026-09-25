@@ -6,6 +6,15 @@ française, puis sa traduction anglaise dans `CHANGELOG.md`. Les changements en
 cours sont consignés sous `## [Unreleased]`, puis regroupés lors de la release.
 Cet historique éditorial commence à la version 0.44.1.
 
+## [Unreleased]
+
+- Le backend natif Windows ARM64 et x64 utilise le tas système pour les chaînes,
+  collections, classes et callbacks de copie/collecte, au lieu d'une réservation
+  de mémoire virtuelle par allocation. Les adaptateurs préservent les registres
+  temporaires et SIMD ; le contrat de valeurs et d'ownership ne change pas.
+  La qualification native et les mesures Windows doivent être terminées avant
+  publication. Linux et macOS x64 restent à traiter ; aucun gain n'y est annoncé.
+
 ## [0.47.0] - 2026-09-24
 
 ### Pourquoi mettre à jour ?

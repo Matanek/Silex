@@ -3,6 +3,7 @@ const A64 = @import("Instructions.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Fixups = @import("Fixups.zig");
 const Machine = @import("Machine.zig");
+const Platform = @import("System.zig").Platform;
 
 const Allocator = std.mem.Allocator;
 
@@ -17,7 +18,9 @@ pub fn append(
     words: *std.ArrayList(u32),
     sites: *std.ArrayList(ExternalCalls.Site),
     externals: []const Machine.ExternalFunction,
+    platform: Platform,
 ) (Allocator.Error || Fixups.Error)![]const Machine.ExternalFunction {
+    std.debug.assert(platform == .darwin or platform == .windows);
     var needed = false;
     for (sites.items) |site| if (site.heap_operation != null) {
         needed = true;
@@ -26,9 +29,9 @@ pub fn append(
     if (!needed) return allocator.dupe(Machine.ExternalFunction, externals);
 
     const allocate_at = words.items.len;
-    try emitAdapter(allocator, words, sites, externals.len, true);
+    try emitAdapter(allocator, words, sites, externals.len, true, platform);
     const release_at = words.items.len;
-    try emitAdapter(allocator, words, sites, externals.len + 1, false);
+    try emitAdapter(allocator, words, sites, externals.len + 1, false, platform);
     var retained: usize = 0;
     for (sites.items) |site| {
         if (site.heap_operation) |operation| {
@@ -42,6 +45,7 @@ pub fn append(
         }
     }
     sites.shrinkRetainingCapacity(retained);
+    if (platform == .windows) return allocator.dupe(Machine.ExternalFunction, externals);
     const result = try allocator.alloc(Machine.ExternalFunction, externals.len + 2);
     @memcpy(result[0..externals.len], externals);
     result[externals.len] = .{
@@ -63,20 +67,28 @@ fn emitAdapter(
     sites: *std.ArrayList(ExternalCalls.Site),
     function: usize,
     allocate: bool,
+    platform: Platform,
 ) Allocator.Error!void {
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, frame_size, false));
     for (0..18) |index| try words.append(allocator, A64.store64(@enumFromInt(index), .zero_or_sp, @intCast(index * 8)));
-    try words.append(allocator, A64.store64(.x30, .zero_or_sp, 144));
+    try words.append(allocator, A64.store64(.x29, .zero_or_sp, 144));
+    try words.append(allocator, A64.store64(.x30, .zero_or_sp, 152));
+    try words.append(allocator, A64.addSubtractImmediate(.x29, .zero_or_sp, 144, true));
     // Preserve full 128-bit vectors, not just AAPCS64's low halves of d8-d15.
     for (0..32) |index| try words.append(allocator, vectorStack(@intCast(index), @intCast(vector_offset + index * 16), false));
     if (allocate) try words.append(allocator, A64.moveWideZero32(.x0, 1));
-    try sites.append(allocator, .{ .instruction_offset = @intCast(words.items.len * 4), .function = function });
+    try sites.append(allocator, .{
+        .instruction_offset = @intCast(words.items.len * 4),
+        .function = function,
+        .windows_symbol = if (platform == .windows) (if (allocate) .crt_calloc else .crt_free) else null,
+    });
     try words.append(allocator, A64.addressPage(.x16));
     try words.append(allocator, A64.load64(.x16, .x16, 0));
     try words.append(allocator, A64.branchLinkRegister(.x16));
     for (0..32) |index| try words.append(allocator, vectorStack(@intCast(index), @intCast(vector_offset + index * 16), true));
     for (@as(usize, if (allocate) 1 else 0)..18) |index| try words.append(allocator, A64.load64(@enumFromInt(index), .zero_or_sp, @intCast(index * 8)));
-    try words.append(allocator, A64.load64(.x30, .zero_or_sp, 144));
+    try words.append(allocator, A64.load64(.x29, .zero_or_sp, 144));
+    try words.append(allocator, A64.load64(.x30, .zero_or_sp, 152));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, frame_size, true));
     try words.append(allocator, A64.returnInstruction());
 }
@@ -94,7 +106,7 @@ test "heap adapters preserve scratch state and resolve only their own calls" {
     defer sites.deinit(std.testing.allocator);
     try @import("Allocation.zig").emit(std.testing.allocator, &words, &sites, .darwin);
     try @import("Allocation.zig").emitFree(std.testing.allocator, &words, &sites, .darwin);
-    const functions = try append(std.testing.allocator, &words, &sites, &.{});
+    const functions = try append(std.testing.allocator, &words, &sites, &.{}, .darwin);
     defer std.testing.allocator.free(functions);
     try std.testing.expectEqual(@as(usize, 2), functions.len);
     try std.testing.expectEqualStrings("calloc", functions[0].source_name);
@@ -128,10 +140,31 @@ test "images without heap operations retain their original imports" {
         .provider = "Darwin.lib_system",
         .source_name = "getpid",
         .signature = .{ .arguments = &.{}, .result = .int32 },
-    }});
+    }}, .darwin);
     defer std.testing.allocator.free(functions);
     try std.testing.expectEqual(@as(usize, 1), functions.len);
     try std.testing.expectEqualStrings("getpid", functions[0].source_name);
     try std.testing.expectEqual(@as(usize, 0), words.items.len);
     try std.testing.expectEqual(@as(usize, 0), sites.items.len);
+}
+
+test "Windows heap preserves the same private ABI without adding Darwin externals" {
+    var words: std.ArrayList(u32) = .empty;
+    defer words.deinit(std.testing.allocator);
+    var sites: std.ArrayList(ExternalCalls.Site) = .empty;
+    defer sites.deinit(std.testing.allocator);
+    try @import("Allocation.zig").emit(std.testing.allocator, &words, &sites, .windows);
+    try @import("Allocation.zig").emitFree(std.testing.allocator, &words, &sites, .windows);
+    const functions = try append(std.testing.allocator, &words, &sites, &.{}, .windows);
+    defer std.testing.allocator.free(functions);
+    try std.testing.expectEqual(@as(usize, 0), functions.len);
+    try std.testing.expectEqual(@as(usize, 2), sites.items.len);
+    try std.testing.expectEqual(@import("../Windows/Imports.zig").Symbol.crt_calloc, sites.items[0].windows_symbol.?);
+    try std.testing.expectEqual(@import("../Windows/Imports.zig").Symbol.crt_free, sites.items[1].windows_symbol.?);
+    try std.testing.expectEqual(A64.compareBranchZero64(.x0), @import("Allocation.zig").failureBranch(.windows));
+    for (0..32) |index| {
+        const offset: u12 = @intCast(vector_offset + index * 16);
+        try std.testing.expectEqual(@as(usize, 2), std.mem.count(u32, words.items, &.{vectorStack(@intCast(index), offset, false)}));
+        try std.testing.expectEqual(@as(usize, 2), std.mem.count(u32, words.items, &.{vectorStack(@intCast(index), offset, true)}));
+    }
 }

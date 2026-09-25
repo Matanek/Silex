@@ -1,13 +1,18 @@
-name: Qualify published native allocation
+name: Qualify native allocation
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Immutable published compiler version to qualify
+        description: Immutable published compiler baseline
         required: true
         default: '0.47.0'
         type: string
+      candidate:
+        description: Build this exact commit and compare it with the published baseline
+        required: true
+        default: false
+        type: boolean
       target:
         description: Native target (all for the final cross-platform record)
         required: true
@@ -23,8 +28,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build:
+    if: inputs.candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.target == 'all' && '["macos-arm64","macos-x64","linux-arm64","linux-x64","windows-arm64","windows-x64"]' || format('["{0}"]', inputs.target)) }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cross-build the exact candidate with pinned Zig
+        shell: bash
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          case "$NATIVE_TARGET" in
+            macos-arm64) triple=aarch64-macos ;;
+            macos-x64) triple=x86_64-macos ;;
+            linux-arm64) triple=aarch64-linux ;;
+            linux-x64) triple=x86_64-linux ;;
+            windows-arm64) triple=aarch64-windows ;;
+            windows-x64) triple=x86_64-windows ;;
+            *) exit 2 ;;
+          esac
+          "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" build \
+            --build-file Toolchain/build.zig -Dtarget="$triple" -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/heap-candidate"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heap-candidate-${{ matrix.target }}-${{ github.sha }}
+          path: ${{ runner.temp }}/heap-candidate/bin/
+          retention-days: 3
+          if-no-files-found: error
+
   qualify:
-    timeout-minutes: 20
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -36,6 +82,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        if: inputs.candidate
+        with:
+          name: heap-candidate-${{ matrix.target }}-${{ github.sha }}
+          path: ${{ runner.temp }}/heap-candidate
       - name: Download the immutable compiler and verify its checksum
         shell: bash
         run: |
@@ -61,6 +112,7 @@ jobs:
         shell: bash
         env:
           SILEX_DATA_ROOT: ${{ runner.temp }}/silex-heap-data
+          COMPARE_CANDIDATE: ${{ inputs.candidate }}
         run: |
           set -euo pipefail
           compiler="$RUNNER_TEMP/compiler-download/silex-$NATIVE_TARGET/bin/silex"
@@ -68,8 +120,16 @@ jobs:
           chmod +x "$compiler"
           "$compiler" setup
           cd "$GITHUB_WORKSPACE/.."
-          node "$GITHUB_WORKSPACE/Toolchain/Tools/QualifyHeap.mjs" \
-            "$compiler" "$RUNNER_TEMP/heap-qualification" "$NATIVE_TARGET"
+          if [ "$COMPARE_CANDIDATE" = true ]; then
+            candidate="$RUNNER_TEMP/heap-candidate/silex"
+            if [[ "$NATIVE_TARGET" == windows-* ]]; then candidate="$candidate.exe"; fi
+            chmod +x "$candidate"
+            node "$GITHUB_WORKSPACE/Toolchain/Tools/QualifyHeap.mjs" \
+              "$candidate" "$RUNNER_TEMP/heap-qualification" "$NATIVE_TARGET" "$compiler"
+          else
+            node "$GITHUB_WORKSPACE/Toolchain/Tools/QualifyHeap.mjs" \
+              "$compiler" "$RUNNER_TEMP/heap-qualification" "$NATIVE_TARGET"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -152,11 +152,7 @@ fn emitAllocation(allocator: Allocator, bytes: *std.ArrayList(u8), import_sites:
             try bytes.appendSlice(allocator, &.{ 0x0f, 0x82 });
         },
         .windows => {
-            try emitImmediate(allocator, bytes, .rcx, 0);
-            try emitMoveRegister(allocator, bytes, .rdx, .rsi);
-            try emitImmediate(allocator, bytes, .r8, 0x3000);
-            try emitImmediate(allocator, bytes, .r9, 4);
-            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_alloc);
+            try @import("SystemHeap.zig").allocate(allocator, bytes, import_sites, Register.rsi);
             try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
         },
     }

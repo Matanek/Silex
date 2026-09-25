@@ -6,6 +6,15 @@ required changes. Each release candidate adds its French entry first in
 is recorded under `## [Unreleased]` and consolidated when preparing a release.
 This editorial history starts with version 0.44.1.
 
+## [Unreleased]
+
+- The Windows ARM64 and x64 native backend uses the system heap for strings,
+  collections, classes, and copy/collection callbacks instead of reserving
+  virtual memory per allocation. Adapters preserve scratch and SIMD registers;
+  value and ownership semantics remain unchanged. Native Windows qualification
+  and measurements must finish before publication. Linux and macOS x64 remain
+  untreated; no improvement is claimed for them.
+
 ## [0.47.0] - 2026-09-24
 
 ### Why upgrade?

@@ -2,7 +2,6 @@ const std = @import("std");
 const A64 = @import("Instructions.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const System = @import("System.zig");
-const WindowsImports = @import("../Windows/Imports.zig");
 
 const Allocator = std.mem.Allocator;
 pub const Platform = System.Platform;
@@ -20,7 +19,7 @@ pub fn emit(
     platform: Platform,
 ) Error!void {
     switch (platform) {
-        .darwin => {
+        .darwin, .windows => {
             try sites.append(allocator, .{
                 .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
                 .function = 0,
@@ -37,27 +36,13 @@ pub fn emit(
             try System.emitUnixCall(allocator, words, platform, linux_mmap);
             try words.append(allocator, A64.compareRegisters(.x0, .zero_or_sp));
         },
-        .windows => {
-            try words.append(allocator, A64.moveWideZero32(.x0, 0));
-            try words.append(allocator, A64.moveWideZero32(.x2, 0x3000));
-            try words.append(allocator, A64.moveWideZero32(.x3, 4));
-            try sites.append(allocator, .{
-                .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
-                .function = 0,
-                .windows_symbol = WindowsImports.Symbol.virtual_alloc,
-            });
-            try words.append(allocator, A64.addressPage(.x16));
-            try words.append(allocator, A64.load64(.x16, .x16, 0));
-            try words.append(allocator, A64.branchLinkRegister(.x16));
-        },
     }
 }
 
 pub fn failureBranch(platform: Platform) u32 {
     return switch (platform) {
-        .darwin => A64.compareBranchZero64(.x0),
+        .darwin, .windows => A64.compareBranchZero64(.x0),
         .linux => A64.conditionalBranch(.less),
-        .windows => A64.compareBranchZero(.x0),
     };
 }
 
@@ -68,7 +53,7 @@ pub fn emitFree(
     platform: Platform,
 ) Error!void {
     switch (platform) {
-        .darwin => {
+        .darwin, .windows => {
             try sites.append(allocator, .{
                 .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
                 .function = 0,
@@ -77,18 +62,6 @@ pub fn emitFree(
             try words.append(allocator, A64.branchLink());
         },
         .linux => try System.emitUnixCall(allocator, words, platform, linux_munmap),
-        .windows => {
-            try words.append(allocator, A64.moveWideZero32(.x1, 0));
-            try immediate(allocator, words, .x2, 0x8000);
-            try sites.append(allocator, .{
-                .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
-                .function = 0,
-                .windows_symbol = WindowsImports.Symbol.virtual_free,
-            });
-            try words.append(allocator, A64.addressPage(.x16));
-            try words.append(allocator, A64.load64(.x16, .x16, 0));
-            try words.append(allocator, A64.branchLinkRegister(.x16));
-        },
     }
 }
 

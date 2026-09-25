@@ -80,12 +80,21 @@ common; the mechanism and performance evidence do not.
 | `windows-x64` | `VirtualAlloc` / `VirtualFree` | not implemented; benefit not measured |
 
 The owning paths are [ARM64 allocation](../Toolchain/Sources/Arm64/Allocation.zig),
-its [Darwin heap adapters](../Toolchain/Sources/Arm64/DarwinHeap.zig), and
+its [system heap adapters](../Toolchain/Sources/Arm64/SystemHeap.zig), and
 [X64 emission](../Toolchain/Sources/X64/Encoder.zig) (`emitAllocation`,
 `emitRuntimeAllocateCallback`, and `emitRuntimeReleaseCallback`). The other
 five paths still request virtual-memory regions for dynamic allocations. The
 same kind of cost is therefore a relevant hypothesis there, not an established
 speedup and not a justified non-applicable case.
+
+The pending Windows implementation routes both architectures through UCRT
+`calloc`/`free`. ARM64 shares its preserving adapters with Darwin; X64 uses
+[Windows system heap adapters](../Toolchain/Sources/X64/SystemHeap.zig) that
+preserve scratch GPRs and all 128-bit SSE lanes around the platform call.
+Classes, strings, collections, deep-copy and cycle callbacks use the same
+allocation/free pair. This is not part of the pinned 0.47.0 table: native
+Windows qualification and paired measurements gate its publication. Linux and
+macOS X64 still use their existing mapping paths.
 
 The next allocator slice must compare equivalent fixed work against a pinned
 baseline on each affected target, preserving zero initialization, alignment,
@@ -118,6 +127,10 @@ sampling, in alternating order. Compare only the same target and host; process
 startup is included and min/median/max are descriptive, not a statistical
 non-regression proof. The manual `heap-qualification.yml` workflow records the
 same proof for an immutable published compiler on any of the six native hosts.
+With `candidate=true`, it first cross-builds the exact workflow commit, then
+executes that candidate and the pinned public baseline on the selected native
+host. Cross-building is not the execution proof: both correctness and timing
+come from the subsequent native job.
 Neither wiring the gate nor recording the 0.47.0 baseline closes the five
 unimplemented heap paths listed above.
 
