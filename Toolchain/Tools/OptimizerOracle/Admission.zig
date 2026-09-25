@@ -306,3 +306,17 @@ test "LLVM evaluation tools select the complete optimizer evidence" {
     try std.testing.expect(selected_rule);
     for (selection.checks) |enabled| try std.testing.expect(enabled);
 }
+
+test "module roots and native heap qualification retain the complete evidence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const manifest = try load(arena.allocator(), std.testing.io, "Benchmarks/Optimizer");
+    try audit(manifest);
+    for ([_][]const u8{ "Toolchain/Root.zig", "Toolchain/Tools/QualifyHeap.mjs" }) |path| {
+        const selection = try plan(arena.allocator(), manifest, &.{path});
+        for (selection.checks) |enabled| try std.testing.expect(enabled);
+    }
+    try std.testing.expectError(error.BaselineSelfValidation, select(arena.allocator(), manifest, &.{
+        "Toolchain/Root.zig", "Toolchain/Benchmarks/Optimizer/Assurance.json",
+    }));
+}
