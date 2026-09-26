@@ -1,0 +1,58 @@
+// Reduced from tile collider shape metrics: float and list payloads share enum storage.
+struct Point {
+    var x:float
+    var y:float
+    init(x:float = 0.0, y:float = 0.0) { self.x = x; self.y = y }
+    func multiply(value:float) Point { return Point(self.x * value, self.y * value) }
+    func subtract(value:Point) Point { return Point(self.x - value.x, self.y - value.y) }
+}
+func minimum(a:float, b:float) float { if a < b { return a }
+    return b }
+func maximum(a:float, b:float) float { if a > b { return a }
+    return b }
+struct Box { let size:Point; let radius:float }
+struct Capsule { let first:Point; let second:Point; let radius:float }
+struct Polygon { let vertices:Point[]; let radius:float }
+enum Shape { box(Box); capsule(Capsule); chain(Polygon); circle(float); polygon(Polygon); segment(Capsule) }
+func metrics(shape:Shape) Point {
+    var lower = Point(100000.0, 100000.0)
+    var upper = Point(-100000.0, -100000.0)
+    var radius = 0.0
+    match shape {
+        box(value) => {
+            radius = value.radius
+            lower = value.size.multiply(-0.5)
+            upper = value.size.multiply(0.5)
+        }
+        capsule(value) => { lower = value.first; upper = value.second; radius = value.radius }
+        chain(value) => {
+            for point in value.vertices {
+                lower.x = minimum(lower.x, point.x)
+                lower.y = minimum(lower.y, point.y)
+                upper.x = maximum(upper.x, point.x)
+                upper.y = maximum(upper.y, point.y)
+            }
+        }
+        circle(value) => { lower = Point(-value, -value); upper = Point(value, value) }
+        polygon(value) => {
+            radius = value.radius
+            for point in value.vertices {
+                lower.x = minimum(lower.x, point.x - radius)
+                lower.y = minimum(lower.y, point.y - radius)
+                upper.x = maximum(upper.x, point.x + radius)
+                upper.y = maximum(upper.y, point.y + radius)
+            }
+        }
+        segment(value) => { lower = value.first; upper = value.second }
+    }
+    return upper.subtract(lower)
+}
+func exercise() {
+    let shape = Shape.polygon(Polygon(vertices:[Point(0.0), Point(3.0, 0.0), Point(3.0, 2.0)], radius:0.0))
+    let size = metrics(shape)
+    assert(size == Point(3.0, 2.0))
+}
+
+
+test "enum float affinity cannot reinterpret a list payload as a floating value" { exercise() }
+func main() { exercise(); print("enum payloads preserve pointer and float bits") }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Machine = @import("Machine.zig");
 const MemoryResidence = @import("MemoryResidence.zig");
+const FloatSlotInference = @import("FloatSlotInference.zig");
 const FloatPairs = @import("FloatPairs.zig");
 const LoopCursor = @import("LoopCursor.zig");
 const ResidenceLiveness = @import("ResidenceLiveness.zig");
@@ -43,7 +44,7 @@ pub fn allocateFloatLanePairsFor(
     const float_slots = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(float_slots);
     @memset(float_slots, false);
-    inferFloatSlots(function, float_slots);
+    try FloatSlotInference.infer(allocator, function, float_slots);
     try FloatPairs.allocate(allocator, function, target, float_slots, residences, registers, null, false);
     return residences;
 }
@@ -70,7 +71,7 @@ pub fn allocateFloatScalarsFor(
     const floats = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(floats);
     @memset(floats, false);
-    inferFloatSlots(function, floats);
+    try FloatSlotInference.infer(allocator, function, floats);
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
     @memset(forced, false);
@@ -207,7 +208,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     const float_slots = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(float_slots);
     @memset(float_slots, false);
-    inferFloatSlots(function, float_slots);
+    try FloatSlotInference.infer(allocator, function, float_slots);
     inferExternalFloatSlots(function, externals, float_slots);
     if (!fully_compatible and hasMixedAggregateLoad(function, float_slots)) return spilled(allocator, function);
     // A call-free function pays the ABI save/restore cost for v8...v15 but
@@ -1056,68 +1057,6 @@ fn spilled(allocator: Allocator, function: Machine.Function) Allocator.Error!Res
     };
 }
 
-fn inferFloatSlots(function: Machine.Function, result: []bool) void {
-    if (function.return_type.isFloat()) {
-        for (function.instructions) |instruction| switch (instruction) {
-            .return_value => |value| if (!value.aggregate and value.width == 1) {
-                result[value.start] = true;
-            },
-            else => {},
-        };
-    }
-    for (function.instructions) |instruction| switch (instruction) {
-        .constant_float32 => |value| result[value.result] = true,
-        .constant_float64 => |value| result[value.result] = true,
-        .unary => |value| if (value.type.isFloat()) {
-            result[value.operand] = true;
-            result[value.result] = true;
-        },
-        .binary => |value| if (value.type.isFloat()) {
-            result[value.left] = true;
-            result[value.right] = true;
-            switch (value.operator) {
-                .add, .subtract, .multiply, .divide, .minimum, .maximum => result[value.result] = true,
-                else => {},
-            }
-        },
-        .convert => |value| {
-            if (value.source.isFloat()) result[value.operand] = true;
-            if (value.target.isFloat()) result[value.result] = true;
-        },
-        else => {},
-    };
-    var changed = true;
-    while (changed) {
-        changed = false;
-        for (function.instructions) |instruction| switch (instruction) {
-            .copy => |copy| propagateFloat(copy.result, copy.operand, result, &changed),
-            .copy_range => |copy| for (0..copy.result.width) |leaf| {
-                propagateFloat(
-                    @intCast(@as(usize, copy.result.start) + leaf),
-                    @intCast(@as(usize, copy.operand.start) + leaf),
-                    result,
-                    &changed,
-                );
-            },
-            .aggregate_init => |value| {
-                var destination_offset: usize = 0;
-                for (value.fields) |field| {
-                    for (0..field.width) |leaf| {
-                        propagateFloat(
-                            @intCast(@as(usize, value.result.start) + destination_offset + leaf),
-                            @intCast(@as(usize, field.start) + leaf),
-                            result,
-                            &changed,
-                        );
-                    }
-                    destination_offset += field.width;
-                }
-            },
-            else => {},
-        };
-    }
-}
-
 fn inferExternalFloatSlots(function: Machine.Function, externals: []const Machine.ExternalFunction, result: []bool) void {
     for (function.instructions) |instruction| switch (instruction) {
         .external_call => |call| {
@@ -1132,13 +1071,6 @@ fn inferExternalFloatSlots(function: Machine.Function, externals: []const Machin
         },
         else => {},
     };
-}
-
-fn propagateFloat(left: Machine.Slot, right: Machine.Slot, result: []bool, changed: *bool) void {
-    if (result[left] == result[right]) return;
-    result[left] = true;
-    result[right] = true;
-    changed.* = true;
 }
 
 fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, externals: []const Machine.ExternalFunction) bool {

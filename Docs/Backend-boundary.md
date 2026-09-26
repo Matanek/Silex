@@ -61,3 +61,13 @@ The portable IR schema, LLVM adapter layouts, native machine IR, and runtime ABI
 may still evolve together with their tests. Stability means preserving typed
 semantics and explicit responsibilities, not freezing an internal file format
 or making two backend layouts identical.
+
+## Variant storage and floating register inference
+
+Enum payload slots have no uniform scalar type across variants. A slot used for
+a float by one variant can hold a collection pointer in another. Native float
+affinity must stop at enum storage instead of propagating backward through a
+payload copy and then forward into another variant. The shared ARM64/X64
+inference keeps those storage slots unclassified and infers each extracted
+payload from its own typed operations. `Tests/Native/EnumPayloadFloats.sx`
+protects this boundary; LLVM keeps its own typed lowering.
