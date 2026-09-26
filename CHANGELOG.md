@@ -8,6 +8,7 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- The package method cache now tracks shaders, their included files, and embedded files. Editing or deleting any of these files invalidates the corresponding compiled constants; later compilations retain these dependencies, even after repeated cache hits.
 - Fixed a native Release crash when iterating a list in an enum whose other variant contains floating-point values. Floating-register inference now respects the boundary between shared enum storage and typed payloads; a standalone regression covers this case.
 
 ## [0.47.1] - 2026-09-25

@@ -15,6 +15,14 @@ entries are misses, and atomic publication prevents readers from observing
 partial data. Native images use target-specific Mach-O, ELF or PE cache
 kinds.
 
+The semantic package cache also records shader sources, their includes, and
+embedded file uses alongside lowered methods. It hashes their current contents
+before reusing the methods: an edit or missing file forces fresh analysis.
+A cache hit restores those dependencies and embedded-file owners into the
+analyzer, so frontend/native cache keys and package resource collection keep
+tracking them across repeated warm builds. This is necessary because reusing a
+lowered method skips the intrinsics that originally read these files.
+
 `-n` and `--nocache` bypass reusable compilation entries. `run` still writes
 its private executable under `.silex/run/`; the option forces rebuilding it
 and does not change the command's output location.

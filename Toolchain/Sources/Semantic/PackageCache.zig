@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const Boundary = @import("../Boundary.zig");
 const CacheBinary = @import("../CacheBinary.zig");
 const CompilationCache = @import("../CompilationCache.zig");
+const EmbeddedFiles = @import("../EmbeddedFiles.zig");
 const Ir = @import("../Ir.zig");
 const Packages = @import("../Packages.zig");
 const Source = @import("../Source.zig");
@@ -43,7 +44,42 @@ const CachedFunction = struct {
     name: []const u8,
     function: Ir.Function,
 };
-const Artifact = struct { context: Context, functions: []const CachedFunction };
+const cache_kind = "semantic-package-graph-binary-v3";
+const Artifact = struct {
+    context: Context,
+    functions: []const CachedFunction,
+    shader_files: []const []const u8,
+    embedded_file_uses: []const EmbeddedFiles.Use,
+    asset_digest: []const u8,
+};
+
+fn assetDigest(allocator: Allocator, io: Io, shaders: []const []const u8, embedded: []const EmbeddedFiles.Use) !Digest {
+    var paths: std.ArrayList([]const u8) = .empty;
+    defer paths.deinit(allocator);
+    try paths.appendSlice(allocator, shaders);
+    for (embedded) |use| try paths.append(allocator, use.path);
+    return CompilationCache.key(allocator, io, paths.items, "semantic-package-assets", "");
+}
+
+test "package asset digest covers shader sources and includes" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const allocator = std.testing.allocator;
+    const shader = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Sprite.hlsl" });
+    defer allocator.free(shader);
+    const include = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Common.hlsl" });
+    defer allocator.free(include);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Sprite.hlsl", .data = "shader" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Common.hlsl", .data = "before" });
+    const first = try assetDigest(allocator, std.testing.io, &.{ shader, include }, &.{});
+    const warm = try assetDigest(allocator, std.testing.io, &.{ shader, include }, &.{});
+    try std.testing.expectEqual(first, warm);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Common.hlsl", .data = "after!" });
+    const changed = try assetDigest(allocator, std.testing.io, &.{ shader, include }, &.{});
+    try std.testing.expect(!std.mem.eql(u8, &first, &changed));
+    try temporary.dir.deleteFile(std.testing.io, "Sprite.hlsl");
+    try std.testing.expectError(error.FileNotFound, assetDigest(allocator, std.testing.io, &.{ shader, include }, &.{}));
+}
 
 pub const Session = struct {
     allocator: Allocator,
@@ -81,8 +117,8 @@ pub const Session = struct {
         boundaries: []const Boundary.Function,
         generated_keys: []const ?[]const u8,
     ) !Session {
-        const cache_key = CompilationCache.artifactKey("semantic-package-graph-binary-v2", &.{ &graph_digest, target });
-        const payload = CompilationCache.load(allocator, io, cache_key, "semantic-package-graph-binary-v2");
+        const cache_key = CompilationCache.artifactKey(cache_kind, &.{ &graph_digest, target });
+        const payload = CompilationCache.load(allocator, io, cache_key, cache_kind);
         var session: Session = .{
             .allocator = allocator,
             .io = io,
@@ -100,6 +136,16 @@ pub const Session = struct {
             .loaded = if (payload) |contents| CacheBinary.decode(Artifact, allocator, contents) catch null else null,
         };
         if (session.loaded) |artifact| {
+            // Reusing a lowered method skips file-reading intrinsics, including
+            // shader compilation. Its embedded constants require their own key.
+            const current_assets = assetDigest(allocator, io, artifact.shader_files, artifact.embedded_file_uses) catch {
+                session.loaded = null;
+                return session;
+            };
+            if (!std.mem.eql(u8, &current_assets, artifact.asset_digest)) {
+                session.loaded = null;
+                return session;
+            }
             const current = session.buildContext() catch {
                 session.loaded = null;
                 return session;
@@ -110,6 +156,25 @@ pub const Session = struct {
             };
         }
         return session;
+    }
+
+    pub fn restoreDependencies(self: Session, analyzer: anytype) !void {
+        const artifact = self.loaded orelse return;
+        for (artifact.shader_files) |path| {
+            var known = false;
+            for (analyzer.shader_files.items) |existing| known = known or std.mem.eql(u8, existing, path);
+            if (!known) try analyzer.shader_files.append(self.allocator, path);
+        }
+        for (artifact.embedded_file_uses) |use| {
+            var known_path = false;
+            for (analyzer.embedded_files.items) |existing| known_path = known_path or std.mem.eql(u8, existing, use.path);
+            if (!known_path) try analyzer.embedded_files.append(self.allocator, use.path);
+            var known_use = false;
+            for (analyzer.embedded_file_uses.items) |existing| {
+                known_use = known_use or (std.mem.eql(u8, existing.owner, use.owner) and std.mem.eql(u8, existing.path, use.path));
+            }
+            if (!known_use) try analyzer.embedded_file_uses.append(self.allocator, use);
+        }
     }
 
     pub fn loadGenerated(self: *Session, key: []const u8, current_name: []const u8) ?Ir.Function {
@@ -140,6 +205,8 @@ pub const Session = struct {
         self: *Session,
         generated_functions: []const Ir.Function,
         generated_keys: []const ?[]const u8,
+        shader_files: []const []const u8,
+        embedded_file_uses: []const EmbeddedFiles.Use,
     ) void {
         if (generated_functions.len != generated_keys.len) return;
         const context = self.buildContext() catch return;
@@ -154,10 +221,17 @@ pub const Session = struct {
         }
         if (functions.items.len == 0) return;
         self.functions_stored = functions.items.len;
-        const artifact = Artifact{ .context = context, .functions = functions.items };
+        const asset_digest = assetDigest(self.allocator, self.io, shader_files, embedded_file_uses) catch return;
+        const artifact = Artifact{
+            .context = context,
+            .functions = functions.items,
+            .shader_files = shader_files,
+            .embedded_file_uses = embedded_file_uses,
+            .asset_digest = &asset_digest,
+        };
         const payload = CacheBinary.encode(self.allocator, artifact) catch return;
-        const digest = CompilationCache.artifactKey("semantic-package-graph-binary-v2", &.{ &self.graph_digest, self.target });
-        CompilationCache.store(self.allocator, self.io, digest, "semantic-package-graph-binary-v2", payload);
+        const digest = CompilationCache.artifactKey(cache_kind, &.{ &self.graph_digest, self.target });
+        CompilationCache.store(self.allocator, self.io, digest, cache_kind, payload);
     }
 
     fn buildContext(self: Session) !Context {

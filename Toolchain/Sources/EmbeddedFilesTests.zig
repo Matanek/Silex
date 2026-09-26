@@ -6,6 +6,53 @@ const NativeTestRunner = @import("NativeTestRunner.zig");
 const Project = @import("Project.zig");
 const PackageResources = @import("PackageResources.zig");
 
+test "cached package methods retain asset dependencies and invalidate changed or missing bytes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "App/Sources");
+    try temporary.dir.createDirPath(std.testing.io, "Assets/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "App/Package.json", .data = "{\"sources\":\"Sources\",\"dependencies\":{\"Assets\":\"=1.0.0\"}}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Assets/Package.json", .data = "{\"name\":\"Assets\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Assets/Module/Reader.sx", .data =
+        \\public struct Reader {
+        \\    func text() str { return embed_text("value.txt") }
+        \\}
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Assets/Module/value.txt", .data = "first" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "App/Sources/Main.sx", .data =
+        \\use Assets.Reader
+        \\func main() { print(Reader().text()) }
+    });
+    const entry = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "App", "Sources", "Main.sx" });
+    const asset = try std.fs.path.resolve(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Assets", "Module", "value.txt" });
+    // Repeat warm loads so a hit cannot silently drop the dependency on write.
+    for (0..3) |iteration| {
+        var compiler = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+        const compiled = try compiler.compile(entry);
+        const result = try Interpreter.runCapture(allocator, compiled.ir);
+        try std.testing.expectEqualStrings("first\n", result.stdout);
+        if (iteration > 0) try std.testing.expect(compiled.metrics.package_functions_reused > 0);
+        var tracked = false;
+        for (compiled.cache_files) |path| tracked = tracked or std.mem.eql(u8, path, asset);
+        try std.testing.expect(tracked);
+        try std.testing.expectEqual(@as(usize, 1), compiled.embedded_file_uses.len);
+        try std.testing.expectEqualStrings(asset, compiled.embedded_file_uses[0].path);
+    }
+    // Same length: invalidation must use content, not just size or timestamps.
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Assets/Module/value.txt", .data = "later" });
+    var changed = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+    const recompiled = try changed.compile(entry);
+    try std.testing.expectEqualStrings("later\n", (try Interpreter.runCapture(allocator, recompiled.ir)).stdout);
+    try std.testing.expectEqual(@as(usize, 0), recompiled.metrics.package_functions_reused);
+    try temporary.dir.deleteFile(std.testing.io, "Assets/Module/value.txt");
+    var missing = Project.Compiler.initWithPackagesAndCache(allocator, std.testing.io, null, true);
+    try std.testing.expectError(error.InvalidSource, missing.compile(entry));
+    try std.testing.expect(std.mem.indexOf(u8, missing.diagnostic.?.message, "cannot read embedded file") != null);
+}
+
 fn expectCompileError(source: []const u8, message: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

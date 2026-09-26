@@ -8,6 +8,7 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le cache des méthodes de packages suit désormais les shaders, leurs fichiers inclus et les fichiers embarqués. Modifier ou supprimer un de ces fichiers invalide les constantes compilées correspondantes ; les compilations suivantes conservent ces dépendances, même après plusieurs réutilisations du cache.
 - Correction d’un crash Release natif lors du parcours d’une liste dans un enum dont une autre variante contient des flottants. L’inférence des registres flottants respecte désormais la frontière entre le stockage partagé de l’enum et ses charges typées ; une régression autonome couvre ce cas.
 
 ## [0.47.1] - 2026-09-25

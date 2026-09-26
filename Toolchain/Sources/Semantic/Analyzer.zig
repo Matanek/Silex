@@ -197,6 +197,7 @@ pub const Analyzer = struct {
                 generated_keys.items,
             ) catch null else null;
         };
+        if (package_cache) |cache| try cache.restoreDependencies(self);
         const source_functions = try self.allocator.alloc(?Ir.Function, program.functions.len);
         @memset(source_functions, null);
         {
@@ -331,7 +332,7 @@ pub const Analyzer = struct {
                 {
                     var cache_span = self.traceSpan(.package_cache_write);
                     defer cache_span.finish();
-                    cache.storeGenerated(generated_functions.items[0..generated_keys.items.len], generated_keys.items);
+                    cache.storeGenerated(generated_functions.items[0..generated_keys.items.len], generated_keys.items, self.shader_files.items, self.embedded_file_uses.items);
                 }
                 self.package_functions_reused = cache.function_hits;
                 self.package_function_misses = cache.function_misses;
