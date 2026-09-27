@@ -380,7 +380,9 @@ fn allocatePairGraph(
     const components = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(components);
     for (components, 0..) |*component, slot| component.* = @intCast(slot);
-    buildPairComponents(components, partners, instructions);
+    // A copy can occur on only one branch while both values are live on the
+    // other. Keep pairs independent; the interference graph still reuses a
+    // color when their complete CFG lifetimes do not overlap.
 
     var component_intervals: std.ArrayList(Interval) = .empty;
     defer component_intervals.deinit(allocator);
@@ -533,86 +535,33 @@ fn pairComponentColorConflicts(
     return false;
 }
 
-fn slotBelongsToPairComponent(
-    components: []const Machine.Slot,
-    partners: []const ?Machine.Slot,
-    slot: Machine.Slot,
-    component: Machine.Slot,
-) bool {
-    if (findPairComponent(components, slot) == component) return true;
-    const partner = partners[slot] orelse return false;
-    return findPairComponent(components, partner) == component;
-}
-
-test "cached pair-component activity matches slot scans across transferred pairs" {
-    const partners = [_]?Machine.Slot{ 1, 0, 3, 2, null, 5 };
+test "conditional pair transfer retains the previous pair on the other branch" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const partners = [_]?Machine.Slot{ 1, 0, 3, 2, null, null, null };
     const instructions = [_]Machine.Instruction{
-        .{ .copy = .{ .result = 2, .operand = 0 } },
-        .{ .copy = .{ .result = 3, .operand = 1 } },
-        .{ .constant_float32 = .{ .result = 4, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 0, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 2, .bits = 0 } },
+        .{ .constant_float32 = .{ .result = 3, .bits = 0 } },
+        .{ .constant_bool = .{ .result = 4, .value = false } },
+        .{ .branch = .{ .condition = 4, .then_instruction = 6, .else_instruction = 8 } },
+        .{ .copy = .{ .result = 0, .operand = 2 } },
+        .{ .copy = .{ .result = 1, .operand = 3 } },
+        .{ .binary = .{ .result = 5, .operator = .add, .left = 0, .right = 2, .type = .float32 } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 1, .right = 3, .type = .float32 } },
+        .return_void,
     };
-    var components = [_]Machine.Slot{ 0, 1, 2, 3, 4, 5 };
-    buildPairComponents(&components, &partners, &instructions);
-    try std.testing.expectEqual(@as(Machine.Slot, 0), findPairComponent(&components, 2));
-    try std.testing.expectEqual(@as(Machine.Slot, 1), findPairComponent(&components, 3));
-
-    var live = [_]bool{false} ** (instructions.len * partners.len);
-    live[0 * partners.len + 0] = true;
-    live[1 * partners.len + 3] = true;
-    live[2 * partners.len + 4] = true;
-    var component_live = [_]bool{false} ** live.len;
-    var component_defined = [_]bool{false} ** live.len;
-    gatherPairComponentActivity(&components, &partners, &instructions, &live, &component_live, &component_defined);
-
-    for (instructions, 0..) |instruction, index| {
-        for ([_]Machine.Slot{ 0, 1 }) |component| {
-            var expected_live = false;
-            var expected_defined = false;
-            for (partners, 0..) |_, slot| {
-                if (!slotBelongsToPairComponent(&components, &partners, @intCast(slot), component)) continue;
-                expected_live = expected_live or live[index * partners.len + slot];
-                expected_defined = expected_defined or instructionDefines(instruction, slot);
-            }
-            try std.testing.expectEqual(expected_live, component_live[index * partners.len + component]);
-            try std.testing.expectEqual(expected_defined, component_defined[index * partners.len + component]);
-        }
-    }
-}
-
-fn buildPairComponents(
-    components: []Machine.Slot,
-    partners: []const ?Machine.Slot,
-    instructions: []const Machine.Instruction,
-) void {
-    for (instructions) |instruction| switch (instruction) {
-        .copy => |copy| unionPairedTransfer(components, partners, copy.result, copy.operand),
-        .copy_range => |copy| for (0..copy.result.width) |leaf| {
-            unionPairedTransfer(
-                components,
-                partners,
-                @intCast(@as(usize, copy.result.start) + leaf),
-                @intCast(@as(usize, copy.operand.start) + leaf),
-            );
-        },
-        else => {},
+    var intervals = [_]Interval{
+        .{ .slot = 0, .first = 0, .last = 8, .weight = 1 },
+        .{ .slot = 2, .first = 2, .last = 9, .weight = 1 },
     };
-}
-
-fn unionPairedTransfer(
-    components: []Machine.Slot,
-    partners: []const ?Machine.Slot,
-    result: Machine.Slot,
-    operand: Machine.Slot,
-) void {
-    const result_partner = partners[result] orelse return;
-    const operand_partner = partners[operand] orelse return;
-    if (result_partner <= result or operand_partner <= operand) return;
-    const left = findPairComponent(components, result);
-    const right = findPairComponent(components, operand);
-    if (left != right) components[@max(left, right)] = @min(left, right);
-    const left_partner = findPairComponent(components, result_partner);
-    const right_partner = findPairComponent(components, operand_partner);
-    if (left_partner != right_partner) components[@max(left_partner, right_partner)] = @min(left_partner, right_partner);
+    var leaders = [_]?u5{null} ** partners.len;
+    try allocatePairGraph(allocator, &leaders, &intervals, &.{ 16, 17 }, &partners, &instructions, partners.len, false);
+    try std.testing.expect(leaders[0] != null);
+    try std.testing.expect(leaders[2] != null);
+    try std.testing.expect(leaders[0] != leaders[2]);
 }
 
 fn findPairComponent(components: []const Machine.Slot, slot: Machine.Slot) Machine.Slot {

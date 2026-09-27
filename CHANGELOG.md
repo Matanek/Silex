@@ -10,6 +10,7 @@ This editorial history starts with version 0.44.1.
 
 - The package method cache now tracks shaders, their included files, and embedded files. Editing or deleting any of these files invalidates the corresponding compiled constants; later compilations retain these dependencies, even after repeated cache hits.
 - Fixed a native Release crash when iterating a list in an enum whose other variant contains floating-point values. Floating-register inference now respects the boundary between shared enum storage and typed payloads; a standalone regression covers this case.
+- Fixed an incorrect normal in ARM64 Native Release when conditional copies made two still-live floating-point pairs share a SIMD register. Register coloring now keeps those pairs distinct while their lifetimes overlap; a 3D geometry regression checks both the normal and separation.
 
 ## [0.47.1] - 2026-09-25
 
