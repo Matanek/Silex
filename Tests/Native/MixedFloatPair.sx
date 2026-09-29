@@ -1,0 +1,26 @@
+struct Bounds {
+    let lower:float
+    let upper:float
+
+    init(center:float, radius:float) {
+        self.lower = center - radius
+        self.upper = center + radius
+    }
+}
+
+func verify_mixed_float_pair() {
+    let bounds = Bounds(1.0, 2.0)
+    assert(bounds.lower == -1.0)
+    assert(bounds.upper == 3.0)
+    let shifted = Bounds(-2.75, 4.75)
+    assert(shifted.lower == -7.5)
+    assert(shifted.upper == 2.0)
+}
+
+test "Release keeps distinct add and subtract fields in an aggregate" {
+    verify_mixed_float_pair()
+}
+
+func main() {
+    verify_mixed_float_pair()
+}

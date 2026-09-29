@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Correction en Native Release ARM64 de l'association SIMD de deux champs
+  flottants produits par des opérations différentes, par exemple les bornes
+  `centre - rayon` et `centre + rayon`. Une régression native vérifie les deux
+  valeurs en Debug et Release ; le défaut produisait deux fois la borne basse.
 - Le cache des méthodes de packages suit désormais les shaders, leurs fichiers inclus et les fichiers embarqués. Modifier ou supprimer un de ces fichiers invalide les constantes compilées correspondantes ; les compilations suivantes conservent ces dépendances, même après plusieurs réutilisations du cache.
 - Correction d’un crash Release natif lors du parcours d’une liste dans un enum dont une autre variante contient des flottants. L’inférence des registres flottants respecte désormais la frontière entre le stockage partagé de l’enum et ses charges typées ; une régression autonome couvre ce cas.
 - Correction d’une normale erronée en Native Release ARM64 lorsque des copies conditionnelles faisaient partager un registre SIMD à deux paires flottantes encore vivantes. Le coloriage conserve ces paires distinctes tant que leurs durées de vie se recouvrent ; une régression de géométrie 3D contrôle la normale et la séparation.

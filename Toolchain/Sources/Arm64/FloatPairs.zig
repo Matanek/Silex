@@ -86,6 +86,9 @@ pub fn allocate(
                         (first_instruction.? != .binary or second_instruction.? != .binary or
                             first_instruction.?.binary.type != .float32 or second_instruction.?.binary.type != .float32 or
                             first_instruction.?.binary.operator != second_instruction.?.binary.operator)) continue;
+                    // A SIMD arithmetic pair has one opcode in every allocation round.
+                    if (first_instruction.? == .binary and second_instruction.? == .binary and
+                        first_instruction.?.binary.operator != second_instruction.?.binary.operator) continue;
                     pairSlots(partners, first, second);
                     if (group.in_loop and group.priority >= 8 and
                         (!memory_required or (group.recurrence and first_instruction.? == .binary and
