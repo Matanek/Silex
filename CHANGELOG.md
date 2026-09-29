@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Release removes balanced temporary references around proven readers and
+  numeric value stores. On macOS and Linux ARM64, class field transfers
+  preserve arithmetic registers, and inline continuations are no longer
+  mistaken for loops. Ownership barriers and actual cycles remain protected.
+
 - Fixed Native Release ARM64 SIMD pairing of float fields produced by
   different operations, such as `center - radius` and `center + radius`.
   A native regression checks both values in Debug and Release; the bug

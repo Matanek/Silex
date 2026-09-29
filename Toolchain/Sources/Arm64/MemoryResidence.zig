@@ -254,6 +254,7 @@ test "memory lane recurrence preserves source-level borrowed updates" {
 // registers because view references never mutate the descriptor itself.
 pub fn supports(instruction: Machine.Instruction) bool {
     return switch (instruction) {
+        .class_load, .class_store => true,
         .reference_load,
         .reference_store,
         .reference_offset,
@@ -275,6 +276,17 @@ pub fn required(function: Machine.Function) bool {
 
 pub fn pin(instruction: Machine.Instruction, forced: []bool) void {
     switch (instruction) {
+        // Class field transfers use only scratch GPRs and make no runtime call.
+        // Their own operands stay in memory; unrelated arithmetic may survive.
+        .class_load => |value| {
+            forced[value.base] = true;
+            pinSpan(value.result, forced);
+        },
+        .class_store => |value| {
+            forced[value.base] = true;
+            forced[value.result] = true;
+            pinSpan(value.replacement, forced);
+        },
         .reference_load => |value| {
             if (value.result.width != 1) pinSpan(value.result, forced);
         },
@@ -749,4 +761,60 @@ test "aggregate reference reads materialize only used leaves at the original rea
     try std.testing.expectEqual(@as(i64, 7), result.value);
     try std.testing.expectEqual(@as(u64, 99), values[0]);
     try std.testing.expectEqual(@as(u64, 7), values[63]);
+}
+
+test "class transfers preserve unrelated arithmetic and pin mixed field payloads" {
+    const RegisterAllocation = @import("RegisterAllocation.zig");
+    const Runner = @import("Runner.zig");
+    const builtin = @import("builtin");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var function: Machine.Function = .{
+        .name = "class_transfers",
+        .parameter_count = 4,
+        .parameters = &.{
+            .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 },
+            .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 },
+        },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 11,
+        .frame_size = try Machine.frameSize(11),
+        .instructions = &.{
+            .{ .binary = .{ .result = 4, .operator = .multiply, .left = 1, .right = 2, .type = .float32 } },
+            .{ .class_load = .{ .result = .{ .start = 5, .width = 3, .aggregate = true }, .base = 0, .byte_offset = 0 } },
+            .{ .class_store = .{ .result = 8, .base = 0, .byte_offset = 0, .replacement = .{ .start = 5, .width = 3, .aggregate = true } } },
+            .{ .binary = .{ .result = 9, .operator = .add, .left = 4, .right = 3, .type = .float32 } },
+            .{ .binary = .{ .result = 10, .operator = .add, .left = 9, .right = 6, .type = .float32 } },
+            .{ .return_value = .{ .start = 10, .width = 1 } },
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    try std.testing.expect(function.float_register_slots[4] != null);
+    for ([_]usize{ 0, 5, 6, 7, 8 }) |slot| {
+        try std.testing.expectEqual(null, function.register_slots[slot]);
+        try std.testing.expectEqual(null, function.float_register_slots[slot]);
+        try std.testing.expectEqual(null, function.float_lane_slots[slot]);
+    }
+    // The lane-only API shared with X64 keeps its old admission contract.
+    try std.testing.expectEqual(@as(usize, 0), (try RegisterAllocation.allocateFloatLanePairsFor(
+        allocator,
+        function,
+        .x64,
+        &.{ 8, 9 },
+    )).len);
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var storage = [_]u64{ 99, 0, 0, 0, 0xf123456789abcdef, @as(u32, @bitCast(@as(f32, 7))), 0x89abcdef01234567 };
+    const before = storage;
+    const result = try Runner.invoke(allocator, .{ .functions = &.{function} }, 0, &.{
+        @intCast(@intFromPtr(&storage)), @as(u32, @bitCast(@as(f32, 3))),
+        @as(u32, @bitCast(@as(f32, 4))), @as(u32, @bitCast(@as(f32, 5))),
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 24))), @as(u32, @truncate(@as(u64, @bitCast(result.value)))));
+    try std.testing.expectEqualSlices(u64, &before, &storage);
 }

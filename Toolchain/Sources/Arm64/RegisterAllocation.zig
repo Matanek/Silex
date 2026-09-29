@@ -185,7 +185,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     if (!isCompatibleFunction(function, true, externals)) return spilled(allocator, function);
     const fully_compatible = isFullyResidenceCompatible(function, externals);
     if (!fully_compatible and !(try hasProfitableScalarRegion(allocator, function.instructions, externals))) return spilled(allocator, function);
-    if (!fully_compatible and hasLoopAggregateCall(function.instructions)) return spilled(allocator, function);
+    if (!fully_compatible and try hasLoopAggregateCall(allocator, function.instructions)) return spilled(allocator, function);
     // Actual C calls preserve x19...x28 and only the low 64 bits of v8...v15.
     // Keep argument/result stack homes. Scalar regions may borrow volatile
     // floating colors only when their live values do not meet a call.
@@ -550,17 +550,37 @@ fn hasMixedAggregateLoad(function: Machine.Function, float_slots: []const bool) 
     return false;
 }
 
-fn hasLoopAggregateCall(instructions: []const Machine.Instruction) bool {
+fn hasLoopAggregateCall(allocator: Allocator, instructions: []const Machine.Instruction) Allocator.Error!bool {
+    // A backward layout edge can return from an inlined branch to its
+    // continuation without forming a loop. Only a call on a CFG cycle needs
+    // the conservative aggregate-call exclusion.
+    const seen = try allocator.alloc(bool, instructions.len);
+    defer allocator.free(seen);
+    var pending: std.ArrayList(usize) = .empty;
+    defer pending.deinit(allocator);
     for (instructions, 0..) |instruction, index| if (instruction == .call) {
         var aggregate = false;
         for (instruction.call.arguments) |argument| aggregate = aggregate or argument.aggregate;
         if (!aggregate) continue;
-        for (instructions, 0..) |control, source| switch (control) {
-            .jump => |target| if (target <= index and index <= source) return true,
-            .branch => |value| if ((value.then_instruction <= index and index <= source) or
-                (value.else_instruction <= index and index <= source)) return true,
-            else => {},
-        };
+        @memset(seen, false);
+        pending.clearRetainingCapacity();
+        if (index + 1 < instructions.len) try pending.append(allocator, index + 1);
+        while (pending.pop()) |current| {
+            if (current == index) return true;
+            if (current >= instructions.len or seen[current]) continue;
+            seen[current] = true;
+            switch (instructions[current]) {
+                .jump => |target| try pending.append(allocator, target),
+                .branch => |branch| {
+                    try pending.append(allocator, branch.then_instruction);
+                    try pending.append(allocator, branch.else_instruction);
+                },
+                .return_value, .return_void, .panic => {},
+                else => if (current + 1 < instructions.len) {
+                    try pending.append(allocator, current + 1);
+                },
+            }
+        }
     };
     return false;
 }
@@ -1096,6 +1116,9 @@ fn isCompatibleFunction(function: Machine.Function, allow_stack_effects: bool, e
         .branch,
         .call,
         => {},
+        // Class transfers preserve ARM64's arithmetic bank. Keep the shared
+        // lane-only admission unchanged for other backends.
+        .class_load, .class_store => if (!allow_stack_effects) return false,
         // ARM64's aggregate emitters already consume registered scalar leaves.
         // Pure constructors need no unrelated memory operation to qualify.
         // The shared lane-only path retains its previous, narrower contract.
@@ -1354,6 +1377,8 @@ fn visit(
             }
         },
         .collection_count => |value| touch(value.result, index, first, last, weights, weight),
+        .class_load,
+        .class_store,
         .reference_load,
         .reference_store,
         .reference_offset,
@@ -2266,4 +2291,25 @@ test "scalar copy affinity falls back when a precolored lane conflicts" {
     );
     try std.testing.expectEqual(@as(?u5, 17), residences[1]);
     try std.testing.expectEqual(@as(?u5, 16), residences[0]);
+}
+
+test "aggregate call loop exclusion follows CFG cycles rather than layout" {
+    const call: Machine.Instruction = .{ .call = .{
+        .function = 1,
+        .arguments = &.{.{ .start = 0, .width = 3, .aggregate = true }},
+        .result = null,
+    } };
+    const allocator = std.testing.allocator;
+    try std.testing.expect(!try hasLoopAggregateCall(allocator, &.{
+        .{ .jump = 3 }, call, .return_void, .{ .jump = 1 },
+    }));
+    try std.testing.expect(!try hasLoopAggregateCall(allocator, &.{
+        call, .return_void, .{ .jump = 0 },
+    }));
+    try std.testing.expect(try hasLoopAggregateCall(allocator, &.{
+        call, .{ .jump = 0 },
+    }));
+    try std.testing.expect(try hasLoopAggregateCall(allocator, &.{
+        call, .{ .branch = .{ .condition = 3, .then_instruction = 0, .else_instruction = 2 } }, .return_void,
+    }));
 }

@@ -40,7 +40,7 @@ fn witness(allocator: std.mem.Allocator, precision: Types.Type, length: usize, s
     };
 }
 
-test "scalar regions need no wide input and preserve class barrier homes" {
+test "scalar regions need no wide input and preserve class field homes" {
     inline for (.{ Types.Type.float32, Types.Type.float64 }) |precision| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
@@ -49,7 +49,7 @@ test "scalar regions need no wide input and preserve class barrier homes" {
         const allocation = try Allocation.allocate(allocator, function);
         try std.testing.expectEqual(@as(usize, function.slot_count), allocation.float_residences.len);
         try std.testing.expect(allocation.float_residences[3] != null);
-        for ([_]usize{ 0, 1, 34, 35 }) |slot| {
+        for ([_]usize{ 0, 1, 35 }) |slot| {
             try std.testing.expectEqual(@as(?u5, null), allocation.residences[slot]);
             try std.testing.expectEqual(@as(?u5, null), allocation.float_residences[slot]);
             try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), allocation.float_lane_residences[slot]);
@@ -76,7 +76,16 @@ test "scalar regions retain the profitability threshold and never count through 
     defer arena.deinit();
     const allocator = arena.allocator();
     for ([_]bool{ false, true }) |split| {
-        const function = try witness(allocator, .float32, if (split) 32 else 31, split);
+        var function = try witness(allocator, .float32, if (split) 32 else 31, split);
+        var instructions: std.ArrayList(Machine.Instruction) = .empty;
+        for (function.instructions) |instruction| {
+            // Ownership operations remain barriers; simple field reads no longer are.
+            if (instruction == .class_load and instruction.class_load.result.start != 1) {
+                try instructions.append(allocator, .{ .class_retain = .{ .operand = 0 } });
+            }
+            try instructions.append(allocator, instruction);
+        }
+        function.instructions = try instructions.toOwnedSlice(allocator);
         const allocation = try Allocation.allocate(allocator, function);
         try std.testing.expectEqual(@as(usize, 0), allocation.float_residences.len);
     }

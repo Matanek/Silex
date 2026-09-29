@@ -9,15 +9,17 @@ const Definition = struct {
 };
 
 pub fn optimize(allocator: std.mem.Allocator, program: Ir.Program) !Ir.Program {
+    const readers = try BalancedClassBorrows.readers(allocator, program);
+    defer allocator.free(readers);
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
-    for (program.functions, 0..) |function, index| functions[index] = try optimizeFunction(allocator, program, function);
+    for (program.functions, 0..) |function, index| functions[index] = try optimizeFunction(allocator, program, function, readers);
     var result = program;
     result.functions = functions;
     return result;
 }
 
-fn optimizeFunction(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
-    const borrowed = try BalancedClassBorrows.optimize(allocator, function);
+fn optimizeFunction(allocator: std.mem.Allocator, program: Ir.Program, function: Ir.Function, readers: []const bool) !Ir.Function {
+    const borrowed = try BalancedClassBorrows.optimizeWithReaders(allocator, function, program, readers);
     const definitions = try collectDefinitions(allocator, borrowed);
     const pruned = try removeOverwrittenStores(allocator, borrowed, definitions);
     const forwarded = try forwardStoredValues(allocator, pruned, definitions);

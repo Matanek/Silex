@@ -8,6 +8,12 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le mode Release élimine les paires de références temporaires autour des
+  lecteurs prouvés et des écritures de valeurs numériques. Sur ARM64 macOS
+  et Linux, les transferts de champs de classes préservent les registres
+  arithmétiques et les continuations inline ne sont plus prises pour des
+  boucles. Les barrières d’ownership et les vrais cycles restent protégés.
+
 - Correction en Native Release ARM64 de l'association SIMD de deux champs
   flottants produits par des opérations différentes, par exemple les bornes
   `centre - rayon` et `centre + rayon`. Une régression native vérifie les deux
