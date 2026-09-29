@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 lists on macOS and Windows initially reserve 128 bytes
+  instead of a whole page. Geometric growth, copying, detachment and
+  destruction guarantees are preserved; small collections no longer zero
+  unused pages.
+
 - Release removes balanced temporary references around proven readers and
   numeric value stores. On macOS and Linux ARM64, class field transfers
   preserve arithmetic registers, and inline continuations are no longer

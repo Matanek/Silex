@@ -15,8 +15,8 @@ const root_count_offset: u12 = Machine.slot_size;
 const edge_count_offset: u12 = 2 * Machine.slot_size;
 const byte_count_offset: u12 = 3 * Machine.slot_size;
 const state_offset: u12 = 4 * Machine.slot_size;
-const darwin_page_size: u64 = 0x4000;
-const windows_page_size: u64 = 0x1000;
+const heap_initial_bytes: u64 = 128;
+const linux_page_bytes: u64 = 0x1000;
 
 fn elementStride(width: u12, encoded_stride: u12) u64 {
     return if (encoded_stride != 0) encoded_stride else @as(u64, width) * Machine.slot_size;
@@ -308,7 +308,7 @@ pub fn emitEdit(
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, header_size, true));
     try ensureMinimumAllocation(allocator, words, platform, .x1);
     // Keep spare capacity so append-heavy lists grow geometrically instead of
-    // issuing one virtual-memory allocation for every element past a page.
+    // issuing one allocation for every element past the initial reservation.
     try words.append(allocator, A64.addRegisters(.x1, .x1, .x1));
     try allocateWithSize(allocator, words, sites, platform);
     const mmap_failed = words.items.len;
@@ -1648,9 +1648,8 @@ fn immediate(allocator: Allocator, words: *std.ArrayList(u32), register: A64.Reg
 
 fn minimumAllocation(platform: Allocation.Platform) u64 {
     return switch (platform) {
-        .darwin => darwin_page_size,
-        .linux => windows_page_size,
-        .windows => windows_page_size,
+        .darwin, .windows => heap_initial_bytes,
+        .linux => linux_page_bytes,
     };
 }
 
@@ -1779,4 +1778,23 @@ test "copy slot aggregates to collection storage with paired transfers" {
         A64.load64Pair(.x9, .x11, .x12, 2 * Machine.slot_size),
         A64.store64Pair(.x9, .x11, .x10, 2 * Machine.slot_size),
     }, words.items);
+}
+
+test "small list reservation follows the allocator rather than the host page size" {
+    inline for (.{ Allocation.Platform.darwin, Allocation.Platform.windows, Allocation.Platform.linux }) |platform| {
+        var words: std.ArrayList(u32) = .empty;
+        defer words.deinit(std.testing.allocator);
+        var epilogue: std.ArrayList(Fixups.Local) = .empty;
+        defer epilogue.deinit(std.testing.allocator);
+        var sites: std.ArrayList(ExternalCalls.Site) = .empty;
+        defer sites.deinit(std.testing.allocator);
+        try emitInit(std.testing.allocator, &words, &epilogue, &sites, platform, .{
+            .result = 0,
+            .element_width = 1,
+            .values = &.{},
+        });
+        const expected: u16 = if (platform == .linux) 4096 else 128;
+        try std.testing.expectEqual(A64.moveWideZero64(.x1, expected, 0), words.items[0]);
+        try std.testing.expectEqual(@as(u64, expected), minimumAllocation(platform));
+    }
 }

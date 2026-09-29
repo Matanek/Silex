@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les listes natives ARM64 sur macOS et Windows réservent initialement
+  128 octets au lieu d’une page entière. Leur croissance reste géométrique,
+  avec les mêmes garanties de copie, de détachement et de destruction ;
+  les petites collections évitent ainsi la mise à zéro de pages inutilisées.
+
 - Le mode Release élimine les paires de références temporaires autour des
   lecteurs prouvés et des écritures de valeurs numériques. Sur ARM64 macOS
   et Linux, les transferts de champs de classes préservent les registres

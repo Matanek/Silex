@@ -1,0 +1,56 @@
+struct SmallPoint {
+    var x:float
+    var y:float
+    var z:float
+    init(value:float) { self.x = value; self.y = value * 2.0; self.z = -value }
+}
+
+class SmallToken {
+    static var drops:int = 0
+    let value:int
+    init(value:int) { self.value = value }
+    drop { SmallToken.drops++ }
+}
+
+func verify_small_collections() {
+    var values:int[] = []
+    for index in 0...64 { values.append(index) }
+    let snapshot = values
+    for index in 64...4096 { values.append(index) }
+    assert(values.count() == 4096 && values[-1] == 4095)
+    assert(snapshot.count() == 64 && snapshot[-1] == 63)
+    var sum = 0
+    for value in values { sum += value }
+    assert(sum == 8386560)
+    values.clear()
+    values.append(7)
+    assert(values.count() == 1 && values[0] == 7 && snapshot[0] == 0)
+
+    var points:SmallPoint[] = []
+    for index in 0...513 { points.append(SmallPoint(index as float)) }
+    let frozen = points
+    points[256] = SmallPoint(-3.0)
+    points.append(SmallPoint(513.0))
+    assert(frozen.count() == 513 && frozen[256].y == 512.0)
+    assert(points[256].x == -3.0 && points[-1].z == -513.0)
+    for index in 0...frozen.count() {
+        assert(frozen[index].x == index as float)
+        assert(frozen[index].z == -(index as float))
+    }
+
+    SmallToken.drops = 0
+    {
+        var tokens:SmallToken[] = []
+        for index in 0...300 { tokens.append(SmallToken(index)) }
+        var retained = tokens
+        tokens.clear()
+        assert(SmallToken.drops == 0)
+        assert(retained.count() == 300 && retained[-1].value == 299)
+    }
+    assert(SmallToken.drops == 300)
+}
+
+test "small collections grow detach clear and release their resources" {
+    verify_small_collections()
+}
+func main() { verify_small_collections(); print("small collection growth passed") }
