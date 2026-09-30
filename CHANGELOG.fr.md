@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- En Native ARM64 Release, les chaînes de copies de structures ne transfèrent
+  plus leurs champs inutilisés. Les stockages accessibles par adresse et les
+  transferts qui se chevauchent restent intégralement préservés.
+
 - En Native ARM64 Release, un appel recevant une structure dans une boucle
   ne force plus toute la fonction à utiliser la pile. Les arguments et
   résultats agrégés restent protégés en mémoire ; les calculs indépendants

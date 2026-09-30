@@ -8,6 +8,7 @@ const Machine = @import("Machine.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
 const AggregateCallForwarding = @import("AggregateCallForwarding.zig");
 const AggregateResultStores = @import("AggregateResultStores.zig");
+const DeadCopyLeaves = @import("DeadCopyLeaves.zig");
 const MemorySchedule = @import("MemorySchedule.zig");
 const Slp = @import("../Optimize/Slp.zig");
 const StackLayout = @import("StackLayout.zig");
@@ -188,6 +189,11 @@ fn lowerInternal(
         function.float_register_slots = allocation.float_residences;
         function.float_lane_slots = allocation.float_lane_residences;
         function.frame_size = allocation.frame_size;
+    };
+    // Prune after coloring: keep the established allocation and packed-lane
+    // placement while removing unused leaf transfers from the emitted work.
+    if (mode == .release) for (functions) |*function| {
+        function.* = try DeadCopyLeaves.optimize(allocator, function.*);
     };
     const result: Machine.Program = .{
         .functions = functions,
@@ -1540,6 +1546,7 @@ fn runtimeConversionHeader(
 test {
     _ = @import("LowerTests.zig");
     _ = MemorySchedule;
+    _ = DeadCopyLeaves;
 }
 
 fn ownsReceiver(program: Ir.Program, function: Ir.Function) bool {

@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 Release no longer transfers unused fields through structure
+  copy chains. Address-taken storage and overlapping transfers remain fully
+  preserved.
+
 - In Native ARM64 Release, an aggregate call inside a loop no longer forces
   the entire function onto the stack. Aggregate arguments and results retain
   protected memory homes while independent arithmetic can keep registers.

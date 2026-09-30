@@ -718,3 +718,14 @@ values and incompatible scalar or aggregate residence classes never overlap;
 storage reached through a derived reference remains pinned. These exceptional
 large functions deliberately skip register coloring until virtual value
 identities and physical stack homes become separate machine-IR concepts.
+
+### Late aggregate copy pruning (ARM64)
+
+After residence allocation, Native ARM64 Release propagates demand per stack
+leaf through raw copies and aggregate initialization. A field never consumed
+by an effect or a returned value does not require a transfer. Demand is
+function-wide and reaches a fixed point across loops; address-taken local
+storage is fully observable. Overlapping aggregate transfers and reused-slot
+functions remain unchanged. The pass neither removes ownership operations nor
+reorders arithmetic, and remaps control-flow targets and source positions.
+The existing register and packed-lane assignments are retained.
