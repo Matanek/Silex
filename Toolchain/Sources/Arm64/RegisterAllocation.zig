@@ -152,7 +152,7 @@ pub fn allocateFloatScalarsFor(
         const interval: Interval = .{ .slot = @intCast(slot), .first = start, .last = last[slot], .weight = weights[slot] };
         if (baseline_forced[slot]) try loaded.append(allocator, interval) else try intervals.append(allocator, interval);
     }
-    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.slot_count, baseline_forced, &.{}, &.{}, false);
+    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.parameters, function.slot_count, baseline_forced, &.{}, &.{}, false);
     if (loaded.items.len != 0) {
         // No component merging can alter the already assigned colors here.
         const roots = try allocator.alloc(Machine.Slot, function.slot_count);
@@ -358,6 +358,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         integer_intervals.items,
         integer_registers,
         function.instructions,
+        function.parameters,
         function.slot_count,
         forced,
         reference_cursors,
@@ -399,6 +400,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         float_intervals.items,
         &pair_registers,
         function.instructions,
+        function.parameters,
         function.slot_count,
         forced,
         reference_cursors,
@@ -591,6 +593,7 @@ fn allocateGraph(
     intervals: []Interval,
     registers: []const u5,
     instructions: []const Machine.Instruction,
+    parameters: []const Machine.Span,
     slot_count: usize,
     forced: []const bool,
     reference_cursors: []const LoopCursor.ReferenceCursor,
@@ -599,6 +602,11 @@ fn allocateGraph(
 ) Allocator.Error!void {
     const live = try ResidenceLiveness.compute(allocator, instructions, slot_count);
     defer allocator.free(live);
+    // The prologue writes every incoming parameter, including unused ones.
+    // Their simultaneous capture must not overwrite another live argument.
+    if (instructions.len != 0) for (parameters) |parameter| {
+        for (0..parameter.width) |leaf| live[@as(usize, parameter.start) + leaf] = true;
+    };
     for (reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
     for (checked_reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
 
@@ -2283,6 +2291,7 @@ test "scalar copy affinity falls back when a precolored lane conflicts" {
         &intervals,
         &.{ 16, 17 },
         &instructions,
+        &.{},
         residences.len,
         &forced,
         &.{},
@@ -2312,4 +2321,44 @@ test "aggregate call loop exclusion follows CFG cycles rather than layout" {
     try std.testing.expect(try hasLoopAggregateCall(allocator, &.{
         call, .{ .branch = .{ .condition = 3, .then_instruction = 0, .else_instruction = 2 } }, .return_void,
     }));
+}
+
+test "unused incoming arguments cannot overwrite a live parameter during capture" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var caller: Machine.Function = .{
+        .name = "live_and_unused_parameters",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 3,
+        .frame_size = try Machine.frameSize(3),
+        .instructions = &.{
+            .{ .call = .{ .function = 1, .arguments = &.{.{ .start = 0, .width = 1 }}, .result = .{ .start = 2, .width = 1 } } },
+            .{ .return_value = .{ .start = 2, .width = 1 } },
+        },
+    };
+    const callee: Machine.Function = .{
+        .name = "identity",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 1,
+        .frame_size = try Machine.frameSize(1),
+        .instructions = &.{.{ .return_value = .{ .start = 0, .width = 1 } }},
+    };
+    const result = try allocate(allocator, caller);
+    try std.testing.expect(result.residences[0] == null or result.residences[1] == null or result.residences[0] != result.residences[1]);
+    caller.register_slots = result.residences;
+    caller.float_register_slots = result.float_residences;
+    caller.float_lane_slots = result.float_lane_residences;
+    caller.frame_size = result.frame_size;
+    if (@import("builtin").os.tag == .macos and @import("builtin").cpu.arch == .aarch64) {
+        const native = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{ caller, callee } }, 0, &.{ 42, 0 });
+        try std.testing.expectEqual(Machine.Status.success, native.status);
+        try std.testing.expectEqual(@as(i64, 42), native.value);
+    }
 }

@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Register allocation accounts for every parameter captured at function entry,
+  including unused ones. An unused parameter can no longer overwrite a live
+  argument’s register in the native prologue.
+
 - On macOS ARM64, class reference counters use the LSE atomic instructions
   guaranteed by Apple Silicon. Decrements remain saturating and retain
   acquire/release synchronization; other targets keep their existing path.

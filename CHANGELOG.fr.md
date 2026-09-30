@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- L’allocation de registres tient compte de tous les paramètres capturés à
+  l’entrée, même inutilisés. Un paramètre inutilisé ne peut plus écraser le
+  registre d’un argument encore vivant dans le prologue natif.
+
 - Sur macOS ARM64, les compteurs de références des classes utilisent les
   instructions atomiques LSE garanties par Apple Silicon. La décrémentation
   reste saturante et conserve la synchronisation acquire/release ; les autres
