@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- In Native ARM64 Release, an aggregate call inside a loop no longer forces
+  the entire function onto the stack. Aggregate arguments and results retain
+  protected memory homes while independent arithmetic can keep registers.
+
 - Native ARM64 Release class field reads and writes can use scalar registers
   directly, avoiding intermediate stack copies. Mixed fields preserve their
   payload bits, and packed SIMD lanes remain excluded from these transfers.

@@ -2,6 +2,7 @@ const Machine = @import("Machine.zig");
 const std = @import("std");
 
 test {
+    _ = @import("RegionalCallTests.zig");
     _ = @import("AggregateCopyTests.zig");
     _ = @import("ViewReplacementTests.zig");
     _ = @import("FloatMemoryTests.zig");

@@ -516,7 +516,10 @@ calculation, not the presence of a wide aggregate load: scalar class or view
 reads can feed the same region. Every
 unsupported instruction is a hard barrier: its complete uses and definitions,
 and every interval live across it, remain stack-resident. Mixed aggregate
-loads and aggregate calls inside loops retain the whole-function spill path.
+loads retain the whole-function spill path. Calls inside loops pin their
+aggregate argument and result spans locally; independent arithmetic regions
+may keep registers, with call-crossing values obeying the preserved-register
+and effect-barrier constraints.
 On ARM64, the same barrier model admits a repeated scalar loop with at least
 four compatible arithmetic operations even when an output or another stack
 effect follows the loop. Admission follows paths reaching the back-edge latch,

@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- En Native ARM64 Release, un appel recevant une structure dans une boucle
+  ne force plus toute la fonction à utiliser la pile. Les arguments et
+  résultats agrégés restent protégés en mémoire ; les calculs indépendants
+  peuvent conserver leurs registres.
+
 - En Native ARM64 Release, les lectures et écritures de champs de classes
   peuvent utiliser directement les registres scalaires, ce qui évite des
   copies intermédiaires sur la pile. Les champs mixtes conservent leurs bits
