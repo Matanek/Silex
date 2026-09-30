@@ -39,6 +39,32 @@ pub fn emit(
     }
 }
 
+// Standard ABI boundary for machine instructions classified as calls. Other
+// runtime helpers retain the private scratch-preserving convention above.
+pub fn emitAbi(allocator: Allocator, words: *std.ArrayList(u32), sites: *std.ArrayList(ExternalCalls.Site), platform: Platform) Error!void {
+    if (platform == .linux) return emit(allocator, words, sites, platform);
+    try words.append(allocator, A64.moveWideZero32(.x0, 1));
+    try emitAbiSite(allocator, words, sites, true);
+}
+
+pub fn emitFreeAbi(allocator: Allocator, words: *std.ArrayList(u32), sites: *std.ArrayList(ExternalCalls.Site), platform: Platform) Error!void {
+    if (platform == .linux) return emitFree(allocator, words, sites, platform);
+    try emitAbiSite(allocator, words, sites, false);
+}
+
+fn emitAbiSite(allocator: Allocator, words: *std.ArrayList(u32), sites: *std.ArrayList(ExternalCalls.Site), allocate: bool) Error!void {
+    try sites.append(allocator, .{
+        .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
+        .function = 0,
+        .heap_operation = if (allocate) .allocate else .release,
+        .heap_preserves_scratch = false,
+    });
+    try words.append(allocator, A64.addressPage(.x16));
+    try words.append(allocator, A64.load64(.x16, .x16, 0));
+    try words.append(allocator, A64.branchLinkRegister(.x16));
+    try words.append(allocator, A64.moveWideZero32(.x8, 0));
+}
+
 pub fn failureBranch(platform: Platform) u32 {
     return switch (platform) {
         .darwin, .windows => A64.compareBranchZero64(.x0),

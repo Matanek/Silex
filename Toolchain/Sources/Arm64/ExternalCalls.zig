@@ -13,6 +13,7 @@ pub const Site = struct {
     function: usize,
     windows_symbol: ?@import("../Windows/Imports.zig").Symbol = null,
     heap_operation: ?enum { allocate, release } = null,
+    heap_preserves_scratch: bool = true,
 };
 
 pub fn emit(

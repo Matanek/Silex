@@ -35,6 +35,18 @@ pub fn append(
     var retained: usize = 0;
     for (sites.items) |site| {
         if (site.heap_operation) |operation| {
+            if (!site.heap_preserves_scratch) {
+                var direct = site;
+                direct.heap_operation = null;
+                direct.function = externals.len + @as(usize, if (operation == .allocate) 0 else 1);
+                direct.windows_symbol = if (platform == .windows)
+                    (if (operation == .allocate) .crt_calloc else .crt_free)
+                else
+                    null;
+                sites.items[retained] = direct;
+                retained += 1;
+                continue;
+            }
             try Fixups.patch26(words.items, site.instruction_offset / 4, switch (operation) {
                 .allocate => allocate_at,
                 .release => release_at,
@@ -166,5 +178,34 @@ test "Windows heap preserves the same private ABI without adding Darwin external
         const offset: u12 = @intCast(vector_offset + index * 16);
         try std.testing.expectEqual(@as(usize, 2), std.mem.count(u32, words.items, &.{vectorStack(@intCast(index), offset, false)}));
         try std.testing.expectEqual(@as(usize, 2), std.mem.count(u32, words.items, &.{vectorStack(@intCast(index), offset, true)}));
+    }
+}
+
+test "ABI heap sites link directly while private helpers keep scratch adapters" {
+    inline for (.{ Platform.darwin, Platform.windows }) |platform| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var words: std.ArrayList(u32) = .empty;
+        var sites: std.ArrayList(ExternalCalls.Site) = .empty;
+        try @import("Allocation.zig").emitAbi(allocator, &words, &sites, platform);
+        const release_word = words.items.len;
+        try @import("Allocation.zig").emitFreeAbi(allocator, &words, &sites, platform);
+        const private_word = words.items.len;
+        try @import("Allocation.zig").emit(allocator, &words, &sites, platform);
+        const functions = try append(allocator, &words, &sites, &.{}, platform);
+        try std.testing.expectEqual(@as(usize, if (platform == .darwin) 2 else 0), functions.len);
+        try std.testing.expectEqual(@as(usize, 4), sites.items.len);
+        try std.testing.expectEqual(@as(u32, 4), sites.items[0].instruction_offset);
+        try std.testing.expectEqual(@as(u32, @intCast(release_word * 4)), sites.items[1].instruction_offset);
+        try std.testing.expectEqual(@as(usize, 0), sites.items[0].function);
+        try std.testing.expectEqual(@as(usize, 1), sites.items[1].function);
+        try std.testing.expectEqual(null, sites.items[0].heap_operation);
+        try std.testing.expectEqual(A64.addressPage(.x16), words.items[1]);
+        try std.testing.expectEqual(A64.addressPage(.x16), words.items[release_word]);
+        try std.testing.expectEqual(A64.moveWideZero32(.x8, 0), words.items[release_word - 1]);
+        try std.testing.expectEqual(A64.moveWideZero32(.x8, 0), words.items[private_word - 1]);
+        // The remaining private allocation still branches to the adapter.
+        try std.testing.expectEqual(@as(u32, 0x94000001), words.items[private_word]);
     }
 }

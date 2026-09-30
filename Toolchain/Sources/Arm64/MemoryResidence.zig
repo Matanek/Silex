@@ -2,6 +2,7 @@ const Machine = @import("Machine.zig");
 const std = @import("std");
 
 test {
+    _ = @import("ClassBoundaryTests.zig");
     _ = @import("RegionalCallTests.zig");
     _ = @import("AggregateCopyTests.zig");
     _ = @import("ViewReplacementTests.zig");
@@ -9,6 +10,23 @@ test {
     _ = @import("DeadCollectionLoadTests.zig");
     _ = @import("MathCallResidenceTests.zig");
     _ = @import("CallResidenceTests.zig");
+}
+
+// Class fields retain stack homes; handles may be resident. These operations
+// preserve the standard callee-save banks. Retain is inline; allocation/drop
+// may enter runtime or destructors.
+pub fn classOperation(instruction: Machine.Instruction) bool {
+    return switch (instruction) {
+        .class_init, .class_retain, .class_drop => true,
+        else => false,
+    };
+}
+
+pub fn callsRuntime(instruction: Machine.Instruction) bool {
+    return switch (instruction) {
+        .class_init, .class_drop => true,
+        else => false,
+    };
 }
 
 pub fn scalarMathCall(external: Machine.ExternalFunction) bool {

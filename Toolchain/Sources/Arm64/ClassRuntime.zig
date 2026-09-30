@@ -15,12 +15,13 @@ pub fn emitInit(
     epilogue: *std.ArrayList(Fixups.Local),
     external_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Platform,
+    function: Machine.Function,
     value: Machine.Instruction.ClassInit,
 ) Error!void {
     var width: usize = 0;
     for (value.fields) |field| width += field.width;
     try immediate(allocator, words, .x1, (width + 4) * Machine.slot_size);
-    try Allocation.emit(allocator, words, external_sites, platform);
+    try Allocation.emitAbi(allocator, words, external_sites, platform);
     const failed = words.items.len;
     try words.append(allocator, Allocation.failureBranch(platform));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
@@ -35,7 +36,9 @@ pub fn emitInit(
         try words.append(allocator, A64.store64(.x9, .x15, @intCast(offset * Machine.slot_size)));
         offset += 1;
     };
-    try words.append(allocator, A64.storeStack(.x15, value.result));
+    if (residence(function.register_slots, value.result)) |register| {
+        try words.append(allocator, A64.moveRegister(register, .x15));
+    } else try words.append(allocator, A64.storeStack(.x15, value.result));
     const done = words.items.len;
     try words.append(allocator, A64.branch());
     try Fixups.patch19(words.items, failed, words.items.len);

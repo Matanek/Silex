@@ -441,7 +441,7 @@ fn allocatePairGraph(
     @memset(preserved, false);
     if (regional_colors) {
         for (instructions, 0..) |instruction, index| {
-            if (instruction != .call and instruction != .external_call) continue;
+            if (instruction != .call and instruction != .external_call and !MemoryResidence.callsRuntime(instruction)) continue;
             for (0..slot_count) |slot| {
                 const partner = partners[slot] orelse continue;
                 if (!live[index * slot_count + slot] and

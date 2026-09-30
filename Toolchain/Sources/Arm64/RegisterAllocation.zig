@@ -189,7 +189,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     // Keep argument/result stack homes. Scalar regions may borrow volatile
     // floating colors only when their live values do not meet a call.
     const has_calls = for (function.instructions) |instruction| {
-        if (instruction == .call) break true;
+        if (instruction == .call or MemoryResidence.callsRuntime(instruction)) break true;
         if (instruction == .external_call) {
             const call = instruction.external_call;
             if (call.function >= externals.len or call.result == null or
@@ -593,7 +593,7 @@ fn allocateGraph(
     @memset(preserved, false);
     if (regional_float_colors) {
         for (instructions, 0..) |instruction, index| {
-            if (instruction != .call and instruction != .external_call) continue;
+            if (instruction != .call and instruction != .external_call and !MemoryResidence.callsRuntime(instruction)) continue;
             for (0..slot_count) |slot| {
                 if (live[index * slot_count + slot] or successorLive(instructions, live, slot_count, index, slot))
                     preserved[alias_roots[slot]] = true;
@@ -1208,6 +1208,7 @@ fn profitableLoopRange(instructions: []const Machine.Instruction, header: usize,
 }
 
 fn isResidenceCompatibleInstruction(instruction: Machine.Instruction, externals: []const Machine.ExternalFunction) bool {
+    if (MemoryResidence.classOperation(instruction)) return true;
     return switch (instruction) {
         .constant_int,
         .constant_bool,
@@ -1258,6 +1259,9 @@ fn pinLiveAt(
 }
 
 fn forceStackOperands(function: Machine.Function, instruction: Machine.Instruction, forced: []bool, externals: []const Machine.ExternalFunction) void {
+    if (instruction == .class_init) {
+        for (instruction.class_init.fields) |field| forceSpan(field, forced);
+    }
     const inline_float_intrinsic = if (instruction == .external_call) root: {
         const call = instruction.external_call;
         break :root call.result != null and call.function < externals.len and
@@ -1357,6 +1361,9 @@ fn visit(
         .collection_count => |value| touch(value.result, index, first, last, weights, weight),
         .class_load,
         .class_store,
+        .class_init,
+        .class_retain,
+        .class_drop,
         .reference_load,
         .reference_store,
         .reference_offset,

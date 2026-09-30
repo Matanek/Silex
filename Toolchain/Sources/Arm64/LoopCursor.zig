@@ -125,7 +125,7 @@ pub fn findReferenceCursors(
 pub fn findReferenceReuses(allocator: Allocator, function: Machine.Function) Allocator.Error!ReferenceReuses {
     var result: ReferenceReuses = .{};
     for (function.instructions) |instruction| switch (instruction) {
-        .call, .external_call => return result,
+        .call, .external_call, .class_init, .class_drop => return result,
         else => {},
     };
     for (function.instructions, 0..) |instruction, first_index| {

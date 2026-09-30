@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le backend Native ARM64 conserve les valeurs numériques indépendantes en
+  registres autour des opérations de classes. Leurs allocations et libérations
+  utilisent directement l’ABI système sur macOS et Windows, sans sauvegarder
+  systématiquement tous les registres temporaires.
+
 - En Native ARM64 Release, les calculs réutilisent directement les valeurs des
   copies temporaires sur la pile lorsque leur stockage reste inchangé. Les
   adresses exposées et les frontières de contrôle conservent leurs copies.

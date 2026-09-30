@@ -79,9 +79,9 @@ test "scalar regions retain the profitability threshold and never count through 
         var function = try witness(allocator, .float32, if (split) 16 else 15, split);
         var instructions: std.ArrayList(Machine.Instruction) = .empty;
         for (function.instructions) |instruction| {
-            // Ownership operations remain barriers; simple field reads no longer are.
+            // Output remains a barrier; class ownership now uses preserved banks.
             if (instruction == .class_load and instruction.class_load.result.start != 1) {
-                try instructions.append(allocator, .{ .class_retain = .{ .operand = 0 } });
+                try instructions.append(allocator, .{ .print = .{ .value = 1, .kind = .float32, .newline = false } });
             }
             try instructions.append(allocator, instruction);
         }

@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 keeps independent numeric values in registers across class
+  operations. Their allocations and releases use the system ABI directly on
+  macOS and Windows without saving every temporary register.
+
 - Native ARM64 Release calculations reuse the values behind temporary stack
   copies while their storage remains unchanged. Exposed addresses and control
   flow boundaries retain their copies.

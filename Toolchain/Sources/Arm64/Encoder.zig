@@ -1387,6 +1387,7 @@ fn encodeFunction(
                     .linux => .linux,
                     .windows => .windows,
                 },
+                function,
                 initialization,
             ),
             .class_test => |test_value| {
@@ -1404,7 +1405,7 @@ fn encodeFunction(
             .class_load => |load| try ClassRuntime.emitLoad(allocator, words, function, load),
             .class_store => |store| try ClassRuntime.emitStore(allocator, words, function, store),
             .class_retain => |retain| {
-                try words.append(allocator, loadStack(.x10, retain.operand));
+                try loadValue(allocator, words, function, .x10, retain.operand);
                 const skip_null = words.items.len;
                 if (retain.nullable) try words.append(allocator, compareBranchZero64(.x10));
                 try emitClassRetain(allocator, words, retain.ownership, platform);
@@ -1414,7 +1415,7 @@ fn encodeFunction(
                 if (enable_cycle_collector) {
                     try words.append(allocator, storeStack(.zero_or_sp, cycle_context_slot));
                 }
-                try words.append(allocator, loadStack(.x10, drop.operand));
+                try loadValue(allocator, words, function, .x10, drop.operand);
                 const skip_null = words.items.len;
                 if (drop.nullable) try words.append(allocator, compareBranchZero64(.x10));
                 const skip_finalization = try emitClassDrop(allocator, words, drop.ownership, platform);
@@ -1425,12 +1426,12 @@ fn encodeFunction(
                 var cycle_unavailable: ?usize = null;
                 var cycle_claimed: ?usize = null;
                 if (enable_cycle_collector) {
-                    try words.append(allocator, loadStack(.x10, drop.operand));
+                    try loadValue(allocator, words, function, .x10, drop.operand);
                     try words.append(allocator, load64(.x9, .x10, 3 * Machine.slot_size));
                     cycle_claimed = words.items.len;
                     try words.append(allocator, compareBranchNonZero(.x9));
                     try words.append(allocator, moveWideZero32(.x0, if (drop.cycle_prechecked) 2 else 0));
-                    try words.append(allocator, loadStack(.x1, drop.operand));
+                    try loadValue(allocator, words, function, .x1, drop.operand);
                     const data_at = words.items.len;
                     try appendRelocatableAddress(allocator, words, .x2);
                     if (drop.nullable) {
@@ -1461,7 +1462,7 @@ fn encodeFunction(
                 const finalize = words.items.len;
                 try Fixups.patch26(words.items, finalize_without_cycle, finalize);
                 try Fixups.patch26(words.items, finalize_cycle, finalize);
-                try words.append(allocator, loadStack(.x10, drop.operand));
+                try loadValue(allocator, words, function, .x10, drop.operand);
                 try words.append(allocator, load64(.x9, .x10, 0));
                 var finalized: std.ArrayList(usize) = .empty;
                 for (drop.plans) |plan| {
@@ -1470,14 +1471,14 @@ fn encodeFunction(
                     const skip = words.items.len;
                     try words.append(allocator, conditionalBranch(.not_equal));
                     for (plan.functions) |finalizer| {
-                        try words.append(allocator, loadStack(.x0, drop.operand));
+                        try loadValue(allocator, words, function, .x0, drop.operand);
                         try calls.append(allocator, .{ .at = words.items.len, .function = finalizer });
                         try words.append(allocator, branchLink());
                         try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                     }
-                    try words.append(allocator, loadStack(.x0, drop.operand));
+                    try loadValue(allocator, words, function, .x0, drop.operand);
                     try emitImmediate64(allocator, words, .x1, plan.byte_count);
-                    try Allocation.emitFree(allocator, words, external_call_sites, platform);
+                    try Allocation.emitFreeAbi(allocator, words, external_call_sites, platform);
                     try finalized.append(allocator, words.items.len);
                     try words.append(allocator, branch());
                     try Fixups.patch19(words.items, skip, words.items.len);
@@ -3766,7 +3767,7 @@ fn emitCachedFloatLiterals(allocator: Allocator, words: *std.ArrayList(u32), cac
 
 fn functionCanClobberFloatLiteralCache(function: Machine.Function) bool {
     for (function.instructions) |instruction| switch (instruction) {
-        .call, .indirect_call, .external_call, .external_indirect_call, .dynamic_call => return true,
+        .call, .indirect_call, .external_call, .external_indirect_call, .dynamic_call, .class_init, .class_drop => return true,
         else => {},
     };
     return false;
@@ -6802,5 +6803,23 @@ test "class counter transitions preserve roots edges and zero saturation" {
         const zero_result = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{zero_function}, .copy_model = &.{0} }, 0, &.{@intCast(@intFromPtr(&header))});
         try std.testing.expectEqual(Machine.Status.success, zero_result.status);
         try std.testing.expectEqualSlices(u64, &.{ 0, 0, 0, 1 }, &header);
+    }
+}
+
+test "class runtime boundaries invalidate volatile literal caches" {
+    const operations = [_]Machine.Instruction{
+        .{ .class_init = .{ .result = 0, .structure = 0, .fields = &.{} } },
+        .{ .class_drop = .{ .operand = 0, .static_type = 0, .plans = &.{} } },
+    };
+    for (operations) |operation| {
+        const function: Machine.Function = .{
+            .name = "runtime_cache_barrier",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 1,
+            .frame_size = try Machine.frameSize(1),
+            .instructions = &.{ operation, .return_void },
+        };
+        try std.testing.expect(functionCanClobberFloatLiteralCache(function));
     }
 }
