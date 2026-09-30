@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 Release waits for external signatures before allocating
+  registers in functions that call a library. Math intrinsics therefore avoid
+  stack transfers previously imposed by an unresolved call.
+
 - Native ARM64 keeps independent numeric values in registers across class
   operations. Their allocations and releases use the system ABI directly on
   macOS and Windows without saving every temporary register.

@@ -389,6 +389,9 @@ fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
 }
 
 fn allocateRegisters(allocator: Allocator, function: Machine.Function) Machine.Error!Machine.Function {
+    // Boundary signatures and intrinsic lowering are resolved later. Coloring
+    // now would freeze avoidable spills around an unknown external call.
+    for (function.instructions) |instruction| if (instruction == .external_call) return function;
     var result = try MemorySchedule.optimize(allocator, function);
     result = try AggregateCallForwarding.optimize(allocator, result);
     const allocation = try RegisterAllocation.allocate(allocator, result);

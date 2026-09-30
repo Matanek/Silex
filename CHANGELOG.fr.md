@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- En Native ARM64 Release, les fonctions qui appellent une bibliothèque
+  externe attendent la résolution de ses signatures avant l’allocation des
+  registres. Les intrinsics mathématiques évitent ainsi les transferts de pile
+  imposés auparavant par un appel encore inconnu.
+
 - Le backend Native ARM64 conserve les valeurs numériques indépendantes en
   registres autour des opérations de classes. Leurs allocations et libérations
   utilisent directement l’ABI système sur macOS et Windows, sans sauvegarder

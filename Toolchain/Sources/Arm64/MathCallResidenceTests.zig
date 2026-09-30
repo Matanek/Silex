@@ -69,3 +69,46 @@ test "scalar math calls retain live values in ABI-preserved registers" {
         try std.testing.expectEqual(@as(usize, 0), fallback.residences.len);
     }
 }
+
+test "full lowering resolves scalar math before allocating profitable regions" {
+    const Ir = @import("../Ir.zig");
+    const Boundary = @import("../Boundary.zig");
+    const Lower = @import("Lower.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var instructions: std.ArrayList(Ir.Instruction) = .empty;
+    try instructions.append(allocator, .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 1)) } });
+    for (0..16) |i| try instructions.append(allocator, .{ .binary = .{
+        .result = i + 2, .left = if (i == 0) 0 else i + 1, .right = 1, .operator = .add,
+    } });
+    try instructions.append(allocator, .{ .boundary_call = .{ .result = 18, .function = 0, .arguments = &.{17} } });
+    try instructions.append(allocator, .{ .binary = .{ .result = 19, .left = 17, .right = 18, .operator = .add } });
+    const value_types = [_]Ir.Type{.float32} ** 20;
+    const function: Ir.Function = .{
+        .name = "sqrt_region", .parameter_types = &.{.float32}, .return_type = .float32,
+        .value_types = &value_types,
+        .blocks = &.{.{ .instructions = instructions.items, .terminator = .{ .return_value = 19 } }},
+    };
+    for ([_]bool{ false, true }) |trusted| {
+        const boundary: Boundary.Function = .{
+            .name = "square_root", .provider = if (trusted) "MacOS.lib_system" else "unrelated_library",
+            .package_private = !trusted,
+            .source_name = "sqrtf", .parameters = &.{.float32}, .return_type = .float32,
+        };
+        const lowered = try Lower.lowerWithModeAndBoundaries(allocator, .{ .functions = &.{function} }, &.{boundary}, .release);
+        const machine = lowered.functions[0];
+        const input = for (machine.instructions) |instruction| {
+            if (instruction == .external_call) break instruction.external_call.arguments[0];
+        } else return error.MissingMathCall;
+        try std.testing.expectEqual(trusted, machine.float_register_slots[input] != null);
+        const image = try Encoder.encode(allocator, lowered, .none);
+        defer image.deinit(allocator);
+        try std.testing.expectEqual(@as(usize, if (trusted) 0 else 1), image.external_call_sites.len);
+        if (trusted and @import("builtin").os.tag == .macos and @import("builtin").cpu.arch == .aarch64) {
+            const actual = try @import("Runner.zig").invoke(allocator, lowered, 0, &.{@as(u32, @bitCast(@as(f32, 9)))});
+            try std.testing.expectEqual(Machine.Status.success, actual.status);
+            try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 30))), @as(u32, @truncate(@as(u64, @bitCast(actual.value)))));
+        }
+    }
+}
