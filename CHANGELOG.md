@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 Release calculations reuse the values behind temporary stack
+  copies while their storage remains unchanged. Exposed addresses and control
+  flow boundaries retain their copies.
+
 - Native ARM64 Release pins mixed aggregate load results without disabling
   registers for the entire function. Arithmetic regions qualify from
   16 floating-point operations.

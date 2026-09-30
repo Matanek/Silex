@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- En Native ARM64 Release, les calculs réutilisent directement les valeurs des
+  copies temporaires sur la pile lorsque leur stockage reste inchangé. Les
+  adresses exposées et les frontières de contrôle conservent leurs copies.
+
 - En Native ARM64 Release, les chargements de structures mixtes protègent
   leurs résultats en mémoire sans désactiver les registres de toute la
   fonction. Les régions de calcul sont admises dès 16 opérations flottantes.

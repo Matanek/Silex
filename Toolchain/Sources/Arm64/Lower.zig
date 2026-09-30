@@ -193,6 +193,7 @@ fn lowerInternal(
     // Prune after coloring: keep the established allocation and packed-lane
     // placement while removing unused leaf transfers from the emitted work.
     if (mode == .release) for (functions) |*function| {
+        function.* = try @import("StackCopyForwarding.zig").optimize(allocator, function.*);
         function.* = try DeadCopyLeaves.optimize(allocator, function.*);
     };
     const result: Machine.Program = .{
