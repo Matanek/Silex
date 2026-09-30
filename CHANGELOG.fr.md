@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Sur macOS ARM64, les compteurs de références des classes utilisent les
+  instructions atomiques LSE garanties par Apple Silicon. La décrémentation
+  reste saturante et conserve la synchronisation acquire/release ; les autres
+  cibles gardent leur chemin existant.
+
 - Les chaînes natives ARM64 issues d’une concaténation, d’octets ou d’un
   formatage réservent et écrivent explicitement leur zéro terminal. Le
   formatage X64 fait de même. Les appels C recevant une chaîne construite

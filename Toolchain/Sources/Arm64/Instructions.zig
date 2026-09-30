@@ -327,6 +327,19 @@ pub fn storeReleaseExclusive64(status: Register, source: Register, base: Registe
     return 0xc800fc00 | (registerBits(status) << 16) | (registerBits(base) << 5) | registerBits(source);
 }
 
+/// LSE instructions require a target profile that guarantees the extension.
+pub fn atomicAddAcquireRelease64(source: Register, previous: Register, base: Register) u32 {
+    return 0xf8e00000 | (registerBits(source) << 16) | (registerBits(base) << 5) | registerBits(previous);
+}
+
+pub fn compareSwapAcquireRelease64(expected: Register, desired: Register, base: Register) u32 {
+    return 0xc8e0fc00 | (registerBits(expected) << 16) | (registerBits(base) << 5) | registerBits(desired);
+}
+
+pub fn loadAcquire64(destination: Register, base: Register) u32 {
+    return 0xc8dffc00 | (registerBits(base) << 5) | registerBits(destination);
+}
+
 pub fn clearExclusive() u32 {
     return 0xd5033f5f;
 }
@@ -788,4 +801,10 @@ test "encode parity comparison without signed remainder" {
     try std.testing.expectEqual(@as(u32, 0xf240037f), testLowBit(.x27));
     try std.testing.expectEqual(@as(u32, 0x1a9f17e4), conditionalSetZero(.x4, true));
     try std.testing.expectEqual(@as(u32, 0x1a9f07e4), conditionalSetZero(.x4, false));
+}
+
+test "encode acquire release LSE atomics from assembler reference words" {
+    try std.testing.expectEqual(@as(u32, 0xf8e901cb), atomicAddAcquireRelease64(.x9, .x11, .x14));
+    try std.testing.expectEqual(@as(u32, 0xc8ecfdcb), compareSwapAcquireRelease64(.x12, .x11, .x14));
+    try std.testing.expectEqual(@as(u32, 0xc8dffdc9), loadAcquire64(.x9, .x14));
 }

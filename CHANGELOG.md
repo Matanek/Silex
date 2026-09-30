@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- On macOS ARM64, class reference counters use the LSE atomic instructions
+  guaranteed by Apple Silicon. Decrements remain saturating and retain
+  acquire/release synchronization; other targets keep their existing path.
+
 - Native ARM64 strings built by concatenation, byte conversion or formatting
   explicitly reserve and write their trailing zero. X64 formatting does the
   same. C calls receiving constructed strings no longer read past the

@@ -651,13 +651,20 @@ fn emitSnapshotRelease(allocator: Allocator, words: *std.ArrayList(u32), data_fi
     try words.append(allocator, A64.storeRelease64(.zero_or_sp, .x14));
 }
 
-fn emitClassRetain(allocator: Allocator, words: *std.ArrayList(u32), ownership: Ir.Ownership) Error!void {
+fn emitClassRetain(allocator: Allocator, words: *std.ArrayList(u32), ownership: Ir.Ownership, platform: Platform) Error!void {
     if (ownership == .edge) try emitMarkCycleDirty(allocator, words);
     const offset: u12 = switch (ownership) {
         .root => Machine.slot_size,
         .edge => 2 * Machine.slot_size,
     };
     try words.append(allocator, addSubtractImmediate(.x14, .x10, offset, true));
+    // Apple Silicon guarantees LSE; Linux and Windows retain the base
+    // ARM64 exclusive loop. Preserve acquire/release ordering in both paths.
+    if (platform == .darwin) {
+        try words.append(allocator, moveWideZero64(.x9, 1, 0));
+        try words.append(allocator, A64.atomicAddAcquireRelease64(.x9, .x11, .x14));
+        return;
+    }
     const retry = words.items.len;
     try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
     try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, true));
@@ -676,7 +683,7 @@ const ClassDropBranches = struct {
 
 /// Returns the branches that skip finalization when another root remains or a
 /// concurrent drop has already claimed the instance.
-fn emitClassDrop(allocator: Allocator, words: *std.ArrayList(u32), ownership: Ir.Ownership) Error!ClassDropBranches {
+fn emitClassDrop(allocator: Allocator, words: *std.ArrayList(u32), ownership: Ir.Ownership, platform: Platform) Error!ClassDropBranches {
     if (ownership == .edge) try emitMarkCycleDirty(allocator, words);
     const offset: u12 = switch (ownership) {
         .root => Machine.slot_size,
@@ -688,14 +695,27 @@ fn emitClassDrop(allocator: Allocator, words: *std.ArrayList(u32), ownership: Ir
     };
     try words.append(allocator, addSubtractImmediate(.x14, .x10, offset, true));
     const release_retry = words.items.len;
-    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
+    try words.append(allocator, if (platform == .darwin) A64.loadAcquire64(.x9, .x14) else A64.loadAcquireExclusive64(.x9, .x14));
     const unrooted = words.items.len;
     try words.append(allocator, compareBranchZero64(.x9));
-    try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, false));
-    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x14));
-    const release_conflicted = words.items.len;
-    try words.append(allocator, compareBranchNonZero(.x11));
-    try Fixups.patch19(words.items, release_conflicted, release_retry);
+    if (platform == .darwin) {
+        // A fetch-sub would wrap an already-zero counter. CAS preserves the
+        // saturating decrement and retries if a concurrent owner changes it.
+        try words.append(allocator, moveRegister(.x12, .x9));
+        try words.append(allocator, addSubtractImmediate(.x11, .x9, 1, false));
+        try words.append(allocator, A64.compareSwapAcquireRelease64(.x12, .x11, .x14));
+        try words.append(allocator, compareRegisters(.x12, .x9));
+        const release_conflicted = words.items.len;
+        try words.append(allocator, conditionalBranch(.not_equal));
+        try Fixups.patch19(words.items, release_conflicted, release_retry);
+        try words.append(allocator, moveRegister(.x9, .x11));
+    } else {
+        try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, false));
+        try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x14));
+        const release_conflicted = words.items.len;
+        try words.append(allocator, compareBranchNonZero(.x11));
+        try Fixups.patch19(words.items, release_conflicted, release_retry);
+    }
     const count_ready = words.items.len;
     try Fixups.patch19(words.items, unrooted, count_ready);
     try words.append(allocator, load64(.x11, .x10, other_offset));
@@ -1387,7 +1407,7 @@ fn encodeFunction(
                 try words.append(allocator, loadStack(.x10, retain.operand));
                 const skip_null = words.items.len;
                 if (retain.nullable) try words.append(allocator, compareBranchZero64(.x10));
-                try emitClassRetain(allocator, words, retain.ownership);
+                try emitClassRetain(allocator, words, retain.ownership, platform);
                 if (retain.nullable) try Fixups.patch19(words.items, skip_null, words.items.len);
             },
             .class_drop => |drop| {
@@ -1397,7 +1417,7 @@ fn encodeFunction(
                 try words.append(allocator, loadStack(.x10, drop.operand));
                 const skip_null = words.items.len;
                 if (drop.nullable) try words.append(allocator, compareBranchZero64(.x10));
-                const skip_finalization = try emitClassDrop(allocator, words, drop.ownership);
+                const skip_finalization = try emitClassDrop(allocator, words, drop.ownership, platform);
                 const finalize_without_cycle = words.items.len;
                 try words.append(allocator, branch());
 
@@ -6733,4 +6753,54 @@ test "map only proven reference reuses to cache registers" {
     try std.testing.expectEqual(Register.x6, referenceReuseRegister(one, 3, true).?);
     try std.testing.expectEqual(Register.x6, referenceReuseRegister(one, 9, false).?);
     try std.testing.expectEqual(@as(?Register, null), referenceReuseRegister(one, 4, true));
+}
+
+test "class counters select LSE only for the Darwin ARM64 profile" {
+    for ([_]Platform{ .darwin, .linux, .windows }) |platform| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var retain: std.ArrayList(u32) = .empty;
+        try emitClassRetain(allocator, &retain, .root, platform);
+        var drop: std.ArrayList(u32) = .empty;
+        const exits = try emitClassDrop(allocator, &drop, .root, platform);
+        try std.testing.expect(exits.rooted < drop.items.len);
+        try std.testing.expectEqual(platform == .darwin, std.mem.indexOfScalar(u32, retain.items, 0xf8e901cb) != null);
+        try std.testing.expectEqual(platform == .darwin, std.mem.indexOfScalar(u32, drop.items, 0xc8ecfdcb) != null);
+        try std.testing.expectEqual(platform != .darwin, std.mem.indexOfScalar(u32, retain.items, A64.storeReleaseExclusive64(.x11, .x9, .x14)) != null);
+    }
+}
+
+test "class counter transitions preserve roots edges and zero saturation" {
+    if (@import("builtin").os.tag != .macos or @import("builtin").cpu.arch != .aarch64) return;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]Ir.Ownership{ .root, .edge }) |ownership| {
+        const function: Machine.Function = .{
+            .name = "balanced_counter",
+            .parameter_count = 1,
+            .parameters = &.{.{ .start = 0, .width = 1 }},
+            .return_type = .void,
+            .slot_count = 1,
+            .frame_size = try Machine.frameSize(1),
+            .instructions = &.{
+                .{ .class_retain = .{ .operand = 0, .ownership = ownership } },
+                .{ .class_drop = .{ .operand = 0, .ownership = ownership, .static_type = 0, .plans = &.{} } },
+                .return_void,
+            },
+        };
+        var header = [_]u64{ 0, 1, 1, 0 };
+        const result = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{function}, .copy_model = &.{0} }, 0, &.{@intCast(@intFromPtr(&header))});
+        try std.testing.expectEqual(Machine.Status.success, result.status);
+        try std.testing.expectEqualSlices(u64, &.{ 0, 1, 1, 0 }, &header);
+        var zero_function = function;
+        zero_function.instructions = function.instructions[1..];
+        // A finalized header keeps this synthetic zero-count probe off the
+        // destruction path: dropping zero must never wrap the counter.
+        header = .{ 0, 0, 0, 1 };
+        const zero_result = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{zero_function}, .copy_model = &.{0} }, 0, &.{@intCast(@intFromPtr(&header))});
+        try std.testing.expectEqual(Machine.Status.success, zero_result.status);
+        try std.testing.expectEqualSlices(u64, &.{ 0, 0, 0, 1 }, &header);
+    }
 }
