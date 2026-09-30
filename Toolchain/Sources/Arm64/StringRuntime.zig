@@ -181,7 +181,7 @@ pub fn emitConcat(
     try words.append(allocator, A64.addSetFlags(.x15, .x10, .x13));
     const length_overflow = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.carry_set));
-    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size + dynamic_prefix_size));
+    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size + dynamic_prefix_size + 1));
     try words.append(allocator, A64.addSetFlags(.x1, .x15, .x9));
     const allocation_overflow = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.carry_set));
@@ -200,7 +200,7 @@ pub fn emitConcat(
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 32));
     try words.append(allocator, A64.moveWideZero32(.x9, 1));
     try words.append(allocator, A64.store64(.x9, .x15, 0));
-    try words.append(allocator, A64.addSubtractImmediate(.x9, .x10, descriptor_header_size + dynamic_prefix_size, true));
+    try words.append(allocator, A64.addSubtractImmediate(.x9, .x10, descriptor_header_size + dynamic_prefix_size + 1, true));
     try words.append(allocator, A64.store64(.x9, .x15, 8));
     try words.append(allocator, A64.addSubtractImmediate(.x15, .x15, dynamic_prefix_size, true));
     try emitImmediate64(allocator, words, .x9, dynamic_flag);
@@ -213,6 +213,7 @@ pub fn emitConcat(
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 16));
     try words.append(allocator, A64.load64(.x11, .zero_or_sp, 24));
     try emitCopy(allocator, words, .x10, .x11, .x12);
+    try words.append(allocator, A64.storeByte(.zero_or_sp, .x12));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, concat_scratch_size, true));
     try words.append(allocator, A64.storeStack(.x15, concat.result));
     const normal_finished = words.items.len;
@@ -241,7 +242,7 @@ pub fn emitFromBytes(
 ) Error!void {
     try words.append(allocator, A64.loadStack(.x10, conversion.bytes.start));
     try words.append(allocator, A64.loadStack(.x11, @intCast(@as(usize, conversion.bytes.start) + 1)));
-    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size + dynamic_prefix_size));
+    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size + dynamic_prefix_size + 1));
     try words.append(allocator, A64.addSetFlags(.x1, .x11, .x9));
     const allocation_overflow = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.carry_set));
@@ -257,7 +258,7 @@ pub fn emitFromBytes(
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 8));
     try words.append(allocator, A64.moveWideZero32(.x9, 1));
     try words.append(allocator, A64.store64(.x9, .x15, 0));
-    try words.append(allocator, A64.addSubtractImmediate(.x9, .x10, descriptor_header_size + dynamic_prefix_size, true));
+    try words.append(allocator, A64.addSubtractImmediate(.x9, .x10, descriptor_header_size + dynamic_prefix_size + 1, true));
     try words.append(allocator, A64.store64(.x9, .x15, 8));
     try words.append(allocator, A64.addSubtractImmediate(.x15, .x15, dynamic_prefix_size, true));
     try emitImmediate64(allocator, words, .x9, dynamic_flag);
@@ -266,6 +267,7 @@ pub fn emitFromBytes(
     try words.append(allocator, A64.load64(.x11, .zero_or_sp, 0));
     try words.append(allocator, A64.addSubtractImmediate(.x12, .x15, descriptor_header_size, true));
     try emitCopyByteSlots(allocator, words, .x10, .x11, .x12);
+    try words.append(allocator, A64.storeByte(.zero_or_sp, .x12));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
     try words.append(allocator, A64.storeStack(.x15, conversion.result));
     const normal_finished = words.items.len;

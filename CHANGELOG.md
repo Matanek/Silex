@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 strings built by concatenation, byte conversion or formatting
+  explicitly reserve and write their trailing zero. X64 formatting does the
+  same. C calls receiving constructed strings no longer read past the
+  allocation, fixing invalid window titles; logical string lengths are unchanged.
+
 - Native ARM64 lists on macOS and Windows initially reserve 128 bytes
   instead of a whole page. Geometric growth, copying, detachment and
   destruction guarantees are preserved; small collections no longer zero

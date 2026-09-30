@@ -175,7 +175,7 @@ fn allocateDescriptor(
     try words.append(allocator, A64.addSubtractImmediate(
         .x1,
         .x12,
-        descriptor_header_size + dynamic_prefix_size,
+        descriptor_header_size + dynamic_prefix_size + 1,
         true,
     ));
     try Allocation.emit(allocator, words, sites, platform);
@@ -190,7 +190,7 @@ fn allocateDescriptor(
     try words.append(allocator, A64.addSubtractImmediate(
         .x9,
         .x12,
-        descriptor_header_size + dynamic_prefix_size,
+        descriptor_header_size + dynamic_prefix_size + 1,
         true,
     ));
     try words.append(allocator, A64.store64(.x9, .x15, 8));
@@ -200,6 +200,7 @@ fn allocateDescriptor(
     try words.append(allocator, A64.store64(.x9, .x15, 0));
     try words.append(allocator, A64.addSubtractImmediate(.x13, .x15, descriptor_header_size, true));
     try emitCopy(allocator, words, .x12, .x11, .x13);
+    try words.append(allocator, A64.storeByte(.zero_or_sp, .x13));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, scratch_size, true));
     try words.append(allocator, A64.storeStack(.x15, result));
     const finished = words.items.len;

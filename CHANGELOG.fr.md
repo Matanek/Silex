@@ -8,6 +8,12 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les chaînes natives ARM64 issues d’une concaténation, d’octets ou d’un
+  formatage réservent et écrivent explicitement leur zéro terminal. Le
+  formatage X64 fait de même. Les appels C recevant une chaîne construite
+  n’accèdent plus à l’octet suivant l’allocation, ce qui corrige notamment
+  les titres de fenêtre invalides ; la longueur logique reste inchangée.
+
 - Les listes natives ARM64 sur macOS et Windows réservent initialement
   128 octets au lieu d’une page entière. Leur croissance reste géométrique,
   avec les mêmes garanties de copie, de détachement et de destruction ;

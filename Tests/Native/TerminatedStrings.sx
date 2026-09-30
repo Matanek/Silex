@@ -1,0 +1,48 @@
+use Interop.C
+
+func verify(text:str) {
+    let end = C.byte_count(text)
+    let byte = C.load<uint8>(C.terminated_pointer(text), end)
+    if byte != 0 as uint8 {
+        print("unterminated string: $(end) bytes, next byte $(byte)")
+    }
+    assert(byte == 0 as uint8)
+}
+
+func verify_terminated_strings() {
+    verify("")
+    verify("literal é")
+    verify("12345678")
+    verify("1234567812345678")
+    verify("é\0A")
+    let empty:uint8[] = []
+    verify(C.string(@empty[0:0]))
+    verify("$(true)")
+    var repeat = 0
+    while repeat < 50 {
+        var text = ""
+        var length = 0
+        while length < 300 {
+            text = text + "é"
+            verify(text)
+            length++
+        }
+        verify("$(repeat)")
+        verify("$(repeat as float / 7.0)")
+        var bytes:uint8[] = []
+        length = 0
+        while length < 300 {
+            bytes.append(65 as uint8)
+            verify(C.string(@bytes[0:bytes.count()]))
+            length++
+        }
+        repeat++
+    }
+    print("terminated strings verified")
+}
+
+func main() { verify_terminated_strings() }
+
+test "native string storage ends in a zero byte beyond its logical length" {
+    verify_terminated_strings()
+}
