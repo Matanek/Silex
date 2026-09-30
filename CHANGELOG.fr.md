@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- En Native ARM64 Release, les lectures et écritures de champs de classes
+  peuvent utiliser directement les registres scalaires, ce qui évite des
+  copies intermédiaires sur la pile. Les champs mixtes conservent leurs bits
+  et les registres SIMD compactés restent exclus de ces transferts.
+
 - L’allocation de registres tient compte de tous les paramètres capturés à
   l’entrée, même inutilisés. Un paramètre inutilisé ne peut plus écraser le
   registre d’un argument encore vivant dans le prologue natif.

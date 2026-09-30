@@ -1401,8 +1401,8 @@ fn encodeFunction(
                 try patch19(words.items, skip_true, words.items.len);
                 try words.append(allocator, storeStack(.x11, test_value.result));
             },
-            .class_load => |load| try ClassRuntime.emitLoad(allocator, words, load),
-            .class_store => |store| try ClassRuntime.emitStore(allocator, words, store),
+            .class_load => |load| try ClassRuntime.emitLoad(allocator, words, function, load),
+            .class_store => |store| try ClassRuntime.emitStore(allocator, words, function, store),
             .class_retain => |retain| {
                 try words.append(allocator, loadStack(.x10, retain.operand));
                 const skip_null = words.items.len;

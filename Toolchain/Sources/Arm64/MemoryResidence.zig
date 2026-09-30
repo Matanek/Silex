@@ -274,19 +274,16 @@ pub fn required(function: Machine.Function) bool {
     return false;
 }
 
+pub fn pinClassLanes(instruction: Machine.Instruction, forced: []bool) void {
+    switch (instruction) {
+        .class_load => |value| pinSpan(value.result, forced),
+        .class_store => |value| pinSpan(value.replacement, forced),
+        else => {},
+    }
+}
+
 pub fn pin(instruction: Machine.Instruction, forced: []bool) void {
     switch (instruction) {
-        // Class field transfers use only scratch GPRs and make no runtime call.
-        // Their own operands stay in memory; unrelated arithmetic may survive.
-        .class_load => |value| {
-            forced[value.base] = true;
-            pinSpan(value.result, forced);
-        },
-        .class_store => |value| {
-            forced[value.base] = true;
-            forced[value.result] = true;
-            pinSpan(value.replacement, forced);
-        },
         .reference_load => |value| {
             if (value.result.width != 1) pinSpan(value.result, forced);
         },
@@ -763,7 +760,7 @@ test "aggregate reference reads materialize only used leaves at the original rea
     try std.testing.expectEqual(@as(u64, 7), values[63]);
 }
 
-test "class transfers preserve unrelated arithmetic and pin mixed field payloads" {
+test "class transfers preserve mixed payload bits in scalar residences" {
     const RegisterAllocation = @import("RegisterAllocation.zig");
     const Runner = @import("Runner.zig");
     const builtin = @import("builtin");
@@ -795,9 +792,11 @@ test "class transfers preserve unrelated arithmetic and pin mixed field payloads
     function.float_register_slots = allocation.float_residences;
     function.float_lane_slots = allocation.float_lane_residences;
     try std.testing.expect(function.float_register_slots[4] != null);
-    for ([_]usize{ 0, 5, 6, 7, 8 }) |slot| {
-        try std.testing.expectEqual(null, function.register_slots[slot]);
-        try std.testing.expectEqual(null, function.float_register_slots[slot]);
+    try std.testing.expect(function.register_slots[0] != null);
+    try std.testing.expect(function.register_slots[5] != null);
+    try std.testing.expect(function.float_register_slots[6] != null);
+    try std.testing.expect(function.register_slots[7] != null);
+    for ([_]usize{ 5, 6, 7 }) |slot| {
         try std.testing.expectEqual(null, function.float_lane_slots[slot]);
     }
     // The lane-only API shared with X64 keeps its old admission contract.

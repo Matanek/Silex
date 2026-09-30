@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 Release class field reads and writes can use scalar registers
+  directly, avoiding intermediate stack copies. Mixed fields preserve their
+  payload bits, and packed SIMD lanes remain excluded from these transfers.
+
 - Register allocation accounts for every parameter captured at function entry,
   including unused ones. An unused parameter can no longer overwrite a live
   argument’s register in the native prologue.

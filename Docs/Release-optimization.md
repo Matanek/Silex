@@ -500,6 +500,14 @@ while values consumed or produced by the memory instructions remain scalar
 or stack-resident. Packing a scalar into a SIMD lane captures it at its
 original use, before another scalar can reuse its register.
 
+ARM64 class field loads and stores consume scalar integer or floating-point
+residences directly. Every payload leaf still occupies a 64-bit slot, including
+mixed aggregates; transfers through floating-point registers preserve all 64
+bits. Packed f32 lanes are excluded from these transfers. A class store consumes
+all replacement leaves before publishing its returned handle, since the result
+may reuse a replacement register. Incoming parameters, including unused ones,
+interfere at function entry because the prologue captures every argument.
+
 ARM64 Release may also color a long scalar floating-point region inside a
 function that contains unsupported machine operations. A region must contain
 at least 32 floating-point arithmetic or conversion operations between

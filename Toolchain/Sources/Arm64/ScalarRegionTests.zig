@@ -40,7 +40,7 @@ fn witness(allocator: std.mem.Allocator, precision: Types.Type, length: usize, s
     };
 }
 
-test "scalar regions need no wide input and preserve class field homes" {
+test "scalar regions keep class fields in scalar registers" {
     inline for (.{ Types.Type.float32, Types.Type.float64 }) |precision| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
@@ -49,9 +49,9 @@ test "scalar regions need no wide input and preserve class field homes" {
         const allocation = try Allocation.allocate(allocator, function);
         try std.testing.expectEqual(@as(usize, function.slot_count), allocation.float_residences.len);
         try std.testing.expect(allocation.float_residences[3] != null);
-        for ([_]usize{ 0, 1, 35 }) |slot| {
-            try std.testing.expectEqual(@as(?u5, null), allocation.residences[slot]);
-            try std.testing.expectEqual(@as(?u5, null), allocation.float_residences[slot]);
+        try std.testing.expect(allocation.residences[0] != null);
+        for ([_]usize{ 1, 35 }) |slot| {
+            try std.testing.expect(allocation.float_residences[slot] != null);
             try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), allocation.float_lane_residences[slot]);
         }
         function.register_slots = allocation.residences;

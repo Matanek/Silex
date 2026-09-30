@@ -267,6 +267,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         // Aggregate returns explicitly extract SIMD lanes; direct calls do
         // not. Keep only this emitter-supported exception to stack pinning.
         if (instruction != .return_value) forceStackOperands(function, instruction, lane_forced, externals);
+        MemoryResidence.pinClassLanes(instruction, lane_forced);
         visit(instruction, index, first, last, weights, instruction_weights[index]);
         if (!isResidenceCompatibleInstruction(instruction, externals)) {
             visitBarrier(instruction, index, first, last, weights, instruction_weights[index]);
