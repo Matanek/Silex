@@ -76,7 +76,7 @@ test "scalar regions retain the profitability threshold and never count through 
     defer arena.deinit();
     const allocator = arena.allocator();
     for ([_]bool{ false, true }) |split| {
-        var function = try witness(allocator, .float32, if (split) 32 else 31, split);
+        var function = try witness(allocator, .float32, if (split) 16 else 15, split);
         var instructions: std.ArrayList(Machine.Instruction) = .empty;
         for (function.instructions) |instruction| {
             // Ownership operations remain barriers; simple field reads no longer are.

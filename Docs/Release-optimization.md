@@ -510,13 +510,14 @@ interfere at function entry because the prologue captures every argument.
 
 ARM64 Release may also color a long scalar floating-point region inside a
 function that contains unsupported machine operations. A region must contain
-at least 32 floating-point arithmetic or conversion operations between
+at least 16 floating-point arithmetic or conversion operations between
 unsupported instructions, so its setup is amortized. Admission depends on the
 calculation, not the presence of a wide aggregate load: scalar class or view
 reads can feed the same region. Every
 unsupported instruction is a hard barrier: its complete uses and definitions,
 and every interval live across it, remain stack-resident. Mixed aggregate
-loads retain the whole-function spill path. Calls inside loops pin their
+loads pin their complete result spans without spilling unrelated arithmetic.
+Calls inside loops pin their
 aggregate argument and result spans locally; independent arithmetic regions
 may keep registers, with call-crossing values obeying the preserved-register
 and effect-barrier constraints.

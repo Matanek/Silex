@@ -209,7 +209,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     @memset(float_slots, false);
     try FloatSlotInference.infer(allocator, function, float_slots);
     inferExternalFloatSlots(function, externals, float_slots);
-    if (!fully_compatible and hasMixedAggregateLoad(function, float_slots)) return spilled(allocator, function);
+
     // A call-free function pays the ABI save/restore cost for v8...v15 but
     // may freely clobber v0...v7 and v16...v31. Exhaust the available
     // volatile colors before borrowing the preserved scalar subset.
@@ -262,6 +262,10 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     }
     const lane_forced = try allocator.dupe(bool, forced);
     defer allocator.free(lane_forced);
+    if (!fully_compatible) {
+        pinMixedAggregateLoads(function, float_slots, forced);
+        pinMixedAggregateLoads(function, float_slots, lane_forced);
+    }
     for (function.instructions, 0..) |instruction, index| {
         // Aggregate returns explicitly extract SIMD lanes; direct calls do
         // not. Keep only this emitter-supported exception to stack pinning.
@@ -541,15 +545,16 @@ fn isCollectionParameter(function: Machine.Function, parameter: Machine.Span) bo
     return false;
 }
 
-fn hasMixedAggregateLoad(function: Machine.Function, float_slots: []const bool) bool {
+// Mixed loads retain contiguous stack homes while unrelated scalar values
+// use the same regional liveness rules as other memory effects.
+fn pinMixedAggregateLoads(function: Machine.Function, float_slots: []const bool, forced: []bool) void {
     for (function.instructions) |instruction| if (instruction == .collection_load) {
         const result = instruction.collection_load.result;
         if (result.width < 2) continue;
         var floats: usize = 0;
         for (0..result.width) |leaf| floats += @intFromBool(float_slots[@as(usize, result.start) + leaf]);
-        if (floats != 0 and floats != result.width) return true;
+        if (floats != 0 and floats != result.width) forceSpan(result, forced);
     };
-    return false;
 }
 
 fn allocateGraph(
@@ -1141,7 +1146,7 @@ fn hasProfitableScalarRegion(allocator: Allocator, instructions: []const Machine
             .convert => |value| @intFromBool(value.source.isFloat() or value.target.isFloat()),
             else => 0,
         };
-        if (arithmetic >= 32) return true;
+        if (arithmetic >= 16) return true;
     }
     return false;
 }

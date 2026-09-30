@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 Release pins mixed aggregate load results without disabling
+  registers for the entire function. Arithmetic regions qualify from
+  16 floating-point operations.
+
 - Native ARM64 Release no longer transfers unused fields through structure
   copy chains. Address-taken storage and overlapping transfers remain fully
   preserved.

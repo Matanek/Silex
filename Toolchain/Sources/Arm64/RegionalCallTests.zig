@@ -92,3 +92,65 @@ test "aggregate calls in a loop pin arguments without spilling independent arith
         try std.testing.expectEqual(@as(u32, @bitCast(expected)), @as(u32, @truncate(@as(u64, @bitCast(result.value)))));
     }
 }
+
+test "mixed collection leaves keep memory homes without disabling a sixteen-operation region" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var instructions: std.ArrayList(Machine.Instruction) = .empty;
+    try instructions.appendSlice(allocator, &.{
+        .{ .collection_load = .{
+            .collection = .{ .start = 0, .width = 2, .aggregate = true },
+            .index = 2,
+            .count = 0,
+            .dynamic = true,
+            .view = true,
+            .element_stride = 16,
+            .header = 0,
+            .tail = 0,
+            .result = .{ .start = 4, .width = 2, .aggregate = true },
+        } },
+    });
+    for (0..16) |i| try instructions.append(allocator, .{ .binary = .{
+        .result = @intCast(6 + i),
+        .left = if (i == 0) 3 else @intCast(5 + i),
+        .right = 4,
+        .operator = .add,
+        .type = .float32,
+    } });
+    try instructions.appendSlice(allocator, &.{
+        .{ .convert = .{ .result = 22, .operand = 5, .source = .int, .target = .float32, .header = 0, .checked = false } },
+        .{ .binary = .{ .result = 23, .left = 21, .right = 22, .operator = .add, .type = .float32 } },
+        .{ .constant_str = .{ .result = 24, .string = 0 } },
+        .{ .print = .{ .value = 24, .kind = .string, .newline = false } },
+        .{ .return_value = .{ .start = 23, .width = 1 } },
+    });
+    var function: Machine.Function = .{
+        .name = "mixed_region",
+        .parameter_count = 3,
+        .parameters = &.{ .{ .start = 0, .width = 2, .aggregate = true }, .{ .start = 2, .width = 1 }, .{ .start = 3, .width = 1 } },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 25,
+        .frame_size = try Machine.frameSize(25),
+        .instructions = instructions.items,
+    };
+    const allocation = try Allocation.allocate(allocator, function);
+    try std.testing.expectEqual(@as(usize, 25), allocation.float_residences.len);
+    try std.testing.expect(allocation.float_residences[6] != null);
+    for (4..6) |slot| {
+        try std.testing.expectEqual(null, allocation.residences[slot]);
+        try std.testing.expectEqual(null, allocation.float_residences[slot]);
+        try std.testing.expectEqual(null, allocation.float_lane_residences[slot]);
+    }
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    function.frame_size = allocation.frame_size;
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var input = [_]u64{ @as(u32, @bitCast(@as(f32, 2))), 23 };
+    const view = [_]u64{ @intFromPtr(&input), 1 };
+    const actual = try Runner.invoke(allocator, .{ .functions = &.{function}, .strings = &.{""} }, 0, &.{ @intCast(@intFromPtr(&view)), 0, @as(u32, @bitCast(@as(f32, 1))) });
+    try std.testing.expectEqual(Machine.Status.success, actual.status);
+    try std.testing.expectEqual(@as(u32, @bitCast(@as(f32, 56))), @as(u32, @truncate(@as(u64, @bitCast(actual.value)))));
+}
