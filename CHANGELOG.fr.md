@@ -8,6 +8,12 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les calculs SIMD différés conservent leurs opérandes jusqu’à leur émission
+  réelle. En Native ARM64 Release, un chargement scalaire intermédiaire ne
+  peut plus écraser une composante : les distances et cadences de déplacement
+  retrouvent les résultats de LLVM. Les grands indices de copies agrégées
+  évitent aussi un dépassement intermédiaire dans la toolchain Debug.
+
 - Native ARM64 conserve les copies de composantes flottantes dont la copie
   SIMD partenaire a été supprimée comme inutilisée. Les affectations partielles
   de vecteurs ne provoquent plus `InvalidMachineProgram` à l’émission Release.

@@ -152,7 +152,7 @@ pub fn allocateFloatScalarsFor(
         const interval: Interval = .{ .slot = @intCast(slot), .first = start, .last = last[slot], .weight = weights[slot] };
         if (baseline_forced[slot]) try loaded.append(allocator, interval) else try intervals.append(allocator, interval);
     }
-    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.parameters, function.slot_count, baseline_forced, &.{}, &.{}, false);
+    try allocateGraph(allocator, residences, intervals.items, registers, function.instructions, function.parameters, function.slot_count, baseline_forced, &.{}, &.{}, false, &.{});
     if (loaded.items.len != 0) {
         // No component merging can alter the already assigned colors here.
         const roots = try allocator.alloc(Machine.Slot, function.slot_count);
@@ -368,6 +368,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         reference_cursors,
         checked_reference_cursors,
         false,
+        &.{},
     );
     // Incoming arguments occupy x0 up to the last register parameter until
     // the prologue captures them. Lower volatile registers beyond that point
@@ -410,6 +411,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
         reference_cursors,
         checked_reference_cursors,
         has_calls,
+        float_lane_residences,
     );
     for (float_lane_residences, 0..) |lane, slot| if (lane != null) {
         float_residences[slot] = null;
@@ -569,9 +571,16 @@ fn allocateGraph(
     reference_cursors: []const LoopCursor.ReferenceCursor,
     checked_reference_cursors: []const LoopCursor.ReferenceCursor,
     regional_float_colors: bool,
+    packed_lanes: []const ?Machine.FloatLaneResidence,
 ) Allocator.Error!void {
     const live = try ResidenceLiveness.compute(allocator, instructions, slot_count);
     defer allocator.free(live);
+    if (packed_lanes.len != 0) {
+        const partners = try allocator.alloc(?Machine.Slot, slot_count);
+        defer allocator.free(partners);
+        for (packed_lanes, 0..) |lane, slot| partners[slot] = if (lane) |value| value.partner else null;
+        FloatPairs.preserveDeferredOperands(instructions, partners, live, slot_count);
+    }
     // The prologue writes every incoming parameter, including unused ones.
     // Their simultaneous capture must not overwrite another live argument.
     if (instructions.len != 0) for (parameters) |parameter| {
@@ -2282,6 +2291,7 @@ test "scalar copy affinity falls back when a precolored lane conflicts" {
         &.{},
         &.{},
         false,
+        &.{},
     );
     try std.testing.expectEqual(@as(?u5, 17), residences[1]);
     try std.testing.expectEqual(@as(?u5, 16), residences[0]);

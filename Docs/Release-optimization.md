@@ -770,3 +770,22 @@ Windows emission. `Tests/Native/PartialFloatVectorCopy.sx` exercises conditional
 vector replacement with an unused component. Runtime validation for the FPS
 consumer is macOS ARM64, Native and LLVM Release; other ARM64 systems have
 emission coverage here, not a new runtime claim.
+
+
+### Deferred SIMD operand lifetimes
+
+Packed arithmetic is emitted at the second scalar definition. Both pair coloring
+and subsequent scalar coloring must retain the first operation's operands through
+that actual use. Scalar CFG liveness alone can allow an intervening load to reuse
+the register of an input already captured in the first lane. The allocator extends
+these local input lifetimes before computing interference and copy affinity;
+packed-source transfers receive the same protection. Scalar-to-lane snapshots
+remain captured at their original copies.
+
+The regression computes X/Z displacement from separate aggregate field reads,
+then its squared length. It covers ARM64 emission on all three platforms and
+executes on macOS ARM64. The source case is compared with Native and LLVM Release.
+X64 consumes the same pair-selection helper but retains its separate scalar bank
+and stack-backed packed operands; no new X64 runtime qualification is claimed.
+Large copy-range slot bases compute the relative leaf before adding the source
+base, preventing an intermediate slot-width overflow with a valid final index.

@@ -8,6 +8,12 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Deferred SIMD operations keep their inputs alive until actual emission.
+  In Native ARM64 Release, an intervening scalar load can no longer overwrite
+  a component, restoring movement distances and cadence to the LLVM results.
+  Large aggregate-copy indices also avoid intermediate overflow in the Debug
+  toolchain.
+
 - Native ARM64 preserves floating-point component copies when their SIMD
   partner copy was removed as unused. Partial vector assignments no longer
   trigger `InvalidMachineProgram` during Release emission.

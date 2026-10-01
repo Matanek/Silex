@@ -371,3 +371,60 @@ test "adjacent float arithmetic preserves product rounding with cached loop lite
         }
     }
 }
+
+test "deferred vector subtraction preserves snapshots across later scalar loads" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var function: Machine.Function = .{
+        .name = "horizontal_distance_squared",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 23,
+        .frame_size = try Machine.frameSize(23),
+        .float_lane_groups = &.{
+            .{ .slots = .{ 10, 19, 0, 0 }, .width = 2, .priority = 9, .recurrence = false, .in_loop = false },
+            .{ .slots = .{ 20, 21, 0, 0 }, .width = 2, .priority = 17, .recurrence = false, .in_loop = false },
+        },
+        .instructions = &.{
+            .{ .reference_load = .{ .reference = 0, .result = .{ .start = 2, .width = 3, .aggregate = true } } },
+            .{ .copy = .{ .result = 5, .operand = 2 } },
+            .{ .reference_load = .{ .reference = 1, .result = .{ .start = 6, .width = 3, .aggregate = true } } },
+            .{ .copy = .{ .result = 9, .operand = 6 } },
+            .{ .binary = .{ .result = 10, .left = 5, .right = 9, .operator = .subtract, .type = .float32 } },
+            .{ .reference_load = .{ .reference = 0, .result = .{ .start = 11, .width = 3, .aggregate = true } } },
+            .{ .copy = .{ .result = 14, .operand = 13 } },
+            .{ .reference_load = .{ .reference = 1, .result = .{ .start = 15, .width = 3, .aggregate = true } } },
+            .{ .copy = .{ .result = 18, .operand = 17 } },
+            .{ .binary = .{ .result = 19, .left = 14, .right = 18, .operator = .subtract, .type = .float32 } },
+            .{ .binary = .{ .result = 20, .left = 10, .right = 10, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 21, .left = 19, .right = 19, .operator = .multiply, .type = .float32 } },
+            .{ .binary = .{ .result = 22, .left = 20, .right = 21, .operator = .add, .type = .float32 } },
+            .{ .return_value = .{ .start = 22, .width = 1 } },
+        },
+    };
+    const allocation = try RegisterAllocation.allocate(allocator, function);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    try std.testing.expect(function.float_lane_slots[10] != null);
+    try std.testing.expect(function.float_lane_slots[19] != null);
+    const program: Machine.Program = .{ .functions = &.{function} };
+    for ([_]Encoder.Platform{ .darwin, .linux, .windows }) |platform| {
+        _ = try switch (platform) {
+            .darwin => Encoder.encode(allocator, program, .none),
+            .linux => Encoder.encodeLinux(allocator, program, .none),
+            .windows => Encoder.encodeWindows(allocator, program, .none),
+        };
+    }
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var current = [_]u64{ @bitCast(@as(i64, floatBits(3, false))), 0, @bitCast(@as(i64, floatBits(4, false))) };
+    var previous = [_]u64{ @bitCast(@as(i64, floatBits(1, false))), 0, @bitCast(@as(i64, floatBits(1, false))) };
+    const result = try Runner.invoke(allocator, program, 0, &.{
+        @intCast(@intFromPtr(&current)), @intCast(@intFromPtr(&previous)),
+    });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(floatBits(13, false), result.value);
+}

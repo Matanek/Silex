@@ -1,0 +1,22 @@
+use STD.Math
+class Motion {
+    var position:Math.Vec3
+    var previous:Math.Vec3
+    init() {
+        self.position = Math.Vec3(0.0, 0.852, 8.0)
+        self.previous = self.position
+    }
+    func advance() float {
+        self.previous = self.position
+        self.position = self.position.add(Math.Vec3(0.0, 0.0, -0.05))
+        let motion = Math.Vec2(self.position.x - self.previous.x,
+            self.position.z - self.previous.z)
+        return motion.length()
+    }
+}
+func main() {
+    var motion = Motion()
+    let distance = motion.advance()
+    print("distance=$(distance)")
+    assert(Math.abs(distance - 0.05) < 0.0001)
+}

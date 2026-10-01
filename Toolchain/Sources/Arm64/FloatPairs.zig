@@ -379,6 +379,39 @@ fn definingInstructionIndex(instructions: []const Machine.Instruction, slot: Mac
     return result;
 }
 
+// The encoder emits a packed operation at its second scalar definition.
+// Keep the first operation's inputs alive through that real use, including
+// scalar loads between the two halves. Original scalar CFG uses end too soon.
+pub fn preserveDeferredOperands(
+    instructions: []const Machine.Instruction,
+    partners: []const ?Machine.Slot,
+    live: []bool,
+    slot_count: usize,
+) void {
+    for (partners, 0..) |maybe_partner, slot| {
+        const partner = maybe_partner orelse continue;
+        if (partner <= slot) continue;
+        const first_index = definingInstructionIndex(instructions, @intCast(slot)) orelse continue;
+        const second_index = definingInstructionIndex(instructions, partner) orelse continue;
+        if (second_index <= first_index) continue;
+        const instruction = instructions[first_index];
+        if (instruction == .binary) {
+            const value = instruction.binary;
+            for (first_index + 1..second_index + 1) |index| {
+                live[index * slot_count + value.left] = true;
+                live[index * slot_count + value.right] = true;
+            }
+        } else if (transferOperand(instruction, @intCast(slot))) |operand| {
+            // Scalar-to-lane snapshots are emitted immediately; only packed
+            // sources can participate in a delayed paired transfer.
+            if (partners[operand] == null) continue;
+            for (first_index + 1..second_index + 1) |index| {
+                live[index * slot_count + operand] = true;
+            }
+        }
+    }
+}
+
 fn allocatePairGraph(
     allocator: Allocator,
     leaders: []?u5,
@@ -446,6 +479,8 @@ fn allocatePairGraph(
             }
         }
     }
+
+    preserveDeferredOperands(instructions, partners, live, slot_count);
 
     // Pairs local to one region may borrow volatile SIMD colors. Pairs live
     // across a call remain constrained to the ABI-preserved v8...v15 bank.
@@ -722,8 +757,8 @@ fn pairDefinitionReady(
         .copy_range => |left| switch (second.?) {
             .copy_range => |right| scalar_copies or slotsResidentInOrderOrEqual(
                 residences,
-                left.operand.start + first_slot - left.result.start,
-                right.operand.start + second_slot - right.result.start,
+                left.operand.start + (first_slot - left.result.start),
+                right.operand.start + (second_slot - right.result.start),
             ),
             else => false,
         },
@@ -787,8 +822,8 @@ fn markPairDependencies(
                 instructions,
                 residences,
                 required,
-                left.operand.start + first_slot - left.result.start,
-                right.operand.start + second_slot - right.result.start,
+                left.operand.start + (first_slot - left.result.start),
+                right.operand.start + (second_slot - right.result.start),
             ),
             else => {},
         },
@@ -828,7 +863,7 @@ fn transferOperand(instruction: Machine.Instruction, slot: Machine.Slot) ?Machin
         .copy => |copy| if (copy.result == slot) copy.operand else null,
         .copy_range => |copy| if (slot >= copy.result.start and
             slot < @as(usize, copy.result.start) + copy.result.width)
-            copy.operand.start + slot - copy.result.start
+            copy.operand.start + (slot - copy.result.start)
         else
             null,
         else => null,
@@ -956,8 +991,8 @@ fn pairResidentOperandTree(
         },
         .copy_range => |left| switch (second_definition) {
             .copy_range => |right| {
-                const left_operand = left.operand.start + first - left.result.start;
-                const right_operand = right.operand.start + second - right.result.start;
+                const left_operand = left.operand.start + (first - left.result.start);
+                const right_operand = right.operand.start + (second - right.result.start);
                 if (operandPairCanBecomeResident(instructions, left_operand, right_operand, partners)) {
                     pairResidentOperandTree(instructions, partners, left_operand, right_operand);
                 }
@@ -1006,8 +1041,8 @@ fn operandPairCanBecomeResident(
         },
         .copy_range => |left| switch (second_definition.?) {
             .copy_range => |right| blk: {
-                const left_operand = left.operand.start + first - left.result.start;
-                const right_operand = right.operand.start + second - right.result.start;
+                const left_operand = left.operand.start + (first - left.result.start);
+                const right_operand = right.operand.start + (second - right.result.start);
                 break :blk first + 1 == second and left_operand + 1 == right_operand;
             },
             else => false,
@@ -1106,4 +1141,18 @@ test "portable min max affinities retain both scalar results on each native targ
             try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), lanes[5]);
         }
     }
+}
+
+test "copy range affinity computes the relative leaf before adding large slot bases" {
+    const instructions = [_]Machine.Instruction{
+        .{ .copy_range = .{
+            .result = .{ .start = 6000, .width = 2, .aggregate = true },
+            .operand = .{ .start = 5000, .width = 2, .aggregate = true },
+        } },
+    };
+    const partners = try std.testing.allocator.alloc(?Machine.Slot, 6002);
+    defer std.testing.allocator.free(partners);
+    @memset(partners, null);
+    try std.testing.expect(operandPairCanBecomeResident(&instructions, 6000, 6001, partners));
+    try std.testing.expectEqual(@as(?Machine.Slot, 5001), transferOperand(instructions[0], 6001));
 }
