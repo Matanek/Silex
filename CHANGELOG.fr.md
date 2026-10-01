@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 conserve les copies de composantes flottantes dont la copie
+  SIMD partenaire a été supprimée comme inutilisée. Les affectations partielles
+  de vecteurs ne provoquent plus `InvalidMachineProgram` à l’émission Release.
+
 - Correction Native Release : les affinités vectorielles de `min/max` restent
   scalaires tant que leur opérateur ne possède pas d’émission SIMD compatible.
   Cela corrige notamment les projections d’ombres déformées dans les scènes 3D.

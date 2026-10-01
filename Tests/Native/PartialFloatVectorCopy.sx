@@ -1,0 +1,33 @@
+struct Vector {
+    var x:float
+    var y:float
+    var z:float
+
+    func scaled(scale:float) Vector {
+        return Vector(x:self.x * scale, y:self.y * scale, z:self.z * scale)
+    }
+}
+
+func horizontal(first:Vector, second:Vector, scale:float, replace:bool) Vector {
+    var desired = first.scaled(scale)
+    if replace { desired = second.scaled(scale) }
+    // The unused Y copy may disappear after SIMD residences are assigned.
+    return Vector(x:desired.x, y:0.0, z:desired.z)
+}
+
+func main() {
+    let first = Vector(x:2.0, y:3.0, z:5.0)
+    let second = Vector(x:7.0, y:11.0, z:13.0)
+    var index = 0
+    while index < 40 {
+        let replace = index % 2 == 1
+        let result = horizontal(first, second, 2.0, replace)
+        if replace {
+            assert(result.x == 14.0 && result.z == 26.0)
+        } else {
+            assert(result.x == 4.0 && result.z == 10.0)
+        }
+        assert(result.y == 0.0)
+        index++
+    }
+}

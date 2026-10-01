@@ -1133,7 +1133,13 @@ fn encodeFunction(
                         function.instructions,
                         instruction_index,
                         pair.partner,
-                    ) orelse return error.InvalidMachineProgram;
+                    ) orelse {
+                        // One lane can survive dead-copy elimination without its
+                        // partner transfer. Update only that lane, preserving the
+                        // other half, just as the copy_range path does.
+                        try emitRegisteredCopy(allocator, words, function, copy.result, copy.operand);
+                        continue;
+                    };
                     const source = try prepareFloatPairOperand(
                         allocator,
                         words,
@@ -6821,5 +6827,43 @@ test "class runtime boundaries invalidate volatile literal caches" {
             .instructions = &.{ operation, .return_void },
         };
         try std.testing.expect(functionCanClobberFloatLiteralCache(function));
+    }
+}
+
+test "copy a surviving SIMD lane without a partner transfer" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for ([_]u1{ 0, 1 }) |lane| {
+        const function: Machine.Function = .{
+            .name = "partial_float_pair_copy",
+            .parameter_count = 0,
+            .return_type = .void,
+            .slot_count = 4,
+            .frame_size = try Machine.frameSize(4),
+            .float_lane_slots = &.{
+                .{ .register = 16, .lane = 0, .partner = 1 },
+                .{ .register = 16, .lane = 1, .partner = 0 },
+                .{ .register = 17, .lane = 0, .partner = 3 },
+                .{ .register = 17, .lane = 1, .partner = 2 },
+            },
+            .instructions = &.{
+                .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 2.0)) } },
+                .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 2.0)) } },
+                .{ .constant_float32 = .{ .result = 2, .bits = @bitCast(@as(f32, 5.0)) } },
+                .{ .constant_float32 = .{ .result = 3, .bits = @bitCast(@as(f32, 5.0)) } },
+                .{ .copy = .{ .result = 2 + @as(Machine.Slot, lane), .operand = lane } },
+                .return_void,
+            },
+        };
+        for ([_]Platform{ .darwin, .linux, .windows }) |platform| {
+            const image = try encodeForPlatform(arena.allocator(), .{ .functions = &.{function} }, .none, platform);
+            var insertions: usize = 0;
+            var offset: usize = 0;
+            while (offset + 4 <= image.code.len) : (offset += 4) {
+                const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+                if (word == A64.insertFloat32Lane(.x17, .x9, lane)) insertions += 1;
+            }
+            try std.testing.expectEqual(@as(usize, 1), insertions);
+        }
     }
 }

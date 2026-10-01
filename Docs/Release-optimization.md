@@ -756,3 +756,17 @@ retain both results and their existing NaN/signed-zero semantics.
 Regression: `Arm64/FloatPairs.zig` checks both target admission paths;
 `GFX.Scene3D/Tests/SunShadowContact.sx` also has a Release executable entry point
 to verify real projected shadows and unoccluded box faces on the GPU.
+
+### Surviving ARM64 vector component copies
+
+Dead-copy elimination can remove one member of an assigned SIMD pair. ARM64
+emits the remaining scalar copy as a lane insertion when no partner transfer
+exists in the block; it preserves the other lane instead of rejecting the
+machine program. The aggregate-copy path already uses this rule. X64 scalar
+copy emission does not require a paired transfer and is unaffected.
+
+The encoder regression covers both destination lanes under Darwin, Linux and
+Windows emission. `Tests/Native/PartialFloatVectorCopy.sx` exercises conditional
+vector replacement with an unused component. Runtime validation for the FPS
+consumer is macOS ARM64, Native and LLVM Release; other ARM64 systems have
+emission coverage here, not a new runtime claim.

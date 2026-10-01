@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 preserves floating-point component copies when their SIMD
+  partner copy was removed as unused. Partial vector assignments no longer
+  trigger `InvalidMachineProgram` during Release emission.
+
 - Native Release fix: `min/max` vector affinities retain scalar execution when
   their operator has no compatible SIMD emission. This fixes distorted shadow
   projections in 3D scenes.
