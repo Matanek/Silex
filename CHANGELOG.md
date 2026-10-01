@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Fixed Native ARM64 Release aggregate class-field loads: simultaneously
+  loaded leaves keep distinct registers, so an unused leaf cannot overwrite
+  a live identity or value.
+
 - Native ARM64 Release waits for external signatures before allocating
   registers in functions that call a library. Math intrinsics therefore avoid
   stack transfers previously imposed by an unresolved call.

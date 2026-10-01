@@ -142,3 +142,40 @@ test "class store consumes replacement before a coalesced result register" {
     try std.testing.expectEqual(@as(i64, 43), result.value);
     try std.testing.expectEqual(@as(u64, 43), object[4]);
 }
+
+test "class aggregate loads keep unused leaves from clobbering live results" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]@import("../Types.zig").Type{ .int, .float32 }) |kind| {
+        var function: Machine.Function = .{
+            .name = "partial_class_load",
+            .parameter_count = 1,
+            .parameters = &.{.{ .start = 0, .width = 1 }},
+            .return_type = kind,
+            .return_width = 1,
+            .slot_count = 4,
+            .frame_size = try Machine.frameSize(4),
+            .instructions = &.{
+                .{ .class_load = .{ .base = 0, .byte_offset = 0, .result = .{ .start = 1, .width = 3, .aggregate = true } } },
+                .{ .return_value = .{ .start = 1, .width = 1 } },
+            },
+        };
+        const allocation = try @import("RegisterAllocation.zig").allocate(allocator, function);
+        function.register_slots = allocation.residences;
+        function.float_register_slots = allocation.float_residences;
+        function.float_lane_slots = allocation.float_lane_residences;
+        for ([_][]const ?u5{ function.register_slots, function.float_register_slots }) |registers| {
+            if (registers[1]) |first| {
+                try std.testing.expect(registers[2] == null or registers[2].? != first);
+                try std.testing.expect(registers[3] == null or registers[3].? != first);
+            }
+        }
+        if (@import("builtin").os.tag != .macos or @import("builtin").cpu.arch != .aarch64) continue;
+        const expected: u64 = if (kind == .int) 17 else @as(u32, @bitCast(@as(f32, 17.0)));
+        var storage = [_]u64{ 0, 0, 0, 0, expected, 29, 43 };
+        const actual = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{function} }, 0, &.{@bitCast(@intFromPtr(&storage))});
+        try std.testing.expectEqual(Machine.Status.success, actual.status);
+        try std.testing.expectEqual(@as(i64, @bitCast(expected)), actual.value);
+    }
+}

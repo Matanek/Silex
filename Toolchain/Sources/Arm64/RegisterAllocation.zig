@@ -784,6 +784,14 @@ fn colorConflicts(
         if (residence == null or residence.? != register or other == slot) continue;
         if (alias_roots[slot] == alias_roots[other]) continue;
         for (0..live.len / slot_count) |instruction| {
+            // Class loads emit every result leaf, including unused ones.
+            // Their simultaneous definitions must not share a register: a
+            // dead trailing leaf would overwrite an earlier live result.
+            if (instructions[instruction] == .class_load) {
+                const result = instructions[instruction].class_load.result;
+                if (slot >= result.start and slot < @as(usize, result.start) + result.width and
+                    other >= result.start and other < @as(usize, result.start) + result.width) return true;
+            }
             // Every interference case below needs at least one live input.
             // Skip dead instruction points before inspecting their emitters.
             if (!live[instruction * slot_count + slot] and !live[instruction * slot_count + other]) continue;

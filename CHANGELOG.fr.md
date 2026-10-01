@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Correction Native ARM64 Release : les feuilles chargées ensemble depuis
+  un champ agrégé de classe conservent des registres distincts. Une feuille
+  inutilisée ne peut plus écraser l'identifiant ou la valeur encore utilisée.
+
 - En Native ARM64 Release, les fonctions qui appellent une bibliothèque
   externe attendent la résolution de ses signatures avant l’allocation des
   registres. Les intrinsics mathématiques évitent ainsi les transferts de pile

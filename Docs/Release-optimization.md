@@ -730,3 +730,16 @@ storage is fully observable. Overlapping aggregate transfers and reused-slot
 functions remain unchanged. The pass neither removes ownership operations nor
 reorders arithmetic, and remaps control-flow targets and source positions.
 The existing register and packed-lane assignments are retained.
+
+### Aggregate class loads and dead leaves
+
+The ARM64 class-load emitter writes every leaf in its result span. These
+simultaneous definitions interfere even when a leaf is dead after the load;
+otherwise the last unused field can overwrite an earlier live field in a
+shared register. The register allocator checks this before its live-input
+shortcut. `Tests/Native/ClassIdentityFields.sx` exercises slot and generation
+identity independently, and `ClassRuntime` checks integer and float result
+residences and execution. This applies to the ARM64 native path on macOS,
+Linux and Windows. The X64 class-load path keeps its existing stack/pinned
+admission; LLVM uses its own typed lowering. Host execution qualifies macOS
+ARM64; the other ARM64 hosts remain for release-matrix execution.

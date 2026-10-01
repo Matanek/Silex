@@ -1,0 +1,35 @@
+class Store {}
+
+struct Identity {
+    let slot:int
+    let generation:int
+}
+
+class Handle {
+    private var store:Store
+    private let id:Identity
+
+    init(store:Store, slot:int, generation:int = 0) {
+        self.store = store
+        self.id = Identity(slot:slot, generation:generation)
+    }
+
+    func same(other:Handle) bool {
+        return self.store == other.store && self.id.slot == other.id.slot &&
+            self.id.generation == other.id.generation
+    }
+}
+
+func main() {
+    var store = Store()
+    var first = Handle(store, 0)
+    var second = Handle(store, 1)
+    var recycled = Handle(store, 0, 1)
+    var same = Handle(store, 0)
+    assert(first.same(first))
+    assert(first.same(same))
+    assert(!first.same(second))
+    assert(!first.same(recycled))
+    assert(!first.same(Handle(Store(), 0)))
+    print("class identity fields: ok")
+}
