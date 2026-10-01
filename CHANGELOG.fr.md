@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Correction Native Release : les affinités vectorielles de `min/max` restent
+  scalaires tant que leur opérateur ne possède pas d’émission SIMD compatible.
+  Cela corrige notamment les projections d’ombres déformées dans les scènes 3D.
+
 - Correction Native ARM64 Release : les feuilles chargées ensemble depuis
   un champ agrégé de classe conservent des registres distincts. Une feuille
   inutilisée ne peut plus écraser l'identifiant ou la valeur encore utilisée.

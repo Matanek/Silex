@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native Release fix: `min/max` vector affinities retain scalar execution when
+  their operator has no compatible SIMD emission. This fixes distorted shadow
+  projections in 3D scenes.
+
 - Fixed Native ARM64 Release aggregate class-field loads: simultaneously
   loaded leaves keep distinct registers, so an unused leaf cannot overwrite
   a live identity or value.

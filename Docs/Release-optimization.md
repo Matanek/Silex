@@ -743,3 +743,16 @@ residences and execution. This applies to the ARM64 native path on macOS,
 Linux and Windows. The X64 class-load path keeps its existing stack/pinned
 admission; LLVM uses its own typed lowering. Host execution qualifies macOS
 ARM64; the other ARM64 hosts remain for release-matrix execution.
+
+### Native SIMD operator legality
+
+Portable lane affinity is a scheduling hint, not proof that the target can
+encode that operator as a pair. The shared ARM64/X64 pair allocator rechecks
+binary definitions before coloring, including affinity reached through operand
+trees. Only the supported float32 add/subtract/multiply/divide pairs may delay
+their first definition until the second. In particular, scalar min/max must
+retain both results and their existing NaN/signed-zero semantics.
+
+Regression: `Arm64/FloatPairs.zig` checks both target admission paths;
+`GFX.Scene3D/Tests/SunShadowContact.sx` also has a Release executable entry point
+to verify real projected shadows and unoccluded box faces on the GPU.

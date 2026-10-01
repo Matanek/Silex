@@ -301,6 +301,19 @@ fn pruneEarlyUses(
         }
         if (multiple or first == null or second == null) continue;
         const definition = instructions[first.?];
+        const follower = instructions[second.?];
+        // Portable affinity can include scalar-only operators such as min/max.
+        // Delaying their leader would discard that result: both native pair
+        // emitters implement only add/subtract/multiply/divide. Check every
+        // discovered pair here, including those seeded through operand trees.
+        if (definition == .binary and (pairableResult(definition) == null or
+            pairableResult(follower) == null or
+            definition.binary.operator != follower.binary.operator))
+        {
+            partners[slot] = null;
+            partners[partner] = null;
+            continue;
+        }
         if (definition != .binary and definition != .copy) continue;
         // The encoder delays the leader until the follower. A checked load,
         // store or scalar use in between must not observe that uncomputed
@@ -1059,4 +1072,38 @@ fn slotsCompatibleForSlp(partners: []const ?Machine.Slot, first: Machine.Slot, s
 
 fn slotsPairedInOrderOrEqual(partners: []const ?Machine.Slot, first: Machine.Slot, second: Machine.Slot) bool {
     return first == second or (first < second and partners[first] == second);
+}
+
+test "portable min max affinities retain both scalar results on each native target" {
+    inline for (.{ VectorCost.Target.arm64, VectorCost.Target.x64 }) |target| {
+        inline for (.{ Machine.BinaryOperator.minimum, Machine.BinaryOperator.maximum }) |operator| {
+            var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer arena.deinit();
+            const allocator = arena.allocator();
+            const instructions = [_]Machine.Instruction{
+                .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 4)) } },
+                .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 6)) } },
+                .{ .constant_float32 = .{ .result = 2, .bits = @bitCast(@as(f32, 0.001)) } },
+                .{ .constant_float32 = .{ .result = 3, .bits = @bitCast(@as(f32, 0.001)) } },
+                .{ .binary = .{ .result = 4, .operator = operator, .left = 0, .right = 2, .type = .float32 } },
+                .{ .binary = .{ .result = 5, .operator = operator, .left = 1, .right = 3, .type = .float32 } },
+                .{ .binary = .{ .result = 6, .operator = .add, .left = 4, .right = 5, .type = .float32 } },
+                .{ .return_value = .{ .start = 6, .width = 1 } },
+            };
+            const function: Machine.Function = .{
+                .name = "scalar_shadow_extents",
+                .parameter_count = 0,
+                .return_type = .float32,
+                .slot_count = 7,
+                .frame_size = try Machine.frameSize(7),
+                .instructions = &instructions,
+                .float_lane_groups = &.{.{ .slots = .{ 4, 5, 0, 0 }, .width = 2, .priority = 16, .recurrence = false, .in_loop = false }},
+            };
+            const floats = [_]bool{true} ** 7;
+            var lanes = [_]?Machine.FloatLaneResidence{null} ** 7;
+            try allocate(allocator, function, target, &floats, &lanes, &.{ 16, 17 }, null, false);
+            try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), lanes[4]);
+            try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), lanes[5]);
+        }
+    }
 }
