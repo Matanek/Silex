@@ -8,6 +8,12 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 conserve les bits lors des copies scalaires ou des champs
+  d'agrégats entre registres généraux et flottants. `abs` d'un champ en Release
+  ne relit plus un emplacement mémoire périmé. Les intrinsics `copysign` et
+  `sqrt` lisent et écrivent aussi la voie float32 appariée correcte sans
+  écraser la composante voisine.
+
 - Les calculs SIMD différés conservent leurs opérandes jusqu’à leur émission
   réelle. En Native ARM64 Release, un chargement scalaire intermédiaire ne
   peut plus écraser une composante : les distances et cadences de déplacement

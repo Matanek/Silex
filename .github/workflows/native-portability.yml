@@ -573,6 +573,12 @@ jobs:
             -o "$RUNNER_TEMP/boundary"
           test "$("$RUNNER_TEMP/boundary")" = "linux arm64 boundary ready"
 
+          paired_intrinsics="$GITHUB_WORKSPACE/Tests/Native/PairedScalarIntrinsics.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$paired_intrinsics" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/paired-scalar-intrinsics-$mode"
+            test "$("$RUNNER_TEMP/paired-scalar-intrinsics-$mode")" = "Paired scalar intrinsics: all components preserved"
+          done
           # Compile the exact standalone witness without the optimizer package's STD graph.
           scalar_root="$RUNNER_TEMP/scalar-float-fixture"
           mkdir -p "$scalar_root"
@@ -890,6 +896,16 @@ jobs:
             $minmaxOutput = @(& $minmaxBinary)
             if ($LASTEXITCODE -ne 0 -or $minmaxOutput.Count -ne 1 -or $minmaxOutput[0] -ne "scalar-math-minmax: pass") {
               throw "scalar math minmax $mode regression failed"
+            }
+          }
+          $pairedIntrinsics = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/PairedScalarIntrinsics.sx"
+          foreach ($mode in @("debug", "release")) {
+            $pairedBinary = Join-Path $env:RUNNER_TEMP "paired-scalar-intrinsics-$mode.exe"
+            & $silex compile --backend native $pairedIntrinsics "--$mode" --nocache -o $pairedBinary
+            if ($LASTEXITCODE -ne 0) { throw "paired scalar intrinsics $mode compilation failed" }
+            $pairedOutput = @(& $pairedBinary)
+            if ($LASTEXITCODE -ne 0 -or $pairedOutput.Count -ne 1 -or $pairedOutput[0] -ne "Paired scalar intrinsics: all components preserved") {
+              throw "paired scalar intrinsics $mode regression failed"
             }
           }
           # Copy bytes unchanged into a standalone fixture, without the optimizer's STD graph.

@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 preserves payload bits when scalar or aggregate-field copies
+  cross general-purpose and floating-point registers. Release `abs` of a field
+  no longer reads a stale stack home. The `copysign` and `sqrt` intrinsics
+  also access the correct paired float32 lane without overwriting its neighbour.
+
 - Deferred SIMD operations keep their inputs alive until actual emission.
   In Native ARM64 Release, an intervening scalar load can no longer overwrite
   a component, restoring movement distances and cadence to the LLVM results.

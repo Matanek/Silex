@@ -218,3 +218,62 @@ test "pure aggregate affinity does not delay an earlier scalar use" {
     try std.testing.expectEqual(Machine.Status.success, result.status);
     try std.testing.expectEqual(@as(i64, @as(u32, @bitCast(@as(f32, -8.25)))), result.value);
 }
+
+test "scalar and aggregate copies transfer floating payloads across register banks" {
+    const Encoder = @import("Encoder.zig");
+    const Instructions = @import("Instructions.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const function: Machine.Function = .{
+        .name = "mixed_bank_copy",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = 5,
+        .frame_size = 48,
+        .register_slots = &.{ 19, null, 20, null, 21 },
+        .float_register_slots = &.{ null, 16, null, 17, null },
+        .instructions = &.{
+            .{ .copy = .{ .result = 1, .operand = 0 } },
+            .{ .copy = .{ .result = 2, .operand = 1 } },
+            .{ .copy_range = .{ .result = .{ .start = 3, .width = 1 }, .operand = .{ .start = 2, .width = 1 } } },
+            .{ .copy_range = .{ .result = .{ .start = 4, .width = 1 }, .operand = .{ .start = 3, .width = 1 } } },
+            .{ .return_value = .{ .start = 4, .width = 1 } },
+        },
+    };
+    for ([_]Encoder.Platform{ .darwin, .linux, .windows }) |platform| {
+        const image = try switch (platform) {
+            .darwin => Encoder.encode(allocator, .{ .functions = &.{function} }, .none),
+            .linux => Encoder.encodeLinux(allocator, .{ .functions = &.{function} }, .none),
+            .windows => Encoder.encodeWindows(allocator, .{ .functions = &.{function} }, .none),
+        };
+        defer image.deinit(allocator);
+        for ([_]u32{
+            Instructions.moveGeneralToFloat(.x16, .x19, true),
+            Instructions.moveFloatToGeneral(.x20, .x16, true),
+            Instructions.moveGeneralToFloat(.x17, .x20, true),
+            Instructions.moveFloatToGeneral(.x21, .x17, true),
+        }) |word| {
+            var found = false;
+            var offset: usize = 0;
+            while (offset + 4 <= image.code.len) : (offset += 4) {
+                if (std.mem.readInt(u32, image.code[offset..][0..4], .little) == word) found = true;
+            }
+            try std.testing.expect(found);
+        }
+    }
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    for ([_]u64{
+        @as(u32, @bitCast(@as(f32, -4))),
+        0x80000000, 0x7fc12345,
+        @bitCast(@as(f64, -12.5)),
+        0x8000000000000000, 0x7ff8123456789abc,
+    }) |payload| {
+        const result = try @import("Runner.zig").invoke(allocator, .{ .functions = &.{function} }, 0, &.{@bitCast(payload)});
+        try std.testing.expectEqual(Machine.Status.success, result.status);
+        try std.testing.expectEqual(payload, @as(u64, @bitCast(result.value)));
+    }
+}

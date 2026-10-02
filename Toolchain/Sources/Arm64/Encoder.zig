@@ -5607,6 +5607,10 @@ fn loadOptionalFloatValue(
         if (source != destination) try words.append(allocator, moveFloat(destination, source, double));
         return;
     };
+    if (valueOptionalResultRegister(function, slot)) |source| {
+        try words.append(allocator, moveGeneralToFloat(destination, source, double));
+        return;
+    }
     if (double) {
         try words.append(allocator, A64.loadFloat64Stack(destination, slot));
         return;
@@ -5648,6 +5652,10 @@ fn storeOptionalFloatValue(
         if (source != destination) try words.append(allocator, moveFloat(destination, source, double));
         return;
     };
+    if (valueOptionalResultRegister(function, slot)) |destination| {
+        try words.append(allocator, moveFloatToGeneral(destination, source, double));
+        return;
+    }
     if (double) {
         try words.append(allocator, A64.storeFloat64Stack(source, slot));
         return;

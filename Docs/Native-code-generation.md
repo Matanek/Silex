@@ -40,6 +40,19 @@ a valid peephole transformation without a distinct semantic permission in the IR
 The native regression corpus covers cancellation-sensitive float32/float64
 expressions; encoder tests cover stack and register operands on all ARM64 formats.
 
+Scalar and aggregate-field copies can cross general-purpose and floating-point
+register banks. ARM64 transfers their payload bits with FMOV in either direction;
+a register-resident leaf has no current stack home to reload. The forced-bank
+regression preserves float32/float64 payloads, signed zeros and NaN payload bits.
+
+ARM64 scalar `sqrt` and `copysign` intrinsics consume the selected lane when a
+float32 operand lives in a packed register. Results update only their allocated
+lane; a scalar register write must not clear the neighbouring live component.
+This emission is shared by the macOS, Linux and Windows ARM64 formats. The
+forced-lane machine test checks both lanes and neighbouring values, with native
+execution on the macOS ARM64 host and structural emission checks for all three
+system routes.
+
 ## Recognize targets
 
 Package composition recognizes `macos-arm64`, `macos-x64`, `linux-arm64`,

@@ -1,0 +1,26 @@
+use STD.Math
+
+func probe(values:Math.Vec3[]) {
+    for value in values {
+        let magnitude = Math.abs(value.y)
+        let root = Math.sqrt(value.z)
+        assert(magnitude >= 0.0)
+        assert(Math.abs(root * root - value.z) < 0.00001)
+        assert(Math.abs(magnitude * magnitude - value.y * value.y) < 0.00001)
+        let shifted = value.add(Math.Vec3(magnitude, root, magnitude + root))
+        assert(Math.abs(shifted.x - value.x - magnitude) < 0.00001)
+        assert(Math.abs(shifted.y - value.y - root) < 0.00001)
+        assert(Math.abs(shifted.z - value.z - magnitude - root) < 0.00001)
+    }
+}
+
+func main() {
+    probe([Math.Vec3(-7.0, -4.0, 9.0), Math.Vec3(3.0, 0.0, 4.0),
+        Math.Vec3(8.0, -2.0, 0.0), Math.Vec3(1.0, 6.0, 25.0)])
+    print("Paired scalar intrinsics: all components preserved")
+}
+
+test "scalar abs and sqrt preserve all components of packed vectors" {
+    probe([Math.Vec3(-7.0, -4.0, 9.0), Math.Vec3(3.0, 0.0, 4.0),
+        Math.Vec3(8.0, -2.0, 0.0), Math.Vec3(1.0, 6.0, 25.0)])
+}

@@ -29,14 +29,19 @@ pub fn emit(
     const external = program.external_functions[call.function];
     if (external.signature.arguments.len != call.arguments.len) return error.InvalidMachineProgram;
     if (@import("MemoryResidence.zig").squareRootPrecision(external)) |double| if (call.result) |result| {
-        const source = floatResidence(function, call.arguments[0]) orelse source: {
+        const source = if (floatLaneResidence(function, call.arguments[0])) |lane| source: {
+            try words.append(allocator, Instructions.duplicateFloat32Lane(.x9, @enumFromInt(lane.register), lane.lane));
+            break :source Register.x9;
+        } else floatResidence(function, call.arguments[0]) orelse source: {
             try loadValue(allocator, words, function, .x9, call.arguments[0]);
             try words.append(allocator, Instructions.moveGeneralToFloat(.x9, .x9, double));
             break :source .x9;
         };
-        const destination = floatResidence(function, result) orelse .x9;
+        const destination = if (floatLaneResidence(function, result) != null) Register.x9 else floatResidence(function, result) orelse .x9;
         try words.append(allocator, Instructions.floatSquareRoot(destination, source, double));
-        if (floatResidence(function, result) == null) {
+        if (floatLaneResidence(function, result)) |lane| {
+            try words.append(allocator, Instructions.insertFloat32Lane(@enumFromInt(lane.register), destination, lane.lane));
+        } else if (floatResidence(function, result) == null) {
             try words.append(allocator, Instructions.moveFloatToGeneral(.x9, destination, double));
             try storeValue(allocator, words, function, .x9, result);
         }
@@ -238,6 +243,11 @@ fn floatResidence(function: Machine.Function, slot: Machine.Slot) ?Register {
     return null;
 }
 
+fn floatLaneResidence(function: Machine.Function, slot: Machine.Slot) ?Machine.FloatLaneResidence {
+    if (function.float_lane_slots.len == 0) return null;
+    return function.float_lane_slots[slot];
+}
+
 fn loadFloatBits(
     allocator: Allocator,
     words: *std.ArrayList(u32),
@@ -246,7 +256,15 @@ fn loadFloatBits(
     slot: Machine.Slot,
     double: bool,
 ) Allocator.Error!void {
-    if (floatResidence(function, slot)) |source| {
+    if (floatLaneResidence(function, slot)) |lane| {
+        const source: Register = @enumFromInt(lane.register);
+        if (lane.lane == 0) {
+            try words.append(allocator, Instructions.moveFloatToGeneral(destination, source, false));
+        } else {
+            try words.append(allocator, Instructions.duplicateFloat32Lane(.x9, source, lane.lane));
+            try words.append(allocator, Instructions.moveFloatToGeneral(destination, .x9, false));
+        }
+    } else if (floatResidence(function, slot)) |source| {
         try words.append(allocator, Instructions.moveFloatToGeneral(destination, source, double));
     } else try loadValue(allocator, words, function, destination, slot);
 }
@@ -259,7 +277,11 @@ fn storeFloatBits(
     slot: Machine.Slot,
     double: bool,
 ) Allocator.Error!void {
-    if (floatResidence(function, slot)) |destination| {
+    if (floatLaneResidence(function, slot)) |lane| {
+        // A scalar FMOV clears the sibling lane. Insert only the result lane.
+        try words.append(allocator, Instructions.moveGeneralToFloat(.x9, source, false));
+        try words.append(allocator, Instructions.insertFloat32Lane(@enumFromInt(lane.register), .x9, lane.lane));
+    } else if (floatResidence(function, slot)) |destination| {
         try words.append(allocator, Instructions.moveGeneralToFloat(destination, source, double));
     } else try storeValue(allocator, words, function, source, slot);
 }
@@ -451,4 +473,86 @@ test "Linux ARM64 lowers the public newfstatat boundary to its native syscall" {
     try std.testing.expectEqual(@as(usize, 0), sites.items.len);
     try std.testing.expectEqual(Instructions.moveWideZero32(.x8, 79), words.items[4]);
     try std.testing.expectEqual(Instructions.linuxServiceCall(), words.items[5]);
+}
+
+test "scalar math intrinsics read and preserve paired float32 lanes" {
+    const builtin = @import("builtin");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]bool{ false, true }) |square_root| {
+        const external: Machine.ExternalFunction = .{
+            .provider = "Darwin.lib_system",
+            .source_name = if (square_root) "sqrtf" else "copysignf",
+            .signature = .{
+                .arguments = if (square_root) &.{.float32} else &.{ .float32, .float32 },
+                .result = .float32,
+            },
+        };
+        for ([_]u1{ 0, 1 }) |source_lane| {
+            for ([_]u1{ 0, 1 }) |result_lane| {
+                for ([_]Machine.Slot{ 2, 5 }) |returned| {
+                    const call: Machine.Instruction.ExternalCall = .{
+                        .result = 2,
+                        .function = 0,
+                        .arguments = if (square_root) &.{0} else &.{ 0, 1 },
+                    };
+                    var registers: [11]?u5 = @splat(null);
+                    var lanes = [_]?Machine.FloatLaneResidence{
+                        .{ .register = 16, .lane = source_lane, .partner = 3 },
+                        .{ .register = 17, .lane = 1, .partner = 4 },
+                        .{ .register = 18, .lane = result_lane, .partner = 5 },
+                        .{ .register = 16, .lane = 1 - source_lane, .partner = 0 },
+                        .{ .register = 17, .lane = 0, .partner = 1 },
+                        .{ .register = 18, .lane = 1 - result_lane, .partner = 2 },
+                        null, null, null, null, null,
+                    };
+                    var instructions = [_]Machine.Instruction{
+                        .{ .constant_float32 = .{ .result = 6, .bits = @bitCast(@as(f32, 4.0)) } },
+                        .{ .constant_float32 = .{ .result = 7, .bits = @bitCast(@as(f32, -1.0)) } },
+                        .{ .constant_float32 = .{ .result = 8, .bits = @bitCast(@as(f32, 10.0)) } },
+                        .{ .constant_float32 = .{ .result = 9, .bits = @bitCast(@as(f32, 12.0)) } },
+                        .{ .constant_float32 = .{ .result = 10, .bits = @bitCast(@as(f32, 7.0)) } },
+                        .{ .copy = .{ .result = 0, .operand = 6 } },
+                        .{ .copy = .{ .result = 1, .operand = 7 } },
+                        .{ .copy = .{ .result = 3, .operand = 8 } },
+                        .{ .copy = .{ .result = 4, .operand = 9 } },
+                        .{ .copy = .{ .result = 5, .operand = 10 } },
+                        .{ .external_call = call },
+                        .{ .return_value = .{ .start = returned, .width = 1 } },
+                    };
+                    const function: Machine.Function = .{
+                        .name = "paired_scalar_intrinsic",
+                        .parameter_count = 0,
+                        .return_type = .float32,
+                        .return_width = 1,
+                        .slot_count = 11,
+                        .frame_size = try Machine.frameSize(11),
+                        .instructions = &instructions,
+                        .float_register_slots = &registers,
+                        .float_lane_slots = &lanes,
+                    };
+                    const program: Machine.Program = .{ .functions = &.{function}, .external_functions = &.{external} };
+                    // All ARM64 system routes use the same lane operations.
+                    for ([_]System.Platform{ .darwin, .linux, .windows }) |platform| {
+                        var words: std.ArrayList(u32) = .empty;
+                        var sites: std.ArrayList(Site) = .empty;
+                        try emit(allocator, &words, &sites, platform, program, function, call);
+                        try std.testing.expectEqual(@as(usize, 0), sites.items.len);
+                        var inserts: usize = 0;
+                        for (words.items) |word| {
+                            if (word == Instructions.insertFloat32Lane(.x18, .x9, result_lane)) inserts += 1;
+                        }
+                        try std.testing.expectEqual(@as(usize, 1), inserts);
+                    }
+                    if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
+                        const result = try @import("Runner.zig").invoke(allocator, program, 0, &.{});
+                        try std.testing.expectEqual(Machine.Status.success, result.status);
+                        const expected: f32 = if (returned == 5) 7.0 else if (square_root) 2.0 else -4.0;
+                        try std.testing.expectEqual(@as(u32, @bitCast(expected)), @as(u32, @truncate(@as(u64, @bitCast(result.value)))));
+                    }
+                }
+            }
+        }
+    }
 }
