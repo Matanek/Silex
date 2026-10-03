@@ -1059,41 +1059,13 @@ fn emitResidentFloatLoads(
 ) Error!usize {
     var leaf = first_leaf;
     if (stride == @as(u64, span.width) * 4) {
-        while (leaf + 1 < end_leaf) {
-            const first_slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
-            const second_slot = first_slot + 1;
-            if (function.float_lane_slots.len != 0) if (function.float_lane_slots[first_slot]) |first_lane| {
-                if (function.float_lane_slots[second_slot]) |second_lane| if (first_lane.register == second_lane.register and
-                    first_lane.lane == 0 and second_lane.lane == 1)
-                {
-                    try emitVector64LoadAtOffset(
-                        allocator,
-                        words,
-                        @enumFromInt(first_lane.register),
-                        base,
-                        leaf * 4,
-                    );
-                    leaf += 2;
-                    continue;
-                };
-            };
-            const first: A64.Register = @enumFromInt(function.float_register_slots[first_slot].?);
-            const second: A64.Register = @enumFromInt(function.float_register_slots[second_slot].?);
-            const byte_offset = leaf * 4;
-            if (first == second or byte_offset > 252) break;
-            try words.append(allocator, A64.loadFloat32Pair(first, second, base, @intCast(byte_offset)));
-            leaf += 2;
-        }
-        while (leaf < end_leaf) : (leaf += 1) {
-            const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
-            const destination: A64.Register = @enumFromInt(function.float_register_slots[slot].?);
-            try words.append(allocator, A64.loadFloat32(destination, base, @intCast(leaf * 4)));
-        }
-        return leaf;
+        return emitCompactFloatLoads(allocator, words, function, span, base, first_leaf, end_leaf);
     }
     while (leaf + 1 < end_leaf) {
         const first_slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
         const second_slot: Machine.Slot = first_slot + 1;
+        if (function.float_lane_slots.len != 0 and
+            (function.float_lane_slots[first_slot] != null or function.float_lane_slots[second_slot] != null)) break;
         const first: A64.Register = @enumFromInt(function.float_register_slots[first_slot].?);
         const second: A64.Register = @enumFromInt(function.float_register_slots[second_slot].?);
         const byte_offset = leaf * Machine.slot_size;
@@ -1103,6 +1075,14 @@ fn emitResidentFloatLoads(
     }
     while (leaf < end_leaf) : (leaf += 1) {
         const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+        if (function.float_lane_slots.len != 0) if (function.float_lane_slots[slot]) |lane| {
+            // Wide list storage still holds one float32 per eight-byte cell.
+            // Load the low word and insert it without clobbering the other lane.
+            try words.append(allocator, A64.load32Offset(.x12, base, @intCast(leaf * Machine.slot_size)));
+            try words.append(allocator, A64.moveGeneralToFloat(.x9, .x12, false));
+            try words.append(allocator, A64.insertFloat32Lane(@enumFromInt(lane.register), .x9, lane.lane));
+            continue;
+        };
         const destination: A64.Register = @enumFromInt(function.float_register_slots[slot].?);
         try words.append(allocator, A64.loadFloat32(destination, base, @intCast(leaf * Machine.slot_size)));
     }

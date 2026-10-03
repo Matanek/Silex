@@ -8,6 +8,13 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 Release charge correctement les lanes SIMD d’un vecteur
+  flottant lu dans une liste à stockage large. Emprunter un autre élément de
+  cette liste ne change plus les coordonnées calculées ; la construction d’un
+  coin convexe dans une scène graphique est qualifiée sur macOS ARM64.
+  Émission ARM64 Darwin/Linux/Windows couverte ; ces deux derniers systèmes
+  ne sont pas exécutés dans cette validation locale.
+
 - Native ARM64 conserve les bits lors des copies scalaires ou des champs
   d'agrégats entre registres généraux et flottants. `abs` d'un champ en Release
   ne relit plus un emplacement mémoire périmé. Les intrinsics `copysign` et

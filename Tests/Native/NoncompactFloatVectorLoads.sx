@@ -1,0 +1,51 @@
+use STD.Math
+
+// Borrowing a Vec3 element selects wide collection storage. Face wrapping
+// must still load coordinates into their assigned SIMD lanes in Release.
+
+func hull_face_boundary3d(points:Math.Vec3[], normal:Math.Vec3, scale:float) Math.Vec3[] {
+    var start = 0
+    var index = 1
+    while index < points.count() {
+        let point = points[index]
+        let old = points[start]
+        if point.x < old.x || (point.x == old.x && point.y < old.y) ||
+            (point.x == old.x && point.y == old.y && point.z < old.z) { start = index }
+        index++
+    }
+    var boundary:Math.Vec3[] = []
+    var current = start
+    while true {
+        boundary.append(points[current])
+        var next = (current + 1) % points.count()
+        index = 0
+        while index < points.count() {
+            if index != current && index != next {
+                let candidate = points[next].subtract(points[current]).divide(scale)
+                let edge = points[index].subtract(points[current]).divide(scale)
+                let turn = normal.dot(candidate.cross(edge))
+                if turn < -0.000000000001 ||
+                    (Math.abs(turn) <= 0.000000000001 && edge.length_squared() > candidate.length_squared()) {
+                    next = index
+                }
+            }
+            index++
+        }
+        current = next
+        if current == start { return boundary }
+        if boundary.count() > points.count() {
+            panic("noncompact vector loads changed the face orientation")
+        }
+    }
+    return boundary
+}
+
+func touch(point:&Math.Vec3) { point.x += 0.0 }
+func main() {
+    var points:Math.Vec3[] = [Math.Vec3(-3.0, -1.0, -2.0), Math.Vec3(-3.0, 2.0, -2.0), Math.Vec3(3.0, -1.0, 2.0)]
+    touch(points[0])
+    let normal = Math.Vec3(-0.55470014, 0.0, 0.8320503)
+    let result = hull_face_boundary3d(points, normal, 7.0)
+    assert(result.count() == 3)
+    print("noncompact hull face verified")
+}

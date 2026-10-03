@@ -428,3 +428,54 @@ test "deferred vector subtraction preserves snapshots across later scalar loads"
     try std.testing.expectEqual(Machine.Status.success, result.status);
     try std.testing.expectEqual(floatBits(13, false), result.value);
 }
+
+test "wide float32 collection loads insert both resident SIMD lanes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const function: Machine.Function = .{
+        .name = "wide_resident_vector",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 8,
+        .frame_size = try Machine.frameSize(8),
+        .float_register_slots = &.{ null, null, null, 16, 16, 17, 18, 19 },
+        .float_lane_slots = &.{ null, null, null, .{ .register = 16, .lane = 0, .partner = 4 }, .{ .register = 16, .lane = 1, .partner = 3 }, null, null, null },
+        .instructions = &.{
+            .{ .constant_int = .{ .result = 2, .bits = 0 } },
+            .{ .collection_load = .{
+                .result = .{ .start = 3, .width = 3, .aggregate = true },
+                .collection = .{ .start = 0, .width = 2, .aggregate = true },
+                .index = 2,
+                .count = 0,
+                .dynamic = true,
+                .view = true,
+                .checked = false,
+                .element_stride = 24,
+                .header = 0,
+                .tail = 0,
+            } },
+            .{ .binary = .{ .result = 6, .left = 3, .right = 4, .operator = .add, .type = .float32 } },
+            .{ .binary = .{ .result = 7, .left = 6, .right = 5, .operator = .add, .type = .float32 } },
+            .{ .return_value = .{ .start = 7, .width = 1 } },
+        },
+    };
+    const program: Machine.Program = .{ .functions = &.{ function, sentinel }, .strings = &.{""} };
+    for ([_]Encoder.Platform{ .darwin, .linux, .windows }) |platform| {
+        const image = try switch (platform) {
+            .darwin => Encoder.encode(allocator, program, .none),
+            .linux => Encoder.encodeLinux(allocator, program, .none),
+            .windows => Encoder.encodeWindows(allocator, program, .none),
+        };
+        const code = image.code[image.function_offsets[0]..image.function_offsets[1]];
+        try std.testing.expect(containsWord(code, A64.insertFloat32Lane(.x16, .x9, 0)));
+        try std.testing.expect(containsWord(code, A64.insertFloat32Lane(.x16, .x9, 1)));
+    }
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var cells = [_]u64{ @intCast(floatBits(2, false)), @intCast(floatBits(3, false)), @intCast(floatBits(5, false)) };
+    const result = try Runner.invoke(allocator, program, 0, &.{ @intCast(@intFromPtr(&cells)), 1 });
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+    try std.testing.expectEqual(floatBits(10, false), result.value);
+}

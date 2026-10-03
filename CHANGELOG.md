@@ -8,6 +8,12 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native ARM64 Release correctly loads SIMD lanes of floating vectors read
+  from lists with wide storage. Borrowing another list element no longer
+  changes the computed coordinates; convex wedge construction in a graphical
+  scene is qualified on macOS ARM64. ARM64 Darwin/Linux/Windows emission is
+  covered; the latter two systems are not executed in this local validation.
+
 - Native ARM64 preserves payload bits when scalar or aggregate-field copies
   cross general-purpose and floating-point registers. Release `abs` of a field
   no longer reads a stale stack home. The `copysign` and `sqrt` intrinsics
