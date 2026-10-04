@@ -1056,3 +1056,54 @@ test "enforce representative GFX package and module member boundaries" {
         compiler.diagnostic.?.message,
     );
 }
+
+test "atom collection signatures preserve the declaring element type" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module/Geometry");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Geometry/@Core.sx",
+        .data =
+        \\public struct Item { var value:int }
+        \\public struct Placement { var value:int }
+        \\package func first(output:&Item[]) {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Geometry/@ZBounds.sx",
+        .data =
+        \\struct PrivateState { var value:int }
+        \\package func second(output:&Item[]) { output.append(Item(value:42)) }
+        \\public func inspect(values:Item[]) { print(values[0].value) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Api.sx",
+        .data =
+        \\use Library.Geometry.Item
+        \\use Library.Geometry.second
+        \\use Library.Geometry.inspect
+        \\public func run() { var values:Item[] = []; second(values); print(values[0].value); inspect(values) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Api\nfunc main() { Api.run() }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n42\n", result.stdout);
+}

@@ -1558,7 +1558,7 @@ pub const Compiler = struct {
                 for (structure.fields) |field| try self.requireTypeScope(target.module, field.type, position, required, declaration_kind, declaration_name);
                 return;
             }
-            if (structure.collection) |collection| return self.requireTypeScope(module, collection.element, position, required, declaration_kind, declaration_name);
+            if (structure.collection) |collection| return self.requireTypeScope(target.module, collection.element, position, required, declaration_kind, declaration_name);
             if (Reexports.structureExported(target_program, structure)) break :scope .public;
             break :scope geographicScope(structure);
         } else geographicScope(findEnum(target_program, target.declaration).?);
@@ -1634,7 +1634,7 @@ pub const Compiler = struct {
                 return;
             }
             if (structure.collection) |collection| {
-                return self.requirePublicType(module, collection.element, position, declaration_kind, declaration_name);
+                return self.requirePublicType(target.module, collection.element, position, declaration_kind, declaration_name);
             }
             if (Reexports.structureExported(target_program, structure)) return;
             const message = if (structure.is_local)

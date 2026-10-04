@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La vérification de visibilité d’une liste partagée entre atomes de source
+  suit le type d’élément dans son atome déclarant. Un type privé sans rapport
+  dans l’atome appelant ne provoque plus de faux rejet d’une signature package
+  ou publique ; les véritables fuites de types privés restent rejetées.
+
 - Native ARM64 Release charge correctement les lanes SIMD d’un vecteur
   flottant lu dans une liste à stockage large. Emprunter un autre élément de
   cette liste ne change plus les coordonnées calculées ; la construction d’un

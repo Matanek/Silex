@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Visibility checks for a list shared across source atoms follow its element
+  type in the declaring atom. An unrelated private type in the caller no
+  longer falsely rejects a package or public signature; actual private type
+  leaks remain rejected.
+
 - Native ARM64 Release correctly loads SIMD lanes of floating vectors read
   from lists with wide storage. Borrowing another list element no longer
   changes the computed coordinates; convex wedge construction in a graphical

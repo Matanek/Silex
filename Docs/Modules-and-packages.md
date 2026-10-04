@@ -71,6 +71,9 @@ Synthesized collection layouts are not independent public declarations. A
 fixed array may contain a module-visible element type inside that module;
 when an authored signature exposes the array, visibility checking follows its
 element type and rejects any narrower type that would leak through the API.
+For a collection resolved in another physical atom, that element is interpreted
+in the declaring atom's type table, not the caller's table. Unrelated private
+types in the caller therefore cannot change the signature's visibility.
 
 ## Collect catalog contributions
 
