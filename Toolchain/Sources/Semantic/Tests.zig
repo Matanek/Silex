@@ -205,6 +205,29 @@ test "require constructors to initialize non-intrinsic fields" {
     );
 }
 
+test "class references remain pending in explicit constructors" {
+    try expectSemanticError(
+        "class Resource { init() {} } class Owner { var resource:Resource; init() {} } func main() {}",
+        "field 'resource' is not initialized on every constructor path",
+    );
+    try expectSemanticError(
+        "class Resource { init() {} } struct Owner { var resource:Resource; init(flag:bool, resource:Resource) { if flag { self.resource = resource } } } func main() {}",
+        "field 'resource' is not initialized on every constructor path",
+    );
+    try expectSemanticError(
+        "class Resource { init() {} } class Owner { var resource:Resource; init(resource:Resource) { print(self.resource == resource); self.resource = resource } } func main() {}",
+        "field 'resource' is read before initialization",
+    );
+    try expectSemanticError(
+        "class Resource { init() {} } class Owner { var resource:Resource; init(resource:Resource) { inspect(self); self.resource = resource } } func inspect(owner:Owner) {} func main() {}",
+        "the complete object 'self' cannot escape before all fields are initialized",
+    );
+    try expectSemanticError(
+        "class Resource { init() {} } struct Pair { var resource:Resource } class Owner { var pair:Pair; init() {} } func main() {}",
+        "field 'pair' is not initialized on every constructor path",
+    );
+}
+
 test "transport compare and overload nominal structure values" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

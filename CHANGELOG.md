@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- In an explicit constructor, a class field without an `=` expression now awaits its assigned reference, even when its class has a parameterless constructor. It no longer creates an immediately replaced temporary instance; an intended prior construction must be written on the field as `= Resource()`. Reads before initialization and uninitialized paths are diagnosed.
+
 - Overloaded constructors provide an expected argument type when all visible candidates accepting the call share that parameter type; empty lists or lists of computed dimensions can be written directly without arbitrarily selecting an overload. Completion offers the element type inside lists and preserves named, nested and incomplete calls.
 
 - An unused abstract helper may declare protocol calls without requiring a concrete implementation in the program; its body remains type checked and no synthetic conformer is added.

@@ -1,0 +1,72 @@
+class ConstructionCounts {
+    static var creations:int=0
+    static var destructions:int=0
+}
+class Resource {
+    var value:int
+    init(value:int=7) {self.value=value;ConstructionCounts.creations++}
+    drop {ConstructionCounts.destructions++}
+}
+class Owner {
+    var resource:Resource
+    init(resource:Resource) {self.resource=resource}
+}
+struct ResourcePair {
+    var resource:Resource
+}
+class PairOwner {
+    var pair:ResourcePair
+    init(resource:Resource) {self.pair=ResourcePair(resource:resource)}
+}
+class ExplicitOwner {
+    var resource:Resource=Resource(11)
+    init(resource:Resource) {self.resource=resource}
+}
+class AutomaticOwner {
+    var resource:Resource
+}
+class BranchOwner {
+    var resource:Resource
+    init(left:Resource,right:Resource,first:bool) {
+        if first {self.resource=left} else {self.resource=right}
+    }
+}
+test "explicit constructors retain supplied class identities without default objects" {
+    let before=ConstructionCounts.creations;let drops=ConstructionCounts.destructions
+    {
+        var supplied=Resource(19)
+        var owner=Owner(supplied);var wrapped=PairOwner(supplied)
+        assert(owner.resource==supplied && wrapped.pair.resource==supplied)
+        owner.resource.value=23
+        assert(wrapped.pair.resource.value==23)
+        assert(ConstructionCounts.creations==before+1 && ConstructionCounts.destructions==drops)
+    }
+    assert(ConstructionCounts.destructions==drops+1)
+}
+test "declared class initializers retain their effects before constructor assignment" {
+    let before=ConstructionCounts.creations;let drops=ConstructionCounts.destructions
+    {
+        var supplied=Resource(19);var owner=ExplicitOwner(supplied)
+        assert(owner.resource==supplied)
+        assert(ConstructionCounts.creations==before+2 && ConstructionCounts.destructions==drops+1)
+    }
+    assert(ConstructionCounts.destructions==drops+2)
+}
+test "automatic field constructors still create requested default class objects" {
+    let before=ConstructionCounts.creations;let drops=ConstructionCounts.destructions
+    {
+        var owner=AutomaticOwner()
+        assert(owner.resource.value==7 && ConstructionCounts.creations==before+1)
+    }
+    assert(ConstructionCounts.destructions==drops+1)
+}
+test "both constructor branches initialize the chosen shared class reference" {
+    let before=ConstructionCounts.creations;let drops=ConstructionCounts.destructions
+    {
+        var left=Resource(3);var right=Resource(5)
+        var a=BranchOwner(left,right,true);var b=BranchOwner(left,right,false)
+        assert(a.resource==left && b.resource==right)
+        assert(ConstructionCounts.creations==before+2 && ConstructionCounts.destructions==drops)
+    }
+    assert(ConstructionCounts.destructions==drops+2)
+}

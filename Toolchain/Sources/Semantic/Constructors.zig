@@ -904,6 +904,11 @@ fn intrinsicAvailableAt(self: anytype, type_value: Ast.Type, depth: usize) bool 
     if (depth > self.structures.len) return false;
     const structure = self.structures[structure_index];
     if (structure.is_protocol) return false;
+    // A class has an identity, not an intrinsic value. In an explicit
+    // constructor its field must receive the intended reference, even when
+    // the class happens to have a parameterless constructor. An explicit
+    // field initializer remains the way to request a fresh default object.
+    if (structure.is_class) return false;
     if (structure.collection) |collection| {
         if (collection.length == null) return !collection.view;
         return intrinsicAvailableAt(self, collection.element, depth + 1);
