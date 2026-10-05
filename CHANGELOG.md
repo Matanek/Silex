@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Static methods now propagate `try` using their declared `Result` return, including void results and error messages; local alternatives remain available.
+
 - Injected systems select their function using the calling module visibility.
   A loaded private same-name function in another module no longer causes a
   false callback rejection; callers can retain their source function names.

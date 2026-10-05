@@ -290,7 +290,7 @@ fn analyzeStatic(self: anytype, structure_index: usize, method_index: usize, met
     const previous_function_context = self.function_context;
     self.function_context = method;
     defer self.function_context = previous_function_context;
-    var builder: Model.FunctionBuilder = .{};
+    var builder: Model.FunctionBuilder = .{ .return_type = method.return_type };
     try builder.blocks.append(self.allocator, .{});
     const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len);
     for (method.parameters, 0..) |parameter, index| {

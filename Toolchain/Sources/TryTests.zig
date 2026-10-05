@@ -362,3 +362,62 @@ test "try returns logical results with mutating receiver state" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("", result.stdout);
 }
+
+test "try propagates Results from static methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func static_try_read(allowed:bool) Result<int,str> {
+        \\    if allowed {return Result<int,str>.success(7)}
+        \\    return Result<int,str>.failure("denied")
+        \\}
+        \\func static_try_write(allowed:bool) Result<void,str> {
+        \\    if allowed {return Result<void,str>.success()}
+        \\    return Result<void,str>.failure("unsaved")
+        \\}
+        \\static class StaticTry {
+        \\    func read(allowed:bool) Result<int?,str> {
+        \\        let value=try static_try_read(allowed)
+        \\        return Result<int?,str>.success(value+1)
+        \\    }
+        \\    func write(allowed:bool) Result<void,str> {
+        \\        try static_try_write(allowed)
+        \\        return Result<void,str>.success()
+        \\    }
+        \\    func fallback(allowed:bool) int {
+        \\        return try static_try_read(allowed) else error {return -1}
+        \\    }
+        \\    func message(allowed:bool) Result<int,str> {
+        \\        return Result<int,str>.success(try static_try_read(allowed) else error "static read failed")
+        \\    }
+        \\}
+        \\func validate_static_results() {
+        \\    assert((try StaticTry.read(true) else error {panic(error)})==8)
+        \\    match StaticTry.read(false) {failure(error)=>{assert(error=="denied")}
+        \\        success(value)=>{panic("unexpected success")}}
+        \\    try StaticTry.write(true) else error {panic(error)}
+        \\    match StaticTry.write(false) {failure(error)=>{assert(error=="unsaved")}
+        \\        success=>{panic("unexpected success")}}
+        \\}
+        \\func validate_static_alternatives() {
+        \\    assert(StaticTry.fallback(false)==-1 && StaticTry.fallback(true)==7)
+        \\    assert((try StaticTry.message(true) else error {panic(error)})==7)
+        \\    match StaticTry.message(false) {failure(error)=>{assert(error=="static read failed")}
+        \\        success(value)=>{panic("unexpected success")}}
+        \\}
+        \\
+        \\func main() {validate_static_results();validate_static_alternatives()}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try expectCompileError(
+        "func read() Result<int,str> {return Result<int,str>.success(1)} static class Bad {func read() int {return try read()}} func main() {}",
+        "'try' requires an enclosing function returning 'Result<U,E>'",
+    );
+    try expectCompileError(
+        "func read() Result<int,int> {return Result<int,int>.failure(1)} static class Bad {func read() Result<int,str> {return Result<int,str>.success(try read())}} func main() {}",
+        "'try' error type 'int' does not match enclosing error type 'str'",
+    );
+}

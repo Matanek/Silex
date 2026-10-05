@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les méthodes statiques propagent désormais `try` selon leur retour `Result`, y compris les résultats sans valeur et les messages d’erreur ; les alternatives locales restent disponibles.
+
 - Les systèmes injectés sélectionnent leur fonction selon la visibilité du
   module appelant. Une fonction homonyme privée chargée depuis un autre module
   ne provoque plus un faux refus de callback ; aucun nom source à contourner.
