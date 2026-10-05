@@ -1,0 +1,12 @@
+struct Payload { var values:int[] }
+protocol Operation {
+    func number() int
+    func payload() Payload
+    func payloads() Payload[]
+    func action()
+}
+func number(operation:Operation) int {var active=operation;return active.number()+1}
+func payload(operation:Operation) Payload {var active=operation;return active.payload()}
+func payloads(operation:Operation) Payload[] {var active=operation;return active.payloads()}
+func action(operation:Operation) {var active=operation;active.action()}
+func main() {print("Unused abstract helpers: pass")}

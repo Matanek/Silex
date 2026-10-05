@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Un helper abstrait inutilisé peut déclarer des appels de protocole sans imposer une implémentation concrète au programme ; son corps reste vérifié et aucun conformer artificiel n’est ajouté.
+
 - Les appels dynamiques de protocole retiennent leurs arguments possédés et transfèrent leurs résultats comme les appels ordinaires ; le calcul natif ne libère plus les listes encore utilisées par l’appelant.
 
 - Les dépendances réciproques entre un module et son descendant sont acceptées dans la hiérarchie d’un même package ; les branches étrangères restent refusées.

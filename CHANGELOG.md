@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- An unused abstract helper may declare protocol calls without requiring a concrete implementation in the program; its body remains type checked and no synthetic conformer is added.
+
 - Dynamic protocol calls retain owned arguments and transfer results like ordinary calls; native execution no longer frees lists still used by the caller.
 
 - Mutual dependencies between a module and its descendant are accepted within one package hierarchy; unrelated branches remain rejected.

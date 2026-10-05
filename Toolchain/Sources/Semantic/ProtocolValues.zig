@@ -150,3 +150,20 @@ pub fn emitExtract(self: anytype, builder: anytype, protocol: Ir.ValueId, struct
     try self.emit(builder, .{ .protocol_extract = .{ .result = result, .operand = protocol, .structure = structure } });
     return result;
 }
+
+/// A closed program may declare an unused abstract helper without constructing
+/// any value of its protocol. Such a call cannot return. Preserve type checking
+/// after the call in an unreachable continuation, never a synthetic conformer.
+pub fn uninhabitedCall(self: anytype, builder: anytype, return_type: Ast.Type, position: @import("../Source.zig").Position) !?Model.TypedValue {
+    const message = try self.emitString(builder, "dynamic protocol has no concrete conforming type in this program");
+    self.terminate(builder, .{ .panic = .{ .message = message.value, .position = position } });
+    builder.current_block = try self.newBlock(builder);
+    if (return_type == .void) return null;
+    const local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, return_type);
+    const value = try self.newValue(builder, return_type);
+    // This local load has no reachable predecessor; it only represents the
+    // expression's declared type while the remaining source is checked.
+    try self.emit(builder, .{ .local_load = .{ .result = value, .local = local } });
+    return .{ .type = return_type, .value = value, .transferred = true };
+}

@@ -1020,11 +1020,8 @@ fn analyzeProtocolCall(
     const protocol_index = ProtocolValues.index(self, receiver.type) orelse return error.InvalidSource;
     const conformers = try ProtocolValues.conformers(self, protocol_index);
     if (conformers.len == 0) {
-        if (requirement.return_type != .void) {
-            return self.fail(call.name_position, "dynamic protocol has no concrete conforming type in this program");
-        }
         try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
-        return null;
+        return ProtocolValues.uninhabitedCall(self, builder, requirement.return_type, call.name_position);
     }
     const updated = try self.newValue(builder, receiver.type);
     const result = if (requirement.return_type == .void) null else try self.newValue(builder, requirement.return_type);

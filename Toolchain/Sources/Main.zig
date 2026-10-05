@@ -3038,6 +3038,7 @@ test {
     _ = @import("Project/CoreTests.zig");
     _ = @import("Project/HierarchyTests.zig");
     _ = @import("Project/OwnerStorageTests.zig");
+    _ = @import("Project/UninhabitedProtocolTests.zig");
     _ = @import("ProjectMigrationTests.zig");
     _ = @import("ProjectStructureTests.zig");
     _ = @import("Semantic/Analyzer.zig");
