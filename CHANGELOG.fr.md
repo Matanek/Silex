@@ -9,6 +9,10 @@ Cet historique éditorial commence à la version 0.44.1.
 ## [Unreleased]
 
 - Les méthodes statiques propagent désormais `try` selon leur retour `Result`, y compris les résultats sans valeur et les messages d’erreur ; les alternatives locales restent disponibles.
+- `interpret` ignore les fonctions système importées qui ne sont pas atteignables
+  depuis `main`. Les appels effectifs et callbacks pouvant atteindre une frontière
+  non prise en charge restent refusés ; les programmes purement portables d’un
+  module proposant aussi des entrées fichiers peuvent être comparés au natif.
 
 - Les systèmes injectés sélectionnent leur fonction selon la visibilité du
   module appelant. Une fonction homonyme privée chargée depuis un autre module

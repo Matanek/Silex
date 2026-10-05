@@ -174,28 +174,31 @@ fn remap(old_to_new: []const ?Ir.FunctionId, original: Ir.FunctionId) Ir.Error!I
     return old_to_new[original] orelse error.InvalidProgram;
 }
 
-fn testFunction(name: []const u8, instructions: []const Ir.Instruction) Ir.Function {
-    const blocks = [_]Ir.Block{.{ .instructions = instructions, .terminator = .return_void }};
+fn testFunction(allocator: std.mem.Allocator, name: []const u8, instructions: []const Ir.Instruction) !Ir.Function {
+    const blocks = try allocator.alloc(Ir.Block, 1);
+    blocks[0] = .{ .instructions = instructions, .terminator = .return_void };
     return .{
         .name = name,
         .parameter_types = &.{},
         .return_type = .void,
         .value_types = &.{},
-        .blocks = &blocks,
+        .blocks = blocks,
     };
 }
 
 test "close executable removes unreachable functions and remaps direct recursion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const main_instructions = [_]Ir.Instruction{.{ .call = .{ .result = null, .function = 2, .arguments = &.{} } }};
     const dead_instructions = [_]Ir.Instruction{};
     const recursive_instructions = [_]Ir.Instruction{.{ .call = .{ .result = null, .function = 2, .arguments = &.{} } }};
     const functions = [_]Ir.Function{
-        testFunction("main", &main_instructions),
-        testFunction("backend_sentinel", &dead_instructions),
-        testFunction("reachable", &recursive_instructions),
+        try testFunction(allocator, "main", &main_instructions),
+        try testFunction(allocator, "backend_sentinel", &dead_instructions),
+        try testFunction(allocator, "reachable", &recursive_instructions),
     };
-    const scope = try executable(std.testing.allocator, .{ .functions = &functions });
-    defer std.testing.allocator.free(scope.old_to_new);
+    const scope = try executable(allocator, .{ .functions = &functions });
     try std.testing.expectEqual(@as(usize, 2), scope.program.functions.len);
     try std.testing.expectEqualStrings("main", scope.program.functions[0].name);
     try std.testing.expectEqualStrings("reachable", scope.program.functions[1].name);
@@ -204,6 +207,9 @@ test "close executable removes unreachable functions and remaps direct recursion
 }
 
 test "close follows callback dynamic and finalizer targets" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const implementations = [_]Ir.Instruction.DynamicCall.Implementation{.{ .structure = 0, .function = 3 }};
     const finalizers = [_]Ir.Instruction.ClassDrop.Finalizer{.{ .structure = 0, .function = 4 }};
     const plans = [_]Ir.Instruction.ClassDrop.Plan{.{ .structure = 0, .functions = &finalizers }};
@@ -214,22 +220,24 @@ test "close follows callback dynamic and finalizer targets" {
     };
     const empty = [_]Ir.Instruction{};
     const functions = [_]Ir.Function{
-        testFunction("root", &root_instructions),
-        testFunction("callback", &empty),
-        testFunction("method", &empty),
-        testFunction("override", &empty),
-        testFunction("drop", &empty),
-        testFunction("backend_sentinel", &empty),
+        try testFunction(allocator, "root", &root_instructions),
+        try testFunction(allocator, "callback", &empty),
+        try testFunction(allocator, "method", &empty),
+        try testFunction(allocator, "override", &empty),
+        try testFunction(allocator, "drop", &empty),
+        try testFunction(allocator, "backend_sentinel", &empty),
     };
-    const scope = try close(std.testing.allocator, .{ .functions = &functions }, &.{0});
-    defer std.testing.allocator.free(scope.old_to_new);
+    const scope = try close(allocator, .{ .functions = &functions }, &.{0});
     try std.testing.expectEqual(@as(usize, 5), scope.program.functions.len);
     try std.testing.expect(scope.function(5) == null);
     try std.testing.expectEqual(@as(Ir.FunctionId, 4), scope.function(4).?);
 }
 
 test "ARM64 and X64 consume the same closed portable program" {
-    var frontend = @import("Frontend.zig").Frontend.init(std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("Frontend.zig").Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\func unreachable_backend_sentinel() {
         \\    print("SILEX_UNREACHABLE_BACKEND_SENTINEL")
@@ -238,8 +246,8 @@ test "ARM64 and X64 consume the same closed portable program" {
         \\    print("reachable")
         \\}
     );
-    const scope = try executable(std.testing.allocator, compilation.ir);
-    const machine = try @import("Arm64/Lower.zig").lowerWithMode(std.testing.allocator, scope.program, .release);
+    const scope = try executable(allocator, compilation.ir);
+    const machine = try @import("Arm64/Lower.zig").lowerWithMode(allocator, scope.program, .release);
     try std.testing.expectEqual(scope.program.functions.len, machine.functions.len);
     for (machine.functions) |function| {
         try std.testing.expect(!std.mem.eql(u8, function.name, "unreachable_backend_sentinel"));
@@ -252,12 +260,12 @@ test "ARM64 and X64 consume the same closed portable program" {
     for (machine.functions, 0..) |function, function_id| {
         if (std.mem.eql(u8, function.name, "main")) main_id = function_id;
     }
-    var arm64 = try @import("Arm64/Encoder.zig").encode(std.testing.allocator, machine, .{ .executable_main = main_id.? });
-    defer arm64.deinit(std.testing.allocator);
-    var linux_x64 = try @import("X64/Encoder.zig").encodeLinux(std.testing.allocator, machine);
-    defer linux_x64.deinit(std.testing.allocator);
-    var windows_x64 = try @import("X64/Encoder.zig").encodeWindows(std.testing.allocator, machine);
-    defer windows_x64.deinit(std.testing.allocator);
+    var arm64 = try @import("Arm64/Encoder.zig").encode(allocator, machine, .{ .executable_main = main_id.? });
+    defer arm64.deinit(allocator);
+    var linux_x64 = try @import("X64/Encoder.zig").encodeLinux(allocator, machine);
+    defer linux_x64.deinit(allocator);
+    var windows_x64 = try @import("X64/Encoder.zig").encodeWindows(allocator, machine);
+    defer windows_x64.deinit(allocator);
     try std.testing.expect(arm64.code.len != 0);
     try std.testing.expect(linux_x64.code.len != 0);
     try std.testing.expect(windows_x64.code.len != 0);

@@ -13,6 +13,7 @@ const Lower = @import("Arm64/Lower.zig");
 const Arm64Encoder = @import("Arm64/Encoder.zig");
 const Arm64Object = @import("Arm64/Object.zig");
 const Interpreter = @import("Interpreter.zig");
+const InterpreterCapabilities = @import("Interpreter/Capabilities.zig");
 const Ir = @import("Ir.zig");
 const Lsp = @import("Lsp/Server.zig");
 const LlvmBackend = @import("LlvmBackend.zig");
@@ -1511,8 +1512,7 @@ fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: [
         const text = try Ir.writeText(allocator, program);
         try Io.File.stdout().writeStreamingAll(init.io, text);
     }
-    for (boundaries) |boundary| {
-        if (Interpreter.supportsBoundary(boundary)) continue;
+    if (try InterpreterCapabilities.firstUnsupported(allocator, program, boundaries)) |boundary| {
         std.debug.print(
             "silex: 'interpret' cannot execute foreign function '{s}' from '{s}'; use 'silex run' for this platform boundary\n",
             .{ boundary.source_name, boundary.provider },
