@@ -644,11 +644,12 @@ pub fn scopeItemsAtForTargetDecisionExpected(
             else
                 use.path;
             if (declarationTarget(project.index, use_path)) |target| {
-                const provider = project.index.providers[target.provider];
+                const provider_index = try declarationProviderIndex(allocator, io, documents, project, target.provider, target.declaration);
+                const provider = project.index.providers[provider_index];
                 if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) {
                     if (try loadProgram(allocator, io, documents, provider)) |loaded| {
                         for (loaded.program.structures) |structure| {
-                            if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration) or
+                            if (!importedMemberVisible(project, provider, structure) or !std.mem.eql(u8, structure.name, target.declaration) or
                                 structure.constructors.len != 0) continue;
                             native_initializer = true;
                             for (structure.fields) |field| {
@@ -749,13 +750,14 @@ pub fn scopeItemsAtForTargetDecisionExpected(
             continue;
         }
         if (declarationTarget(project.index, use_path)) |target| {
-            const provider = project.index.providers[target.provider];
+            const provider_index = try declarationProviderIndex(allocator, io, documents, project, target.provider, target.declaration);
+            const provider = project.index.providers[provider_index];
             if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
             const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
             var matched = false;
             for (loaded.program.structures) |structure| {
                 if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
-                if (structure.is_local or (!structure.is_public and !providerInCurrentModule(project, provider))) continue;
+                if (!importedMemberVisible(project, provider, structure)) continue;
                 try appendNominalItems(
                     allocator,
                     loaded,
@@ -1908,7 +1910,10 @@ fn appendImportedMembersDepth(
     }
     for (loaded.program.enums) |enumeration| {
         if (!std.mem.eql(u8, enumeration.name, target.declaration)) continue;
-        if (!enumeration.is_public or !query.static_receiver or query.type_only) return;
+        if (enumeration.is_local or !query.static_receiver or query.type_only) return;
+        if (enumeration.is_internal) {
+            if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) return;
+        } else if (!enumeration.is_public and !providerInCurrentModule(project, provider)) return;
         for (enumeration.variants) |variant| {
             if (!std.mem.startsWith(u8, variant.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
@@ -2427,18 +2432,26 @@ fn importedTypePath(
     project: IndexedProject,
     local_path: []const u8,
 ) !?[]const u8 {
-    if (declarationTarget(project.index, local_path)) |target| {
+    const canonical_path = if (ProjectIndex.currentProvider(project)) |provider|
+        try ProjectIndex.canonicalUsePath(allocator, project, provider, local_path)
+    else
+        local_path;
+    if (declarationTarget(project.index, canonical_path)) |target| {
         const provider = project.index.providers[target.provider];
-        if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return local_path;
+        if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return canonical_path;
     }
     const separator = std.mem.indexOfScalar(u8, local_path, '.');
     const first = if (separator) |index| local_path[0..index] else local_path;
     const use = findUseByAlias(program, first) orelse return null;
+    const use_path = if (ProjectIndex.currentProvider(project)) |provider|
+        try ProjectIndex.canonicalUsePath(allocator, project, provider, use.path)
+    else
+        use.path;
     const suffix = if (separator) |index| local_path[index + 1 ..] else "";
     const full = if (suffix.len == 0)
-        use.path
+        use_path
     else
-        try std.fmt.allocPrint(allocator, "{s}.{s}", .{ use.path, suffix });
+        try std.fmt.allocPrint(allocator, "{s}.{s}", .{ use_path, suffix });
     return if (declarationTarget(project.index, full) != null) full else null;
 }
 

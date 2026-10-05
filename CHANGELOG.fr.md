@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les types `package` importés depuis un module composé sont résolus dans leur atome déclarant, indépendamment de l’ordre des fichiers. Le LSP conserve les imports canoniques `Package`, leurs aliases, les membres et variantes autorisés ; les types locaux et les types privés au package restent masqués aux consommateurs extérieurs.
+
 - Dans un constructeur explicite, un champ de classe sans expression `=` attend désormais la référence qui lui est affectée, même si sa classe possède un constructeur sans argument. Il ne crée plus d’instance temporaire immédiatement remplacée ; une construction préalable souhaitée doit être écrite sur le champ avec `= Resource()`. Les lectures prématurées et chemins sans initialisation sont diagnostiqués.
 
 - Les constructeurs surchargés transmettent un type attendu à un argument lorsque tous les candidats visibles acceptant l’appel partagent ce type de paramètre ; les listes vides ou de dimensions calculées peuvent ainsi être écrites directement sans choisir arbitrairement une surcharge. La complétion propose le type de l’élément à l’intérieur des listes et conserve les appels nommés, imbriqués et incomplets.

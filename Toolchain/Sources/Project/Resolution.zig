@@ -83,7 +83,7 @@ pub fn requireContextualTarget(
 pub fn structureTarget(self: anytype, module: usize, name: []const u8) !?Target {
     if (try structureCandidate(self, module, name)) |target| {
         if (self.units[target.module].state == .loaded) {
-            if (Names.findStructure(self.units[target.module].program.?, target.declaration) != null) return target;
+            if (Fragments.structureTarget(self.index, self.units, target.module, target.declaration)) |structure| return structure;
             if (try self.resolveReexport(
                 target.module,
                 target.declaration,
@@ -111,7 +111,7 @@ fn nestedStructureTarget(self: anytype, module: usize, name: []const u8) !?Targe
 pub fn enumTarget(self: anytype, module: usize, name: []const u8) !?Target {
     const target = try enumCandidate(self, module, name) orelse return null;
     if (self.units[target.module].state != .loaded) return null;
-    if (Names.findEnum(self.units[target.module].program.?, target.declaration) != null) return target;
+    if (Fragments.enumTarget(self.index, self.units, target.module, target.declaration)) |enumeration| return enumeration;
     return self.resolveReexport(
         target.module,
         target.declaration,

@@ -6,6 +6,89 @@ const WorkspaceFixtures = @import("../CompletionContract/WorkspaceFixtures.zig")
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
+test "workspace private nominal atoms keep package completion and canonical definitions" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "PrivateAtoms/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Package.json", .data = "{\"name\":\"PrivateAtoms\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/@First.sx", .data = "public func anchor() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/@Second.sx", .data =
+        \\package class Secret {init() {} func value() int {return 42} private func hidden() {}}
+        \\package enum Mode {ready}
+        \\package struct Record {var amount:int}
+        \\local struct LocalOnly {}
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/Child.sx", .data = "func main() {}" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "PrivateAtoms" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Module/Child.sx", .{root});
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    for ([_][]const u8{
+        "use Package.Secret\nfunc consume(value:S<|>) {}",
+        "use Package.Secret as Hidden\nfunc consume(value:H<|>) {}",
+        "func consume(value:Package.<|>) {}",
+    }, [_][]const u8{ "Secret", "Hidden", "Secret" }) |source, required| {
+        const items = try Support.serverCompletion(&server, allocator, uri, source);
+        try Support.expectPresent(required, items);
+        try Support.expectAbsent("LocalOnly", items);
+        try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, try Support.serverCompletion(&server, allocator, uri, source));
+    }
+    const members = try Support.serverCompletionAfterTrigger(&server, allocator, uri, "use Package.Secret\nfunc consume(value:Secret) {value.<|>}", ".");
+    try Support.expectExactLabels(&.{"value"}, members);
+    try Support.expectItem(.{ .label = "value", .kind = 2, .detail = "value() int", .insert_text = "value()" }, members);
+    for ([_][]const u8{
+        "use Package.Secret as Hidden\nfunc consume(value:Hidden) {value.<|>}",
+        "func consume(value:Package.Secret) {value.<|>}",
+        "use Package.Secret\nfunc main() {var value=Secret(); value.<|>}",
+    }) |source| {
+        try Support.expectExactLabels(&.{"value"}, try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, "."));
+    }
+    const variants = try Support.serverCompletionAfterTrigger(&server, allocator, uri, "use Package.Mode\nfunc main() {let value=Mode.<|>}", ".");
+    try Support.expectExactLabels(&.{"ready"}, variants);
+    const fields = try Support.serverCompletion(&server, allocator, uri, "use Package.Record\nfunc main() {let value=Record(a<|>)}");
+    try Support.expectPresent("amount", fields);
+    const local = try Support.serverCompletion(&server, allocator, uri, "use Package.LocalOnly\nfunc consume(value:L<|>) {}");
+    try Support.expectAbsent("LocalOnly", local);
+    const definition = (try Support.serverDefinition(&server, allocator, uri, "use Package.Secret\nfunc consume(value:Sec<|>ret) {}")) orelse return error.MissingPrivateAtomDefinition;
+    try std.testing.expect(std.mem.endsWith(u8, definition.uri, "/Module/%40Second.sx"));
+}
+
+test "workspace private nominal atoms stay hidden from ordinary dependencies" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Api/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\",\"dependencies\":{\"Api\":\"=1.0.0\"}}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Package.json", .data = "{\"name\":\"Api\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@First.sx", .data = "public func anchor() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@Second.sx", .data = "package class Secret {init() {} func value() int {return 42}}\npackage enum Mode {ready}\nlocal struct LocalOnly {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    for ([_][]const u8{
+        "func consume(value:Api.<|>) {}",
+        "use Api.Secret\nfunc consume(value:S<|>) {}",
+        "use Api.Secret\nfunc consume(value:Secret) {value.<|>}",
+        "use Api.Mode\nfunc main() {let value=Mode.<|>}",
+    }) |source| {
+        const items = try Support.serverCompletion(&server, allocator, uri, source);
+        for ([_][]const u8{ "Secret", "Mode", "LocalOnly", "value", "ready" }) |label| try Support.expectAbsent(label, items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
 test "workspace topology registry fixtures are executable completion contracts" {
     const proof = "Lsp.Tests.WorkspaceTopologyOracle: workspace topology registry fixtures are executable completion contracts";
     for (Contract.scenarios) |scenario| {

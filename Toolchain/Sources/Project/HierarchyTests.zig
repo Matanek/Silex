@@ -2,6 +2,74 @@ const std = @import("std");
 const Compiler = @import("../Project.zig").Compiler;
 const Interpreter = @import("../Interpreter.zig");
 
+test "private nominal atoms resolve package imports independently of physical order" {
+    for ([_][]const u8{ "@A.sx", "@Z.sx" }) |atom| {
+        for ([_][]const u8{
+            "use Package.Secret\nuse Package.Mode\npublic func answer() int { var value:Secret=Secret(); let mode:Mode=Mode.ready; if mode==Mode.ready {return value.value()} return 0 }",
+            "public func answer() int { var value:Package.Secret=Package.Secret(); let mode:Package.Mode=Package.Mode.ready; if mode==Package.Mode.ready {return value.value()} return 0 }",
+        }) |consumer| {
+            var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer arena.deinit();
+            const allocator = arena.allocator();
+            var temporary = std.testing.tmpDir(.{});
+            defer temporary.cleanup();
+            try temporary.dir.createDirPath(std.testing.io, "PrivateAtoms/Module");
+            try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Package.json", .data = "{\"name\":\"PrivateAtoms\",\"version\":\"1.0.0\"}" });
+            try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/@M.sx", .data = "public func anchor() int {return 0}" });
+            const atom_path = try std.fs.path.join(allocator, &.{ "PrivateAtoms/Module", atom });
+            try temporary.dir.writeFile(std.testing.io, .{ .sub_path = atom_path, .data =
+                \\package class Secret {init() {} func value() int {return 42}}
+                \\package enum Mode {ready}
+            });
+            try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/Child.sx", .data = consumer });
+            try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/Main.sx", .data = "use Package.Child\nfunc main() {print(Child.answer())}" });
+            const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "PrivateAtoms", "Module", "Main.sx" });
+            var compiler = Compiler.init(allocator, std.testing.io);
+            const compilation = try compiler.compile(input);
+            const result = try Interpreter.runCapture(allocator, compilation.ir);
+            try std.testing.expectEqualStrings("42\n", result.stdout);
+        }
+    }
+}
+
+test "private nominal atoms keep package and file visibility after resolution" {
+    for ([_][]const u8{ "Secret", "Mode" }) |name| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try temporary.dir.createDirPath(std.testing.io, "Api/Module");
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\",\"dependencies\":{\"Api\":\"=1.0.0\"}}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Package.json", .data = "{\"name\":\"Api\",\"version\":\"1.0.0\"}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@First.sx", .data = "public func anchor() {}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@Second.sx", .data = "package struct Secret {}\npackage enum Mode {ready}" });
+        const main = try std.fmt.allocPrint(allocator, "use Api.{s}\nfunc consume(value:{s}) {{}}\nfunc main() {{}}", .{ name, name });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = main });
+        const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+        var compiler = Compiler.init(allocator, std.testing.io);
+        try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+        try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "package-visible and unavailable outside package 'Api'") != null);
+    }
+    for ([_][]const u8{ "Secret", "Mode" }) |name| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try temporary.dir.createDirPath(std.testing.io, "PrivateAtoms/Module");
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Package.json", .data = "{\"name\":\"PrivateAtoms\",\"version\":\"1.0.0\"}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/@First.sx", .data = "public func anchor() {}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/@Second.sx", .data = "local struct Secret {}\nlocal enum Mode {ready}" });
+        const main = try std.fmt.allocPrint(allocator, "use Package.{s}\nfunc consume(value:{s}) {{}}\nfunc main() {{}}", .{ name, name });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "PrivateAtoms/Module/Main.sx", .data = main });
+        const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "PrivateAtoms/Module/Main.sx" });
+        var compiler = Compiler.init(allocator, std.testing.io);
+        try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+        try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "local to its source file") != null);
+    }
+}
+
 test "hierarchical module cycles compose protocol signatures from either entry order" {
     for ([_][]const u8{ "use Group\nuse Group.Rules", "use Group.Rules\nuse Group" }) |imports| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
