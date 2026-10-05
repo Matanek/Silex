@@ -1355,3 +1355,69 @@ test "mutable typed resource slots preserve root ownership through value receive
     try std.testing.expectEqualStrings("clear\nitem 2\nitem 1\ndone\n", result.stdout);
     _ = try Lower.lower(allocator, compilation.ir);
 }
+
+test "system callback inference excludes hidden same-name module functions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.createDirPath(std.testing.io, "Scenes");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Helper.sx",
+        .data =
+        \\func update(value:int) int { return value + 1 }
+        \\public func needed() int { return update(40) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Scenes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.Helper
+        \\struct State { var value:int }
+        \\func update(state:&State) { state.value += Helper.needed() }
+        \\func main() {
+        \\    var application = Application()
+        \\    var resources = application.resources()
+        \\    resources.insert(State(value:1))
+        \\    application.add_system(0, update)
+        \\    let state:@State = resources.get<State>()
+        \\    print(state.value)
+        \\}
+        ,
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    var compiler = Project.Compiler.initWithPackages(allocator, std.testing.io, root);
+    const compilation = try compiler.compile(try std.fs.path.join(allocator, &.{ root, "Scenes", "Main.sx" }));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
+test "unqualified system function inference obeys calling module visibility" {
+    const Ast = @import("Ast.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = @import("Parser.zig").Parser.init(allocator, "func update(value:int) {}\nfunc hidden(value:float) {}\n");
+    var program = try parser.parse();
+    const functions = try allocator.dupe(Ast.Function, program.functions);
+    functions[0].name = "Scene.update";
+    functions[1].name = "Hidden.update";
+    functions[1].owner = 1;
+    functions[1].position.file = 1;
+    functions[1].name_position.file = 1;
+    program.functions = functions;
+    var specializer = @import("Generics/Specializer.zig").Specializer.init(allocator);
+    specializer.source = program;
+    const call = Ast.Expression.Call{ .name = "add_system", .name_position = .{ .offset = 0, .line = 1, .column = 1 }, .arguments = &.{}, .module = "Scene" };
+    const inferred = try specializer.inferConcreteFunctionType("update", call);
+    try std.testing.expect(inferred != null);
+    const signature = specializer.function_types.items[inferred.?.functionIndex().?];
+    try std.testing.expectEqual(@as(usize, 1), signature.parameters.len);
+    try std.testing.expectEqual(Ast.Type.int, signature.parameters[0].type);
+    try std.testing.expect(try specializer.inferConcreteFunctionType("Hidden.update", call) == null);
+}

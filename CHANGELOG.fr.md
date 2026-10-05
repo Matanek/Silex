@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les systèmes injectés sélectionnent leur fonction selon la visibilité du
+  module appelant. Une fonction homonyme privée chargée depuis un autre module
+  ne provoque plus un faux refus de callback ; aucun nom source à contourner.
+
 - La vérification de visibilité d’une liste partagée entre atomes de source
   suit le type d’élément dans son atome déclarant. Un type privé sans rapport
   dans l’atome appelant ne provoque plus de faux rejet d’une signature package

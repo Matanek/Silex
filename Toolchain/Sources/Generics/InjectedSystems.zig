@@ -38,7 +38,7 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     if (instance_method) |target| {
         callback_type = try self.internFunctionType(target.method);
     } else if (target_name) |name| {
-        callback_type = try self.inferConcreteFunctionType(name);
+        callback_type = try self.inferConcreteFunctionType(name, call.*);
     }
     if (callback_type == null) callback_type = self.inferExpressionType(callback, locals);
     const concrete_callback_type = callback_type orelse

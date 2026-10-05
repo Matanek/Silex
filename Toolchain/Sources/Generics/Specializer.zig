@@ -188,10 +188,11 @@ pub const Specializer = struct {
         return .function(index);
     }
 
-    pub fn inferConcreteFunctionType(self: *Specializer, name: []const u8) SpecializeError!?Ast.Type {
+    pub fn inferConcreteFunctionType(self: *Specializer, name: []const u8, call: Ast.Expression.Call) SpecializeError!?Ast.Type {
         var match: ?Ast.Function = null;
         for (self.source.functions) |function| {
-            if (function.type_parameters.len != 0 or !functionNameMatches(function.name, name)) continue;
+            if (function.type_parameters.len != 0 or !functionNameMatches(function.name, name) or
+                !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
             if (match != null) return null;
             match = function;
         }
