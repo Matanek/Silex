@@ -4038,10 +4038,11 @@ fn expectedTypeAt(allocator: Allocator, source: []const u8, program: Ast.Program
     }
     if (annotation_start) |start| if (annotation_end) |end| {
         const spelling = std.mem.trim(u8, source[start..end], " \t\r\n");
-        const type_value = typeForSourceSpelling(program, spelling) orelse return .{
+        const annotated_type = typeForSourceSpelling(program, spelling) orelse return .{
             .name = spelling,
             .strict = true,
         };
+        const type_value = expectedNestedValueType(program, annotated_type, source[end + 1 .. context.prefix_start]) orelse return null;
         return .{
             .name = typeName(program, type_value),
             .strict = true,
@@ -4058,6 +4059,42 @@ fn currentStatementTokens(tokens: []const Token) []const Token {
         else => {},
     };
     return tokens[start..];
+}
+
+// Project an enclosing collection context onto the expression currently edited.
+// Index expressions always expect an int; a literal expects its element type.
+fn expectedNestedValueType(program: Ast.Program, enclosing: Ast.Type, expression: []const u8) ?Ast.Type {
+    var expected: ?Ast.Type = enclosing;
+    var parents: [128]?Ast.Type = undefined;
+    var depth: usize = 0;
+    var previous: ?TokenTag = null;
+    var lexer = LexerModule.Lexer.init(expression);
+    while (true) {
+        const token = lexer.next() catch return null;
+        if (token.tag == .end) break;
+        switch (token.tag) {
+            .left_bracket => {
+                if (depth == parents.len) return null;
+                parents[depth] = expected;
+                depth += 1;
+                const indexed = if (previous) |tag| switch (tag) {
+                    .identifier, .keyword_self, .integer, .floating, .keyword_true, .keyword_false, .string, .string_end, .right_parenthesis, .right_bracket => true,
+                    else => false,
+                } else false;
+                expected = if (indexed) .int else if (expected) |value|
+                    collectionElementType(program, value.optionalChild() orelse value)
+                else
+                    null;
+            },
+            .right_bracket => if (depth != 0) {
+                depth -= 1;
+                expected = parents[depth];
+            },
+            else => {},
+        }
+        previous = token.tag;
+    }
+    return expected;
 }
 
 fn expectedActiveArgumentType(
@@ -4143,7 +4180,7 @@ fn expectedActiveArgumentType(
         }
     };
 
-    const type_value = selected orelse return null;
+    const type_value = expectedNestedValueType(program, selected orelse return null, source[argument.value_start..cursor]) orelse return null;
     return .{
         .name = typeName(program, type_value),
         .strict = true,
@@ -4351,6 +4388,7 @@ fn expectedCallArgumentType(allocator: Allocator, source: []const u8, program: A
         receiver: ?[]const u8,
         argument: usize = 0,
         bracket_depth: usize = 0,
+        value_start: usize,
     };
     var calls: [128]Call = undefined;
     var call_count: usize = 0;
@@ -4363,6 +4401,7 @@ fn expectedCallArgumentType(allocator: Allocator, source: []const u8, program: A
             .left_parenthesis => {
                 if (call_count == calls.len) return null;
                 calls[call_count] = .{
+                    .value_start = token.end,
                     .name = if (previous != null and previous.?.tag == .identifier) previous.?.lexeme else null,
                     .receiver = if (previous != null and previous.?.tag == .identifier and previous.?.start != 0 and
                         source[previous.?.start - 1] == '.')
@@ -4386,6 +4425,7 @@ fn expectedCallArgumentType(allocator: Allocator, source: []const u8, program: A
             },
             .comma => if (call_count != 0 and calls[call_count - 1].bracket_depth == 0) {
                 calls[call_count - 1].argument += 1;
+                calls[call_count - 1].value_start = token.end;
             },
             else => {},
         }
@@ -4449,7 +4489,7 @@ fn expectedCallArgumentType(allocator: Allocator, source: []const u8, program: A
                 }
             }
         };
-        const type_value = selected orelse return null;
+        const type_value = expectedNestedValueType(program, selected orelse return null, source[call.value_start..]) orelse return null;
         return .{
             .name = typeName(program, type_value),
             .strict = true,
@@ -4703,7 +4743,7 @@ fn parseForCompletionObserved(
         .aggregate_field => if (control_body_missing) "__completion:true {}" else "__completion:true",
         .statement => if (control_body_missing or (for_source and !for_body_follows))
             "true {}"
-        else if (lineHasAssignmentBeforeCursor(before_prefix))
+        else if (context.inside_parentheses or lineHasAssignmentBeforeCursor(before_prefix))
             "true"
         else if (closers.len != 0)
             "true"
@@ -7721,4 +7761,50 @@ test "filter collection mutations for bindings parameters and fixed arrays" {
     try std.testing.expectEqualStrings("clear", items[0].label);
     try std.testing.expectEqualStrings("clear()", items[0].detail);
     try std.testing.expectEqual(CompletionKind.method, items[0].kind);
+}
+
+test "project list element and index contexts in completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const header =
+        "struct Grid {init(values:float[],shape:int[]) {} init(values:int32[],shape:int[]) {}}\n" ++
+        "struct Holder {init(grid:Grid) {}}\n" ++
+        "struct Receiver {func take(shape:int[]) {}}\n" ++
+        "func take(shape:int[]) {}\nfunc nested(shape:int[][]) {}\n" ++
+        "func main() {var values:float[]=[1.0];var ids:int[]=[0];let rows=1;let columns=2;let flag=true;let name=\"x\";var receiver=Receiver();";
+    const cases = [_][]const u8{
+        "Grid(values,[<|>])}",         "Grid(shape:[<|>],values:values)}",
+        "Holder(Grid(values,[<|>]))}", "take([<|>])}",
+        "receiver.take([<|>])}",       "nested([[<|>]])}",
+        "let shape:int[]=[<|>];}",     "take([ids[<|>]])}",
+        "take([rows,<|>])}",           "Grid(values,[<|>}",
+    };
+    for (cases) |suffix| {
+        const marked = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, suffix });
+        const cursor = std.mem.indexOf(u8, marked, "<|>").?;
+        const source = try std.mem.concat(allocator, u8, &.{ marked[0..cursor], marked[cursor + 3 ..] });
+        const items = try itemsAt(allocator, source, cursor, .invoked);
+        for ([_][]const u8{ "rows", "columns" }) |name| {
+            const item = items[indexOf(items, name) orelse return error.MissingIntegerCompletion];
+            try std.testing.expectEqual(@as(u8, 6), item.kind);
+            try std.testing.expectEqualStrings(name, item.insertText.?);
+            try std.testing.expectEqualStrings(name, item.filterText.?);
+            try std.testing.expect(item.insertTextFormat == null);
+        }
+        for ([_][]const u8{ "values", "ids", "flag", "name" }) |name| {
+            if (contains(items, name)) {
+                const diagnostic = try decisionAt(allocator, source, cursor, .invoked);
+                const expected = if (diagnostic.program) |program| expectedTypeAt(allocator, source, program, cursor, diagnostic) else null;
+                std.debug.print("unexpected {s} in {s}: kind={s} recovery={s} program={} expected={s}\n", .{ name, suffix, @tagName(diagnostic.kind), @tagName(diagnostic.recovery), diagnostic.program != null, if (expected) |v| v.name else "none" });
+            }
+            try std.testing.expect(!contains(items, name));
+        }
+        try std.testing.expect(std.mem.order(u8, items[indexOf(items, "rows").?].sortText.?, items[indexOf(items, "copy") orelse return error.MissingCopyKeyword].sortText.?) == .lt);
+    }
+    const prefix_source = try std.fmt.allocPrint(allocator, "{s}Grid(values,[ro])}}", .{header});
+    const cursor = std.mem.lastIndexOf(u8, prefix_source, "ro]").? + 2;
+    const prefixed = try itemsAt(allocator, prefix_source, cursor, .invoked);
+    try std.testing.expect(contains(prefixed, "rows"));
+    try std.testing.expect(!contains(prefixed, "columns"));
 }

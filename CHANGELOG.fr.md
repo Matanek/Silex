@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les constructeurs surchargés transmettent un type attendu à un argument lorsque tous les candidats visibles acceptant l’appel partagent ce type de paramètre ; les listes vides ou de dimensions calculées peuvent ainsi être écrites directement sans choisir arbitrairement une surcharge. La complétion propose le type de l’élément à l’intérieur des listes et conserve les appels nommés, imbriqués et incomplets.
+
 - Un helper abstrait inutilisé peut déclarer des appels de protocole sans imposer une implémentation concrète au programme ; son corps reste vérifié et aucun conformer artificiel n’est ajouté.
 
 - Les appels dynamiques de protocole retiennent leurs arguments possédés et transfèrent leurs résultats comme les appels ordinaires ; le calcul natif ne libère plus les listes encore utilisées par l’appelant.

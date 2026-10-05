@@ -22,6 +22,7 @@ test {
     _ = @import("Lsp/Tests/InheritedCallCompletion.zig");
     _ = @import("Lsp/Tests/WorkspaceContracts.zig");
     _ = @import("Lsp/Tests/HierarchyCompletion.zig");
+    _ = @import("Lsp/Tests/ConstructorContext.zig");
     _ = @import("Lsp/Tests/LoosePackages.zig");
     _ = @import("Lsp/Tests/InvalidSourcePaths.zig");
     _ = @import("Lsp/Tests/Part03Contracts.zig");

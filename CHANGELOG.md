@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Overloaded constructors provide an expected argument type when all visible candidates accepting the call share that parameter type; empty lists or lists of computed dimensions can be written directly without arbitrarily selecting an overload. Completion offers the element type inside lists and preserves named, nested and incomplete calls.
+
 - An unused abstract helper may declare protocol calls without requiring a concrete implementation in the program; its body remains type checked and no synthetic conformer is added.
 
 - Dynamic protocol calls retain owned arguments and transfer results like ordinary calls; native execution no longer frees lists still used by the caller.

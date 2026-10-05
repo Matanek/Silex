@@ -1,0 +1,22 @@
+struct Grid {
+    var shape:int[]
+    init(values:float[],shape:int[],enabled:bool=true) {self.shape=shape}
+    init(values:int32[],shape:int[],enabled:bool=true) {self.shape=shape}
+}
+struct Holder {var grid:Grid;init(grid:Grid) {self.grid=grid}}
+test "shared constructor context accepts runtime dimensions and nested calls" {
+    var values:float[]=[1.0,2.0]
+    let rows=1
+    let columns=2
+    let grid=Grid(values,[rows,columns])
+    let holder=Holder(Grid(values,[rows,columns]))
+    assert(grid.shape[1]==2 && holder.grid.shape[0]==1)
+}
+test "shared named constructor context accepts empty lists and defaults" {
+    var values:int32[]=[1,2]
+    let rows=1
+    let columns=2
+    let grid=Grid(values:values,shape:[rows,columns])
+    let empty=Grid(shape:[],values:values,enabled:false)
+    assert(grid.shape[1]==2 && empty.shape.is_empty())
+}

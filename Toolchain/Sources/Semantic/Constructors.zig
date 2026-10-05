@@ -188,8 +188,7 @@ pub fn analyzeCall(
 ) !Model.TypedValue {
     if (call.named_arguments.len != 0) return analyzeNamedCall(self, builder, structure_index, declaration, call);
 
-    var arity_count: usize = 0;
-    var sole: ?usize = null;
+    var candidates: std.ArrayList(usize) = .empty;
     var inaccessible = false;
     var inaccessible_local = false;
     var inaccessible_internal = false;
@@ -201,11 +200,10 @@ pub fn analyzeCall(
             continue;
         }
         if (Support.acceptsArity(constructor.parameters, call.arguments.len)) {
-            arity_count += 1;
-            sole = constructor_index;
+            try candidates.append(self.allocator, constructor_index);
         }
     }
-    if (arity_count == 0) {
+    if (candidates.items.len == 0) {
         if (inaccessible) {
             const message = if (inaccessible_local)
                 try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is local to its source file", .{declaration.name})
@@ -225,10 +223,7 @@ pub fn analyzeCall(
 
     var arguments: std.ArrayList(Model.TypedValue) = .empty;
     for (call.arguments, 0..) |argument, argument_index| {
-        const expected = if (arity_count == 1) expected: {
-            const parameter_type = declaration.constructors[sole.?].parameters[argument_index].type;
-            break :expected Optionals.expectedContext(parameter_type, argument);
-        } else null;
+        const expected = commonExpectedContext(declaration, candidates.items, argument_index, argument);
         try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
     }
     var lexical_captures = false;
@@ -349,10 +344,7 @@ fn analyzeNamedCall(
     @memset(typed, null);
     for (sources, 0..) |maybe_source, index| {
         const source = maybe_source orelse continue;
-        const expected = if (candidates.items.len == 1)
-            Optionals.expectedContext(declaration.constructors[candidates.items[0]].parameters[index].type, source)
-        else
-            null;
+        const expected = commonExpectedContext(declaration, candidates.items, index, source);
         typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
     }
     var lexical_captures = false;
@@ -438,6 +430,21 @@ fn analyzeNamedCall(
         .lexical_captures = lexical_captures,
         .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
     };
+}
+
+/// An overload family can provide context without choosing an overload when
+/// every visible, argument-compatible initializer agrees on this parameter.
+fn commonExpectedContext(declaration: Ast.Structure, candidates: []const usize, parameter_index: usize, expression: *const Ast.Expression) ?Ast.Type {
+    var common: ?Ast.Type = null;
+    for (candidates) |index| {
+        const parameters = declaration.constructors[index].parameters;
+        if (parameter_index >= parameters.len) return null;
+        const type_value = parameters[parameter_index].type;
+        if (common) |previous| {
+            if (previous != type_value) return null;
+        } else common = type_value;
+    }
+    return if (common) |type_value| Optionals.expectedContext(type_value, expression) else null;
 }
 
 fn failArgumentProblem(self: anytype, call: Ast.Expression.Call, structure_name: []const u8, problem: Arguments.Problem) !void {
