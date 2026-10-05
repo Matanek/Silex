@@ -11,6 +11,7 @@ This editorial history starts with version 0.44.1.
 - Fix `interpret` to accept `list.insert(list.count(), value)`, including
   empty lists, while retaining strict read and removal bounds.
 
+- Static methods now propagate `try` using their declared `Result` return, including void results and error messages; local alternatives remain available.
 - `interpret` ignores imported system functions unreachable from `main`.
   Effective calls and callbacks that may reach an unsupported boundary remain
   rejected, allowing portable programs in modules that also offer file loading

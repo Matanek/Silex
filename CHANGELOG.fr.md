@@ -11,6 +11,7 @@ Cet historique éditorial commence à la version 0.44.1.
 - Corriger `interpret` pour accepter `list.insert(list.count(), value)`,
   y compris sur une liste vide, sans élargir les bornes de lecture ou de retrait.
 
+- Les méthodes statiques propagent désormais `try` selon leur retour `Result`, y compris les résultats sans valeur et les messages d’erreur ; les alternatives locales restent disponibles.
 - `interpret` ignore les fonctions système importées qui ne sont pas atteignables
   depuis `main`. Les appels effectifs et callbacks pouvant atteindre une frontière
   non prise en charge restent refusés ; les programmes purement portables d’un
