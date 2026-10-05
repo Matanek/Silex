@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Dynamic protocol calls retain owned arguments and transfer results like ordinary calls; native execution no longer frees lists still used by the caller.
+
+- Mutual dependencies between a module and its descendant are accepted within one package hierarchy; unrelated branches remain rejected.
+- Module-visible fields of a class with a destructor remain accessible across its composed module atoms without exposing private fields.
+
 - Fix `interpret` to accept `list.insert(list.count(), value)`, including
   empty lists, while retaining strict read and removal bounds.
 

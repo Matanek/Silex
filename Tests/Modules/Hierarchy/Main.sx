@@ -1,0 +1,19 @@
+use Group.Rules
+use Group
+
+struct Double:Rules.Operation {
+    func forward(input:Group.Value) Group.Value { return Group.Value(amount:input.amount * 2) }
+}
+test "Parent and child protocol signatures compose" {
+    assert(Group.apply(Double(), Group.Value(amount:21)).amount == 42)
+}
+test "Owner fields remain shared across source atoms" {
+    var owner = Group.Owner()
+    assert(Group.double_owner(owner) == 42)
+}
+func main() {
+    assert(Group.apply(Double(), Group.Value(amount:21)).amount == 42)
+    var owner = Group.Owner()
+    assert(Group.double_owner(owner) == 42)
+    print("Hierarchical modules and owner storage: pass")
+}

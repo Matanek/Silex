@@ -1,0 +1,12 @@
+use Group.Rules
+
+public struct Value { var amount:int }
+public class Owner {
+    module var amount:int = 21
+    init() {}
+    drop {}
+}
+public func apply(operation:Rules.Operation, input:Value) Value {
+    var active = operation
+    return active.forward(input)
+}

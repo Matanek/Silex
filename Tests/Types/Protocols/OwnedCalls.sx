@@ -1,0 +1,42 @@
+struct Payload {
+    var values:float[]
+    var a:int = 1
+    var b:int = 2
+    var c:int = 3
+    var d:int = 4
+}
+protocol Operation {
+    func square(inputs:Payload[]) Payload
+    func keep(inputs:Payload[]) Payload[]
+    func count(inputs:Payload[]) int
+}
+struct Pure:Operation {
+    func square(inputs:Payload[]) Payload { return Payload(values:[inputs[0].values[0] * inputs[0].values[0]]) }
+    func keep(inputs:Payload[]) Payload[] { return inputs }
+    func count(inputs:Payload[]) int { return inputs.count() }
+}
+func apply(operation:Operation, inputs:Payload[]) Payload {
+    var active = operation
+    return active.square(inputs)
+}
+test "Protocol value arguments preserve the caller ownership" {
+    var operation:Operation = Pure()
+    var inputs:Payload[] = [Payload(values:[2.0])]
+    var iteration = 0
+    while iteration < 32 {
+        assert(operation.count(inputs) == 1)
+        assert(inputs[0].values[0] == 2.0)
+        assert(apply(operation, inputs).values[0] == 4.0)
+        iteration++
+    }
+}
+test "Protocol aggregate and collection results own their returned resources" {
+    var operation:Operation = Pure()
+    var inputs:Payload[] = [Payload(values:[3.0])]
+    let copied = operation.keep(inputs)
+    inputs = []
+    assert(copied.count() == 1 && copied[0].values[0] == 3.0)
+    let output = apply(operation, copied)
+    assert(output.values[0] == 9.0)
+}
+func main() {}

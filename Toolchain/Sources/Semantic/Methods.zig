@@ -1000,6 +1000,9 @@ fn analyzeProtocolCall(
         } else {
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
+            if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
+                try Resources.retainValue(self, builder, parameter.type, converted.value);
+            }
             if (parameter.mode == .read and converted.transferred and Resources.ownsValue(self, converted.type)) {
                 try read_temporaries.append(self.allocator, converted);
             }
@@ -1088,7 +1091,7 @@ fn analyzeProtocolCall(
     else
         updated;
     try writePlace(self, builder, place, replacement);
-    return if (result) |value| .{ .type = requirement.return_type, .value = value } else null;
+    return if (result) |value| .{ .type = requirement.return_type, .value = value, .transferred = Resources.ownsValue(self, requirement.return_type) } else null;
 }
 
 fn requireMutablePlace(self: anytype, builder: anytype, expression: *const Ast.Expression, method_name: []const u8) !Place {

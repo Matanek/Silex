@@ -1761,7 +1761,7 @@ fn appendImportedMembersDepth(
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
     for (loaded.program.structures) |structure| {
         if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
-        if (!structure.is_public) return;
+        if (!importedMemberVisible(project, provider, structure)) return;
         if (query.override_context != null and !structure.is_class) return;
         if (query.static_receiver) {
             for (loaded.program.structures) |nested| {
@@ -2472,7 +2472,10 @@ fn importedNominalTypePath(
     project: IndexedProject,
     local_path: []const u8,
 ) !?[]const u8 {
-    const resolved = try importedTypePath(allocator, program, project, local_path) orelse return null;
+    const resolved = try importedTypePath(allocator, program, project, local_path) orelse implicit: {
+        const current = ProjectIndex.currentProvider(project) orelse return null;
+        break :implicit try std.fmt.allocPrint(allocator, "{s}.{s}", .{ current.name, local_path });
+    };
     return if (try importedPathIsNominal(allocator, io, documents, project, resolved, 0)) resolved else null;
 }
 
@@ -2486,7 +2489,8 @@ fn importedPathIsNominal(
 ) !bool {
     if (depth > project.index.providers.len) return false;
     const target = declarationTarget(project.index, path) orelse return false;
-    const provider = project.index.providers[target.provider];
+    const provider_index = try declarationProviderIndex(allocator, io, documents, project, target.provider, target.declaration);
+    const provider = project.index.providers[provider_index];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return false;
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return false;
     for (loaded.program.structures) |structure| {

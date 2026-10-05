@@ -1212,7 +1212,7 @@ pub const Analyzer = struct {
 
     pub fn ownerStorageVisible(self: *Analyzer, structure_index: usize, position: Source.Position) bool {
         const declaration = self.findAstStructure(self.structures[structure_index].name) orelse return false;
-        if (position.file == declaration.position.file) return true;
+        if (position.file == declaration.position.file or Visibility.sameModule(self, structure_index)) return true;
         for (self.program.uses) |use_value| {
             if (use_value.position.file == position.file and use_value.type_target != null and use_value.type_target.? == Ast.Type.structure(structure_index)) return true;
         }

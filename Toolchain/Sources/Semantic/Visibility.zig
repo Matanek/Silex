@@ -65,7 +65,7 @@ fn protectedAnchor(self: anytype, structure_index: usize) usize {
     return self.structureIndex(owner_name) orelse structure_index;
 }
 
-fn sameModule(self: anytype, structure_index: usize) bool {
+pub fn sameModule(self: anytype, structure_index: usize) bool {
     const target_root = root(self, structure_index);
     const target = declarationAt(self, target_root) orelse return false;
     const accessor = self.owner_context orelse return false;

@@ -9,6 +9,8 @@ test {
     _ = @import("Sources/ReflectionTests.zig");
     _ = @import("Sources/TypedResourceTests.zig");
     _ = @import("Sources/Project/CoreTests.zig");
+    _ = @import("Sources/Project/HierarchyTests.zig");
+    _ = @import("Sources/Project/OwnerStorageTests.zig");
     _ = @import("Sources/EmbeddedFilesTests.zig");
     _ = @import("Sources/Interpreter.zig");
     _ = @import("Sources/Interpreter/Capabilities.zig");

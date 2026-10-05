@@ -180,8 +180,11 @@ pub fn load(self: anytype, module: usize, from: ?usize) !void {
     if (all_loaded) return;
     if (loading) {
         if (from) |source| {
+            const source_provider = self.index.providers[source];
+            const target_provider = self.index.providers[module];
+            const same_hierarchy = hierarchyCycle(self, source, module);
             if (!Fragments.same(self.index, source, module) and
-                !Names.sameParent(self.index.providers[source].name, self.index.providers[module].name))
+                !Names.sameParent(source_provider.name, target_provider.name) and !same_hierarchy)
             {
                 return self.fail(
                     .{ .offset = 0, .line = 1, .column = 1, .file = self.index.providers[source].file },
@@ -192,8 +195,12 @@ pub fn load(self: anytype, module: usize, from: ?usize) !void {
         return;
     }
 
+    defer for (self.units, 0..) |*unit, fragment| {
+        if (Fragments.same(self.index, module, fragment)) unit.loading_from = null;
+    };
     for (self.units, 0..) |*unit, fragment| {
         if (!Fragments.same(self.index, module, fragment)) continue;
+        unit.loading_from = from;
         unit.state = .loading;
         try parse(self, fragment);
     }
@@ -207,6 +214,28 @@ pub fn load(self: anytype, module: usize, from: ?usize) !void {
         try self.activateQualifiedReferences(fragment);
         unit.state = .loaded;
     }
+}
+
+fn hierarchyCycle(self: anytype, source: usize, target: usize) bool {
+    const source_provider = self.index.providers[source];
+    const target_provider = self.index.providers[target];
+    if (source_provider.owner != target_provider.owner) return false;
+    const ancestor = if (Names.isAncestor(source_provider.name, target_provider.name))
+        source_provider.name
+    else if (Names.isAncestor(target_provider.name, source_provider.name))
+        target_provider.name
+    else
+        return false;
+    var current = source;
+    // Check the complete active dependency path, not only its closing edge.
+    for (0..self.units.len) |_| {
+        const provider = self.index.providers[current];
+        if (provider.owner != target_provider.owner or
+            (!std.mem.eql(u8, provider.name, ancestor) and !Names.isAncestor(ancestor, provider.name))) return false;
+        if (Fragments.same(self.index, current, target)) return true;
+        current = self.units[current].loading_from orelse return false;
+    }
+    return false;
 }
 
 fn validateMergedDeclarations(self: anytype, module: usize) !void {

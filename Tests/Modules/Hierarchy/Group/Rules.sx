@@ -1,0 +1,5 @@
+use Group
+
+public protocol Operation {
+    func forward(input:Group.Value) Group.Value
+}

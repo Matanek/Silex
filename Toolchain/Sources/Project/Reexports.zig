@@ -23,6 +23,7 @@ pub const CatalogContribution = struct {
 
 pub const Unit = struct {
     state: State = .fresh,
+    loading_from: ?usize = null,
     source: ?[]const u8 = null,
     public_surface_indexed: bool = false,
     public_declarations: []const PublicDeclaration = &.{},

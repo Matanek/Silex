@@ -1,0 +1,4 @@
+public func double_owner(owner:Owner) int {
+    owner.amount *= 2
+    return owner.amount
+}

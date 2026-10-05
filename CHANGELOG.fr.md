@@ -8,6 +8,11 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les appels dynamiques de protocole retiennent leurs arguments possédés et transfèrent leurs résultats comme les appels ordinaires ; le calcul natif ne libère plus les listes encore utilisées par l’appelant.
+
+- Les dépendances réciproques entre un module et son descendant sont acceptées dans la hiérarchie d’un même package ; les branches étrangères restent refusées.
+- Les champs de visibilité `module` d’une classe avec destructeur restent accessibles entre les atomes de son module composé, sans exposer ses champs privés.
+
 - Corriger `interpret` pour accepter `list.insert(list.count(), value)`,
   y compris sur une liste vide, sans élargir les bornes de lecture ou de retrait.
 

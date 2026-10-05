@@ -56,6 +56,11 @@ pub fn sameParent(left: []const u8, right: []const u8) bool {
     return std.mem.eql(u8, parent(left), parent(right));
 }
 
+pub fn isAncestor(ancestor: []const u8, descendant: []const u8) bool {
+    return ancestor.len > 0 and descendant.len > ancestor.len and
+        std.mem.startsWith(u8, descendant, ancestor) and descendant[ancestor.len] == '.';
+}
+
 pub fn parent(path: []const u8) []const u8 {
     const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return "";
     return path[0..separator];
@@ -75,4 +80,13 @@ test "collapse the principal declaration prefix for nested nominal types" {
     const name = try nominal(allocator, "GFX.GPU.Plugin", "Plugin.Settings");
     defer allocator.free(name);
     try std.testing.expectEqualStrings("GFX.GPU.Plugin.Settings", name);
+}
+
+test "logical ancestry respects segment boundaries" {
+    try std.testing.expect(isAncestor("Group", "Group.Rules"));
+    try std.testing.expect(isAncestor("Group", "Group.Nested.Rules"));
+    try std.testing.expect(!isAncestor("Group", "Grouped.Rules"));
+    try std.testing.expect(!isAncestor("Group", "Group"));
+    try std.testing.expect(!isAncestor("", "Group"));
+    try std.testing.expect(!isAncestor("Group.Rules", "Group"));
 }

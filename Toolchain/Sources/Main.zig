@@ -3036,6 +3036,8 @@ test {
     _ = @import("Parser.zig");
     _ = @import("Project.zig");
     _ = @import("Project/CoreTests.zig");
+    _ = @import("Project/HierarchyTests.zig");
+    _ = @import("Project/OwnerStorageTests.zig");
     _ = @import("ProjectMigrationTests.zig");
     _ = @import("ProjectStructureTests.zig");
     _ = @import("Semantic/Analyzer.zig");
