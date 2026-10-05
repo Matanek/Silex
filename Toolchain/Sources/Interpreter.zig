@@ -945,7 +945,12 @@ fn executeListEdit(
     var index: usize = 0;
     if (edit.kind == .insert or edit.kind == .take) {
         const raw = try integer(try load(values, edit.index.?));
-        index = normalizedCollectionIndex(raw, source.fields.len) orelse {
+        // Insertion accepts the gap after the last element, including an
+        // empty list. Reads and removals still require an existing element.
+        index = (if (edit.kind == .insert and raw == @as(i64, @intCast(source.fields.len)))
+            source.fields.len
+        else
+            normalizedCollectionIndex(raw, source.fields.len)) orelse {
             const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ raw, source.fields.len });
             try Output.appendRuntimeError(session, program, edit.position, "", message);
             session.terminated = true;

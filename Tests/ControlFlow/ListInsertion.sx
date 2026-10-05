@@ -1,0 +1,11 @@
+test "list insertion includes the end boundary and preserves snapshots" {
+    var values:int[] = []
+    values.insert(0, 7)
+    let original = values
+    values.insert(values.count(), 9)
+    values.insert(-1, 8)
+    values.insert(0, 6)
+    assert(values.count() == 4)
+    assert(values[0] == 6 && values[1] == 7 && values[2] == 8 && values[3] == 9)
+    assert(original.count() == 1 && original[0] == 7)
+}

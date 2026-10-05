@@ -189,3 +189,47 @@ test "reject nested collection mutations through immutable paths" {
         try std.testing.expect(frontend.diagnostic != null);
     }
 }
+
+test "interpreter inserts at empty and nonempty end without relaxing take bounds" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func main() {
+        \\    var values:int[] = []
+        \\    values.insert(0, 7)
+        \\    let original = values
+        \\    values.insert(values.count(), 9)
+        \\    values.insert(-1, 8)
+        \\    values.insert(0, 6)
+        \\    print(values.count(), " ", values[0], values[1], values[2], values[3], " ", original.count(), " ", original[0])
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("4 6789 1 7\n", result.stdout);
+    const optimized = try Release.optimize(allocator, compilation.ir);
+    const release_result = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqualStrings(result.stdout, release_result.stdout);
+}
+
+test "interpreter rejects insertion past the end and removal at count" {
+    const sources = [_][]const u8{
+        "func main() { var values:int[] = []; values.insert(1, 7) }",
+        "func main() { var values:int[] = []; values.insert(-1, 7) }",
+        "func main() { var values = [7]; values.take(1) }",
+        "func main() { var values = [7]; values.insert(2, 8) }",
+        "func main() { var values = [7]; values.insert(-2, 8) }",
+    };
+    for (sources) |source| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var frontend = Frontend.Frontend.init(allocator);
+        const compilation = try frontend.compile(source);
+        const result = try Interpreter.runCapture(allocator, compilation.ir);
+        try std.testing.expectEqual(@as(u8, 1), result.exit_code);
+        try std.testing.expect(std.mem.indexOf(u8, result.stderr, "out of bounds") != null);
+    }
+}

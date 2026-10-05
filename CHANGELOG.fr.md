@@ -8,6 +8,9 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Corriger `interpret` pour accepter `list.insert(list.count(), value)`,
+  y compris sur une liste vide, sans élargir les bornes de lecture ou de retrait.
+
 - `interpret` ignore les fonctions système importées qui ne sont pas atteignables
   depuis `main`. Les appels effectifs et callbacks pouvant atteindre une frontière
   non prise en charge restent refusés ; les programmes purement portables d’un

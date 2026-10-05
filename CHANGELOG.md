@@ -8,6 +8,9 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Fix `interpret` to accept `list.insert(list.count(), value)`, including
+  empty lists, while retaining strict read and removal bounds.
+
 - `interpret` ignores imported system functions unreachable from `main`.
   Effective calls and callbacks that may reach an unsupported boundary remain
   rejected, allowing portable programs in modules that also offer file loading
