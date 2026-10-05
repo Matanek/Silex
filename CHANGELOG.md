@@ -12,6 +12,8 @@ This editorial history starts with version 0.44.1.
   A loaded private same-name function in another module no longer causes a
   false callback rejection; callers can retain their source function names.
 
+- `try`, including local alternatives and messages, preserves the logical `Result` and receiver state in mutating struct and class methods. Propagated failures now follow the receiver return path.
+
 - Visibility checks for a list shared across source atoms follow its element
   type in the declaring atom. An unrelated private type in the caller no
   longer falsely rejects a package or public signature; actual private type
