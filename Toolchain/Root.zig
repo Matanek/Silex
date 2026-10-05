@@ -11,6 +11,7 @@ test {
     _ = @import("Sources/Project/CoreTests.zig");
     _ = @import("Sources/EmbeddedFilesTests.zig");
     _ = @import("Sources/Interpreter.zig");
+    _ = @import("Sources/Interpreter/Capabilities.zig");
     _ = @import("Sources/Optimize/ValueRanges.zig");
     _ = @import("Sources/PackageArchive.zig");
     _ = @import("Sources/PackageDescriptor.zig");

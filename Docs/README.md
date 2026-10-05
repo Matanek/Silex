@@ -60,6 +60,12 @@ open Silex document
     -> inline colors for direct GFX.Color expressions
 ```
 
+The reference interpreter checks foreign-call support on the conservative
+function closure from `main`, including callback references and finalizers.
+Imported provider declarations alone do not require execution support. The
+interpreter still rejects unsupported calls in that closure and guards indirect
+foreign dispatch at runtime; it does not gain native file I/O from this check.
+
 ## Architecture rules
 
 These rules keep source semantics independent from the bootstrap implementation

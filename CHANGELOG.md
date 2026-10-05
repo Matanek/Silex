@@ -8,6 +8,11 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- `interpret` ignores imported system functions unreachable from `main`.
+  Effective calls and callbacks that may reach an unsupported boundary remain
+  rejected, allowing portable programs in modules that also offer file loading
+  to be compared with native execution.
+
 - Injected systems select their function using the calling module visibility.
   A loaded private same-name function in another module no longer causes a
   false callback rejection; callers can retain their source function names.
