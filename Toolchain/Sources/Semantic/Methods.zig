@@ -183,7 +183,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
     const mutating = self.method_mutability[flat];
     const borrowed_mutable = method.return_mode == .mutable;
     const receiver_type = Ast.Type.structure(structure_index);
-    var builder: Model.FunctionBuilder = .{ .return_type = if (mutating and !borrowed_mutable) null else method.return_type };
+    var builder: Model.FunctionBuilder = .{ .return_type = method.return_type };
     try builder.blocks.append(self.allocator, .{});
 
     const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len + 1);
@@ -1497,7 +1497,7 @@ pub fn analyzeMutatingReturnStatement(
     try emitMutatingReturn(self, builder, context.structure_index, context.flat, context.self_local, method, value);
 }
 
-fn emitMutatingReturn(
+pub fn emitMutatingReturn(
     self: anytype,
     builder: anytype,
     structure_index: usize,

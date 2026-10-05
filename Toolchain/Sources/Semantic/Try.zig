@@ -6,6 +6,7 @@ const Availability = @import("Availability.zig");
 const Model = @import("Model.zig");
 const Resources = @import("Resources.zig");
 const Support = @import("Support.zig");
+const Methods = @import("Methods.zig");
 
 pub fn analyzeValue(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Model.TypedValue {
     return (try analyze(self, builder, unary, true)).?;
@@ -149,9 +150,7 @@ fn propagate(
         .variant = destination_failure,
         .values = try self.allocator.dupe(Ir.ValueId, &.{error_value}),
     } });
-    try Resources.emitActiveDrops(self, builder, 0);
-    try Resources.emitMutexUnlocks(self, builder, 0);
-    self.terminate(builder, .{ .return_value = propagated });
+    try emitPropagatedReturn(self, builder, return_type, propagated);
 
     builder.current_block = success_block;
     return extractSuccess(self, builder, unary, operand, source_index, source, require_value);
@@ -218,9 +217,7 @@ fn analyzeMessagePropagation(
         .variant = variantIndex(destination, "failure").?,
         .values = try self.allocator.dupe(Ir.ValueId, &.{message.value}),
     } });
-    try Resources.emitActiveDrops(self, builder, 0);
-    try Resources.emitMutexUnlocks(self, builder, 0);
-    self.terminate(builder, .{ .return_value = propagated });
+    try emitPropagatedReturn(self, builder, return_type, propagated);
 }
 
 fn extractSuccess(
@@ -264,4 +261,17 @@ fn findResult(enums: []const Ir.Enum, type_value: Ast.Type) ?usize {
 fn variantIndex(enumeration: Ir.Enum, name: []const u8) ?usize {
     for (enumeration.variants, 0..) |variant, index| if (std.mem.eql(u8, variant.name, name)) return index;
     return null;
+}
+
+fn emitPropagatedReturn(self: anytype, builder: anytype, return_type: Ast.Type, value: Ir.ValueId) !void {
+    if (builder.mutating_return) |context| {
+        try Methods.emitMutatingReturn(
+            self, builder, context.structure_index, context.flat, context.self_local,
+            self.function_context.?, .{ .type = return_type, .value = value, .transferred = true },
+        );
+        return;
+    }
+    try Resources.emitActiveDrops(self, builder, 0);
+    try Resources.emitMutexUnlocks(self, builder, 0);
+    self.terminate(builder, .{ .return_value = value });
 }

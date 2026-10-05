@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- `try`, y compris ses alternatives locales et messages, conserve le retour `Result` et l’état du récepteur dans les méthodes modifiables de structures et classes. Les erreurs propagées ne contournent plus le retour du récepteur.
+
 - La vérification de visibilité d’une liste partagée entre atomes de source
   suit le type d’élément dans son atome déclarant. Un type privé sans rapport
   dans l’atome appelant ne provoque plus de faux rejet d’une signature package

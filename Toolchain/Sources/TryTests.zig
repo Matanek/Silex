@@ -275,3 +275,90 @@ test "diagnose invalid try operands contexts and error types" {
         "'try' requires an enclosing function returning 'Result<U,E>'",
     );
 }
+
+test "try returns logical results with mutating receiver state" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func read_value(allowed:bool) Result<int,str> {
+        \\    if allowed { return Result<int,str>.success(7) }
+        \\    return Result<int,str>.failure("denied")
+        \\}
+        \\func save_value(allowed:bool) Result<void,str> {
+        \\    if allowed { return Result<void,str>.success() }
+        \\    return Result<void,str>.failure("unsaved")
+        \\}
+        \\struct Counter {
+        \\    var calls:int
+        \\    init() {self.calls=0}
+        \\    func read(allowed:bool) Result<int,str> {
+        \\        self.calls++
+        \\        let value = try read_value(allowed)
+        \\        self.calls += 10
+        \\        return Result<int,str>.success(value)
+        \\    }
+        \\    func save(allowed:bool) Result<void,str> {
+        \\        self.calls++
+        \\        try save_value(allowed)
+        \\        self.calls += 10
+        \\        return Result<void,str>.success()
+        \\    }
+        \\    func fallback(allowed:bool) int {
+        \\        self.calls++
+        \\        return try read_value(allowed) else error { return -1 }
+        \\    }
+        \\    func message(allowed:bool) Result<int,str> {
+        \\        self.calls++
+        \\        return Result<int,str>.success(try read_value(allowed) else error "read failed")
+        \\    }
+        \\}
+        \\class ReferenceCounter {
+        \\    var calls:int
+        \\    init() {self.calls=0}
+        \\    func read(allowed:bool) Result<int?,str> {
+        \\        self.calls++
+        \\        let value = try read_value(allowed)
+        \\        self.calls += 10
+        \\        return Result<int?,str>.success(value)
+        \\    }
+        \\}
+        \\func validate() {
+        \\    var counter=Counter()
+        \\    match counter.read(false) {
+        \\        failure(error) => {assert(error == "denied")}
+        \\        success(value) => {panic("unexpected success")}
+        \\    }
+        \\    assert(counter.calls == 1)
+        \\    assert((try counter.read(true) else error {panic(error)}) == 7 && counter.calls == 12)
+        \\    match counter.save(false) {
+        \\        failure(error) => {assert(error == "unsaved")}
+        \\        success => {panic("unexpected success")}
+        \\    }
+        \\    assert(counter.calls == 13)
+        \\    try counter.save(true) else error {panic(error)}
+        \\    assert(counter.calls == 24)
+        \\    assert(counter.fallback(false) == -1 && counter.calls == 25)
+        \\    assert(counter.fallback(true) == 7 && counter.calls == 26)
+        \\    match counter.message(false) {
+        \\        failure(error) => {assert(error == "read failed")}
+        \\        success(value) => {panic("unexpected success")}
+        \\    }
+        \\    assert(counter.calls == 27)
+        \\    assert((try counter.message(true) else error {panic(error)}) == 7 && counter.calls == 28)
+        \\    var reference=ReferenceCounter()
+        \\    var alias=reference
+        \\    match reference.read(false) {
+        \\        failure(error) => {assert(error == "denied")}
+        \\        success(value) => {panic("unexpected success")}
+        \\    }
+        \\    assert(alias.calls == 1)
+        \\    assert((try alias.read(true) else error {panic(error)}) == 7 && reference.calls == 12)
+        \\}
+        \\
+        \\func main() { validate() }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("", result.stdout);
+}
