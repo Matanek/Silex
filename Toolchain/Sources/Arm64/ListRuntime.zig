@@ -263,6 +263,35 @@ pub fn emitEdit(
 
     var reused: ?usize = null;
     var shared_or_full: [2]usize = undefined;
+    if (value.kind == .take_last) {
+        // Extract from a unique buffer in place. Shared snapshots keep the copy path.
+        try words.append(allocator, A64.load64(.x11, .x10, root_count_offset));
+        try words.append(allocator, A64.load64(.x5, .x10, edge_count_offset));
+        try words.append(allocator, A64.addRegisters(.x11, .x11, .x5));
+        try immediate(allocator, words, .x5, 1);
+        try words.append(allocator, A64.compareRegisters(.x11, .x5));
+        const shared = words.items.len;
+        try words.append(allocator, A64.conditionalBranch(.not_equal));
+        if (value.removed) |removed| {
+            try words.append(allocator, A64.addSubtractImmediate(.x14, .x10, header_size, true));
+            try immediate(allocator, words, .x11, stride);
+            try words.append(allocator, A64.multiply(.x5, .x9, .x11));
+            try words.append(allocator, A64.addRegisters(.x14, .x14, .x5));
+            for (0..removed.width) |leaf| {
+                if (compact_float32) {
+                    try words.append(allocator, A64.load32Offset(.x5, .x14, @intCast(leaf * 4)));
+                } else try words.append(allocator, A64.load64(.x5, .x14, @intCast(leaf * Machine.slot_size)));
+                try words.append(allocator, A64.storeStack(.x5, @intCast(@as(usize, removed.start) + leaf)));
+            }
+        }
+        try words.append(allocator, A64.store64(.x12, .x10, 0));
+        // The common IR drops the old collection after publishing the result.
+        try emitRetain(allocator, words, .{ .operand = value.collection, .ownership = value.ownership });
+        try words.append(allocator, A64.storeStack(.x10, value.result));
+        reused = words.items.len;
+        try words.append(allocator, A64.branch());
+        try Fixups.patch19(words.items, shared, words.items.len);
+    }
     if (value.kind == .append or value.kind == .clear) {
         try words.append(allocator, A64.load64(.x11, .x10, root_count_offset));
         try words.append(allocator, A64.load64(.x5, .x10, edge_count_offset));

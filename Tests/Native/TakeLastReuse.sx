@@ -1,0 +1,61 @@
+class PopToken {
+    static var drops:int = 0
+    let value:int
+    init(value:int) {self.value = value}
+    drop {PopToken.drops++}
+}
+struct PopRecord {let text:str; let value:int}
+
+func verify_take_last() {
+    var values:int[] = []
+    for index in 0...4096 {values.append(index)}
+    for index in 0...4096 {assert(values.take_last() == 4095 - index)}
+    assert(values.count() == 0)
+    values.append(17)
+    assert(values.take_last() == 17 && values.count() == 0)
+
+    var shared = [1,2,3]
+    let snapshot = shared
+    assert(shared.take_last() == 3)
+    shared.append(9)
+    assert(snapshot.count() == 3 && snapshot[2] == 3)
+    assert(shared.count() == 3 && shared[2] == 9)
+
+    var compact:float32[] = []
+    for index in 0...129 {compact.append(index as float32)}
+    assert(compact.take_last() == 128.0 as float32)
+    let frozen = compact
+    assert(compact.take_last() == 127.0 as float32)
+    assert(frozen.count() == 128 && frozen[-1] == 127.0 as float32)
+
+    var records:PopRecord[] = [PopRecord(text:"first",value:1), PopRecord(text:"last",value:2)]
+    let retained = records
+    let removed = records.take_last()
+    assert(removed.text == "last" && removed.value == 2)
+    records.append(PopRecord(text:"new",value:3))
+    assert(retained[-1].text == "last" && records[-1].text == "new")
+
+    PopToken.drops = 0
+    {
+        var tokens:PopToken[] = []
+        for index in 0...128 {tokens.append(PopToken(index))}
+        for index in 0...128 {
+            var token = tokens.take_last()
+            assert(token.value == 127 - index)
+        }
+        assert(tokens.count() == 0 && PopToken.drops == 128)
+    }
+    assert(PopToken.drops == 128)
+    {
+        var tokens:PopToken[] = [PopToken(1),PopToken(2)]
+        var frozen_tokens = tokens
+        var last = tokens.take_last()
+        assert(last.value == 2 && frozen_tokens[-1].value == 2)
+        tokens.clear()
+        assert(PopToken.drops == 128)
+    }
+    assert(PopToken.drops == 130)
+}
+
+test "take_last preserves shared snapshots compact storage and owning elements" {verify_take_last()}
+func main() {verify_take_last(); print("take_last reuse passed")}

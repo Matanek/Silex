@@ -2941,6 +2941,27 @@ fn emitListTakeLast(
         }
     }
 
+    // The source load borrows the buffer. Only a sole root/edge can be shortened.
+    try emitLoadMemory(allocator, bytes, .rax, .rbx, root_count_offset);
+    try emitLoadMemory(allocator, bytes, .rcx, .rbx, edge_count_offset);
+    try emitRegisterBinary(allocator, bytes, 0x01, .rax, .rcx);
+    try emitImmediate(allocator, bytes, .rcx, 1);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const shared = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitStoreMemory(allocator, bytes, .rbx, 0, .r13);
+    // Balance the common IR's later drop of the old collection.
+    try emitAtomicIncrement(allocator, bytes, .rbx, switch (value.ownership) {
+        .root => root_count_offset,
+        .edge => edge_count_offset,
+    });
+    try emitStoreStack(allocator, bytes, .rbx, value.result);
+    try bytes.append(allocator, 0xe9);
+    const reused = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, shared, bytes.items.len);
+
     try emitMoveRegister(allocator, bytes, .rsi, .r13);
     try emitImmediate(allocator, bytes, .rcx, @as(u64, value.element_width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xf1 });
@@ -2965,6 +2986,7 @@ fn emitListTakeLast(
     try patchRelative(bytes.items, repeat, loop);
     try patchRelative(bytes.items, copied, bytes.items.len);
     try emitStoreStack(allocator, bytes, .r15, value.result);
+    try patchRelative(bytes.items, reused, bytes.items.len);
 }
 
 fn emitCollectionView(

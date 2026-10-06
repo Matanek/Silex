@@ -810,3 +810,18 @@ have this delayed-constant defect. LLVM retains its own lowering. The native por
 Debug and Release in its Linux and Windows ARM64 jobs. Host native
 execution qualifies macOS ARM64; Linux and Windows ARM64 execution remains
 for an authorized remote candidate run.
+## Unique collection tail extraction
+
+Native ARM64 and X64 reuse a dynamic collection's buffer for `take_last()`
+when its combined root and edge count is one. Only the final element is read
+and the logical count changes; reserved capacity stays available for a later
+append. Shared snapshots retain the existing copy path. The result retains
+the reused buffer once to balance the common IR's subsequent drop of the old
+collection; extracting an owning element still follows the ordinary edge-to-root
+conversion. Compact float32 storage uses its actual byte stride.
+
+`Tests/Native/TakeLastReuse.sx` covers emptying/reusing a buffer, shared snapshots,
+float32, string-owning records and class destructors. The portability workflow
+runs this source in Debug and Release. This optimization avoids a whole-buffer
+copy at every heap removal; it makes no claim about other collection operations
+or about timings on unmeasured targets.

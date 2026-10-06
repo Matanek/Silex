@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- `take_last()` réutilise le buffer d’une collection non partagée sur ARM64 et X64, au lieu de recopier tous ses éléments. Les snapshots partagés, les formats float32 et les ressources extraites conservent leur propriété.
+
 - Les références de fonctions visibles dans un module restent accessibles depuis les constructeurs et méthodes de ses autres atomes, avec les mêmes règles de visibilité que les appels. La complétion conserve la signature d’un champ callback et propose les fonctions de ses autres atomes ; la navigation retrouve leur déclaration canonique. Les fonctions locales au fichier et les modules privés restent inaccessibles hors de leur portée.
 
 - Native Release ARM64 conserve les constantes flottantes utilisées avant la définition de leur partenaire SIMD ; les rotations de quaternion ne lisent plus une ancienne valeur de registre dans ce cas.

@@ -365,6 +365,20 @@ jobs:
           printf '%s\n' "$portability_output"
           cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^native cycle drop$')
           test "$cycle_drops" -eq 6
+          take_last_source="$GITHUB_WORKSPACE/Tests/Native/TakeLastReuse.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$take_last_source" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/take-last-$mode"
+            take_last_output=$("$RUNNER_TEMP/take-last-$mode")
+            test "$take_last_output" = "take_last reuse passed"
+          done
+          callbacks_source="$GITHUB_WORKSPACE/Tests/Modules/CallbackAtoms/Main.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$callbacks_source" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/module-callbacks-$mode"
+            callbacks_output=$("$RUNNER_TEMP/module-callbacks-$mode")
+            test "$callbacks_output" = "42"
+          done
 
   optimizer-x64:
     if: inputs.target == 'optimizer-x64'
@@ -668,6 +682,20 @@ jobs:
             test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
             test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 18
           done
+          take_last_source="$GITHUB_WORKSPACE/Tests/Native/TakeLastReuse.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$take_last_source" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/take-last-$mode"
+            take_last_output=$("$RUNNER_TEMP/take-last-$mode")
+            test "$take_last_output" = "take_last reuse passed"
+          done
+          callbacks_source="$GITHUB_WORKSPACE/Tests/Modules/CallbackAtoms/Main.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$callbacks_source" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/module-callbacks-$mode"
+            callbacks_output=$("$RUNNER_TEMP/module-callbacks-$mode")
+            test "$callbacks_output" = "42"
+          done
 
   linux-x64:
     if: inputs.target == 'all' || inputs.target == 'linux-x64'
@@ -815,6 +843,20 @@ jobs:
             integer_memory_output=$("$RUNNER_TEMP/integer-memory-regions-$mode")
             test "$(printf '%s\n' "$integer_memory_output" | wc -l)" -eq 18
             test "$(printf '%s\n' "$integer_memory_output" | grep -c '^true$')" -eq 18
+          done
+          take_last_source="$GITHUB_WORKSPACE/Tests/Native/TakeLastReuse.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$take_last_source" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/take-last-$mode"
+            take_last_output=$("$RUNNER_TEMP/take-last-$mode")
+            test "$take_last_output" = "take_last reuse passed"
+          done
+          callbacks_source="$GITHUB_WORKSPACE/Tests/Modules/CallbackAtoms/Main.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$callbacks_source" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/module-callbacks-$mode"
+            callbacks_output=$("$RUNNER_TEMP/module-callbacks-$mode")
+            test "$callbacks_output" = "42"
           done
 
   windows-x64:
@@ -1024,6 +1066,26 @@ jobs:
             $integerMemoryOutput = @(& $integerMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 18 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "integer memory regions $mode regression failed"
+            }
+          }
+          $takeLastSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/TakeLastReuse.sx"
+          foreach ($mode in @("debug", "release")) {
+            $takeLastExecutable = Join-Path $env:RUNNER_TEMP "take-last-$mode.exe"
+            & $silex compile --backend native $takeLastSource "--$mode" --nocache -o $takeLastExecutable
+            if ($LASTEXITCODE -ne 0) { throw "take_last compilation failed: $mode" }
+            $takeLastOutput = @(& $takeLastExecutable)
+            if ($LASTEXITCODE -ne 0 -or ($takeLastOutput -join "`n") -ne "take_last reuse passed") {
+              throw "take_last ownership regression: $mode"
+            }
+          }
+          $callbacksSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Modules/CallbackAtoms/Main.sx"
+          foreach ($mode in @("debug", "release")) {
+            $callbacksExecutable = Join-Path $env:RUNNER_TEMP "module-callbacks-$mode.exe"
+            & $silex compile --backend native $callbacksSource "--$mode" --nocache -o $callbacksExecutable
+            if ($LASTEXITCODE -ne 0) { throw "module callbacks compilation failed: $mode" }
+            $callbacksOutput = @(& $callbacksExecutable)
+            if ($LASTEXITCODE -ne 0 -or ($callbacksOutput -join "`n") -ne "42") {
+              throw "module callbacks regression: $mode"
             }
           }
 
@@ -1391,5 +1453,25 @@ jobs:
             $integerMemoryOutput = @(& $integerMemoryBinary)
             if ($LASTEXITCODE -ne 0 -or $integerMemoryOutput.Count -ne 18 -or @($integerMemoryOutput | Where-Object { $_ -ne "true" }).Count -ne 0) {
               throw "integer memory regions $mode regression failed"
+            }
+          }
+          $takeLastSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/TakeLastReuse.sx"
+          foreach ($mode in @("debug", "release")) {
+            $takeLastExecutable = Join-Path $env:RUNNER_TEMP "take-last-$mode.exe"
+            & $silex compile --backend native $takeLastSource "--$mode" --nocache -o $takeLastExecutable
+            if ($LASTEXITCODE -ne 0) { throw "take_last compilation failed: $mode" }
+            $takeLastOutput = @(& $takeLastExecutable)
+            if ($LASTEXITCODE -ne 0 -or ($takeLastOutput -join "`n") -ne "take_last reuse passed") {
+              throw "take_last ownership regression: $mode"
+            }
+          }
+          $callbacksSource = Join-Path $env:GITHUB_WORKSPACE "Tests/Modules/CallbackAtoms/Main.sx"
+          foreach ($mode in @("debug", "release")) {
+            $callbacksExecutable = Join-Path $env:RUNNER_TEMP "module-callbacks-$mode.exe"
+            & $silex compile --backend native $callbacksSource "--$mode" --nocache -o $callbacksExecutable
+            if ($LASTEXITCODE -ne 0) { throw "module callbacks compilation failed: $mode" }
+            $callbacksOutput = @(& $callbacksExecutable)
+            if ($LASTEXITCODE -ne 0 -or ($callbacksOutput -join "`n") -ne "42") {
+              throw "module callbacks regression: $mode"
             }
           }
