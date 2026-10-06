@@ -579,6 +579,12 @@ jobs:
               -o "$RUNNER_TEMP/paired-scalar-intrinsics-$mode"
             test "$("$RUNNER_TEMP/paired-scalar-intrinsics-$mode")" = "Paired scalar intrinsics: all components preserved"
           done
+          quaternion_frames="$GITHUB_WORKSPACE/Tests/Native/QuaternionFrameConstants.sx"
+          for mode in debug release; do
+            "$silex" compile --backend native "$quaternion_frames" "--$mode" --nocache \
+              -o "$RUNNER_TEMP/quaternion-frames-$mode"
+            test "$("$RUNNER_TEMP/quaternion-frames-$mode")" = "Quaternion frames: all components preserved"
+          done
           # Compile the exact standalone witness without the optimizer package's STD graph.
           scalar_root="$RUNNER_TEMP/scalar-float-fixture"
           mkdir -p "$scalar_root"
@@ -906,6 +912,16 @@ jobs:
             $pairedOutput = @(& $pairedBinary)
             if ($LASTEXITCODE -ne 0 -or $pairedOutput.Count -ne 1 -or $pairedOutput[0] -ne "Paired scalar intrinsics: all components preserved") {
               throw "paired scalar intrinsics $mode regression failed"
+            }
+          }
+          $quaternionFrames = Join-Path $env:GITHUB_WORKSPACE "Tests/Native/QuaternionFrameConstants.sx"
+          foreach ($mode in @("debug", "release")) {
+            $quaternionBinary = Join-Path $env:RUNNER_TEMP "quaternion-frames-$mode.exe"
+            & $silex compile --backend native $quaternionFrames "--$mode" --nocache -o $quaternionBinary
+            if ($LASTEXITCODE -ne 0) { throw "quaternion frames $mode compilation failed" }
+            $quaternionOutput = @(& $quaternionBinary)
+            if ($LASTEXITCODE -ne 0 -or $quaternionOutput.Count -ne 1 -or $quaternionOutput[0] -ne "Quaternion frames: all components preserved") {
+              throw "quaternion frames $mode regression failed"
             }
           }
           # Copy bytes unchanged into a standalone fixture, without the optimizer's STD graph.
