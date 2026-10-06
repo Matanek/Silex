@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Une cascade sur une valeur temporaire passée à un paramètre optionnel modifie désormais la valeur avant son injection dans l’optionnel, y compris pour les classes et collections. La complétion conserve les membres du récepteur concret.
+
 - `publish --dry-run` et la préparation de publication utilisent Shadercross configuré par `silex setup`, comme les autres commandes de compilation. Les packages dont une source importe des programmes HLSL ne sont plus refusés à tort comme non configurés.
 
 - `take_last()` réutilise le buffer d’une collection non partagée sur ARM64 et X64, au lieu de recopier tous ses éléments. Les snapshots partagés, les formats float32 et les ressources extraites conservent leur propriété.

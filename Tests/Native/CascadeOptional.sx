@@ -1,0 +1,26 @@
+struct Settings { var enabled:bool = true; init() {} }
+class Box {
+    static var drops:int = 0
+    var enabled:bool = true
+    init() {}
+    drop { Box.drops++ }
+}
+func accept(settings:Settings? = null) { assert(settings != null && !settings!.enabled) }
+func accept_box(box:Box?) { assert(box != null && !box!.enabled) }
+func verify_optional_cascades() {
+    accept(Settings() ..enabled = false)
+    let value:Settings? = Settings() ..enabled = false
+    assert(value != null && !value!.enabled)
+    Box.drops = 0
+    accept_box(Box() ..enabled = false)
+    assert(Box.drops == 1)
+    {
+        let retained:Box? = Box() ..enabled = false
+        assert(retained != null && !retained!.enabled)
+    }
+    assert(Box.drops == 2)
+    let numbers:int32[]? = [] ..append(7 as int32)
+    assert(numbers![0] == 7)
+}
+func main() { verify_optional_cascades(); print("optional cascades verified") }
+test "optional injection follows cascades and preserves owned payloads" { verify_optional_cascades() }

@@ -18,7 +18,10 @@ pub fn analyze(
     const target = if (stablePlace(cascade.receiver, builder.bindings.items))
         cascade.receiver
     else target: {
-        const receiver = try self.analyzeExpressionExpected(builder, cascade.receiver, expected);
+        // Optional injection belongs to the result, after receiver mutation.
+        // Preserve the payload context for collection and tuple literals.
+        const receiver_context = if (expected) |target| target.optionalChild() orelse target else null;
+        const receiver = try self.analyzeExpressionExpected(builder, cascade.receiver, receiver_context);
         if (receiver.type == .void) return self.fail(cascade.receiver.position, "cascade receiver cannot have type 'void'");
         if (Resources.requiresRetain(self, receiver.type) and !receiver.transferred) {
             try Resources.retainValue(self, builder, receiver.type, receiver.value);

@@ -7815,3 +7815,19 @@ test "project list element and index contexts in completion" {
     try std.testing.expect(contains(prefixed, "rows"));
     try std.testing.expect(!contains(prefixed, "columns"));
 }
+
+test "complete a concrete cascade passed to an optional parameter" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for ([_][]const u8{ "..", "..en", "." }) |suffix| {
+        const source = try std.fmt.allocPrint(arena.allocator(),
+            "struct Settings {{ var enabled:bool = true; private var hidden:int = 0; init() {{}} }}\n" ++
+            "func accept(value:Settings?) {{}}\nfunc main() {{\n    accept(Settings()\n        {s}\n    )\n}}", .{suffix});
+        const cursor = std.mem.lastIndexOf(u8, source, suffix).? + suffix.len;
+        const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+        try std.testing.expectEqual(@as(usize, 1), items.len);
+        try std.testing.expectEqualStrings("enabled", items[0].label);
+        try std.testing.expect(!contains(items, "hidden"));
+        try std.testing.expect(!contains(items, "if"));
+    }
+}

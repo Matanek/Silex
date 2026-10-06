@@ -226,3 +226,27 @@ test "compose a cascade whose receiver is a qualified package type" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("true\n", result.stdout);
 }
+
+test "inject optional context only after temporary cascade operations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Settings { var enabled:bool = true; init() {} }
+        \\class Box { var enabled:bool = true; init() {} }
+        \\func accept(value:Settings?) { print(value!.enabled) }
+        \\func accept_box(value:Box?) { print(value!.enabled) }
+        \\func main() {
+        \\    accept(Settings() ..enabled = false)
+        \\    let value:Settings? = Settings() ..enabled = false
+        \\    print(value!.enabled)
+        \\    accept_box(Box() ..enabled = false)
+        \\    let numbers:int32[]? = [] ..append(7 as int32)
+        \\    print(numbers![0])
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("false\nfalse\nfalse\n7\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}

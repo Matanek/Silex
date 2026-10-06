@@ -244,3 +244,12 @@ through `C.mutable_pointer` clears the flag before exposing an ordinary C
 address. `reference.address` expresses that normalization in portable IR;
 the interpreter keeps the same domain explicitly beside its reference value.
 These details are not a public serialization or foreign-call ABI.
+
+## Cascade result context
+
+A cascade evaluates its concrete receiver once and mutates it before applying
+contextual conversion to the result. When the expected result is optional,
+collection and tuple literals receive the payload context; optional injection
+happens after all cascade operations. An actual optional receiver still follows
+the ordinary presence and member-access rules. This is shared frontend lowering,
+with no target ABI or emitter changes.
