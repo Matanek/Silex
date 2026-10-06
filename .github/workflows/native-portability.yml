@@ -521,6 +521,14 @@ jobs:
       - name: Check out Silex
         uses: actions/checkout@v6
 
+      - name: Check out the pinned STD fixture dependency
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-STD
+          # v0.22.0 supplies the Linux ARM64 provider graph used by Math fixtures.
+          ref: 80aabd9a2de919af52dc0b8bf2d0f9de50aa75c5
+          path: Dependencies/STD
+
       - name: Verify native ARM64 runner
         shell: bash
         run: |
@@ -560,6 +568,7 @@ jobs:
 
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
+          "$silex" link "$GITHUB_WORKSPACE/Dependencies/STD" --workspace "$GITHUB_WORKSPACE"
           managed_zig="$HOME/.silex/toolchain/zig/0.16.0/linux-arm64/zig"
           test -x "$managed_zig"
           file "$managed_zig" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64)'
