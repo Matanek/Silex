@@ -261,6 +261,7 @@ fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         },
     };
     var publication = PackagePublication.Manager.init(allocator, init.io, try globalPackagesRoot(allocator, init.environ_map));
+    publication.shadercross_path = try shaderCompilerPath(allocator, init.environ_map);
     const prepared = publication.prepare(options.package) catch |err| switch (err) {
         error.InvalidPackagePublication => {
             std.debug.print("silex: cannot prepare package publication: {s}\n", .{publication.diagnostic orelse "invalid package publication"});
@@ -403,7 +404,8 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
     defer progress.finish();
     const local_source = if (Io.Dir.cwd().statFile(init.io, options.package_path, .{})) |found|
         found.kind == .directory
-    else |_| false;
+    else |_|
+        false;
     const selected = try installPackageOperand(
         init,
         allocator,
@@ -418,10 +420,8 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
     const result = selected.result;
     if (!local_source and selected.v2) {
         const project_root = try Io.Dir.cwd().realPathFileAlloc(init.io, ".", allocator);
-        const requested_version = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}",
-            .{ result.package.version.major, result.package.version.minor, result.package.version.patch });
-        _ = PackageLock.writeProject(allocator, init.io, project_root, packages_root,
-            .{ .name = result.package.name, .version = requested_version }) catch |err| {
+        const requested_version = try std.fmt.allocPrint(allocator, "{d}.{d}.{d}", .{ result.package.version.major, result.package.version.minor, result.package.version.patch });
+        _ = PackageLock.writeProject(allocator, init.io, project_root, packages_root, .{ .name = result.package.name, .version = requested_version }) catch |err| {
             std.debug.print("silex: package installed, but its project lock could not be written: {t}\n", .{err});
             return 1;
         };
@@ -488,8 +488,7 @@ fn installPackageOperand(
                     store,
                 ) catch |err| switch (err) {
                     error.InvalidRegistry => {
-                        std.debug.print("silex: cannot install development dependencies: {s}\n",
-                            .{public_registry.diagnostic orelse "invalid v2 registry package"});
+                        std.debug.print("silex: cannot install development dependencies: {s}\n", .{public_registry.diagnostic orelse "invalid v2 registry package"});
                         return null;
                     },
                     else => return err,
@@ -605,7 +604,9 @@ fn registryMode(environment: *const std.process.Environ.Map) RegistryMode {
 fn publicRegistryOrigin(init: std.process.Init) !?[]const u8 {
     return switch (registryMode(init.environ_map)) {
         .automatic => if (try PackageRegistryV2.available(init.gpa, init.io))
-            PackageRegistryV2.public_origin else null,
+            PackageRegistryV2.public_origin
+        else
+            null,
         .public => PackageRegistryV2.public_origin,
         .staging => try RegistryLogin.publicTestOrigin(init),
         .legacy => null,
@@ -2895,10 +2896,17 @@ fn configureShaderCompiler(
     allocator: std.mem.Allocator,
     environment: *const std.process.Environ.Map,
 ) !void {
-    const root = try globalToolchainRoot(allocator, environment) orelse return;
-    const host = TargetModule.Target.host() orelse return;
-    if (!host.hasNativeEmitter()) return;
-    compiler.shadercross_path = try ToolchainSetup.executablePath(allocator, root, host);
+    compiler.shadercross_path = try shaderCompilerPath(allocator, environment);
+}
+
+fn shaderCompilerPath(
+    allocator: std.mem.Allocator,
+    environment: *const std.process.Environ.Map,
+) !?[]const u8 {
+    const root = try globalToolchainRoot(allocator, environment) orelse return null;
+    const host = TargetModule.Target.host() orelse return null;
+    if (!host.hasNativeEmitter()) return null;
+    return try ToolchainSetup.executablePath(allocator, root, host);
 }
 
 fn lowerModeForTarget(mode: Cli.Mode, target: TargetModule.Target) Lower.Mode {

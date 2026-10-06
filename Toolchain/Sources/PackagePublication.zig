@@ -32,6 +32,7 @@ pub const Manager = struct {
     io: Io,
     global_packages_root: ?[]const u8,
     diagnostic: ?[]const u8 = null,
+    shadercross_path: ?[]const u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, global_packages_root: ?[]const u8) Manager {
         return .{ .allocator = allocator, .io = io, .global_packages_root = global_packages_root };
@@ -55,6 +56,7 @@ pub const Manager = struct {
         for (sources) |relative| {
             const source_path = try std.fs.path.join(self.allocator, &.{ package_root, relative });
             var compiler = Project.Compiler.initWithPackages(self.allocator, self.io, self.global_packages_root);
+            compiler.shadercross_path = self.shadercross_path;
             compiler.target = targetForSource(relative, host) catch return self.fail("package source uses an unsupported Platform or Target variant");
             const compilation = compiler.compileTests(source_path) catch |err| switch (err) {
                 error.InvalidSource, error.InvalidPackageGraph => return self.fail(compiler.diagnosticMessage() orelse "package source does not compile"),
@@ -372,13 +374,13 @@ test "publish native boundary archives for every declared target" {
     try temporary.dir.createDirPath(std.testing.io, "Portable/Module");
     try temporary.dir.createDirPath(std.testing.io, "Portable/Boundary/macos-x64");
     try temporary.dir.createDirPath(std.testing.io, "Portable/Boundary/linux-x64");
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Package.json", .data =
-        "{\"name\":\"Portable\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.44.0\"}," ++
-        "\"boundary\":{\"macos-x64\":{\"providers\":{\"Native\":{\"archive\":\"Boundary/macos-x64/libNative.a\"}}}," ++
-        "\"linux-x64\":{\"providers\":{\"Native\":{\"archive\":\"Boundary/linux-x64/libNative.a\"}}}}}\n",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Portable/Package.json",
+        .data = "{\"name\":\"Portable\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.44.0\"}," ++
+            "\"boundary\":{\"macos-x64\":{\"providers\":{\"Native\":{\"archive\":\"Boundary/macos-x64/libNative.a\"}}}," ++
+            "\"linux-x64\":{\"providers\":{\"Native\":{\"archive\":\"Boundary/linux-x64/libNative.a\"}}}}}\n",
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Module/Value.sx", .data =
-        "public func answer() int { return 42 }\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Module/Value.sx", .data = "public func answer() int { return 42 }\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Boundary/macos-x64/libNative.a", .data = "macOS bytes" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Portable/Boundary/linux-x64/libNative.a", .data = "Linux bytes" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Portable" });
@@ -408,4 +410,30 @@ test "reject non-NFC and Unicode lowercase publication collisions" {
         .{ .target = "linux-x64", .name = "Runtime", .path = "Boundary/Runtime.a", .sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
         .{ .target = "windows-x64", .name = "Runtime", .path = "boundary/runtime.a", .sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
     });
+}
+
+test "publication forwards the configured host Shadercross path" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/GPU");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Package.json", .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.44.0\"}}\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/GPU/Pipelines.sx", .data =
+        \\public struct ComputeProgram {}
+        \\func main() {
+        \\    let shader = ComputeProgram.hlsl(source: "[numthreads(1, 1, 1)] void compute_main(uint3 id : SV_DispatchThreadID) {}")
+        \\}
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX" });
+    var manager = Manager.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackagePublication, manager.prepare(root));
+    try std.testing.expectEqualStrings("Shadercross is not configured; run 'silex setup' before compiling HLSL", manager.diagnostic.?);
+
+    // A missing configured executable distinguishes forwarding from leaving
+    // the compiler unconfigured, without depending on an installed provider.
+    manager.shadercross_path = try std.fs.path.join(allocator, &.{ root, "missing-shadercross" });
+    try std.testing.expectError(error.InvalidPackagePublication, manager.prepare(root));
+    try std.testing.expectEqualStrings("Shadercross is not installed; run 'silex setup' before compiling HLSL", manager.diagnostic.?);
 }

@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- `publish --dry-run` and publication preparation use Shadercross configured by `silex setup`, like the other compilation commands. Packages whose sources import HLSL programs are no longer incorrectly rejected as unconfigured.
+
 - `take_last()` reuses an unshared collection buffer on ARM64 and X64 instead of copying every element. Shared snapshots, float32 storage and extracted resources retain their ownership.
 
 - Module-visible function references remain accessible from constructors and methods in the other atoms of that module, following the visibility rules of ordinary calls. Completion retains a callback field signature and offers functions from the other atoms; navigation resolves their canonical declaration. File-local functions and private modules remain hidden outside their scope.
