@@ -10,6 +10,7 @@ const TypedResources = @import("TypedResources.zig");
 const InjectedSystems = @import("InjectedSystems.zig");
 const EcsComponents = @import("EcsComponents.zig");
 const WorkerSafety = @import("WorkerSafety.zig");
+const LexicalCallbacks = @import("LexicalCallbacks.zig");
 const ModuleScopes = @import("../ModuleScopes.zig");
 const Packages = @import("../Packages.zig");
 
@@ -124,7 +125,7 @@ pub const Specializer = struct {
         }
 
         for (program.functions) |function| {
-            if (function.type_parameters.len != 0) continue;
+            if (function.type_parameters.len != 0 or function.is_anonymous) continue;
             var present = false;
             for (self.functions.items) |existing| {
                 if (samePosition(existing.name_position, function.name_position)) {
@@ -641,7 +642,7 @@ pub const Specializer = struct {
                         );
                         return self.fail(copy.arguments[0].position, message);
                     };
-                    copy.arguments[0].value.identifier = try self.instantiate(template, copy.type_arguments, copy.name_position);
+                    copy.arguments[0].value.identifier = try self.instantiate(template, copy.type_arguments, copy.name_position, &.{});
                     const parameter_types = try self.allocator.alloc(Ast.FunctionType.ParameterType, template.parameters.len);
                     for (template.parameters, 0..) |parameter, parameter_index| parameter_types[parameter_index] = .{
                         .type = try self.rewriteType(parameter.type, copy.type_arguments, parameter.position),
@@ -861,14 +862,8 @@ pub const Specializer = struct {
                 break :value .{ .identifier = self.typeName(specialized) };
             },
             .identifier => |name| value: {
-                if (arguments.len != 0) {
-                    for (self.source.functions) |function| {
-                        if (!function.is_anonymous or !functionNameMatches(function.name, name) or
-                            !samePosition(function.position, expression.position) or
-                            function.type_parameters.len != arguments.len) continue;
-                        break :value .{ .identifier = try self.instantiate(function, arguments, expression.position) };
-                    }
-                }
+                if (try LexicalCallbacks.specialize(self, name, arguments, expression.position, locals.items)) |specialized|
+                    break :value .{ .identifier = specialized };
                 break :value expression.value;
             },
             else => expression.value,
@@ -937,7 +932,7 @@ pub const Specializer = struct {
         }
 
         if (is_ambiguous) return self.ambiguous(call.name_position, call.name);
-        if (selected) |template| return try self.instantiate(template.*, selected_arguments, call.name_position);
+        if (selected) |template| return try self.instantiate(template.*, selected_arguments, call.name_position, &.{});
         if (!saw_generic) {
             if (call.type_arguments.len == 0) return null;
             const message = try std.fmt.allocPrint(self.allocator, "function '{s}' does not accept type arguments", .{call.name});
@@ -1215,11 +1210,12 @@ pub const Specializer = struct {
         return name;
     }
 
-    fn instantiate(
+    pub fn instantiate(
         self: *Specializer,
         template: Ast.Function,
         arguments: []const Ast.Type,
         position: Source.Position,
+        captures: []const Binding,
     ) SpecializeError![]const u8 {
         const previous_specialization_file = self.specialization_file;
         self.specialization_file = previous_specialization_file orelse position.file;
@@ -1252,8 +1248,10 @@ pub const Specializer = struct {
         concrete.type_parameters = &.{};
         concrete.specialization_file = self.specialization_file;
         var locals: std.ArrayList(Binding) = .empty;
+        try locals.appendSlice(self.allocator, captures);
         concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
         concrete.return_type = try self.rewriteType(template.return_type, arguments, template.name_position);
+        _ = try self.internFunctionType(concrete);
         const previous_contracts = self.active_contracts;
         self.active_contracts = try self.genericContracts(template.type_parameters, arguments);
         defer self.active_contracts = previous_contracts;

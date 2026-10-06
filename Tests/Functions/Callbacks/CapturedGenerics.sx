@@ -1,0 +1,46 @@
+class Cell<T> {
+    let current:T
+    init(value:T) { self.current = value }
+    func value() T { return self.current }
+}
+struct Reader {
+    func read<T>(cell:Cell<T>) T { return cell.value() }
+}
+func identity<T>(value:T) T { return value }
+func name() int { return 99 }
+func apply(callback:func() str) str { return callback() }
+func inspect<T>(cell:Cell<T>) T {
+    let callback = func() T { return Reader().read(cell) }
+    return callback()
+}
+
+test "generic method infers the type of a captured class" {
+    var state = Cell<str>("Silex")
+    let describe = func(reader:Reader) str { return reader.read(state) }
+    assert(describe(Reader()) == "Silex")
+}
+
+test "lexical capture wins over a same named function during inference" {
+    var name = Cell<str>("local")
+    let describe = func() str { return Reader().read(name) }
+    assert(describe() == "local")
+}
+
+test "generic calls infer through nested lexical captures" {
+    var state = Cell<str>("nested")
+    let describe = func() str {
+        return apply(func() str { return identity(Reader().read(state)) })
+    }
+    assert(describe() == "nested")
+}
+
+test "callback parameter shadows enclosing bindings of other types" {
+    var state = Cell<int>(42)
+    let describe = func(state:Cell<bool>) bool { return Reader().read(state) }
+    assert(describe(Cell<bool>(true)))
+}
+
+test "generic parents specialize their callback captures consistently" {
+    assert(inspect(Cell<int>(42)) == 42)
+    assert(inspect(Cell<str>("generic")) == "generic")
+}

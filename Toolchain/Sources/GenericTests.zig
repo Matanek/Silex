@@ -5,6 +5,77 @@ const Interpreter = @import("Interpreter.zig");
 const Parser = @import("Parser.zig").Parser;
 const Project = @import("Project.zig");
 
+test "infer generic calls from anonymous lexical captures" {
+    const prelude =
+        \\class Cell<T> { let value:T; init(value:T) { self.value = value } }
+        \\struct Reader { func read<T>(cell:Cell<T>) T { return cell.value } }
+        \\func identity<T>(value:T) T { return value }
+        \\func name() int { return 99 }
+        \\func apply(callback:func() str) str { return callback() }
+        \\func inspect<T>(cell:Cell<T>) T {
+        \\    let callback = func() T { return Reader().read(cell) }
+        \\    return callback()
+        \\}
+    ;
+    const cases = [_]struct { body: []const u8, expected: []const u8 }{
+        .{
+            .body =
+            \\func main() {
+            \\    var name = Cell<str>("Silex")
+            \\    let callback = func(reader:Reader) str { return reader.read(name) }
+            \\    print(callback(Reader()))
+            \\}
+            ,
+            .expected = "Silex\n",
+        },
+        .{
+            .body =
+            \\func main() {
+            \\    var cell = Cell<str>("nested")
+            \\    let callback = func() str {
+            \\        return apply(func() str { return identity(Reader().read(cell)) })
+            \\    }
+            \\    print(callback())
+            \\}
+            ,
+            .expected = "nested\n",
+        },
+        .{
+            .body =
+            \\func main() {
+            \\    var cell = Cell<int>(42)
+            \\    print(inspect(cell))
+            \\    print(inspect(Cell<str>("generic")))
+            \\}
+            ,
+            .expected = "42\ngeneric\n",
+        },
+        .{
+            .body =
+            \\func main() {
+            \\    var cell = Cell<int>(42)
+            \\    let callback = func(cell:Cell<bool>) bool { return Reader().read(cell) }
+            \\    print(callback(Cell<bool>(true)))
+            \\}
+            ,
+            .expected = "true\n",
+        },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var frontend = Frontend.Frontend.init(allocator);
+        const source = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ prelude, case.body });
+        const compilation = frontend.compile(source) catch |err| {
+            if (frontend.diagnostic) |diagnostic| std.debug.print("lexical inference at {d}:{d}: {s}\n", .{ diagnostic.position.line, diagnostic.position.column, diagnostic.message });
+            return err;
+        };
+        const result = try Interpreter.runCapture(allocator, compilation.ir);
+        try std.testing.expectEqualStrings(case.expected, result.stdout);
+    }
+}
+
 fn expectCompileError(source: []const u8, message: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
