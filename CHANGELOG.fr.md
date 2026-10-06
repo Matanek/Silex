@@ -10,6 +10,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 - Les références de fonctions visibles dans un module restent accessibles depuis les constructeurs et méthodes de ses autres atomes, avec les mêmes règles de visibilité que les appels. La complétion conserve la signature d’un champ callback et propose les fonctions de ses autres atomes ; la navigation retrouve leur déclaration canonique. Les fonctions locales au fichier et les modules privés restent inaccessibles hors de leur portée.
 
+- Native Release ARM64 conserve les constantes flottantes utilisées avant la définition de leur partenaire SIMD ; les rotations de quaternion ne lisent plus une ancienne valeur de registre dans ce cas.
+
 - Le remplacement d’un champ possédant une ressource dans un élément de collection de classe ne libère plus deux fois l’ancienne référence. Les snapshots partagés restaurés et les auto-affectations conservent leur ressource jusqu’à la destruction du dernier propriétaire.
 
 - Les méthodes d’extension `module` sont accessibles depuis les atomes et enfants d’implémentation du module fournisseur activé, y compris les appels statiques, nommés et génériques. La complétion et la navigation LSP suivent les imports directs et transitifs du fichier en cours d’édition et retrouvent l’atome déclarant. Les méthodes `module` restent masquées hors de ce module, les méthodes `local` hors de leur fichier.

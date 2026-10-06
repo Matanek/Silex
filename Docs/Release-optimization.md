@@ -789,3 +789,24 @@ X64 consumes the same pair-selection helper but retains its separate scalar bank
 and stack-backed packed operands; no new X64 runtime qualification is claimed.
 Large copy-range slot bases compute the relative leaf before adding the source
 base, preventing an intermediate slot-width overflow with a valid final index.
+
+
+### Deferred SIMD constant definitions
+
+ARM64 emits a pair of equal float32 constants at its second lane definition.
+The first constant must have no scalar use before that point, and slot order
+must agree with definition order. The shared pair selector now checks this
+ordering for constants as it already does for arithmetic and scalar copies.
+Otherwise a quaternion rotation can consume the previous register contents
+instead of zero or two. Adjacent constant pairs without an early use remain
+eligible.
+
+`Tests/Native/QuaternionFrameConstants.sx` checks two rotated axes and their
+round trip through another quaternion frame. The allocation regression covers
+early uses, reversed definition order and a legal adjacent pair. ARM64 native
+emission shares this rule across macOS, Linux and Windows. X64 uses the same
+selector but materializes constants individually on the stack, so it did not
+have this delayed-constant defect. LLVM retains its own lowering. The native portability workflow explicitly compiles and runs the fixture in
+Debug and Release in its Linux and Windows ARM64 jobs. Host native
+execution qualifies macOS ARM64; Linux and Windows ARM64 execution remains
+for an authorized remote candidate run.
