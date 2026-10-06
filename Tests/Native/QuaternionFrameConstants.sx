@@ -1,0 +1,23 @@
+use STD.Math
+
+func verify_rotated_frames() {
+    let first_rotation = Math.Quat.angle_axis(0.7,Math.Vec3(0.0,1.0,0.0))
+    let second_rotation = Math.Quat.angle_axis(-0.4,Math.Vec3(1.0,0.0,0.0))
+    let axis = first_rotation.rotate(Math.Vec3(0.0,0.0,1.0))
+    let normal = first_rotation.rotate(Math.Vec3(1.0,0.0,0.0))
+    let local_axis = second_rotation.conjugated().rotate(axis)
+    let local_normal = second_rotation.conjugated().rotate(normal)
+    let actual_axis = second_rotation.rotate(local_axis)
+    let actual_normal = second_rotation.rotate(local_normal)
+    assert(Math.abs(axis.x-Math.sin(0.7)) < 0.0001 && Math.abs(axis.z-Math.cos(0.7)) < 0.0001)
+    assert(actual_axis.nearly_equal(axis,0.0001) && actual_normal.nearly_equal(normal,0.0001))
+}
+
+test "quaternion frames retain constants used before a SIMD follower" {
+    verify_rotated_frames()
+}
+
+func main() {
+    verify_rotated_frames()
+    print("Quaternion frames: all components preserved")
+}

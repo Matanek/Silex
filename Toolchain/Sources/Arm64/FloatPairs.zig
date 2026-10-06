@@ -314,7 +314,7 @@ fn pruneEarlyUses(
             partners[partner] = null;
             continue;
         }
-        if (definition != .binary and definition != .copy) continue;
+        if (definition != .binary and definition != .copy and definition != .constant_float32) continue;
         // The encoder delays the leader until the follower. A checked load,
         // store or scalar use in between must not observe that uncomputed
         // result. Portable affinity alone does not prove this ordering.
@@ -892,6 +892,7 @@ fn instructionsCanPair(
 ) bool {
     const values = switch (first) {
         .copy => |value| [_]Machine.Slot{ value.operand, value.result, value.result },
+        .constant_float32 => |value| [_]Machine.Slot{ value.result, value.result, value.result },
         .binary => |value| [_]Machine.Slot{ value.left, value.right, value.result },
         else => return false,
     };
@@ -1155,4 +1156,32 @@ test "copy range affinity computes the relative leaf before adding large slot ba
     @memset(partners, null);
     try std.testing.expect(operandPairCanBecomeResident(&instructions, 6000, 6001, partners));
     try std.testing.expectEqual(@as(?Machine.Slot, 5001), transferOperand(instructions[0], 6001));
+}
+
+test "constant float pairs preserve scalar uses before their follower" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 2)) } },
+        .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 0, .type = .float32 } },
+        .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 2)) } },
+        .{ .binary = .{ .result = 3, .operator = .multiply, .left = 1, .right = 1, .type = .float32 } },
+    };
+    var partners = [_]?Machine.Slot{ 1, 0, null, null };
+    const recurrences = [_]bool{false} ** 4;
+    pruneEarlyUses(&instructions, &partners, &recurrences);
+    try std.testing.expectEqual(@as(?Machine.Slot, null), partners[0]);
+    try std.testing.expectEqual(@as(?Machine.Slot, null), partners[1]);
+
+    // With no intervening use, delaying the leader remains legal.
+    const adjacent = [_]Machine.Instruction{ instructions[0], instructions[2], instructions[1], instructions[3] };
+    partners = .{ 1, 0, null, null };
+    pruneEarlyUses(&adjacent, &partners, &recurrences);
+    try std.testing.expectEqual(@as(?Machine.Slot, 1), partners[0]);
+    try std.testing.expectEqual(@as(?Machine.Slot, 0), partners[1]);
+
+    // Slot order is not definition order: the encoder still waits for lane 1.
+    const reversed = [_]Machine.Instruction{ instructions[2], instructions[0], instructions[1], instructions[3] };
+    partners = .{ 1, 0, null, null };
+    pruneEarlyUses(&reversed, &partners, &recurrences);
+    try std.testing.expectEqual(@as(?Machine.Slot, null), partners[0]);
+    try std.testing.expectEqual(@as(?Machine.Slot, null), partners[1]);
 }

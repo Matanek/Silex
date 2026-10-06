@@ -12,6 +12,8 @@ This editorial history starts with version 0.44.1.
 
 - Generic calls in anonymous callbacks now infer types from captured values, including nested callbacks and generic parent functions. Callback parameters retain lexical shadowing; capture lifetime rules are unchanged.
 
+- Native ARM64 Release preserves floating-point constants used before their SIMD partner is defined; quaternion rotations no longer read a previous register value in this case.
+
 - Replacing a resource-owning field in an indexed class collection no longer releases the old reference twice. Restored shared snapshots and self-assignments keep their resource alive until the last owner is destroyed.
 
 - Module-visible extension methods are accessible from atoms and implementation children of their activated provider module, including static, named and generic calls. LSP completion and navigation follow direct and transitive imports in the edited file and resolve the declaring atom. Module-visible methods remain hidden outside that module, and file-local methods outside their file.
