@@ -255,7 +255,7 @@ jobs:
           file "$shadercross" | grep -F 'x86_64'
           "$shadercross" --help >/dev/null 2>&1
           boundary_root="$GITHUB_WORKSPACE/Toolchain/Fixtures/MacOSX64Boundary/Boundary/macos-x64"
-          zig cc -target x86_64-macos -c "$boundary_root/Provider.c" -o "$boundary_root/Provider.o"
+          zig cc -target x86_64-macos -O2 -c "$boundary_root/Provider.c" -o "$boundary_root/Provider.o"
           zig ar rcs "$boundary_root/libMacOSX64Boundary.a" "$boundary_root/Provider.o"
           boundary_consumer="$GITHUB_WORKSPACE/Toolchain/Fixtures/MacOSX64BoundaryConsumer"
           "$silex" link "$GITHUB_WORKSPACE/Toolchain/Fixtures/MacOSX64Boundary" \
