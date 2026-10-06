@@ -1,0 +1,73 @@
+nocopy class SnapshotToken {
+    static var drops:int=0
+    let id:int
+    var parent:SnapshotToken?=null
+    init(id:int,parent:SnapshotToken?=null) {self.id=id;self.parent=parent}
+    drop {SnapshotToken.drops++}
+}
+enum SnapshotStorage {host(int);shared(SnapshotToken)}
+struct SnapshotValue {var storage:SnapshotStorage}
+class SnapshotSlot {
+    var value:SnapshotValue
+    init() {self.value=SnapshotValue(storage:SnapshotStorage.host(0))}
+}
+struct SavedSnapshot {var values:SnapshotValue?[]}
+class SnapshotEngine {
+    private var slots:SnapshotSlot[]
+    init() {self.slots=[SnapshotSlot()]}
+    func publish(value:SnapshotValue) {self.slots[0].value=value}
+    func state() SavedSnapshot {
+        var values:SnapshotValue?[]=[]
+        for slot in self.slots {values.append(slot.value)}
+        return SavedSnapshot(values:values)
+    }
+    func restore(snapshot:SavedSnapshot) {
+        var restored:SnapshotSlot[]=[]
+        for value in snapshot.values {
+            var slot=SnapshotSlot()
+            if let current=value {slot.value=current}
+            restored.append(slot)
+        }
+        self.slots=restored
+    }
+    func replace_with_child() {
+        match self.slots[0].value.storage {
+            shared(value)=>{self.publish(SnapshotValue(storage:SnapshotStorage.shared(SnapshotToken(2,value))))}
+            else=>{panic("missing token")}
+        }
+    }
+    func clear_parent() {
+        match self.slots[0].value.storage {shared(value)=>{value.parent=null};else=>{}}
+    }
+    func id() int {
+        return match self.slots[0].value.storage {shared(value)=>value.id;else=>0}
+    }
+}
+test "restored aliases survive replacement of nested class fields" {
+    SnapshotToken.drops=0
+    {
+        var source=SnapshotEngine()
+        source.publish(SnapshotValue(storage:SnapshotStorage.shared(SnapshotToken(1))))
+        var resumed=SnapshotEngine()
+        resumed.restore(source.state())
+        assert(resumed.id()==1 && SnapshotToken.drops==0)
+        source.replace_with_child()
+        source.clear_parent()
+        assert(SnapshotToken.drops==0)
+        assert(source.id()==2 && resumed.id()==1)
+    }
+    assert(SnapshotToken.drops==2)
+}
+
+test "indexed class field self assignment keeps the shared identity alive" {
+    SnapshotToken.drops=0
+    {
+        var source=SnapshotEngine()
+        source.publish(SnapshotValue(storage:SnapshotStorage.shared(SnapshotToken(1))))
+        for iteration in 0...1000 {
+            if let current=source.state().values[0] {source.publish(current)}
+            assert(source.id()==1 && SnapshotToken.drops==0)
+        }
+    }
+    assert(SnapshotToken.drops==1)
+}

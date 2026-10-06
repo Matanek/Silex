@@ -298,7 +298,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                             .reference = element_reference,
                             .operand = replacement,
                         } });
-                        if (storage_ownership == .edge and drops_replaced_value) {
+                        if (storage_ownership == .edge and drops_replaced_value and !released_edge_value) {
                             try Resources.emitDropOwned(self, builder, current_type, current_value, .edge);
                         }
                         return;

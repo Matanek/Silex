@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le remplacement d’un champ possédant une ressource dans un élément de collection de classe ne libère plus deux fois l’ancienne référence. Les snapshots partagés restaurés et les auto-affectations conservent leur ressource jusqu’à la destruction du dernier propriétaire.
+
 - Les méthodes d’extension `module` sont accessibles depuis les atomes et enfants d’implémentation du module fournisseur activé, y compris les appels statiques, nommés et génériques. La complétion et la navigation LSP suivent les imports directs et transitifs du fichier en cours d’édition et retrouvent l’atome déclarant. Les méthodes `module` restent masquées hors de ce module, les méthodes `local` hors de leur fichier.
 
 - Les types `package` importés depuis un module composé sont résolus dans leur atome déclarant, indépendamment de l’ordre des fichiers. Le LSP conserve les imports canoniques `Package`, leurs aliases, les membres et variantes autorisés ; les types locaux et les types privés au package restent masqués aux consommateurs extérieurs.
