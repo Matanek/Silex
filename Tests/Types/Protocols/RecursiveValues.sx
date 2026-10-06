@@ -1,0 +1,23 @@
+protocol View { func count() int }
+struct Leaf:View { let label:str; func count() int { return 1 } }
+struct Group:View {
+    var children:View[]
+    func count() int {
+        var total = 0
+        for child in self.children { var value = child; total += value.count() }
+        return total
+    }
+}
+class Wrapper:View {
+    var child:View?
+    func count() int {
+        if var child = self.child { return child.count() }
+        return 0
+    }
+}
+test "recursive descriptions copy arrays and optional payloads" {
+    var value:View = Group(children:[Leaf(label:"a"), Wrapper(child:Group(children:[Leaf(label:"b")]))])
+    var copied = value
+    assert(value.count() == 2)
+    assert(copied.count() == 2)
+}

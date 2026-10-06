@@ -12,6 +12,10 @@ This editorial history starts with version 0.44.1.
 
 - Module-visible function references remain accessible from constructors and methods in the other atoms of that module, following the visibility rules of ordinary calls. Completion retains a callback field signature and offers functions from the other atoms; navigation resolves their canonical declaration. File-local functions and private modules remain hidden outside their scope.
 
+- Recursive descriptions stored in collections of protocol values now retain and release their contents without infinite compiler recursion. Direct inline value cycles receive a source diagnostic: their representation must cross a class or dynamic-array field.
+
+- Generic calls in anonymous callbacks now infer types from captured values, including nested callbacks and generic parent functions. Callback parameters retain lexical shadowing; capture lifetime rules are unchanged.
+
 - Native ARM64 Release preserves floating-point constants used before their SIMD partner is defined; quaternion rotations no longer read a previous register value in this case.
 
 - Replacing a resource-owning field in an indexed class collection no longer releases the old reference twice. Restored shared snapshots and self-assignments keep their resource alive until the last owner is destroyed.

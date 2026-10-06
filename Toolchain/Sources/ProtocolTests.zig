@@ -475,3 +475,84 @@ test "protocol erasure transfers temporary resources through collection mutation
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("consumed\nitem dropped\ndone\n", output);
 }
+
+test "recursive protocol values retain and release finite nested payloads" {
+    const output = try run(
+        \\protocol Tree { func count() int }
+        \\class Token {
+        \\    static var destroyed:int = 0
+        \\    drop { Token.destroyed++ }
+        \\}
+        \\struct Leaf:Tree {
+        \\    var token:Token
+        \\    let label:str
+        \\    func count() int { return 1 }
+        \\}
+        \\struct Branch:Tree {
+        \\    var children:Tree[]
+        \\    func count() int {
+        \\        var total = 0
+        \\        for child in self.children { var value = child; total += value.count() }
+        \\        return total
+        \\    }
+        \\}
+        \\enum Choice { absent; present(Tree) }
+        \\class Wrapped:Tree {
+        \\    var choice:Choice
+        \\    func count() int {
+        \\        match self.choice {
+        \\            absent => { return 0 }
+        \\            present(child) => { var value = child; return value.count() }
+        \\        }
+        \\    }
+        \\}
+        \\class Optional:Tree {
+        \\    var child:Tree?
+        \\    func count() int {
+        \\        if var child = self.child { return child.count() }
+        \\        return 0
+        \\    }
+        \\}
+        \\func relay(tree:Tree) Tree { return tree }
+        \\func main() {
+        \\    {
+        \\        var tree:Tree = Branch(children:[
+        \\            Leaf(token:Token(), label:"a"),
+        \\            Optional(child:Wrapped(choice:Choice.present(Branch(children:[Leaf(token:Token(), label:"b")])))),
+        \\            Optional(child:null), Wrapped(choice:Choice.absent)
+        \\        ])
+        \\        var copied = relay(tree)
+        \\        assert(tree.count() == 2 && copied.count() == 2)
+        \\        assert(Token.destroyed == 0)
+        \\    }
+        \\    assert(Token.destroyed == 2)
+        \\    print("recursive ownership ok")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("recursive ownership ok\n", output);
+}
+
+test "mutually recursive protocol resource helpers preserve payload dispatch" {
+    const output = try run(
+        \\protocol First { func read() int }
+        \\protocol Second { func read() int }
+        \\struct Number:First { let value:int; func read() int { return self.value } }
+        \\struct Forward:Second { var children:First[]; func read() int { var child = self.children[0]; return child.read() } }
+        \\struct Back:First { var children:Second[]; func read() int { var child = self.children[0]; return child.read() } }
+        \\func main() {
+        \\    var value:First = Back(children:[Forward(children:[Number(value:42)])])
+        \\    var copied = value
+        \\    print(value.read(), " ", copied.read())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("42 42\n", output);
+}
+
+test "reject unbounded inline recursive protocol payloads before native lowering" {
+    try expectCompileError(
+        "protocol Item { func count() int } struct Wrapped:Item { var child:Item?; func count() int { return 0 } } func main() {}",
+        "recursive protocol values must cross a class or dynamic-array field",
+    );
+}

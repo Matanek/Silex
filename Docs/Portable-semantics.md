@@ -37,6 +37,14 @@ offset, layout or copy machine operation. Calls, returns, local storage and
 recursive equality preserve value semantics in the reference interpreter and
 native backend.
 
+Recursive protocol resource graphs use private retain/drop helper functions
+for each required ownership domain. Their calls recurse over actual payloads
+at execution rather than expanding the conformer graph during IR emission.
+A directly inline protocol cycle has no finite aggregate layout and is rejected
+before target lowering; classes and dynamic arrays provide finite boundaries.
+These helpers currently bypass the generated package-function cache, as do
+callers referencing them, until complete conformer-graph provenance is available.
+
 Class roots lower to typed retain and finalization operations. Their runtime
 representation, unique-finalization guard, cycle handling and target layout
 remain private to the interpreter and target lowering; source code observes

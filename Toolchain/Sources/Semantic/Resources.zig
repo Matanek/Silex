@@ -463,6 +463,18 @@ pub fn retainValueOwned(self: anytype, builder: anytype, type_value: Ast.Type, v
 }
 
 fn emitProtocolResource(self: anytype, builder: anytype, protocol_index: usize, value: Ir.ValueId, retain: bool, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {
+    if (protocol_index < self.recursive_protocol_resources.len and self.recursive_protocol_resources[protocol_index]) {
+        try self.emit(builder, .{ .call = .{
+            .result = null,
+            .function = @import("ProtocolResources.zig").functionId(self, protocol_index, retain, ownership, invoke_value_drop),
+            .arguments = try self.allocator.dupe(Ir.ValueId, &.{value}),
+        } });
+        return;
+    }
+    return emitProtocolResourceBody(self, builder, protocol_index, value, retain, ownership, invoke_value_drop);
+}
+
+pub fn emitProtocolResourceBody(self: anytype, builder: anytype, protocol_index: usize, value: Ir.ValueId, retain: bool, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {
     const ProtocolValues = @import("ProtocolValues.zig");
     const conformers = try ProtocolValues.conformers(self, protocol_index);
     if (conformers.len == 0) return;
