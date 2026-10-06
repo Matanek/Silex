@@ -2228,8 +2228,12 @@ fn methodVisible(packages: ?Packages.Graph, module_scope_roots: []const []const 
         call.owner == method.owner;
     if (method.is_private or method.is_protected) return call.owner == method.owner;
     if (call.name_position.file == method.position.file) return true;
-    const separator = std.mem.lastIndexOfScalar(u8, structure.name, '.') orelse return false;
-    const declaration_module = structure.name[0..separator];
+    const declaration_module = if (method.extension) |extension|
+        extension.provider
+    else module: {
+        const separator = std.mem.lastIndexOfScalar(u8, structure.name, '.') orelse return false;
+        break :module structure.name[0..separator];
+    };
     if (call.owner != method.owner and
         (packages == null or !packages.?.canAccessMergedModule(call.owner, method.owner, declaration_module))) return false;
     return ModuleScopes.same(module_scope_roots, call.module, declaration_module);

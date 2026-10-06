@@ -482,3 +482,79 @@ test "reject inaccessible extension conformance protocols" {
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("structure 'Hidden' is module-visible and unavailable outside its module", compiler.diagnostic.?.message);
 }
+
+test "module extension methods span provider atoms and implementation children" {
+    for ([_][]const u8{ "use Group\nuse Core", "use Core\nuse Group" }) |imports| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try temporary.dir.createDirPath(std.testing.io, "Group");
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\"}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Value {let number:int}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/@Extension.sx", .data =
+            \\use Core
+            \\extend Core.Value {
+            \\    module func hidden(delta:int = 0) int {return self.number + delta}
+            \\    module func identity<T>(value:T) T {return value}
+            \\    module static func make() Core.Value {return Core.Value(number:42)}
+            \\    local func file_only() int {return self.number}
+            \\}
+        });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/@Caller.sx", .data =
+            \\use Core
+            \\public func answer() int {
+            \\    let value = Core.Value.make()
+            \\    let reference = value.hidden
+            \\    return reference(0) + value.hidden(delta:1) + value.identity(42)
+            \\}
+        });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/Child.sx", .data =
+            \\use Core
+            \\use Group
+            \\public func child() int {return Core.Value(number:42).hidden()}
+        });
+        const main = try std.fmt.allocPrint(allocator, "{s}\nuse Group.Child\nfunc main() {{print(Group.answer(), \" \", Child.child())}}", .{imports});
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = main });
+        const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+        var compiler = Project.Compiler.init(allocator, std.testing.io);
+        const compilation = compiler.compile(input) catch |err| {
+            if (compiler.diagnostic) |diagnostic| std.debug.print("\nExtension diagnostic: {s}\n", .{diagnostic.message});
+            return err;
+        };
+        const result = try Interpreter.runCapture(allocator, compilation.ir);
+        try std.testing.expectEqualStrings("127 42\n", result.stdout);
+    }
+}
+
+test "module extension visibility remains provider scoped and local stays file scoped" {
+    for ([_]u8{ 0, 1, 2 }) |boundary| {
+        const local_method = boundary == 1;
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try temporary.dir.createDirPath(std.testing.io, "Group");
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\"}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Value {}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/@Extension.sx", .data =
+            \\use Core
+            \\extend Core.Value {
+            \\    module func hidden() int {return 42}
+            \\    local func file_only() int {return 7}
+            \\}
+        });
+        const method = if (local_method) "file_only" else "hidden";
+        if (boundary == 2) try temporary.dir.createDirPath(std.testing.io, "Group/Owned");
+        const caller = if (boundary == 2) "Group/Owned/@Caller.sx" else if (local_method) "Group/Child.sx" else "Main.sx";
+        const main = try std.fmt.allocPrint(allocator, "use Core\nuse Group\nfunc main() {{Core.Value().{s}()}}", .{method});
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = caller, .data = main });
+        const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, caller });
+        var compiler = Project.Compiler.init(allocator, std.testing.io);
+        try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+        const expected = if (local_method) "method 'file_only' is local to its source file" else "method 'hidden' is module-visible and unavailable outside its module";
+        try std.testing.expectEqualStrings(expected, compiler.diagnostic.?.message);
+    }
+}

@@ -17,7 +17,9 @@ pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, pos
             if (member.is_public) return true;
             if (member.is_local) return position.file == member.position.file;
             if (member.is_internal) return packageVisible(self, member.owner);
-            return position.file == member.position.file;
+            if (position.file == member.position.file) return true;
+            if (member.is_private or member.is_protected) return false;
+            return providerModuleVisible(self, member.owner, extension.provider);
         }
     }
     if (member.is_public) return true;
@@ -68,10 +70,14 @@ fn protectedAnchor(self: anytype, structure_index: usize) usize {
 pub fn sameModule(self: anytype, structure_index: usize) bool {
     const target_root = root(self, structure_index);
     const target = declarationAt(self, target_root) orelse return false;
-    const accessor = self.owner_context orelse return false;
     const target_module = declarationModule(self.module_scope_roots, target.name) orelse return false;
-    if (accessor != target.owner and
-        (self.packages == null or !self.packages.?.canAccessMergedModule(accessor, target.owner, target_module))) return false;
+    return providerModuleVisible(self, target.owner, target_module);
+}
+
+fn providerModuleVisible(self: anytype, provider: usize, target_module: []const u8) bool {
+    const accessor = self.owner_context orelse return false;
+    if (accessor != provider and
+        (self.packages == null or !self.packages.?.canAccessMergedModule(accessor, provider, target_module))) return false;
     if (self.module_context) |context| return ModuleScopes.same(self.module_scope_roots, context, target_module);
     const context = self.member_context orelse return false;
     const context_declaration = declarationAt(self, root(self, context)) orelse return false;

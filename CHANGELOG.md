@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Module-visible extension methods are accessible from atoms and implementation children of their activated provider module, including static, named and generic calls. LSP completion and navigation follow direct and transitive imports in the edited file and resolve the declaring atom. Module-visible methods remain hidden outside that module, and file-local methods outside their file.
+
 - Imported `package` types in a composed module resolve in their declaring atom, regardless of file order. The LSP preserves canonical `Package` imports, aliases, and accessible members and variants; file-local and package-private types remain hidden from external consumers.
 
 - In an explicit constructor, a class field without an `=` expression now awaits its assigned reference, even when its class has a parameterless constructor. It no longer creates an immediately replaced temporary instance; an intended prior construction must be written on the field as `= Resource()`. Reads before initialization and uninitialized paths are diagnosed.

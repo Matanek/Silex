@@ -1813,6 +1813,7 @@ fn appendImportedMembersDepth(
                     .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
                 }, Completion.memberMethodPriority, true);
             }
+            try appendActivatedExtensionMethods(allocator, io, documents, project, current_source, query, structure, ranked);
             return;
         }
         if (query.override_context == null) for (structure.fields) |field| {
@@ -1880,16 +1881,7 @@ fn appendImportedMembersDepth(
             }, Completion.memberMethodPriority, true);
         }
         if (query.override_context == null) {
-            try appendProviderExtensionMethods(
-                allocator,
-                project,
-                current_source,
-                query,
-                loaded,
-                structure,
-                provider,
-                ranked,
-            );
+            try appendActivatedExtensionMethods(allocator, io, documents, project, current_source, query, structure, ranked);
             try appendCurrentExtensionMethods(
                 allocator,
                 project,
@@ -2041,6 +2033,22 @@ fn programProvidesDeclaration(program: Ast.Program, declaration: []const u8) boo
     return false;
 }
 
+fn appendActivatedExtensionMethods(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    source: []const u8,
+    query: ImportedMemberQuery,
+    target: Ast.Structure,
+    ranked: *std.ArrayList(RankedItem),
+) !void {
+    const active = try ProjectIndex.activeExtensionProviders(allocator, io, documents, project, if (query.current_program) |program| .{ .source = source, .program = program } else null, query.type_path);
+    for (active) |entry| {
+        try appendProviderExtensionMethods(allocator, project, source, query, entry.loaded, target, entry.provider, ranked);
+    }
+}
+
 fn appendProviderExtensionMethods(
     allocator: Allocator,
     project: IndexedProject,
@@ -2052,18 +2060,12 @@ fn appendProviderExtensionMethods(
     ranked: *std.ArrayList(RankedItem),
 ) !void {
     for (loaded.program.extensions) |extension| {
-        const local_target = Completion.typeName(loaded.program, extension.target);
-        const matches_local_target = std.mem.indexOfScalar(u8, local_target, '.') == null and
-            std.mem.eql(u8, local_target, target.name);
-        const matches_imported_target = if (matches_local_target)
-            true
-        else if (try importedTypePath(allocator, loaded.program, project, local_target)) |resolved|
-            std.mem.eql(u8, resolved, query.type_path)
-        else
-            false;
-        if (!matches_imported_target) continue;
+        const resolved_target = try providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(Completion.typeName(loaded.program, extension.target)));
+        const target_identity = try ProjectIndex.nominalIdentityPath(allocator, project, resolved_target);
+        const receiver_identity = try ProjectIndex.nominalIdentityPath(allocator, project, query.type_path);
+        if (!std.mem.eql(u8, target_identity, receiver_identity)) continue;
         for (extension.methods) |method| {
-            if (method.is_static) continue;
+            if (method.is_static != query.static_receiver) continue;
             if (method.visibility_explicit) {
                 if (!importedMemberVisible(project, provider, method)) continue;
             } else if (!importedMemberVisible(project, provider, target)) continue;
@@ -2638,7 +2640,7 @@ fn lastSegment(path: []const u8) []const u8 {
     return path[separator + 1 ..];
 }
 
-fn importedMemberVisible(project: IndexedProject, provider: Modules.Provider, member: anytype) bool {
+pub fn importedMemberVisible(project: IndexedProject, provider: Modules.Provider, member: anytype) bool {
     if (member.is_public) return true;
     if (member.is_local or member.is_private or member.is_protected) return false;
     if (member.is_internal) return project.graph.canAccessPackage(project.current_owner, provider.owner);

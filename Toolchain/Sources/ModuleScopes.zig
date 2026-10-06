@@ -34,6 +34,7 @@ fn providerScope(providers: anytype, module: []const u8) []const u8 {
         const basename = std.fs.path.basename(provider.path);
         if (!Modules.isFragmentFile(basename)) continue;
         const root = logical(provider.name);
+        if (std.mem.eql(u8, root, module)) return root;
         if (root.len >= module.len or !std.mem.startsWith(u8, module, root) or module[root.len] != '.') continue;
         if (result == null or root.len > result.?.len) result = root;
     }
@@ -54,4 +55,15 @@ test "share module scope through a declared parent module only" {
     try std.testing.expect(same(roots, "STD.Text", "STD.Text.$Platform"));
     try std.testing.expect(!same(roots, "STD.Regex.Engine", "STD.Text.Data"));
     try std.testing.expect(!same(roots, "Layer.A", "Layer.B"));
+}
+
+test "editor provider scopes retain a nested composed module boundary" {
+    const providers = [_]struct { name: []const u8, path: []const u8 }{
+        .{ .name = "Group", .path = "Group/@Extension.sx" },
+        .{ .name = "Group.Owned", .path = "Group/Owned/@Caller.sx" },
+    };
+    try std.testing.expect(sameProviders(&providers, "Group", "Group.Child"));
+    try std.testing.expect(sameProviders(&providers, "Group.Owned", "Group.Owned.Child"));
+    try std.testing.expect(!sameProviders(&providers, "Group", "Group.Owned"));
+    try std.testing.expect(!sameProviders(&providers, "Group.Child", "Group.Owned.Child"));
 }

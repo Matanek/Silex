@@ -23,6 +23,86 @@ pub const LoadedProgram = struct {
     program: Ast.Program,
 };
 
+pub const ActiveExtensionProvider = struct {
+    provider: Modules.Provider,
+    loaded: LoadedProgram,
+};
+
+/// Extensions are activated by the current composed provider and its use closure.
+/// The parsed editing overlay preserves imports even when the cursor source is incomplete.
+pub fn activeExtensionProviders(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    current_overlay: ?LoadedProgram,
+    referenced_type: ?[]const u8,
+) ![]const ActiveExtensionProvider {
+    const current = currentProvider(project) orelse return &.{};
+    const visited = try allocator.alloc(bool, project.index.providers.len);
+    @memset(visited, false);
+    var pending: std.ArrayList(usize) = .empty;
+    var result: std.ArrayList(ActiveExtensionProvider) = .empty;
+    try activateExtensionProvider(allocator, project, current, visited, &pending);
+    if (referenced_type) |path| {
+        if (referencedProvider(project, project.current_owner, path)) |provider| {
+            try activateExtensionProvider(allocator, project, provider, visited, &pending);
+        }
+    }
+    var next: usize = 0;
+    while (next < pending.items.len) : (next += 1) {
+        const provider = project.index.providers[pending.items[next]];
+        const loaded: LoadedProgram = if (samePath(provider.path, project.current_path) and current_overlay != null)
+            current_overlay.?
+        else
+            try loadProgram(allocator, io, documents, provider) orelse continue;
+        try result.append(allocator, .{ .provider = provider, .loaded = loaded });
+        for (loaded.program.uses) |use| {
+            const path = try canonicalUsePath(allocator, project, provider, use.path);
+            if (referencedProvider(project, provider.owner, path)) |dependency| {
+                try activateExtensionProvider(allocator, project, dependency, visited, &pending);
+            }
+        }
+    }
+    return result.toOwnedSlice(allocator);
+}
+
+fn referencedProvider(project: IndexedProject, owner: usize, path: []const u8) ?Modules.Provider {
+    var best: ?Modules.Provider = null;
+    for (project.index.providers) |candidate| {
+        if (!project.graph.canAccess(owner, candidate.owner, candidate.name)) continue;
+        if (!std.mem.eql(u8, path, candidate.name) and
+            !(path.len > candidate.name.len and std.mem.startsWith(u8, path, candidate.name) and path[candidate.name.len] == '.')) continue;
+        if (best == null or candidate.name.len > best.?.name.len) best = candidate;
+    }
+    return best;
+}
+
+fn activateExtensionProvider(
+    allocator: Allocator,
+    project: IndexedProject,
+    selected: Modules.Provider,
+    visited: []bool,
+    pending: *std.ArrayList(usize),
+) !void {
+    for (project.index.providers, 0..) |provider, provider_index| {
+        if (visited[provider_index] or provider.owner != selected.owner or !std.mem.eql(u8, provider.name, selected.name)) continue;
+        visited[provider_index] = true;
+        try pending.append(allocator, provider_index);
+    }
+}
+
+/// A module's homonymous principal type has the same nominal identity as its explicit path.
+pub fn nominalIdentityPath(allocator: Allocator, project: IndexedProject, path: []const u8) ![]const u8 {
+    for (project.index.providers) |provider| {
+        if (!std.mem.eql(u8, path, provider.name)) continue;
+        const separator = std.mem.lastIndexOfScalar(u8, path, '.');
+        const principal = if (separator) |dot| path[dot + 1 ..] else path;
+        return std.fmt.allocPrint(allocator, "{s}.{s}", .{ path, principal });
+    }
+    return path;
+}
+
 pub const CatalogUse = struct {
     provider: Modules.Provider,
     use: Ast.Use,

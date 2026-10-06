@@ -89,7 +89,45 @@ pub fn definitionAtForTarget(
         try std.fmt.allocPrint(allocator, "{s}.{s}", .{ resolved.type_path, member })
     else
         try resolveImportedPath(allocator, project, program, request.path);
-    return definitionForPath(allocator, io, documents, project, resolved_path, encoding, 0, if (receiver) |resolved| !resolved.static_receiver else false, if (receiver) |resolved| resolved.inherited_access else false);
+    if (try definitionForPath(allocator, io, documents, project, resolved_path, encoding, 0, if (receiver) |resolved| !resolved.static_receiver else false, if (receiver) |resolved| resolved.inherited_access else false)) |definition| return definition;
+    const query = receiver orelse return null;
+    const active = try ProjectIndex.activeExtensionProviders(allocator, io, documents, project, .{ .source = source, .program = program }, query.type_path);
+    for (active) |entry| {
+        for (entry.loaded.program.extensions) |extension| {
+            const target_path = try Workspace.providerTypePath(allocator, project, entry.loaded.program, entry.provider, Completion.nominalReceiverName(Completion.typeName(entry.loaded.program, extension.target)));
+            const target_identity = try ProjectIndex.nominalIdentityPath(allocator, project, target_path);
+            const receiver_identity = try ProjectIndex.nominalIdentityPath(allocator, project, query.type_path);
+            if (!std.mem.eql(u8, target_identity, receiver_identity)) continue;
+            for (extension.methods) |method| {
+                if (method.is_static != query.static_receiver or !std.mem.eql(u8, method.name, member)) continue;
+                if (!try extensionMethodVisible(allocator, io, documents, project, entry.provider, query.type_path, method)) continue;
+                return location(allocator, entry.provider.path, entry.loaded.source, method.name_position, method.name.len, encoding);
+            }
+        }
+    }
+    return null;
+}
+
+fn extensionMethodVisible(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: ProjectIndex.IndexedProject,
+    extension_provider: Modules.Provider,
+    type_path: []const u8,
+    method: Ast.Function,
+) !bool {
+    if (method.visibility_explicit) return Workspace.importedMemberVisible(project, extension_provider, method);
+    const target = declarationTarget(project.index, type_path) orelse return false;
+    const canonical_provider = project.index.providers[target.provider];
+    for (project.index.providers) |provider| {
+        if (provider.owner != canonical_provider.owner or !std.mem.eql(u8, provider.name, canonical_provider.name)) continue;
+        const loaded = try ProjectIndex.loadProgram(allocator, io, documents, provider) orelse continue;
+        if (structureNamed(loaded.program, target.declaration)) |structure| {
+            return Workspace.importedMemberVisible(project, extension_provider, structure);
+        }
+    }
+    return false;
 }
 
 fn definitionForPath(

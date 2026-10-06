@@ -590,3 +590,82 @@ test "every workspace topology has a registered proof and suppression is detecte
         try std.testing.expectError(error.MissingTopologyProof, auditTopologyCoverage(topology));
     }
 }
+
+test "workspace module extension visibility follows its provider atoms" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Group");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Value {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Other.sx", .data = "public struct Value {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/@Extension.sx", .data =
+        \\use Core
+        \\use Other
+        \\extend Other.Value {func unrelated() int {return 0}}
+        \\extend Core.Value {
+        \\    module func hidden() int {return 42}
+        \\    local func file_only() int {return 7}
+        \\    func opened() int {return 9}
+        \\    module static func make() Core.Value {return Core.Value()}
+        \\    static func opened_static() int {return 11}
+        \\}
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/@Caller.sx", .data = "func anchor() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/Child.sx", .data = "func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge.sx", .data = "use Group" });
+    const sources = [_][]const u8{
+        "use Core.Value\nuse Group\nfunc consume(value:Value) {value.<|>}",
+        "use Core\nuse Group\nfunc consume(value:Core.Value) {value.<|>}",
+        "use Core.Value as Item\nuse Bridge\nfunc consume(value:Item) {value.<|>}",
+    };
+    for ([_][]const u8{ "Group/@Caller.sx", "Group/Child.sx" }) |relative| {
+        const uri = try std.fmt.allocPrint(allocator, "file://{s}/{s}", .{ root, relative });
+        for (sources) |source| {
+            const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+            try Support.expectExactLabels(&.{ "hidden", "opened" }, items);
+            try Support.expectItem(.{ .label = "hidden", .kind = 2, .detail = "hidden() int", .insert_text = "hidden()" }, items);
+            try Support.expectNoDuplicates(items);
+            try Support.expectEqualItems(items, try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, "."));
+        }
+        const statics = try Support.serverCompletionAfterTrigger(&server, allocator, uri, "use Core.Value\nuse Group\nfunc main() {Value.<|>}", ".");
+        try Support.expectPresent("make", statics);
+        try Support.expectPresent("opened_static", statics);
+        try Support.expectAbsent("hidden", statics);
+        for (sources) |source| {
+            const call_source = try std.mem.replaceOwned(u8, allocator, source, "value.<|>", "value.hid<|>den()");
+            const definition = (try Support.serverDefinition(&server, allocator, uri, call_source)) orelse return error.MissingExtensionAtomDefinition;
+            try std.testing.expect(std.mem.endsWith(u8, definition.uri, "/Group/%40Extension.sx"));
+        }
+        const static_definition = (try Support.serverDefinition(&server, allocator, uri, "use Core.Value\nuse Group\nfunc main() {Value.ma<|>ke()}")) orelse return error.MissingExtensionStaticDefinition;
+        try std.testing.expect(std.mem.endsWith(u8, static_definition.uri, "/Group/%40Extension.sx"));
+    }
+    try temporary.dir.createDirPath(std.testing.io, "Group/Owned");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Group/Owned/@Caller.sx", .data = "func anchor() {}" });
+    const owned_uri = try std.fmt.allocPrint(allocator, "file://{s}/Group/Owned/@Caller.sx", .{root});
+    const owned = try Support.serverCompletionAfterTrigger(&server, allocator, owned_uri, sources[0], ".");
+    try Support.expectExactLabels(&.{"opened"}, owned);
+    try std.testing.expectEqual(null, try Support.serverDefinition(&server, allocator, owned_uri, "use Core.Value\nuse Group\nfunc consume(value:Value) {value.hid<|>den()}"));
+    const external_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const external = try Support.serverCompletionAfterTrigger(&server, allocator, external_uri, sources[0], ".");
+    try Support.expectExactLabels(&.{"opened"}, external);
+    const inactive = try Support.serverCompletionAfterTrigger(&server, allocator, external_uri, "use Core.Value\nfunc consume(value:Value) {value.<|>}", ".");
+    try Support.expectAbsent("hidden", inactive);
+    try Support.expectAbsent("opened", inactive);
+    const external_statics = try Support.serverCompletionAfterTrigger(&server, allocator, external_uri, "use Core.Value\nuse Group\nfunc main() {Value.<|>}", ".");
+    try Support.expectAbsent("make", external_statics);
+    try Support.expectPresent("opened_static", external_statics);
+    try std.testing.expectEqual(null, try Support.serverDefinition(&server, allocator, external_uri, "use Core.Value\nuse Group\nfunc consume(value:Value) {value.hid<|>den()}"));
+    try std.testing.expectEqual(null, try Support.serverDefinition(&server, allocator, external_uri, "use Core.Value\nfunc consume(value:Value) {value.op<|>ened()}"));
+    try std.testing.expectEqual(null, try Support.serverDefinition(&server, allocator, external_uri, "use Core.Value\nuse Group\nfunc main() {Value.ma<|>ke()}"));
+    const public_definition = (try Support.serverDefinition(&server, allocator, external_uri, "use Core.Value\nuse Group\nfunc consume(value:Value) {value.op<|>ened()}")) orelse return error.MissingPublicExtensionDefinition;
+    try std.testing.expect(std.mem.endsWith(u8, public_definition.uri, "/Group/%40Extension.sx"));
+}
