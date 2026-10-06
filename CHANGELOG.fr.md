@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les descriptions récursives transportées dans des collections de valeurs de protocole conservent et libèrent désormais leurs contenus sans récursion infinie du compilateur. Un cycle directement imbriqué par valeur est diagnostiqué : sa représentation doit passer par un champ de classe ou de tableau dynamique.
+
 - Les appels génériques dans un callback anonyme infèrent désormais leurs types depuis les valeurs capturées, y compris dans les callbacks imbriqués et les fonctions parentes génériques. Les paramètres du callback conservent leur masquage lexical ; les règles de durée de vie des captures restent inchangées.
 
 - Le remplacement d’un champ possédant une ressource dans un élément de collection de classe ne libère plus deux fois l’ancienne référence. Les snapshots partagés restaurés et les auto-affectations conservent leur ressource jusqu’à la destruction du dernier propriétaire.
