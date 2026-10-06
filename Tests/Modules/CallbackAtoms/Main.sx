@@ -1,0 +1,6 @@
+use Callbacks.Caller
+func main() { var caller = Caller(); print(caller.calculate()) }
+test "module callbacks cross atoms inside a constructor and method" {
+    var caller = Caller()
+    assert(caller.calculate() == 42)
+}

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
+const ModuleScopes = @import("../ModuleScopes.zig");
 const Packages = @import("../Packages.zig");
 const ParserModule = @import("../Parser.zig");
 const Source = @import("../Source.zig");
@@ -90,6 +91,18 @@ pub fn definitionAtForTarget(
     else
         try resolveImportedPath(allocator, project, program, request.path);
     if (try definitionForPath(allocator, io, documents, project, resolved_path, encoding, 0, if (receiver) |resolved| !resolved.static_receiver else false, if (receiver) |resolved| resolved.inherited_access else false)) |definition| return definition;
+    if (std.mem.indexOfScalar(u8, request.path, '.') == null) {
+        if (ProjectIndex.currentProvider(project)) |current| for (project.index.providers) |provider| {
+            if (provider.owner != current.owner or
+                !ModuleScopes.sameProviders(project.index.providers, current.name, provider.name)) continue;
+            const loaded = try ProjectIndex.loadProgram(allocator, io, documents, provider) orelse continue;
+            for (loaded.program.functions) |function| {
+                if (function.operator != null or !std.mem.eql(u8, function.name, request.path) or
+                    !Workspace.importedMemberVisible(project, provider, function)) continue;
+                return location(allocator, provider.path, loaded.source, function.name_position, function.name.len, encoding);
+            }
+        };
+    }
     const query = receiver orelse return null;
     const active = try ProjectIndex.activeExtensionProviders(allocator, io, documents, project, .{ .source = source, .program = program }, query.type_path);
     for (active) |entry| {

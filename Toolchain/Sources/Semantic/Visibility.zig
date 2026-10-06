@@ -19,7 +19,7 @@ pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, pos
             if (member.is_internal) return packageVisible(self, member.owner);
             if (position.file == member.position.file) return true;
             if (member.is_private or member.is_protected) return false;
-            return providerModuleVisible(self, member.owner, extension.provider);
+            return moduleVisible(self, member.owner, extension.provider);
         }
     }
     if (member.is_public) return true;
@@ -71,10 +71,10 @@ pub fn sameModule(self: anytype, structure_index: usize) bool {
     const target_root = root(self, structure_index);
     const target = declarationAt(self, target_root) orelse return false;
     const target_module = declarationModule(self.module_scope_roots, target.name) orelse return false;
-    return providerModuleVisible(self, target.owner, target_module);
+    return moduleVisible(self, target.owner, target_module);
 }
 
-fn providerModuleVisible(self: anytype, provider: usize, target_module: []const u8) bool {
+pub fn moduleVisible(self: anytype, provider: usize, target_module: []const u8) bool {
     const accessor = self.owner_context orelse return false;
     if (accessor != provider and
         (self.packages == null or !self.packages.?.canAccessMergedModule(accessor, provider, target_module))) return false;

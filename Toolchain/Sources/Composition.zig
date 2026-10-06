@@ -220,3 +220,40 @@ fn countFunctions(program: Ir.Program, name: []const u8) usize {
     }
     return count;
 }
+
+test "module function callbacks remain visible in constructors and methods across atoms" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Api/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\",\"dependencies\":{\"Api\":\"=1.0.0\"}}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Package.json", .data = "{\"name\":\"Api\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@Functions.sx", .data = "func increment(value:int) int {return value+1}\nlocal func hidden(value:int) int {return value}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@Caller.sx", .data =
+        \\public class Caller {
+        \\    let callback:func(int) int
+        \\    init() { self.callback=increment }
+        \\    func calculate() int {let another:func(int) int=increment; return another(self.callback(40))}
+        \\}
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Api.Caller\nfunc calculate() int {var caller=Caller(); return caller.calculate()}\nfunc main() {calculate()}" });
+    const input = try inputPath(allocator, &temporary.sub_path);
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compiled = try compiler.compile(input);
+    const value = try Interpreter.invoke(allocator, compiled.ir, functionId(compiled.ir, "Main.calculate").?, &.{});
+    try std.testing.expectEqual(@as(i64, 42), value.integer);
+    for ([_][]const u8{
+        "use Api.Caller\nfunc main() {let callback:func(int) int=Api.increment}",
+        "use Api.Caller\nfunc main() {let callback:func(int) int=Api.hidden}",
+    }) |source| {
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+        var rejected = Project.Compiler.init(allocator, std.testing.io);
+        try std.testing.expectError(error.InvalidSource, rejected.compile(input));
+    }
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Api.Caller\nfunc main() {var caller=Caller()}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@Caller.sx", .data = "public class Caller {let callback:func(int) int; init() {self.callback=hidden}}" });
+    var hidden = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, hidden.compile(input));
+}

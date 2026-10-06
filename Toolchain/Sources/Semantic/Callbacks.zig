@@ -1,5 +1,4 @@
 const std = @import("std");
-const ModuleScopes = @import("../ModuleScopes.zig");
 const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
@@ -365,10 +364,8 @@ fn visible(self: anytype, function: Ast.Function, file: usize) bool {
     if (function.is_local) return function.position.file == file;
     if (function.is_public or function.position.file == file) return true;
     if (function.is_internal) return Visibility.packageVisible(self, function.owner);
-    if ((self.owner_context orelse return false) != function.owner) return false;
-    const context = self.module_context orelse return false;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
-    return ModuleScopes.same(self.module_scope_roots, function.name[0..separator], context);
+    return Visibility.moduleVisible(self, function.owner, function.name[0..separator]);
 }
 
 fn nameMatches(candidate: []const u8, requested: []const u8) bool {

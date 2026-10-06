@@ -669,3 +669,36 @@ test "workspace module extension visibility follows its provider atoms" {
     const public_definition = (try Support.serverDefinition(&server, allocator, external_uri, "use Core.Value\nuse Group\nfunc consume(value:Value) {value.op<|>ened()}")) orelse return error.MissingPublicExtensionDefinition;
     try std.testing.expect(std.mem.endsWith(u8, public_definition.uri, "/Group/%40Extension.sx"));
 }
+
+test "workspace module callback completion crosses atoms in constructors and methods" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Callbacks/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Callbacks/Package.json", .data = "{\"name\":\"Callbacks\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Callbacks/Module/@Functions.sx", .data = "func increment(value:int) int {return value+1}\nfunc wrong(value:str) int {return 0}\nlocal func hidden(value:int) int {return value}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Callbacks/Module/@Caller.sx", .data = "class Caller {let callback:func(int) int; init() {self.callback=increment}}" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Callbacks" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Module/@Caller.sx", .{root});
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    for ([_][]const u8{
+        "class Caller {let callback:func(int) int; init() {self.callback=<|>}}",
+        "class Caller {let callback:func(int) int; init() {self.callback=inc<|>}}",
+        "class Caller {func inspect() {let callback:func(int) int=<|>}}",
+    }) |source| {
+        const items = try Support.serverCompletion(&server, allocator, uri, source);
+        try Support.expectItem(.{ .label = "increment", .kind = 3, .detail = "increment(value:int) int", .insert_text = "increment" }, items);
+        try Support.expectAbsent("hidden", items);
+        try Support.expectAbsent("wrong", items);
+        try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, try Support.serverCompletion(&server, allocator, uri, source));
+        try std.testing.expectEqual(null, try Support.serverDefinition(&server, allocator, uri, "class Caller {let callback:func(int) int; init() {self.callback=hid<|>den}}"));
+        const definition = (try Support.serverDefinition(&server, allocator, uri, "class Caller {let callback:func(int) int; init() {self.callback=inc<|>rement}}")) orelse return error.MissingCallbackDefinition;
+        try std.testing.expect(std.mem.endsWith(u8, definition.uri, "/Module/%40Functions.sx"));
+    }
+}

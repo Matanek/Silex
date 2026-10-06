@@ -4525,7 +4525,14 @@ fn expectedAssignmentType(
     const target = std.mem.trim(u8, source[tokens[start].start..tokens[operator].start], " \t\r\n");
     const target_type = resolveReceiverTypeForAccess(allocator, source, program, cursor, target, false) orelse
         cascadeAssignmentType(allocator, source, program, cursor, target) orelse return null;
-    return .{ .name = target_type, .strict = true };
+    // Keep the typed field signature: its display name is only "function".
+    const resolved_type = expressionTypeAt(allocator, source, program, cursor, target) orelse
+        typeForSourceSpelling(program, target_type);
+    return .{
+        .name = target_type,
+        .strict = true,
+        .function_type = if (resolved_type) |resolved| if (resolved.functionIndex() != null) resolved else null else null,
+    };
 }
 
 fn cascadeAssignmentType(

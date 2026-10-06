@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Module-visible function references remain accessible from constructors and methods in the other atoms of that module, following the visibility rules of ordinary calls. Completion retains a callback field signature and offers functions from the other atoms; navigation resolves their canonical declaration. File-local functions and private modules remain hidden outside their scope.
+
 - Replacing a resource-owning field in an indexed class collection no longer releases the old reference twice. Restored shared snapshots and self-assignments keep their resource alive until the last owner is destroyed.
 
 - Module-visible extension methods are accessible from atoms and implementation children of their activated provider module, including static, named and generic calls. LSP completion and navigation follow direct and transitive imports in the edited file and resolve the declaring atom. Module-visible methods remain hidden outside that module, and file-local methods outside their file.

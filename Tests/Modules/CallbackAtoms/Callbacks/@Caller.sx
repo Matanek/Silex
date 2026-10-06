@@ -1,0 +1,5 @@
+public class Caller {
+    let callback:func(int) int
+    init() { self.callback = increment }
+    func calculate() int { let another:func(int) int = increment; return another(self.callback(40)) }
+}

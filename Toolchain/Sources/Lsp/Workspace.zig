@@ -618,11 +618,6 @@ pub fn scopeItemsAtForTargetDecisionExpected(
     const wants_target = !type_only and matchesPrefix("Target", prefix) and
         !hasLocalNominal(program, "Target") and findUseByAlias(program, "Target") == null;
     const wants_direct_path = prefix.len != 0;
-    if (program.uses.len == 0 and !wants_platform and !wants_target and !type_only and !return_expression and
-        !wants_direct_path)
-    {
-        return allocator.alloc(Types.CompletionItem, 0);
-    }
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
@@ -728,6 +723,20 @@ pub fn scopeItemsAtForTargetDecisionExpected(
         cursor,
         &ranked,
     );
+    // Atoms share their module's unqualified functions, also without a `use`.
+    if (!type_only) for (project.index.providers) |provider| {
+        if (samePath(provider.path, project.current_path) or !providerInCurrentModule(project, provider)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        for (loaded.program.functions) |function| {
+            if (function.is_local or function.operator != null or !matchesPrefix(function.name, prefix)) continue;
+            if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
+            try appendRanked(allocator, &ranked, .{
+                .label = function.name,
+                .kind = CompletionKind.function,
+                .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+            }, 18, false);
+        }
+    };
     for (program.uses) |use| {
         const label = use.alias orelse lastSegment(use.path);
         const use_path = if (current_provider) |provider|

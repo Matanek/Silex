@@ -29,6 +29,22 @@ const producer_cases = [_]ProducerCase{
         .forbidden = "wrong",
     },
     .{
+        .id = "constructor-callback-assignment",
+        .producer = .function_declaration,
+        .canonical = "func candidate(value:int) int {return value}\nfunc wrong(value:str) int {return 0}\nclass Holder {let callback:func(int) int; init() {self.callback=candidate}}\nfunc main() {}",
+        .partial = "func candidate(value:int) int {return value}\nfunc wrong(value:str) int {return 0}\nclass Holder {let callback:func(int) int; init() {self.callback=<|>}}\nfunc main() {}",
+        .expected = .{ .function = "candidate" },
+        .forbidden = "wrong",
+    },
+    .{
+        .id = "method-callback-assignment",
+        .producer = .function_declaration,
+        .canonical = "func candidate(value:int) int {return value}\nfunc wrong(value:str) int {return 0}\nclass Holder {var callback:func(int) int; init() {self.callback=candidate} func replace() {self.callback=candidate}}\nfunc main() {}",
+        .partial = "func candidate(value:int) int {return value}\nfunc wrong(value:str) int {return 0}\nclass Holder {var callback:func(int) int; init() {self.callback=candidate} func replace() {self.callback=<|>}}\nfunc main() {}",
+        .expected = .{ .function = "candidate" },
+        .forbidden = "wrong",
+    },
+    .{
         .id = "static-method",
         .producer = .method_declaration,
         .canonical = "struct Predicates { static func candidate(value:int) bool { return true } static func wrong(value:str) bool { return true } }\nfunc accept(callback:func(int) bool) {}\nfunc main() { accept(Predicates.candidate) }",

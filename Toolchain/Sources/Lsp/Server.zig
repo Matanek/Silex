@@ -220,7 +220,7 @@ pub const Server = struct {
                 });
             }
             const needs_workspace = self.workspace_root_uri != null and
-                needsWorkspaceCompletion(source, decision);
+                (needsWorkspaceCompletion(source, decision) or function_value_expected);
             if (needs_workspace) {
                 const project_outcome = try Workspace.completionOutcomeAtForTargetWithDecision(
                     allocator,
