@@ -1,0 +1,20 @@
+func verify_large_collection_growth() {
+    var values:float32[] = []
+    for index in 0...1000000 { values.append((index % 17) as float32) }
+    assert(values.count() == 1000000)
+    for index in 0...values.count() { assert(values[index] == (index % 17) as float32) }
+    let snapshot = values
+    values.append(42.0 as float32)
+    values[0] = -1.0 as float32
+    assert(snapshot.count() == 1000000 && snapshot[0] == 0.0 as float32)
+    assert(snapshot[-1] == (999999 % 17) as float32)
+    assert(values.count() == 1000001 && values[0] == -1.0 as float32)
+    assert(values[-1] == 42.0 as float32)
+    values.clear()
+    values.append(7.0 as float32)
+    assert(values.count() == 1 && values[0] == 7.0 as float32)
+    assert(snapshot.count() == 1000000 && snapshot[-1] == (999999 % 17) as float32)
+}
+
+test "large float32 collections grow while preserving shared snapshots" { verify_large_collection_growth() }
+func main() { verify_large_collection_growth(); print("large collection growth passed") }

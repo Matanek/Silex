@@ -2684,6 +2684,40 @@ fn emitListEdit(
     try emitImmediate(allocator, bytes, .rcx, @as(u64, value.element_width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xf1 });
     try emitAddImmediateRegister(allocator, bytes, .rsi, list_header_size);
+    // A unique list can transfer its existing ownership to the result when
+    // the reserved allocation still fits the new element.
+    try emitLoadMemory(allocator, bytes, .rax, .rbx, root_count_offset);
+    try emitLoadMemory(allocator, bytes, .rcx, .rbx, edge_count_offset);
+    try emitRegisterBinary(allocator, bytes, 0x01, .rax, .rcx);
+    try emitImmediate(allocator, bytes, .rcx, 1);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const shared = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitLoadMemory(allocator, bytes, .rcx, .rbx, byte_count_offset);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rsi, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x87 });
+    const full = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitMoveRegister(allocator, bytes, .r14, .rbx);
+    try emitAddImmediateRegister(allocator, bytes, .r14, list_header_size);
+    try emitMoveRegister(allocator, bytes, .rax, .r12);
+    try emitImmediate(allocator, bytes, .rcx, @as(u64, value.element_width) * Machine.slot_size);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xc1 });
+    try emitRegisterBinary(allocator, bytes, 0x01, .r14, .rax);
+    for (0..value.argument.?.width) |leaf| {
+        try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, value.argument.?.start) + leaf));
+        try emitStoreMemory(allocator, bytes, .r14, @intCast(leaf * Machine.slot_size), .rax);
+    }
+    try emitStoreMemory(allocator, bytes, .rbx, 0, .r13);
+    try emitStoreStack(allocator, bytes, .rbx, value.result);
+    try bytes.append(allocator, 0xe9);
+    const reused = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, shared, bytes.items.len);
+    try patchRelative(bytes.items, full, bytes.items.len);
+    // Retain spare space on growth, matching the geometric ARM64 policy.
+    try emitRegisterBinary(allocator, bytes, 0x01, .rsi, .rsi);
     try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
     try emitMoveRegister(allocator, bytes, .r15, .rax);
     try emitListHeader(allocator, bytes, .r15, .r13, .rsi, value.ownership);
@@ -2709,6 +2743,7 @@ fn emitListEdit(
     }
     try emitStoreStack(allocator, bytes, .r15, value.result);
     try emitListDropSlot(allocator, bytes, import_sites, platform, value.collection, value.ownership);
+    try patchRelative(bytes.items, reused, bytes.items.len);
 }
 
 fn emitGeneralListEdit(

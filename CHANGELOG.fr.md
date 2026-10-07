@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Sur X64, `append()` réutilise la capacité disponible d’une liste non partagée et réserve de l’espace lors de sa croissance. La construction de grands tableaux ne recopie plus tout leur contenu à chaque ajout ; les snapshots partagés restent indépendants.
+
 - Une itération mutable `indexed()` conserve l’élément possédé jusqu’à sa réécriture. Le nettoyage du corps tenait compte de l’élément mais oubliait la liaison d’index, provoquant une libération prématurée et un crash X64.
 
 - `for var` et `indexed()` peuvent parcourir un champ de collection modifiable en réécrivant son stockage à chaque itération, y compris avant continue et break ; les copies de listes restent indépendantes.

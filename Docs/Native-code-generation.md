@@ -325,3 +325,12 @@ it to its internal Darwin provider and emits the `libSystem` load command,
 `_write` symbol, binding stream and GOT directly. Only the typed `Interop`
 declaration is exposed to binding authors; the target mechanism does not
 change the language's internal calling convention.
+
+Dynamic-list append on X64 transfers a uniquely owned allocation to its result
+when the stored byte capacity fits the new element. Otherwise it allocates
+geometrically and preserves copy-on-write snapshots through the existing
+ownership callbacks. The mechanism is shared by macOS, Linux and Windows X64.
+X64 list elements retain their eight-byte machine slots, including float32;
+logical sample counts do not describe physical reserved bytes. The portable
+`LargeCollectionGrowth.sx` fixture checks a million float32 elements, shared
+snapshots and subsequent mutation, alongside the owning-element fixtures.
