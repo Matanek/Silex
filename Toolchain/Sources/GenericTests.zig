@@ -1131,3 +1131,30 @@ test "generic calls infer inherited method results and forced optional layers" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\n42\n42\n7\n7\n99\n", result.stdout);
 }
+
+
+test "reuse a canonical collection registered before its generic element is rewritten" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Choice { first; second }
+        \\struct Option<T> { let value:T }
+        \\class Group<T> {
+        \\    let options:Option<T>[]
+        \\    init(options:Option<T>[]) { self.options = options }
+        \\}
+        \\class Form {
+        \\    func options() Option<Choice>[] { return [Option<Choice>(value:Choice.first)] }
+        \\    func group() Group<Choice> { return Group<Choice>(self.options()) }
+        \\}
+        \\func main() {
+        \\    var form = Form()
+        \\    print(form.group().options.count())
+        \\    print(form.group().options[0].value == Choice.first)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("1\ntrue\n", result.stdout);
+}

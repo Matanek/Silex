@@ -1422,6 +1422,14 @@ pub const Specializer = struct {
             try std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ self.typeName(element), length })
         else
             try std.fmt.allocPrint(self.allocator, "{s}[]", .{self.typeName(element)});
+        // A concrete source collection may already be registered while its
+        // generic element is still awaiting the initial structure rewrite.
+        // Its canonical name denotes the same collection as this specialization.
+        for (self.structures.items) |structure| {
+            if (structure.collection != null and std.mem.eql(u8, structure.name, name)) {
+                return self.typeForName(name) orelse error.InvalidSource;
+            }
+        }
         const type_value = self.typeForName(name) orelse new_type: {
             const value: Ast.Type = .structure(self.type_names.items.len);
             try self.type_names.append(self.allocator, name);

@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Réutiliser l’identité des tableaux de types génériques déjà déclarés dans la source pendant leur spécialisation. Une méthode retournant `Option<Choix>[]` et un champ `Option<T>[]` ne déclarent plus deux structures portant le même nom.
+
 - Le collecteur de cycles natif ignore les éléments des tableaux de scalaires, chaînes et scalaires optionnels : ils ne portent aucune arête de classe. Les données d’une grande liste ne sont plus parcourues à chaque nettoyage temporaire ; les tableaux contenant des classes restent tracés.
 
 - Sur ARM64, le nettoyage des références de classe adresse son contexte runtime indépendamment des registres de valeurs lorsque la pile atteint la limite de 32 Kio. Cela évite un crash ou la corruption d’un registre vivant à cette limite, notamment lors de la construction de descriptions UI en Release.
