@@ -7,7 +7,11 @@ fn run(source: []const u8) ![]const u8 {
     defer arena.deinit();
     const allocator = arena.allocator();
     var frontend = Frontend.Frontend.init(allocator);
-    const result = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const compiled = frontend.compile(source) catch |err| {
+        if (frontend.diagnostic) |diagnostic| std.debug.print("view fixture: {s}\n", .{diagnostic.message});
+        return err;
+    };
+    const result = try Interpreter.runCapture(allocator, compiled.ir);
     return std.testing.allocator.dupe(u8, result.stdout);
 }
 
@@ -211,4 +215,46 @@ test "mutable views publish class field mutations to their own fields" {
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("10\n2\n3\n40\n", output);
+}
+
+test "mutable views share their calling convention across methods protocols callbacks and constructors" {
+    const output = try run(
+        \\protocol Processor { func process(samples:&float32[..]) }
+        \\class Effect:Processor {
+        \\    init() {}
+        \\    func process(samples:&float32[..]) { samples[0] += 0.25 as float32 }
+        \\    static func apply(samples:&float32[..]) { samples[0] += 0.5 as float32 }
+        \\}
+        \\class Initialize {
+        \\    init(samples:&float32[..]) { samples[0] += 0.125 as float32 }
+        \\}
+        \\func main() {
+        \\    var samples:float32[] = [0.0 as float32, 0.0 as float32]
+        \\    var effect = Effect()
+        \\    effect.process(&samples[0:2])
+        \\    effect.process(samples:&samples[0:2])
+        \\    Effect.apply(&samples[0:2])
+        \\    Effect.apply(samples:&samples[0:2])
+        \\    var dynamic:Processor = effect
+        \\    dynamic.process(&samples[0:2])
+        \\    var callback:func(&float32[..]) void = effect.process
+        \\    callback(&samples[0:2])
+        \\    var initialize = Initialize(&samples[0:2])
+        \\    var named = Initialize(samples:&samples[0:2])
+        \\    assert(samples[0] == 2.25 as float32)
+        \\    assert(samples[1] == 0.0 as float32)
+        \\    print(samples[0])
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("2.25\n", output);
+}
+
+test "mutable view methods continue to reject immutable collection roots" {
+    try expectCompileError(
+        \\class Effect { init() {} func process(samples:&float32[..]) { samples[0] = 0.0 as float32 } }
+        \\func main() { var effect = Effect(); let samples:float32[] = [0.25 as float32]; effect.process(&samples[0:1]) }
+    ,
+        "a mutable view requires a var collection root",
+    );
 }

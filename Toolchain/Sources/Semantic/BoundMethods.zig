@@ -4,6 +4,7 @@ const Ir = @import("../Ir.zig");
 const Callbacks = @import("Callbacks.zig");
 const Resources = @import("Resources.zig");
 const StorageOwnership = @import("StorageOwnership.zig");
+const Collections = @import("Collections.zig");
 const Model = @import("Model.zig");
 const Inheritance = @import("Inheritance.zig");
 
@@ -23,7 +24,7 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
     try builder.value_types.append(self.allocator, capture_type);
     const parameter_types = try self.allocator.alloc(Ast.Type, signature.parameters.len);
     for (signature.parameters, 0..) |parameter, index| {
-        parameter_types[index] = if (parameter.mode == .mutable) .address else parameter.type;
+        parameter_types[index] = Collections.loweredBorrowType(self.structures, parameter.mode, parameter.type);
         try builder.value_types.append(self.allocator, parameter_types[index]);
     }
 

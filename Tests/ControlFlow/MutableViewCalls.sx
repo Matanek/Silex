@@ -1,0 +1,29 @@
+protocol Processor { func process(samples:&float32[..]) }
+class Effect:Processor {
+    init() {}
+    func process(samples:&float32[..]) { samples[0] += 0.25 as float32 }
+    static func apply(samples:&float32[..]) { samples[0] += 0.5 as float32 }
+}
+class Initialize {
+    init(samples:&float32[..]) { samples[0] += 0.125 as float32 }
+}
+func exercise() {
+    var samples:float32[] = [0.0 as float32, 0.0 as float32]
+    var effect = Effect()
+    effect.process(&samples[0:2])
+    effect.process(samples:&samples[0:2])
+    Effect.apply(&samples[0:2])
+    Effect.apply(samples:&samples[0:2])
+    var dynamic:Processor = effect
+    dynamic.process(&samples[0:2])
+    var callback:func(&float32[..]) void = effect.process
+    callback(&samples[0:2])
+    var initialize = Initialize(&samples[0:2])
+    var named = Initialize(samples:&samples[0:2])
+    assert(samples[0] == 2.25 as float32)
+    assert(samples[1] == 0.0 as float32)
+    print(samples[0])
+}
+
+func main() { exercise() }
+test "mutable views cross concrete named static dynamic and bound calls" { exercise() }

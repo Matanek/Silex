@@ -227,18 +227,22 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
 
     for (method.parameters, 0..) |parameter, parameter_index| {
         const value = parameter_index + 1;
-        const lowered_type: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
-        parameter_types[value] = lowered_type;
-        try builder.value_types.append(self.allocator, lowered_type);
-        try builder.bindings.append(self.allocator, .{
-            .name = parameter.name,
-            .type = parameter.type,
-            .value = if (parameter.mode == .mutable) null else value,
-            .reference = if (parameter.mode == .mutable) value else null,
-            .mutable = parameter.mode == .mutable,
-            .parameter = true,
-            .parameter_mode = parameter.mode,
-        });
+        if (parameter.mode == .mutable and Collections.isViewType(self.structures, parameter.type)) {
+            parameter_types[value] = try Collections.bindFunctionParameter(self, &builder, parameter, value);
+        } else {
+            const lowered: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
+            parameter_types[value] = lowered;
+            try builder.value_types.append(self.allocator, lowered);
+            try builder.bindings.append(self.allocator, .{
+                .name = parameter.name,
+                .type = parameter.type,
+                .value = if (parameter.mode == .mutable) null else value,
+                .reference = if (parameter.mode == .mutable) value else null,
+                .mutable = parameter.mode == .mutable,
+                .parameter = true,
+                .parameter_mode = parameter.mode,
+            });
+        }
     }
 
     const terminated = if (mutating and !borrowed_mutable)
@@ -294,18 +298,22 @@ fn analyzeStatic(self: anytype, structure_index: usize, method_index: usize, met
     try builder.blocks.append(self.allocator, .{});
     const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len);
     for (method.parameters, 0..) |parameter, index| {
-        const lowered: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
-        parameter_types[index] = lowered;
-        try builder.value_types.append(self.allocator, lowered);
-        try builder.bindings.append(self.allocator, .{
-            .name = parameter.name,
-            .type = parameter.type,
-            .value = if (parameter.mode == .mutable) null else index,
-            .reference = if (parameter.mode == .mutable) index else null,
-            .mutable = parameter.mode == .mutable,
-            .parameter = true,
-            .parameter_mode = parameter.mode,
-        });
+        if (parameter.mode == .mutable and Collections.isViewType(self.structures, parameter.type)) {
+            parameter_types[index] = try Collections.bindFunctionParameter(self, &builder, parameter, index);
+        } else {
+            const lowered: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
+            parameter_types[index] = lowered;
+            try builder.value_types.append(self.allocator, lowered);
+            try builder.bindings.append(self.allocator, .{
+                .name = parameter.name,
+                .type = parameter.type,
+                .value = if (parameter.mode == .mutable) null else index,
+                .reference = if (parameter.mode == .mutable) index else null,
+                .mutable = parameter.mode == .mutable,
+                .parameter = true,
+                .parameter_mode = parameter.mode,
+            });
+        }
     }
     const terminated = try self.analyzeStatements(&builder, method, method.statements);
     if (!terminated) {
@@ -605,6 +613,11 @@ fn analyzeReceiverCall(
     try argument_ids.append(self.allocator, if (borrowed_receiver) |prepared| prepared.reference else method_receiver.value);
     for (arguments.items, method.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
+            if (Collections.isViewType(self.structures, parameter.type)) {
+                if (argument.borrowed_mode != .mutable) return self.fail(call.arguments[index].position, "mutable view parameter requires an '&T[..]' argument");
+                try argument_ids.append(self.allocator, argument.value);
+                continue;
+            }
             const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
             try mutable_arguments.append(self.allocator, prepared);
             try argument_ids.append(self.allocator, prepared.reference);
@@ -855,6 +868,11 @@ fn analyzeNamedCall(
         };
         const argument = typed[index].?;
         if (parameter.mode == .mutable) {
+            if (Collections.isViewType(self.structures, parameter.type)) {
+                if (argument.borrowed_mode != .mutable) return self.fail(source.position, "mutable view parameter requires an '&T[..]' argument");
+                try ids.append(self.allocator, argument.value);
+                continue;
+            }
             const prepared = try MutableReferences.prepare(self, builder, source, parameter.type);
             try mutable_arguments.append(self.allocator, prepared);
             try ids.append(self.allocator, prepared.reference);
@@ -994,6 +1012,11 @@ fn analyzeProtocolCall(
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     for (arguments, requirement.parameters[0..arguments.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
+            if (Collections.isViewType(self.structures, parameter.type)) {
+                if (argument.borrowed_mode != .mutable) return self.fail(call.arguments[index].position, "mutable view parameter requires an '&T[..]' argument");
+                try argument_ids.append(self.allocator, argument.value);
+                continue;
+            }
             const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
             try mutable_arguments.append(self.allocator, prepared);
             try argument_ids.append(self.allocator, prepared.reference);

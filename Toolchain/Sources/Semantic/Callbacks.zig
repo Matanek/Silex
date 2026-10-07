@@ -309,6 +309,11 @@ pub fn call(self: anytype, builder: anytype, call_value: Ast.Expression.Call) !?
             return self.fail(expression.position, message);
         }
         if (parameter.mode == .mutable) {
+            if (Collections.isViewType(self.structures, parameter.type)) {
+                if (argument.borrowed_mode != .mutable) return self.fail(expression.position, "mutable view parameter requires an '&T[..]' argument");
+                try arguments.append(self.allocator, argument.value);
+                continue;
+            }
             const prepared = try MutableReferences.prepare(self, builder, expression, parameter.type);
             try mutable_arguments.append(self.allocator, .{ .prepared = prepared });
             try arguments.append(self.allocator, prepared.reference);

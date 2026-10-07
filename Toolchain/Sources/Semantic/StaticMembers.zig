@@ -7,6 +7,8 @@ const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Visibility = @import("Visibility.zig");
 const Optionals = @import("Optionals.zig");
+const Collections = @import("Collections.zig");
+const Borrowing = @import("Borrowing.zig");
 const Model = @import("Model.zig");
 const Resources = @import("Resources.zig");
 const ShaderAssets = @import("../ShaderAssets.zig");
@@ -166,9 +168,11 @@ pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call
     }
     const method_index = selected orelse return self.fail(call.name_position, "no static method overload matches the argument types");
     const method = structure.methods[method_index];
+    try Borrowing.validateReadArguments(self, method.parameters, call.arguments);
     var ids: std.ArrayList(Ir.ValueId) = .empty;
     for (arguments.items, method.parameters[0..arguments.items.len], call.arguments) |argument, parameter, source| {
-        if (parameter.mode != .value) return self.fail(source.position, "borrowed static method parameters are not supported yet");
+        if (parameter.mode != .value and !Collections.isViewType(self.structures, parameter.type)) return self.fail(source.position, "borrowed static method parameters are not supported yet");
+        if (parameter.mode == .mutable and argument.borrowed_mode != .mutable) return self.fail(source.position, "mutable view parameter requires an '&T[..]' argument");
         const converted = try self.coerce(builder, argument, parameter.type, source.position);
         if (Resources.requiresRetain(self, parameter.type) and !converted.transferred) try Resources.retainValue(self, builder, parameter.type, converted.value);
         try ids.append(self.allocator, converted.value);
@@ -246,14 +250,17 @@ fn analyzeNamedCall(self: anytype, builder: anytype, structure_index: usize, cal
     const method_index = selected orelse return self.fail(call.name_position, "no static method overload matches the argument types");
     const method = structure.methods[method_index];
     const mapped = (try Arguments.map(self.allocator, method.parameters, call.arguments, call.named_arguments)).arguments;
+    try Borrowing.validateMappedReadArguments(self, method.parameters, mapped);
     var ids: std.ArrayList(Ir.ValueId) = .empty;
     for (method.parameters, mapped, 0..) |parameter, maybe_source, index| {
         const source = maybe_source orelse {
             try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
             continue;
         };
-        if (parameter.mode != .value) return self.fail(source.position, "borrowed static method parameters are not supported yet");
-        const converted = try self.coerce(builder, typed[index].?, parameter.type, source.position);
+        const argument = typed[index].?;
+        if (parameter.mode != .value and !Collections.isViewType(self.structures, parameter.type)) return self.fail(source.position, "borrowed static method parameters are not supported yet");
+        if (parameter.mode == .mutable and argument.borrowed_mode != .mutable) return self.fail(source.position, "mutable view parameter requires an '&T[..]' argument");
+        const converted = try self.coerce(builder, argument, parameter.type, source.position);
         if (Resources.requiresRetain(self, parameter.type) and !converted.transferred) try Resources.retainValue(self, builder, parameter.type, converted.value);
         try ids.append(self.allocator, converted.value);
     }
