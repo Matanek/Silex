@@ -4,6 +4,7 @@ const Arguments = @import("Arguments.zig");
 const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
+const Collections = @import("Collections.zig");
 const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
 const Control = @import("Control.zig");
@@ -42,18 +43,22 @@ pub fn analyze(
 
     const parameter_types = try self.allocator.alloc(Ast.Type, constructor.parameters.len);
     for (constructor.parameters, 0..) |parameter, value| {
-        const lowered_type: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
-        parameter_types[value] = lowered_type;
-        try builder.value_types.append(self.allocator, lowered_type);
-        try builder.bindings.append(self.allocator, .{
-            .name = parameter.name,
-            .type = parameter.type,
-            .value = if (parameter.mode == .mutable) null else value,
-            .reference = if (parameter.mode == .mutable) value else null,
-            .mutable = parameter.mode == .mutable,
-            .parameter = true,
-            .parameter_mode = parameter.mode,
-        });
+        if (parameter.mode == .mutable and Collections.isViewType(self.structures, parameter.type)) {
+            parameter_types[value] = try Collections.bindFunctionParameter(self, &builder, parameter, value);
+        } else {
+            const lowered: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
+            parameter_types[value] = lowered;
+            try builder.value_types.append(self.allocator, lowered);
+            try builder.bindings.append(self.allocator, .{
+                .name = parameter.name,
+                .type = parameter.type,
+                .value = if (parameter.mode == .mutable) null else value,
+                .reference = if (parameter.mode == .mutable) value else null,
+                .mutable = parameter.mode == .mutable,
+                .parameter = true,
+                .parameter_mode = parameter.mode,
+            });
+        }
     }
 
     const initialized = try self.allocator.alloc(bool, declaration.fields.len);
@@ -273,6 +278,11 @@ pub fn analyzeCall(
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     for (arguments.items, constructor.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
+            if (Collections.isViewType(self.structures, parameter.type)) {
+                if (argument.borrowed_mode != .mutable) return self.fail(call.arguments[index].position, "mutable view parameter requires an '&T[..]' argument");
+                try argument_ids.append(self.allocator, argument.value);
+                continue;
+            }
             const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
             try mutable_arguments.append(self.allocator, prepared);
             try argument_ids.append(self.allocator, prepared.reference);
@@ -403,6 +413,11 @@ fn analyzeNamedCall(
         };
         const argument = typed[index].?;
         if (parameter.mode == .mutable) {
+            if (Collections.isViewType(self.structures, parameter.type)) {
+                if (argument.borrowed_mode != .mutable) return self.fail(source.position, "mutable view parameter requires an '&T[..]' argument");
+                try ids.append(self.allocator, argument.value);
+                continue;
+            }
             const prepared = try MutableReferences.prepare(self, builder, source, parameter.type);
             try mutable_arguments.append(self.allocator, prepared);
             try ids.append(self.allocator, prepared.reference);

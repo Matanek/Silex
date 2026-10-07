@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Mutable views `&T[..]` use the same calling convention in methods, constructors and callbacks as in free functions, including named calls and dynamic protocols.
+
 - A cascade on a temporary value passed to an optional parameter now mutates the value before optional injection, including classes and collections. Completion preserves the concrete receiver’s members.
 
 - `publish --dry-run` and publication preparation use Shadercross configured by `silex setup`, like the other compilation commands. Packages whose sources import HLSL programs are no longer incorrectly rejected as unconfigured.

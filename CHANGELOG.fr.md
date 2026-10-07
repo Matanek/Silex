@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les tranches modifiables `&T[..]` traversent les méthodes, constructeurs et callbacks comme les fonctions libres, y compris les appels nommés et les protocoles dynamiques.
+
 - Une cascade sur une valeur temporaire passée à un paramètre optionnel modifie désormais la valeur avant son injection dans l’optionnel, y compris pour les classes et collections. La complétion conserve les membres du récepteur concret.
 
 - `publish --dry-run` et la préparation de publication utilisent Shadercross configuré par `silex setup`, comme les autres commandes de compilation. Les packages dont une source importe des programmes HLSL ne sont plus refusés à tort comme non configurés.
