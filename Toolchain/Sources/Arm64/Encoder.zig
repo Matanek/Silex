@@ -3586,6 +3586,13 @@ fn encodeComparisonFlags(
     binary: Machine.Instruction.Binary,
     float_literals: *const FloatLiteralCache,
 ) Error!void {
+    // A loop backedge may repeat this comparison after the remainder and zero
+    // have been elided. Recompute parity from the live source, as at the header.
+    if (parityComparison(function, instruction_index, binary)) |parity| {
+        const source = try prepareValueOperand(allocator, words, function, .x9, parity.source);
+        try words.append(allocator, A64.testLowBit(source));
+        return;
+    }
     const zero_right = comparisonHasElidedZeroRight(function, instruction_index, binary);
     if (binary.type.isFloat()) {
         const double = binary.type == .float64;
@@ -6481,6 +6488,39 @@ test "recognize a comparison-only while header at its back edge" {
     try std.testing.expectEqual(@as(usize, 2), backedge.branch_index);
     try std.testing.expectEqual(@as(usize, 3), backedge.body);
     try std.testing.expect(backedge.body_on_true);
+}
+
+test "recompute fused parity flags from the live source at a loop backedge" {
+    for ([_]Ir.Type{ .int, .uint }) |value_type| {
+        for ([_]Machine.BinaryOperator{ .equal, .not_equal }) |operator| {
+            for ([_]bool{ false, true }) |reversed| {
+                const instructions = [_]Machine.Instruction{
+                    .{ .constant_int = .{ .result = 1, .bits = 2, .type = value_type } },
+                    .{ .binary = .{ .result = 2, .operator = .remainder, .left = 0, .right = 1, .type = value_type } },
+                    .{ .constant_int = .{ .result = 3, .bits = 0, .type = value_type } },
+                    .{ .binary = .{ .result = 4, .operator = operator, .left = if (reversed) 3 else 2, .right = if (reversed) 2 else 3, .type = value_type } },
+                    .{ .branch = .{ .condition = 4, .then_instruction = 5, .else_instruction = 7 } },
+                    .{ .copy = .{ .result = 0, .operand = 0 } },
+                    .{ .jump = 1 },
+                    .return_void,
+                };
+                const function: Machine.Function = .{
+                    .name = "parity_loop",
+                    .parameter_count = 1,
+                    .parameters = &.{.{ .start = 0, .width = 1 }},
+                    .return_type = .void,
+                    .slot_count = 5,
+                    .frame_size = try Machine.frameSize(5),
+                    .register_slots = &.{ 19, 20, 21, 22, 23 },
+                    .instructions = &instructions,
+                };
+                var words: std.ArrayList(u32) = .empty;
+                defer words.deinit(std.testing.allocator);
+                try encodeComparisonFlags(std.testing.allocator, &words, function, 3, instructions[3].binary, &.{});
+                try std.testing.expectEqualSlices(u32, &.{A64.testLowBit(.x19)}, words.items);
+            }
+        }
+    }
 }
 
 test "recognize a countdown decrement that can carry backedge flags" {

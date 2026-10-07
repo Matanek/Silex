@@ -38,6 +38,12 @@ and links the native runtime and package artifacts. Its register representation,
 stack layout, calling convention, object writer, and embedded runtime layouts
 are private native decisions.
 
+Instruction fusion must preserve every path that reevaluates an operation.
+When a loop backedge repeats a fused comparison, it must read the live source
+operands of the fusion rather than an intermediate slot whose definition was
+elided. The ARM64 parity-loop regression exercises this boundary with both
+signed and unsigned values and with either comparison direction.
+
 The LLVM backend serializes the same closed IR to LLVM IR, runs the qualified
 LLVM optimizer and code generator, then links its formatting runtime and the
 same resolved package artifacts. LLVM types, aggregate reserves, private heap

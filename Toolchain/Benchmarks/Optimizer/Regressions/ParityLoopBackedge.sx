@@ -1,0 +1,46 @@
+class State {
+    var count:int
+    init(count:int) { self.count = count }
+}
+
+func signed_rows(first:int) {
+    var state = State(first)
+    var iteration = 0
+    while iteration < 8 {
+        var key = state.count
+        var row = 0
+        while key % 2 == 0 { row++; key /= 2 }
+        print(row)
+        state.count++
+        iteration++
+    }
+}
+
+func unsigned_rows() {
+    var iteration:uint = 1
+    while iteration <= 8 {
+        var key = iteration
+        var row = 0
+        while (0 as uint) == key % 2 { row++; key /= 2 }
+        print(row)
+        iteration++
+    }
+}
+
+func odd_rows() {
+    var iteration = 1
+    while iteration <= 8 {
+        var key = iteration
+        var row = 0
+        while key % 2 != 0 { row++; key /= 2 }
+        print(row)
+        iteration++
+    }
+}
+
+func main() {
+    signed_rows(1)
+    signed_rows(-8)
+    unsigned_rows()
+    odd_rows()
+}

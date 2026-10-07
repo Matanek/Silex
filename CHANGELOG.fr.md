@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- En Release ARM64, une boucle testant `value % 2 == 0` ou `!= 0` réévalue correctement la parité après chaque tour. Les boucles imbriquées ne lisent plus un reste éliminé par la fusion des instructions.
+
 - Sur ARM64, le nettoyage des références de classe adresse son contexte runtime indépendamment des registres de valeurs lorsque la pile atteint la limite de 32 Kio. Cela évite un crash ou la corruption d’un registre vivant à cette limite, notamment lors de la construction de descriptions UI en Release.
 - Les tranches modifiables `&T[..]` traversent les méthodes, constructeurs et callbacks comme les fonctions libres, y compris les appels nommés et les protocoles dynamiques.
 

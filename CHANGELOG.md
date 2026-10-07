@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- ARM64 Release loops testing `value % 2 == 0` or `!= 0` now reevaluate parity after each iteration. Nested loops no longer read a remainder eliminated by instruction fusion.
+
 - On ARM64, class-reference cleanup addresses its runtime context independently of value registers when the stack reaches the 32 KiB boundary. This prevents crashes or corruption of a live register at that boundary, including UI description construction in Release.
 - Mutable views `&T[..]` use the same calling convention in methods, constructors and callbacks as in free functions, including named calls and dynamic protocols.
 

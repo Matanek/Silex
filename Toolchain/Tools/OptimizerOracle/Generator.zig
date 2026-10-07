@@ -118,6 +118,7 @@ pub const corpus = [_]CorpusEntry{
 };
 
 pub const regressions = [_]RegressionEntry{
+    .{ .name = "Regressions/ParityLoopBackedge.sx", .concern = "fused parity loop backedges reread the live source for signed and unsigned values, reversed operands, nested loops and inequality" },
     .{ .name = "Regressions/NestedAggregateReads.sx", .concern = "nested plain reference and checked-view projections preserve snapshot timing across alias writes, branches, negative indices and escaping child values" },
     .{ .name = "Regressions/ScalarClassRegions.sx", .concern = "long scalar regions retain class snapshots across conditional alias writes, including signed zero and NaN" },
     .{ .name = "Regressions/ScalarClassLeaves.sx", .concern = "scalar class state and mutator leaves preserve shared identity, reassignment barriers, signed updates, NaN, signed zero, boolean fields, and resource replacement barriers" },
