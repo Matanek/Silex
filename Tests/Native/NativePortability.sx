@@ -146,6 +146,31 @@ class DirectCycleNode {
     drop { print("native cycle drop") }
 }
 
+class NativeScalarCycle {
+    static var drops:int = 0
+    var next:NativeScalarCycle? = null
+    let integers:int[] = [10, 20, 30]
+    let strings:str[] = ["alpha", "βeta"]
+    let optionals:int?[] = [null, 7]
+    drop { NativeScalarCycle.drops++ }
+}
+
+func verify_scalar_cycle() {
+    NativeScalarCycle.drops = 0
+    {
+        var value = NativeScalarCycle()
+        value.next = value
+        assert(value.integers[1] == 20)
+        assert(value.strings[1] == "βeta")
+        assert(value.optionals[0] == null && value.optionals[1] == 7)
+    }
+    assert(NativeScalarCycle.drops == 1)
+}
+
+test "finalize native cycles containing scalar string and optional arrays" {
+    verify_scalar_cycle()
+}
+
 class CollectionCycleNode {
     var links:CollectionCycleNode[]
 
@@ -668,6 +693,7 @@ func main() {
     verify_mutex()
     verify_deep_copy()
     verify_cycles()
+    verify_scalar_cycle()
 }
 
 struct NativeBorrowedValues {

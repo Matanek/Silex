@@ -55,6 +55,15 @@ module interface or ordinary executable. On a macos-arm64 host, test
 compilation lowers each selected source once and emits an isolated native
 process entry for every block, including the active system boundaries.
 
+## Trace native cycle ownership edges
+
+Native cycle trials follow class ownership edges. Arrays of scalars, strings
+and optional scalars contain no such edges and are skipped without visiting
+their elements, irrespective of their length. This does not change ordinary
+storage cleanup: strings and collection buffers still use their generated
+finalizers. Arrays containing class references and owned callback receivers
+remain part of the reachability proof.
+
 ## Release static roots at normal entry completion
 
 Semantic analysis synthesizes static initialization and finalization in portable

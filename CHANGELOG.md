@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native cycle collection skips elements of scalar, string and optional-scalar arrays because they cannot own class edges. Large list data is no longer scanned during each temporary cleanup; arrays containing classes remain traced.
+
 - The parser distinguishes compound comparisons from generic calls when an operand is parenthesized; fixed-array, tuple and function type arguments remain recognized.
 
 - On X64, `append()` reuses spare capacity in an unshared list and reserves space when growing. Building large arrays no longer copies all their contents on every append; shared snapshots remain independent.
