@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le collecteur de cycles natif ignore les éléments des tableaux de scalaires, chaînes et scalaires optionnels : ils ne portent aucune arête de classe. Les données d’une grande liste ne sont plus parcourues à chaque nettoyage temporaire ; les tableaux contenant des classes restent tracés.
+
 - Sur ARM64, le nettoyage des références de classe adresse son contexte runtime indépendamment des registres de valeurs lorsque la pile atteint la limite de 32 Kio. Cela évite un crash ou la corruption d’un registre vivant à cette limite, notamment lors de la construction de descriptions UI en Release.
 - Les tranches modifiables `&T[..]` traversent les méthodes, constructeurs et callbacks comme les fonctions libres, y compris les appels nommés et les protocoles dynamiques.
 

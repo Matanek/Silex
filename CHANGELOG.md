@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native cycle collection skips elements of scalar, string and optional-scalar arrays because they cannot own class edges. Large list data is no longer scanned during each temporary cleanup; arrays containing classes remain traced.
+
 - On ARM64, class-reference cleanup addresses its runtime context independently of value registers when the stack reaches the 32 KiB boundary. This prevents crashes or corruption of a live register at that boundary, including UI description construction in Release.
 - Mutable views `&T[..]` use the same calling convention in methods, constructors and callbacks as in free functions, including named calls and dynamic protocols.
 

@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const TestState = if (builtin.is_test) struct {
+    var traced_values: usize = 0;
+} else struct {};
+
 const type_base_mask: u64 = 0x00ffffff;
 const optional_depth_shift: u6 = 24;
 const structure_base: u64 = 0x100;
@@ -424,6 +428,7 @@ fn copyNode(destination: *Node, source: Node) void {
 }
 
 fn traceValue(context: *Context, value: [*]u64, type_value: u64) bool {
+    if (builtin.is_test) TestState.traced_values += 1;
     if (optionalChild(type_value)) |child| {
         if (value[0] == 0) return true;
         return traceValue(context, value + 1, child);
@@ -520,6 +525,9 @@ fn traceProtocol(context: *Context, value: [*]u64, data: [*]const u64) bool {
 }
 
 fn traceArray(context: *Context, value: [*]u64, element_type: u64, count: usize) bool {
+    // Scalars (including strings and optionals) cannot own class edges.
+    // Their storage length must not become work for a reachability trial.
+    if (element_type & type_base_mask <= scalar_limit) return true;
     const width = context.width(element_type);
     for (0..count) |index| if (!traceValue(context, value + index * width, element_type)) return false;
     return true;
@@ -595,6 +603,34 @@ fn testRelease(address: [*]u8, byte_count: usize) callconv(.c) void {
     if (!builtin.is_test) return;
     const words: [*]u64 = @ptrCast(@alignCast(address));
     std.testing.allocator.free(words[0 .. byte_count / @sizeOf(u64)]);
+}
+
+test "cycle tracing does not visit scalar array elements" {
+    const values = try std.testing.allocator.alloc(u64, 50000);
+    defer std.testing.allocator.free(values);
+    @memset(values, 0);
+    var context: Context = undefined;
+    TestState.traced_values = 0;
+    try std.testing.expect(traceArray(&context, values.ptr, 12, values.len));
+    try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
+}
+
+test "cycle tracing skips optional scalars but still visits class array edges" {
+    var context: Context = undefined;
+    var values = [_]u64{ 1, 12, 0, 0 };
+    TestState.traced_values = 0;
+    const optional_scalar = (@as(u64, 1) << optional_depth_shift) | 12;
+    try std.testing.expect(traceArray(&context, &values, optional_scalar, 2));
+    try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
+
+    const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 42, 0, 0 };
+    var rooted = [_]u64{ 42, 1, 0, 0 };
+    var edges = [_]u64{ @intFromPtr(&rooted), @intFromPtr(&rooted) };
+    context.model = &model;
+    context.count = 0;
+    context.marking = false;
+    try std.testing.expect(traceArray(&context, &edges, structure_base, 2));
+    try std.testing.expectEqual(@as(usize, 2), TestState.traced_values);
 }
 
 test "X64 callbacks prove and commit a direct class cycle" {
