@@ -7831,3 +7831,26 @@ test "complete a concrete cascade passed to an optional parameter" {
         try std.testing.expect(!contains(items, "if"));
     }
 }
+
+test "mutable indexed field traversal keeps collection completion and insertion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Owner {
+        \\    var values:int[]
+        \\    func update() {
+        \\        for index, var value in self.values.
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "self.values.\n").? + "self.values.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    const indexed = items[indexOf(items, "indexed").?];
+    try std.testing.expectEqualStrings("indexed()", indexed.insertText.?);
+    try std.testing.expectEqual(CompletionKind.method, indexed.kind);
+    try std.testing.expect(contains(items, "count"));
+    try std.testing.expect(!contains(items, "values"));
+    const repeated = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqual(items.len, repeated.len);
+    for (items, repeated) |item, again| try std.testing.expectEqualStrings(item.label, again.label);
+}

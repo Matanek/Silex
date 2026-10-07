@@ -556,3 +556,53 @@ test "reject unbounded inline recursive protocol payloads before native lowering
         "recursive protocol values must cross a class or dynamic-array field",
     );
 }
+
+test "protocol getters read constructor parameters and borrowed collection elements without writeback" {
+    const output = try run(
+        \\protocol Named { name:str { get } }
+        \\struct Item:Named { let name:str }
+        \\class Computed:Named { let name:str { get { return "computed" } } }
+        \\class Wrapper {
+        \\    let name:str
+        \\    init(source:Named) { self.name = source.name }
+        \\}
+        \\func main() {
+        \\    var source:Named = Item(name:"item")
+        \\    var wrapper = Wrapper(source)
+        \\    print(wrapper.name)
+        \\    var values:Named[] = [source, Computed()]
+        \\    for value in values { print(value.name) }
+        \\    print(Wrapper(Computed()).name)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("item\nitem\ncomputed\ncomputed\n", output);
+}
+
+test "mutable iteration updates collection fields rather than a copied snapshot" {
+    const output = try run(
+        \\struct Owner {
+        \\    var values:int[]
+        \\    func update() {
+        \\        for index, var value in self.values.indexed() {
+        \\            value += index + 1
+        \\            if index == 0 { continue }
+        \\            if index == 1 { break }
+        \\        }
+        \\    }
+        \\}
+        \\func main() {
+        \\    var owner = Owner(values:[1, 2, 3])
+        \\    let snapshot = owner.values
+        \\    owner.update(); owner.update()
+        \\    print(owner.values[0], " ", owner.values[1], " ", owner.values[2])
+        \\    print(snapshot[0], " ", snapshot[1], " ", snapshot[2])
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("3 6 3\n1 2 3\n", output);
+    try expectCompileError(
+        "struct Owner { let values:int[]; func update() { for var value in self.values { value++ } } } func main() {}",
+        "field 'values' is immutable and cannot be borrowed as '&'",
+    );
+}

@@ -38,3 +38,14 @@ test "nested mutation rejects a value returned by a property" {
         "cannot mutate a member of value returned by property 'position'; assign a new property value instead",
     );
 }
+
+test "getters cannot mutate self through prepared views or nested protocol methods" {
+    try expectCompileError(
+        "func fill(values:&int[..]) {} struct Owner { var values:int[1]; let count:int { get { fill(&self.values[0:1]); return 1 } } } func main() {}",
+        "a getter cannot mutate self; use an explicit method for observable mutation",
+    );
+    try expectCompileError(
+        "protocol Resettable { func reset() } struct State:Resettable { var value:int; func reset() { self.value = 0 } } class Owner { var state:Resettable; init(state:Resettable) { self.state = state } let value:int { get { self.state.reset(); return 0 } } } func main() {}",
+        "a getter cannot mutate self; use an explicit method for observable mutation",
+    );
+}

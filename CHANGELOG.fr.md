@@ -8,6 +8,14 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Une itération mutable `indexed()` conserve l’élément possédé jusqu’à sa réécriture. Le nettoyage du corps tenait compte de l’élément mais oubliait la liaison d’index, provoquant une libération prématurée et un crash X64.
+
+- `for var` et `indexed()` peuvent parcourir un champ de collection modifiable en réécrivant son stockage à chaque itération, y compris avant continue et break ; les copies de listes restent indépendantes.
+
+- L’inférence de mutabilité suit aussi les vues modifiables de champs, les méthodes des protocoles contenus et les itérations modifiables sur les collections de self. Les getters restent protégés contre ces mutations indirectes.
+
+- Les propriétés de protocole se lisent depuis les paramètres de constructeur et les éléments empruntés d’une collection sans exiger un récepteur modifiable ni réécrire son stockage.
+
 - En Release ARM64, une boucle testant `value % 2 == 0` ou `!= 0` réévalue correctement la parité après chaque tour. Les boucles imbriquées ne lisent plus un reste éliminé par la fusion des instructions.
 
 - Sur ARM64, le nettoyage des références de classe adresse son contexte runtime indépendamment des registres de valeurs lorsque la pile atteint la limite de 32 Kio. Cela évite un crash ou la corruption d’un registre vivant à cette limite, notamment lors de la construction de descriptions UI en Release.

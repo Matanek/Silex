@@ -10,6 +10,7 @@ const Collections = @import("Collections.zig");
 const Availability = @import("Availability.zig");
 const Resources = @import("Resources.zig");
 const StringIteration = @import("StringIteration.zig");
+const MutableReferences = @import("MutableReferences.zig");
 
 pub const ConditionalValue = struct {
     condition: Model.TypedValue,
@@ -248,8 +249,15 @@ fn analyzeCollectionFor(
         .identifier => |name| name,
         else => null,
     };
+    // Mutable fields use the same stable storage path as mutable references.
+    // Read and write that path on each iteration, without a copied list snapshot.
+    const collection_reference: ?Ir.ValueId = if (loop.mode == .mutable and collection_expression.value == .field_access) reference: {
+        const prepared = try MutableReferences.prepare(self, builder, collection_expression, source.type);
+        if (prepared.temporary != null) return self.fail(collection_expression.position, "for var requires stable mutable collection storage");
+        break :reference prepared.reference;
+    } else null;
     const outer_binding_count = builder.bindings.items.len;
-    const collection_local: Ir.LocalId = if (loop.mode == .mutable) mutable: {
+    const collection_local: Ir.LocalId = if (collection_reference != null) 0 else if (loop.mode == .mutable) mutable: {
         const name = switch (collection_expression.value) {
             .identifier => |value| value,
             else => return self.fail(collection_expression.position, "for var requires a var collection binding"),
@@ -263,7 +271,7 @@ fn analyzeCollectionFor(
         try self.emit(builder, .{ .local_store = .{ .local = value, .operand = source.value } });
         break :local value;
     };
-    const owns_source = source_root == null and (Resources.needsDrop(self, source.type) or Resources.containsClass(self, source.type));
+    const owns_source = collection_reference == null and source_root == null and (Resources.needsDrop(self, source.type) or Resources.containsClass(self, source.type));
     if (owns_source and Resources.requiresRetain(self, source.type) and !source.transferred) {
         try Resources.retainValue(self, builder, source.type, source.value);
     }
@@ -288,7 +296,7 @@ fn analyzeCollectionFor(
     builder.current_block = condition_block;
     const index = try loadLocalValue(self, builder, index_local, .int);
     const count = if (collection.length) |length| try emitInt(self, builder, length) else count: {
-        const value = try loadLocalValue(self, builder, collection_local, source.type);
+        const value = try loadCollection(self, builder, collection_local, collection_reference, source.type);
         const result = try self.newValue(builder, .int);
         try self.emit(builder, .{ .collection_count = .{ .result = result, .collection = value } });
         break :count result;
@@ -297,7 +305,7 @@ fn analyzeCollectionFor(
     self.terminate(builder, .{ .branch = .{ .condition = condition, .then_block = body_block, .else_block = exit_block } });
 
     builder.current_block = body_block;
-    const collection_value = try loadLocalValue(self, builder, collection_local, source.type);
+    const collection_value = try loadCollection(self, builder, collection_local, collection_reference, source.type);
     const element = try self.newValue(builder, collection.element);
     try self.emit(builder, .{ .collection_load = .{
         .result = element,
@@ -344,7 +352,7 @@ fn analyzeCollectionFor(
     const terminated = try analyze_body(context, self, builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
-    if (!terminated) try Resources.emitActiveDrops(self, builder, if (loop.mode == .mutable) binding_count + 1 else binding_count);
+    if (!terminated) try Resources.emitActiveDrops(self, builder, loop_context.drop_binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
     if (!terminated) {
         try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
@@ -352,7 +360,7 @@ fn analyzeCollectionFor(
     }
 
     builder.current_block = update_block;
-    if (element_local) |local| try writeCollectionElement(self, builder, collection_local, source.type, index_local, local, collection.element, loop.position);
+    if (element_local) |local| try writeCollectionElement(self, builder, collection_local, collection_reference, source.type, index_local, local, collection.element, loop.position);
     const next = try self.newValue(builder, .int);
     try self.emit(builder, .{ .binary = .{
         .result = next,
@@ -366,7 +374,7 @@ fn analyzeCollectionFor(
 
     if (element_local) |local| {
         builder.current_block = break_update_block;
-        try writeCollectionElement(self, builder, collection_local, source.type, index_local, local, collection.element, loop.position);
+        try writeCollectionElement(self, builder, collection_local, collection_reference, source.type, index_local, local, collection.element, loop.position);
         self.terminate(builder, .{ .jump = exit_block });
     }
     builder.current_block = exit_block;
@@ -1052,8 +1060,17 @@ fn analyzeRangeFor(
     return false;
 }
 
-fn writeCollectionElement(self: anytype, builder: anytype, collection_local: Ir.LocalId, collection_type: Ast.Type, index_local: Ir.LocalId, element_local: Ir.LocalId, element_type: Ast.Type, position: Source.Position) !void {
-    const collection = try loadLocalValue(self, builder, collection_local, collection_type);
+fn loadCollection(self: anytype, builder: anytype, local: Ir.LocalId, reference: ?Ir.ValueId, type_value: Ast.Type) !Ir.ValueId {
+    if (reference) |address| {
+        const result = try self.newValue(builder, type_value);
+        try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = address } });
+        return result;
+    }
+    return loadLocalValue(self, builder, local, type_value);
+}
+
+fn writeCollectionElement(self: anytype, builder: anytype, collection_local: Ir.LocalId, collection_reference: ?Ir.ValueId, collection_type: Ast.Type, index_local: Ir.LocalId, element_local: Ir.LocalId, element_type: Ast.Type, position: Source.Position) !void {
+    const collection = try loadCollection(self, builder, collection_local, collection_reference, collection_type);
     const index = try loadLocalValue(self, builder, index_local, .int);
     const element = try loadLocalValue(self, builder, element_local, element_type);
     if (Resources.requiresRetain(self, element_type)) try Resources.retainValue(self, builder, element_type, element);
@@ -1064,7 +1081,9 @@ fn writeCollectionElement(self: anytype, builder: anytype, collection_local: Ir.
     }
     const updated = try self.newValue(builder, collection_type);
     try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = collection, .index = index, .replacement = element, .position = position } });
-    try self.emit(builder, .{ .local_store = .{ .local = collection_local, .operand = updated } });
+    if (collection_reference) |reference| {
+        try self.emit(builder, .{ .reference_store = .{ .reference = reference, .operand = updated } });
+    } else try self.emit(builder, .{ .local_store = .{ .local = collection_local, .operand = updated } });
     if (Resources.needsDrop(self, element_type) or Resources.containsClass(self, element_type)) {
         try Resources.emitDrop(self, builder, element_type, element);
     }

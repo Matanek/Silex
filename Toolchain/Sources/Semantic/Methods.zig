@@ -1006,7 +1006,10 @@ fn analyzeProtocolCall(
 ) !?Model.TypedValue {
     if (requirement.return_mode != .value) return self.fail(call.name_position, "dynamic protocol methods cannot return '@T' or '&T'");
     try Borrowing.validateReadArguments(self, requirement.parameters, call.arguments);
-    const place = try prepareReceiverPlace(self, builder, try requireMutablePlace(self, builder, call.receiver.?, call.name), receiver, safe_receiver_type);
+    // Property getters are nonmutating for every conformer. A constructor
+    // parameter or borrowed projection can be read without receiver writeback.
+    const getter = if (requirement.accessor) |accessor| accessor.kind == .get else false;
+    const place: ?Place = if (getter) null else try prepareReceiverPlace(self, builder, try requireMutablePlace(self, builder, call.receiver.?, call.name), receiver, safe_receiver_type);
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
     var read_temporaries: std.ArrayList(Model.TypedValue) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
@@ -1046,7 +1049,7 @@ fn analyzeProtocolCall(
         try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
         return ProtocolValues.uninhabitedCall(self, builder, requirement.return_type, call.name_position);
     }
-    const updated = try self.newValue(builder, receiver.type);
+    const updated = if (getter) null else try self.newValue(builder, receiver.type);
     const result = if (requirement.return_type == .void) null else try self.newValue(builder, requirement.return_type);
     const merge_block = try self.newBlock(builder);
     for (conformers, 0..) |structure_index, conformer_index| {
@@ -1091,7 +1094,7 @@ fn analyzeProtocolCall(
             try self.emit(builder, .{ .class_cast = .{ .result = value, .operand = returned_receiver } });
             break :replacement value;
         } else returned_receiver;
-        try self.emit(builder, .{ .protocol_init = .{ .result = updated, .operand = replacement, .structure = structure_index } });
+        if (updated) |target| try self.emit(builder, .{ .protocol_init = .{ .result = target, .operand = replacement, .structure = structure_index } });
         if (result) |target| {
             const source = if (mutating) source: {
                 const value = try self.newValue(builder, requirement.return_type);
@@ -1106,11 +1109,13 @@ fn analyzeProtocolCall(
     builder.current_block = merge_block;
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
     try Resources.emitReadTemporaryDrops(self, builder, read_temporaries.items);
-    const replacement = if (safe_receiver_type) |optional_type|
-        (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = updated }, optional_type)).?.value
-    else
-        updated;
-    try writePlace(self, builder, place, replacement);
+    if (place) |target| {
+        const replacement = if (safe_receiver_type) |optional_type|
+            (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = updated.? }, optional_type)).?.value
+        else
+            updated.?;
+        try writePlace(self, builder, target, replacement);
+    }
     return if (result) |value| .{ .type = requirement.return_type, .value = value, .transferred = Resources.ownsValue(self, requirement.return_type) } else null;
 }
 
@@ -1649,7 +1654,11 @@ fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, stat
         .while_statement => |loop| if (expressionCallsMutatingSelf(program, structure_index, loop.condition.source(), mutating) or statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true,
         .for_statement => |loop| {
             switch (loop.source) {
-                .collection => |source| if (expressionCallsMutatingSelf(program, structure_index, source, mutating)) return true,
+                .collection => |source| {
+                    const collection_source = if (source.value == .call and std.mem.eql(u8, source.value.call.name, "indexed")) source.value.call.receiver orelse source else source;
+                    if (loop.mode == .mutable) if (Borrowing.rootName(collection_source)) |root| if (std.mem.eql(u8, root, "self")) return true;
+                    if (expressionCallsMutatingSelf(program, structure_index, source, mutating)) return true;
+                },
                 .range => |range| if (expressionCallsMutatingSelf(program, structure_index, range.start, mutating) or expressionCallsMutatingSelf(program, structure_index, range.end, mutating)) return true,
             }
             if (statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true;
@@ -1692,6 +1701,7 @@ fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, exp
         },
         .field_access => |access| expressionCallsMutatingSelf(program, structure_index, access.base, mutating),
         .unary => |unary| calls: {
+            if (unary.operator == .borrow_mutable) if (Borrowing.rootName(unary.operand)) |root| if (std.mem.eql(u8, root, "self")) break :calls true;
             if (expressionCallsMutatingSelf(program, structure_index, unary.operand, mutating)) break :calls true;
             if (unary.try_alternative) |alternative| {
                 if (alternative.statements) |statements| if (statementsCallMutatingSelf(program, structure_index, statements, mutating)) break :calls true;
@@ -1748,7 +1758,9 @@ fn mutatingMethodInStructure(program: Ast.Program, structure_index: usize, name:
     if (structure_index >= program.structures.len) return false;
     const offset = flatMethodIndex(program, structure_index, 0);
     for (program.structures[structure_index].methods, 0..) |method, method_index| {
-        if (mutating[offset + method_index] and std.mem.eql(u8, method.name, name) and Support.acceptsArity(method.parameters, arity)) return true;
+        const protocol_mutating = program.structures[structure_index].is_protocol and
+            (if (method.accessor) |accessor| accessor.kind != .get else true);
+        if ((mutating[offset + method_index] or protocol_mutating) and std.mem.eql(u8, method.name, name) and Support.acceptsArity(method.parameters, arity)) return true;
     }
     return false;
 }

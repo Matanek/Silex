@@ -1,0 +1,84 @@
+protocol Named { name:str { get } }
+struct Item:Named { let name:str }
+class Computed:Named { let name:str { get { return "computed" } } }
+class Wrapper {
+    let name:str
+    init(source:Named) { self.name = source.name }
+}
+
+test "protocol getters read immutable constructor parameters and borrowed elements" {
+    var source:Named = Item(name:"item")
+    var wrapper = Wrapper(source)
+    assert(wrapper.name == "item")
+    var values:Named[] = [source, Computed()]
+    var index = 0
+    for value in values {
+        if index == 0 { assert(value.name == "item") }
+        else { assert(value.name == "computed") }
+        index++
+    }
+    assert(index == 2)
+    assert(Wrapper(Computed()).name == "computed")
+    assert(values[0].name == "item" && values[1].name == "computed")
+}
+
+protocol Writer { func write(samples:&float32[..]); func reset() }
+struct Stateful:Writer {
+    var frame:int
+    func write(samples:&float32[..]) { samples[0] = self.frame as float32; self.frame++ }
+    func reset() { self.frame = 0 }
+}
+class Owner {
+    private var source:Writer
+    private var buffer:float32[]
+    init(source:Writer) { self.source = source; self.buffer = [0.0 as float32] }
+    func render() float32 { self.source.write(&self.buffer[0:1]); return self.buffer[0] }
+    func reset() { self.source.reset() }
+}
+class CollectionOwner {
+    private var sources:Writer[]
+    init(source:Writer) { self.sources = [source] }
+    func reset() { for var source in self.sources { source.reset() } }
+    func render(samples:&float32[..]) { for var source in self.sources { source.write(samples) } }
+}
+
+test "method mutability includes prepared views protocol fields and mutable self iteration" {
+    var owner = Owner(Stateful(frame:7))
+    assert(owner.render() == 7.0 as float32)
+    assert(owner.render() == 8.0 as float32)
+    owner.reset(); assert(owner.render() == 0.0 as float32)
+    var collection = CollectionOwner(Stateful(frame:7))
+    collection.reset()
+    var samples:float32[] = [0.0 as float32]
+    collection.render(&samples[0:1]); assert(samples[0] == 0.0 as float32)
+    collection.render(&samples[0:1]); assert(samples[0] == 1.0 as float32)
+}
+
+struct CollectionValue {
+    var values:int[]
+    func increment() {
+        for index, var value in self.values.indexed() {
+            value += index + 1
+            if index == 0 { continue }
+            if index == 1 { break }
+        }
+    }
+}
+class CollectionReference {
+    var value:CollectionValue
+    init() { self.value = CollectionValue(values:[1, 2, 3]) }
+    func increment() { self.value.increment() }
+}
+
+test "mutable field iteration writes through stable storage and preserves list copies" {
+    var value = CollectionValue(values:[1, 2, 3])
+    let original = value.values
+    value.increment()
+    assert(value.values[0] == 2 && value.values[1] == 4 && value.values[2] == 3)
+    assert(original[0] == 1 && original[1] == 2 && original[2] == 3)
+    var reference = CollectionReference()
+    reference.increment(); reference.increment()
+    assert(reference.value.values[0] == 3 && reference.value.values[1] == 6 && reference.value.values[2] == 3)
+    var empty = CollectionValue(values:[])
+    empty.increment(); assert(empty.values.count() == 0)
+}

@@ -1,0 +1,20 @@
+protocol Live { func touch() }
+class Item:Live {
+    var value:int = 0
+    func touch() { self.value++ }
+}
+
+test "indexed mutable protocol iteration retains its element until writeback" {
+    var values:Live[] = [Item(), Item(), Item(), Item()]
+    let expected:float32[] = [0.0 as float32, 0.0 as float32, 0.0 as float32, 0.0 as float32]
+    for index, var value in values.indexed() {
+        var buffer:float32[] = [1.0 as float32]
+        assert(buffer[0] > expected[index])
+        value.touch()
+    }
+    for index, var value in values.indexed() {
+        value.touch()
+        if index == 0 { continue }
+        if index == 2 { break }
+    }
+}

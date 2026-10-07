@@ -8,6 +8,14 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Mutable `indexed()` iteration keeps the owned element alive until writeback. Body cleanup failed to account for the index binding, causing premature release and an X64 crash.
+
+- `for var` and `indexed()` can traverse mutable collection fields and write their storage on every iteration, including before continue and break; list copies remain independent.
+
+- Mutability inference also follows mutable field views, contained protocol methods and mutable iteration over self collections. Getters remain protected against these indirect mutations.
+
+- Protocol properties can be read from constructor parameters and borrowed collection elements without requiring a mutable receiver or writing its storage back.
+
 - ARM64 Release loops testing `value % 2 == 0` or `!= 0` now reevaluate parity after each iteration. Nested loops no longer read a remainder eliminated by instruction fusion.
 
 - On ARM64, class-reference cleanup addresses its runtime context independently of value registers when the stack reaches the 32 KiB boundary. This prevents crashes or corruption of a live register at that boundary, including UI description construction in Release.
