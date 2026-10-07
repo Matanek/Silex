@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- On ARM64, class-reference cleanup addresses its runtime context independently of value registers when the stack reaches the 32 KiB boundary. This prevents crashes or corruption of a live register at that boundary, including UI description construction in Release.
+
 - A cascade on a temporary value passed to an optional parameter now mutates the value before optional injection, including classes and collections. Completion preserves the concrete receiver’s members.
 
 - `publish --dry-run` and publication preparation use Shadercross configured by `silex setup`, like the other compilation commands. Packages whose sources import HLSL programs are no longer incorrectly rejected as unconfigured.

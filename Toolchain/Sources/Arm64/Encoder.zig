@@ -840,7 +840,9 @@ fn encodeFunction(
     const saved_register_size: u32 = @intCast(std.mem.alignForward(usize, saved_register_count * Machine.slot_size, 16));
     const local_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
     const encoded_frame_size = std.math.add(u32, local_frame_size, saved_register_size) catch return error.InvalidMachineProgram;
-    const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
+    // Encoder-owned runtime storage is outside the value slots. Address it
+    // from SP: x28 may still hold a resident value at the direct-window limit.
+    const cycle_context_offset: usize = function.frame_size;
     const frameless = function.register_slots.len != 0 and encoded_frame_size == 0;
     if (!frameless) {
         try words.append(allocator, saveFrame());
@@ -1419,7 +1421,7 @@ fn encodeFunction(
             },
             .class_drop => |drop| {
                 if (enable_cycle_collector) {
-                    try words.append(allocator, storeStack(.zero_or_sp, cycle_context_slot));
+                    try emitStoreAtOffset(allocator, words, .zero_or_sp, .zero_or_sp, cycle_context_offset);
                 }
                 try loadValue(allocator, words, function, .x10, drop.operand);
                 const skip_null = words.items.len;
@@ -1460,7 +1462,7 @@ fn encodeFunction(
                     try words.append(allocator, moveWideZero32(.x8, 0));
                     cycle_unavailable = words.items.len;
                     try words.append(allocator, compareBranchZero64(.x0));
-                    try words.append(allocator, storeStack(.x0, cycle_context_slot));
+                    try emitStoreAtOffset(allocator, words, .x0, .zero_or_sp, cycle_context_offset);
                 }
                 const finalize_cycle = words.items.len;
                 try words.append(allocator, branch());
@@ -1492,7 +1494,7 @@ fn encodeFunction(
                 const finalization_complete = words.items.len;
                 for (finalized.items) |at| try Fixups.patch26(words.items, at, finalization_complete);
                 if (enable_cycle_collector) {
-                    try words.append(allocator, loadStack(.x1, cycle_context_slot));
+                    try emitLoadAtOffset(allocator, words, .x1, .zero_or_sp, cycle_context_offset);
                     const no_context = words.items.len;
                     try words.append(allocator, compareBranchZero64(.x1));
                     try words.append(allocator, moveWideZero64(.x0, 1, 0));
@@ -5861,6 +5863,106 @@ test "encode known AArch64 instruction words" {
     try std.testing.expectEqual(@as(u32, 0xc80afdc9), A64.storeReleaseExclusive64(.x10, .x9, .x14));
     try std.testing.expectEqual(@as(u32, 0xc89ffddf), A64.storeRelease64(.zero_or_sp, .x14));
     try std.testing.expectEqual(@as(u32, 0xd65f03c0), returnInstruction());
+}
+
+test "cycle context crosses the direct stack window without using its value base" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_]Machine.Slot{ Machine.direct_stack_slots - 2, Machine.direct_stack_slots, Machine.direct_stack_slots + 2 }) |slots| {
+        const function: Machine.Function = .{
+            .name = "cycle_context_boundary",
+            .parameter_count = 0,
+            .return_type = .int,
+            .return_width = 1,
+            .slot_count = slots,
+            .frame_size = try Machine.frameSize(slots),
+            .instructions = &.{
+                .{ .constant_int = .{ .result = 0, .bits = 0 } },
+                .{ .class_drop = .{ .operand = 0, .nullable = true, .static_type = 0, .plans = &.{} } },
+                .{ .constant_int = .{ .result = 1, .bits = 42 } },
+                .{ .return_value = .{ .start = 1, .width = 1 } },
+            },
+        };
+        const program: Machine.Program = .{ .functions = &.{function}, .copy_model = &.{0} };
+        for ([_]Platform{ .darwin, .linux, .windows }) |platform| {
+            const image = try encodeForPlatform(allocator, program, .none, platform);
+            var base_initialized = false;
+            var context_initialized = false;
+            var offset: usize = image.function_offsets[0];
+            while (offset + 4 <= image.code.len) : (offset += 4) {
+                const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+                if (word == addSubtractImmediate(.x28, .zero_or_sp, 0, true)) base_initialized = true;
+                const context_store = store64(.zero_or_sp, .x13, 0);
+                if (word == context_store) {
+                    context_initialized = true;
+                    break;
+                }
+                const context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
+                if (word == storeStack(.zero_or_sp, context_slot)) {
+                    context_initialized = context_slot < Machine.direct_stack_slots or base_initialized;
+                    break;
+                }
+                if (word == compareBranchZero64(.x10)) break;
+            }
+            try std.testing.expect(context_initialized);
+        }
+        if (@import("builtin").os.tag == .macos and @import("builtin").cpu.arch == .aarch64) {
+            const result = try @import("Runner.zig").invoke(allocator, program, 0, &.{});
+            try std.testing.expectEqual(Machine.Status.success, result.status);
+            try std.testing.expectEqual(@as(i64, 42), result.value);
+        }
+    }
+}
+
+test "cycle context preserves a resident x28 at the aligned stack boundary" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parameters: [8]Machine.Span = undefined;
+    for (&parameters, 0..) |*parameter, slot| parameter.* = .{ .start = @intCast(slot), .width = 1 };
+    var instructions: std.ArrayList(Machine.Instruction) = .empty;
+    try instructions.appendSlice(allocator, &.{
+        .{ .constant_int = .{ .result = 8, .bits = 17 } },
+        .{ .constant_int = .{ .result = 9, .bits = 31 } },
+        .{ .constant_int = .{ .result = 10, .bits = 0 } },
+        .{ .class_drop = .{ .operand = 10, .nullable = true, .static_type = 0, .plans = &.{} } },
+        .{ .binary = .{ .result = 11, .left = 0, .right = 1, .operator = .add } },
+    });
+    for (2..10) |slot| try instructions.append(allocator, .{ .binary = .{ .result = 11, .left = 11, .right = @intCast(slot), .operator = .add } });
+    try instructions.append(allocator, .{ .return_value = .{ .start = 11, .width = 1 } });
+    var function: Machine.Function = .{
+        .name = "resident_cycle_context_boundary",
+        .parameter_count = 8,
+        .parameters = &parameters,
+        .return_type = .int,
+        .return_width = 1,
+        .slot_count = Machine.direct_stack_slots - 1,
+        .frame_size = try Machine.frameSize(Machine.direct_stack_slots - 1),
+        .instructions = instructions.items,
+    };
+    const allocation = try @import("RegisterAllocation.zig").allocate(allocator, function);
+    try std.testing.expectEqual(@as(u32, 32768), allocation.frame_size);
+    try std.testing.expect(std.mem.indexOfScalar(?u5, allocation.residences, 28) != null);
+    function.register_slots = allocation.residences;
+    function.float_register_slots = allocation.float_residences;
+    function.float_lane_slots = allocation.float_lane_residences;
+    function.frame_size = allocation.frame_size;
+    const program: Machine.Program = .{ .functions = &.{function}, .copy_model = &.{0} };
+    const image = try encode(allocator, program, .none);
+    var context_initialized = false;
+    var offset: usize = image.function_offsets[0];
+    while (offset + 4 <= image.code.len) : (offset += 4) {
+        const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
+        if (word == store64(.zero_or_sp, .x13, 0)) context_initialized = true;
+        if (word == compareBranchZero64(.x10)) break;
+    }
+    try std.testing.expect(context_initialized);
+    if (@import("builtin").os.tag == .macos and @import("builtin").cpu.arch == .aarch64) {
+        const result = try @import("Runner.zig").invoke(allocator, program, 0, &.{ 1, 2, 3, 4, 5, 6, 7, 8 });
+        try std.testing.expectEqual(Machine.Status.success, result.status);
+        try std.testing.expectEqual(@as(i64, 84), result.value);
+    }
 }
 
 test "probe every Windows stack page in large ARM64 frames" {

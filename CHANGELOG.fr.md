@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Sur ARM64, le nettoyage des références de classe adresse son contexte runtime indépendamment des registres de valeurs lorsque la pile atteint la limite de 32 Kio. Cela évite un crash ou la corruption d’un registre vivant à cette limite, notamment lors de la construction de descriptions UI en Release.
+
 - Une cascade sur une valeur temporaire passée à un paramètre optionnel modifie désormais la valeur avant son injection dans l’optionnel, y compris pour les classes et collections. La complétion conserve les membres du récepteur concret.
 
 - `publish --dry-run` et la préparation de publication utilisent Shadercross configuré par `silex setup`, comme les autres commandes de compilation. Les packages dont une source importe des programmes HLSL ne sont plus refusés à tort comme non configurés.

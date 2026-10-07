@@ -28,5 +28,6 @@ test {
     _ = @import("Sources/Llvm/Units.zig");
     _ = @import("Sources/Llvm/Store.zig");
     _ = @import("Sources/Arm64/SystemHeap.zig");
+    _ = @import("Sources/Arm64/Encoder.zig");
     _ = @import("Sources/X64/SystemHeap.zig");
 }

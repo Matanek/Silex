@@ -519,6 +519,15 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = bootstrap_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const stack_window_tests = b.addTest(.{
+        .root_module = module,
+        // Keep unnamed import tests reachable as well as the regression.
+        .filters = &.{ "test_0", "cycle context" },
+    });
+    stack_window_tests.stack_size = bootstrap_stack_size;
+    const stack_window_command = b.addRunArtifact(stack_window_tests);
+    stack_window_command.setCwd(b.path(""));
+    b.step("test-arm64-stack-window", "Verify the ARM64 runtime stack window boundary").dependOn(&stack_window_command.step);
     const deep_copy_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("Runtime/DeepCopy.zig"),
