@@ -1,0 +1,16 @@
+enum Choice { first; second }
+struct Option<T> { let value:T }
+class Group<T> {
+    let options:Option<T>[]
+    init(options:Option<T>[]) { self.options = options }
+}
+class Form {
+    func options() Option<Choice>[] { return [Option<Choice>(value:Choice.first)] }
+    func group() Group<Choice> { return Group<Choice>(self.options()) }
+}
+test "reuse a concrete collection with a generic element across methods and fields" {
+    var form = Form()
+    var group = form.group()
+    assert(group.options.count() == 1)
+    assert(group.options[0].value == Choice.first)
+}

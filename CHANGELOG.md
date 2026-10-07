@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Reuse the identity of source-declared arrays of generic types during specialization. A method returning `Option<Choice>[]` and a field `Option<T>[]` no longer declare two structures with the same name.
+
 - Native cycle collection skips elements of scalar, string and optional-scalar arrays because they cannot own class edges. Large list data is no longer scanned during each temporary cleanup; arrays containing classes remain traced.
 
 - The parser distinguishes compound comparisons from generic calls when an operand is parenthesized; fixed-array, tuple and function type arguments remain recognized.

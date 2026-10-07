@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Réutiliser l’identité des tableaux de types génériques déjà déclarés dans la source pendant leur spécialisation. Une méthode retournant `Option<Choix>[]` et un champ `Option<T>[]` ne déclarent plus deux structures portant le même nom.
+
 - Le collecteur de cycles natif ignore les éléments des tableaux de scalaires, chaînes et scalaires optionnels : ils ne portent aucune arête de classe. Les données d’une grande liste ne sont plus parcourues à chaque nettoyage temporaire ; les tableaux contenant des classes restent tracés.
 
 - Le parseur distingue les comparaisons composées des appels génériques lorsque l’un des opérandes est parenthésé ; les arguments de types avec tableaux fixes, tuples et fonctions restent reconnus.
