@@ -55,6 +55,7 @@ fn tokenFollowsArguments(parser: anytype, expected: anytype) !bool {
     if (parser.current.tag != .less) return false;
     var lexer = parser.lexer;
     var depth: usize = 1;
+    var brackets: usize = 0;
     while (depth != 0) {
         const token = lexer.next() catch return false;
         switch (token.tag) {
@@ -64,8 +65,23 @@ fn tokenFollowsArguments(parser: anytype, expected: anytype) !bool {
                 if (depth < 2) return false;
                 depth -= 2;
             },
-            .end, .semicolon, .left_brace, .right_brace => return false,
-            else => {},
+            .left_bracket => brackets += 1,
+            .right_bracket => {
+                if (brackets == 0) return false;
+                brackets -= 1;
+            },
+            // Type syntax allows numbers only as fixed-array lengths. A pair
+            // of comparisons around an expression is not a generic call.
+            .integer => if (brackets == 0) return false,
+            .identifier, .keyword_func, .keyword_void,
+            .keyword_int, .keyword_int8, .keyword_int16, .keyword_int32,
+            .keyword_int64, .keyword_uint, .keyword_uint8, .keyword_uint16,
+            .keyword_uint32, .keyword_uint64, .keyword_bool,
+            .keyword_float, .keyword_float32, .keyword_float64, .keyword_str,
+            .dot, .comma, .colon, .left_parenthesis, .right_parenthesis,
+            .dot_dot, .question, .question_question, .at, .amp,
+            => {},
+            else => return false,
         }
     }
     return (lexer.next() catch return false).tag == expected;

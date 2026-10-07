@@ -1131,3 +1131,34 @@ test "generic calls infer inherited method results and forced optional layers" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\n42\n42\n7\n7\n99\n", result.stdout);
 }
+
+test "generic lookahead preserves compound comparisons and complex type arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Counter {
+        \\    let change:int
+        \\    func ready(count:int) bool { return self.change < 4 && count > (self.change+1)*5 }
+        \\}
+        \\func identity<T>(value:T) T { return value }
+        \\func main() {
+        \\    let lower = 1; let upper = 9; let other = 4
+        \\    print(lower < 4 && upper > (5))
+        \\    print(lower < other && upper > (5))
+        \\    print(lower < 0 || upper > (5))
+        \\    print(Counter(change:1).ready(11))
+        \\    print(Counter(change:4).ready(100))
+        \\    let values:int[2] = [7,9]
+        \\    print(identity<int[2]>(values)[1])
+        \\    let pair:(first:int, second:str) = (first:42, second:"answer")
+        \\    print(identity<(first:int, second:str)>(pair).first)
+        \\    let callback = func(value:int) int { return value+1 }
+        \\    let typed = identity<func(int) int>(callback)
+        \\    print(typed(41))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("true\ntrue\ntrue\ntrue\nfalse\n9\n42\n42\n", result.stdout);
+}

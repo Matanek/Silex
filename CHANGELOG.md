@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- The parser distinguishes compound comparisons from generic calls when an operand is parenthesized; fixed-array, tuple and function type arguments remain recognized.
+
 - On X64, `append()` reuses spare capacity in an unshared list and reserves space when growing. Building large arrays no longer copies all their contents on every append; shared snapshots remain independent.
 
 - Mutable `indexed()` iteration keeps the owned element alive until writeback. Body cleanup failed to account for the index binding, causing premature release and an X64 crash.
