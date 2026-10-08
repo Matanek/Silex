@@ -67,3 +67,17 @@ fn requiredCount(parameters: []const Ast.Parameter) usize {
     }
     return parameters.len;
 }
+
+// No overload is selected: only an identical parameter type provides argument context.
+pub fn commonParameterType(declarations: anytype, candidates: anytype, parameter_index: usize) ?Ast.Type {
+    var common: ?Ast.Type = null;
+    for (candidates) |candidate| {
+        const parameters = declarations[candidate].parameters;
+        if (parameter_index >= parameters.len) return null;
+        const type_value = parameters[parameter_index].type;
+        if (common) |previous| {
+            if (previous != type_value) return null;
+        } else common = type_value;
+    }
+    return common;
+}

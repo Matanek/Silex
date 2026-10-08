@@ -147,8 +147,8 @@ pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call
     if (candidates.items.len == 0) return self.fail(call.name_position, "type has no visible static method accepting these arguments");
     var arguments: std.ArrayList(Model.TypedValue) = .empty;
     for (call.arguments, 0..) |argument, index| {
-        const expected = if (candidates.items.len == 1)
-            Optionals.expectedContext(structure.methods[candidates.items[0]].parameters[index].type, argument)
+        const expected = if (Arguments.commonParameterType(structure.methods, candidates.items, index)) |type_value|
+            Optionals.expectedContext(type_value, argument)
         else
             null;
         try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
@@ -225,7 +225,7 @@ fn analyzeNamedCall(self: anytype, builder: anytype, structure_index: usize, cal
     @memset(typed, null);
     for (sources, 0..) |maybe_source, index| {
         const source = maybe_source orelse continue;
-        const expected = if (candidates.items.len == 1) Optionals.expectedContext(structure.methods[candidates.items[0]].parameters[index].type, source) else null;
+        const expected = if (Arguments.commonParameterType(structure.methods, candidates.items, index)) |type_value| Optionals.expectedContext(type_value, source) else null;
         typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
     }
     var selected: ?usize = null;

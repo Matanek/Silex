@@ -1,0 +1,35 @@
+public protocol Effect { func value() int }
+class Gain:Effect {
+    let amount:int
+    init(amount:int) { self.amount = amount }
+    func value() int { return self.amount }
+}
+func choose(using:int, effects:Effect[], extra:int = 0) int {
+    if effects.count() == 0 { return extra }
+    var effect = effects[0]
+    return effect.value() + extra
+}
+func choose(using:str, effects:Effect[], extra:int = 0) int {
+    if effects.count() == 0 { return extra }
+    var effect = effects[0]
+    return effect.value() + extra
+}
+public static struct Factory {
+    func choose(using:int, effects:Effect[], extra:int = 0) int {
+        if effects.count() == 0 { return extra }
+        var effect = effects[0]
+        return effect.value() + extra
+    }
+    func choose(using:str, effects:Effect[], extra:int = 0) int {
+        if effects.count() == 0 { return extra }
+        var effect = effects[0]
+        return effect.value() + extra
+    }
+}
+test "named function and static overloads contextualize protocol and empty collections" {
+    var gain = Gain(40)
+    assert(choose(effects:[gain], using:1, extra:2) == 42)
+    assert(choose(using:"", effects:[], extra:42) == 42)
+    assert(Factory.choose(1, effects:[gain], extra:2) == 42)
+    assert(Factory.choose(effects:[], using:"", extra:42) == 42)
+}

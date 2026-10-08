@@ -44,10 +44,7 @@ pub fn analyzeFunction(self: anytype, builder: anytype, call: Ast.Expression.Cal
     @memset(typed, null);
     for (sources, 0..) |maybe_source, index| {
         const source = maybe_source orelse continue;
-        const expected = if (candidates.items.len == 1)
-            Optionals.expectedContext(self.program.functions[candidates.items[0]].parameters[index].type, source)
-        else
-            null;
+        const expected = if (Arguments.commonParameterType(self.program.functions, candidates.items, index)) |type_value| Optionals.expectedContext(type_value, source) else null;
         typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
     }
 
