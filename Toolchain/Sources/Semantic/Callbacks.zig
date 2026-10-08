@@ -353,6 +353,13 @@ fn inferType(self: anytype, builder: anytype, expression: *const Ast.Expression)
             for (self.structures[structure_index].fields) |field| if (std.mem.eql(u8, field.name, access.name)) break :field_value field.type;
             break :field_value null;
         },
+        .index_access => |access| element_value: {
+            const base = inferType(self, builder, access.base) orelse break :element_value null;
+            const structure_index = base.structureIndex() orelse break :element_value null;
+            if (structure_index >= self.structures.len) break :element_value null;
+            const collection = self.structures[structure_index].collection orelse break :element_value null;
+            break :element_value collection.element;
+        },
         else => null,
     };
 }

@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Callbacks stored in array element fields can be called directly, including through a collection held in a field. The receiver and index are evaluated once; completion and bound-receiver lifetime are covered.
+
 - Preserve shared context for named arguments of overloaded functions and static methods: structure/protocol lists and empty lists use the common parameter type without an intermediate array or arbitrary selection when candidate types differ.
 
 - ARM64 failure guards reach their handler beyond 1 MiB, including large composed constructors. Successful execution and error propagation retain their results; Darwin/Linux/Windows encoding regressions and native macOS execution, with no new Linux/Windows execution proof.

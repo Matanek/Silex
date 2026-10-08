@@ -54,3 +54,29 @@ test "generic reader remains discoverable inside a captured callback" {
         try Support.expectEqualItems(items, try Support.complete(allocator, source));
     }
 }
+
+test "callback fields on indexed receivers remain discoverable and callable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const header =
+        \\struct Slot { var callback:func(int) int; private var hidden:int = 0 }
+        \\class Owner { var slots:Slot[] }
+        \\func add(value:int) int { return value }
+    ;
+    const setup = "\nfunc main() { let slots:Slot[] = [Slot(callback:add)]; var owner = Owner(slots:slots); ";
+    var frontend = Frontend.init(allocator);
+    _ = try frontend.compile(header ++ setup ++ "print(owner.slots[0].callback(3)) }");
+    for ([_][]const u8{ "slots[0].<|>", "slots[0].ca<|>", "owner.slots[0].<|>" }) |partial| {
+        const source = try std.fmt.allocPrint(allocator, "{s}{s}{s} }}", .{ header, setup, partial });
+        const items = try Support.complete(allocator, source);
+        try std.testing.expect(hasLabel(items, "callback"));
+        try std.testing.expect(!hasLabel(items, "hidden"));
+        try std.testing.expect(!hasLabel(items, "count"));
+        for (items) |item| if (std.mem.eql(u8, item.label, "callback")) {
+            try std.testing.expectEqualStrings("callback", item.insertText.?);
+        };
+        try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, try Support.complete(allocator, source));
+    }
+}

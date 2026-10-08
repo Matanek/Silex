@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Un callback stocké dans un champ d’élément de tableau peut être appelé directement, y compris depuis une collection détenue dans un champ. Le récepteur et l’index sont évalués une seule fois ; complétion et durée de vie du récepteur lié sont couvertes.
+
 - Conserve le contexte commun des arguments nommés de fonctions et méthodes statiques surchargées : listes de structures/protocoles et listes vides utilisent le type partagé des paramètres, sans tableau intermédiaire ni choix arbitraire lorsque les types diffèrent.
 
 - Les gardes d’erreur ARM64 atteignent leur handler au-delà de 1 Mo, notamment dans les grands constructeurs composés. Le chemin normal et la propagation des erreurs conservent leurs résultats ; régressions d’encodage Darwin/Linux/Windows et exécution native macOS, sans nouvelle preuve d’exécution Linux/Windows.

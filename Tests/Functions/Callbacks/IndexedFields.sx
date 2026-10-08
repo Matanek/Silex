@@ -1,0 +1,27 @@
+struct Slot { var callback:func(int) int }
+class Receiver {
+    var total:int = 0
+    func add(value:int) int { self.total += value; return self.total }
+}
+class Owner { var slots:Slot[] }
+class Index {
+    static var calls:int = 0
+    static func next() int { Index.calls++; return 0 }
+}
+func verify() {
+    Index.calls = 0
+    var receiver = Receiver()
+    let slots:Slot[] = [Slot(callback:receiver.add)]
+    assert(slots[Index.next()].callback(3) == 3)
+    var owner = Owner(slots:slots)
+    assert(owner.slots[Index.next()].callback(4) == 7)
+    let fixed:Slot[1] = [Slot(callback:receiver.add)]
+    assert(fixed[Index.next()].callback(2) == 9)
+    {
+        let view = @slots[0:1]
+        assert(view[Index.next()].callback(1) == 10)
+    }
+    assert(receiver.total == 10 && Index.calls == 4)
+}
+func main() { verify(); print("indexed callbacks: OK") }
+test "indexed callback fields keep their receiver and evaluate the index once" { verify() }
