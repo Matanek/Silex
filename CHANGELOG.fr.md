@@ -10,6 +10,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 - Un callback stocké dans un champ d’élément de tableau peut être appelé directement, y compris depuis une collection détenue dans un champ. Le récepteur et l’index sont évalués une seule fois ; complétion et durée de vie du récepteur lié sont couvertes.
 
+- Le collecteur de cycles natif ignore aussi les tableaux de structures et d’énumérations composées uniquement de scalaires, chaînes et collections sans référence de classe. Les grandes sources de `Select` ne sont plus parcourues à chaque nettoyage temporaire ; les arêtes de classes et callbacks et les finalizers ordinaires restent préservés. Régressions et mesures natives macOS ARM64 ; les payloads communs ARM64/X64 sont reconstruits, sans nouvelle preuve d’exécution sur les autres hôtes.
+
 - Conserve le contexte commun des arguments nommés de fonctions et méthodes statiques surchargées : listes de structures/protocoles et listes vides utilisent le type partagé des paramètres, sans tableau intermédiaire ni choix arbitraire lorsque les types diffèrent.
 
 - Les gardes d’erreur ARM64 atteignent leur handler au-delà de 1 Mo, notamment dans les grands constructeurs composés. Le chemin normal et la propagation des erreurs conservent leurs résultats ; régressions d’encodage Darwin/Linux/Windows et exécution native macOS, sans nouvelle preuve d’exécution Linux/Windows.

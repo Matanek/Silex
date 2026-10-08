@@ -171,6 +171,39 @@ test "finalize native cycles containing scalar string and optional arrays" {
     verify_scalar_cycle()
 }
 
+enum NativeRowDetail { empty; text(str); numbers(int?[]) }
+struct NativeScalarRow {
+    let number:int
+    let label:str
+    let detail:NativeRowDetail
+}
+struct NativeAggregateEdge {
+    var owner:NativeAggregateCycle
+    var callback:func() int
+}
+class NativeAggregateCycle {
+    static var drops:int = 0
+    var edges:NativeAggregateEdge[] = []
+    let rows:NativeScalarRow[] = [
+        NativeScalarRow(number:1, label:"alpha", detail:NativeRowDetail.text("βeta")),
+        NativeScalarRow(number:2, label:"gamma", detail:NativeRowDetail.numbers([null, 7]))]
+    func number() int { return self.rows[1].number }
+    drop { NativeAggregateCycle.drops++ }
+}
+func verify_aggregate_cycle() {
+    NativeAggregateCycle.drops = 0
+    {
+        var value = NativeAggregateCycle()
+        value.edges.append(NativeAggregateEdge(owner:value, callback:value.number))
+        assert(value.edges[0].owner.rows[0].label == "alpha")
+        assert(value.edges[0].callback() == 2)
+    }
+    assert(NativeAggregateCycle.drops == 1)
+}
+test "aggregate arrays preserve native class and callback cycle finalization" {
+    verify_aggregate_cycle()
+}
+
 class CollectionCycleNode {
     var links:CollectionCycleNode[]
 
@@ -694,6 +727,7 @@ func main() {
     verify_deep_copy()
     verify_cycles()
     verify_scalar_cycle()
+    verify_aggregate_cycle()
 }
 
 struct NativeBorrowedValues {

@@ -528,9 +528,45 @@ fn traceArray(context: *Context, value: [*]u64, element_type: u64, count: usize)
     // Scalars (including strings and optionals) cannot own class edges.
     // Their storage length must not become work for a reachability trial.
     if (element_type & type_base_mask <= scalar_limit) return true;
+    var path: TypePath = undefined;
+    path.count = 0;
+    if (!mayOwnClassEdge(context, element_type, &path)) return true;
     const width = context.width(element_type);
     for (0..count) |index| if (!traceValue(context, value + index * width, element_type)) return false;
     return true;
+}
+
+// Inspect the element's type once, rather than every value in its storage.
+// Unknown/recursive shapes remain conservative; classes and callbacks must
+// always be traced, even when their own fields cannot form a cycle.
+fn mayOwnClassEdge(context: *const Context, type_value: u64, path: *TypePath) bool {
+    const base = type_value & type_base_mask;
+    if (base <= scalar_limit) return false;
+    if (base >= function_base) return true;
+    if (base < structure_base or path.count == path.values.len or path.contains(base)) return true;
+    path.push(base);
+    defer path.pop();
+    const entry_value = context.entry(base);
+    const data = context.data(entry_value);
+    const kind: Kind = @enumFromInt(entry_value[0]);
+    if (kind == .class or kind == .protocol) return true;
+    if (kind == .list or kind == .array) return mayOwnClassEdge(context, data[0], path);
+    if (kind == .value) {
+        for (0..@as(usize, @intCast(entry_value[3]))) |index| {
+            if (mayOwnClassEdge(context, data[index], path)) return true;
+        }
+        return false;
+    }
+    var cursor: usize = 1;
+    for (0..@as(usize, @intCast(data[0]))) |_| {
+        const count: usize = @intCast(data[cursor]);
+        cursor += 1;
+        for (0..count) |index| {
+            if (mayOwnClassEdge(context, data[cursor + index], path)) return true;
+        }
+        cursor += count;
+    }
+    return false;
 }
 
 fn traceEnumeration(context: *Context, value: [*]u64, data: [*]const u64) bool {
@@ -631,6 +667,96 @@ test "cycle tracing skips optional scalars but still visits class array edges" {
     context.marking = false;
     try std.testing.expect(traceArray(&context, &edges, structure_base, 2));
     try std.testing.expectEqual(@as(usize, 2), TestState.traced_values);
+}
+
+test "cycle tracing does not visit arrays of scalar-only structures" {
+    // SelectOption<int>: value, label, disabled and stable key.
+    const model = [_]u64{ 1, @intFromEnum(Kind.value), 4, 5, 4, 6, 12, 1, 12 };
+    const values = try std.testing.allocator.alloc(u64, 50000 * 4);
+    defer std.testing.allocator.free(values);
+    @memset(values, 0);
+    var context: Context = undefined;
+    context.model = &model;
+    TestState.traced_values = 0;
+    try std.testing.expect(traceArray(&context, values.ptr, structure_base, 50000));
+    try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
+}
+
+test "cycle tracing skips optional and nested scalar aggregates" {
+    const model = [_]u64{
+        4,
+        @intFromEnum(Kind.value),
+        4,
+        17,
+        4,
+        @intFromEnum(Kind.list),
+        1,
+        21,
+        0,
+        @intFromEnum(Kind.enumeration),
+        7,
+        22,
+        0,
+        @intFromEnum(Kind.value),
+        7,
+        27,
+        1,
+        6,
+        12,
+        1,
+        12,
+        structure_base,
+        2,
+        0,
+        2,
+        (@as(u64, 1) << optional_depth_shift) | structure_base,
+        structure_base + 1,
+        structure_base + 2,
+    };
+    var context: Context = undefined;
+    context.model = &model;
+    var values = [_]u64{0} ** 14;
+    TestState.traced_values = 0;
+    try std.testing.expect(traceArray(&context, &values, (@as(u64, 1) << optional_depth_shift) | structure_base, 2));
+    try std.testing.expect(traceArray(&context, &values, structure_base + 3, 2));
+    try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
+}
+
+test "scalar fields do not hide class and callback edges in aggregate arrays" {
+    const model = [_]u64{
+        3,
+        @intFromEnum(Kind.class),
+        1,
+        13,
+        0,
+        @intFromEnum(Kind.value),
+        2,
+        17,
+        2,
+        @intFromEnum(Kind.value),
+        4,
+        19,
+        2,
+        1,
+        42,
+        0,
+        0,
+        6,
+        structure_base,
+        12,
+        function_base,
+    };
+    var rooted = [_]u64{ 42, 1, 0, 0 };
+    var classes = [_]u64{ 7, @intFromPtr(&rooted) };
+    var callbacks = [_]u64{ 0, 0, 0, @intFromPtr(&rooted) };
+    var context: Context = undefined;
+    context.model = &model;
+    context.count = 0;
+    context.marking = false;
+    TestState.traced_values = 0;
+    try std.testing.expect(traceArray(&context, &classes, structure_base + 1, 1));
+    try std.testing.expect(traceArray(&context, &callbacks, structure_base + 2, 1));
+    try std.testing.expectEqual(@as(usize, 6), TestState.traced_values);
 }
 
 test "X64 callbacks prove and commit a direct class cycle" {

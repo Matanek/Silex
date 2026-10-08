@@ -59,7 +59,11 @@ process entry for every block, including the active system boundaries.
 
 Native cycle trials follow class ownership edges. Arrays of scalars, strings
 and optional scalars contain no such edges and are skipped without visiting
-their elements, irrespective of their length. This does not change ordinary
+their elements, irrespective of their length. The same rule applies to
+structures, enumeration payloads and nested collections composed exclusively
+of such values: the collector checks the element's type once per array, rather
+than inspecting every element. Unknown and recursive type shapes remain
+conservative. This does not change ordinary
 storage cleanup: strings and collection buffers still use their generated
 finalizers. Arrays containing class references and owned callback receivers
 remain part of the reachability proof.
