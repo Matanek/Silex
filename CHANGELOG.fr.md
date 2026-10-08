@@ -9,6 +9,7 @@ Cet historique éditorial commence à la version 0.44.1.
 ## [Unreleased]
 
 - Les gardes d’erreur ARM64 atteignent leur handler au-delà de 1 Mo, notamment dans les grands constructeurs composés. Le chemin normal et la propagation des erreurs conservent leurs résultats ; régressions d’encodage Darwin/Linux/Windows et exécution native macOS, sans nouvelle preuve d’exécution Linux/Windows.
+- Compose la conversion numérique implicite avec la promotion optionnelle : durées `float` vers `float64?`, sans extraction ni rétrécissement implicite ; coût des surcharges et propositions du LSP cohérents. Les arguments nommés de méthodes surchargées transmettent le type attendu commun aux listes sans sélectionner arbitrairement une surcharge.
 
 - Réutiliser l’identité des tableaux de types génériques déjà déclarés dans la source pendant leur spécialisation. Une méthode retournant `Option<Choix>[]` et un champ `Option<T>[]` ne déclarent plus deux structures portant le même nom.
 

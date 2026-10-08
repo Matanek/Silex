@@ -5,6 +5,7 @@ const ParserModule = @import("../Parser.zig");
 const ExtensionMerger = @import("../Extensions.zig");
 const RecoveryModule = @import("Recovery.zig");
 const Types = @import("Types.zig");
+const Numeric = @import("../Numeric.zig");
 
 const Allocator = std.mem.Allocator;
 const CompletionItem = Types.CompletionItem;
@@ -2503,7 +2504,7 @@ fn appendExpressionSymbols(
             }, typedPriority(program, 10, selection_type, local.type_name), false);
         }
         for (lexical_callables) |scope| for (scope.parameters) |parameter| {
-            const parameter_type = typeName(program, parameter.type);
+            const parameter_type = try typeSpelling(allocator, program, parameter.type);
             const function_expected = if (selection_type) |expected| expectedCallbackSignature(program, expected) else null;
             if (function_expected) |expected_function| {
                 if (!callbackTypeMatchesSignature(program, parameter.type, expected_function)) continue;
@@ -2813,7 +2814,22 @@ fn matchesExpectedType(program: ?Ast.Program, expected: ?ExpectedType, actual: ?
 
 fn expectedTypeCompatible(program: ?Ast.Program, expected: ExpectedType, actual: []const u8) bool {
     if (expected.constraint == .iterable) return isIterableType(program, actual);
-    return std.mem.eql(u8, expected.name, actual);
+    return valueTypeCompatible(expected.name, actual);
+}
+
+fn valueTypeCompatible(expected: []const u8, actual: []const u8) bool {
+    if (std.mem.eql(u8, expected, actual)) return true;
+    // Promotion may wrap a converted payload, but never implicitly unwraps.
+    if (std.mem.endsWith(u8, expected, "?")) return valueTypeCompatible(expected[0 .. expected.len - 1], actual);
+    const target = fundamentalNumericType(expected) orelse return false;
+    const source = fundamentalNumericType(actual) orelse return false;
+    return Numeric.canWiden(source, target);
+}
+
+fn fundamentalNumericType(name: []const u8) ?Ast.Type {
+    const canonical = if (std.mem.eql(u8, name, "float")) "float32" else if (std.mem.eql(u8, name, "int64")) "int" else if (std.mem.eql(u8, name, "uint64")) "uint" else name;
+    const type_value = std.meta.stringToEnum(Ast.Type, canonical) orelse return null;
+    return if (type_value.isNumeric()) type_value else null;
 }
 
 fn isIterableType(program: ?Ast.Program, spelling: []const u8) bool {
@@ -4014,7 +4030,7 @@ fn expectedTypeAt(allocator: Allocator, source: []const u8, program: Ast.Program
         if (expectedCallArgumentType(allocator, source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
         if (context.match_subject) return null;
         return if (callable) |current| .{
-            .name = baseTypeName(program, current.return_type),
+            .name = typeSpelling(allocator, program, current.return_type) catch return null,
             .strict = true,
             .function_type = if (current.return_type.optionalChild() == null and
                 current.return_type.functionIndex() != null)
@@ -4044,7 +4060,7 @@ fn expectedTypeAt(allocator: Allocator, source: []const u8, program: Ast.Program
         };
         const type_value = expectedNestedValueType(program, annotated_type, source[end + 1 .. context.prefix_start]) orelse return null;
         return .{
-            .name = typeName(program, type_value),
+            .name = typeSpelling(allocator, program, type_value) catch return null,
             .strict = true,
             .function_type = if (type_value.functionIndex() != null) type_value else null,
         };
@@ -4182,7 +4198,7 @@ fn expectedActiveArgumentType(
 
     const type_value = expectedNestedValueType(program, selected orelse return null, source[argument.value_start..cursor]) orelse return null;
     return .{
-        .name = typeName(program, type_value),
+        .name = typeSpelling(allocator, program, type_value) catch return null,
         .strict = true,
         .function_type = if (type_value.functionIndex() != null) type_value else null,
     };
@@ -4491,7 +4507,7 @@ fn expectedCallArgumentType(allocator: Allocator, source: []const u8, program: A
         };
         const type_value = expectedNestedValueType(program, selected orelse return null, source[call.value_start..]) orelse return null;
         return .{
-            .name = typeName(program, type_value),
+            .name = typeSpelling(allocator, program, type_value) catch return null,
             .strict = true,
             .function_type = if (type_value.functionIndex() != null) type_value else null,
         };
