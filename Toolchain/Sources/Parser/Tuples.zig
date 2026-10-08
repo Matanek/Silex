@@ -46,6 +46,10 @@ pub fn parseType(self: anytype, position: Source.Position) !Ast.Type {
         try self.advance();
         if (self.current.tag == .right_parenthesis) return self.fail("tuple types require an element after ','");
     }
+    if (fields.items.len == 1 and named.? == false and fields.items[0].access_mode == .value) {
+        try self.expect(.right_parenthesis, "expected ')' after grouped type");
+        return fields.items[0].type;
+    }
     if (fields.items.len < 2) return self.failAt(position, "a tuple type requires at least two elements");
     try self.expect(.right_parenthesis, "expected ')' after tuple type");
     return internType(self, position, named.?, try fields.toOwnedSlice(self.allocator));

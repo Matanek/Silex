@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Parentheses can group a type: `(func(str) int?)?` distinguishes an optional function from its optional result. Generic optional callbacks preserve their signature and type suggestions remain available inside these annotations.
+
 - Callbacks stored in array element fields can be called directly, including through a collection held in a field. The receiver and index are evaluated once; completion and bound-receiver lifetime are covered.
 
 - Native cycle collection also skips arrays of structures and enumerations composed only of scalars, strings and collections without class references. Large `Select` sources are no longer traversed during every temporary cleanup; class and callback edges and ordinary finalizers remain intact. Native macOS ARM64 regressions and measurements; shared ARM64/X64 payloads are rebuilt, with no new execution evidence on other hosts.

@@ -80,3 +80,29 @@ test "callback fields on indexed receivers remain discoverable and callable" {
         try Support.expectEqualItems(items, try Support.complete(allocator, source));
     }
 }
+
+test "grouped callback type contexts retain types and exclude values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const header = "struct Target {}\nfunc factory() Target { return Target() }\n";
+    var frontend = Frontend.init(allocator);
+    _ = try frontend.compile(header ++ "func main() { let convert:(func(str) Target?)? = null }\n");
+    for ([_][]const u8{
+        "let convert:(<|>)? = null",
+        "let convert:(func(<|>) Target?)? = null",
+        "let convert:(func(str) Tar<|>?)? = null",
+        "let convert:((Tar<|>))? = null",
+    }) |partial| {
+        const source = try std.fmt.allocPrint(allocator, "{s}func main() {{ {s} }}", .{ header, partial });
+        const items = try Support.complete(allocator, source);
+        try std.testing.expect(hasLabel(items, "Target"));
+        try std.testing.expect(!hasLabel(items, "factory"));
+        try std.testing.expect(!hasLabel(items, "true"));
+        for (items) |item| if (std.mem.eql(u8, item.label, "Target")) {
+            try std.testing.expectEqualStrings("Target", item.insertText.?);
+        };
+        try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, try Support.complete(allocator, source));
+    }
+}

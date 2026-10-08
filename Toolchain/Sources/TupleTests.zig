@@ -112,6 +112,12 @@ test "diagnose tuple names arity types destructuring and positional access" {
     );
 }
 
+test "grouped types preserve tuple arity diagnostics" {
+    try expectCompileError("func main() { let value:(only:int) = 1 }", "a tuple type requires at least two elements");
+    try expectCompileError("func main() { let value:(@int) = 1 }", "a tuple type requires at least two elements");
+    try expectCompileError("func main() { let value:(int,) = 1 }", "tuple types require an element after ','");
+}
+
 test "destructuring preserves recursive tuple destruction" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

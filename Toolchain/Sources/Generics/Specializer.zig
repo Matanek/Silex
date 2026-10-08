@@ -1725,6 +1725,12 @@ pub const Specializer = struct {
 
     fn matchesPattern(self: *Specializer, pattern: Ast.Type, actual: Ast.Type, arguments: []const Ast.Type) bool {
         if (pattern.optionalChild()) |child| {
+            // Callback signatures contain their own generic parameters. Match
+            // those structurally rather than comparing a source signature ID
+            // with its instantiated counterpart inside an optional wrapper.
+            if (child.functionIndex() != null) {
+                return self.matchesPattern(child, actual.optionalChild() orelse actual, arguments);
+            }
             const expected_child = self.substitutedPattern(child, arguments) orelse return false;
             return compatible(actual, .optional(expected_child));
         }

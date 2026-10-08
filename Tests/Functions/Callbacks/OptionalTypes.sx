@@ -1,0 +1,31 @@
+func parse(value:str) int? { if value == "42" { return 42 }
+    return null }
+func parse(value:bool) bool? { return value }
+struct Parsing {
+    static func integer(value:str) int? { return parse(value) }
+}
+func apply<T>(convert:(func(str) T?)?, value:str) T? {
+    if let callback = convert { return callback(value) }
+    return null
+}
+test "optional callback and optional return remain distinct under grouped types" {
+    let callback:(func(str) int?)? = parse
+    assert(apply<int>(callback, "42") == 42)
+    assert(apply<int>(callback, "bad") == null)
+    assert(apply<int>(null, "42") == null)
+    assert(apply(callback, "42") == 42)
+    let qualified:(func(str) int?)? = Parsing.integer
+    assert(apply<int>(qualified, "42") == 42)
+    let ordinary:func(str) int? = parse
+    assert(ordinary("42") == 42)
+}
+test "grouped type suffixes preserve scalar tuple and callback identity" {
+    var values:(int?)[] = [1, null]
+    assert(values[0] == 1 && values[1] == null)
+    let pair:((int, str)) = (7, "seven")
+    let (first, second) = pair
+    assert(first == 7 && second == "seven")
+    let callbacks:(func(str) int?)[] = [parse]
+    let first_callback = callbacks[0]
+    assert(first_callback("42") == 42)
+}

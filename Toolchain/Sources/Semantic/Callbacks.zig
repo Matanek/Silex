@@ -203,7 +203,9 @@ pub fn prepare(self: anytype) ![]const Ir.FunctionType {
 }
 
 pub fn reference(self: anytype, builder: anytype, position: anytype, name: []const u8, expected: Ast.Type) !?Model.TypedValue {
-    const signature_index = expected.functionIndex() orelse return null;
+    var callback_type = expected;
+    while (callback_type.optionalChild()) |child| callback_type = child;
+    const signature_index = callback_type.functionIndex() orelse return null;
     if (signature_index >= self.program.function_types.len) return error.InvalidSource;
     const signature = self.program.function_types[signature_index];
     var selected: ?Ir.FunctionId = null;
@@ -228,10 +230,10 @@ pub fn reference(self: anytype, builder: anytype, position: anytype, name: []con
         }
     }
     const function_id = selected orelse return null;
-    const result = try self.newValue(builder, expected);
+    const result = try self.newValue(builder, callback_type);
     const captures = try self.prepareAnonymousCaptures(builder, function_id);
     try self.emit(builder, .{ .function_reference = .{ .result = result, .function = function_id, .captures = captures } });
-    return .{ .type = expected, .value = result, .lexical_captures = captures.len != 0 };
+    return .{ .type = callback_type, .value = result, .lexical_captures = captures.len != 0 };
 }
 
 pub fn inferredReference(self: anytype, builder: anytype, position: anytype, name: []const u8) !?Model.TypedValue {

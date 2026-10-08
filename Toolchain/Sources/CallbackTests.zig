@@ -382,3 +382,10 @@ test "bound methods preserve inherited state and overriding behavior" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("inherited-bound-callback-ok\n", output);
 }
+
+test "optional callbacks reject an incompatible parameter signature" {
+    try expectCompileError(
+        "func parse(value:bool) int? { return null } func main() { let callback:(func(str) int?)? = parse }",
+        "unknown variable 'parse'",
+    );
+}

@@ -894,11 +894,11 @@ pub const Analyzer = struct {
                 if (access.base.value == .identifier and Support.findBinding(builder.bindings.items, access.base.value.identifier) != null) {
                     break :function_reference try self.analyzeFieldAccess(builder, access);
                 }
-                if (expected) |target| if (target.functionIndex() != null) {
+                if (expected) |target| {
                     if (try GenericSyntax.qualifiedName(self.allocator, expression)) |name| {
                         if (try Callbacks.reference(self, builder, expression.position, name, target)) |reference| break :function_reference reference;
                     }
-                };
+                }
                 break :function_reference try self.analyzeFieldAccess(builder, access);
             },
             .call => |call| (try self.analyzeCall(builder, call)) orelse {
