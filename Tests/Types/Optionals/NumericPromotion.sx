@@ -1,0 +1,28 @@
+func optional_value(seconds:float64?) float64 { return seconds! }
+func nested(value:float) float64?? { return value }
+func choose(value:float?) int { return 1 }
+func choose(value:float64?) int { return 2 }
+struct Holder { let value:float64? }
+class Receiver {
+    func accept(value:float64?) float64 { return value! }
+    func accept(value:str?) float64 { return 0.0 }
+    func prepare(note:int, points:Holder[] = []) float64 { return points[0].value! }
+    func prepare(note:str, points:Holder[] = []) float64 { return points[0].value! + 1.0 }
+}
+
+test "numeric widening composes with optional promotion across language boundaries" {
+    let fraction:float = 0.25
+    let direct:float64? = fraction
+    var assigned:float64? = null; assigned = fraction
+    assert(direct! == 0.25 as float64 && assigned! == direct!)
+    assert(Holder(value:fraction).value! == direct!)
+    assert(optional_value(0.25) == direct! && optional_value(1) == 1.0 as float64)
+    assert(nested(fraction)!! == direct!)
+    assert(choose(fraction) == 1 && choose(1) == 1)
+    let precise:float64 = 0.5; assert(choose(precise) == 2)
+    var receiver = Receiver()
+    assert(receiver.accept(value:fraction) == direct!)
+    let point = Holder(value:fraction)
+    assert(receiver.prepare(note:1, points:[point]) == direct!)
+    assert(receiver.prepare(note:"x", points:[point]) == direct! + 1.0)
+}

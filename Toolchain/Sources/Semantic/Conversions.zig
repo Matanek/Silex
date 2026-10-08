@@ -11,7 +11,7 @@ pub fn coerce(self: anytype, builder: anytype, value: Model.TypedValue, target: 
     if (sameFunctionType(self, value.type, target)) return .{ .type = target, .value = value.value };
     if (try Optionals.promote(self, builder, value, target)) |promoted| return promoted;
     if (target.optionalChild()) |child| {
-        if (Inheritance.canUpcast(self, value.type, child) or ProtocolValues.canErase(self, value.type, child)) {
+        if (canImplicitlyConvert(self, value.type, child)) {
             const converted = try coerce(self, builder, value, child, position);
             return (try Optionals.promote(self, builder, converted, target)).?;
         }
@@ -44,7 +44,7 @@ pub fn canImplicitlyConvert(self: anytype, source: Types.Type, target: Types.Typ
     if (source == target or sameFunctionType(self, source, target) or Numeric.canWiden(source, target) or Optionals.canConvert(source, target) or
         Inheritance.canUpcast(self, source, target) or ProtocolValues.canErase(self, source, target)) return true;
     return if (target.optionalChild()) |child|
-        Inheritance.canUpcast(self, source, child) or ProtocolValues.canErase(self, source, child)
+        canImplicitlyConvert(self, source, child)
     else
         false;
 }
@@ -53,7 +53,7 @@ pub fn cost(self: anytype, source: Types.Type, target: Types.Type) ?u8 {
     if (source == target or sameFunctionType(self, source, target)) return 0;
     if (Optionals.conversionCost(source, target)) |value| return value;
     if (Inheritance.canUpcast(self, source, target) or ProtocolValues.canErase(self, source, target)) return 1;
-    if (target.optionalChild()) |child| if (Inheritance.canUpcast(self, source, child) or ProtocolValues.canErase(self, source, child)) return 2;
+    if (target.optionalChild()) |child| if (cost(self, source, child)) |payload_cost| return payload_cost + 1;
     if (!Numeric.canWiden(source, target)) return null;
     if (source.isInteger() and target.isFloat()) {
         // `float` is the language's canonical floating type. Prefer it when an

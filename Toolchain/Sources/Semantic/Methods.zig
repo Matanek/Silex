@@ -785,10 +785,16 @@ fn analyzeNamedCall(
     @memset(typed, null);
     for (sources, 0..) |maybe_source, index| {
         const source = maybe_source orelse continue;
-        const expected = if (candidates.items.len == 1)
-            Optionals.expectedContext(all_candidates[candidates.items[0]].method.parameters[index].type, source)
-        else
-            null;
+        // A shared parameter supplies context even before another argument
+        // selects the overload. Conflicting parameter types supply no context.
+        const expected = expected: {
+            const parameter_type = all_candidates[candidates.items[0]].method.parameters[index].type;
+            for (candidates.items[1..]) |candidate_index| {
+                const parameters = all_candidates[candidate_index].method.parameters;
+                if (index >= parameters.len or parameters[index].type != parameter_type) break :expected null;
+            }
+            break :expected Optionals.expectedContext(parameter_type, source);
+        };
         typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
     }
     var selected: ?usize = null;

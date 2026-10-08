@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Compose implicit numeric widening with optional promotion: `float` durations can feed `float64?` without implicit unwrapping or narrowing; overload costs and LSP value suggestions follow the same rule. Named overloaded method arguments provide their shared collection context without selecting an overload arbitrarily.
+
 - Reuse the identity of source-declared arrays of generic types during specialization. A method returning `Option<Choice>[]` and a field `Option<T>[]` no longer declare two structures with the same name.
 
 - Native cycle collection skips elements of scalar, string and optional-scalar arrays because they cannot own class edges. Large list data is no longer scanned during each temporary cleanup; arrays containing classes remain traced.

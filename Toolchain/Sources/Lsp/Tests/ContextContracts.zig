@@ -459,3 +459,36 @@ test "offer only the two try fallback constructs after a completed operand" {
     try Support.expectAbsent("else", ordinary);
     try Support.expectAbsent("else error", ordinary);
 }
+
+test "numeric payloads remain discoverable in optional value contexts without unwrapping" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_][]const u8{
+        "func inspect(candidate:float, wrong:str) { let seconds:float64? = <|> } func main() {}",
+        "func inspect(candidate:float, wrong:str) { var seconds:float64? = null; seconds = <|> } func main() {}",
+        "func inspect(candidate:float, wrong:str) float64?? { return <|> } func main() {}",
+        "func accept(seconds:float64?) {} func inspect(candidate:float, wrong:str) { accept(<|>) } func main() {}",
+    }) |source| {
+        const items = try Support.complete(allocator, source);
+        Support.expectPresent("candidate", items) catch |err| {
+            std.debug.print("optional context: {s}\n", .{source});
+            return err;
+        };
+        try Support.expectAbsent("wrong", items);
+        try Support.expectNoDuplicates(items);
+    }
+    var server = ServerModule.Server.init(allocator, std.testing.io);
+    defer server.deinit();
+    const protocol_items = try Support.serverCompletion(&server, allocator, "file:///OptionalNumericValues.sx", "func accept(seconds:float64?) {} func inspect(candidate:float, wrong:str) { accept(<|>) } func main() {}");
+    Support.expectItem(.{ .label = "candidate", .kind = 6, .detail = "candidate:float", .insert_text = "candidate" }, protocol_items) catch |err| {
+        for (protocol_items) |item| if (std.mem.eql(u8, item.label, "candidate")) std.debug.print("optional metadata: {any}\n", .{item});
+        return err;
+    };
+    try Support.expectAbsent("wrong", protocol_items);
+    try Support.expectNoDuplicates(protocol_items);
+    const narrow = try Support.complete(allocator, "func inspect(candidate:float64, wrong:str) { let seconds:float? = <|> } func main() {}");
+    try Support.expectAbsent("candidate", narrow);
+    const wrapped = try Support.complete(allocator, "func inspect(candidate:float?, wrong:str) { let seconds:float64? = <|> } func main() {}");
+    try Support.expectAbsent("candidate", wrapped);
+}

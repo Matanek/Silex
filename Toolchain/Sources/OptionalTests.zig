@@ -495,3 +495,59 @@ test "nested optional safe access removes only one layer" {
         "type 'Box?' has no fields",
     );
 }
+
+test "compose numeric widening with optional promotion and overload costs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Box { let seconds:float64? }
+        \\func accept(seconds:float64?) bool { return seconds != null }
+        \\func lift(value:float) float64?? { return value }
+        \\func choose(value:float?) int { return 1 }
+        \\func choose(value:float64?) int { return 2 }
+        \\func main() {
+        \\    let fraction:float = 0.25
+        \\    let wide:float64? = fraction
+        \\    var mutable:float64? = null
+        \\    mutable = fraction
+        \\    assert(wide! == 0.25 as float64 && mutable! == wide!)
+        \\    assert(Box(seconds:fraction).seconds! == wide!)
+        \\    assert(accept(0.01) && accept(fraction) && accept(1))
+        \\    assert(lift(fraction)!! == wide!)
+        \\    assert(choose(fraction) == 1 && choose(1) == 1)
+        \\    let precise:float64 = 0.5
+        \\    assert(choose(precise) == 2)
+        \\}
+    );
+    _ = try Interpreter.runCapture(allocator, compilation.ir);
+    try expectCompileError(
+        "func main() { let wide:float64 = 0.5; let narrow:float? = wide }",
+        "cannot implicitly convert 'float64' to 'float?'",
+    );
+    try expectCompileError(
+        "func main() { let source:float? = 0.5; let target:float64? = source }",
+        "cannot implicitly convert 'float?' to 'float64?'",
+    );
+}
+
+test "shared named overload parameters supply a collection context without choosing an overload" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    const compilation = try frontend.compile(
+        \\struct Point { let x:int }
+        \\class Receiver {
+        \\    func prepare(note:int, points:Point[] = []) int { return points[0].x }
+        \\    func prepare(note:str, points:Point[] = []) int { return points[0].x + 1 }
+        \\}
+        \\func main() {
+        \\    var receiver = Receiver()
+        \\    let point = Point(x:42)
+        \\    assert(receiver.prepare(note:1, points:[point]) == 42)
+        \\    assert(receiver.prepare(note:"x", points:[point]) == 43)
+        \\}
+    );
+    _ = try Interpreter.runCapture(arena.allocator(), compilation.ir);
+}
