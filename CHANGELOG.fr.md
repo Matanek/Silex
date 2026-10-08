@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les gardes d’erreur ARM64 atteignent leur handler au-delà de 1 Mo, notamment dans les grands constructeurs composés. Le chemin normal et la propagation des erreurs conservent leurs résultats ; régressions d’encodage Darwin/Linux/Windows et exécution native macOS, sans nouvelle preuve d’exécution Linux/Windows.
+
 - Réutiliser l’identité des tableaux de types génériques déjà déclarés dans la source pendant leur spécialisation. Une méthode retournant `Option<Choix>[]` et un champ `Option<T>[]` ne déclarent plus deux structures portant le même nom.
 
 - Le collecteur de cycles natif ignore les éléments des tableaux de scalaires, chaînes et scalaires optionnels : ils ne portent aucune arête de classe. Les données d’une grande liste ne sont plus parcourues à chaque nettoyage temporaire ; les tableaux contenant des classes restent tracés.

@@ -528,6 +528,14 @@ pub fn build(b: *std.Build) void {
     const stack_window_command = b.addRunArtifact(stack_window_tests);
     stack_window_command.setCwd(b.path(""));
     b.step("test-arm64-stack-window", "Verify the ARM64 runtime stack window boundary").dependOn(&stack_window_command.step);
+    const long_guard_tests = b.addTest(.{
+        .root_module = module,
+        .filters = &.{ "test_0", "failure guard", "omit status checks" },
+    });
+    long_guard_tests.stack_size = bootstrap_stack_size;
+    const long_guard_command = b.addRunArtifact(long_guard_tests);
+    long_guard_command.setCwd(b.path(""));
+    b.step("test-arm64-long-guards", "Verify ARM64 failure handlers beyond one MiB").dependOn(&long_guard_command.step);
     const deep_copy_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("Runtime/DeepCopy.zig"),

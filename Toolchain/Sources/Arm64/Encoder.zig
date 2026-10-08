@@ -5789,12 +5789,9 @@ fn appendFixup(
     fixups: *std.ArrayList(LocalFixup),
     instruction: u32,
     width: FixupWidth,
-) Allocator.Error!void {
+) Error!void {
     switch (width) {
-        .imm19 => {
-            try fixups.append(allocator, .{ .at = words.items.len, .width = .imm19 });
-            try words.append(allocator, instruction);
-        },
+        .imm19 => try Fixups.appendFailureBranch(allocator, words, fixups, instruction),
         .imm26 => {
             try fixups.append(allocator, .{ .at = words.items.len, .width = .imm26 });
             try words.append(allocator, instruction);
@@ -6206,9 +6203,11 @@ test "omit status checks only for proven infallible direct callees" {
     const image = try encode(allocator, .{ .functions = &functions }, .none);
     var status_checks: usize = 0;
     var offset: usize = 0;
-    while (offset + @sizeOf(u32) <= image.code.len) : (offset += @sizeOf(u32)) {
+    while (offset + 2 * @sizeOf(u32) <= image.code.len) : (offset += @sizeOf(u32)) {
         const word = std.mem.readInt(u32, image.code[offset..][0..4], .little);
-        status_checks += @intFromBool((word & 0xff00001f) == compareBranchNonZero(.x8));
+        const next = std.mem.readInt(u32, image.code[offset + 4 ..][0..4], .little);
+        status_checks += @intFromBool(word == (compareBranchZero(.x8) | (2 << 5)) and
+            next & 0xfc000000 == branch());
     }
     try std.testing.expectEqual(@as(usize, 1), status_checks);
 }

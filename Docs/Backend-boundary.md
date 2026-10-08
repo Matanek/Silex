@@ -44,6 +44,14 @@ operands of the fusion rather than an intermediate slot whose definition was
 elided. The ARM64 parity-loop regression exercises this boundary with both
 signed and unsigned values and with either comparison direction.
 
+ARM64 failure guards must reach the function's handler even when emitted code
+exceeds the one-MiB range of an imm19 branch. The inverted predicate skips an
+imm26 branch on the successful path; flags, registers and failure status remain
+unchanged. This adds one encoded instruction per guard. CFG branches retain
+their own short-branch rules. The encoding is shared by Darwin, Linux and
+Windows; the long-guard regression distinguishes emission on all three from
+native execution on its host.
+
 The LLVM backend serializes the same closed IR to LLVM IR, runs the qualified
 LLVM optimizer and code generator, then links its formatting runtime and the
 same resolved package artifacts. LLVM types, aggregate reserves, private heap
