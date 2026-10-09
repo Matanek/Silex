@@ -12,7 +12,25 @@ pub fn prepare(self: anytype) ![]const bool {
     @memset(recursive, false);
     const visited = try self.allocator.alloc(bool, self.structures.len);
     for (self.structures, 0..) |structure, index| {
-        if (!structure.is_protocol) continue;
+        if (structure.is_class or structure.is_static) continue;
+        if (!structure.is_protocol) {
+            @memset(visited, false);
+            visited[index] = true;
+            if (structure.collection) |collection| {
+                recursive[index] = !collection.view and reaches(self, collection.element, index, visited);
+            } else {
+                for (self.enums) |enumeration| {
+                    if (enumeration.type_index != index) continue;
+                    for (enumeration.variants) |variant| for (variant.associated_types) |payload| {
+                        if (reaches(self, payload, index, visited)) recursive[index] = true;
+                    };
+                }
+                for (structure.fields) |field| {
+                    if (reaches(self, field.type, index, visited)) recursive[index] = true;
+                }
+            }
+            continue;
+        }
         @memset(visited, false);
         visited[index] = true;
         if (inlineCycle(self, .structure(index), index, visited, true)) {
@@ -60,7 +78,7 @@ fn reaches(self: anytype, type_value: Ast.Type, target: usize, visited: []bool) 
 
 pub fn count(self: anytype) usize {
     var result: usize = 0;
-    for (self.recursive_protocol_resources) |recursive| if (recursive) {
+    for (self.recursive_value_resources) |recursive| if (recursive) {
         result += 6;
     };
     return result;
@@ -68,7 +86,7 @@ pub fn count(self: anytype) usize {
 
 pub fn functionId(self: anytype, protocol: usize, retain: bool, ownership: Ir.Ownership, invoke_drop: bool) Ir.FunctionId {
     var result = @import("Callbacks.zig").boundWrapperBase(self.program);
-    for (self.recursive_protocol_resources[0..protocol]) |recursive| if (recursive) {
+    for (self.recursive_value_resources[0..protocol]) |recursive| if (recursive) {
         result += 6;
     };
     return result + operation(retain, ownership, invoke_drop);
@@ -84,7 +102,13 @@ pub fn analyze(self: anytype, protocol: usize, retain: bool, ownership: Ir.Owner
     var builder: Model.FunctionBuilder = .{ .return_type = .void };
     try builder.blocks.append(self.allocator, .{});
     try builder.value_types.append(self.allocator, type_value);
-    try Resources.emitProtocolResourceBody(self, &builder, protocol, 0, retain, ownership, invoke_drop);
+    if (self.structures[protocol].is_protocol) {
+        try Resources.emitProtocolResourceBody(self, &builder, protocol, 0, retain, ownership, invoke_drop);
+    } else if (retain) {
+        try Resources.retainValueBody(self, &builder, type_value, 0, ownership);
+    } else {
+        try Resources.emitDropBody(self, &builder, type_value, 0, ownership, invoke_drop);
+    }
     self.terminate(&builder, .return_void);
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, index| blocks[index] = .{

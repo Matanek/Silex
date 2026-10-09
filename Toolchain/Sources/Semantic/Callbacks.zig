@@ -91,7 +91,7 @@ pub fn memberReference(
         .function_type = selected_type.?,
         .owns_receiver = owns_receiver,
     });
-    const wrapper = boundWrapperBase(self.program) + @import("ProtocolResources.zig").count(self) + wrapper_index;
+    const wrapper = boundWrapperBase(self.program) + @import("ValueResources.zig").count(self) + wrapper_index;
     if (owns_receiver and !base.transferred) try Resources.retainValue(self, builder, base.type, base.value);
     const result = try self.newValue(builder, selected_type.?);
     try self.emit(builder, .{ .function_reference = .{

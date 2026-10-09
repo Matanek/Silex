@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Recursive structures through dynamic lists copy and drop without infinite compiler recursion; their resource operations use IR calls, like recursive protocols. Interpreter and native macOS ARM64 regressions.
+
 - Parentheses can group a type: `(func(str) int?)?` distinguishes an optional function from its optional result. Generic optional callbacks preserve their signature and type suggestions remain available inside these annotations.
 
 - Callbacks stored in array element fields can be called directly, including through a collection held in a field. The receiver and index are evaluated once; completion and bound-receiver lifetime are covered.

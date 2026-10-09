@@ -20,7 +20,7 @@ const Borrowing = @import("Borrowing.zig");
 const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
-const ProtocolResources = @import("ProtocolResources.zig");
+const ValueResources = @import("ValueResources.zig");
 const ProjectionOwnership = @import("ProjectionOwnership.zig");
 const Optionals = @import("Optionals.zig");
 const Operators = @import("Operators.zig");
@@ -82,7 +82,7 @@ pub const Analyzer = struct {
     owner_context: ?usize = null,
     anonymous_captures: []?[]const AnonymousCapture = &.{},
     bound_methods: std.ArrayList(Callbacks.BoundMethod) = .empty,
-    recursive_protocol_resources: []const bool = &.{},
+    recursive_value_resources: []const bool = &.{},
     function_context: ?Ast.Function = null,
     static_initialization_limit: ?usize = null,
     target: ?Target = null,
@@ -141,7 +141,7 @@ pub const Analyzer = struct {
             try self.validateDeclarations(require_entry);
             try self.validateParameterDefaults();
         }
-        self.recursive_protocol_resources = try ProtocolResources.prepare(self);
+        self.recursive_value_resources = try ValueResources.prepare(self);
         var generated_keys: std.ArrayList(?[]const u8) = .empty;
         const package_cache_enabled = self.package_cache_digest != null;
         for (program.structures) |structure| {
@@ -182,7 +182,7 @@ pub const Analyzer = struct {
         };
         // These helpers depend on the complete dynamic conformer graph. Until
         // they have cache provenance, callers referring to them are cache misses.
-        for (0..ProtocolResources.count(self)) |_| try generated_keys.append(self.allocator, null);
+        for (0..ValueResources.count(self)) |_| try generated_keys.append(self.allocator, null);
         const semantic_target = if (self.target) |target| target else Target.macos_arm64;
         var package_cache = cache: {
             var span = self.traceSpan(.package_cache_read);
@@ -295,11 +295,11 @@ pub const Analyzer = struct {
                     try generated_functions.append(self.allocator, cached orelse try Resources.analyzeClassFields(self, nominal, structure));
                 };
             }
-            for (self.recursive_protocol_resources, 0..) |recursive, protocol| {
+            for (self.recursive_value_resources, 0..) |recursive, protocol| {
                 if (!recursive) continue;
                 for (0..3) |kind| {
                     for ([_]Ir.Ownership{ .root, .edge }) |ownership| {
-                        try generated_functions.append(self.allocator, try ProtocolResources.analyze(self, protocol, kind == 0, ownership, kind != 2));
+                        try generated_functions.append(self.allocator, try ValueResources.analyze(self, protocol, kind == 0, ownership, kind != 2));
                         generated_index += 1;
                     }
                 }

@@ -1,0 +1,17 @@
+class Token { static var destroyed:int = 0; drop { Token.destroyed++ } }
+struct Item { var token:Token?; let label:str; var children:Item[] }
+func relay(item:Item) Item { return item }
+func check_tree() {
+    {
+        var item = Item(token:Token(), label:"root", children:[Item(token:Token(), label:"leaf", children:[])])
+        var copied = relay(item)
+        assert(copied.children[0].label == "leaf")
+        assert(Token.destroyed == 0)
+    }
+    assert(Token.destroyed == 2)
+    print("recursive values ok")
+}
+
+test "recursive struct arrays retain finite values" { check_tree() }
+
+func main() { check_tree() }

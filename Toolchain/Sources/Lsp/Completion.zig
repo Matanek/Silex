@@ -7836,8 +7836,7 @@ test "complete a concrete cascade passed to an optional parameter" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     for ([_][]const u8{ "..", "..en", "." }) |suffix| {
-        const source = try std.fmt.allocPrint(arena.allocator(),
-            "struct Settings {{ var enabled:bool = true; private var hidden:int = 0; init() {{}} }}\n" ++
+        const source = try std.fmt.allocPrint(arena.allocator(), "struct Settings {{ var enabled:bool = true; private var hidden:int = 0; init() {{}} }}\n" ++
             "func accept(value:Settings?) {{}}\nfunc main() {{\n    accept(Settings()\n        {s}\n    )\n}}", .{suffix});
         const cursor = std.mem.lastIndexOf(u8, source, suffix).? + suffix.len;
         const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
@@ -7869,4 +7868,15 @@ test "mutable indexed field traversal keeps collection completion and insertion"
     const repeated = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
     try std.testing.expectEqual(items.len, repeated.len);
     for (items, repeated) |item, again| try std.testing.expectEqualStrings(item.label, again.label);
+}
+
+test "recursive list element members stay discoverable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "struct Item { let label:str; var children:Item[] } func main() { var item = Item(label:\"root\", children:[]); item.children[0]. }";
+    const cursor = std.mem.indexOf(u8, source, "children[0].").? + "children[0].".len;
+    const members = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(members, "label"));
+    try std.testing.expect(contains(members, "children"));
+    try std.testing.expect(!contains(members, "append"));
 }

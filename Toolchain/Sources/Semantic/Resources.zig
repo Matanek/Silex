@@ -316,6 +316,11 @@ pub fn releaseConstructedBase(self: anytype, builder: anytype, type_value: Ast.T
 }
 
 fn emitDropOwnedInner(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {
+    if (try emitRecursiveValueResource(self, builder, type_value, value, false, ownership, invoke_value_drop)) return;
+    return emitDropBody(self, builder, type_value, value, ownership, invoke_value_drop);
+}
+
+pub fn emitDropBody(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {
     if (type_value.functionIndex() != null) {
         try self.emit(builder, .{ .class_drop = .{
             .operand = value,
@@ -414,6 +419,11 @@ pub fn retainValue(self: anytype, builder: anytype, type_value: Ast.Type, value:
 }
 
 pub fn retainValueOwned(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
+    if (try emitRecursiveValueResource(self, builder, type_value, value, true, ownership, true)) return;
+    return retainValueBody(self, builder, type_value, value, ownership);
+}
+
+pub fn retainValueBody(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, ownership: Ir.Ownership) AnalyzeError!void {
     if (type_value.functionIndex() != null) {
         try self.emit(builder, .{ .class_retain = .{ .operand = value, .ownership = ownership } });
         return;
@@ -462,11 +472,24 @@ pub fn retainValueOwned(self: anytype, builder: anytype, type_value: Ast.Type, v
     }
 }
 
+// A finite dynamic-array value cycle needs an IR call boundary, just like a
+// recursive protocol. Re-expanding its fields here would recurse in the compiler.
+fn emitRecursiveValueResource(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId, retain: bool, ownership: Ir.Ownership, invoke_drop: bool) AnalyzeError!bool {
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.recursive_value_resources.len or !self.recursive_value_resources[index] or self.structures[index].is_protocol) return false;
+    try self.emit(builder, .{ .call = .{
+        .result = null,
+        .function = @import("ValueResources.zig").functionId(self, index, retain, ownership, invoke_drop),
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{value}),
+    } });
+    return true;
+}
+
 fn emitProtocolResource(self: anytype, builder: anytype, protocol_index: usize, value: Ir.ValueId, retain: bool, ownership: Ir.Ownership, invoke_value_drop: bool) AnalyzeError!void {
-    if (protocol_index < self.recursive_protocol_resources.len and self.recursive_protocol_resources[protocol_index]) {
+    if (protocol_index < self.recursive_value_resources.len and self.recursive_value_resources[protocol_index]) {
         try self.emit(builder, .{ .call = .{
             .result = null,
-            .function = @import("ProtocolResources.zig").functionId(self, protocol_index, retain, ownership, invoke_value_drop),
+            .function = @import("ValueResources.zig").functionId(self, protocol_index, retain, ownership, invoke_value_drop),
             .arguments = try self.allocator.dupe(Ir.ValueId, &.{value}),
         } });
         return;
