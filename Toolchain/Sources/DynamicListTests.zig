@@ -64,3 +64,20 @@ test "report dynamic list bounds" {
     try std.testing.expectEqual(@as(u8, 1), result.exit_code);
     try std.testing.expectEqualStrings("<source>:1:48: runtime error: collection index -3 is out of bounds for count 2\n", result.stderr);
 }
+
+test "append null uses the optional element context and keeps sequence appends" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func main() {
+        \\    var values:int?[] = []; values.append(null); values.append(42)
+        \\    let more:int?[] = [7, null]; values.append(more)
+        \\    assert(values.count() == 4 && values[0] == null && values[1] == 42 && values[3] == null)
+        \\    print("optional append ok")
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("optional append ok\n", result.stdout);
+}

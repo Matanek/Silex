@@ -9,6 +9,7 @@ Cet historique éditorial commence à la version 0.44.1.
 ## [Unreleased]
 
 - Les structures récursives via des listes dynamiques se copient et se détruisent sans récursion infinie du compilateur ; leurs opérations de ressources utilisent des appels IR, comme les protocoles récursifs. Régressions interprétées et natives macOS ARM64.
+- Accepter append(null) pour une liste d’éléments optionnels en utilisant le type connu du récepteur, sans modifier l’ajout de séquences.
 
 - Les parenthèses peuvent regrouper un type : `(func(str) int?)?` distingue une fonction optionnelle de son résultat optionnel. Les callbacks optionnels génériques conservent leur signature et les suggestions de types restent disponibles dans ces annotations.
 

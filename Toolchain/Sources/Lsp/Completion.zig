@@ -7880,3 +7880,12 @@ test "recursive list element members stay discoverable" {
     try std.testing.expect(contains(members, "children"));
     try std.testing.expect(!contains(members, "append"));
 }
+
+test "optional list append keeps value suggestions after null initialization" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const optional = "func main() { var absent:int? = null; var values:int?[] = []; values.append( ) }";
+    const argument = std.mem.indexOf(u8, optional, "append(").? + "append(".len;
+    const values = try itemsAt(arena.allocator(), optional, argument, .invoked);
+    try std.testing.expect(contains(values, "absent"));
+}

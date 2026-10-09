@@ -246,7 +246,11 @@ fn analyzeMutationBody(self: anytype, builder: anytype, call: Ast.Expression.Cal
         kind = .clear;
     } else if (std.mem.eql(u8, call.name, "append")) {
         try requireArity(self, call, 1);
-        const value = try self.analyzeExpression(builder, call.arguments[0]);
+        // null can only denote one optional element, never an appended sequence.
+        const value = if (call.arguments[0].value == .null_value)
+            try self.analyzeExpressionExpected(builder, call.arguments[0], collection.element)
+        else
+            try self.analyzeExpression(builder, call.arguments[0]);
         if (value.type == collection.element) {
             kind = .append;
             argument = value.value;

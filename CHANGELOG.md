@@ -9,6 +9,7 @@ This editorial history starts with version 0.44.1.
 ## [Unreleased]
 
 - Recursive structures through dynamic lists copy and drop without infinite compiler recursion; their resource operations use IR calls, like recursive protocols. Interpreter and native macOS ARM64 regressions.
+- Accept append(null) for lists of optional elements using the known receiver type, while preserving sequence append behavior.
 
 - Parentheses can group a type: `(func(str) int?)?` distinguishes an optional function from its optional result. Generic optional callbacks preserve their signature and type suggestions remain available inside these annotations.
 
