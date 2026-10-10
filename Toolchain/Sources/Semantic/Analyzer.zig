@@ -63,6 +63,10 @@ pub const AnonymousCapture = struct {
     borrowed_root: ?[]const u8,
     borrowed_mode: Ast.Parameter.Mode,
 };
+const AnonymousAccess = struct {
+    member: ?usize,
+    extension: bool,
+};
 pub const Analyzer = struct {
     allocator: Allocator,
     program: Ast.Program = undefined,
@@ -81,6 +85,7 @@ pub const Analyzer = struct {
     module_scope_roots: []const []const u8 = &.{},
     owner_context: ?usize = null,
     anonymous_captures: []?[]const AnonymousCapture = &.{},
+    anonymous_access: []?AnonymousAccess = &.{},
     bound_methods: std.ArrayList(Callbacks.BoundMethod) = .empty,
     recursive_value_resources: []const bool = &.{},
     function_context: ?Ast.Function = null,
@@ -119,6 +124,8 @@ pub const Analyzer = struct {
         self.bound_methods.clearRetainingCapacity();
         self.anonymous_captures = try self.allocator.alloc(?[]const AnonymousCapture, program.functions.len);
         @memset(self.anonymous_captures, null);
+        self.anonymous_access = try self.allocator.alloc(?AnonymousAccess, program.functions.len);
+        @memset(self.anonymous_access, null);
         const function_types = prepared: {
             var span = self.traceSpan(.semantic_preparation);
             defer span.finish();
@@ -623,6 +630,15 @@ pub const Analyzer = struct {
             .system_adapter => |adapter| return InjectedSystems.analyze(self, function, adapter),
             else => {},
         };
+        const previous_member_context = self.member_context;
+        const previous_extension_context = self.extension_context;
+        if (function.is_anonymous) {
+            const access = self.anonymous_access[function_id];
+            self.member_context = if (access) |value| value.member else null;
+            self.extension_context = if (access) |value| value.extension else false;
+        }
+        defer self.member_context = previous_member_context;
+        defer self.extension_context = previous_extension_context;
         const previous_owner_context = self.owner_context;
         self.owner_context = function.owner;
         defer self.owner_context = previous_owner_context;
@@ -708,6 +724,12 @@ pub const Analyzer = struct {
         function_id: Ir.FunctionId,
     ) AnalyzeError![]const Ir.ValueId {
         if (function_id >= self.program.functions.len or !self.program.functions[function_id].is_anonymous) return &.{};
+        if (self.anonymous_access[function_id] == null) {
+            self.anonymous_access[function_id] = .{
+                .member = self.member_context,
+                .extension = self.extension_context,
+            };
+        }
         var infos: std.ArrayList(AnonymousCapture) = .empty;
         var values: std.ArrayList(Ir.ValueId) = .empty;
         for (builder.bindings.items) |binding| {

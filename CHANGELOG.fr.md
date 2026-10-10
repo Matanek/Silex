@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les fonctions anonymes conservent les droits privés/protégés de leur contexte lexical, y compris après imbrication et pour les méthodes statiques. Capturer un récepteur depuis l’extérieur ne donne aucun accès supplémentaire ; les restrictions des extensions restent appliquées.
+
 - Les structures récursives via des listes dynamiques se copient et se détruisent sans récursion infinie du compilateur ; leurs opérations de ressources utilisent des appels IR, comme les protocoles récursifs. Régressions interprétées et natives macOS ARM64.
 - Accepter append(null) pour une liste d’éléments optionnels en utilisant le type connu du récepteur, sans modifier l’ajout de séquences.
 

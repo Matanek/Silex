@@ -1,0 +1,37 @@
+class Owner {
+    private var value:int = 7
+    private func add(amount:int) { self.value += amount }
+    func exercise() int {
+        let callback = func() {
+            self.add(2)
+            let nested = func() { self.value += 3 }
+            nested()
+        }
+        callback()
+        return self.value
+    }
+}
+static class StaticOwner {
+    private func answer() int { return 42 }
+    func exercise() int {
+        let callback = func() int { return StaticOwner.answer() }
+        return callback()
+    }
+}
+class Parent {
+    protected var value:int = 5
+}
+class Child:Parent {
+    func exercise() int {
+        let callback = func() int { return self.value }
+        return callback()
+    }
+}
+func check_private() {
+    assert(Owner().exercise() == 12)
+    assert(StaticOwner.exercise() == 42)
+    assert(Child().exercise() == 5)
+    print("private lexical callbacks: OK")
+}
+func main() { check_private() }
+test "closures inherit lexical private and protected access across nesting" { check_private() }

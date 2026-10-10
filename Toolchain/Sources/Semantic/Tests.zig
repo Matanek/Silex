@@ -152,6 +152,56 @@ test "enforce private structure members while defaults inherit module visibility
     );
 }
 
+test "anonymous functions retain lexical member access without granting receiver authority" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\class Vault {
+        \\    private var secret:int = 7
+        \\    private func add() { self.secret += 2 }
+        \\    func reveal() int {
+        \\        let callback = func() {
+        \\            self.add()
+        \\            let nested = func() { self.secret += 3 }
+        \\            nested()
+        \\        }
+        \\        callback()
+        \\        return self.secret
+        \\    }
+        \\}
+        \\class Parent { protected var value:int = 5 }
+        \\class Child:Parent {
+        \\    func reveal() int { let callback = func() int { return self.value }; return callback() }
+        \\}
+        \\static class StaticVault {
+        \\    private func answer() int { return 42 }
+        \\    func reveal() int { let callback = func() int { return StaticVault.answer() }; return callback() }
+        \\}
+        \\func main() { print(Vault().reveal()); print(Child().reveal()); print(StaticVault.reveal()) }
+    );
+    var analyzer = Analyzer.init(allocator);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, try analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings("12\n5\n42\n", result.stdout);
+
+    try expectSemanticError(
+        "class Vault { private var secret:int = 1 } func main() { let vault = Vault(); let callback = func() int { return vault.secret }; print(callback()) }",
+        "field 'secret' is private and unavailable here",
+    );
+    try expectSemanticError(
+        "class Vault { private func secret() int { return 1 } } func main() { let vault = Vault(); let callback = func() int { return vault.secret() }; print(callback()) }",
+        "method 'secret' is private and unavailable here",
+    );
+    try expectSemanticError(
+        "class Parent { private var secret:int = 1 } class Child:Parent { func reveal() int { let callback = func() int { return self.secret }; return callback() } } func main() { print(Child().reveal()) }",
+        "field 'secret' is private and unavailable here",
+    );
+    try expectSemanticError(
+        "class Vault { private var secret:int = 1 } extend Vault { func reveal() int { let callback = func() int { return self.secret }; return callback() } } func main() { print(Vault().reveal()) }",
+        "field 'secret' is private and unavailable here",
+    );
+}
+
 test "enforce structure fields nominal identity defaults and representation cycles" {
     try expectSemanticError(
         "struct Position { var x:int } struct Velocity { var x:int } func main() { let value:Velocity = Position(x:1) }",

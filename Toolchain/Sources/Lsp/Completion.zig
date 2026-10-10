@@ -2014,7 +2014,7 @@ fn appendMembers(
         return;
     }
     if (structure.is_tuple and !structure.tuple_named) return;
-    const access_structure = if (containingCallable(source, program, cursor)) |callable| callable.structure_name else null;
+    const access_structure = memberAccessStructure(source, program, cursor);
     if (std.mem.eql(u8, std.mem.trim(u8, receiver, " \t\r\n"), structure.name)) {
         for (program.structures) |nested| {
             const enclosing = nested.enclosing orelse continue;
@@ -2853,8 +2853,20 @@ const Callable = struct {
 };
 
 fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?Callable {
+    return containingCallableFor(source, program, cursor, false);
+}
+
+fn memberAccessStructure(source: []const u8, program: Ast.Program, cursor: usize) ?[]const u8 {
+    const callable = containingCallableFor(source, program, cursor, true) orelse return null;
+    return callable.structure_name;
+}
+
+// Member visibility belongs to the enclosing method, while argument and return
+// inference still needs the nearest anonymous callable's own signature.
+fn containingCallableFor(source: []const u8, program: Ast.Program, cursor: usize, member_access: bool) ?Callable {
     var result: ?Callable = null;
     for (program.functions) |function| {
+        if (member_access and function.is_anonymous) continue;
         if (bodyContainsCursor(source, function.position.offset, cursor) and
             (result == null or function.position.offset > result.?.position)) result = .{
             .position = function.position.offset,
@@ -2871,7 +2883,7 @@ fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?
                 .position = method.position.offset,
                 .parameters = method.parameters,
                 .return_type = method.return_type,
-                .structure_name = structure.name,
+                .structure_name = if (member_access and method.extension != null) null else structure.name,
             };
         }
         for (structure.constructors) |constructor| {
@@ -2892,7 +2904,7 @@ fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?
                 .position = method.position.offset,
                 .parameters = method.parameters,
                 .return_type = method.return_type,
-                .structure_name = target_name,
+                .structure_name = if (member_access) null else target_name,
             };
         }
     }
@@ -3747,7 +3759,7 @@ pub fn resolveReceiverTypeForAccess(
         if (directCall(access.member)) |call| {
             var declaring = owner;
             var declaring_type = base_type;
-            const access_structure = if (containingCallable(source, program, cursor)) |callable| callable.structure_name else null;
+            const access_structure = memberAccessStructure(source, program, cursor);
             for (0..program.structures.len + 1) |_| {
                 var return_type: ?[]const u8 = null;
                 for (declaring.methods) |method| {
@@ -6355,6 +6367,66 @@ test "complete an inline cascade" {
     const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
     try std.testing.expect(contains(items, "visible"));
     try std.testing.expect(contains(items, "show"));
+}
+
+test "complete lexical private members in nested callbacks and hide them outside" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\class Vault {
+        \\    private var secret:int = 1
+        \\    private func hidden() {}
+        \\    func visible() {}
+        \\    func reveal() {
+        \\        let callback = func() { let nested = func() { self. }; nested() }
+        \\        callback()
+        \\    }
+        \\}
+        \\func main() { let vault = Vault(); let callback = func() { vault.visible() } }
+    ;
+    const inside = std.mem.indexOf(u8, source, "self.").? + "self.".len;
+    const local = try itemsAt(arena.allocator(), source, inside, .trigger_character);
+    try std.testing.expect(contains(local, "secret"));
+    try std.testing.expect(contains(local, "hidden"));
+    try std.testing.expect(contains(local, "visible"));
+    const completed = try std.mem.replaceOwned(u8, arena.allocator(), source, "self. }", "self.hidden() }");
+    const outside_source = try std.mem.replaceOwned(u8, arena.allocator(), completed, "vault.visible()", "vault.");
+    const outside = std.mem.indexOf(u8, outside_source, "vault. }").? + "vault.".len;
+    const foreign = try itemsAt(arena.allocator(), outside_source, outside, .trigger_character);
+    try std.testing.expect(contains(foreign, "visible"));
+    try std.testing.expect(!contains(foreign, "secret"));
+    try std.testing.expect(!contains(foreign, "hidden"));
+}
+
+test "callback member completion retains static and protected scope but excludes extensions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const static_source =
+        \\static class Vault {
+        \\    private func hidden() int { return 42 }
+        \\    func visible() int { let callback = func() int { return Vault. }; return callback() }
+        \\}
+    ;
+    const static_cursor = std.mem.indexOf(u8, static_source, "Vault. }").? + "Vault.".len;
+    try std.testing.expect(contains(try itemsAt(allocator, static_source, static_cursor, .trigger_character), "hidden"));
+    const inherited =
+        \\class Parent { private var secret:int = 1; protected var allowed:int = 2; var visible:int = 3 }
+        \\class Child:Parent { func read() { let callback = func() { self. } } }
+    ;
+    const inherited_cursor = std.mem.indexOf(u8, inherited, "self.").? + "self.".len;
+    const child = try itemsAt(allocator, inherited, inherited_cursor, .trigger_character);
+    try std.testing.expect(contains(child, "allowed"));
+    try std.testing.expect(contains(child, "visible"));
+    try std.testing.expect(!contains(child, "secret"));
+    const extension_source =
+        \\class Vault { private var secret:int = 1; var visible:int = 2 }
+        \\extend Vault { func read() { let callback = func() { self. } } }
+    ;
+    const extension_cursor = std.mem.indexOf(u8, extension_source, "self.").? + "self.".len;
+    const extended = try itemsAt(allocator, extension_source, extension_cursor, .trigger_character);
+    try std.testing.expect(contains(extended, "visible"));
+    try std.testing.expect(!contains(extended, "secret"));
 }
 
 test "complete test-local helpers only inside their block" {
