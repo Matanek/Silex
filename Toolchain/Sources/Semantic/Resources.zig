@@ -830,7 +830,7 @@ fn statementsForbidden(statements: []const Ast.Statement) bool {
 
 fn expressionHasTry(expression: *const Ast.Expression) bool {
     return switch (expression.value) {
-        .unary => |value| value.operator == .propagate or expressionHasTry(value.operand),
+        .unary => |value| (value.operator == .try_result and value.try_alternative != null) or expressionHasTry(value.operand),
         .field_access => |value| expressionHasTry(value.base),
         .binary => |value| expressionHasTry(value.left) or expressionHasTry(value.right),
         .conversion => |value| expressionHasTry(value.operand),

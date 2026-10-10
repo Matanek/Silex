@@ -2392,7 +2392,7 @@ fn importedInstanceCallReturnTypePath(
                     !std.mem.eql(u8, method.name, call.name) or
                     !parametersAcceptArity(method.parameters, call.arity)) continue;
                 const candidate = try Completion.specializedTypeName(allocator, loaded.program, structure, query.receiver_type orelse structure.name, method.return_type);
-                const resolved = try providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(candidate));
+                const resolved = try providerTypePath(allocator, project, loaded.program, provider, Completion.nominalReceiverName(Completion.effectiveCallSpelling(candidate, false)));
                 if (return_name != null and !std.mem.eql(u8, return_name.?, resolved)) return null;
                 return_name = resolved;
             }
@@ -2420,7 +2420,8 @@ fn importedInstanceCallReturnTypePath(
 }
 
 fn returnTypeName(program: Ast.Program, source_type: Ast.Type) ?[]const u8 {
-    const type_value = source_type.optionalChild() orelse source_type;
+    const call_type = Completion.effectiveCallType(program, source_type, false);
+    const type_value = call_type.optionalChild() orelse call_type;
     if (type_value.genericInstantiationIndex()) |index| {
         if (index >= program.generic_types.len) return null;
         return Completion.typeName(program, program.generic_types[index].base);

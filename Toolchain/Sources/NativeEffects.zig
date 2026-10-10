@@ -458,9 +458,9 @@ test "native try failure alternatives match the reference interpreter" {
         \\    return Result<int,str>.success(value)
         \\}
         \\func main() {
-        \\    match load(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match load(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match contextual(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try load(true)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try load(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try contextual(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);
@@ -754,9 +754,9 @@ test "native intrinsic Result values match the reference interpreter" {
         \\}
         \\func save() Result<void, str> { return Result<void, str>.success() }
         \\func main() {
-        \\    match load(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match load(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match save() { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try load(true)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try load(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try save()) { success => { print("saved") }; failure(error) => { print(error) } }
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);
@@ -778,7 +778,7 @@ test "native try propagation matches the reference interpreter" {
         \\    return Result<int, str>.failure("denied")
         \\}
         \\func compute(allowed:bool) Result<int, str> {
-        \\    let value = try read(allowed) + 2
+        \\    let value = try read(allowed) else error { return Result<int,str>.failure(error) } + 2
         \\    return Result<int, str>.success(value)
         \\}
         \\func save(allowed:bool) Result<void, str> {
@@ -786,14 +786,14 @@ test "native try propagation matches the reference interpreter" {
         \\    return Result<void, str>.failure("not saved")
         \\}
         \\func save_all(allowed:bool) Result<void, str> {
-        \\    try save(allowed)
+        \\    try save(allowed) else error { return Result<void,str>.failure(error) }
         \\    return Result<void, str>.success()
         \\}
         \\func main() {
-        \\    match compute(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match compute(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match save_all(true) { success => { print("saved") }; failure(error) => { print(error) } }
-        \\    match save_all(false) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try compute(true)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try compute(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try save_all(true)) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try save_all(false)) { success => { print("saved") }; failure(error) => { print(error) } }
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);
@@ -817,16 +817,16 @@ test "native try transfers resource payloads without leaking or borrowing local 
         \\}
         \\func read_local_failure() Result<int,Failure> {
         \\    var result = Result<int,Failure>.failure(Failure(code:7))
-        \\    let value = try result
+        \\    let value = try result else error { return Result<int,Failure>.failure(error) }
         \\    return Result<int,Failure>.success(value)
         \\}
         \\func read_box() Result<int,Failure> {
-        \\    var box = try create_box()
+        \\    var box = try create_box() else error { return Result<int,Failure>.failure(error) }
         \\    return Result<int,Failure>.success(box.value)
         \\}
         \\func main() {
-        \\    match read_box() { success(value) => { print(value) }; failure(error) => { print(error.code) } }
-        \\    match read_local_failure() { success(value) => { print(value) }; failure(error) => { print(error.code) } }
+        \\    match (try read_box()) { success(value) => { print(value) }; failure(error) => { print(error.code) } }
+        \\    match (try read_local_failure()) { success(value) => { print(value) }; failure(error) => { print(error.code) } }
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);
@@ -854,10 +854,10 @@ test "native map_error transformation matches the reference interpreter" {
         \\    return Result<void, str>.failure("denied")
         \\}
         \\func main() {
-        \\    match map_error(load(true), convert) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match map_error(load(false), convert) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match map_error(save(true), convert) { success => { print("saved") }; failure(error) => { print(error) } }
-        \\    match map_error(save(false), convert) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try map_error((try load(true)), convert)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try map_error((try load(false)), convert)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try map_error((try save(true)), convert)) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try map_error((try save(false)), convert)) { success => { print("saved") }; failure(error) => { print(error) } }
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);

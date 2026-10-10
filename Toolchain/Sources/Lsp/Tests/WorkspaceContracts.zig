@@ -1416,3 +1416,51 @@ test "workspace completion uses the unsaved contents of imported documents" {
     try Support.expectAbsent("PreviousBufferType", items);
     try Support.expectNoDuplicates(items);
 }
+
+test "result call policy server resolves ordinary imported successes and keeps captures opaque" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Api/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"sources\":\".\",\"dependencies\":{\"Api\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api/Package.json",
+        .data = "{\"name\":\"Api\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api/Module/Reader.sx",
+        .data = "public struct Value { public let number:int } public func read() Result<Value,str> { return Result<Value,str>.success(Value(number:42)) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const ordinary = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use Api.Reader
+        \\func main() { let value = Reader.read(); value.<|> }
+    );
+    try std.testing.expect(Support.containsLabel("number", ordinary));
+    const captured = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use Api.Reader
+        \\func main() { let value = try Reader.read(); value.<|> }
+    );
+    try std.testing.expect(!Support.containsLabel("number", captured));
+    const direct = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use Api.Reader
+        \\func main() { Reader.read().<|> }
+    );
+    try std.testing.expect(Support.containsLabel("number", direct));
+    const repeated = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use Api.Reader
+        \\func main() { Reader.read().<|> }
+    );
+    try Support.expectEqualItems(direct, repeated);
+}

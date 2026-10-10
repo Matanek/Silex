@@ -45,7 +45,7 @@ test "try propagates only string failures through recoverable main" {
     const compilation = try frontend.compile(
         \\func load() Result<void,str> { return Result<void,str>.failure("missing") }
         \\func main() Result<void,str> {
-        \\    try load()
+        \\    try load() else error { return Result<void,str>.failure(error) }
         \\    return Result<void,str>.success()
         \\}
     );
@@ -73,7 +73,7 @@ test "diagnose every invalid main return contract" {
         "function 'main' must return 'Result<void,str>' on every path",
     );
     try expectCompileError(
-        "func load() Result<void,int> { return Result<void,int>.failure(1) } func main() Result<void,str> { try load(); return Result<void,str>.success() }",
-        "'try' error type 'int' does not match enclosing error type 'str'",
+        "func load() Result<void,int> { return Result<void,int>.failure(1) } func main() Result<void,str> { try load() else error { return Result<void,str>.failure(error) }; return Result<void,str>.success() }",
+        "cannot implicitly convert 'int' to 'str'",
     );
 }

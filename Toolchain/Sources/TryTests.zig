@@ -24,7 +24,7 @@ test "propagate Result successes failures and void with one operand evaluation" 
         \\}
         \\func propagated(allowed:bool) Result<int, str> {
         \\    print("before")
-        \\    let value = try read(allowed) + 2
+        \\    let value = try read(allowed) else error { return Result<int,str>.failure(error) } + 2
         \\    print("after")
         \\    return Result<int, str>.success(value)
         \\}
@@ -34,15 +34,15 @@ test "propagate Result successes failures and void with one operand evaluation" 
         \\    return Result<void, str>.failure("not saved")
         \\}
         \\func save_all(allowed:bool) Result<void, str> {
-        \\    try save(allowed)
+        \\    try save(allowed) else error { return Result<void,str>.failure(error) }
         \\    print("after save")
         \\    return Result<void, str>.success()
         \\}
         \\func main() {
-        \\    match propagated(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match propagated(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match save_all(true) { success => { print("saved") }; failure(error) => { print(error) } }
-        \\    match save_all(false) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try propagated(true)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try propagated(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try save_all(true)) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try save_all(false)) { success => { print("saved") }; failure(error) => { print(error) } }
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
@@ -60,10 +60,10 @@ test "lower try as deterministic ordinary enum control flow" {
     const compilation = try frontend.compile(
         \\func read() Result<int, str> { return Result<int, str>.success(42) }
         \\func propagate() Result<bool, str> {
-        \\    let value = try read()
+        \\    let value = try read() else error { return Result<bool,str>.failure(error) }
         \\    return Result<bool, str>.success(value == 42)
         \\}
-        \\func main() { match propagate() { success(value) => { print(value) }; failure(error) => { print(error) } } }
+        \\func main() { match (try propagate()) { success(value) => { print(value) }; failure(error) => { print(error) } } }
     );
     const text = try Ir.writeText(allocator, compilation.ir);
     try std.testing.expect(std.mem.indexOf(u8, text, "enum.test") != null);
@@ -124,11 +124,11 @@ test "handle Result failures locally and replace errors with contextual messages
         \\    return Result<int,str>.success(value)
         \\}
         \\func main() {
-        \\    match inspected(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match inspected(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match ignored(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match contextual(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match contextual(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try inspected(true)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try inspected(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try ignored(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try contextual(true)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try contextual(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
@@ -169,8 +169,8 @@ test "handle void Result locally and allow loop exits" {
         \\    }
         \\}
         \\func main() {
-        \\    match save_all(true) { success => { print("ok") }; failure(error) => { print(error) } }
-        \\    match save_all(false) { success => { print("ok") }; failure(error) => { print(error) } }
+        \\    match (try save_all(true)) { success => { print("ok") }; failure(error) => { print(error) } }
+        \\    match (try save_all(false)) { success => { print("ok") }; failure(error) => { print(error) } }
         \\    stop_on_failure()
         \\    continue_on_failure()
         \\}
@@ -209,7 +209,7 @@ test "clean try else error payloads on local and short exits" {
         \\    let value = try read(3) else error message()
         \\    return Result<int,str>.success(value)
         \\}
-        \\func main() { ignored(); inspected(); contextual() }
+        \\func main() { {let ignored_result = try ignored()} {let ignored_result = try inspected()} {let ignored_result = try contextual()} }
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings(
@@ -249,30 +249,30 @@ test "diagnose invalid try else branches bindings messages and contexts" {
     );
 }
 
-test "diagnose invalid try operands contexts and error types" {
+test "diagnose invalid captures and captured values in success contexts" {
     try expectCompileError(
         "func compute() Result<int, str> { return try 1 } func main() {}",
         "'try' expects 'Result<T,E>', found 'int'",
     );
     try expectCompileError(
         "func read() Result<int, str> { return Result<int, str>.success(1) } func compute() int { return try read() } func main() {}",
-        "'try' requires an enclosing function returning 'Result<U,E>'",
+        "cannot implicitly convert 'Result<int,str>' to 'int'",
     );
     try expectCompileError(
         "struct ReadError {} struct SaveError {} func read() Result<int, ReadError> { return Result<int, ReadError>.success(1) } func save() Result<int, SaveError> { return Result<int, SaveError>.success(try read()) } func main() {}",
-        "'try' error type 'ReadError' does not match enclosing error type 'SaveError'",
+        "cannot implicitly convert 'Result<int,ReadError>' to 'int'",
     );
     try expectCompileError(
         "func read() Result<void, str> { return Result<void, str>.success() } func value() Result<int, str> { let item = try read(); return Result<int, str>.success(item) } func main() {}",
-        "'try' of 'Result<void,E>' does not produce a value",
+        "cannot implicitly convert 'Result<void,str>' to 'int'",
     );
     try expectCompileError(
         "func read() Result<int, str> { return Result<int, str>.success(1) } func value() Result<void, str> { try read(); return Result<void, str>.success() } func main() {}",
-        "the success value produced by 'try' must be used",
+        "the Result captured by 'try' must be used",
     );
     try expectCompileError(
         "func read() Result<int, str> { return Result<int, str>.success(1) } struct Box { let value:int; init() { self.value = try read() } } func main() {}",
-        "'try' requires an enclosing function returning 'Result<U,E>'",
+        "cannot implicitly convert 'Result<int,str>' to 'int'",
     );
 }
 
@@ -295,13 +295,13 @@ test "try returns logical results with mutating receiver state" {
         \\    init() {self.calls=0}
         \\    func read(allowed:bool) Result<int,str> {
         \\        self.calls++
-        \\        let value = try read_value(allowed)
+        \\        let value = try read_value(allowed) else error { return Result<int,str>.failure(error) }
         \\        self.calls += 10
         \\        return Result<int,str>.success(value)
         \\    }
         \\    func save(allowed:bool) Result<void,str> {
         \\        self.calls++
-        \\        try save_value(allowed)
+        \\        try save_value(allowed) else error { return Result<void,str>.failure(error) }
         \\        self.calls += 10
         \\        return Result<void,str>.success()
         \\    }
@@ -319,20 +319,20 @@ test "try returns logical results with mutating receiver state" {
         \\    init() {self.calls=0}
         \\    func read(allowed:bool) Result<int?,str> {
         \\        self.calls++
-        \\        let value = try read_value(allowed)
+        \\        let value = try read_value(allowed) else error { return Result<int?,str>.failure(error) }
         \\        self.calls += 10
         \\        return Result<int?,str>.success(value)
         \\    }
         \\}
         \\func validate() {
         \\    var counter=Counter()
-        \\    match counter.read(false) {
+        \\    match (try counter.read(false)) {
         \\        failure(error) => {assert(error == "denied")}
         \\        success(value) => {panic("unexpected success")}
         \\    }
         \\    assert(counter.calls == 1)
         \\    assert((try counter.read(true) else error {panic(error)}) == 7 && counter.calls == 12)
-        \\    match counter.save(false) {
+        \\    match (try counter.save(false)) {
         \\        failure(error) => {assert(error == "unsaved")}
         \\        success => {panic("unexpected success")}
         \\    }
@@ -341,7 +341,7 @@ test "try returns logical results with mutating receiver state" {
         \\    assert(counter.calls == 24)
         \\    assert(counter.fallback(false) == -1 && counter.calls == 25)
         \\    assert(counter.fallback(true) == 7 && counter.calls == 26)
-        \\    match counter.message(false) {
+        \\    match (try counter.message(false)) {
         \\        failure(error) => {assert(error == "read failed")}
         \\        success(value) => {panic("unexpected success")}
         \\    }
@@ -349,7 +349,7 @@ test "try returns logical results with mutating receiver state" {
         \\    assert((try counter.message(true) else error {panic(error)}) == 7 && counter.calls == 28)
         \\    var reference=ReferenceCounter()
         \\    var alias=reference
-        \\    match reference.read(false) {
+        \\    match (try reference.read(false)) {
         \\        failure(error) => {assert(error == "denied")}
         \\        success(value) => {panic("unexpected success")}
         \\    }
@@ -379,11 +379,11 @@ test "try propagates Results from static methods" {
         \\}
         \\static class StaticTry {
         \\    func read(allowed:bool) Result<int?,str> {
-        \\        let value=try static_try_read(allowed)
+        \\        let value=try static_try_read(allowed) else error { return Result<int?,str>.failure(error) }
         \\        return Result<int?,str>.success(value+1)
         \\    }
         \\    func write(allowed:bool) Result<void,str> {
-        \\        try static_try_write(allowed)
+        \\        try static_try_write(allowed) else error { return Result<void,str>.failure(error) }
         \\        return Result<void,str>.success()
         \\    }
         \\    func fallback(allowed:bool) int {
@@ -395,16 +395,16 @@ test "try propagates Results from static methods" {
         \\}
         \\func validate_static_results() {
         \\    assert((try StaticTry.read(true) else error {panic(error)})==8)
-        \\    match StaticTry.read(false) {failure(error)=>{assert(error=="denied")}
+        \\    match (try StaticTry.read(false)) {failure(error)=>{assert(error=="denied")}
         \\        success(value)=>{panic("unexpected success")}}
         \\    try StaticTry.write(true) else error {panic(error)}
-        \\    match StaticTry.write(false) {failure(error)=>{assert(error=="unsaved")}
+        \\    match (try StaticTry.write(false)) {failure(error)=>{assert(error=="unsaved")}
         \\        success=>{panic("unexpected success")}}
         \\}
         \\func validate_static_alternatives() {
         \\    assert(StaticTry.fallback(false)==-1 && StaticTry.fallback(true)==7)
         \\    assert((try StaticTry.message(true) else error {panic(error)})==7)
-        \\    match StaticTry.message(false) {failure(error)=>{assert(error=="static read failed")}
+        \\    match (try StaticTry.message(false)) {failure(error)=>{assert(error=="static read failed")}
         \\        success(value)=>{panic("unexpected success")}}
         \\}
         \\
@@ -414,10 +414,10 @@ test "try propagates Results from static methods" {
     try std.testing.expectEqualStrings("", result.stdout);
     try expectCompileError(
         "func read() Result<int,str> {return Result<int,str>.success(1)} static class Bad {func read() int {return try read()}} func main() {}",
-        "'try' requires an enclosing function returning 'Result<U,E>'",
+        "cannot implicitly convert 'Result<int,str>' to 'int'",
     );
     try expectCompileError(
         "func read() Result<int,int> {return Result<int,int>.failure(1)} static class Bad {func read() Result<int,str> {return Result<int,str>.success(try read())}} func main() {}",
-        "'try' error type 'int' does not match enclosing error type 'str'",
+        "cannot implicitly convert 'Result<int,int>' to 'int'",
     );
 }

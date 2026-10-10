@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Une opération `Result<T,E>` possède une seule implémentation : l’appel ordinaire produit `T` ou panique ; `try operation()` conserve le `Result`. Cette évolution remplace l’ancienne extraction/propagation de `try`. Les propagations utilisent désormais une branche explicite `else error { return … }`, et les anciennes captures ordinaires ajoutent `try`. Les constructions explicites de Result restent des données ; receveur, arguments et défauts gardent une évaluation unique. Le LSP suit le mode d’appel et les caches antérieurs sont invalidés.
+
 - Les structures récursives via des listes dynamiques se copient et se détruisent sans récursion infinie du compilateur ; leurs opérations de ressources utilisent des appels IR, comme les protocoles récursifs. Régressions interprétées et natives macOS ARM64.
 - Accepter append(null) pour une liste d’éléments optionnels en utilisant le type connu du récepteur, sans modifier l’ajout de séquences.
 

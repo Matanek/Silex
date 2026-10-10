@@ -213,12 +213,12 @@ test "custom iterator values and cursors clean before return and try propagation
         \\    return 0
         \\}
         \\func propagate() Result<void,str> {
-        \\    for item in Cursor(value:0) { print(item.value); try failure() }
+        \\    for item in Cursor(value:0) { print(item.value); try failure() else error { return Result<void,str>.failure(error) } }
         \\    return Result<void,str>.success()
         \\}
         \\func main() {
         \\    print(early())
-        \\    match propagate() { success => {}; failure(message) => { print(message) } }
+        \\    match (try propagate()) { success => {}; failure(message) => { print(message) } }
         \\}
     );
     defer std.testing.allocator.free(output);

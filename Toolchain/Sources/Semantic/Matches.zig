@@ -510,7 +510,7 @@ fn releaseLiteralSubject(self: anytype, builder: anytype, prepared: Prepared) !v
 fn isStatementExpression(expression: *const Ast.Expression) bool {
     return switch (expression.value) {
         .call, .cascade, .match_expression => true,
-        .unary => |unary| unary.operator == .propagate,
+        .unary => |unary| unary.operator == .try_result,
         else => false,
     };
 }

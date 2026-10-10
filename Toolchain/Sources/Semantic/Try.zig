@@ -7,6 +7,72 @@ const Model = @import("Model.zig");
 const Resources = @import("Resources.zig");
 const Support = @import("Support.zig");
 const Methods = @import("Methods.zig");
+const Source = @import("../Source.zig");
+const AnalyzeError = std.mem.Allocator.Error || Source.Error;
+const Diagnostic = @import("ResultDiagnostic.zig");
+
+pub fn finishCall(self: anytype, builder: anytype, call: Ast.Expression.Call, result: ?Model.TypedValue) AnalyzeError!?Model.TypedValue {
+    const operand = result orelse return null;
+    const source_index = findResult(self.enums, operand.type) orelse {
+        if (call.capture_result) {
+            const message = try std.fmt.allocPrint(self.allocator, "'try' expects 'Result<T,E>', found '{s}'", .{self.typeName(operand.type)});
+            return self.fail(call.name_position, message);
+        }
+        return operand;
+    };
+    if (call.capture_result) return operand;
+    const source = self.enums[source_index];
+    const succeeded = try self.newValue(builder, .bool);
+    try self.emit(builder, .{ .enum_test = .{
+        .result = succeeded,
+        .operand = operand.value,
+        .enumeration = source_index,
+        .variant = variantIndex(source, "success").?,
+    } });
+    const success_block = try self.newBlock(builder);
+    const failure_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{
+        .condition = succeeded,
+        .then_block = success_block,
+        .else_block = failure_block,
+    } });
+    builder.current_block = failure_block;
+    const error_type = Result.errorType(source).?;
+    const error_value = try self.newValue(builder, error_type);
+    try self.emit(builder, .{ .enum_payload = .{
+        .result = error_value,
+        .operand = operand.value,
+        .enumeration = source_index,
+        .variant = variantIndex(source, "failure").?,
+        .index = 0,
+    } });
+    var message = try Diagnostic.format(self, builder, .{ .type = error_type, .value = error_value }, 0);
+    if (error_type != .str) {
+        const prefix = try self.emitString(builder, try std.fmt.allocPrint(self.allocator, "call to '{s}' failed: ", .{call.name}));
+        message = try Diagnostic.concat(self, builder, prefix, message);
+    }
+    self.terminate(builder, .{ .panic = .{ .message = message.value, .position = call.name_position } });
+    builder.current_block = success_block;
+    const success_type = Result.successType(source).?;
+    if (success_type == .void) return null;
+    const value = try self.newValue(builder, success_type);
+    try self.emit(builder, .{ .enum_payload = .{
+        .result = value,
+        .operand = operand.value,
+        .enumeration = source_index,
+        .variant = variantIndex(source, "success").?,
+        .index = 0,
+    } });
+    return .{
+        .type = success_type,
+        .value = value,
+        .transferred = operand.transferred and Resources.ownsValue(self, success_type),
+        .borrowed_root = operand.borrowed_root,
+        .borrowed_mode = operand.borrowed_mode,
+        .lexical_captures = operand.lexical_captures,
+        .lexical_borrows = operand.lexical_borrows,
+    };
+}
 
 pub fn analyzeValue(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Model.TypedValue {
     return (try analyze(self, builder, unary, true)).?;
@@ -18,13 +84,24 @@ pub fn analyzeStatement(self: anytype, builder: anytype, unary: Ast.Expression.U
 
 fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary, require_value: bool) !?Model.TypedValue {
     const operand = try self.analyzeExpression(builder, unary.operand);
+    const alternative = unary.try_alternative;
+    if (alternative == null) {
+        const captured = if (unary.operand.value == .call and unary.operand.value.call.safe)
+            operand.type.optionalChild() orelse operand.type
+        else
+            operand.type;
+        if (findResult(self.enums, captured) == null) {
+            const message = try std.fmt.allocPrint(self.allocator, "'try' expects 'Result<T,E>', found '{s}'", .{self.typeName(operand.type)});
+            return self.fail(unary.operator_position, message);
+        }
+        if (!require_value) return self.fail(unary.operator_position, "the Result captured by 'try' must be used");
+        return operand;
+    }
     const source_index = findResult(self.enums, operand.type) orelse {
         const message = try std.fmt.allocPrint(self.allocator, "'try' expects 'Result<T,E>', found '{s}'", .{self.typeName(operand.type)});
         return self.fail(unary.operator_position, message);
     };
     const source = self.enums[source_index];
-    const alternative = unary.try_alternative;
-    if (alternative == null) return propagate(self, builder, unary, operand, source_index, source, require_value);
 
     const function = self.function_context orelse return self.fail(
         alternative.?.position,
@@ -79,78 +156,6 @@ fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary, require
     }
     builder.bindings.shrinkRetainingCapacity(availability_count);
     Availability.restore(builder.bindings.items, success_availability);
-
-    builder.current_block = success_block;
-    return extractSuccess(self, builder, unary, operand, source_index, source, require_value);
-}
-
-fn propagate(
-    self: anytype,
-    builder: anytype,
-    unary: Ast.Expression.Unary,
-    operand: Model.TypedValue,
-    source_index: usize,
-    source: Ir.Enum,
-    require_value: bool,
-) !?Model.TypedValue {
-    const return_type = builder.return_type orelse return self.fail(
-        unary.operator_position,
-        "'try' requires an enclosing function returning 'Result<U,E>'",
-    );
-    const destination_index = findResult(self.enums, return_type) orelse return self.fail(
-        unary.operator_position,
-        "'try' requires an enclosing function returning 'Result<U,E>'",
-    );
-    const destination = self.enums[destination_index];
-    const source_error = Result.errorType(source).?;
-    const destination_error = Result.errorType(destination).?;
-    if (source_error != destination_error) {
-        const message = try std.fmt.allocPrint(
-            self.allocator,
-            "'try' error type '{s}' does not match enclosing error type '{s}'",
-            .{ self.typeName(source_error), self.typeName(destination_error) },
-        );
-        return self.fail(unary.operator_position, message);
-    }
-
-    const source_success = variantIndex(source, "success").?;
-    const source_failure = variantIndex(source, "failure").?;
-    const destination_failure = variantIndex(destination, "failure").?;
-    const succeeded = try self.newValue(builder, .bool);
-    try self.emit(builder, .{ .enum_test = .{
-        .result = succeeded,
-        .operand = operand.value,
-        .enumeration = source_index,
-        .variant = source_success,
-    } });
-    const success_block = try self.newBlock(builder);
-    const failure_block = try self.newBlock(builder);
-    self.terminate(builder, .{ .branch = .{
-        .condition = succeeded,
-        .then_block = success_block,
-        .else_block = failure_block,
-    } });
-
-    builder.current_block = failure_block;
-    const error_value = try self.newValue(builder, source_error);
-    try self.emit(builder, .{ .enum_payload = .{
-        .result = error_value,
-        .operand = operand.value,
-        .enumeration = source_index,
-        .variant = source_failure,
-        .index = 0,
-    } });
-    if (!operand.transferred and Resources.requiresRetain(self, source_error)) {
-        try Resources.retainValue(self, builder, source_error, error_value);
-    }
-    const propagated = try self.newValue(builder, return_type);
-    try self.emit(builder, .{ .enum_init = .{
-        .result = propagated,
-        .enumeration = destination_index,
-        .variant = destination_failure,
-        .values = try self.allocator.dupe(Ir.ValueId, &.{error_value}),
-    } });
-    try emitPropagatedReturn(self, builder, return_type, propagated);
 
     builder.current_block = success_block;
     return extractSuccess(self, builder, unary, operand, source_index, source, require_value);
@@ -247,6 +252,10 @@ fn extractSuccess(
         .type = success_type,
         .value = value,
         .transferred = operand.transferred and Resources.ownsValue(self, success_type),
+        .borrowed_root = operand.borrowed_root,
+        .borrowed_mode = operand.borrowed_mode,
+        .lexical_captures = operand.lexical_captures,
+        .lexical_borrows = operand.lexical_borrows,
     };
 }
 
@@ -266,8 +275,13 @@ fn variantIndex(enumeration: Ir.Enum, name: []const u8) ?usize {
 fn emitPropagatedReturn(self: anytype, builder: anytype, return_type: Ast.Type, value: Ir.ValueId) !void {
     if (builder.mutating_return) |context| {
         try Methods.emitMutatingReturn(
-            self, builder, context.structure_index, context.flat, context.self_local,
-            self.function_context.?, .{ .type = return_type, .value = value, .transferred = true },
+            self,
+            builder,
+            context.structure_index,
+            context.flat,
+            context.self_local,
+            self.function_context.?,
+            .{ .type = return_type, .value = value, .transferred = true },
         );
         return;
     }

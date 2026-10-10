@@ -1,0 +1,6 @@
+func read() Result<void,str> { return Result<void,str>.failure("original failure") }
+func main() {
+    match try read() { failure(error) => { print(error) }; success => { panic("unexpected") } }
+    read()
+    print("unreachable")
+}

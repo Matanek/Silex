@@ -1796,6 +1796,26 @@ pub const Specializer = struct {
     }
 
     pub fn inferExpressionType(self: *Specializer, expression: *const Ast.Expression, locals: []const Binding) ?Ast.Type {
+        const raw = self.inferExpressionTypeRaw(expression, locals) orelse return null;
+        if (expression.value != .call) return raw;
+        const call = expression.value.call;
+        const constructor = if (call.receiver) |receiver|
+            if (receiver.value == .identifier)
+                if (self.typeForName(receiver.value.identifier)) |owner| self.enumForType(owner) != null else false
+            else
+                false
+        else
+            false;
+        var result = raw;
+        if (!call.capture_result and !constructor) {
+            if (self.enumForType(raw)) |enumeration| {
+                result = Result.successType(enumeration) orelse raw;
+            }
+        }
+        return if (call.safe and result != .void and result.optionalChild() == null) .optional(result) else result;
+    }
+
+    fn inferExpressionTypeRaw(self: *Specializer, expression: *const Ast.Expression, locals: []const Binding) ?Ast.Type {
         return switch (expression.value) {
             .integer => .int,
             .floating => .float32,
@@ -1846,7 +1866,14 @@ pub const Specializer = struct {
                     }
                     if (self.typeForName(call.name)) |type_value| break :call_type type_value;
                 } else if (call.receiver.?.value == .identifier and self.typeForName(call.receiver.?.value.identifier) != null) {
-                    break :call_type self.typeForName(call.receiver.?.value.identifier).?;
+                    const owner_type = self.typeForName(call.receiver.?.value.identifier).?;
+                    if (self.enumForType(owner_type) != null) break :call_type owner_type;
+                    if (self.structureForType(owner_type)) |owner| for (owner.methods) |method| {
+                        if (method.is_static and std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
+                            break :call_type method.return_type;
+                        }
+                    };
+                    break :call_type null;
                 } else if (self.inferExpressionType(call.receiver.?, locals)) |receiver_type| {
                     const child = receiver_type.optionalChild() orelse receiver_type;
                     if (self.structureForType(child)) |structure| {
@@ -1864,10 +1891,7 @@ pub const Specializer = struct {
                             remaining -= 1;
                             for (current.methods) |method| {
                                 if (std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
-                                    break :call_type if (call.safe and method.return_type.optionalChild() == null)
-                                        .optional(method.return_type)
-                                    else
-                                        method.return_type;
+                                    break :call_type method.return_type;
                                 }
                             }
                             owner = if (current.base) |base| self.structureForType(base) else null;
@@ -1911,8 +1935,8 @@ pub const Specializer = struct {
                 .bool
             else if (unary.operator == .force_optional)
                 if (self.inferExpressionType(unary.operand, locals)) |operand_type| operand_type.optionalChild() else null
-            else if (unary.operator == .propagate)
-                self.inferPropagatedType(unary.operand, locals)
+            else if (unary.operator == .try_result)
+                if (unary.try_alternative != null) self.inferPropagatedType(unary.operand, locals) else self.inferExpressionType(unary.operand, locals)
             else
                 self.inferExpressionType(unary.operand, locals),
             .binary => |binary| switch (binary.operator) {

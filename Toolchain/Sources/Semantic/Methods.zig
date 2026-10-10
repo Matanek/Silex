@@ -408,7 +408,7 @@ pub fn analyzeCallWithReceiver(
     else
         false;
     if (rooted) try Resources.retainValue(self, builder, receiver.type, receiver.value);
-    const result = try analyzeReceiverCall(self, builder, call, receiver, safe_receiver_type);
+    const result = try @import("Try.zig").finishCall(self, builder, call, try analyzeReceiverCall(self, builder, call, receiver, safe_receiver_type));
     if (rooted) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     return result;
 }

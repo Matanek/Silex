@@ -6,7 +6,7 @@ pub const Type = Types.Type;
 pub const UnaryOperator = enum {
     negate,
     logical_not,
-    propagate,
+    try_result,
     move,
     copy,
     borrow_read,
@@ -98,6 +98,9 @@ pub const Expression = struct {
         /// whose result exposes one optional layer.
         iterator_next: bool = false,
         safe: bool = false,
+        /// Preserve this operation's declared Result. Its receiver and arguments
+        /// still follow their own call policies.
+        capture_result: bool = false,
         arguments: []const *Expression,
         named_arguments: []const NamedArgument = &.{},
         type_arguments: []const Type = &.{},

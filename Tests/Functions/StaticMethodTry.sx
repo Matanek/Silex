@@ -8,11 +8,11 @@ func static_try_write(allowed:bool) Result<void,str> {
 }
 static class StaticTry {
     func read(allowed:bool) Result<int?,str> {
-        let value=try static_try_read(allowed)
+        let value=try static_try_read(allowed) else error { return Result<int?,str>.failure(error) }
         return Result<int?,str>.success(value+1)
     }
     func write(allowed:bool) Result<void,str> {
-        try static_try_write(allowed)
+        try static_try_write(allowed) else error { return Result<void,str>.failure(error) }
         return Result<void,str>.success()
     }
     func fallback(allowed:bool) int {
@@ -24,15 +24,15 @@ static class StaticTry {
 }
 test "static methods propagate value and void Results on success and failure" {
     assert((try StaticTry.read(true) else error {panic(error)})==8)
-    match StaticTry.read(false) {failure(error)=>{assert(error=="denied")}
+    match (try StaticTry.read(false)) {failure(error)=>{assert(error=="denied")}
         success(value)=>{panic("unexpected success")}}
     try StaticTry.write(true) else error {panic(error)}
-    match StaticTry.write(false) {failure(error)=>{assert(error=="unsaved")}
+    match (try StaticTry.write(false)) {failure(error)=>{assert(error=="unsaved")}
         success=>{panic("unexpected success")}}
 }
 test "static methods retain local fallback and message propagation" {
     assert(StaticTry.fallback(false)==-1 && StaticTry.fallback(true)==7)
     assert((try StaticTry.message(true) else error {panic(error)})==7)
-    match StaticTry.message(false) {failure(error)=>{assert(error=="static read failed")}
+    match (try StaticTry.message(false)) {failure(error)=>{assert(error=="static read failed")}
         success(value)=>{panic("unexpected success")}}
 }

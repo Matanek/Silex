@@ -1,0 +1,10 @@
+struct Failure { let code:int; let subject:str? }
+func read() Result<int,Failure> { return Result<int,Failure>.failure(Failure(code:7,subject:null)) }
+func enclosing() Result<void,str> {
+    let result = try read()
+    match result { failure(error) => { assert(error.code == 7); print("kept") }; success(_) => { panic("unexpected") } }
+    print(read())
+    print("unreachable")
+    return Result<void,str>.success()
+}
+func main() { enclosing() }
