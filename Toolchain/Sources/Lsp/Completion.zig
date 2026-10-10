@@ -71,6 +71,7 @@ pub const Decision = struct {
     safe_member_access: bool = false,
     completing_try_error: bool = false,
     completing_try_alternative: bool = false,
+    continuing_try_else: bool = false,
     active_call: ?ActiveCall = null,
     active_argument: ?ActiveArgument = null,
     program: ?Ast.Program = null,
@@ -148,7 +149,10 @@ pub fn decisionAt(
     decision.in_match_branch_block = try isDirectMatchBranchBlockAt(allocator, source, decision.prefix_start);
     if (decision.has_try) {
         decision.completing_try_error = try isTryErrorBindingPositionAt(allocator, source, decision.prefix_start);
-        decision.completing_try_alternative = try isTryAlternativePositionAt(allocator, source, decision.prefix_start);
+        const alternative = try isTryAlternativePositionAt(allocator, source, decision.prefix_start);
+        const across_line = continuationAcrossLine(source, decision.prefix_start);
+        decision.completing_try_alternative = alternative and !across_line;
+        decision.continuing_try_else = alternative and across_line;
     }
     if (decision.inside_parentheses) {
         decision.active_call = try activeCallAt(allocator, source, cursor);
@@ -265,7 +269,7 @@ pub fn itemsAtWithDecision(
     }
 
     const contextual_try_alternative = completing_try_alternative and program != null;
-    if (contextual_try_alternative) {
+    if (contextual_try_alternative or context.continuing_try_else) {
         try appendCandidate(allocator, &candidates, context, .{
             .label = "else",
             // Keep the semantic kind independent from InsertTextFormat.Snippet: Zed may
@@ -2541,7 +2545,8 @@ fn appendExpressionSymbols(
             if (current.test_owner == null or !std.mem.eql(u8, current.test_owner.?, owner)) continue;
         }
         if (!callAcceptsParameters(source, cursor, program, function.parameters)) continue;
-        const return_type = typeName(program, function.return_type);
+        const call_type = effectiveCallType(program, function.return_type, try captureCallAt(allocator, source, context.prefix_start));
+        const return_type = try typeSpelling(allocator, program, call_type);
         const passed_as_value = if (selection_type) |expected|
             if (expectedCallbackSignature(program, expected)) |signature|
                 functionMatchesSignature(function, signature)
@@ -2551,7 +2556,7 @@ fn appendExpressionSymbols(
             false;
         const returns_expected_callback = if (selection_type) |expected|
             if (expectedCallbackSignature(program, expected)) |signature|
-                callbackTypeMatchesSignature(program, function.return_type, signature)
+                callbackTypeMatchesSignature(program, call_type, signature)
             else
                 false
         else
@@ -2687,7 +2692,7 @@ fn appendExpressionIntroducers(
 ) !void {
     try appendKeywords(allocator, candidates, context, &.{
         .{ "match", "Silex match expression" },
-        .{ "try", "Silex result propagation" },
+        .{ "try", "Silex Result capture" },
         .{ "move", "Silex value transfer" },
         .{ "copy", "Silex detached copy" },
     }, 50);
@@ -3141,6 +3146,11 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 }
                 if (tokens[index + 1].tag != .identifier) continue;
                 const name = tokens[index + 1].lexeme;
+                const inferred = inferDeclarationValueType(source, program, containingCallable(source, program, cursor), locals.items, tokens[index..end]);
+                const inferred_name = if (index + 2 < end and tokens[index + 2].tag == .equal and inferred != null)
+                    try typeSpelling(allocator, program, inferred.?)
+                else
+                    inferDeclarationType(source, program, tokens[index..end]);
                 try locals.append(allocator, .{
                     .name = name,
                     .mutable = token.tag == .keyword_var,
@@ -3148,14 +3158,8 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                         declarationInitializer(source, tokens[index + 3 ..])
                     else
                         null,
-                    .type_name = inferDeclarationType(source, program, tokens[index..end]),
-                    .type_value = inferDeclarationValueType(
-                        source,
-                        program,
-                        containingCallable(source, program, cursor),
-                        locals.items,
-                        tokens[index..end],
-                    ),
+                    .type_name = inferred_name,
+                    .type_value = inferred,
                     .depth = depth,
                 });
             },
@@ -3635,30 +3639,34 @@ fn inferDeclarationValueType(
             const spelling = std.mem.trimStart(u8, std.mem.trim(u8, source[tokens[index + 1].start..tokens[end - 1].end], " \t\r\n"), "@& \t");
             return typeForSourceSpelling(program, spelling);
         }
-        if (token.tag != .equal or index + 1 >= tokens.len or tokens[index + 1].tag != .identifier) continue;
-        const name = tokens[index + 1].lexeme;
-        if (index + 3 < tokens.len and tokens[index + 2].tag == .dot and
-            tokens[index + 3].tag == .identifier)
+        if (token.tag != .equal or index + 1 >= tokens.len) continue;
+        var value_index = index + 1;
+        const capture = tokens[value_index].tag == .keyword_try and !initializerHasTryAlternative(tokens[value_index..]);
+        if (tokens[value_index].tag == .keyword_try) value_index += 1;
+        if (value_index >= tokens.len or tokens[value_index].tag != .identifier) continue;
+        const name = tokens[value_index].lexeme;
+        if (value_index + 2 < tokens.len and tokens[value_index + 1].tag == .dot and
+            tokens[value_index + 2].tag == .identifier)
         {
             const owner_type = lexicalNamedType(callable, locals, name) orelse
                 if (findStructure(program, name)) |structure| Ast.Type.structure(findStructureIndex(program, structure.name) orelse return null) else return null;
             const owner = structureForType(program, owner_type) orelse return null;
-            const method_name = tokens[index + 3].lexeme;
+            const method_name = tokens[value_index + 2].lexeme;
             var selected: ?Ast.Type = null;
             for (owner.methods) |method| {
                 if (!std.mem.eql(u8, method.name, method_name)) continue;
                 if (selected != null and selected.? != method.return_type) return null;
                 selected = method.return_type;
             }
-            return selected;
+            return if (selected) |declared| effectiveCallType(program, declared, capture) else null;
         }
-        if (index + 2 >= tokens.len or tokens[index + 2].tag != .left_parenthesis) {
+        if (value_index + 1 >= tokens.len or tokens[value_index + 1].tag != .left_parenthesis) {
             return lexicalNamedType(callable, locals, name);
         }
         if (lexicalNamedType(callable, locals, name)) |callee_type| {
             const function_index = callee_type.functionIndex() orelse return null;
             if (function_index >= program.function_types.len) return null;
-            return program.function_types[function_index].return_type;
+            return effectiveCallType(program, program.function_types[function_index].return_type, capture);
         }
         var selected: ?Ast.Type = null;
         for (program.functions) |function| {
@@ -3666,7 +3674,7 @@ fn inferDeclarationValueType(
             if (selected != null and selected.? != function.return_type) return null;
             selected = function.return_type;
         }
-        return selected;
+        return if (selected) |declared| effectiveCallType(program, declared, capture) else null;
     }
     return null;
 }
@@ -3731,11 +3739,13 @@ pub fn resolveReceiverTypeForAccess(
     receiver: []const u8,
     safe_access: bool,
 ) ?[]const u8 {
-    const trimmed = std.mem.trim(u8, receiver, " \t\r\n");
+    var trimmed = std.mem.trim(u8, receiver, " \t\r\n");
     if (trimmed.len == 0) return null;
     if (outerParenthesizedExpression(trimmed)) |inner| {
         return resolveReceiverTypeForAccess(allocator, source, program, cursor, inner, safe_access);
     }
+    const capture = std.mem.startsWith(u8, trimmed, "try ");
+    if (capture) trimmed = std.mem.trimStart(u8, trimmed[4..], " \t\r\n");
     if (indexedExpressionBase(trimmed)) |base| {
         const base_type = resolveReceiverTypeForAccess(allocator, source, program, cursor, base, false) orelse return null;
         const collection = findStructure(program, nominalReceiverName(base_type)) orelse return null;
@@ -3776,7 +3786,7 @@ pub fn resolveReceiverTypeForAccess(
                     if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
                     return_type = candidate;
                 }
-                if (return_type) |resolved| return typeAfterSafeAccess(resolved, safe_access);
+                if (return_type) |resolved| return typeAfterSafeAccess(effectiveCallSpelling(resolved, capture), safe_access);
                 if (static_access) return null;
                 declaring_type = specializedTypeName(allocator, program, declaring, declaring_type, declaring.base orelse return null) catch return null;
                 declaring = findStructure(program, nominalReceiverName(declaring_type)) orelse return null;
@@ -3829,13 +3839,13 @@ pub fn resolveReceiverTypeForAccess(
                         program,
                         program.function_types[function_index].return_type,
                     ) catch return null;
-                    return typeAfterSafeAccess(return_type, safe_access);
+                    return typeAfterSafeAccess(effectiveCallSpelling(return_type, capture), safe_access);
                 }
             }
         }
         for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) {
             const return_type = typeSpelling(allocator, program, function.return_type) catch return null;
-            return typeAfterSafeAccess(return_type, safe_access);
+            return typeAfterSafeAccess(effectiveCallSpelling(return_type, capture), safe_access);
         };
         const qualified = qualifiedCall(trimmed) orelse return null;
         const owner = findStructure(program, qualified.owner) orelse return null;
@@ -3847,7 +3857,7 @@ pub fn resolveReceiverTypeForAccess(
             if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
             return_type = candidate;
         }
-        return if (return_type) |resolved| typeAfterSafeAccess(resolved, safe_access) else null;
+        return if (return_type) |resolved| typeAfterSafeAccess(effectiveCallSpelling(resolved, capture), safe_access) else null;
     }
 
     var parts = std.mem.splitScalar(u8, trimmed, '.');
@@ -4309,6 +4319,24 @@ fn isIdentifierExpression(expression: []const u8) bool {
 }
 
 fn expressionTypeAt(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    expression: []const u8,
+) ?Ast.Type {
+    var trimmed = std.mem.trim(u8, expression, " \t\r\n");
+    if (outerParenthesizedExpression(trimmed)) |inner| return expressionTypeAt(allocator, source, program, cursor, inner);
+    const capture = std.mem.startsWith(u8, trimmed, "try ");
+    if (capture) trimmed = std.mem.trimStart(u8, trimmed[4..], " \t\r\n");
+    const declared = expressionTypeAtRaw(allocator, source, program, cursor, trimmed) orelse return null;
+    return if (directCall(trimmed) != null or qualifiedCall(trimmed) != null)
+        effectiveCallType(program, declared, capture)
+    else
+        declared;
+}
+
+fn expressionTypeAtRaw(
     allocator: Allocator,
     source: []const u8,
     program: Ast.Program,
@@ -7177,6 +7205,44 @@ test "infer custom iterator bindings from next optional payload" {
     try std.testing.expect(contains(items, "inspect"));
 }
 
+test "result call policy completion exposes the ordinary success receiver" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Value { let number:int }
+        \\func read() Result<Value,str> { return Result<Value,str>.success(Value(number:42)) }
+        \\func main() {
+        \\    let value = read()
+        \\    value.
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "value.").? + "value.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "number"));
+    try std.testing.expect(!contains(items, "success"));
+    try std.testing.expect(!contains(items, "failure"));
+    const repeated = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqual(items.len, repeated.len);
+    try std.testing.expectEqualStrings(items[indexOf(items, "number").?].detail, repeated[indexOf(repeated, "number").?].detail);
+}
+
+test "result call policy completion keeps captured locals typed as Result" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func read() Result<int,str> { return Result<int,str>.success(42) }
+        \\func main() {
+        \\    let captured = try read()
+        \\    capt
+        \\}
+    ;
+    const cursor = std.mem.lastIndexOf(u8, source, "capt\n").? + "capt".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "captured"));
+    const item = items[indexOf(items, "captured").?];
+    try std.testing.expectEqualStrings("captured:Result<int, str>", item.detail);
+}
+
 test "infer string iterator bindings as uint32 scalars" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -7960,4 +8026,56 @@ test "optional list append keeps value suggestions after null initialization" {
     const argument = std.mem.indexOf(u8, optional, "append(").? + "append(".len;
     const values = try itemsAt(arena.allocator(), optional, argument, .invoked);
     try std.testing.expect(contains(values, "absent"));
+}
+
+fn continuationAcrossLine(source: []const u8, position: usize) bool {
+    var index = position;
+    while (index != 0) {
+        index -= 1;
+        switch (source[index]) {
+            '\n', '\r' => return true,
+            ' ', '\t' => {},
+            else => return false,
+        }
+    }
+    return false;
+}
+
+pub fn effectiveCallType(program: Ast.Program, declared: Ast.Type, capture: bool) Ast.Type {
+    if (capture) return declared;
+    const index = declared.genericInstantiationIndex() orelse return declared;
+    if (index >= program.generic_types.len) return declared;
+    const generic = program.generic_types[index];
+    if (generic.arguments.len != 2 or !std.mem.eql(u8, typeName(program, generic.base), "Result")) return declared;
+    return generic.arguments[0];
+}
+
+pub fn effectiveCallSpelling(declared: []const u8, capture: bool) []const u8 {
+    if (!capture) if (resultArguments(declared)) |arguments| return arguments.success;
+    return declared;
+}
+
+fn captureCallAt(allocator: Allocator, source: []const u8, prefix_start: usize) !bool {
+    const tokens = try tokensUntil(allocator, source, prefix_start);
+    var index = tokens.len;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .keyword_try => return true,
+            .identifier, .dot, .question_dot => {},
+            else => return false,
+        }
+    }
+    return false;
+}
+
+fn initializerHasTryAlternative(tokens: []const Token) bool {
+    var depth: usize = 0;
+    for (tokens) |token| switch (token.tag) {
+        .left_parenthesis, .left_bracket => depth += 1,
+        .right_parenthesis, .right_bracket => depth -|= 1,
+        .keyword_else => if (depth == 0) return true,
+        else => {},
+    };
+    return false;
 }

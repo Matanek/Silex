@@ -177,7 +177,7 @@ test "compile terminal match nested in a mutating method branch" {
         \\}
         \\func main() {
         \\    var parser = Parser(0)
-        \\    match parser.run() { success(value) => { assert(value == 7, "nested match") }; failure(error) => { panic(error) } }
+        \\    match (try parser.run()) { success(value) => { assert(value == 7, "nested match") }; failure(error) => { panic(error) } }
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);

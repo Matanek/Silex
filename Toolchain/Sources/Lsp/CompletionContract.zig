@@ -146,7 +146,7 @@ pub const scenarios = [_]Scenario{
         \\class State { var value:int }
         \\struct Owner { var state:State }
         \\func parse() Result<int, str> { return Result<int, str>.success(1) }
-        \\func propagate() Result<int, str> { return Result<int, str>.success(try parse()) }
+        \\func propagate() Result<int, str> { return Result<int, str>.success(try parse() else error { return Result<int,str>.failure(error) }) }
         \\func transfer(value:Box) Box { return move value }
         \\func detach(value:Owner) Owner { return copy value }
         \\func callback() func(int) int { return func(value:int) int { return value } }
@@ -978,7 +978,7 @@ pub fn expressionChoiceWitness(tag: Lexer.TokenTag) ?[]const u8 {
 
 pub fn unaryExpressionChoice(operator: Ast.UnaryOperator) ?Lexer.TokenTag {
     return switch (operator) {
-        .propagate => .keyword_try,
+        .try_result => .keyword_try,
         .move => .keyword_move,
         .copy => .keyword_copy,
         .negate,

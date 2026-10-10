@@ -40,7 +40,7 @@ test "ordinary block return break continue and try exits clean completed owners"
         \\func early() { let value = Leaf(id:1); return }
         \\func propagate() Result<int,str> {
         \\    let value = Leaf(id:2)
-        \\    let number = try Result<int,str>.failure("bad")
+        \\    let number = try Result<int,str>.failure("bad") else error { return Result<int,str>.failure(error) }
         \\    return Result<int,str>.success(number)
         \\}
         \\func main() {
@@ -49,7 +49,7 @@ test "ordinary block return break continue and try exits clean completed owners"
         \\    var count = 0
         \\    while count < 1 { let skipped = Leaf(id:5); count += 1; continue }
         \\    early()
-        \\    match propagate() { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try propagate()) { success(value) => { print(value) }; failure(error) => { print(error) } }
         \\}
     );
     defer std.testing.allocator.free(output);

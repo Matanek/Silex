@@ -847,7 +847,7 @@ pub const Analyzer = struct {
                     }
                     return false;
                 },
-                .unary => |unary| if (unary.operator == .propagate) {
+                .unary => |unary| if (unary.operator == .try_result) {
                     try Try.analyzeStatement(self, builder, unary);
                     return false;
                 } else unreachable,
@@ -948,7 +948,7 @@ pub const Analyzer = struct {
         unary: Ast.Expression.Unary,
         expected: ?Types.Type,
     ) AnalyzeError!TypedValue {
-        if (unary.operator == .propagate) return Try.analyzeValue(self, builder, unary);
+        if (unary.operator == .try_result) return Try.analyzeValue(self, builder, unary);
         if (unary.operator == .move) return Moves.analyze(self, builder, unary);
         if (unary.operator == .copy) return Copies.analyze(self, builder, unary);
         if (unary.operator == .borrow_read or unary.operator == .borrow_mutable) return Collections.analyzeView(self, builder, unary);
@@ -1616,14 +1616,14 @@ pub const Analyzer = struct {
     }
 
     pub fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
-        if (try Callbacks.call(self, builder, call)) |result| return result.value;
+        if (try Callbacks.call(self, builder, call)) |result| return Try.finishCall(self, builder, call, result.value);
         if (call.receiver == null and std.mem.eql(u8, call.name, "reflect")) return try Reflection.analyze(self, builder, call);
-        if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
+        if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return Try.finishCall(self, builder, call, try MapError.analyze(self, builder, call));
         if (try EmbeddedFiles.analyze(self, builder, call)) |value| return value;
         if (call.receiver == null and std.mem.eql(u8, call.name, "C.call")) {
-            return try Interop.analyzeIntrinsic(self, builder, call);
+            return Try.finishCall(self, builder, call, try Interop.analyzeIntrinsic(self, builder, call));
         }
-        if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
+        if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return Try.finishCall(self, builder, call, value);
         if (call.receiver) |receiver_expression| {
             if (Collections.isMutation(call.name) and Collections.receiverIsCollection(self, builder, receiver_expression)) {
                 return try Collections.analyzeMutation(self, builder, call);
@@ -1638,7 +1638,7 @@ pub const Analyzer = struct {
                     if (!Visibility.typeVisible(self, structure_index, call.name_position)) {
                         return self.fail(call.name_position, "nested type is unavailable in this context");
                     }
-                    return try StaticMembers.analyzeCall(self, builder, structure_index, call);
+                    return Try.finishCall(self, builder, call, try StaticMembers.analyzeCall(self, builder, structure_index, call));
                 }
                 if (Enums.find(self, receiver_name)) |enum_index| {
                     return try Enums.analyzeInitializer(self, builder, call, enum_index);
@@ -1666,8 +1666,12 @@ pub const Analyzer = struct {
                 return try self.emitStringCount(builder, value);
             }
         }
-        if (Interop.hasFunction(self, call.name)) return Interop.analyzeCall(self, builder, call);
-        if (call.named_arguments.len != 0) return NamedCalls.analyzeFunction(self, builder, call);
+        if (Interop.hasFunction(self, call.name)) return Try.finishCall(self, builder, call, try Interop.analyzeCall(self, builder, call));
+        if (call.named_arguments.len != 0) return Try.finishCall(self, builder, call, try NamedCalls.analyzeFunction(self, builder, call));
+        return Try.finishCall(self, builder, call, try self.analyzeFunctionCall(builder, call));
+    }
+
+    fn analyzeFunctionCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         var total_named: usize = 0;
         var named_count: usize = 0;
         var arity_count: usize = 0;

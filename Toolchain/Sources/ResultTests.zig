@@ -27,10 +27,10 @@ test "construct and match intrinsic Result value and void successes" {
         \\    return Result<void, str>.failure("denied")
         \\}
         \\func main() {
-        \\    match parse(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match parse(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match save(true) { success => { print("saved") }; failure(error) => { print(error) } }
-        \\    match save(false) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try parse(true)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try parse(false)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try save(true)) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try save(false)) { success => { print("saved") }; failure(error) => { print(error) } }
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
@@ -50,7 +50,7 @@ test "compose Result identities and transparent aliases through modules" {
         \\use Result<int, Api.Failure> as ParseResult
         \\func forward(value:ParseResult) Result<int, Api.Failure> { return value }
         \\func main() {
-        \\    match forward(Api.parse()) {
+        \\    match try forward(try Api.parse()) {
         \\        success(value) => { print(value) }
         \\        failure(error) => { print(error.message) }
         \\    }
@@ -85,7 +85,7 @@ test "emit deterministic Result IR" {
     const source =
         \\enum Failure { bad }
         \\func value() Result<int, Failure> { return Result<int, Failure>.success(7) }
-        \\func main() { match value() { success(number) => { print(number) }; failure(error) => { print("failure") } } }
+        \\func main() { match (try value()) { success(number) => { print(number) }; failure(error) => { print("failure") } } }
     ;
     var first = Frontend.Frontend.init(allocator);
     var second = Frontend.Frontend.init(allocator);

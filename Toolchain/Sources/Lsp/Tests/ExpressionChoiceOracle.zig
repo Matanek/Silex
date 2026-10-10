@@ -8,7 +8,7 @@ const Types = @import("../Types.zig");
 
 const Composition = @import("../CompletionContract/Composition.zig");
 
-const CanonicalId = enum { match_expression, result_propagation, move_value, copy_value, anonymous_function, member_surface };
+const CanonicalId = enum { match_expression, result_capture, move_value, copy_value, anonymous_function, member_surface };
 
 const CanonicalTemplate = struct {
     id: CanonicalId,
@@ -48,7 +48,7 @@ const canonical =
 
 const try_canonical =
     \\func parse() Result<int, str> { return Result<int, str>.success(1) }
-    \\func propagate() Result<int, str> { return Result<int, str>.success(try parse()) }
+    \\func capture() Result<int, str> { return try parse() }
     \\func main() {}
 ;
 
@@ -112,17 +112,14 @@ const cases = [_]Case{
     },
     .{
         .id = "return-try-expression-introducer",
-        .canonical = .result_propagation,
-        .partial_before =
-        \\func parse() Result<int, str> { return Result<int, str>.success(1) }
-        \\func propagate() Result<int, str> { return Result<int, str>.success(
-        ,
+        .canonical = .result_capture,
+        .partial_before = "func parse() Result<int, str> { return Result<int, str>.success(1) }\nfunc capture() Result<int, str> { return ",
         .choice = "try",
-        .partial_after = ")\n}",
+        .partial_after = "\n}",
         .expected = .{
             .label = "try",
             .kind = 14,
-            .detail = "Silex result propagation",
+            .detail = "Silex Result capture",
             .insert_text = "try",
         },
         .forbidden = &.{ "while", "public" },
@@ -191,7 +188,7 @@ const cases = [_]Case{
 
 const canonical_templates = [_]CanonicalTemplate{
     .{ .id = .match_expression, .source = canonical },
-    .{ .id = .result_propagation, .source = try_canonical },
+    .{ .id = .result_capture, .source = try_canonical },
     .{ .id = .move_value, .source = move_canonical },
     .{ .id = .copy_value, .source = copy_canonical },
     .{ .id = .anonymous_function, .source = function_canonical },

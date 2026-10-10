@@ -1,0 +1,56 @@
+enum ParseError { invalid(str) }
+
+func parse(text:str) Result<int,ParseError> {
+    if text.count() == 0 {
+        return Result<int,ParseError>.failure(ParseError.invalid("empty"))
+    }
+    return Result<int,ParseError>.success(42)
+}
+
+func main() {
+    let answer = parse("42")
+    print(answer)
+
+    let result = try parse("")
+    match result {
+        success(value) => { print(value) }
+        failure(error) => {
+            match error { invalid(reason) => { print(reason) } }
+        }
+    }
+}
+
+func load(text:str) Result<int,ParseError> {
+    let value = try parse(text) else error {
+        return Result<int,ParseError>.failure(error)
+    }
+    return Result<int,ParseError>.success(value + 1)
+}
+
+func load_for_cli(text:str) Result<int,str> {
+    let value = try parse(text) else error "cannot parse: $(text)"
+    return Result<int,str>.success(value)
+}
+
+enum AppError { input(ParseError) }
+
+func convert(error:ParseError) AppError { return AppError.input(error) }
+
+
+test "Result guide demonstrates capture and explicit propagation" {
+    assert(load("42") == 43)
+    match try load("") {
+        failure(error) => { match error { invalid(reason) => { assert(reason == "empty") } } }
+        success(_) => { panic("unexpected") }
+    }
+    match try load_for_cli("") {
+        failure(error) => { assert(error == "cannot parse: ") }
+        success(_) => { panic("unexpected") }
+    }
+    let text = ""
+    let config = try map_error(try parse(text), convert)
+    match config {
+        failure(error) => { match error { input(original) => { match original { invalid(reason) => { assert(reason == "empty") } } } } }
+        success(_) => { panic("unexpected") }
+    }
+}

@@ -56,7 +56,7 @@ test "anonymous scopes clean try propagation and end bound receiver borrows" {
         \\struct Counter { var value:int; func increment() { self.value++ } }
         \\func failure() Result<void,str> { return Result<void,str>.failure("stop") }
         \\func scoped() Result<void,str> {
-        \\    { let resource = Resource(name:"try"); try failure() }
+        \\    { let resource = Resource(name:"try"); try failure() else error { return Result<void,str>.failure(error) } }
         \\    return Result<void,str>.success()
         \\}
         \\func main() {
@@ -64,7 +64,7 @@ test "anonymous scopes clean try propagation and end bound receiver borrows" {
         \\    { let increment:func() = counter.increment; increment() }
         \\    counter.value += 1
         \\    print(counter.value)
-        \\    match scoped() { success => {}; failure(message) => { print(message) } }
+        \\    match (try scoped()) { success => {}; failure(message) => { print(message) } }
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);

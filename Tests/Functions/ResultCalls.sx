@@ -1,0 +1,33 @@
+func result_argument() Result<int,str> { return Result<int,str>.success(40) }
+func result_read(value:int = result_argument()) Result<int,str> { return Result<int,str>.success(value + 2) }
+func result_identity<T>(value:T) T { return value }
+static class ResultFactory {
+    func create() Result<int,str> { return Result<int,str>.success(42) }
+}
+class ResultBase {
+    func read() Result<int,str> { return Result<int,str>.success(42) }
+}
+class ResultChild:ResultBase {}
+func nested_result() Result<Result<int,str>,str> {
+    return Result<Result<int,str>,str>.success(Result<int,str>.failure("inner"))
+}
+func result_optional() Result<int?,str> { return Result<int?,str>.success(null) }
+func validate_result_calls() {
+    assert(result_read() == 42)
+    assert(result_identity(ResultFactory.create()) == 42)
+    let captured = try result_read(value:result_argument())
+    match captured { success(value) => { assert(value == 42) }; failure(_) => { panic("unexpected") } }
+    var child = ResultChild()
+    assert(result_identity(child.read()) == 42)
+    match try child.read() { success(value) => { assert(value == 42) }; failure(_) => { panic("unexpected") } }
+    let inner = nested_result()
+    match inner { failure(error) => { assert(error == "inner") }; success(_) => { panic("unexpected") } }
+    let optional = result_optional()
+    assert(optional == null)
+    let data = Result<int,str>.success(42)
+    match data { success(value) => { assert(value == 42) }; failure(_) => { panic("unexpected") } }
+    let stored = try data
+    match stored { success(value) => { assert(value == 42) }; failure(_) => { panic("unexpected") } }
+}
+func main() { validate_result_calls() }
+test "Result calls use one declaration with ordinary values or explicit captures" { validate_result_calls() }

@@ -26,10 +26,10 @@ test "map Result errors once while preserving value and void successes" {
         \\    return Result<void, str>.failure("denied")
         \\}
         \\func main() {
-        \\    match map_error(load(true), convert) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match map_error<int, str, int>(load(false), convert) { success(value) => { print(value) }; failure(error) => { print(error) } }
-        \\    match map_error(save(true), convert) { success => { print("saved") }; failure(error) => { print(error) } }
-        \\    match map_error<str, int>(save(false), convert) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try map_error((try load(true)), convert)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try map_error<int, str, int>((try load(false)), convert)) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try map_error((try save(true)), convert)) { success => { print("saved") }; failure(error) => { print(error) } }
+        \\    match (try map_error<str, int>((try save(false)), convert)) { success => { print("saved") }; failure(error) => { print(error) } }
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
@@ -45,10 +45,10 @@ test "map_error composes explicitly with try" {
         \\func convert(error:str) int { return error.count() }
         \\func source() Result<int, str> { return Result<int, str>.failure("bad") }
         \\func mapped() Result<bool, int> {
-        \\    let value = try map_error(source(), convert)
+        \\    let value = try map_error((try source()), convert) else error { return Result<bool,int>.failure(error) }
         \\    return Result<bool, int>.success(value == 42)
         \\}
-        \\func main() { match mapped() { success(value) => { print(value) }; failure(error) => { print(error) } } }
+        \\func main() { match (try mapped()) { success(value) => { print(value) }; failure(error) => { print(error) } } }
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("3\n", result.stdout);
@@ -64,7 +64,7 @@ test "map_error selects a compatible named overload" {
         \\func convert(error:str) bool { return error == "bad" }
         \\func source() Result<int, str> { return Result<int, str>.failure("bad") }
         \\func main() {
-        \\    match map_error<int, str, bool>(source(), convert) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match (try map_error<int, str, bool>((try source()), convert)) { success(value) => { print(value) }; failure(error) => { print(error) } }
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
@@ -77,15 +77,15 @@ test "diagnose invalid map_error calls and reserve its name" {
         "'map_error' expects 'Result<T,E>', found 'int'",
     );
     try expectCompileError(
-        "func convert(error:int) str { return \"bad\" } func source() Result<int, str> { return Result<int, str>.failure(\"bad\") } func main() { map_error(source(), convert) }",
+        "func convert(error:int) str { return \"bad\" } func source() Result<int, str> { return Result<int, str>.failure(\"bad\") } func main() { map_error(try source(), convert) }",
         "'map_error' transformation must have signature 'func(str) F'",
     );
     try expectCompileError(
-        "func source() Result<int, str> { return Result<int, str>.failure(\"bad\") } func main() { let convert = 1; map_error(source(), convert) }",
+        "func source() Result<int, str> { return Result<int, str>.failure(\"bad\") } func main() { let convert = 1; map_error(try source(), convert) }",
         "unknown transformation function 'convert'",
     );
     try expectCompileError(
-        "func convert(error:str) int { return 1 } func source() Result<int, str> { return Result<int, str>.failure(\"bad\") } func main() { map_error<int, str>(source(), convert) }",
+        "func convert(error:str) int { return 1 } func source() Result<int, str> { return Result<int, str>.failure(\"bad\") } func main() { map_error<int, str>(try source(), convert) }",
         "'map_error' expects 3 explicit type arguments matching its Result and transformation",
     );
     try expectCompileError(

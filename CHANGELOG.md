@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- A `Result<T,E>` operation has one implementation: an ordinary call produces `T` or panics; `try operation()` keeps the `Result`. This replaces the previous extraction/propagation meaning of `try`. Propagation now uses an explicit `else error { return … }` branch, and previous ordinary captures add `try`. Explicit Result constructions remain data; receivers, arguments and defaults are evaluated once. LSP completion follows the call mode and previous caches are invalidated.
+
 - Anonymous functions retain the private/protected access of their lexical context, including nested callbacks and static methods. Capturing a receiver from outside grants no additional access; extension restrictions still apply.
 
 - Recursive structures through dynamic lists copy and drop without infinite compiler recursion; their resource operations use IR calls, like recursive protocols. Interpreter and native macOS ARM64 regressions.

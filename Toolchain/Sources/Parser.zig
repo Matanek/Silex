@@ -832,6 +832,9 @@ pub const Parser = struct {
         const operator = self.current;
         try self.advance();
         const operand = try self.parseUnary(allow_line_breaks);
+        if (operator.tag == .keyword_try and operand.value == .call) {
+            operand.value.call.capture_result = true;
+        }
         var alternative: ?Ast.Expression.TryAlternative = null;
         if (operator.tag == .keyword_try and self.current.tag == .keyword_else) {
             const else_token = self.current;
@@ -865,7 +868,7 @@ pub const Parser = struct {
                 .operator = switch (operator.tag) {
                     .minus => .negate,
                     .bang => .logical_not,
-                    .keyword_try => .propagate,
+                    .keyword_try => .try_result,
                     .keyword_move => .move,
                     .keyword_copy => .copy,
                     .at => .borrow_read,

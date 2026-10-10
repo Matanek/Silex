@@ -30,7 +30,7 @@ func append_seed(value:@uint8[..]) int {
 func exercise() bool {
     let seed = Seed(bytes:fixed(30))
     var pair:Pair? = null
-    match make_pair() {
+    match (try make_pair()) {
         success(value) => { pair = value }
         failure(error) => { return false }
     }

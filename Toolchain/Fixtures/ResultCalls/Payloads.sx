@@ -1,0 +1,39 @@
+class Token {
+    static var drops:int = 0
+    let id:int
+    init(id:int) { self.id = id }
+    drop { Token.drops++ }
+}
+func create(allowed:bool) Result<Token,Token> {
+    if allowed { return Result<Token,Token>.success(Token(42)) }
+    return Result<Token,Token>.failure(Token(13))
+}
+protocol Reader { func read() Result<int,str> }
+struct Source:Reader { func read() Result<int,str> { return Result<int,str>.success(42) } }
+func view(value:@Result<Token,str>) @Result<Token,str> { return value }
+func inspect(value:@Token) int { return value.id }
+func main() {
+    { var value = create(true); assert(value.id == 42 && Token.drops == 0) }
+    assert(Token.drops == 1)
+    {
+        var captured = try create(false)
+        match captured { failure(error) => { assert(error.id == 13) }; success(_) => { panic("unexpected") } }
+    }
+    assert(Token.drops == 2)
+    {
+        var stored = Result<Token,str>.success(Token(42))
+        assert(inspect(view(stored)) == 42)
+    }
+    assert(Token.drops == 3)
+    var reader:Reader = Source()
+    assert(reader.read() == 42)
+    match try reader.read() { success(value) => { assert(value == 42) }; failure(_) => { panic("unexpected") } }
+    var source:Source? = Source()
+    assert(source?.read() == 42)
+    if let captured = try source?.read() {
+        match captured { success(value) => { assert(value == 42) }; failure(_) => { panic("unexpected") } }
+    }
+    source = null
+    assert(source?.read() == null)
+    assert((try source?.read()) == null)
+}

@@ -11,13 +11,13 @@ struct Counter {
     init() {self.calls=0}
     func read(allowed:bool) Result<int,str> {
         self.calls++
-        let value = try read_value(allowed)
+        let value = try read_value(allowed) else error { return Result<int,str>.failure(error) }
         self.calls += 10
         return Result<int,str>.success(value)
     }
     func save(allowed:bool) Result<void,str> {
         self.calls++
-        try save_value(allowed)
+        try save_value(allowed) else error { return Result<void,str>.failure(error) }
         self.calls += 10
         return Result<void,str>.success()
     }
@@ -35,20 +35,20 @@ class ReferenceCounter {
     init() {self.calls=0}
     func read(allowed:bool) Result<int?,str> {
         self.calls++
-        let value = try read_value(allowed)
+        let value = try read_value(allowed) else error { return Result<int?,str>.failure(error) }
         self.calls += 10
         return Result<int?,str>.success(value)
     }
 }
 func validate() {
     var counter=Counter()
-    match counter.read(false) {
+    match (try counter.read(false)) {
         failure(error) => {assert(error == "denied")}
         success(value) => {panic("unexpected success")}
     }
     assert(counter.calls == 1)
     assert((try counter.read(true) else error {panic(error)}) == 7 && counter.calls == 12)
-    match counter.save(false) {
+    match (try counter.save(false)) {
         failure(error) => {assert(error == "unsaved")}
         success => {panic("unexpected success")}
     }
@@ -57,7 +57,7 @@ func validate() {
     assert(counter.calls == 24)
     assert(counter.fallback(false) == -1 && counter.calls == 25)
     assert(counter.fallback(true) == 7 && counter.calls == 26)
-    match counter.message(false) {
+    match (try counter.message(false)) {
         failure(error) => {assert(error == "read failed")}
         success(value) => {panic("unexpected success")}
     }
@@ -65,7 +65,7 @@ func validate() {
     assert((try counter.message(true) else error {panic(error)}) == 7 && counter.calls == 28)
     var reference=ReferenceCounter()
     var alias=reference
-    match reference.read(false) {
+    match (try reference.read(false)) {
         failure(error) => {assert(error == "denied")}
         success(value) => {panic("unexpected success")}
     }

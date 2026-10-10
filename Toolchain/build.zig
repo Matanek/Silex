@@ -519,6 +519,18 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = bootstrap_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const result_call_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "result call policy" } });
+    result_call_tests.stack_size = bootstrap_stack_size;
+    const result_call_command = b.addRunArtifact(result_call_tests);
+    result_call_command.setCwd(b.path(""));
+    b.step("test-result-calls", "Verify ordinary and captured Result calls").dependOn(&result_call_command.step);
+    const result_call_cli_command = b.addSystemCommand(&.{"python3"});
+    result_call_cli_command.addFileArg(b.path("Tools/VerifyResultCalls.py"));
+    result_call_cli_command.addArtifactArg(executable);
+    result_call_cli_command.addDirectoryArg(b.path(".."));
+    result_call_cli_command.setCwd(b.path("../.."));
+    result_call_cli_command.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
+    b.step("test-result-call-cli", "Verify Result calls in interpreter and native Debug/Release").dependOn(&result_call_cli_command.step);
     const stack_window_tests = b.addTest(.{
         .root_module = module,
         // Keep unnamed import tests reachable as well as the regression.
@@ -577,6 +589,7 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run compiler and Silex language tests");
     test_step.dependOn(&test_command.step);
+    test_step.dependOn(&result_call_cli_command.step);
     test_step.dependOn(&deep_copy_test_command.step);
     test_step.dependOn(&cycle_test_command.step);
     test_step.dependOn(&llvm_cycle_test_command.step);
@@ -693,6 +706,7 @@ pub fn build(b: *std.Build) void {
     // The language-test command already builds this executable in the
     // requested mode without installing it into zig-out/bin.
     check_step.dependOn(&test_command.step);
+    check_step.dependOn(&result_call_cli_command.step);
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&cycle_test_command.step);
     check_step.dependOn(&llvm_cycle_test_command.step);
