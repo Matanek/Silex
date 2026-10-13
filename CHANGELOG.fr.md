@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Un alias de fonction importée ne renomme plus une méthode homonyme appelée sur un récepteur ; appels d’instance, statiques, génériques et de protocole conservent leur résolution propre.
+
 - Une opération `Result<T,E>` possède une seule implémentation : l’appel ordinaire produit `T` ou panique ; `try operation()` conserve le `Result`. Cette évolution remplace l’ancienne extraction/propagation de `try`. Les propagations utilisent désormais une branche explicite `else error { return … }`, et les anciennes captures ordinaires ajoutent `try`. Les constructions explicites de Result restent des données ; receveur, arguments et défauts gardent une évaluation unique. Le LSP suit le mode d’appel et les caches antérieurs sont invalidés.
 
 - Les fonctions anonymes conservent les droits privés/protégés de leur contexte lexical, y compris après imbrication et pour les méthodes statiques. Capturer un récepteur depuis l’extérieur ne donne aucun accès supplémentaire ; les restrictions des extensions restent appliquées.

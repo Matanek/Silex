@@ -1834,6 +1834,9 @@ pub const Compiler = struct {
                         }
                     } else try self.rewriteExpression(module, receiver, type_map);
                 }
+                // A surviving receiver belongs to member lookup. Lexical use
+                // bindings qualify free calls, never a method's source name.
+                if (call.receiver != null) return;
                 if (call.receiver == null and
                     (std.mem.eql(u8, call.name, "embed_text") or std.mem.eql(u8, call.name, "embed_bytes"))) return;
                 if (call.receiver == null and std.mem.eql(u8, call.name, "reflect")) return;

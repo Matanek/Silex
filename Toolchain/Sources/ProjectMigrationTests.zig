@@ -653,3 +653,37 @@ test "enforce local fields methods and constructors from other files" {
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expect(std.mem.startsWith(u8, compiler.diagnostic.?.message, "constructor of 'Api.Box' is local"));
 }
+
+test "function imports do not qualify names selected through receivers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Helpers.sx",
+        .data = "public func square(value:int) int { return value * value }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Module.Helpers.square as count
+        \\protocol Counted { func count() int }
+        \\struct Counter:Counted { func count() int { return 3 } }
+        \\static struct StaticCounter { func count() int { return 4 } }
+        \\struct GenericCounter<T> { let value:T; func count() int { return 5 } }
+        \\func main() {
+        \\    let counter = Counter()
+        \\    var protocol_value:Counted = counter
+        \\    let callback = counter.count
+        \\    print(counter.count() + Counter().count() + protocol_value.count() + callback())
+        \\    print(StaticCounter.count() + GenericCounter<int>(value:1).count() + count(3))
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("12\n18\n", result.stdout);
+}

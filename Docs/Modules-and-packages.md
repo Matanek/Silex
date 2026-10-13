@@ -75,6 +75,12 @@ For a collection resolved in another physical atom, that element is interpreted
 in the declaring atom's type table, not the caller's table. Unrelated private
 types in the caller therefore cannot change the signature's visibility.
 
+Calls retaining an expression or nominal-type receiver keep their member name
+through project rewriting. Composition qualifies only receiver-free calls through
+lexical imports; semantic member lookup selects instance, static and protocol
+methods from the receiver type. Arguments and receiver expressions are still
+rewritten before this boundary.
+
 ## Collect catalog contributions
 
 Umbrella catalog contributions are discovered only in an active named

@@ -11,6 +11,15 @@ const Case = struct {
 
 test "part 04 local receiver registry gaps are executable contracts" {
     const cases = [_]Case{
+        .{ .id = "member-function-import-name-collision", .source = "use STD.Math.sqrt as count\nstruct Counter { func count() int { return 3 } }\nfunc main() { let counter = Counter(); counter.<|> }", .expected = &.{
+            .{ .label = "count", .kind = 2, .detail = "count() int", .insert_text = "count()" },
+        }, .forbidden = &.{"sqrt"} },
+        .{ .id = "member-function-import-name-prefix", .source = "use STD.Math.sqrt as count\nstruct Counter { func count() int { return 3 } }\nfunc main() { let counter = Counter(); counter.c<|> }", .expected = &.{
+            .{ .label = "count", .kind = 2, .detail = "count() int", .insert_text = "count()" },
+        }, .forbidden = &.{"sqrt"} },
+        .{ .id = "member-static-import-name-collision", .source = "use STD.Math.sqrt as count\nstatic struct Counter { func count() int { return 4 } }\nfunc main() { Counter.<|> }", .expected = &.{
+            .{ .label = "count", .kind = 2, .detail = "count() int", .insert_text = "count()" },
+        }, .forbidden = &.{"sqrt"} },
         .{ .id = "member-self-receiver", .source = "struct Counter { var value:int; func read() int { return self.<|> } }\nfunc main() {}", .expected = &.{
             .{ .label = "value", .kind = 5, .detail = "value:int", .insert_text = "value" },
             .{ .label = "read", .kind = 2, .detail = "read() int", .insert_text = "read()" },

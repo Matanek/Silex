@@ -1,0 +1,25 @@
+use STD.Math.sqrt as count
+
+protocol Counted { func count() int }
+struct Counter:Counted {
+    func count() int { return 3 }
+}
+static struct StaticCounter { func count() int { return 4 } }
+struct GenericCounter<T> { let value:T; func count() int { return 5 } }
+
+func verify() {
+    let counter = Counter()
+    var protocol_value:Counted = counter
+    let generic = GenericCounter<int>(value:1)
+    let callback = counter.count
+    assert(counter.count() == 3 && Counter().count() == 3)
+    assert(protocol_value.count() == 3 && callback() == 3)
+    assert(StaticCounter.count() == 4 && generic.count() == 5)
+    assert(count(9.0) == 3.0)
+}
+
+func main() { verify(); print("lexical imports preserve member names: OK") }
+
+test "a lexical function import alias does not rename an instance method" {
+    verify()
+}
