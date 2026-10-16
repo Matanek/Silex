@@ -171,6 +171,32 @@ test "finalize native cycles containing scalar string and optional arrays" {
     verify_scalar_cycle()
 }
 
+class NativeFieldCycle {
+    static var drops:int = 0
+    let prefix:int? = 7
+    let absent:str? = null
+    let label:str = "café"
+    var next:NativeFieldCycle? = null
+    let suffix:float = 2.0
+    drop { NativeFieldCycle.drops++ }
+}
+
+func verify_field_cycle() {
+    NativeFieldCycle.drops = 0
+    {
+        var value = NativeFieldCycle()
+        value.next = value
+        assert(value.prefix == 7 && value.absent == null)
+        assert(value.label == "café" && value.suffix == 2.0)
+        assert(value.next != null)
+    }
+    assert(NativeFieldCycle.drops == 1)
+}
+
+test "scalar field widths preserve a native class cycle between values" {
+    verify_field_cycle()
+}
+
 enum NativeRowDetail { empty; text(str); numbers(int?[]) }
 struct NativeScalarRow {
     let number:int
@@ -728,6 +754,7 @@ func main() {
     verify_cycles()
     verify_scalar_cycle()
     verify_aggregate_cycle()
+    verify_field_cycle()
 }
 
 struct NativeBorrowedValues {

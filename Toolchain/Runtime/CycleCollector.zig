@@ -50,10 +50,15 @@ const Context = struct {
     }
 
     fn width(self: *const Context, type_value: u64) usize {
-        if (optionalChild(type_value)) |child| return 1 + self.width(child);
-        if (type_value <= scalar_limit) return if (type_value == 0) 0 else 1;
-        if (type_value >= function_base and type_value < function_end) return 3;
-        return @intCast(self.entry(type_value)[1]);
+        const depth: usize = @intCast(type_value >> optional_depth_shift);
+        const base = type_value & type_base_mask;
+        const payload: usize = if (base <= scalar_limit)
+            @intFromBool(base != 0)
+        else if (base >= function_base and base < function_end)
+            3
+        else
+            @intCast(self.entry(base)[1]);
+        return depth + payload;
     }
 
     fn data(self: *const Context, entry_value: [*]const u64) [*]const u64 {
@@ -502,8 +507,14 @@ fn traceListEdge(context: *Context, list: [*]u64, type_value: u64, element_type:
 fn traceFields(context: *Context, value: [*]u64, fields: [*]const u64, count: usize) bool {
     var offset: usize = 0;
     for (0..count) |index| {
-        if (!traceValue(context, value + offset, fields[index])) return false;
-        offset += context.width(fields[index]);
+        const field = fields[index];
+        // Like scalar collection elements, scalar fields cannot carry class
+        // edges. Preserve their full optional storage width without visiting
+        // each tag and payload during every reachability trial.
+        if (field & type_base_mask > scalar_limit) {
+            if (!traceValue(context, value + offset, field)) return false;
+        }
+        offset += context.width(field);
     }
     return true;
 }
@@ -651,6 +662,42 @@ test "cycle tracing does not visit scalar array elements" {
     try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
 }
 
+test "cycle tracing skips scalar fields while preserving optional storage widths" {
+    var context: Context = undefined;
+    const optional_int = (@as(u64, 1) << optional_depth_shift) | 6;
+    const nested_string = (@as(u64, 3) << optional_depth_shift) | 12;
+    var values = [_]u64{ 7, 1, 42, 0, 0, 0, 0 };
+    const fields = [_]u64{ 6, optional_int, nested_string };
+    TestState.traced_values = 0;
+    try std.testing.expect(traceFields(&context, &values, &fields, fields.len));
+    try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
+    try std.testing.expectEqual(@as(usize, 0), context.width(0));
+    try std.testing.expectEqual(@as(usize, 2), context.width(optional_int));
+    try std.testing.expectEqual(@as(usize, 4), context.width(nested_string));
+    try std.testing.expectEqual(@as(usize, 5), context.width((@as(u64, 2) << optional_depth_shift) | function_base));
+}
+
+test "optional scalar fields keep following class and callback edges at their exact offsets" {
+    var context: Context = undefined;
+    const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 42, 0, 0 };
+    var rooted = [_]u64{ 42, 1, 0, 0 };
+    const nested_scalar = (@as(u64, 2) << optional_depth_shift) | 12;
+    const optional_class = (@as(u64, 1) << optional_depth_shift) | structure_base;
+    const fields = [_]u64{ nested_scalar, optional_class, 6, function_base };
+    // The outer optional scalar is absent; its entire reserved storage still
+    // precedes the live class and callback. Bogus tag/payload words catch an
+    // incorrect compacted offset without relying on elapsed time.
+    var values = [_]u64{ 0, 99, 99, 1, @intFromPtr(&rooted), 42, 0, 0, @intFromPtr(&rooted) };
+    context.model = &model;
+    context.count = 0;
+    context.marking = false;
+    TestState.traced_values = 0;
+    try std.testing.expect(traceFields(&context, &values, &fields, fields.len));
+    try std.testing.expectEqual(@as(usize, 3), TestState.traced_values);
+    try std.testing.expectEqual(@as(u64, 1), rooted[1]);
+    try std.testing.expectEqual(@as(usize, 3), context.width((@as(u64, 2) << optional_depth_shift) | structure_base));
+}
+
 test "cycle tracing skips optional scalars but still visits class array edges" {
     var context: Context = undefined;
     var values = [_]u64{ 1, 12, 0, 0 };
@@ -756,7 +803,7 @@ test "scalar fields do not hide class and callback edges in aggregate arrays" {
     TestState.traced_values = 0;
     try std.testing.expect(traceArray(&context, &classes, structure_base + 1, 1));
     try std.testing.expect(traceArray(&context, &callbacks, structure_base + 2, 1));
-    try std.testing.expectEqual(@as(usize, 6), TestState.traced_values);
+    try std.testing.expectEqual(@as(usize, 4), TestState.traced_values);
 }
 
 test "X64 callbacks prove and commit a direct class cycle" {

@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La collecte native des cycles ignore aussi les champs scalaires, chaînes et optionnels scalaires, tout en conservant leur largeur réservée. Les parcours fréquents d’interface évitent ces visites sans masquer les références de classes ni les callbacks. Régressions du collecteur et des cycles natifs ; mesures locales de la galerie de tableaux.
+
 - Un alias de fonction importée ne renomme plus une méthode homonyme appelée sur un récepteur ; appels d’instance, statiques, génériques et de protocole conservent leur résolution propre.
 
 - Une opération `Result<T,E>` possède une seule implémentation : l’appel ordinaire produit `T` ou panique ; `try operation()` conserve le `Result`. Cette évolution remplace l’ancienne extraction/propagation de `try`. Les propagations utilisent désormais une branche explicite `else error { return … }`, et les anciennes captures ordinaires ajoutent `try`. Les constructions explicites de Result restent des données ; receveur, arguments et défauts gardent une évaluation unique. Le LSP suit le mode d’appel et les caches antérieurs sont invalidés.

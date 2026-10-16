@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native cycle collection also skips scalar, string and optional scalar fields while preserving their reserved width. Frequent UI traversals avoid these visits without hiding class references or callbacks. Collector and native cycle regressions; local table gallery measurements.
+
 - An imported function alias no longer renames an identically named method called through a receiver; instance, static, generic and protocol calls retain member resolution.
 
 - A `Result<T,E>` operation has one implementation: an ordinary call produces `T` or panics; `try operation()` keeps the `Result`. This replaces the previous extraction/propagation meaning of `try`. Propagation now uses an explicit `else error { return … }` branch, and previous ordinary captures add `try`. Explicit Result constructions remain data; receivers, arguments and defaults are evaluated once. LSP completion follows the call mode and previous caches are invalidated.
