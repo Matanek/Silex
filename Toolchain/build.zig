@@ -519,6 +519,11 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = bootstrap_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const default_scope_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "parameter defaults" } });
+    default_scope_tests.stack_size = bootstrap_stack_size;
+    const default_scope_command = b.addRunArtifact(default_scope_tests);
+    default_scope_command.setCwd(b.path(""));
+    b.step("test-default-scopes", "Verify declaration scope for parameter defaults").dependOn(&default_scope_command.step);
     const result_call_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "result call policy" } });
     result_call_tests.stack_size = bootstrap_stack_size;
     const result_call_command = b.addRunArtifact(result_call_tests);

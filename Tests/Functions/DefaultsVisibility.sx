@@ -1,0 +1,24 @@
+package enum Mode { ready; other }
+static struct Seeds {
+    var calls:int=0
+    func next() Mode { Seeds.calls++;return Mode.ready }
+}
+func choose(mode:Mode=Seeds.next()) bool {return mode==Mode.ready}
+package class Box {
+    var mode:Mode
+    private static func initial() Mode {return Seeds.next()}
+    init(mode:Mode=Box.initial()) {self.mode=mode}
+    func read(mode:Mode=Box.initial()) bool {return mode==self.mode}
+    static func check(mode:Mode=Box.initial()) bool {return mode==Mode.ready}
+}
+func verify() {
+    Seeds.calls=0
+    var box=Box();assert(Seeds.calls==1 && box.mode==Mode.ready)
+    assert(box.read() && Seeds.calls==2)
+    assert(Box.check() && Seeds.calls==3)
+    assert(choose() && Seeds.calls==4)
+    assert(!choose(mode:Mode.other) && Seeds.calls==4)
+    assert(box.read(mode:Mode.ready) && Seeds.calls==4)
+}
+func main() {verify();print("default declaration scope and single evaluation verified")}
+test "internal enum defaults preserve scope and evaluate once on omission" {verify()}

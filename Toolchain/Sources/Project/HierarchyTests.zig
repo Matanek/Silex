@@ -157,3 +157,58 @@ test "hierarchical module cycles cannot conceal an unrelated intermediate branch
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("module dependency cycle crosses logical parents", compiler.diagnostic.?.message);
 }
+
+test "parameter defaults keep provider scope across packages without leaking private member access" {
+    for ([_]bool{ false, true }) |invalid_access| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var temporary = std.testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try temporary.dir.createDirPath(std.testing.io, "Api/Module");
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\",\"dependencies\":{\"Api\":\"=1.0.0\"}}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Package.json", .data = "{\"name\":\"Api\",\"version\":\"1.0.0\"}" });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Module/@Api.sx", .data =
+            \\public enum Mode { ready; other }
+            \\package func seed() Mode { return Mode.ready }
+            \\public func value(mode:Mode=seed()) int {if mode==Mode.ready {return 7} return 0}
+            \\public func generic<T>(value:T, mode:Mode=seed()) T {return value}
+            \\public class Box {
+            \\    var mode:Mode
+            \\    private static func initial() Mode {return seed()}
+            \\    init(mode:Mode=Box.initial()) {self.mode=mode}
+            \\    func read(mode:Mode=Box.initial()) int {if mode==self.mode {return 11} return 0}
+            \\    static func check(mode:Mode=Box.initial()) int {if mode==Mode.ready {return 13} return 0}
+            \\}
+            \\public class GenericBox<T> {
+            \\    let value:T
+            \\    init(value:T, mode:Mode=seed()) {self.value=value}
+            \\    func read() T {return self.value}
+            \\}
+        });
+        const source = if (invalid_access)
+            \\use Api
+            \\func main() {let value=Api.Box.check();Api.Box.initial()}
+        else
+            \\use Api
+            \\func main() {
+            \\    var box=Api.Box()
+            \\    assert(Api.value()==7 && box.read()==11 && Api.Box.check()==13)
+            \\    assert(Api.value(mode:Api.Mode.other)==0 && Api.generic<int>(42)==42)
+            \\    var generic=Api.GenericBox<int>(17);assert(generic.read()==17)
+            \\    print("defaults visibility ok")
+            \\}
+        ;
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+        const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+        var compiler = Compiler.init(allocator, std.testing.io);
+        if (invalid_access) {
+            try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+            try std.testing.expectEqualStrings("type has no visible static method accepting these arguments", compiler.diagnostic.?.message);
+        } else {
+            const compilation = try compiler.compile(input);
+            const result = try Interpreter.runCapture(allocator, compilation.ir);
+            try std.testing.expectEqualStrings("defaults visibility ok\n", result.stdout);
+        }
+    }
+}
