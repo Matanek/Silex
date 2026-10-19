@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const CompilationTrace = @import("../CompilationTrace.zig");
 const Arguments = @import("Arguments.zig");
+const Defaults = @import("Defaults.zig");
 const NamedCalls = @import("NamedCalls.zig");
 const Boundary = @import("../Boundary.zig");
 const Ir = @import("../Ir.zig");
@@ -76,6 +77,7 @@ pub const Analyzer = struct {
     enums: []const Ir.Enum = &.{},
     method_mutability: []const bool = &.{},
     default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
+    default_scopes: std.AutoHashMapUnmanaged(*const Ast.Expression, Defaults.Scope) = .empty,
     diagnostic: ?Source.Diagnostic = null,
     member_context: ?usize = null,
     constructor_context: ?usize = null,
@@ -139,6 +141,7 @@ pub const Analyzer = struct {
             self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
             break :prepared prepared_function_types;
         };
+        try Defaults.prepare(self);
         {
             var span = self.traceSpan(.semantic_validation);
             defer span.finish();
@@ -146,7 +149,7 @@ pub const Analyzer = struct {
             try Protocols.validate(self);
             try Declarations.validateFieldDefaults(self);
             try self.validateDeclarations(require_entry);
-            try self.validateParameterDefaults();
+            try Defaults.validate(self);
         }
         self.recursive_value_resources = try ValueResources.prepare(self);
         var generated_keys: std.ArrayList(?[]const u8) = .empty;
@@ -582,32 +585,6 @@ pub const Analyzer = struct {
         return false;
     }
 
-    fn validateParameterDefaults(self: *Analyzer) AnalyzeError!void {
-        for (self.program.functions) |function| {
-            if (function.specialization_file == null) try self.validateDefaults(function.parameters);
-        }
-        for (self.program.structures) |structure| {
-            for (structure.constructors) |constructor| {
-                if (constructor.specialization_file == null) try self.validateDefaults(constructor.parameters);
-            }
-            for (structure.methods) |method| {
-                if (method.specialization_file == null) try self.validateDefaults(method.parameters);
-            }
-        }
-    }
-
-    fn validateDefaults(self: *Analyzer, parameters: []const Ast.Parameter) AnalyzeError!void {
-        var builder: FunctionBuilder = .{};
-        try builder.blocks.append(self.allocator, .{});
-        for (parameters) |parameter| {
-            if (parameter.mode == .mutable and parameter.default != null) {
-                return self.fail(parameter.position, "a mutable-reference parameter cannot have a default value");
-            }
-            if (parameter.default == null) continue;
-            _ = try self.analyzeParameterDefault(&builder, parameter);
-        }
-    }
-
     fn effectiveSignature(
         self: *Analyzer,
         name: []const u8,
@@ -772,46 +749,9 @@ pub const Analyzer = struct {
         return false;
     }
 
-    pub fn analyzeParameterDefault(
-        self: *Analyzer,
-        builder: *FunctionBuilder,
-        parameter: Ast.Parameter,
-    ) AnalyzeError!TypedValue {
-        const expression = parameter.default orelse return error.InvalidSource;
-        for (self.default_expansions.items) |active| {
-            if (active == expression) {
-                return self.fail(expression.position, "default parameter expansion is recursive");
-            }
-        }
-        try self.default_expansions.append(self.allocator, expression);
-        defer _ = self.default_expansions.pop();
-        const caller_bindings = builder.bindings;
-        const caller_return_type = builder.return_type;
-        builder.bindings = .empty;
-        builder.return_type = null;
-        defer {
-            builder.bindings = caller_bindings;
-            builder.return_type = caller_return_type;
-        }
-        var value = try self.analyzeExpressionExpected(
-            builder,
-            expression,
-            Optionals.expectedContext(parameter.type, expression),
-        );
-        if (value.type != parameter.type and self.canImplicitlyConvert(value.type, parameter.type)) {
-            value = try self.coerce(builder, value, parameter.type, expression.position);
-        }
-        if (value.type != parameter.type) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "default for parameter '{s}' expects '{s}', found '{s}'",
-                .{ parameter.name, self.typeName(parameter.type), self.typeName(value.type) },
-            );
-            return self.fail(expression.position, message);
-        }
-        return value;
+    pub fn analyzeParameterDefault(self: *Analyzer, builder: *FunctionBuilder, parameter: Ast.Parameter) AnalyzeError!TypedValue {
+        return Defaults.analyze(self, builder, parameter);
     }
-
     fn analyzeStatement(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.Statement) AnalyzeError!bool {
         return switch (statement) {
             .variable_declaration => |declaration| variable: {

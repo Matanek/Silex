@@ -519,6 +519,11 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = bootstrap_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const default_scope_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "parameter defaults" } });
+    default_scope_tests.stack_size = bootstrap_stack_size;
+    const default_scope_command = b.addRunArtifact(default_scope_tests);
+    default_scope_command.setCwd(b.path(""));
+    b.step("test-default-scopes", "Verify declaration scope for parameter defaults").dependOn(&default_scope_command.step);
     const result_call_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "result call policy" } });
     result_call_tests.stack_size = bootstrap_stack_size;
     const result_call_command = b.addRunArtifact(result_call_tests);
@@ -635,6 +640,7 @@ pub fn build(b: *std.Build) void {
     });
     lsp_admission_module.addOptions("build_options", build_options);
     const lsp_admission_tests = b.addTest(.{ .root_module = lsp_admission_module });
+    lsp_admission_tests.stack_size = bootstrap_stack_size;
     const lsp_admission_command = b.addRunArtifact(lsp_admission_tests);
     lsp_admission_command.setCwd(b.path(""));
     const lsp_admission_step = b.step("test-lsp-admission", "Run the host completion admission used by installation");
@@ -645,6 +651,7 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&lsp_admission_command.step);
 
     const lsp_tests = b.addTest(.{ .root_module = lsp_test_module });
+    lsp_tests.stack_size = bootstrap_stack_size;
     const lsp_test_command = b.addRunArtifact(lsp_tests);
     lsp_test_command.setCwd(b.path(""));
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");

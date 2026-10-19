@@ -8,7 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les lanceurs de tests LSP et d’admission reçoivent la même pile Debug de 32 Mio que le bootstrap : le test de récursion atteint son diagnostic au lieu de déborder la pile système.
+
 - La collecte native des cycles ignore aussi les champs scalaires, chaînes et optionnels scalaires, tout en conservant leur largeur réservée. Les parcours fréquents d’interface évitent ces visites sans masquer les références de classes ni les callbacks. Régressions du collecteur et des cycles natifs ; mesures locales de la galerie de tableaux.
+- Les valeurs par défaut de paramètres conservent les droits de leur déclaration : les enums et helpers internes restent utilisables dans les fonctions, constructeurs et méthodes, sans donner ces droits à l’appelant.
 
 - Un alias de fonction importée ne renomme plus une méthode homonyme appelée sur un récepteur ; appels d’instance, statiques, génériques et de protocole conservent leur résolution propre.
 

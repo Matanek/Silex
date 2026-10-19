@@ -8,7 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- LSP and admission test runners use the bootstrap’s 32 MiB Debug stack, so the recursion test reaches its diagnostic instead of overflowing the system stack.
+
 - Native cycle collection also skips scalar, string and optional scalar fields while preserving their reserved width. Frequent UI traversals avoid these visits without hiding class references or callbacks. Collector and native cycle regressions; local table gallery measurements.
+- Parameter defaults retain their declaration’s visibility: internal enums and helpers work in functions, constructors and methods without granting those access rights to the caller.
 
 - An imported function alias no longer renames an identically named method called through a receiver; instance, static, generic and protocol calls retain member resolution.
 
