@@ -301,8 +301,8 @@ test "reject unsupported protocol declaration forms and dynamic values" {
         "generic protocol methods are not supported",
     );
     try expectCompileError(
-        "protocol Drawable { func draw() {} } func main() {}",
-        "protocol requirements cannot declare a body",
+        "protocol Drawable { func draw(amount:int=1) {} } func main() {}",
+        "protocol requirements cannot declare parameter defaults",
     );
     try expectCompileError(
         "protocol Drawable { func draw() } func main() { let value:Drawable }",

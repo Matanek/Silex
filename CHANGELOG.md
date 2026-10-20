@@ -8,6 +8,10 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Protocol methods can provide default bodies: existing conformers reuse them, explicit implementations take precedence, and concrete, generic, and dynamic calls preserve the same choice. Bodies are checked in protocol scope even when unused; competing defaults require an explicit implementation. Completion, labels, and navigation retain the original declarations across imports and extensions.
+- Method calls through a protocol accept named arguments using the protocol's labels. Comparing an optional protocol with the `null` literal tests presence without requiring a comparable payload.
+- `main` retains its module scope for calls across atoms. The LSP also indexes open files before their first save, preserving file or atom identity and visibility boundaries.
+
 - LSP and admission test runners use the bootstrap’s 32 MiB Debug stack, so the recursion test reaches its diagnostic instead of overflowing the system stack.
 
 - Native cycle collection also skips scalar, string and optional scalar fields while preserving their reserved width. Frequent UI traversals avoid these visits without hiding class references or callbacks. Collector and native cycle regressions; local table gallery measurements.

@@ -108,6 +108,16 @@ Erasure preserves the payload's ownership and transfer status. A temporary
 structure converted to a protocol carries its existing resources into the
 destination; a conversion of a stored value retains the ordinary copy rules.
 
+Protocol method bodies are checked once with a protocol-typed `self`, including
+unused bodies. Signature expansion precedes generic inference and is reused by
+local completion. Generated concrete witness methods call the nominal body;
+mutable methods reuse the existing receiver/result carriers, including explicit
+`try` exits. Read-only bodies retain a local receiver only after parameter value
+IDs have been registered. Neither source syntax nor portable IR gains a new
+calling convention. Explicit implementations and valid inherited methods take
+precedence; extension methods are considered in the declaring conformance's
+source scope. Unresolved competing defaults are diagnosed before lowering.
+
 A generic parameter may carry one protocol identity through parsing, module
 activation and public interfaces. Specialization validates the selected
 concrete type's nominal or inherited conformance before rewriting the body;

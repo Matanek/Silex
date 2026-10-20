@@ -5,15 +5,20 @@ const ModuleScopes = @import("../ModuleScopes.zig");
 
 pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, position: Source.Position) bool {
     if (!typeVisible(self, structure_index, position)) return false;
+    if (comptime @hasField(@TypeOf(member), "protocol_witness")) {
+        if (member.protocol_witness) |origin| {
+            if (member.extension) |extension| if (!extensionActive(self, extension.visible_files, position)) return false;
+            const protocol = self.structureIndex(origin.protocol) orelse return false;
+            const declaration = self.program.structures[protocol];
+            if (origin.method >= declaration.methods.len) return false;
+            // The witness implements the original declaration. A conformer in
+            // another package does not acquire its provider's access rights.
+            return memberVisible(self, protocol, declaration.methods[origin.method], position);
+        }
+    }
     if (comptime @hasField(@TypeOf(member), "extension")) {
         if (member.extension) |extension| {
-            const active_file = self.specialization_file orelse position.file;
-            var active = false;
-            for (extension.visible_files) |file| if (file == active_file) {
-                active = true;
-                break;
-            };
-            if (!active) return false;
+            if (!extensionActive(self, extension.visible_files, position)) return false;
             if (member.is_public) return true;
             if (member.is_local) return position.file == member.position.file;
             if (member.is_internal) return packageVisible(self, member.owner);
@@ -34,6 +39,12 @@ pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, pos
     const context = self.member_context orelse return false;
     if (sameFamily(self, context, structure_index)) return true;
     return member.is_protected and Inheritance.isDescendant(self, context, protectedAnchor(self, structure_index));
+}
+
+fn extensionActive(self: anytype, files: []const usize, position: Source.Position) bool {
+    const active_file = self.specialization_file orelse position.file;
+    for (files) |file| if (file == active_file) return true;
+    return false;
 }
 
 pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Position) bool {

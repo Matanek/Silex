@@ -1,0 +1,197 @@
+protocol Source {
+    func value() int
+}
+
+class Reading:Source {
+    static var drops:int = 0
+    var number:int
+    func value() int { return self.number }
+    drop { Reading.drops++ }
+}
+
+protocol Session {
+    func source() Source? { return null }
+    func echo(value:Source) Source { return value }
+    func number(value:int) int { return value }
+    func borrow(value:@int) int { return value }
+    func edit(value:&int) { value += 3 }
+}
+
+struct Legacy:Session {}
+struct Container<T>:Session { let stored:T }
+
+struct Accessible:Session {
+    func source() Source? { return Reading(number:42) }
+}
+
+func available<T:Session>(value:T) bool {
+    var active = value
+    return active.source() != null
+}
+
+func check_optional_capability() {
+    Reading.drops = 0
+    {
+        var legacy = Legacy()
+        var plain:Session = legacy
+        assert(legacy.number(value:17) == 17 && plain.number(value:23) == 23)
+        var borrowed = 1
+        legacy.edit(borrowed)
+        plain.edit(borrowed)
+        assert(legacy.borrow(borrowed) == 7 && plain.borrow(borrowed) == 7)
+        var integer = Container<int>(stored:5)
+        var string = Container<str>(stored:"owned")
+        assert(integer.number(31) == 31 && string.number(37) == 37)
+        assert(!available(integer) && !available(string))
+        assert(legacy.source() == null && plain.source() == null)
+        assert(!available(legacy))
+        var accessible = Accessible()
+        var enhanced:Session = accessible
+        if var source = enhanced.source() {
+            assert(source.value() == 42)
+        } else { panic("missing source") }
+        assert(Reading.drops == 1)
+        assert(available(accessible))
+        assert(Reading.drops == 2)
+        {
+            var argument = Reading(number:7)
+            var echoed = legacy.echo(argument)
+            argument.number = 8
+            assert(echoed.value() == 8)
+        }
+        assert(Reading.drops == 3)
+    }
+    assert(Reading.drops == 3)
+}
+
+protocol Counter {
+    value:int { get set }
+    func add(amount:int) int { self.value += amount; return self.value }
+    func reset() { self.value = 0 }
+    func attempt(ok:bool) Result<int,str> {
+        self.value++
+        if !ok { return Result<int,str>.failure("denied") }
+        return Result<int,str>.success(self.value)
+    }
+    func snapshot() int {
+        let read = func() int { return self.value }
+        return read()
+    }
+    func save(ok:bool) Result<void,str> {
+        self.value++
+        if !ok { return Result<void,str>.failure("unsaved") }
+        return Result<void,str>.success()
+    }
+}
+
+struct ValueCounter:Counter { var value:int = 0 }
+class SharedCounter:Counter {
+    static var drops:int = 0
+    var value:int = 0
+    drop { SharedCounter.drops++ }
+}
+
+func check_mutable_defaults() {
+    SharedCounter.drops = 0
+    var value = ValueCounter()
+    assert(value.add(amount:3) == 3 && value.value == 3)
+    var erased:Counter = value
+    assert(erased.add(amount:2) == 5 && value.value == 3)
+    match try erased.attempt(false) {
+        failure(error) => { assert(error == "denied") }
+        success(_) => { panic("unexpected success") }
+    }
+    assert(erased.value == 6)
+    var object = SharedCounter()
+    var alias = object
+    var shared:Counter = object
+    assert(shared.add(amount:7) == 7 && alias.value == 7)
+    assert(shared.snapshot() == 7)
+    let snapshot = object.snapshot
+    assert(snapshot() == 7)
+    assert(shared.attempt(true) == 8 && alias.value == 8)
+    shared.reset()
+    assert(alias.value == 0)
+    match try shared.save(false) {
+        failure(error) => { assert(error == "unsaved") }
+        success => { panic("unexpected success") }
+    }
+    assert(alias.value == 1)
+    shared.save(true)
+    assert(alias.value == 2)
+}
+
+protocol Named {
+    func name(prefix:str) str
+    func caption() str { return self.name(prefix:"item") }
+}
+
+struct Item:Named {
+    func name(other:str) str { return other + " 42" }
+}
+
+class Base:Named {
+    func name(other:str) str { return other }
+}
+
+class Custom:Base {
+    override func caption() str { return "custom" }
+}
+
+func check_nominal_dispatch() {
+    var item = Item()
+    assert(item.caption() == "item 42")
+    var erased:Named = item
+    assert(erased.caption() == "item 42")
+    assert(erased.name(prefix:"answer") == "answer 42")
+    var child = Custom()
+    var parent:Base = child
+    var dynamic:Named = parent
+    assert(parent.caption() == "custom" && dynamic.caption() == "custom")
+}
+
+protocol Labelled { func label() str { return "stock" } }
+struct ExtensionItem {}
+extend ExtensionItem:Labelled {}
+
+func check_extension_default() {
+    var item = ExtensionItem()
+    var labelled:Labelled = item
+    assert(item.label() == "stock" && labelled.label() == "stock")
+}
+
+protocol Stepping {
+    func step(amount:int) int
+    func twice() int { return self.step(amount:1) + self.step(amount:1) }
+}
+
+struct Stateful:Stepping {
+    var count:int = 0
+    func step(other:int) int { self.count += other; return self.count }
+}
+
+func check_named_mutation() {
+    var value = Stateful()
+    assert(value.twice() == 3 && value.count == 2)
+    var erased:Stepping = value
+    assert(erased.twice() == 7 && erased.step(0) == 4 && value.count == 2)
+}
+
+test "Optional protocol capabilities preserve legacy conformers and owned results" { check_optional_capability() }
+test "Default methods write back values and preserve shared class identity" {
+    check_mutable_defaults()
+    assert(SharedCounter.drops == 1)
+}
+test "Default bodies use protocol labels and remain overridable" { check_nominal_dispatch() }
+test "Extension conformances reuse default method bodies" { check_extension_default() }
+test "Named requirement calls write back the receiver" { check_named_mutation() }
+
+func main() {
+    check_optional_capability()
+    check_mutable_defaults()
+    assert(SharedCounter.drops == 1)
+    check_nominal_dispatch()
+    check_extension_default()
+    check_named_mutation()
+    print("protocol defaults verified")
+}

@@ -7,6 +7,7 @@ const ParserModule = @import("../Parser.zig");
 const Source = @import("../Source.zig");
 const TargetModule = @import("../Target.zig");
 const Completion = @import("Completion.zig");
+const ProtocolMembers = @import("ProtocolMembers.zig");
 const ProjectIndex = @import("ProjectIndex.zig");
 const Protocol = @import("Protocol.zig");
 const Types = @import("Types.zig");
@@ -85,6 +86,17 @@ pub fn definitionAtForTarget(
         document_path,
     );
     const member = lastSegment(request.path);
+    if (std.mem.lastIndexOfScalar(u8, request.path, '.')) |separator| {
+        const spelling = request.path[0..separator];
+        if (Completion.resolveReceiverType(allocator, source, program, request.end, spelling)) |receiver_type| {
+            if (!std.mem.eql(u8, spelling, Completion.nominalReceiverName(receiver_type))) {
+                const methods = try ProtocolMembers.defaults(allocator, io, documents, project, .{ .source = source, .program = program }, receiver_type);
+                for (methods) |method| if (std.mem.eql(u8, method.function.name, member)) {
+                    return location(allocator, method.provider.path, method.loaded.source, method.function.name_position, method.function.name.len, encoding);
+                };
+            }
+        }
+    }
     const receiver = try Workspace.importedReceiverAt(allocator, io, documents, project, source, request.end);
     const resolved_path = if (receiver) |resolved|
         try std.fmt.allocPrint(allocator, "{s}.{s}", .{ resolved.type_path, member })

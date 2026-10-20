@@ -259,7 +259,7 @@ fn extractSuccess(
     };
 }
 
-fn findResult(enums: []const Ir.Enum, type_value: Ast.Type) ?usize {
+pub fn findResult(enums: []const Ir.Enum, type_value: Ast.Type) ?usize {
     const type_index = type_value.structureIndex() orelse return null;
     for (enums, 0..) |enumeration, index| {
         if (enumeration.type_index == type_index and Result.isConcrete(enumeration)) return index;

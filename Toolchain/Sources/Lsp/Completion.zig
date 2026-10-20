@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const LexerModule = @import("../Lexer.zig");
 const ParserModule = @import("../Parser.zig");
 const ExtensionMerger = @import("../Extensions.zig");
+const ProtocolDefaults = @import("../ProtocolDefaults.zig");
 const RecoveryModule = @import("Recovery.zig");
 const Types = @import("Types.zig");
 const Numeric = @import("../Numeric.zig");
@@ -2855,6 +2856,7 @@ const Callable = struct {
     return_type: Ast.Type,
     structure_name: ?[]const u8 = null,
     test_owner: ?[]const u8 = null,
+    type_parameters: []const Ast.TypeParameter = &.{},
 };
 
 fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?Callable {
@@ -2878,10 +2880,12 @@ fn containingCallableFor(source: []const u8, program: Ast.Program, cursor: usize
             .parameters = function.parameters,
             .return_type = function.return_type,
             .test_owner = function.test_owner,
+            .type_parameters = function.type_parameters,
         };
     }
     for (program.structures) |structure| {
         for (structure.methods) |method| {
+            if (method.protocol_witness != null or (structure.is_protocol and !method.protocol_default)) continue;
             if (method.accessor) |accessor| if (accessor.synthetic) continue;
             if (bodyContainsCursor(source, method.position.offset, cursor) and
                 (result == null or method.position.offset > result.?.position)) result = .{
@@ -2889,6 +2893,7 @@ fn containingCallableFor(source: []const u8, program: Ast.Program, cursor: usize
                 .parameters = method.parameters,
                 .return_type = method.return_type,
                 .structure_name = if (member_access and method.extension != null) null else structure.name,
+                .type_parameters = method.type_parameters,
             };
         }
         for (structure.constructors) |constructor| {
@@ -2924,15 +2929,17 @@ fn containingCallables(allocator: Allocator, source: []const u8, program: Ast.Pr
             .parameters = function.parameters,
             .return_type = function.return_type,
             .test_owner = function.test_owner,
+            .type_parameters = function.type_parameters,
         });
     };
     for (program.structures) |structure| {
-        for (structure.methods) |method| if (bodyContainsCursor(source, method.position.offset, cursor)) {
+        for (structure.methods) |method| if (method.protocol_witness == null and (!structure.is_protocol or method.protocol_default) and bodyContainsCursor(source, method.position.offset, cursor)) {
             try result.append(allocator, .{
                 .position = method.position.offset,
                 .parameters = method.parameters,
                 .return_type = method.return_type,
                 .structure_name = structure.name,
+                .type_parameters = method.type_parameters,
             });
         };
         for (structure.constructors) |constructor| if (bodyContainsCursor(source, constructor.position.offset, cursor)) {
@@ -3880,6 +3887,13 @@ pub fn resolveReceiverTypeForAccess(
             scope_index -= 1;
             for (lexical_callables[scope_index].parameters) |parameter| {
                 if (std.mem.eql(u8, parameter.name, first)) {
+                    if (parameter.type.genericParameterIndex()) |index| {
+                        const scope = lexical_callables[scope_index];
+                        if (index < scope.type_parameters.len) if (scope.type_parameters[index].constraint) |constraint| {
+                            current_type = typeName(program, constraint);
+                            break;
+                        };
+                    }
                     current_type = if (genericType(parameter.type) != null)
                         typeSpelling(allocator, program, parameter.type) catch return null
                     else
@@ -5031,7 +5045,9 @@ fn memberFollowedByAssignment(source: []const u8, cursor: usize) bool {
 
 fn mergeExtensionsForCompletion(allocator: Allocator, program: Ast.Program) ?Ast.Program {
     var merger = ExtensionMerger.Merger.init(allocator);
-    return merger.merge(program, true, true) catch program;
+    const merged = merger.merge(program, true, true) catch program;
+    var defaults = ProtocolDefaults.Expander{ .allocator = allocator };
+    return defaults.expand(merged) catch merged;
 }
 
 pub fn functionSignature(

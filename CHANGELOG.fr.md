@@ -8,6 +8,10 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les méthodes de protocole peuvent fournir un corps par défaut : les conformants existants le réutilisent, une implémentation explicite garde priorité, et les appels concrets, génériques et dynamiques conservent le même choix. Les corps sont vérifiés dans la portée du protocole, même inutilisés ; les défauts concurrents exigent une résolution explicite. La complétion, les labels et la navigation suivent les déclarations d’origine, y compris avec imports et extensions.
+- Les appels de méthodes à travers un protocole acceptent les arguments nommés selon les labels du protocole. Comparer un protocole optionnel au littéral `null` vérifie sa présence sans exiger que son contenu soit comparable.
+- `main` conserve la portée de son module pour les appels entre atomes. Le LSP indexe aussi les fichiers ouverts avant leur premier enregistrement, en conservant leur identité de fichier ou d’atome et leurs limites de visibilité.
+
 - Les lanceurs de tests LSP et d’admission reçoivent la même pile Debug de 32 Mio que le bootstrap : le test de récursion atteint son diagnostic au lieu de déborder la pile système.
 
 - La collecte native des cycles ignore aussi les champs scalaires, chaînes et optionnels scalaires, tout en conservant leur largeur réservée. Les parcours fréquents d’interface évitent ces visites sans masquer les références de classes ni les callbacks. Régressions du collecteur et des cycles natifs ; mesures locales de la galerie de tableaux.

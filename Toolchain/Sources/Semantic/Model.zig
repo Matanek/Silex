@@ -9,6 +9,8 @@ pub const LexicalBorrow = struct {
 };
 
 pub const Binding = struct {
+    nominal_receiver: bool = false,
+    owned_receiver: bool = false,
     name: []const u8,
     type: Types.Type,
     value: ?Ir.ValueId = null,

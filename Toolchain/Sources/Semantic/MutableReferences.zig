@@ -26,6 +26,7 @@ pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expressio
         return self.fail(expression.position, message);
     };
     const binding = builder.bindings.items[root_index];
+    if (binding.nominal_receiver and expression.value == .identifier) return self.fail(expression.position, "a default protocol method cannot expose self as a mutable protocol reference");
     if (binding.borrowed_root == null) try @import("Borrowing.zig").ensureRootUnborrowed(self, builder, root_name, expression.position);
     if (!binding.available) return self.fail(expression.position, "moved value cannot be borrowed mutably");
     if (!binding.mutable or (binding.local == null and binding.reference == null)) {

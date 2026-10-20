@@ -92,7 +92,12 @@ pub const Specializer = struct {
         return .{ .allocator = allocator };
     }
 
-    pub fn specialize(self: *Specializer, program: Ast.Program) SpecializeError!Ast.Program {
+    pub fn specialize(self: *Specializer, input: Ast.Program) SpecializeError!Ast.Program {
+        var defaults = @import("../ProtocolDefaults.zig").Expander{ .allocator = self.allocator };
+        const program = defaults.expand(input) catch |err| {
+            self.diagnostic = defaults.diagnostic;
+            return err;
+        };
         self.source = program;
         self.diagnostic = null;
         var found_main = false;

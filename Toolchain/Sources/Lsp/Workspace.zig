@@ -7,6 +7,7 @@ const PackageTestFixtures = @import("../Packages/TestFixtures.zig");
 const TargetModule = @import("../Target.zig");
 const ParserModule = @import("../Parser.zig");
 const Completion = @import("Completion.zig");
+const ProtocolMembers = @import("ProtocolMembers.zig");
 const LexerModule = @import("../Lexer.zig");
 const ProjectIndex = @import("ProjectIndex.zig");
 const Types = @import("Types.zig");
@@ -58,6 +59,7 @@ const ImportedMemberQuery = struct {
     inherited_access: bool = false,
     merge_local: bool = false,
     override_context: ?Completion.Decision = null,
+    protocol_defaults_resolved: bool = false,
 };
 
 const IndexedProject = ProjectIndex.IndexedProject;
@@ -165,11 +167,30 @@ pub fn completionOutcomeAtForTargetWithDecision(
     const root = try projectRoot(allocator, io, document_path, root_hint);
     const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
     const query = try queryAt(allocator, source, decision, project, io, documents);
-    if (query == null) return if (decision.kind == .member) .unresolved_receiver else .not_applicable;
-    const completing_use_path = std.meta.activeTag(query.?) == .use_path;
-
     var ranked: std.ArrayList(RankedItem) = .empty;
-    switch (query.?) {
+    var protocol_defaults_resolved = false;
+    if (decision.kind == .member and !decision.qualified_type_position) {
+        if (decision.program) |program| if (decision.receiver) |receiver| {
+            if (Completion.resolveReceiverTypeForAccess(allocator, source, program, cursor, receiver, decision.safe_member_access)) |receiver_type| {
+                if (!std.mem.eql(u8, receiver, Completion.nominalReceiverName(receiver_type))) {
+                    protocol_defaults_resolved = true;
+                    const methods = try ProtocolMembers.defaults(allocator, io, documents, project, .{ .source = source, .program = program }, receiver_type);
+                    for (methods) |method| {
+                        if (!matchesPrefix(method.function.name, decision.prefix) or
+                            !Completion.callAcceptsParameters(source, cursor, method.loaded.program, method.function.parameters)) continue;
+                        try appendRanked(allocator, &ranked, .{
+                            .label = method.function.name,
+                            .kind = CompletionKind.method,
+                            .detail = try Completion.functionSignatureForReceiver(allocator, method.loaded.source, method.loaded.program, method.structure, method.receiver, method.function),
+                        }, Completion.memberMethodPriority, true);
+                    }
+                }
+            }
+        };
+    }
+    if (query == null and ranked.items.len == 0) return if (decision.kind == .member) .unresolved_receiver else .not_applicable;
+    const completing_use_path = if (query) |value| std.meta.activeTag(value) == .use_path else false;
+    if (query) |value| switch (value) {
         .use_path => |path| try appendPathItems(allocator, io, documents, project, path, null, cursor, &ranked),
         .qualifier => |qualified| {
             try appendPathItems(allocator, io, documents, project, .{
@@ -197,6 +218,7 @@ pub fn completionOutcomeAtForTargetWithDecision(
         .imported_member => |member| {
             var resolved = member;
             resolved.current_program = decision.program;
+            resolved.protocol_defaults_resolved = protocol_defaults_resolved;
             if (member.merge_local) {
                 const local = try Completion.itemsAtWithDecision(allocator, source, decision, null);
                 for (local) |item| {
@@ -215,6 +237,9 @@ pub fn completionOutcomeAtForTargetWithDecision(
                 &ranked,
             );
         },
+    } else {
+        const local = try Completion.itemsAtWithDecision(allocator, source, decision, null);
+        for (local) |item| try appendRanked(allocator, &ranked, item, if (item.kind == CompletionKind.method) Completion.memberMethodPriority else Completion.memberFieldPriority, true);
     }
     std.mem.sort(RankedItem, ranked.items, {}, rankedLessThan);
     const result = try allocator.alloc(Types.CompletionItem, ranked.items.len);
@@ -1838,6 +1863,7 @@ fn appendImportedMembersDepth(
             }, Completion.memberFieldPriority, false);
         };
         for (structure.methods) |method| {
+            if (query.protocol_defaults_resolved and structure.is_protocol and method.protocol_default) continue;
             if (method.accessor) |accessor| {
                 if (query.override_context == null and structure.is_protocol and accessor.kind == .get and inheritedMemberVisible(project, provider, query, method) and std.mem.startsWith(u8, accessor.property, query.prefix)) {
                     try appendRanked(allocator, ranked, .{
@@ -2368,6 +2394,12 @@ fn importedInstanceCallReturnTypePath(
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
     const local_type = Completion.resolveReceiverType(allocator, source, current, cursor, call.owner) orelse return null;
+    const defaults = try ProtocolMembers.defaults(allocator, io, documents, project, .{ .source = source, .program = current }, local_type);
+    for (defaults) |method| {
+        if (!std.mem.eql(u8, method.function.name, call.name) or !parametersAcceptArity(method.function.parameters, call.arity)) continue;
+        const spelling = try Completion.specializedTypeName(allocator, method.loaded.program, method.structure, method.receiver, method.function.return_type);
+        return try providerTypePath(allocator, project, method.loaded.program, method.provider, Completion.nominalReceiverName(Completion.effectiveCallSpelling(spelling, false)));
+    }
     const access = if (Completion.enclosingClass(source, current, cursor)) |child| localDerivesFrom(current, child.name, local_type) else false;
     const inherited = try inheritedQuery(allocator, project, current, local_type, .{ .kind = .member, .prefix = "", .prefix_start = cursor, .cursor = cursor, .program = current }, access);
     var query: ImportedMemberQuery = inherited orelse .{
@@ -2581,7 +2613,7 @@ fn bodyContainsCursor(source: []const u8, start: usize, cursor: usize) bool {
 
 const DeclarationTarget = struct { provider: usize, declaration: []const u8 };
 
-fn declarationTarget(index: Modules.Index, path: []const u8) ?DeclarationTarget {
+pub fn declarationTarget(index: Modules.Index, path: []const u8) ?DeclarationTarget {
     var best: ?DeclarationTarget = null;
     var best_length: usize = 0;
     for (index.providers, 0..) |provider, provider_index| {
@@ -2612,6 +2644,8 @@ fn appendRanked(
             return;
         }
         if (existing.item.kind != CompletionKind.module and item.kind == CompletionKind.module) return;
+        if (overloaded and item.kind == CompletionKind.method and existing.item.kind == item.kind and
+            Completion.sameOverrideSignature(existing.item.detail, item.detail)) return;
         if (overloaded and existing.item.kind == item.kind and !std.mem.eql(u8, existing.item.detail, item.detail)) continue;
         if (priority < existing.priority) ranked.items[index] = .{ .item = item, .priority = priority };
         return;

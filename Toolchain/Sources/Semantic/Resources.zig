@@ -396,7 +396,7 @@ pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !v
         index -= 1;
         const binding = builder.bindings.items[index];
         if (!binding.available or binding.borrowed_root != null or binding.parameter_mode != .value or
-            std.mem.eql(u8, binding.name, "self") or
+            (std.mem.eql(u8, binding.name, "self") and !binding.owned_receiver) or
             (!needsDrop(self, binding.type) and !containsClass(self, binding.type))) continue;
         const value = if (binding.local) |local| value: {
             const loaded = try self.newValue(builder, binding.type);

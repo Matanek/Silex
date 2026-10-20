@@ -203,11 +203,20 @@ pub fn index(
             try indexes.append(allocator, discovered);
         }
     }
-    const module_index = try Modules.combineWithMerges(
+    var module_index = try Modules.combineWithMerges(
         allocator,
         indexes.items,
         try graph.moduleMerges(allocator),
     );
+    var indexed_document = false;
+    for (module_index.providers) |provider| if (samePath(provider.path, document_path)) {
+        indexed_document = true;
+        break;
+    };
+    if (!indexed_document) if (try editingProvider(allocator, io, graph.packages[0], document_path)) |provider| {
+        const entry: Modules.Index = .{ .providers = &.{provider} };
+        module_index = try Modules.combine(allocator, &.{ module_index, entry });
+    };
     var current_owner: usize = 0;
     for (module_index.providers) |provider| if (samePath(provider.path, document_path)) {
         current_owner = provider.owner;
@@ -219,6 +228,38 @@ pub fn index(
         .current_owner = current_owner,
         .current_path = document_path,
     };
+}
+
+// A didOpen document need not exist on disk. Give the editing source the
+// same module/atom identity it will have after saving, before resolving imports.
+fn editingProvider(allocator: Allocator, io: Io, package: Packages.Package, document_path: []const u8) !?Modules.Provider {
+    const cwd = try std.process.currentPathAlloc(io, allocator);
+    var relative = try std.fs.path.relative(allocator, cwd, null, package.root, document_path);
+    if (outsideRoot(relative)) return null;
+    var origin: Modules.Origin = .entry;
+    var root_length: usize = 0;
+    for (package.module_roots) |module_root| {
+        const candidate = try std.fs.path.relative(allocator, cwd, null, module_root.path, document_path);
+        if (outsideRoot(candidate) or module_root.path.len < root_length) continue;
+        relative = candidate;
+        origin = module_root.origin;
+        root_length = module_root.path.len;
+    }
+    const name = Modules.sourceModuleName(allocator, relative, package.name) catch |err| switch (err) {
+        error.InvalidModulePath => return null,
+        else => return err,
+    };
+    const directory = try Modules.moduleDirectoryName(allocator, relative);
+    const prefix = if (package.name) |package_name|
+        if (directory.len == 0) package_name else try std.fmt.allocPrint(allocator, "{s}.{s}", .{ package_name, directory })
+    else
+        directory;
+    return .{ .name = name, .path = document_path, .local_prefix = prefix, .file = 0, .owner = 0, .origin = origin };
+}
+
+fn outsideRoot(relative: []const u8) bool {
+    return std.mem.eql(u8, relative, "..") or std.mem.startsWith(u8, relative, "../") or
+        std.mem.startsWith(u8, relative, "..\\") or std.fs.path.isAbsolute(relative);
 }
 
 pub fn loadProgram(

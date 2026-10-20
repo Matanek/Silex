@@ -39,6 +39,11 @@ const Replacement = struct {
 
 pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.AssignmentStatement) !void {
     const target = assignment.target;
+    if (target.fields.len == 0 and target.indices.len == 0) {
+        if (Support.findBindingIndex(builder.bindings.items, target.name)) |index| {
+            if (builder.bindings.items[index].nominal_receiver) return self.fail(assignment.position, "a default protocol method cannot replace self; mutate its declared members instead");
+        }
+    }
     if (StaticMembers.ownerIndex(self, target.name)) |structure_index| if (target.fields.len == 1 and target.indices.len == 0 and target.indexed_fields.len == 0) {
         if (StaticMembers.find(self, structure_index, target.fields[0].name)) |field| {
             if (!Visibility.memberVisible(self, field.owner, field.declaration, target.fields[0].name_position)) return self.fail(target.fields[0].name_position, "static field is unavailable here");

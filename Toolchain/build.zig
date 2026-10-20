@@ -524,6 +524,18 @@ pub fn build(b: *std.Build) void {
     const default_scope_command = b.addRunArtifact(default_scope_tests);
     default_scope_command.setCwd(b.path(""));
     b.step("test-default-scopes", "Verify declaration scope for parameter defaults").dependOn(&default_scope_command.step);
+    const protocol_default_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "protocol defaults" } });
+    protocol_default_tests.stack_size = bootstrap_stack_size;
+    const protocol_default_command = b.addRunArtifact(protocol_default_tests);
+    protocol_default_command.setCwd(b.path(""));
+    b.step("test-protocol-defaults", "Verify nominal protocol default implementations").dependOn(&protocol_default_command.step);
+    const protocol_default_cli = b.addSystemCommand(&.{"python3"});
+    protocol_default_cli.addFileArg(b.path("Tools/VerifyProtocolDefaults.py"));
+    protocol_default_cli.addArtifactArg(executable);
+    protocol_default_cli.addDirectoryArg(b.path(".."));
+    protocol_default_cli.setCwd(b.path("../.."));
+    protocol_default_cli.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
+    b.step("test-protocol-default-cli", "Verify protocol defaults through native and interpreter CLI").dependOn(&protocol_default_cli.step);
     const result_call_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "result call policy" } });
     result_call_tests.stack_size = bootstrap_stack_size;
     const result_call_command = b.addRunArtifact(result_call_tests);
@@ -631,6 +643,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lsp_test_module.addOptions("build_options", build_options);
+    const protocol_completion_tests = b.addTest(.{ .root_module = lsp_test_module, .filters = &.{ "test_0", "protocol defaults" } });
+    protocol_completion_tests.stack_size = bootstrap_stack_size;
+    const protocol_completion_command = b.addRunArtifact(protocol_completion_tests);
+    protocol_completion_command.setCwd(b.path(""));
+    b.step("test-protocol-default-completion", "Verify completion of default protocol methods").dependOn(&protocol_completion_command.step);
 
     const lsp_admission_module = b.createModule(.{
         .root_source_file = b.path("Sources/LspAdmissionTests.zig"),

@@ -175,18 +175,21 @@ fn parseRequirement(self: anytype) !Ast.Function {
         return_mode = if (self.current.tag == .at) .read else .mutable;
         try self.advance();
     }
-    if (self.current.tag == .left_brace) return self.fail("protocol requirements cannot declare a body");
-    const return_type: Ast.Type = if (self.current.tag == .semicolon or self.current.tag == .right_brace or
+    const return_type: Ast.Type = if (self.current.tag == .left_brace or self.current.tag == .semicolon or self.current.tag == .right_brace or
         self.current.position.line > self.previous.position.line) .void else try self.parseType();
-    if (self.current.tag == .left_brace) return self.fail("protocol requirements cannot declare a body");
-    try self.expectStatementTerminator();
+    const has_body = self.current.tag == .left_brace;
+    const statements: []const Ast.Statement = if (has_body) try self.parseBlock() else statements: {
+        try self.expectStatementTerminator();
+        break :statements &.{};
+    };
     return .{
+        .protocol_default = has_body,
         .position = position,
         .name_position = name_position,
         .name = name,
         .parameters = try parameters.toOwnedSlice(self.allocator),
         .return_type = return_type,
         .return_mode = return_mode,
-        .statements = &.{},
+        .statements = statements,
     };
 }

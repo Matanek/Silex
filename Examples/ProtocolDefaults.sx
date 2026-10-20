@@ -1,0 +1,16 @@
+protocol Session {
+    func title() str { return "Session" }
+}
+
+struct Legacy:Session {}
+
+struct Editor:Session {
+    func title() str { return "Editor" }
+}
+
+func main() {
+    var legacy = Legacy()
+    var editor:Session = Editor()
+    print(legacy.title())
+    print(editor.title())
+}

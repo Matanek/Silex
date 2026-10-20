@@ -217,6 +217,7 @@ pub const Expression = struct {
         operand: *Expression,
         target: Type,
         operator_position: Source.Position,
+        protocol_witness: bool = false,
     };
 
     pub const IndexAccess = struct {
@@ -606,6 +607,10 @@ pub const CatalogContribution = struct {
 };
 
 pub const Function = struct {
+    protocol_default: bool = false,
+    protocol_body: ?ProtocolMethod = null,
+    protocol_witness: ?ProtocolMethod = null,
+    protocol_result: ?Type = null,
     is_anonymous: bool = false,
     is_test: bool = false,
     is_test_entry: bool = false,
@@ -646,6 +651,12 @@ pub const Function = struct {
 
         pub const Kind = enum { get, set };
     };
+};
+
+pub const ProtocolMethod = struct {
+    protocol: []const u8,
+    method: usize,
+    file: usize = 0,
 };
 
 pub const FunctionIntrinsic = union(enum) {

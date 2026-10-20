@@ -47,6 +47,7 @@ const StaticMembers = @import("StaticMembers.zig");
 const StaticInitialization = @import("StaticInitialization.zig");
 const StaticFinalization = @import("StaticFinalization.zig");
 const Protocols = @import("Protocols.zig");
+const ProtocolValues = @import("ProtocolValues.zig");
 const Conversions = @import("Conversions.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
 const Types = @import("../Types.zig");
@@ -58,6 +59,7 @@ pub const TypedValue = Model.TypedValue;
 pub const BlockBuilder = Model.BlockBuilder;
 pub const FunctionBuilder = Model.FunctionBuilder;
 pub const AnonymousCapture = struct {
+    nominal_receiver: bool = false,
     name: []const u8,
     type: Types.Type,
     mutable: bool,
@@ -116,10 +118,12 @@ pub const Analyzer = struct {
         return self.analyzeProgram(program, false);
     }
     fn analyzeProgram(self: *Analyzer, source_program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
+        self.diagnostic = null;
         const program = materialized: {
             var span = self.traceSpan(.semantic_materialization);
             defer span.finish();
-            break :materialized try Protocols.materializeFieldWitnesses(self.allocator, source_program);
+            const fields = try Protocols.materializeFieldWitnesses(self.allocator, source_program);
+            break :materialized try @import("ProtocolDefaults.zig").materialize(self, fields);
         };
         self.program = program;
         self.diagnostic = null;
@@ -141,6 +145,7 @@ pub const Analyzer = struct {
             self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
             break :prepared prepared_function_types;
         };
+        try @import("ProtocolDefaults.zig").prepare(self);
         try Defaults.prepare(self);
         {
             var span = self.traceSpan(.semantic_validation);
@@ -392,7 +397,9 @@ pub const Analyzer = struct {
                 if (self.isAccessPattern(parameter.type)) {
                     return self.fail(parameter.position, "borrowed access tuples are non-runtime generic patterns");
                 }
-                try Resources.validateParameter(self, parameter);
+                // The generated header includes the method's implicit receiver.
+                // This is not a source-level borrowed protocol parameter.
+                if (!(function.protocol_body != null and index == 0)) try Resources.validateParameter(self, parameter);
                 for (function.parameters[0..index]) |previous| {
                     if (std.mem.eql(u8, parameter.name, previous.name)) {
                         const message = try std.fmt.allocPrint(self.allocator, "parameter '{s}' is already declared", .{parameter.name});
@@ -603,6 +610,12 @@ pub const Analyzer = struct {
     }
 
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
+        if (function.protocol_body) |origin| {
+            const protocol = self.structureIndex(origin.protocol) orelse return error.InvalidSource;
+            var lowered = try Methods.analyze(self, protocol, origin.method, self.program.structures[protocol].methods[origin.method]);
+            lowered.name = function.name;
+            return lowered;
+        }
         if (function.intrinsic) |intrinsic| switch (intrinsic) {
             .system_adapter => |adapter| return InjectedSystems.analyze(self, function, adapter),
             else => {},
@@ -622,6 +635,8 @@ pub const Analyzer = struct {
         const previous_module_context = self.module_context;
         self.module_context = if (std.mem.lastIndexOfScalar(u8, function.name, '.')) |separator|
             function.name[0..separator]
+        else if (std.mem.eql(u8, function.name, "main") and self.program.entry_module.len != 0)
+            self.program.entry_module
         else
             null;
         defer self.module_context = previous_module_context;
@@ -646,6 +661,7 @@ pub const Analyzer = struct {
             try builder.value_types.append(self.allocator, .address);
             try builder.bindings.append(self.allocator, .{
                 .name = capture.name,
+                .nominal_receiver = capture.nominal_receiver,
                 .type = capture.type,
                 .reference = capture_index,
                 .mutable = capture.mutable,
@@ -727,6 +743,7 @@ pub const Analyzer = struct {
             } else continue;
             try infos.append(self.allocator, .{
                 .name = binding.name,
+                .nominal_receiver = binding.nominal_receiver,
                 .type = binding.type,
                 .mutable = binding.mutable,
                 .borrowed_root = binding.borrowed_root,
@@ -1003,12 +1020,17 @@ pub const Analyzer = struct {
             }
         }
         const same_numeric = left.type == right.type and left.type.isNumeric();
+        // Testing absence never compares the payload (which may be a dynamic
+        // protocol or another non-comparable type). Optional control flow uses
+        // the same IR comparison against an absent value.
+        const null_comparison = equality and left.type == right.type and left.type.optionalChild() != null and
+            (binary.left.value == .null_value or binary.right.value == .null_value);
         const valid = if (bitwise)
             same_numeric and left.type.isInteger() and !left.type.isSignedInteger()
         else if (shift)
             left.type.isInteger() and !left.type.isSignedInteger() and right.type.isInteger()
         else if (equality)
-            same_numeric or (left.type == right.type and Support.isComparable(self, left.type))
+            null_comparison or same_numeric or (left.type == right.type and Support.isComparable(self, left.type))
         else
             same_numeric and (!left.type.isFloat() or binary.operator != .remainder);
         if (!valid) {
@@ -2035,6 +2057,14 @@ pub const Analyzer = struct {
         conversion: Ast.Expression.Conversion,
     ) AnalyzeError!TypedValue {
         const operand = try self.analyzeExpression(builder, conversion.operand);
+        if (conversion.protocol_witness) {
+            const concrete = conversion.target.structureIndex() orelse return error.InvalidSource;
+            const value = try ProtocolValues.emitExtract(self, builder, operand.value, concrete);
+            var extracted = operand;
+            extracted.type = conversion.target;
+            extracted.value = value;
+            return extracted;
+        }
         if (!operand.type.isNumeric() or !conversion.target.isNumeric()) {
             return self.fail(conversion.operator_position, "'as' requires numeric source and target types");
         }

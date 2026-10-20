@@ -711,6 +711,16 @@ pub const scenarios = [_]Scenario{
         .provenance = "global completion loss after a syntax error",
         .status = .{ .protected = "Lsp.ContextContracts: server keeps member completion across independent syntax errors" },
     },
+    .{
+        .id = "member-protocol-default",
+        .capability = .member_local,
+        .canonical_source = "public protocol Reading {func read() int {return 1}}\npublic class Legacy:Reading {}\nfunc main() {var value=Legacy();assert(value.read()==1)}",
+        .partial_source = "public protocol Reading {func read() int {return 1}}\npublic class Legacy:Reading {}\nfunc main() {var value=Legacy();value.re<|>}",
+        .required = &.{"read"},
+        .forbidden = &.{"$default$body0"},
+        .provenance = "FR/Language/Data-types/Protocols",
+        .status = .{ .protected = "Lsp.Tests.ProtocolDefaults: protocol defaults preserve an independent semantic member oracle" },
+    },
 };
 
 pub const Position = Axes.Position;
@@ -1083,6 +1093,10 @@ const program_field_decisions = [_]AstFieldDecision{
 };
 
 const function_field_decisions = [_]AstFieldDecision{
+    .{ .name = "protocol_default", .witness = "member-protocol-default" },
+    .{ .name = "protocol_body", .irrelevant_reason = "private helper bodies are materialized only during typed lowering, after source completion" },
+    .{ .name = "protocol_witness", .witness = "member-protocol-default" },
+    .{ .name = "protocol_result", .irrelevant_reason = "private mutable result carriers are materialized only during typed lowering" },
     .{ .name = "is_anonymous", .witness = "call-argument-expression" },
     .{ .name = "is_test", .irrelevant_reason = "test execution metadata does not change the public completion surface" },
     .{ .name = "is_test_entry", .irrelevant_reason = "test entry metadata does not change the public completion surface" },
