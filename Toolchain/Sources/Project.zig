@@ -1840,6 +1840,7 @@ pub const Compiler = struct {
                 if (call.receiver == null and
                     (std.mem.eql(u8, call.name, "embed_text") or std.mem.eql(u8, call.name, "embed_bytes"))) return;
                 if (call.receiver == null and std.mem.eql(u8, call.name, "reflect")) return;
+                if (call.receiver == null and std.mem.eql(u8, call.name, "round_float")) return;
                 if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) {
                     if (call.arguments.len == 2 and call.arguments[1].value == .identifier) {
                         try self.qualifyFunctionReference(module, &call.arguments[1].value.identifier);

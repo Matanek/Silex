@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Add `round_float<T>(value)`: explicit rounded floating conversion to `float32` or `float64`, using nearest ties-to-even with subnormals, signed zero, infinities and NaNs. The `as` conversion retains its lossless check.
+
 - LSP and admission test runners use the bootstrap’s 32 MiB Debug stack, so the recursion test reaches its diagnostic instead of overflowing the system stack.
 
 - Native cycle collection also skips scalar, string and optional scalar fields while preserving their reserved width. Frequent UI traversals avoid these visits without hiding class references or callbacks. Collector and native cycle regressions; local table gallery measurements.

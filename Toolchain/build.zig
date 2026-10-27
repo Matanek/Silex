@@ -519,6 +519,11 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = bootstrap_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const rounded_float_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "rounded floating conversion", "native rounded conversion" } });
+    rounded_float_tests.stack_size = bootstrap_stack_size;
+    const rounded_float_command = b.addRunArtifact(rounded_float_tests);
+    rounded_float_command.setCwd(b.path(""));
+    b.step("test-rounded-floats", "Verify explicit floating rounding and exact conversion guards").dependOn(&rounded_float_command.step);
     const default_scope_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "parameter defaults" } });
     default_scope_tests.stack_size = bootstrap_stack_size;
     const default_scope_command = b.addRunArtifact(default_scope_tests);

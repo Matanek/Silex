@@ -1419,3 +1419,45 @@ test "use completion is strictly limited to accessible modules and packages" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Vec3\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
 }
+
+test "rounded float completion keeps the target catalogue exclusive through workspace merging and overlays" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data = "public struct Other {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    server.workspace_root_uri = try std.testing.allocator.dupe(u8, root_uri);
+    const source = "use Api.Other\nuse float32 as Single\nuse Single as Alias\nfunc main() { let value = round_float< }";
+    try server.setDocument(.{ .uri = uri, .text = source, .version = 1 });
+    const cursor = std.mem.indexOf(u8, source, "round_float<").? + "round_float<".len;
+    const request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 1,
+        .method = "textDocument/completion",
+        .params = .{ .textDocument = .{ .uri = uri }, .position = Protocol.positionAtByteOffset(source, cursor, .utf16).?, .context = .{ .triggerKind = 1 } },
+    }, .{});
+    const response = (try server.handleBody(allocator, request)).?;
+    for ([_][]const u8{ "float", "float32", "float64", "Single", "Alias" }) |name| {
+        const fragment = try std.fmt.allocPrint(allocator, "\"label\":\"{s}\"", .{name});
+        try std.testing.expect(std.mem.indexOf(u8, response, fragment) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Other\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"int\"") == null);
+    const changed = "func main() { let value = rou }";
+    try server.setDocument(.{ .uri = uri, .text = changed, .version = 2 });
+    const next_request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 2,
+        .method = "textDocument/completion",
+        .params = .{ .textDocument = .{ .uri = uri }, .position = Protocol.positionAtByteOffset(changed, std.mem.indexOf(u8, changed, "rou").? + 3, .utf16).?, .context = .{ .triggerKind = 1 } },
+    }, .{});
+    const next = (try server.handleBody(allocator, next_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, next, "\"label\":\"round_float\"") != null);
+}

@@ -1339,7 +1339,7 @@ fn convert(value: Value, target: Ir.Type, checked: bool) Error!Value {
     if (source == .float32 and target == .float64) return .{ .float64 = @floatCast(value.float32) };
     if (source == .float64 and target == .float32) {
         const result: f32 = @floatCast(value.float64);
-        if (@as(f64, @floatCast(result)) != value.float64) return error.InvalidConversion;
+        if (checked and @as(f64, @floatCast(result)) != value.float64) return error.InvalidConversion;
         return .{ .float32 = result };
     }
     if (source.isFloat() and target.isInteger()) {

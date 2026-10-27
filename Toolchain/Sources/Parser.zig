@@ -265,6 +265,7 @@ pub const Parser = struct {
             const name_position = self.current.position;
             if (std.mem.eql(u8, parsed, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
             if (std.mem.eql(u8, parsed, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+            if (std.mem.eql(u8, parsed, "round_float")) return self.failAt(name_position, "'round_float' is a reserved intrinsic function name");
             if (std.mem.eql(u8, parsed, "reflect")) return self.failAt(name_position, "'reflect' is a reserved intrinsic function name");
             if (std.mem.eql(u8, parsed, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
             if (std.mem.eql(u8, parsed, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
@@ -577,6 +578,7 @@ pub const Parser = struct {
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "_")) return self.failAt(name_position, "'_' is reserved for ignored match payloads");
         if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, name, "round_float")) return self.failAt(name_position, "'round_float' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "reflect")) return self.failAt(name_position, "'reflect' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");

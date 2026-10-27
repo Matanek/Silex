@@ -673,6 +673,10 @@ pub const Specializer = struct {
                         }
                     }
                 };
+                if (copy.receiver == null and std.mem.eql(u8, copy.name, "round_float")) {
+                    if (copy.type_arguments.len == 1) copy.result_type = copy.type_arguments[0];
+                    break :value .{ .call = copy };
+                }
                 if (copy.receiver == null and std.mem.eql(u8, copy.name, "map_error")) {
                     copy.result_type = try self.specializeMapError(copy, locals.items);
                     copy.type_arguments = &.{};

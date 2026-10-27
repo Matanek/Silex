@@ -25,6 +25,7 @@ const CompletionKind = struct {
     const enum_type: u8 = 13;
     const enum_member: u8 = 20;
     const keyword: u8 = 14;
+    const type_parameter: u8 = 25;
 };
 
 pub const memberFieldPriority: u8 = 0;
@@ -65,6 +66,7 @@ pub const Decision = struct {
     return_expression: bool = false,
     match_subject: bool = false,
     qualified_type_position: bool = false,
+    rounded_float_target: bool = false,
     has_use: bool = false,
     has_try: bool = false,
     inside_parentheses: bool = false,
@@ -103,7 +105,7 @@ const ExpectedType = struct {
     strict: bool = false,
     function_type: ?Ast.Type = null,
     function_signature: ?Ast.FunctionType = null,
-    constraint: enum { exact, iterable } = .exact,
+    constraint: enum { exact, iterable, numeric } = .exact,
 };
 
 const builtin_types = [_][]const u8{
@@ -300,7 +302,9 @@ pub fn itemsAtWithDecision(
             context,
             expected_type,
         ),
-        .type_name => {
+        .type_name => if (context.rounded_float_target) {
+            try appendRoundedFloatTargets(allocator, &candidates, context, source, program, cursor);
+        } else {
             try appendCandidate(allocator, &candidates, context, .{
                 .label = "Result",
                 .kind = CompletionKind.enum_type,
@@ -729,6 +733,15 @@ pub fn parameterItemsAtWithDecision(
     source: []const u8,
     decision: Decision,
 ) ![]const CompletionItem {
+    if (decision.active_argument) |argument| {
+        if (isRoundedFloatCall(argument.callee_expression) and argument.parameter_name == null and argument.positional_index == 0 and
+            std.mem.startsWith(u8, "value", decision.prefix))
+        {
+            const result = try allocator.alloc(CompletionItem, 1);
+            result[0] = .{ .label = "value", .kind = CompletionKind.variable, .detail = "value:numeric", .insertText = "value:" };
+            return result;
+        }
+    }
     const call = decision.active_call orelse
         return allocator.alloc(CompletionItem, 0);
     const lookup_source = try sourceForParameterLookup(allocator, source, decision.cursor, call);
@@ -1490,13 +1503,16 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         };
     }
 
+    const rounded_target = tokens.len >= 2 and tokens[tokens.len - 1].tag == .less and
+        tokens[tokens.len - 2].tag == .identifier and std.mem.eql(u8, tokens[tokens.len - 2].lexeme, "round_float");
     const nominal_relation = isNominalRelationPosition(line_tokens);
-    if (isTypePosition(tokens, line_tokens, scope.pending_callable, nominal_relation) or
+    if (rounded_target or isTypePosition(tokens, line_tokens, scope.pending_callable, nominal_relation) or
         isTypeArgumentPrefix(source, prefix_start)) return .{
         .kind = .type_name,
         .prefix = prefix,
         .prefix_start = prefix_start,
         .nominal_relation = nominal_relation,
+        .rounded_float_target = rounded_target,
         .in_loop = scope.in_loop,
         .has_use = has_use,
         .has_try = has_try,
@@ -2468,6 +2484,14 @@ fn appendExpressionSymbols(
         expected_type;
     try appendEmbeddedFileIntrinsics(allocator, candidates, context, selection_type);
     try appendReflectionIntrinsic(allocator, candidates, context);
+    if (matchesExpectedType(program, expected_type, "float32") or matchesExpectedType(program, expected_type, "float64"))
+        try appendCandidate(allocator, candidates, context, .{
+            .label = "round_float",
+            .kind = CompletionKind.function,
+            .detail = "round_float<T>(value:numeric) T",
+            .insertText = "round_float<${1:float32}>(${2:value})",
+            .insertTextFormat = 2,
+        }, 18, false);
     if (matchesExpectedType(program, selection_type, "Result")) try appendCandidate(
         allocator,
         candidates,
@@ -2626,6 +2650,50 @@ fn appendEmbeddedFileIntrinsics(
         .kind = CompletionKind.function,
         .detail = "embed_bytes(file:str) uint8[]",
     }, typedPriority(null, 18, expected_type, "uint8[]"), true);
+}
+
+fn appendRoundedFloatTargets(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    context: Context,
+    source: []const u8,
+    program: ?Ast.Program,
+    cursor: usize,
+) !void {
+    for ([_][]const u8{ "float", "float32", "float64" }) |name|
+        try appendCandidate(allocator, candidates, context, .{ .label = name, .kind = CompletionKind.keyword, .detail = "Silex floating target type" }, 10, false);
+    const parsed = program orelse return;
+    for (parsed.uses) |use| {
+        if (use.alias == null) continue;
+        const target = primitiveAliasTarget(parsed, use, 0) orelse continue;
+        if (!target.isFloat()) continue;
+        try appendCandidate(allocator, candidates, context, .{ .label = use.alias.?, .kind = CompletionKind.structure, .detail = "Silex floating type alias" }, 8, false);
+    }
+    for (parsed.functions) |function| {
+        if (!bodyContainsCursor(source, function.position.offset, cursor)) continue;
+        for (function.type_parameters) |parameter| try appendCandidate(allocator, candidates, context, .{ .label = parameter.name, .kind = CompletionKind.type_parameter, .detail = "Silex generic target type" }, 8, false);
+    }
+    for (parsed.structures) |structure| {
+        if (!bodyContainsCursor(source, structure.position.offset, cursor)) continue;
+        for (structure.type_parameters) |parameter| try appendCandidate(allocator, candidates, context, .{ .label = parameter.name, .kind = CompletionKind.type_parameter, .detail = "Silex generic target type" }, 8, false);
+        for (structure.methods) |method| {
+            if (!bodyContainsCursor(source, method.position.offset, cursor)) continue;
+            for (method.type_parameters) |parameter| try appendCandidate(allocator, candidates, context, .{ .label = parameter.name, .kind = CompletionKind.type_parameter, .detail = "Silex generic target type" }, 8, false);
+        }
+    }
+}
+
+fn primitiveAliasTarget(program: Ast.Program, use: Ast.Use, depth: usize) ?Ast.Type {
+    if (use.type_target) |target| return target;
+    if (depth > program.uses.len or std.mem.indexOfScalar(u8, use.path, '.') != null) return null;
+    for (program.uses) |candidate| {
+        if (candidate.alias != null and std.mem.eql(u8, candidate.alias.?, use.path)) return primitiveAliasTarget(program, candidate, depth + 1);
+    }
+    return null;
+}
+
+fn isRoundedFloatCall(expression: []const u8) bool {
+    return std.mem.startsWith(u8, expression, "round_float<") and std.mem.endsWith(u8, expression, ">");
 }
 
 fn appendReflectionIntrinsic(
@@ -2819,7 +2887,21 @@ fn matchesExpectedType(program: ?Ast.Program, expected: ?ExpectedType, actual: ?
 
 fn expectedTypeCompatible(program: ?Ast.Program, expected: ExpectedType, actual: []const u8) bool {
     if (expected.constraint == .iterable) return isIterableType(program, actual);
-    return valueTypeCompatible(expected.name, actual);
+    if (expected.constraint == .numeric) return numericCompletionType(program, actual) != null;
+    const target = numericCompletionType(program, expected.name);
+    const source = numericCompletionType(program, actual);
+    return valueTypeCompatible(if (target) |value| value.name() else expected.name, if (source) |value| value.name() else actual);
+}
+
+fn numericCompletionType(program: ?Ast.Program, name: []const u8) ?Ast.Type {
+    if (fundamentalNumericType(name)) |value| return value;
+    const parsed = program orelse return null;
+    for (parsed.uses) |use| {
+        if (use.alias == null or !std.mem.eql(u8, use.alias.?, name)) continue;
+        const value = primitiveAliasTarget(parsed, use, 0) orelse return null;
+        return if (value.isNumeric()) value else null;
+    }
+    return null;
 }
 
 fn valueTypeCompatible(expected: []const u8, actual: []const u8) bool {
@@ -4142,6 +4224,9 @@ fn expectedActiveArgumentType(
     cursor: usize,
     argument: ActiveArgument,
 ) ?ExpectedType {
+    if (isRoundedFloatCall(argument.callee_expression) and argument.positional_index == 0 and
+        (argument.parameter_name == null or std.mem.eql(u8, argument.parameter_name.?, "value")))
+        return .{ .name = "float64", .strict = true, .constraint = .numeric };
     var selected: ?Ast.Type = null;
     var generic_expected: ?ExpectedType = null;
     if (expressionTypeAt(allocator, source, program, cursor, argument.callee_expression)) |callee_type| {
@@ -4802,7 +4887,10 @@ fn parseForCompletionObserved(
             "__completion() {}"
         else
             "__completion()",
-        .type_name => "int",
+        .type_name => if (context.rounded_float_target)
+            if (std.mem.startsWith(u8, std.mem.trimStart(u8, source[cursor..], " \t\r\n"), ">")) "float32" else "float32>(0.0)"
+        else
+            "int",
         .aggregate_field => if (control_body_missing) "__completion:true {}" else "__completion:true",
         .statement => if (control_body_missing or (for_source and !for_body_follows))
             "true {}"
@@ -8078,4 +8166,82 @@ fn initializerHasTryAlternative(tokens: []const Token) bool {
         else => {},
     };
     return false;
+}
+
+test "rounded float completion expression metadata and negative contexts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source = "func main() { let value = rou }";
+    const cursor = std.mem.indexOf(u8, source, "rou").? + 3;
+    const items = try itemsAt(allocator, source, cursor, .invoked);
+    var count: usize = 0;
+    for (items) |item| if (std.mem.eql(u8, item.label, "round_float")) {
+        count += 1;
+        try std.testing.expectEqual(@as(u8, 3), item.kind);
+        try std.testing.expectEqualStrings("round_float<${1:float32}>(${2:value})", item.insertText.?);
+        try std.testing.expectEqual(@as(?u8, 2), item.insertTextFormat);
+    };
+    try std.testing.expectEqual(@as(usize, 1), count);
+    const again = try itemsAt(allocator, source, cursor, .invoked);
+    try std.testing.expectEqualStrings(items[0].label, again[0].label);
+    for ([_][]const u8{ "func rou", "use rou", "struct X { rou", "func main() { let n:int = rou", "func main() { let b:bool = rou", "func main() { let n = 1; n.rou" }) |negative| {
+        const found = try itemsAt(allocator, negative, negative.len, .invoked);
+        try std.testing.expect(!contains(found, "round_float"));
+    }
+}
+
+test "rounded float completion target slot filters types and retains aliases and generics" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source = "use float32 as Single\nstruct Other {}\nfunc convert<T>(value:float64) T { return round_float< }";
+    const cursor = std.mem.indexOf(u8, source, "round_float<").? + "round_float<".len;
+    const decision = try decisionAt(allocator, source, cursor, .invoked);
+    try std.testing.expect(decision.rounded_float_target);
+    const items = try itemsAt(allocator, source, cursor, .invoked);
+    try std.testing.expectEqual(@as(usize, 5), items.len);
+    for ([_][]const u8{ "float", "float32", "float64", "Single", "T" }) |name| try std.testing.expect(contains(items, name));
+    for ([_][]const u8{ "int", "bool", "Result", "Other", "round_float" }) |name| try std.testing.expect(!contains(items, name));
+    const partial = "func main() { let value = round_float<fl";
+    const prefixed = try itemsAt(allocator, partial, partial.len, .invoked);
+    try std.testing.expectEqual(@as(usize, 3), prefixed.len);
+}
+
+test "rounded float completion arguments are numeric with the value label" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_][]const u8{ "", "value:" }) |label| {
+        const source = try std.fmt.allocPrint(allocator, "func main(integer:int, large:uint64, precise:float64, text:str) {{ let result = round_float<float32>({s} }}", .{label});
+        const cursor = source.len - 2;
+        const items = try itemsAt(allocator, source, cursor, .invoked);
+        try std.testing.expect(contains(items, "integer"));
+        try std.testing.expect(contains(items, "large"));
+        try std.testing.expect(contains(items, "precise"));
+        try std.testing.expect(!contains(items, "text"));
+        if (label.len == 0) {
+            const decision = try decisionAt(allocator, source, cursor, .invoked);
+            const labels = try parameterItemsAtWithDecision(allocator, source, decision);
+            try std.testing.expectEqual(@as(usize, 1), labels.len);
+            try std.testing.expectEqualStrings("value:", labels[0].insertText.?);
+        }
+    }
+}
+
+test "rounded float completion respects numeric aliases in arguments and expected results" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const arguments = "use uint64 as Count\nuse float32 as Single\nfunc main(counter:Count,weight:Single,text:str) { let result=round_float<float32>( }";
+    const items = try itemsAt(allocator, arguments, arguments.len - 2, .invoked);
+    try std.testing.expect(contains(items, "counter"));
+    try std.testing.expect(contains(items, "weight"));
+    try std.testing.expect(!contains(items, "text"));
+    const typed = "use float32 as Single\nfunc main() { let result:Single=rou }";
+    const found = try itemsAt(allocator, typed, typed.len - 2, .invoked);
+    try std.testing.expect(contains(found, "round_float"));
+    const integer = "use uint64 as Count\nfunc main() { let result:Count=rou }";
+    const excluded = try itemsAt(allocator, integer, integer.len - 2, .invoked);
+    try std.testing.expect(!contains(excluded, "round_float"));
 }

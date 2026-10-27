@@ -605,7 +605,7 @@ pub fn scopeItemsAtForTargetDecisionExpected(
     decision: Completion.Decision,
     expected_type: ?[]const u8,
 ) ![]const Types.CompletionItem {
-    if (decision.kind == .none or decision.override_start != null) return allocator.alloc(Types.CompletionItem, 0);
+    if (decision.kind == .none or decision.override_start != null or decision.rounded_float_target) return allocator.alloc(Types.CompletionItem, 0);
     const cursor = decision.cursor;
     const prefix = decision.prefix;
     const type_only = decision.kind == .type_name or decision.qualified_type_position;

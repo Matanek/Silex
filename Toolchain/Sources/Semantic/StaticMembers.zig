@@ -10,6 +10,7 @@ const Optionals = @import("Optionals.zig");
 const Collections = @import("Collections.zig");
 const Borrowing = @import("Borrowing.zig");
 const Model = @import("Model.zig");
+const RoundedFloats = @import("RoundedFloats.zig");
 const Resources = @import("Resources.zig");
 const ShaderAssets = @import("../ShaderAssets.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
@@ -712,6 +713,13 @@ fn convertConstant(self: anytype, value: Constant, target: Ast.Type, position: S
 }
 
 fn evaluateCall(self: anytype, evaluation: *Evaluation, call: Ast.Expression.Call, locals: []const Local) EvaluateError!Constant {
+    if (call.receiver == null and std.mem.eql(u8, call.name, "round_float")) {
+        const target = try RoundedFloats.target(self, call);
+        const expression = try RoundedFloats.operand(self, call);
+        const value = try evaluateExpression(self, evaluation, expression, null, locals);
+        if (!value.type.isNumeric()) return self.fail(expression.position, "round_float source must be numeric");
+        return convertConstant(self, value, target, call.name_position, false);
+    }
     if (try constructorTarget(self, call)) |structure_index| {
         return evaluateConstructor(self, evaluation, structure_index, call, locals);
     }

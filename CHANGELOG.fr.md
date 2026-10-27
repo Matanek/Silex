@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Ajout de `round_float<T>(value)` : conversion flottante avec arrondi explicite vers `float32` ou `float64`, au plus proche avec égalités au pair, sous-normaux, zéro signé, infinis et NaN. La conversion `as` conserve son contrôle sans perte.
+
 - Les lanceurs de tests LSP et d’admission reçoivent la même pile Debug de 32 Mio que le bootstrap : le test de récursion atteint son diagnostic au lieu de déborder la pile système.
 
 - La collecte native des cycles ignore aussi les champs scalaires, chaînes et optionnels scalaires, tout en conservant leur largeur réservée. Les parcours fréquents d’interface évitent ces visites sans masquer les références de classes ni les callbacks. Régressions du collecteur et des cycles natifs ; mesures locales de la galerie de tableaux.
