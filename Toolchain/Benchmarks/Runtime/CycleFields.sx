@@ -1,0 +1,42 @@
+use STD.Time
+
+// Cold, small trials complement the large retained UI graph profile.
+// Destruction counts are correctness checks; timings are not test thresholds.
+class Counts { var drops:int = 0 }
+struct Scalars {
+    var a:int = 1; var b:int = 2; var c:int = 3; var d:int = 4
+    var e:int = 5; var f:int = 6; var g:int = 7; var h:int = 8
+}
+class Narrow {
+    var counts:Counts
+    var next:Narrow? = null
+    init(counts:Counts) { self.counts = counts }
+    drop { self.counts.drops += 1 }
+    func link() { self.next = self }
+}
+class Wide {
+    var a:Scalars = Scalars(); var b:Scalars = Scalars()
+    var c:Scalars = Scalars(); var d:Scalars = Scalars()
+    var e:Scalars = Scalars(); var f:Scalars = Scalars()
+    var g:Scalars = Scalars(); var h:Scalars = Scalars()
+    var counts:Counts
+    var next:Wide? = null
+    init(counts:Counts) { self.counts = counts }
+    drop { self.counts.drops += 1 }
+    func link() { self.next = self }
+}
+func narrow(counts:Counts) { var node = Narrow(counts); node.link() }
+func wide(counts:Counts) { var node = Wide(counts); node.link() }
+func main() {
+    var counts = Counts()
+    var clock = Time.Stopwatch()
+    clock.restart()
+    for i in 0...100000 { narrow(counts) }
+    let narrow_ms = clock.get_elapsed_milliseconds()
+    assert(counts.drops == 100000)
+    clock.restart()
+    for i in 0...100000 { wide(counts) }
+    let wide_ms = clock.get_elapsed_milliseconds()
+    assert(counts.drops == 200000)
+    print("cycle fields n=100000 narrow_ms=$(narrow_ms) wide_ms=$(wide_ms) drops=$(counts.drops)")
+}

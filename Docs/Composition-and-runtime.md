@@ -68,6 +68,22 @@ storage cleanup: strings and collection buffers still use their generated
 finalizers. Arrays containing class references and owned callback receivers
 remain part of the reachability proof.
 
+Within one trial, a bounded set of field plans reuses immutable type metadata.
+A plan records the offsets and types of fields that may own class edges,
+including the reserved storage of absent optional values; it never records
+object addresses or reachability results. Descriptor identity and field count
+form the key. Exhausting either the plan or step capacity uses the uncached
+traversal. Plans live only in the existing context page, so a later trial
+rebuilds them. An occupancy mask avoids reading or clearing unused slots.
+Type-only proofs borrow a separate pointer-sized model view, keeping the traversal
+reserve off the native stack. The shared ARM64 entry is checked against the
+Windows guard-page limit in its emitted payload.
+
+Embedded runtime entry points must remain self-contained apart from their
+explicit allocation callbacks. A bulk initialization can introduce a libc
+stub even when standalone Zig tests pass; qualify the emitted payload and a
+native Silex consumer as well as its unit tests.
+
 ## Release static roots at normal entry completion
 
 Semantic analysis synthesizes static initialization and finalization in portable

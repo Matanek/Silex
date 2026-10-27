@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native cycle collection reuses field offsets and types within a trial, using a bounded reserve in the existing context; aggregates without class references avoid repeated visits. Exhaustion preserves full traversal. Values, roots and finalizers retain their behavior. ARM64/X64 payloads share the implementation; CPU measurements remain limited to their macOS ARM64 Debug configurations, without claiming a global gain or execution on other systems.
+
 - Protocol methods can provide default bodies: existing conformers reuse them, explicit implementations take precedence, and concrete, generic, and dynamic calls preserve the same choice. Bodies are checked in protocol scope even when unused; competing defaults require an explicit implementation. Completion, labels, and navigation retain the original declarations across imports and extensions.
 - Method calls through a protocol accept named arguments using the protocol's labels. Comparing an optional protocol with the `null` literal tests presence without requiring a comparable payload.
 - `main` retains its module scope for calls across atoms. The LSP also indexes open files before their first save, preserving file or atom identity and visibility boundaries.

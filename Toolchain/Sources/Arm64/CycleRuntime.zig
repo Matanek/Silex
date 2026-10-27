@@ -98,3 +98,28 @@ test "bundled Linux ARM64 cycle runtime is an AArch64 ELF image" {
     try std.testing.expectEqualStrings("\x7fELF", linux_object_bytes[0..4]);
     try std.testing.expect(runtime.entry_offset < runtime.bytes.len);
 }
+
+// This payload also runs on Windows, whose committed stack grows by guarded
+// 4 KiB pages. A type-only probe must not put the full heap context on stack.
+test "shared ARM64 cycle entry does not skip a Windows stack guard page" {
+    const runtime = try payload();
+    var cursor = runtime.entry_offset;
+    var branches: usize = 0;
+    while (branches < 8) : (branches += 1) {
+        const word = std.mem.readInt(u32, runtime.bytes[cursor..][0..4], .little);
+        if (word & 0xfc000000 != 0x14000000) break;
+        const displacement: i64 = @as(i64, @as(i26, @bitCast(@as(u26, @truncate(word))))) * 4;
+        cursor = @intCast(@as(i64, @intCast(cursor)) + displacement);
+    }
+    var allocation: usize = 0;
+    for (0..32) |_| {
+        const word = std.mem.readInt(u32, runtime.bytes[cursor..][0..4], .little);
+        if (word & 0xff000010 == 0x54000000) break;
+        if (word & 0xff8003ff == 0xd10003ff) {
+            const immediate: usize = (word >> 10) & 0xfff;
+            allocation += immediate << @as(u6, if (word & 0x400000 != 0) 12 else 0);
+        }
+        cursor += 4;
+    }
+    try std.testing.expect(allocation <= 4080);
+}

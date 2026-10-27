@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La collecte native réutilise les offsets et types des champs pendant un parcours, dans une réserve bornée au contexte existant ; les agrégats sans référence de classe évitent leurs visites répétées. La saturation conserve le parcours complet. Les valeurs, racines et finaliseurs restent inchangés. Implémentation partagée par les payloads ARM64/X64 ; mesures CPU limitées à leurs configurations macOS ARM64 Debug, sans gain global ni exécution des autres systèmes revendiqués.
+
 - Les méthodes de protocole peuvent fournir un corps par défaut : les conformants existants le réutilisent, une implémentation explicite garde priorité, et les appels concrets, génériques et dynamiques conservent le même choix. Les corps sont vérifiés dans la portée du protocole, même inutilisés ; les défauts concurrents exigent une résolution explicite. La complétion, les labels et la navigation suivent les déclarations d’origine, y compris avec imports et extensions.
 - Les appels de méthodes à travers un protocole acceptent les arguments nommés selon les labels du protocole. Comparer un protocole optionnel au littéral `null` vérifie sa présence sans exiger que son contenu soit comparable.
 - `main` conserve la portée de son module pour les appels entre atomes. Le LSP indexe aussi les fichiers ouverts avant leur premier enregistrement, en conservant leur identité de fichier ou d’atome et leurs limites de visibilité.

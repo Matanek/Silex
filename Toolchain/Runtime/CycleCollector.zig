@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 const TestState = if (builtin.is_test) struct {
     var traced_values: usize = 0;
+    var field_plans: usize = 0;
 } else struct {};
 
 const type_base_mask: u64 = 0x00ffffff;
@@ -15,6 +16,17 @@ const entry_words: usize = 4;
 const class_header_words: usize = 4;
 const list_header_words: usize = 5;
 const page_bytes: usize = 0x4000;
+const field_plan_capacity = 64;
+const field_step_capacity = 512;
+
+const FieldPlan = struct {
+    key: usize = 0,
+    field_count: usize = 0,
+    first_step: usize = 0,
+    step_count: usize = 0,
+};
+
+const FieldStep = struct { offset: usize, type_value: u64 };
 
 const AllocateFunction = *const fn (usize) callconv(.c) ?[*]u64;
 const ReleaseFunction = *const fn ([*]u8, usize) callconv(.c) void;
@@ -35,21 +47,15 @@ const Node = struct {
     live: bool,
 };
 
-const Context = struct {
+// Type-only proofs must not reserve the traversal cache on the native stack.
+const TypeModel = struct {
     model: [*]const u64,
-    nodes: [*]Node,
-    count: usize,
-    capacity: usize,
-    node_byte_count: usize,
-    marking: bool,
-    allocate_function: AllocateFunction,
-    release_function: ReleaseFunction,
 
-    fn entry(self: *const Context, type_value: u64) [*]const u64 {
+    fn entry(self: *const TypeModel, type_value: u64) [*]const u64 {
         return self.model + 1 + @as(usize, @intCast(type_value - structure_base)) * entry_words;
     }
 
-    fn width(self: *const Context, type_value: u64) usize {
+    fn width(self: *const TypeModel, type_value: u64) usize {
         const depth: usize = @intCast(type_value >> optional_depth_shift);
         const base = type_value & type_base_mask;
         const payload: usize = if (base <= scalar_limit)
@@ -61,8 +67,42 @@ const Context = struct {
         return depth + payload;
     }
 
-    fn data(self: *const Context, entry_value: [*]const u64) [*]const u64 {
+    fn data(self: *const TypeModel, entry_value: [*]const u64) [*]const u64 {
         return self.model + @as(usize, @intCast(entry_value[2]));
+    }
+};
+
+const Context = struct {
+    types: TypeModel,
+    nodes: [*]Node,
+    count: usize,
+    capacity: usize,
+    node_byte_count: usize,
+    marking: bool,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+    field_plans: [field_plan_capacity]FieldPlan,
+    occupied_field_plans: u64,
+    field_steps: [field_step_capacity]FieldStep,
+    field_step_count: usize,
+
+    fn resetFieldPlans(self: *Context) void {
+        // Unoccupied entries are never read. Besides avoiding cold clearing,
+        // this keeps payload initialization independent of libc zeroing stubs.
+        self.occupied_field_plans = 0;
+        self.field_step_count = 0;
+    }
+
+    fn entry(self: *const Context, type_value: u64) [*]const u64 {
+        return self.types.entry(type_value);
+    }
+
+    fn width(self: *const Context, type_value: u64) usize {
+        return self.types.width(type_value);
+    }
+
+    fn data(self: *const Context, entry_value: [*]const u64) [*]const u64 {
+        return self.types.data(entry_value);
     }
 
     fn allocate(self: *const Context, byte_count: usize) ?[*]u8 {
@@ -73,6 +113,10 @@ const Context = struct {
         self.release_function(address, byte_count);
     }
 };
+
+comptime {
+    if (@sizeOf(Context) > page_bytes) @compileError("cycle context must fit its allocation page");
+}
 
 const AddResult = enum { added, existing, failed };
 
@@ -140,14 +184,7 @@ fn prepare(
     // before tracing so pooled objects can safely mutate after retaining a root.
     if (@atomicLoad(u64, candidate_roots, .acquire) != 0) return reject(candidate, null, 4);
     if (!cycle_prechecked) {
-        var probe: Context = undefined;
-        probe.model = model;
-        probe.nodes = undefined;
-        probe.count = 0;
-        probe.capacity = 0;
-        probe.node_byte_count = 0;
-        probe.allocate_function = allocate_function;
-        probe.release_function = release_function;
+        const probe: TypeModel = .{ .model = model };
         const graph_kind = classGraphKind(&probe, candidate, type_value, 0);
         if (graph_kind != .class_graph) return reject(candidate, null, if (graph_kind == .none) 4 else 0);
     }
@@ -157,7 +194,7 @@ fn prepare(
         release_function(context_mapping, page_bytes);
         return reject(candidate, null, 0);
     });
-    context.model = model;
+    context.types = .{ .model = model };
     context.nodes = @ptrCast(@alignCast(node_mapping));
     context.count = 0;
     context.capacity = page_bytes / @sizeOf(Node);
@@ -165,6 +202,7 @@ fn prepare(
     context.marking = false;
     context.allocate_function = allocate_function;
     context.release_function = release_function;
+    context.resetFieldPlans();
     if (addNode(context, candidate, type_value, false) != .added or !traceClass(context, candidate, type_value)) {
         releaseClaims(context);
         discard(context);
@@ -244,7 +282,7 @@ const TypePath = struct {
     }
 };
 
-fn classGraphKind(context: *const Context, object: [*]u64, type_value: u64, depth: usize) GraphKind {
+fn classGraphKind(context: *const TypeModel, object: [*]u64, type_value: u64, depth: usize) GraphKind {
     if (depth > 64) return .unsupported;
     const data = context.data(context.entry(type_value));
     var cursor: usize = 1;
@@ -262,7 +300,7 @@ fn classGraphKind(context: *const Context, object: [*]u64, type_value: u64, dept
     return .unsupported;
 }
 
-fn fieldsGraphKind(context: *const Context, fields: [*]const u64, count: usize, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
+fn fieldsGraphKind(context: *const TypeModel, fields: [*]const u64, count: usize, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
     var result: GraphKind = .none;
     for (0..count) |index| switch (typeGraphKind(context, fields[index], target_structure, path, depth + 1)) {
         .none => {},
@@ -272,7 +310,7 @@ fn fieldsGraphKind(context: *const Context, fields: [*]const u64, count: usize, 
     return result;
 }
 
-fn typeGraphKind(context: *const Context, type_value: u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
+fn typeGraphKind(context: *const TypeModel, type_value: u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
     if (depth > path.values.len) return .unsupported;
     if (optionalChild(type_value)) |child| return typeGraphKind(context, child, target_structure, path, depth + 1);
     if (type_value <= scalar_limit) return .none;
@@ -297,7 +335,7 @@ fn finish(context: *Context) void {
     discard(context);
 }
 
-fn classTypeGraphKind(context: *const Context, data: [*]const u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
+fn classTypeGraphKind(context: *const TypeModel, data: [*]const u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
     var result: GraphKind = .none;
     var cursor: usize = 1;
     for (0..@as(usize, @intCast(data[0]))) |_| {
@@ -312,7 +350,7 @@ fn classTypeGraphKind(context: *const Context, data: [*]const u64, target_struct
     return result;
 }
 
-fn protocolGraphKind(context: *const Context, data: [*]const u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
+fn protocolGraphKind(context: *const TypeModel, data: [*]const u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
     var result: GraphKind = .none;
     var cursor: usize = 1;
     for (0..@as(usize, @intCast(data[0]))) |_| {
@@ -324,7 +362,7 @@ fn protocolGraphKind(context: *const Context, data: [*]const u64, target_structu
     return result;
 }
 
-fn enumerationGraphKind(context: *const Context, data: [*]const u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
+fn enumerationGraphKind(context: *const TypeModel, data: [*]const u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
     var result: GraphKind = .none;
     var cursor: usize = 1;
     for (0..@as(usize, @intCast(data[0]))) |_| {
@@ -505,6 +543,54 @@ fn traceListEdge(context: *Context, list: [*]u64, type_value: u64, element_type:
 }
 
 fn traceFields(context: *Context, value: [*]u64, fields: [*]const u64, count: usize) bool {
+    if (count == 0) return true;
+    if (fieldPlan(context, fields, count)) |plan| {
+        // Plans contain metadata offsets, never object addresses. Recursive
+        // visits may append other plans but cannot move or replace these steps.
+        for (plan.first_step..plan.first_step + plan.step_count) |index| {
+            const step = context.field_steps[index];
+            if (!traceValue(context, value + step.offset, step.type_value)) return false;
+        }
+        return true;
+    }
+    return traceFieldsUncached(context, value, fields, count);
+}
+
+fn fieldPlan(context: *Context, fields: [*]const u64, count: usize) ?FieldPlan {
+    const key = @intFromPtr(fields);
+    var slot = ((key >> 3) ^ (key >> 11)) & (field_plan_capacity - 1);
+    var probes: usize = 0;
+    while (probes < field_plan_capacity) : (probes += 1) {
+        const bit = @as(u64, 1) << @intCast(slot);
+        if (context.occupied_field_plans & bit == 0) break;
+        const plan = context.field_plans[slot];
+        if (plan.key == key and plan.field_count == count) return plan;
+        slot = (slot + 1) & (field_plan_capacity - 1);
+    }
+    if (probes == field_plan_capacity) return null;
+    const first = context.field_step_count;
+    var offset: usize = 0;
+    for (fields[0..count]) |field| {
+        var path: TypePath = undefined;
+        path.count = 0;
+        if (mayOwnClassEdge(context, field, &path)) {
+            if (context.field_step_count == field_step_capacity) {
+                context.field_step_count = first;
+                return null;
+            }
+            context.field_steps[context.field_step_count] = .{ .offset = offset, .type_value = field };
+            context.field_step_count += 1;
+        }
+        offset += context.width(field);
+    }
+    const plan: FieldPlan = .{ .key = key, .field_count = count, .first_step = first, .step_count = context.field_step_count - first };
+    context.field_plans[slot] = plan;
+    context.occupied_field_plans |= @as(u64, 1) << @intCast(slot);
+    if (builtin.is_test) TestState.field_plans += 1;
+    return plan;
+}
+
+fn traceFieldsUncached(context: *Context, value: [*]u64, fields: [*]const u64, count: usize) bool {
     var offset: usize = 0;
     for (0..count) |index| {
         const field = fields[index];
@@ -657,6 +743,7 @@ test "cycle tracing does not visit scalar array elements" {
     defer std.testing.allocator.free(values);
     @memset(values, 0);
     var context: Context = undefined;
+    context.resetFieldPlans();
     TestState.traced_values = 0;
     try std.testing.expect(traceArray(&context, values.ptr, 12, values.len));
     try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
@@ -664,6 +751,7 @@ test "cycle tracing does not visit scalar array elements" {
 
 test "cycle tracing skips scalar fields while preserving optional storage widths" {
     var context: Context = undefined;
+    context.resetFieldPlans();
     const optional_int = (@as(u64, 1) << optional_depth_shift) | 6;
     const nested_string = (@as(u64, 3) << optional_depth_shift) | 12;
     var values = [_]u64{ 7, 1, 42, 0, 0, 0, 0 };
@@ -679,6 +767,7 @@ test "cycle tracing skips scalar fields while preserving optional storage widths
 
 test "optional scalar fields keep following class and callback edges at their exact offsets" {
     var context: Context = undefined;
+    context.resetFieldPlans();
     const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 42, 0, 0 };
     var rooted = [_]u64{ 42, 1, 0, 0 };
     const nested_scalar = (@as(u64, 2) << optional_depth_shift) | 12;
@@ -688,7 +777,7 @@ test "optional scalar fields keep following class and callback edges at their ex
     // precedes the live class and callback. Bogus tag/payload words catch an
     // incorrect compacted offset without relying on elapsed time.
     var values = [_]u64{ 0, 99, 99, 1, @intFromPtr(&rooted), 42, 0, 0, @intFromPtr(&rooted) };
-    context.model = &model;
+    context.types = .{ .model = &model };
     context.count = 0;
     context.marking = false;
     TestState.traced_values = 0;
@@ -700,6 +789,7 @@ test "optional scalar fields keep following class and callback edges at their ex
 
 test "cycle tracing skips optional scalars but still visits class array edges" {
     var context: Context = undefined;
+    context.resetFieldPlans();
     var values = [_]u64{ 1, 12, 0, 0 };
     TestState.traced_values = 0;
     const optional_scalar = (@as(u64, 1) << optional_depth_shift) | 12;
@@ -709,7 +799,7 @@ test "cycle tracing skips optional scalars but still visits class array edges" {
     const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 42, 0, 0 };
     var rooted = [_]u64{ 42, 1, 0, 0 };
     var edges = [_]u64{ @intFromPtr(&rooted), @intFromPtr(&rooted) };
-    context.model = &model;
+    context.types = .{ .model = &model };
     context.count = 0;
     context.marking = false;
     try std.testing.expect(traceArray(&context, &edges, structure_base, 2));
@@ -723,7 +813,8 @@ test "cycle tracing does not visit arrays of scalar-only structures" {
     defer std.testing.allocator.free(values);
     @memset(values, 0);
     var context: Context = undefined;
-    context.model = &model;
+    context.resetFieldPlans();
+    context.types = .{ .model = &model };
     TestState.traced_values = 0;
     try std.testing.expect(traceArray(&context, values.ptr, structure_base, 50000));
     try std.testing.expectEqual(@as(usize, 0), TestState.traced_values);
@@ -761,7 +852,8 @@ test "cycle tracing skips optional and nested scalar aggregates" {
         structure_base + 2,
     };
     var context: Context = undefined;
-    context.model = &model;
+    context.resetFieldPlans();
+    context.types = .{ .model = &model };
     var values = [_]u64{0} ** 14;
     TestState.traced_values = 0;
     try std.testing.expect(traceArray(&context, &values, (@as(u64, 1) << optional_depth_shift) | structure_base, 2));
@@ -797,13 +889,94 @@ test "scalar fields do not hide class and callback edges in aggregate arrays" {
     var classes = [_]u64{ 7, @intFromPtr(&rooted) };
     var callbacks = [_]u64{ 0, 0, 0, @intFromPtr(&rooted) };
     var context: Context = undefined;
-    context.model = &model;
+    context.resetFieldPlans();
+    context.types = .{ .model = &model };
     context.count = 0;
     context.marking = false;
     TestState.traced_values = 0;
     try std.testing.expect(traceArray(&context, &classes, structure_base + 1, 1));
     try std.testing.expect(traceArray(&context, &callbacks, structure_base + 2, 1));
     try std.testing.expectEqual(@as(usize, 4), TestState.traced_values);
+}
+
+test "field plans skip scalar aggregates once and preserve callback offsets" {
+    const optional_string = (@as(u64, 1) << optional_depth_shift) | 12;
+    const model = [_]u64{
+        2,
+        @intFromEnum(Kind.value),
+        3,
+        9,
+        2,
+        @intFromEnum(Kind.class),
+        1,
+        11,
+        0,
+        6,
+        optional_string,
+        1,
+        1,
+        0,
+        0,
+    };
+    var rooted = [_]u64{ 1, 1, 0, 0 };
+    var values = [_]u64{ 7, 0, 99, 0, 0, @intFromPtr(&rooted) };
+    const fields = [_]u64{ structure_base, function_base };
+    var context: Context = undefined;
+    context.resetFieldPlans();
+    context.types = .{ .model = &model };
+    context.count = 0;
+    context.marking = false;
+    TestState.traced_values = 0;
+    TestState.field_plans = 0;
+    try std.testing.expect(traceFields(&context, &values, &fields, fields.len));
+    try std.testing.expect(traceFields(&context, &values, &fields, fields.len));
+    try std.testing.expectEqual(@as(usize, 2), TestState.traced_values);
+    try std.testing.expectEqual(@as(usize, 1), TestState.field_plans);
+    try std.testing.expectEqual(@as(usize, 3), context.field_steps[0].offset);
+    try std.testing.expectEqual(@as(u64, 1), rooted[1]);
+}
+
+test "field plans distinguish descriptor prefixes by their field count" {
+    const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 0, 0, 0 };
+    var rooted = [_]u64{ 0, 1, 0, 0 };
+    var values = [_]u64{ 7, @intFromPtr(&rooted) };
+    const fields = [_]u64{ 6, structure_base };
+    var context: Context = undefined;
+    context.resetFieldPlans();
+    context.types = .{ .model = &model };
+    context.count = 0;
+    context.marking = false;
+    TestState.traced_values = 0;
+    TestState.field_plans = 0;
+    try std.testing.expect(traceFields(&context, &values, &fields, 1));
+    try std.testing.expect(traceFields(&context, &values, &fields, 2));
+    try std.testing.expectEqual(@as(usize, 1), TestState.traced_values);
+    try std.testing.expectEqual(@as(usize, 2), TestState.field_plans);
+}
+
+test "field plan capacity exhaustion falls back without losing class edges" {
+    const model = [_]u64{ 1, @intFromEnum(Kind.class), 1, 5, 0, 1, 0, 0, 0 };
+    var rooted = [_]u64{ 0, 1, 0, 0 };
+    var values = [_]u64{ @intFromPtr(&rooted), @intFromPtr(&rooted) };
+    const fields = [_]u64{ structure_base, structure_base };
+    var context: Context = undefined;
+    context.resetFieldPlans();
+    context.types = .{ .model = &model };
+    context.count = 0;
+    context.marking = false;
+    context.field_step_count = field_step_capacity - 1;
+    TestState.traced_values = 0;
+    try std.testing.expect(traceFields(&context, &values, &fields, fields.len));
+    try std.testing.expectEqual(@as(usize, 2), TestState.traced_values);
+    try std.testing.expectEqual(field_step_capacity - 1, context.field_step_count);
+    context.field_step_count = 0;
+    for (&context.field_plans, 0..) |*plan, index| plan.* = .{ .key = index + 1 };
+    context.occupied_field_plans = std.math.maxInt(u64);
+    TestState.traced_values = 0;
+    try std.testing.expect(traceFields(&context, &values, &fields, fields.len));
+    try std.testing.expectEqual(@as(usize, 2), TestState.traced_values);
+    try std.testing.expectEqual(@as(usize, 0), context.field_step_count);
+    try std.testing.expectEqual(@as(u64, 1), rooted[1]);
 }
 
 test "X64 callbacks prove and commit a direct class cycle" {
