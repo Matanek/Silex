@@ -1,0 +1,53 @@
+use float32 as Single
+
+struct RoundedConstants {
+    static let precise:float64=0.1
+    static let rounded:float32=round_float<Single>(RoundedConstants.precise)
+}
+func rounded_generic<T>(value:float64) T { return round_float<T>(value) }
+
+func single(value:float64) float32 { return round_float<float32>(value) }
+
+test "explicit floating rounding differs from exact conversion" {
+    let precise:float64=0.1
+    let narrowed=single(precise)
+    assert(narrowed==0.1 && narrowed as float64!=precise)
+    let exact:float64=1.5
+    assert(single(exact)==exact as float32)
+    assert(round_float<float64>(narrowed)==narrowed as float64)
+}
+test "floating rounding uses nearest ties to even" {
+    let even:float64=1.000000059604644775390625
+    let odd:float64=1.000000178813934326171875
+    assert(single(even)==1.0 && single(odd)==1.0000002384185791015625)
+    assert(single(-even)== -1.0 && single(-odd)== -1.0000002384185791015625)
+}
+
+test "integer to floating rounding is explicit" {
+    let signed:int64=16777217
+    let unsigned:uint64=18446744073709551615
+    assert(round_float<float32>(signed)==16777216.0)
+    assert(round_float<float64>(unsigned)==18446744073709551616.0)
+    assert(round_float<float32>(-signed)== -16777216.0)
+}
+
+test "rounded floating conversion preserves IEEE boundaries" {
+    let smallest:float64=1.4012984643248170709237295832899161312802619418765e-45
+    assert((single(smallest) as float64)==smallest)
+    assert(single(smallest*0.5)==0.0)
+    assert((single(smallest*1.5) as float64)==smallest*2.0)
+    let negative=single(-smallest*0.5)
+    assert(1.0/negative<0.0)
+    let huge:float64=1e300
+    let infinite=single(huge)
+    assert(infinite!=0.0 && infinite+infinite==infinite)
+    let zero:float64=0.0
+    let nan=single(zero/zero)
+    assert(nan!=nan)
+}
+
+test "rounded conversion supports aliases generics named values and static initialization" {
+    let precise:float64=0.1
+    assert(round_float<Single>(value:precise)==RoundedConstants.rounded)
+    assert(rounded_generic<Single>(precise)==RoundedConstants.rounded)
+}

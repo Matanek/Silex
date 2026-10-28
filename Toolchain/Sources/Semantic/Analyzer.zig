@@ -35,6 +35,7 @@ const Control = @import("Control.zig");
 const Enums = @import("Enums.zig");
 const Matches = @import("Matches.zig");
 const MapError = @import("MapError.zig");
+const RoundedFloats = @import("RoundedFloats.zig");
 const Support = @import("Support.zig");
 const Try = @import("Try.zig");
 const Visibility = @import("Visibility.zig");
@@ -1581,6 +1582,7 @@ pub const Analyzer = struct {
         if (try Callbacks.call(self, builder, call)) |result| return Try.finishCall(self, builder, call, result.value);
         if (call.receiver == null and std.mem.eql(u8, call.name, "reflect")) return try Reflection.analyze(self, builder, call);
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return Try.finishCall(self, builder, call, try MapError.analyze(self, builder, call));
+        if (call.receiver == null and std.mem.eql(u8, call.name, "round_float")) return Try.finishCall(self, builder, call, try RoundedFloats.analyze(self, builder, call));
         if (try EmbeddedFiles.analyze(self, builder, call)) |value| return value;
         if (call.receiver == null and std.mem.eql(u8, call.name, "C.call")) {
             return Try.finishCall(self, builder, call, try Interop.analyzeIntrinsic(self, builder, call));

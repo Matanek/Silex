@@ -38,7 +38,7 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
         try bindBranch(self, builder, prepared, branch, variant_index);
         try enterGuardedBody(self, builder, prepared, branch, branch_index, binding_count);
-        try releaseLiteralSubject(self, builder, prepared);
+        try releaseUnusedSubject(self, builder, prepared, branch);
         const branch_expression = if (branch.value) |value| value else yielded: {
             const statements = branch.statements.?;
             if (statements.len == 0 or statements[statements.len - 1] != .yield_statement) {
@@ -119,7 +119,7 @@ pub fn analyzeStatementUsing(
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
         try bindBranch(self, builder, prepared, branch, variant_index);
         try enterGuardedBody(self, builder, prepared, branch, branch_index, binding_count);
-        try releaseLiteralSubject(self, builder, prepared);
+        try releaseUnusedSubject(self, builder, prepared, branch);
         const statements = if (branch.statements) |statements| statements else expression: {
             if (!isStatementExpression(branch.value.?)) {
                 return self.fail(branch.value.?.position, "match statement expression branch must be a call, cascade, propagated result, or nested match");
@@ -500,9 +500,11 @@ fn bindBranch(
     }
 }
 
-fn releaseLiteralSubject(self: anytype, builder: anytype, prepared: Prepared) !void {
+fn releaseUnusedSubject(self: anytype, builder: anytype, prepared: Prepared, branch: Ast.Expression.MatchBranch) !void {
     const subject = prepared.subject orelse return;
-    if (prepared.enum_index == null and subject.transferred and Resources.needsDrop(self, subject.type)) {
+    // Explicit enum branches transfer every payload into their bindings. An
+    // else branch has no bindings and must release the whole owned subject.
+    if ((prepared.enum_index == null or branch.is_else) and subject.transferred and Resources.ownsValue(self, subject.type)) {
         try Resources.emitDrop(self, builder, subject.type, subject.value);
     }
 }

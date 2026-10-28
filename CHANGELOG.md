@@ -18,6 +18,10 @@ This editorial history starts with version 0.44.1.
 - Method calls through a protocol accept named arguments using the protocol's labels. Comparing an optional protocol with the `null` literal tests presence without requiring a comparable payload.
 - `main` retains its module scope for calls across atoms. The LSP also indexes open files before their first save, preserving file or atom identity and visibility boundaries.
 
+- `match` also releases a resource-bearing temporary subject when it selects `else`. Payload-binding branches keep their transfer behavior and borrowed subjects remain alive; object destruction is covered by native tests and an LLVM check.
+
+- Add `round_float<T>(value)`: explicit rounded floating conversion to `float32` or `float64`, using nearest ties-to-even with subnormals, signed zero, infinities and NaNs. The `as` conversion retains its lossless check.
+
 - LSP and admission test runners use the bootstrap’s 32 MiB Debug stack, so the recursion test reaches its diagnostic instead of overflowing the system stack.
 
 - Native cycle collection also skips scalar, string and optional scalar fields while preserving their reserved width. Frequent UI traversals avoid these visits without hiding class references or callbacks. Collector and native cycle regressions; local table gallery measurements.
