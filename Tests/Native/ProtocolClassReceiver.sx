@@ -1,0 +1,70 @@
+// Class conformers mutate their shared identity. A protocol call must not
+// overwrite a field that a reentrant callback replaced during dispatch.
+protocol Action {
+    func run(callback:func()) int
+    func value() int
+}
+class Counts { var drops:int = 0 }
+class Actor:Action {
+    var amount:int
+    var counts:Counts
+    init(amount:int, counts:Counts) { self.amount = amount; self.counts = counts }
+    func run(callback:func()) int { callback(); return self.amount }
+    func value() int { return self.amount }
+    drop { self.counts.drops++ }
+}
+struct Counter:Action {
+    var amount:int
+    func run(callback:func()) int { self.amount++; callback(); return self.amount }
+    func value() int { return self.amount }
+}
+func noop() {}
+class Holder {
+    var action:Action
+    var replacement:Action
+    init(action:Action, replacement:Action) { self.action = action; self.replacement = replacement }
+    func replace() { self.action = self.replacement }
+    func invoke() int { return self.action.run(self.replace) }
+    func tick() int { return self.action.run(noop) }
+    func value() int { return self.action.value() }
+}
+func verify_retained_class() {
+    var counts = Counts()
+    var first = Actor(17, counts); var second = Actor(29, counts)
+    var holder = Holder(first, second)
+    assert(holder.invoke() == 17)
+    assert(holder.value() == 29, "protocol class call restored a replaced receiver")
+}
+func verify_scoped_class() {
+    var counts = Counts()
+    {
+        var holder = Holder(Actor(17, counts), Actor(29, counts))
+        assert(holder.invoke() == 17)
+        assert(holder.value() == 29)
+        assert(counts.drops == 1, "old receiver stays alive until dispatch returns")
+    }
+    assert(counts.drops == 2)
+}
+func verify_value() {
+    var holder = Holder(Counter(amount:5), Counter(amount:20))
+    assert(holder.tick() == 6 && holder.value() == 6)
+    assert(holder.tick() == 7 && holder.value() == 7)
+    assert(holder.invoke() == 8 && holder.value() == 8)
+}
+class OptionalHolder {
+    var action:Action?
+    init(action:Action) { self.action = action }
+    func clear() { self.action = null }
+    func invoke() int? { return self.action?.run(self.clear) }
+}
+func verify_optional_class() {
+    var counts = Counts()
+    var holder = OptionalHolder(Actor(17, counts))
+    assert(holder.invoke() == 17)
+    assert(holder.action == null && counts.drops == 1)
+}
+func main() {
+    // Held roots make the old compiler's first failure deterministic and safe.
+    verify_retained_class(); verify_scoped_class(); verify_value(); verify_optional_class()
+    print("Protocol class receiver : OK")
+}

@@ -118,6 +118,16 @@ Choose the subsystem that matches the question you are investigating:
 - [Implementation status](Implementation-status.md): portable coverage and the
   runtime, native, serialization, and editor limits that remain.
 
+## Protocol receiver identity
+
+Dynamic calls borrow a class conformer's shared identity. The compiler keeps
+that identity alive through argument evaluation, dispatch and result extraction,
+including callbacks that replace the protocol's source field. Class witnesses
+do not write the original receiver back after dispatch. Value witnesses retain
+ordinary value writeback, including protocols with both kinds of conformer.
+Internal lifetime protection does not copy or invoke a value conformer's drop.
+Safe calls through optional fields participate in method mutability inference.
+
 ## Bound callback ownership
 
 Native function values contain three words: code, environment and an optional

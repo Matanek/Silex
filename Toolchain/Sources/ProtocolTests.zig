@@ -606,3 +606,91 @@ test "mutable iteration updates collection fields rather than a copied snapshot"
         "field 'values' is immutable and cannot be borrowed as '&'",
     );
 }
+
+test "protocol class receivers preserve reentrant replacement in mixed conformances" {
+    const output = try run(
+        \\protocol Action { func invoke(callback:func()) int; func read() int }
+        \\class Item:Action { var amount:int; func invoke(callback:func()) int { callback(); return self.amount } func read() int { return self.amount } }
+        \\struct Value:Action { var amount:int; func invoke(callback:func()) int { self.amount++; callback(); return self.amount } func read() int { return self.amount } }
+        \\class Holder {
+        \\    var item:Action; var next:Action
+        \\    func replace() { self.item = self.next }
+        \\    func call() int { return self.item.invoke(self.replace) }
+        \\    func read() int { return self.item.read() }
+        \\}
+        \\func main() {
+        \\    var first = Item(amount:17); var next = Item(amount:29)
+        \\    var holder = Holder(item:first, next:next)
+        \\    assert(holder.call() == 17 && holder.read() == 29)
+        \\    var value = Holder(item:Value(amount:5), next:Value(amount:20))
+        \\    assert(value.call() == 6 && value.read() == 6)
+        \\    print("mixed receivers ok")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("mixed receivers ok\n", output);
+}
+
+test "protocol class receivers omit unchanged field stores in typed IR" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    const program = (try frontend.compile(
+        \\protocol Readable { func read() int }
+        \\class Item:Readable { func read() int { return 7 } }
+        \\class Holder { var item:Readable; func read() int { return self.item.read() } }
+        \\func main() { var holder = Holder(item:Item()); assert(holder.read() == 7) }
+    )).ir;
+    var found = false;
+    for (program.functions) |function| {
+        if (!std.mem.startsWith(u8, function.name, "Holder.read#")) continue;
+        found = true;
+        for (function.blocks) |block| for (block.instructions) |instruction| {
+            try std.testing.expect(instruction != .field_store);
+        };
+    }
+    try std.testing.expect(found);
+}
+
+test "protocol class receivers do not drop value conformers during an internal hold" {
+    const output = try run(
+        \\protocol Readable { func read() int }
+        \\class Item:Readable { func read() int { return 9 } }
+        \\struct Value:Readable {
+        \\    static var drops:int = 0
+        \\    var amount:int
+        \\    func read() int { return self.amount }
+        \\    drop { Value.drops++ }
+        \\}
+        \\func main() {
+        \\    var value:Readable = Value(amount:7)
+        \\    let before = Value.drops
+        \\    assert(value.read() == 7 && value.read() == 7)
+        \\    assert(Value.drops == before)
+        \\    var item:Readable = Item(); assert(item.read() == 9)
+        \\    print("value drops ok")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("value drops ok\n", output);
+}
+
+test "protocol class receivers preserve optional replacement through safe dispatch" {
+    const output = try run(
+        \\protocol Action { func invoke(callback:func()) int }
+        \\class Item:Action { func invoke(callback:func()) int { callback(); return 17 } }
+        \\class Holder {
+        \\    var item:Action?
+        \\    func clear() { self.item = null }
+        \\    func call() int? { return self.item?.invoke(self.clear) }
+        \\}
+        \\func main() {
+        \\    var holder = Holder(item:Item())
+        \\    assert(holder.call() == 17 && holder.item == null)
+        \\    assert(holder.call() == null)
+        \\    print("optional receivers ok")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("optional receivers ok\n", output);
+}

@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les appels via un protocole conservent le récepteur de classe pendant les arguments et callbacks, puis gardent son identité partagée sans réécrire le champ d’origine. Un remplacement réentrant reste en place, tandis que les conformités de type valeur conservent leur mise à jour. Les appels sûrs depuis un champ optionnel participent à l’inférence de mutabilité.
+
 - La collecte native réutilise les offsets et types des champs pendant un parcours, dans une réserve bornée au contexte existant ; les agrégats sans référence de classe évitent leurs visites répétées. La saturation conserve le parcours complet. Les valeurs, racines et finaliseurs restent inchangés. Implémentation partagée par les payloads ARM64/X64 ; mesures CPU limitées à leurs configurations macOS ARM64 Debug, sans gain global ni exécution des autres systèmes revendiqués.
 
 - Les méthodes de protocole peuvent fournir un corps par défaut : les conformants existants le réutilisent, une implémentation explicite garde priorité, et les appels concrets, génériques et dynamiques conservent le même choix. Les corps sont vérifiés dans la portée du protocole, même inutilisés ; les défauts concurrents exigent une résolution explicite. La complétion, les labels et la navigation suivent les déclarations d’origine, y compris avec imports et extensions.

@@ -8,6 +8,7 @@ test {
     // regression suites reachable from the actual build root.
     _ = @import("Sources/BackendTransfer.zig");
     _ = @import("Sources/ClassTests.zig");
+    _ = @import("Sources/ProtocolTests.zig");
     _ = @import("Sources/NamedArgumentTests.zig");
     _ = @import("Sources/ViewTests.zig");
     _ = @import("Sources/ReflectionTests.zig");

@@ -524,6 +524,11 @@ pub fn build(b: *std.Build) void {
     const default_scope_command = b.addRunArtifact(default_scope_tests);
     default_scope_command.setCwd(b.path(""));
     b.step("test-default-scopes", "Verify declaration scope for parameter defaults").dependOn(&default_scope_command.step);
+    const protocol_receiver_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "protocol class receivers" } });
+    protocol_receiver_tests.stack_size = bootstrap_stack_size;
+    const protocol_receiver_command = b.addRunArtifact(protocol_receiver_tests);
+    protocol_receiver_command.setCwd(b.path(""));
+    b.step("test-protocol-receivers", "Verify protocol receiver identity, lifetime and value writeback").dependOn(&protocol_receiver_command.step);
     const protocol_default_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "protocol defaults" } });
     protocol_default_tests.stack_size = bootstrap_stack_size;
     const protocol_default_command = b.addRunArtifact(protocol_default_tests);

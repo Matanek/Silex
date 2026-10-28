@@ -237,7 +237,11 @@ fn receiverStructure(program: Ast.Program, root_structure: usize, expression: *c
         .field_access => |access| if (receiverStructure(program, root_structure, access.base)) |base| field: {
             if (base >= program.structures.len) break :field null;
             for (program.structures[base].fields) |field_value| {
-                if (std.mem.eql(u8, field_value.name, access.name)) break :field field_value.type.structureIndex();
+                if (std.mem.eql(u8, field_value.name, access.name)) {
+                    var field_type = field_value.type;
+                    while (field_type.optionalChild()) |child| field_type = child;
+                    return field_type.structureIndex();
+                }
             }
             break :field null;
         } else null,
