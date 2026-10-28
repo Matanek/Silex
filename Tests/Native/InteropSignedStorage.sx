@@ -1,0 +1,42 @@
+use Interop.C
+
+class Field { var value:int32 = 7 }
+struct Record { var value:int32 = 7 }
+
+func write(value:&int32, replacement:int32) {
+    let address = C.address_bits(C.mutable_pointer(value))
+    C.store<int32>(address,0 as uint,replacement)
+}
+
+public func exercise() {
+    var value:int32 = 7
+    let address = C.address_bits(C.mutable_pointer(value))
+    C.store<int32>(address,0 as uint,-123 as int32)
+    assert(value == -123 as int32)
+    assert(value as int == -123 && value as float == -123.0)
+    write(value,42 as int32)
+    assert(value == 42)
+    var field = Field(); var alias = field
+    write(field.value,-456 as int32)
+    assert(alias.value == -456 as int32)
+    var record = Record()
+    write(record.value,-789 as int32)
+    assert(record.value == -789 as int32)
+    var fixed:int32[2] = [7,8]
+    write(fixed[1],-17 as int32)
+    assert(fixed[0] == 7 && fixed[1] == -17 as int32)
+    var dynamic:int32[] = [7,8]
+    write(dynamic[0],-19 as int32)
+    assert(dynamic[0] == -19 as int32 && dynamic[1] == 8)
+    var count = 0
+    while count < 3 {
+        write(value,(count-1) as int32)
+        if count == 0 { assert(value == -1 as int32) }
+        else { assert(value as int == count-1) }
+        count++
+    }
+}
+
+func main() { exercise(); print("Signed interop storage : OK") }
+
+test "typed reads restore the sign after C pointer writes to ordinary mutable places" { exercise() }

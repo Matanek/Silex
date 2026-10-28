@@ -446,11 +446,31 @@ fn lowerFunction(
     for (function.blocks, 0..) |block, block_id| {
         starts[block_id] = next_instruction;
         next_instruction += block.instructions.len + 1;
+        for (block.instructions) |instruction| {
+            if (signedMemoryResult(function, instruction) != null) next_instruction += 1;
+        }
     }
     for (function.blocks) |block| {
         for (block.instructions, 0..) |instruction, instruction_index| {
             try instructions.append(allocator, try lowerInstruction(allocator, program, cycle_capabilities, strings, function, layout, instruction));
             try instruction_positions.append(allocator, if (instruction_index < block.instruction_positions.len) block.instruction_positions[instruction_index] else function.source_position);
+            if (signedMemoryResult(function, instruction)) |result| {
+                // Silex slots are 64 bits. A foreign write changes only the
+                // pointed-to C integer width, so its unused high slot bits
+                // cannot define the value subsequently read by Silex. Restore
+                // the signed representation at the typed memory-read boundary.
+                // The same unchecked narrowing operation serves both encoders.
+                const slot = layout.values[result].start;
+                try instructions.append(allocator, .{ .convert = .{
+                    .result = slot,
+                    .operand = slot,
+                    .source = .uint,
+                    .target = function.value_types[result],
+                    .checked = false,
+                    .header = 0,
+                } });
+                try instruction_positions.append(allocator, if (instruction_index < block.instruction_positions.len) block.instruction_positions[instruction_index] else function.source_position);
+            }
         }
         try instructions.append(allocator, try lowerTerminator(allocator, program, strings, layout, block.terminator, starts));
         try instruction_positions.append(allocator, block.terminator_position orelse function.source_position);
@@ -474,6 +494,19 @@ fn lowerFunction(
         .instructions = try instructions.toOwnedSlice(allocator),
         .instruction_positions = try instruction_positions.toOwnedSlice(allocator),
     };
+}
+
+fn signedMemoryResult(function: Ir.Function, instruction: Ir.Instruction) ?Ir.ValueId {
+    const result = switch (instruction) {
+        .local_load => |value| value.result,
+        .field_load => |value| value.result,
+        .reference_load => |value| value.result,
+        .collection_load => |value| value.result,
+        .global_load => |value| value.result,
+        else => return null,
+    };
+    const type_value = function.value_types[result];
+    return if (type_value.isSignedInteger() and type_value.bitWidth() < 64) result else null;
 }
 
 fn lowerSlpGroups(allocator: Allocator, layout: Layout, plan: Slp.Plan) Allocator.Error![]const Machine.FloatLaneGroup {

@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Reading narrow signed integers after a C pointer write now restores their sign, including fields, mutable borrows and collection elements.
+
 - Protocol calls keep class receivers alive through arguments and callbacks, then preserve their shared identity without writing back the original field. Reentrant replacements remain in place, while value conformers still write back updates. Safe calls through optional fields participate in mutability inference.
 
 - Native cycle collection reuses field offsets and types within a trial, using a bounded reserve in the existing context; aggregates without class references avoid repeated visits. Exhaustion preserves full traversal. Values, roots and finalizers retain their behavior. ARM64/X64 payloads share the implementation; CPU measurements remain limited to their macOS ARM64 Debug configurations, without claiming a global gain or execution on other systems.
