@@ -1,0 +1,68 @@
+class DropCounter {
+    var count:int = 0
+}
+class Token {
+    var counter:DropCounter
+    init(counter:DropCounter) { self.counter = counter }
+    drop { self.counter.count++ }
+}
+enum Subject {
+    empty
+    token(Token)
+}
+func make(counter:DropCounter) Subject { return Subject.token(Token(counter)) }
+func discard(counter:DropCounter) {
+    match make(counter) {
+        empty => {}
+        else => {}
+    }
+}
+test "statement match releases an owned enum on its else branch" {
+    var counter = DropCounter()
+    discard(counter)
+    assert(counter.count==1)
+}
+test "value match releases an owned enum on its else branch" {
+    var counter = DropCounter()
+    let result = match make(counter) {
+        empty => 0
+        else => 1
+    }
+    assert(result==1 && counter.count==1)
+}
+test "matching a borrowed enum does not release its original payload" {
+    var counter = DropCounter()
+    {
+        let subject = make(counter)
+        match subject {
+            empty => {}
+            else => {}
+        }
+        assert(counter.count==0)
+    }
+    assert(counter.count==1)
+}
+test "explicit payload bindings consume an owned enum once" {
+    var counter = DropCounter()
+    match make(counter) {
+        token(value) => { assert(value.counter==counter) }
+        empty => {}
+    }
+    assert(counter.count==1)
+    match make(counter) {
+        token(_) => {}
+        empty => {}
+    }
+    assert(counter.count==2)
+}
+test "a value match can return an owned payload beyond its subject" {
+    var counter = DropCounter()
+    {
+        var token = match make(counter) {
+            token(value) => value
+            empty => Token(counter)
+        }
+        assert(token.counter==counter && counter.count==0)
+    }
+    assert(counter.count==1)
+}
