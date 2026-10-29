@@ -104,6 +104,8 @@ pub const Compiler = struct {
     index: Modules.Index = undefined,
     module_scope_roots: []const []const u8 = &.{},
     units: []Unit = &.{},
+    alias_visits: []TypeAliases.Visit = &.{},
+    reexport_visiting: []bool = &.{},
     catalog_contributions: []const CatalogContribution = &.{},
     files: []const []const u8 = &.{},
     entry_module: usize = 0,
@@ -603,19 +605,19 @@ pub const Compiler = struct {
                     binding.module.?,
                     binding.declaration.?,
                     .function,
-                    try self.allocator.alloc(bool, self.units.len),
+                    try self.reexportVisiting(),
                 );
                 const structures = try self.resolveReexport(
                     binding.module.?,
                     binding.declaration.?,
                     .structure,
-                    try self.allocator.alloc(bool, self.units.len),
+                    try self.reexportVisiting(),
                 );
                 const enumerations = try self.resolveReexport(
                     binding.module.?,
                     binding.declaration.?,
                     .enumeration,
-                    try self.allocator.alloc(bool, self.units.len),
+                    try self.reexportVisiting(),
                 );
                 const declaration_count = @as(u2, @intFromBool(functions != null)) +
                     @as(u2, @intFromBool(structures != null)) + @as(u2, @intFromBool(enumerations != null));
@@ -657,7 +659,12 @@ pub const Compiler = struct {
     ) Error!?TypeAliases.Target {
         var capacity = self.units.len;
         for (self.units) |unit| capacity += unit.bindings.len;
-        const visits = try self.allocator.alloc(TypeAliases.Visit, capacity + 1);
+        if (self.alias_visits.len < capacity + 1) {
+            self.alias_visits = try self.allocator.alloc(TypeAliases.Visit, capacity + 1);
+        }
+        // TypeAliases traverses only immutable units and returns before another
+        // compiler lookup can begin; no result retains this visitation storage.
+        const visits = self.alias_visits;
         const resolved = (if (exported_only)
             TypeAliases.resolveExported(self.units, module, name, visits)
         else
@@ -739,6 +746,15 @@ pub const Compiler = struct {
                 .{ alias, enumeration.name },
             );
         return self.fail(position, message);
+    }
+
+    pub fn reexportVisiting(self: *Compiler) Allocator.Error![]bool {
+        if (self.reexport_visiting.len < self.units.len) {
+            self.reexport_visiting = try self.allocator.alloc(bool, self.units.len);
+        }
+        // Reexports.resolve is a synchronous traversal with no compiler callbacks.
+        // It clears this buffer at entry and never returns references into it.
+        return self.reexport_visiting[0..self.units.len];
     }
 
     pub fn resolveReexport(
@@ -1346,7 +1362,7 @@ pub const Compiler = struct {
                     binding.module.?,
                     binding.declaration.?,
                     .function,
-                    try self.allocator.alloc(bool, self.units.len),
+                    try self.reexportVisiting(),
                 );
                 if (function_target) |target| {
                     if (self.units[target.module].state != .loaded) continue;
@@ -1365,7 +1381,7 @@ pub const Compiler = struct {
                     binding.module.?,
                     binding.declaration.?,
                     .structure,
-                    try self.allocator.alloc(bool, self.units.len),
+                    try self.reexportVisiting(),
                 );
                 if (structure_target) |target| {
                     if (self.units[target.module].state != .loaded) continue;
@@ -1384,7 +1400,7 @@ pub const Compiler = struct {
                     binding.module.?,
                     binding.declaration.?,
                     .enumeration,
-                    try self.allocator.alloc(bool, self.units.len),
+                    try self.reexportVisiting(),
                 );
                 if (enum_target) |target| {
                     if (self.units[target.module].state != .loaded) continue;
@@ -2074,3 +2090,21 @@ pub const Compiler = struct {
         return error.InvalidSource;
     }
 };
+
+
+test "repeated module resolution bounds retained visitation storage" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var compiler = Compiler.init(arena.allocator(), std.testing.io);
+    compiler.units = try arena.allocator().alloc(Unit, 257);
+    @memset(compiler.units, .{});
+    const position: Source.Position = .{ .offset = 0, .line = 1, .column = 1 };
+    try std.testing.expect((try compiler.resolveTypeAlias(0, "missing", position, false)) == null);
+    try std.testing.expect((try compiler.resolveReexport(0, "missing", .structure, try compiler.reexportVisiting())) == null);
+    const capacity = arena.queryCapacity();
+    for (0..5000) |_| {
+        try std.testing.expect((try compiler.resolveTypeAlias(0, "missing", position, false)) == null);
+        try std.testing.expect((try compiler.resolveReexport(0, "missing", .structure, try compiler.reexportVisiting())) == null);
+    }
+    try std.testing.expectEqual(capacity, arena.queryCapacity());
+}

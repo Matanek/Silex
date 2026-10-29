@@ -88,7 +88,7 @@ pub fn structureTarget(self: anytype, module: usize, name: []const u8) !?Target 
                 target.module,
                 target.declaration,
                 .structure,
-                try self.allocator.alloc(bool, self.units.len),
+                try self.reexportVisiting(),
             )) |reexport| return reexport;
         }
     }
@@ -116,7 +116,7 @@ pub fn enumTarget(self: anytype, module: usize, name: []const u8) !?Target {
         target.module,
         target.declaration,
         .enumeration,
-        try self.allocator.alloc(bool, self.units.len),
+        try self.reexportVisiting(),
     );
 }
 
@@ -141,7 +141,7 @@ pub fn functionTarget(self: anytype, target: Target) !?Target {
         target.module,
         target.declaration,
         .function,
-        try self.allocator.alloc(bool, self.units.len),
+        try self.reexportVisiting(),
     );
 }
 

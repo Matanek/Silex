@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La composition des modules réutilise les tableaux de visite des alias et réexports entre les recherches pour borner sa mémoire temporaire.
+
 - `match` libère aussi le sujet temporaire qui contient des ressources lorsqu’il sélectionne `else`. Les branches avec liaison de payload conservent leur transfert, et un sujet emprunté reste vivant ; tests de destruction des objets en natif et contrôle LLVM.
 
 - Ajout de `round_float<T>(value)` : conversion flottante avec arrondi explicite vers `float32` ou `float64`, au plus proche avec égalités au pair, sous-normaux, zéro signé, infinis et NaN. La conversion `as` conserve son contrôle sans perte.
