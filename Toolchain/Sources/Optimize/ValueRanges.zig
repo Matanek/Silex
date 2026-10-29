@@ -96,14 +96,19 @@ fn solveFunction(allocator: Allocator, function: Ir.Function, comptime increment
     // of the rewritten IR allocated below through the caller's allocator.
     var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer scratch.deinit();
-    const temporary = scratch.allocator();
+    return solveWithScratch(allocator, scratch.allocator(), function, incremental, evaluations);
+}
+
+fn solveWithScratch(allocator: Allocator, temporary: Allocator, function: Ir.Function, comptime incremental: bool, evaluations: ?*usize) !Ir.Function {
     const value_count = function.value_types.len;
     const active_values = try activeValues(temporary, function, incremental);
+    const tracked_count = active_values.len;
+    if (tracked_count == 0) return function;
     const block_count = function.blocks.len;
     const predecessors = try buildPredecessors(temporary, function.blocks);
     const comparisons = try comparisonDefinitions(temporary, function);
-    const entry = try temporary.alloc(Fact, block_count * value_count);
-    const exit = try temporary.alloc(Fact, block_count * value_count);
+    const entry = try temporary.alloc(Fact, block_count * tracked_count);
+    const exit = try temporary.alloc(Fact, block_count * tracked_count);
     @memset(entry, .absent);
     @memset(exit, .absent);
     const entry_reachable = try temporary.alloc(bool, block_count);
@@ -112,6 +117,7 @@ fn solveFunction(allocator: Allocator, function: Ir.Function, comptime increment
     @memset(exit_reachable, false);
     const incoming = try temporary.alloc(Fact, value_count);
     const working = try temporary.alloc(Fact, value_count);
+    const predecessor_facts = try temporary.alloc(Fact, value_count);
 
     const pending = try temporary.alloc(bool, block_count);
     @memset(pending, false);
@@ -133,6 +139,7 @@ fn solveFunction(allocator: Allocator, function: Ir.Function, comptime increment
                 exit,
                 exit_reachable,
                 incoming,
+                predecessor_facts,
             );
             const reachable = block_id == 0 or incoming_reachable;
             if (!reachable) continue;
@@ -144,16 +151,16 @@ fn solveFunction(allocator: Allocator, function: Ir.Function, comptime increment
             // Widening every block in the cyclic region would erase bounds
             // established by a dominating branch before its loop body.
             const widen = iteration >= block_count and hasBackwardPredecessor(predecessors[block_id].items, block_id);
-            for (active_values) |value| {
+            for (active_values, 0..) |value, column| {
                 if (accumulate(
-                    &entry[at(value_count, block_id, value)],
+                    &entry[at(tracked_count, block_id, column)],
                     incoming[value],
                     function.value_types[value],
                     widen,
                 )) changed = true;
             }
 
-            @memcpy(working, entry[block_id * value_count ..][0..value_count]);
+            expandFacts(active_values, entry[block_id * tracked_count ..][0..tracked_count], working);
             for (function.blocks[block_id].instructions) |instruction| {
                 transfer(function, working, instruction);
             }
@@ -162,9 +169,9 @@ fn solveFunction(allocator: Allocator, function: Ir.Function, comptime increment
                 exit_reachable[block_id] = true;
                 exit_changed = true;
             }
-            for (active_values) |value| {
+            for (active_values, 0..) |value, column| {
                 if (accumulate(
-                    &exit[at(value_count, block_id, value)],
+                    &exit[at(tracked_count, block_id, column)],
                     working[value],
                     function.value_types[value],
                     widen,
@@ -194,7 +201,7 @@ fn solveFunction(allocator: Allocator, function: Ir.Function, comptime increment
     var blocks: ?[]Ir.Block = null;
     const facts = try temporary.alloc(Fact, value_count);
     for (function.blocks, 0..) |block, block_id| {
-        @memcpy(facts, entry[block_id * value_count ..][0..value_count]);
+        expandFacts(active_values, entry[block_id * tracked_count ..][0..tracked_count], facts);
         var instructions: ?[]Ir.Instruction = null;
         for (block.instructions, 0..) |original, instruction_id| {
             const rewritten = rewriteInstruction(function, facts, original);
@@ -233,6 +240,18 @@ fn activeValues(allocator: Allocator, function: Ir.Function, comptime sparse: bo
     return values.toOwnedSlice(allocator);
 }
 
+// Persistent block rows contain only tracked integer facts. Transfers and edge
+// refinement still use original value IDs in a reusable dense working vector.
+fn expandFacts(values: []const Ir.ValueId, row: []const Fact, dense: []Fact) void {
+    // activeValues is sorted: a full set is the identity mapping.
+    if (values.len == dense.len) {
+        @memcpy(dense, row);
+        return;
+    }
+    @memset(dense, .absent);
+    for (values, row) |value, fact| dense[value] = fact;
+}
+
 fn incomingFacts(
     function: Ir.Function,
     block_id: Ir.BlockId,
@@ -242,8 +261,9 @@ fn incomingFacts(
     exits: []const Fact,
     exit_reachable: []const bool,
     facts: []Fact,
+    predecessor_facts: []Fact,
 ) bool {
-    const value_count = function.value_types.len;
+    const tracked_count = active_values.len;
     @memset(facts, .absent);
     var reachable = false;
     if (block_id == 0) {
@@ -254,23 +274,23 @@ fn incomingFacts(
         };
     }
     for (predecessors[block_id].items) |predecessor| {
-        if (!exit_reachable[predecessor] or !edgePossible(
-            function,
-            predecessor,
-            block_id,
-            comparisons,
-            exits[predecessor * value_count ..][0..value_count],
-        )) continue;
+        if (!exit_reachable[predecessor]) continue;
+        const row = exits[predecessor * tracked_count ..][0..tracked_count];
+        const edge_facts: []const Fact = if (tracked_count == function.value_types.len) row else expanded: {
+            expandFacts(active_values, row, predecessor_facts);
+            break :expanded predecessor_facts;
+        };
+        if (!edgePossible(function, predecessor, block_id, comparisons, edge_facts)) continue;
         reachable = true;
         for (active_values) |value| {
-            var incoming = exits[at(value_count, predecessor, value)];
+            var incoming = edge_facts[value];
             incoming = refineForEdge(
                 function,
                 predecessor,
                 block_id,
                 value,
                 comparisons,
-                exits[predecessor * value_count ..][0..value_count],
+                edge_facts,
                 incoming,
             );
             facts[value] = joinFacts(facts[value], incoming);
@@ -1034,4 +1054,42 @@ test "range analysis retains only rewritten IR between passes" {
         const observed = try @import("../Interpreter.zig").runCapture(execution.allocator(), .{ .functions = &.{result} });
         try std.testing.expectEqualStrings("42\n", observed.stdout);
     }
+}
+
+test "integer range tables scale with tracked values rather than descriptor slots" {
+    const a = std.testing.allocator;
+    const types = try a.alloc(Ir.Type, 5000);
+    defer a.free(types);
+    @memset(types, .float32);
+    @memset(types[0..3], .int);
+    var blocks: [64]Ir.Block = undefined;
+    blocks[0] = .{ .instructions = &.{
+        .{ .constant_int = .{ .result = 0, .bits = 40 } },
+        .{ .constant_int = .{ .result = 1, .bits = 2 } },
+        .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1, .checked = true } },
+    }, .terminator = .{ .jump = 1 } };
+    for (1..blocks.len - 1) |index| blocks[index] = .{
+        .instructions = &.{},
+        .terminator = .{ .jump = index + 1 },
+    };
+    blocks[blocks.len - 1] = .{
+        .instructions = &.{.{ .print = .{ .value = 2, .newline = true } }},
+        .terminator = .return_void,
+    };
+    const function: Ir.Function = .{
+        .name = "main",
+        .parameter_types = &.{},
+        .return_type = .void,
+        .value_types = types,
+        .blocks = &blocks,
+    };
+    const storage = try a.alloc(u8, 4 * 1024 * 1024);
+    defer a.free(storage);
+    var temporary = std.heap.FixedBufferAllocator.init(storage);
+    var output = std.heap.ArenaAllocator.init(a);
+    defer output.deinit();
+    const optimized = try solveWithScratch(output.allocator(), temporary.allocator(), function, true, null);
+    try std.testing.expect(!optimized.blocks[0].instructions[2].binary.checked);
+    const observed = try @import("../Interpreter.zig").runCapture(output.allocator(), .{ .functions = &.{optimized} });
+    try std.testing.expectEqualStrings("42\n", observed.stdout);
 }
