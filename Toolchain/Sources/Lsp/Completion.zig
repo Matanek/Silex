@@ -3781,6 +3781,10 @@ fn lexicalNamedType(callable: ?Callable, locals: []const Local, name: []const u8
 }
 
 fn typeForSourceSpelling(program: Ast.Program, spelling: []const u8) ?Ast.Type {
+    const trimmed = std.mem.trim(u8, spelling, " \t\r\n");
+    if (std.mem.endsWith(u8, trimmed, "?")) {
+        return .optional(typeForSourceSpelling(program, trimmed[0 .. trimmed.len - 1]) orelse return null);
+    }
     for (builtin_types) |name| if (sourceSpellingsEqual(name, spelling)) {
         inline for (@typeInfo(Ast.Type).@"enum".fields) |field| {
             const candidate: Ast.Type = @enumFromInt(field.value);
@@ -4119,6 +4123,20 @@ fn expectedTypeAt(allocator: Allocator, source: []const u8, program: Ast.Program
         argument,
     )) |expected| return expected;
     if (context.kind != .expression and context.kind != .statement) return null;
+    if (@import("CoalesceContext.zig").at(source, context.prefix_start)) |fallback| {
+        if (expressionTypeAt(allocator, source, program, cursor, fallback.left)) |left| {
+            if (left.optionalChild()) |payload| {
+                const tuple = if (structureForType(program, payload)) |structure| structure.is_tuple else false;
+                if (collectionElementType(program, payload) != null or tuple) {
+                    if (expectedNestedValueTypeWithSuffix(program, payload, fallback.right, fallback.full_right)) |wanted| return .{
+                        .name = typeSpelling(allocator, program, wanted) catch return null,
+                        .strict = true,
+                        .function_type = if (wanted.functionIndex() != null) wanted else null,
+                    };
+                }
+            }
+        }
+    }
     const callable = containingCallable(source, program, cursor);
     const line = lineAtOffset(source, cursor);
     var lexer = LexerModule.Lexer.init(source[0..context.prefix_start]);
@@ -4198,37 +4216,86 @@ fn currentStatementTokens(tokens: []const Token) []const Token {
 // Project an enclosing collection context onto the expression currently edited.
 // Index expressions always expect an int; a literal expects its element type.
 fn expectedNestedValueType(program: Ast.Program, enclosing: Ast.Type, expression: []const u8) ?Ast.Type {
+    return expectedNestedValueTypeWithSuffix(program, enclosing, expression, expression);
+}
+
+fn expectedNestedValueTypeWithSuffix(program: Ast.Program, enclosing: Ast.Type, expression: []const u8, full_expression: []const u8) ?Ast.Type {
+    const Frame = struct {
+        tag: TokenTag,
+        parent: ?Ast.Type,
+        tuple: ?Ast.Structure = null,
+        field: usize = 0,
+    };
     var expected: ?Ast.Type = enclosing;
-    var parents: [128]?Ast.Type = undefined;
+    var parents: [128]Frame = undefined;
     var depth: usize = 0;
-    var previous: ?TokenTag = null;
+    var previous: ?Token = null;
     var lexer = LexerModule.Lexer.init(expression);
     while (true) {
         const token = lexer.next() catch return null;
         if (token.tag == .end) break;
         switch (token.tag) {
-            .left_bracket => {
+            .left_bracket, .left_parenthesis => {
                 if (depth == parents.len) return null;
-                parents[depth] = expected;
-                depth += 1;
-                const indexed = if (previous) |tag| switch (tag) {
+                const called_or_indexed = if (previous) |value| switch (value.tag) {
                     .identifier, .keyword_self, .integer, .floating, .keyword_true, .keyword_false, .string, .string_end, .right_parenthesis, .right_bracket => true,
                     else => false,
                 } else false;
-                expected = if (indexed) .int else if (expected) |value|
-                    collectionElementType(program, value.optionalChild() orelse value)
-                else
-                    null;
+                parents[depth] = .{ .tag = token.tag, .parent = expected };
+                if (token.tag == .left_bracket) {
+                    expected = if (called_or_indexed) .int else if (expected) |value|
+                        collectionElementType(program, value.optionalChild() orelse value)
+                    else
+                        null;
+                } else if (!called_or_indexed and tupleLiteralAt(full_expression, token.end)) {
+                    if (expected) |value| if (structureForType(program, value.optionalChild() orelse value)) |tuple| {
+                        if (tuple.is_tuple and tuple.fields.len != 0) {
+                            parents[depth].tuple = tuple;
+                            expected = tuple.fields[0].type;
+                        }
+                    };
+                }
+                depth += 1;
             },
-            .right_bracket => if (depth != 0) {
+            .right_bracket, .right_parenthesis => if (depth != 0) {
+                const opening: TokenTag = if (token.tag == .right_bracket) .left_bracket else .left_parenthesis;
+                if (parents[depth - 1].tag != opening) return null;
                 depth -= 1;
-                expected = parents[depth];
+                expected = parents[depth].parent;
+            },
+            .comma => if (depth != 0) {
+                const frame = &parents[depth - 1];
+                if (frame.tuple) |tuple| {
+                    frame.field += 1;
+                    expected = if (frame.field < tuple.fields.len) tuple.fields[frame.field].type else null;
+                }
             },
             else => {},
         }
-        previous = token.tag;
+        previous = token;
     }
     return expected;
+}
+
+// A comma (or named element) at this depth distinguishes a tuple from an
+// ordinary grouping. Include the suffix after the cursor so grouping around
+// a tuple does not consume its first field's type prematurely.
+fn tupleLiteralAt(expression: []const u8, start: usize) bool {
+    var lexer = LexerModule.Lexer.init(expression[start..]);
+    var depth: usize = 0;
+    while (true) {
+        const token = lexer.next() catch return false;
+        switch (token.tag) {
+            .end => return false,
+            .comma, .colon => if (depth == 0) return true,
+            .left_parenthesis, .left_bracket, .left_brace => depth += 1,
+            .right_parenthesis, .right_bracket, .right_brace => {
+                if (depth == 0) return false;
+                depth -= 1;
+            },
+            else => {},
+        }
+    }
 }
 
 fn expectedActiveArgumentType(
@@ -4480,8 +4547,10 @@ fn expressionTypeAtRaw(
         for (owner.methods) |method| {
             if (method.is_static != static_access or !std.mem.eql(u8, method.name, call.name) or
                 !acceptsArity(method.parameters, call.arity)) continue;
-            if (return_type != null and return_type.? != method.return_type) return null;
-            return_type = method.return_type;
+            const spelling = specializedTypeName(allocator, program, owner, receiver_type, method.return_type) catch return null;
+            const candidate = typeForSourceSpelling(program, spelling) orelse method.return_type;
+            if (return_type != null and return_type.? != candidate) return null;
+            return_type = candidate;
         }
         return return_type;
     }

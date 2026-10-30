@@ -1,4 +1,5 @@
 test {
+    _ = @import("Lsp/Tests/CoalesceCollections.zig");
     _ = @import("Lsp/Tests/ProtocolDefaults.zig");
     _ = @import("Lsp/Completion.zig");
     _ = @import("Lsp/CompletionContract.zig");

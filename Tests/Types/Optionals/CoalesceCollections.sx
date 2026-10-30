@@ -1,0 +1,50 @@
+use STD.Collections.Dictionary
+
+func values_or_empty(values:int[]?) int[] { return values ?? [] }
+struct Entry { let value:int }
+struct Holder<T> { let value:T?; func get() T? { return self.value } }
+
+public func exercise() {
+    let missing:int[]? = null
+    let empty = values_or_empty(missing)
+    assert(empty.is_empty())
+    let supplied:int[] = [3,7]
+    let present:int[]? = supplied
+    let retained = present ?? []
+    assert(retained.count() == 2 && retained[1] == 7)
+    var rows = Dictionary<str,str[]>()
+    let unknown:str[] = rows.find("missing") ?? []
+    assert(unknown.is_empty())
+    rows.set("found",["été","中"])
+    let known = rows.find("found") ?? []
+    assert(known.count() == 2 && known[1] == "中")
+    let first:int[]? = null
+    let second:int[]? = supplied
+    let chained = first ?? second ?? []
+    assert(chained[0] == 3)
+    let entries:Entry[]? = null
+    let created = entries ?? [Entry(value:9)]
+    assert(created[0].value == 9)
+    let nested:int[][]? = null
+    let matrix = nested ?? [[],[4]]
+    assert(matrix[0].is_empty() && matrix[1][0] == 4)
+    let optional_pair:(int[],str)? = null
+    let pair = optional_pair ?? ([],"fallback")
+    let (items,label) = pair
+    assert(items.is_empty() && label == "fallback")
+    let generic:Holder<int[]> = Holder<int[]>(value:null)
+    let restored = generic.get() ?? []
+    assert(restored.is_empty())
+    let optional_named:(text:str,items:int[])? = null
+    let named = optional_named ?? (text:"named",items:[])
+    assert(named.items.is_empty() && named.text == "named")
+    // Supplying a collection context must not narrow ordinary numeric fallback.
+    let narrow:int8? = null
+    let widened = narrow ?? 300
+    assert(widened == 300)
+    let fraction = narrow ?? (1.5 as float64)
+    assert(fraction == 1.5 as float64)
+}
+
+test "coalescing supplies the payload type to collection fallback literals" { exercise() }
+func main() { exercise(); print("Optional collection context : OK") }

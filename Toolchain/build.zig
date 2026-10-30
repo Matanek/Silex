@@ -524,6 +524,12 @@ pub fn build(b: *std.Build) void {
     const rounded_float_command = b.addRunArtifact(rounded_float_tests);
     rounded_float_command.setCwd(b.path(""));
     b.step("test-rounded-floats", "Verify explicit floating rounding and exact conversion guards").dependOn(&rounded_float_command.step);
+    const coalesce_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "coalescing collection" } });
+    coalesce_tests.stack_size = bootstrap_stack_size;
+    const coalesce_command = b.addRunArtifact(coalesce_tests);
+    coalesce_command.setCwd(b.path(""));
+    const coalesce_step = b.step("test-coalesce-collections", "Verify contextual collection fallbacks and completion");
+    coalesce_step.dependOn(&coalesce_command.step);
     const default_scope_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "parameter defaults" } });
     default_scope_tests.stack_size = bootstrap_stack_size;
     const default_scope_command = b.addRunArtifact(default_scope_tests);
@@ -653,6 +659,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lsp_test_module.addOptions("build_options", build_options);
+    const coalesce_completion_tests = b.addTest(.{ .root_module = lsp_test_module, .filters = &.{ "test_0", "coalescing collection" } });
+    coalesce_completion_tests.stack_size = bootstrap_stack_size;
+    const coalesce_completion_command = b.addRunArtifact(coalesce_completion_tests);
+    coalesce_completion_command.setCwd(b.path(""));
+    coalesce_completion_command.step.dependOn(&coalesce_command.step);
+    coalesce_step.dependOn(&coalesce_completion_command.step);
     const protocol_completion_tests = b.addTest(.{ .root_module = lsp_test_module, .filters = &.{ "test_0", "protocol defaults" } });
     protocol_completion_tests.stack_size = bootstrap_stack_size;
     const protocol_completion_command = b.addRunArtifact(protocol_completion_tests);

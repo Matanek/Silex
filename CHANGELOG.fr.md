@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les littéraux de collection utilisés comme remplacement optionnel héritent du type de la valeur, y compris les listes vides et les champs de tuples ; l’élargissement des remplacements numériques est préservé. La complétion conserve le même contexte d’élément.
+
 - Les lectures d’entiers signés étroits après une écriture par pointeur C rétablissent correctement leur signe, y compris dans les champs, emprunts et éléments de collection.
 
 - Les appels via un protocole conservent le récepteur de classe pendant les arguments et callbacks, puis gardent son identité partagée sans réécrire le champ d’origine. Un remplacement réentrant reste en place, tandis que les conformités de type valeur conservent leur mise à jour. Les appels sûrs depuis un champ optionnel participent à l’inférence de mutabilité.

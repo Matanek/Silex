@@ -13,6 +13,7 @@ test {
     _ = @import("Sources/ViewTests.zig");
     _ = @import("Sources/ReflectionTests.zig");
     _ = @import("Sources/RoundedFloatsTests.zig");
+    _ = @import("Sources/OptionalTests.zig");
     _ = @import("Sources/TypedResourceTests.zig");
     _ = @import("Sources/Project/CoreTests.zig");
     _ = @import("Sources/Project/HierarchyTests.zig");

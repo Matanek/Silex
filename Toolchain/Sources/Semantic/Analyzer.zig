@@ -1097,7 +1097,14 @@ pub const Analyzer = struct {
         self.terminate(builder, .{ .branch = .{ .condition = presence.value, .then_block = present, .else_block = absent } });
 
         builder.current_block = absent;
-        var right = try self.analyzeExpression(builder, binary.right);
+        // Collection literals obtain their element/shape from the optional
+        // payload, just like typed bindings and parameters. Keep ordinary
+        // numeric fallbacks independently typed so widening is unchanged.
+        const right_hint = switch (binary.right.value) {
+            .sequence_literal, .tuple_literal => Optionals.expectedContext(left.type, binary.right),
+            else => null,
+        };
+        var right = try self.analyzeExpressionExpected(builder, binary.right, right_hint);
         const result_type = if (right.type == left.type)
             left.type
         else if (right.type == child)

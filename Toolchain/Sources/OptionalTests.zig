@@ -469,6 +469,49 @@ test "diagnose invalid optional coalescing operands" {
     );
 }
 
+test "coalescing collection fallbacks supply context without narrowing scalar fallback" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Entry { let value:int }
+        \\func fallback(values:int[]?) int[] { return values ?? [] }
+        \\func main() {
+        \\    print(fallback(null).count())
+        \\    let source:int[] = [3,7]
+        \\    let present:int[]? = source
+        \\    let selected = present ?? []
+        \\    print(selected.count(), " ", selected[1])
+        \\    let missing:Entry[]? = null
+        \\    let entries = missing ?? [Entry(value:9)]
+        \\    print(entries[0].value)
+        \\    let nested:int[][]? = null
+        \\    let matrix = nested ?? [[],[4]]
+        \\    print(matrix[0].count(), " ", matrix[1][0])
+        \\    let absent_pair:(int[],str)? = null
+        \\    let pair = absent_pair ?? ([],"fallback")
+        \\    let (items,label) = pair
+        \\    print(items.count(), " ", label)
+        \\    let narrow:int8? = null
+        \\    print(narrow ?? 300)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("0\n2 7\n9\n0 4\n0 fallback\n300\n", result.stdout);
+}
+
+test "coalescing collection literals retains element and fixed length diagnostics" {
+    try expectCompileError(
+        "func main() { let source:int[]? = null; let values = source ?? [true] }",
+        "cannot implicitly convert 'bool' to 'int'",
+    );
+    try expectCompileError(
+        "func main() { let source:int[2]? = null; let values = source ?? [1] }",
+        "array literal expects 2 values, found 1",
+    );
+}
+
 test "coalescing composite values cleans only the selected owned result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

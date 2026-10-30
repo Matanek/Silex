@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Collection literals used as optional fallbacks inherit the payload type, including empty lists and tuple fields, while ordinary numeric fallback widening is preserved. Completion keeps the same element context.
+
 - Reading narrow signed integers after a C pointer write now restores their sign, including fields, mutable borrows and collection elements.
 
 - Protocol calls keep class receivers alive through arguments and callbacks, then preserve their shared identity without writing back the original field. Reentrant replacements remain in place, while value conformers still write back updates. Safe calls through optional fields participate in mutability inference.
