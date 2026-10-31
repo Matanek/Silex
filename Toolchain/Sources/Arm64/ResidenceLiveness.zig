@@ -133,8 +133,8 @@ pub fn instructionUses(instruction: Machine.Instruction, slot: usize) bool {
         .external_call => |call| for (call.arguments) |argument| {
             if (argument == slot) break true;
         } else false,
-        .external_indirect_call => |call| call.callee == slot or for (call.arguments) |argument| {
-            if (argument == slot) break true;
+        .external_indirect_call => |call| call.callee == slot or for (call.arguments, 0..) |argument, index| {
+            if (slot >= argument and @as(usize, slot) - argument < Machine.cArgumentWidth(call.signature, index)) break true;
         } else false,
         .dynamic_call => |call| call.receiver == slot or for (call.arguments) |argument| {
             if (spanContains(argument, slot)) break true;

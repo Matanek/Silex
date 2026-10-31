@@ -7,6 +7,7 @@ const PackageTestFixtures = @import("../Packages/TestFixtures.zig");
 const TargetModule = @import("../Target.zig");
 const ParserModule = @import("../Parser.zig");
 const Completion = @import("Completion.zig");
+const NativeInterop = Completion.NativeInterop;
 const ProtocolMembers = @import("ProtocolMembers.zig");
 const LexerModule = @import("../Lexer.zig");
 const ProjectIndex = @import("ProjectIndex.zig");
@@ -35,6 +36,7 @@ const Query = union(enum) {
 };
 
 const PathQuery = struct {
+    native_arguments: ?[]const u8 = null,
     qualifier: []const u8,
     prefix: []const u8,
     type_only: bool = false,
@@ -48,6 +50,7 @@ const QualifierQuery = struct {
 };
 
 const ImportedMemberQuery = struct {
+    native_arguments: ?[]const u8 = null,
     type_path: []const u8,
     prefix: []const u8,
     cursor: usize,
@@ -162,6 +165,7 @@ pub fn completionOutcomeAtForTargetWithDecision(
     decision: Completion.Decision,
 ) !CompletionOutcome {
     const cursor = decision.cursor;
+    const native_arguments = Completion.nativeCallbackArguments(decision);
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
@@ -169,7 +173,7 @@ pub fn completionOutcomeAtForTargetWithDecision(
     const query = try queryAt(allocator, source, decision, project, io, documents);
     var ranked: std.ArrayList(RankedItem) = .empty;
     var protocol_defaults_resolved = false;
-    if (decision.kind == .member and !decision.qualified_type_position) {
+    if (decision.kind == .member and !decision.qualified_type_position and native_arguments == null) {
         if (decision.program) |program| if (decision.receiver) |receiver| {
             if (Completion.resolveReceiverTypeForAccess(allocator, source, program, cursor, receiver, decision.safe_member_access)) |receiver_type| {
                 if (!std.mem.eql(u8, receiver, Completion.nominalReceiverName(receiver_type))) {
@@ -194,6 +198,7 @@ pub fn completionOutcomeAtForTargetWithDecision(
         .use_path => |path| try appendPathItems(allocator, io, documents, project, path, null, cursor, &ranked),
         .qualifier => |qualified| {
             try appendPathItems(allocator, io, documents, project, .{
+                .native_arguments = native_arguments,
                 .qualifier = qualified.path,
                 .prefix = qualified.prefix,
                 .type_only = qualified.type_only,
@@ -205,6 +210,7 @@ pub fn completionOutcomeAtForTargetWithDecision(
                 project,
                 source,
                 .{
+                    .native_arguments = native_arguments,
                     .type_path = qualified.path,
                     .prefix = qualified.prefix,
                     .cursor = qualified.cursor,
@@ -217,6 +223,7 @@ pub fn completionOutcomeAtForTargetWithDecision(
         },
         .imported_member => |member| {
             var resolved = member;
+            resolved.native_arguments = native_arguments;
             resolved.current_program = decision.program;
             resolved.protocol_defaults_resolved = protocol_defaults_resolved;
             if (member.merge_local) {
@@ -632,6 +639,7 @@ pub fn scopeItemsAtForTargetDecisionExpected(
 ) ![]const Types.CompletionItem {
     if (decision.kind == .none or decision.override_start != null or decision.rounded_float_target) return allocator.alloc(Types.CompletionItem, 0);
     const cursor = decision.cursor;
+    const native_arguments = Completion.nativeCallbackArguments(decision);
     const prefix = decision.prefix;
     const type_only = decision.kind == .type_name or decision.qualified_type_position;
     const return_expression = decision.return_expression;
@@ -733,7 +741,7 @@ pub fn scopeItemsAtForTargetDecisionExpected(
         io,
         documents,
         project,
-        .{ .qualifier = "", .prefix = prefix },
+        .{ .qualifier = "", .prefix = prefix, .native_arguments = native_arguments },
         null,
         cursor,
         &ranked,
@@ -743,7 +751,7 @@ pub fn scopeItemsAtForTargetDecisionExpected(
         io,
         documents,
         project,
-        .{ .qualifier = "", .prefix = prefix },
+        .{ .qualifier = "", .prefix = prefix, .native_arguments = native_arguments },
         source,
         cursor,
         &ranked,
@@ -754,11 +762,14 @@ pub fn scopeItemsAtForTargetDecisionExpected(
         const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
         for (loaded.program.functions) |function| {
             if (function.is_local or function.operator != null or !matchesPrefix(function.name, prefix)) continue;
+            if (native_arguments) |arguments| if (!NativeInterop.compatible(loaded.program, function, arguments)) continue;
             if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
             try appendRanked(allocator, &ranked, .{
                 .label = function.name,
                 .kind = CompletionKind.function,
                 .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+                .insertText = if (native_arguments != null) function.name else null,
+                .insertTextFormat = if (native_arguments != null) 1 else null,
             }, 18, false);
         }
     };
@@ -825,6 +836,7 @@ pub fn scopeItemsAtForTargetDecisionExpected(
                 if (function.is_internal) {
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
+                if (native_arguments) |arguments| if (!NativeInterop.compatible(loaded.program, function, arguments)) continue;
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
                 var displayed = function;
                 displayed.name = label;
@@ -832,6 +844,8 @@ pub fn scopeItemsAtForTargetDecisionExpected(
                     .label = label,
                     .kind = CompletionKind.function,
                     .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, displayed),
+                    .insertText = if (native_arguments != null) label else null,
+                    .insertTextFormat = if (native_arguments != null) 1 else null,
                 }, 35, true);
                 matched = true;
             };
@@ -881,8 +895,8 @@ pub fn scopeItemsAtForTargetDecisionExpected(
         result[index] = entry.item;
         result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ entry.priority, index });
         result[index].filterText = entry.item.label;
-        result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
-        result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
+        result[index].insertText = entry.item.insertText orelse try Completion.insertTextForAt(allocator, entry.item, source, cursor);
+        result[index].insertTextFormat = entry.item.insertTextFormat orelse Completion.insertTextFormatForAt(entry.item, source, cursor);
     }
     const expanded = try Completion.expandOptionalCallVariants(allocator, result, source, cursor);
     const unique = Completion.deduplicateCallableShapes(expanded);
@@ -1260,7 +1274,7 @@ fn appendPathItems(
         else
             try std.fmt.allocPrint(allocator, "{s}.{s}", .{ canonical_qualifier, child });
         if (!try modulePathVisible(allocator, io, documents, project, child_path)) continue;
-        if ((query.type_only or call_source != null) and end == remainder.len and
+        if (query.native_arguments == null and (query.type_only or call_source != null) and end == remainder.len and
             (exact_loaded == null or !hasPublicDeclaration(exact_loaded.?.program, child)) and
             try appendPrincipalType(
                 allocator,
@@ -1322,6 +1336,7 @@ fn appendPathItems(
         if (!query.type_only) {
             for (loaded.program.functions) |function| {
                 if (function.is_local or function.operator != null) continue;
+                if (query.native_arguments) |arguments| if (!NativeInterop.compatible(loaded.program, function, arguments)) continue;
                 if (function.is_internal) {
                     if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!module_context and contextual_provider == null and !function.is_public) continue;
@@ -1336,6 +1351,8 @@ fn appendPathItems(
                     .label = function.name,
                     .kind = CompletionKind.function,
                     .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+                    .insertText = if (query.native_arguments != null) function.name else null,
+                    .insertTextFormat = if (query.native_arguments != null) 1 else null,
                 }, 10, true);
             }
         }
@@ -1776,6 +1793,7 @@ fn appendImportedMembers(
     query: ImportedMemberQuery,
     ranked: *std.ArrayList(RankedItem),
 ) !void {
+    if (query.native_arguments != null and !query.static_receiver) return;
     return appendImportedMembersDepth(allocator, io, documents, project, current_source, query, ranked, 0);
 }
 
@@ -1903,6 +1921,7 @@ fn appendImportedMembersDepth(
                 continue;
             }
 
+            if (query.native_arguments) |arguments| if (!method.is_static or !NativeInterop.compatible(loaded.program, method, arguments)) continue;
             if (!Completion.callAcceptsParameters(
                 current_source,
                 query.cursor,
@@ -1913,6 +1932,8 @@ fn appendImportedMembersDepth(
                 .label = method.name,
                 .kind = CompletionKind.method,
                 .detail = try Completion.functionSignatureForReceiver(allocator, loaded.source, loaded.program, structure, query.receiver_type orelse structure.name, method),
+                .insertText = if (query.native_arguments != null) method.name else null,
+                .insertTextFormat = if (query.native_arguments != null) 1 else null,
             }, Completion.memberMethodPriority, true);
         }
         if (query.override_context == null) {

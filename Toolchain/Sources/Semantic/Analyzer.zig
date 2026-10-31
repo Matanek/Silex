@@ -874,10 +874,10 @@ pub const Analyzer = struct {
                 if (access.base.value == .identifier and Support.findBinding(builder.bindings.items, access.base.value.identifier) != null) {
                     break :function_reference try self.analyzeFieldAccess(builder, access);
                 }
-                if (expected) |target| {
-                    if (try GenericSyntax.qualifiedName(self.allocator, expression)) |name| {
+                if (try GenericSyntax.qualifiedName(self.allocator, expression)) |name| {
+                    if (expected) |target| {
                         if (try Callbacks.reference(self, builder, expression.position, name, target)) |reference| break :function_reference reference;
-                    }
+                    } else if (try Callbacks.inferredReference(self, builder, expression.position, name)) |reference| break :function_reference reference;
                 }
                 break :function_reference try self.analyzeFieldAccess(builder, access);
             },
@@ -2117,7 +2117,7 @@ pub const Analyzer = struct {
     }
 };
 
-fn functionMentionsName(program: Ast.Program, function: Ast.Function, name: []const u8) bool {
+pub fn functionMentionsName(program: Ast.Program, function: Ast.Function, name: []const u8) bool {
     for (function.parameters) |parameter| if (std.mem.eql(u8, parameter.name, name)) return false;
     return statementsMentionFreeName(program, function.statements, name, false);
 }

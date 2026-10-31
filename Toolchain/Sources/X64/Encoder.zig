@@ -34,6 +34,7 @@ pub const Error = Machine.Error || Allocator.Error || FloatRuntime.Error || Deep
 
 pub const Image = struct {
     code: []u8,
+    callback_entries: []const Machine.CallbackEntry = &.{},
     entry_offset: u32,
     data_offset: u32,
     address_sites: []const AddressSite = &.{},
@@ -42,6 +43,7 @@ pub const Image = struct {
 
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
+        allocator.free(self.callback_entries);
         allocator.free(self.address_sites);
         allocator.free(self.windows_import_sites);
         allocator.free(self.external_call_sites);
@@ -55,7 +57,7 @@ pub const AddressSite = struct {
 
 const Register = enum(u4) { rax = 0, rcx = 1, rdx = 2, rbx = 3, rsp = 4, rbp = 5, rsi = 6, rdi = 7, r8 = 8, r9 = 9, r10 = 10, r11 = 11, r12 = 12, r13 = 13, r14 = 14, r15 = 15 };
 const CallFixup = struct { displacement_at: usize, function: usize };
-const FunctionAddressFixup = struct { displacement_at: usize, function: usize };
+const FunctionAddressFixup = struct { displacement_at: usize, function: usize, c_signature: ?Machine.ExternalFunction.Signature = null };
 const BranchFixup = struct { displacement_at: usize, instruction: usize };
 const EpilogueFixup = struct { displacement_at: usize };
 const DataFixup = struct { displacement_at: usize, string: usize };
@@ -201,14 +203,21 @@ fn encode(
         },
     }
 
+    var callback_entries: std.ArrayList(Machine.CallbackEntry) = .empty;
+    errdefer callback_entries.deinit(allocator);
     var thunk_offsets = std.AutoHashMap(usize, usize).init(allocator);
     defer thunk_offsets.deinit();
     for (function_addresses.items) |fixup| {
         if (fixup.function >= offsets.len or offsets[fixup.function] == std.math.maxInt(u32)) return error.InvalidMachineProgram;
-        const thunk = try thunk_offsets.getOrPut(fixup.function);
+        const thunk = try thunk_offsets.getOrPut(fixup.function * 2 + @intFromBool(fixup.c_signature != null));
         if (!thunk.found_existing) {
             thunk.value_ptr.* = bytes.items.len;
-            switch (platform) {
+            if (fixup.c_signature) |signature| {
+                try callback_entries.append(allocator, .{ .function = fixup.function, .offset = @intCast(thunk.value_ptr.*) });
+                try @import("CallbackAbi.zig").emit(allocator, &bytes, platform, signature);
+                try appendCall(allocator, &bytes, &calls, fixup.function);
+                try @import("CallbackAbi.zig").finish(allocator, &bytes, platform, signature);
+            } else switch (platform) {
                 .darwin, .linux => try emitLinuxFunctionThunk(allocator, &bytes, &calls, program.functions[fixup.function], fixup.function),
                 .windows => try emitWindowsFunctionThunk(allocator, &bytes, &calls, program.functions[fixup.function], fixup.function),
             }
@@ -332,6 +341,7 @@ fn encode(
     }
     return .{
         .code = try bytes.toOwnedSlice(allocator),
+        .callback_entries = try callback_entries.toOwnedSlice(allocator),
         .entry_offset = entry_offset,
         .data_offset = data_offset,
         .address_sites = try address_sites.toOwnedSlice(allocator),
@@ -819,7 +829,7 @@ fn encodeFunction(
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x05 });
                 const displacement_at = bytes.items.len;
                 try bytes.appendNTimes(allocator, 0, 4);
-                try function_addresses.append(allocator, .{ .displacement_at = displacement_at, .function = address.function });
+                try function_addresses.append(allocator, .{ .displacement_at = displacement_at, .function = address.function, .c_signature = address.c_signature });
                 try emitStoreStack(allocator, bytes, .rax, address.result.start);
                 if (address.owns_receiver) {
                     try emitLoadStack(allocator, bytes, .rax, address.captures[0]);

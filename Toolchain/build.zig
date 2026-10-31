@@ -13,6 +13,9 @@ pub fn build(b: *std.Build) void {
         .off, .any => .ReleaseFast,
     };
 
+    const test_optimize = b.option(std.builtin.OptimizeMode, "test-optimize", "Optimization mode for compiler and LSP unit tests") orelse optimize;
+    const test_stack_size: ?u64 = if (test_optimize == .Debug) 32 * 1024 * 1024 else null;
+
     // Unoptimized interpreter frames exceed 16 MiB at the 512-call guard.
     // Give the Debug bootstrap and its tests room to reach that same guard.
     const bootstrap_stack_size: ?u64 = if (optimize == .Debug) 32 * 1024 * 1024 else null;
@@ -515,33 +518,50 @@ pub fn build(b: *std.Build) void {
     const progress_test_step = b.step("test-cli-progress", "Verify progress animation and diagnostics in POSIX terminals");
     progress_test_step.dependOn(&progress_test_command.step);
 
-    const tests = b.addTest(.{ .root_module = module });
-    tests.stack_size = bootstrap_stack_size;
+    // Native C call sites belong to the test harness, never the CLI module.
+    const test_module = b.createModule(.{
+        .root_source_file = b.path("Root.zig"),
+        .target = target,
+        .optimize = test_optimize,
+    });
+    for (module.import_table.keys(), module.import_table.values()) |name, imported| test_module.addImport(name, imported);
+    if (target.result.os.tag == .windows) {
+        test_module.linkSystemLibrary("crypt32", .{});
+        test_module.linkSystemLibrary("shell32", .{});
+    }
+    test_module.addCSourceFile(.{ .file = b.path("Sources/CallbackAbiOracle.c"), .flags = &.{"-std=c11"} });
+    const tests = b.addTest(.{ .root_module = test_module });
+    tests.stack_size = test_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
-    const rounded_float_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "rounded floating conversion", "native rounded conversion" } });
-    rounded_float_tests.stack_size = bootstrap_stack_size;
+    const rounded_float_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "rounded floating conversion", "native rounded conversion" } });
+    rounded_float_tests.stack_size = test_stack_size;
     const rounded_float_command = b.addRunArtifact(rounded_float_tests);
     rounded_float_command.setCwd(b.path(""));
     b.step("test-rounded-floats", "Verify explicit floating rounding and exact conversion guards").dependOn(&rounded_float_command.step);
-    const coalesce_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "coalescing collection" } });
-    coalesce_tests.stack_size = bootstrap_stack_size;
+    const callback_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "C callback ABI" } });
+    callback_tests.stack_size = test_stack_size;
+    const callback_command = b.addRunArtifact(callback_tests);
+    callback_command.setCwd(b.path(""));
+    b.step("test-callback-abi", "Verify C callback entries against native ABI oracles").dependOn(&callback_command.step);
+    const coalesce_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "coalescing collection" } });
+    coalesce_tests.stack_size = test_stack_size;
     const coalesce_command = b.addRunArtifact(coalesce_tests);
     coalesce_command.setCwd(b.path(""));
     const coalesce_step = b.step("test-coalesce-collections", "Verify contextual collection fallbacks and completion");
     coalesce_step.dependOn(&coalesce_command.step);
-    const default_scope_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "parameter defaults" } });
-    default_scope_tests.stack_size = bootstrap_stack_size;
+    const default_scope_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "parameter defaults" } });
+    default_scope_tests.stack_size = test_stack_size;
     const default_scope_command = b.addRunArtifact(default_scope_tests);
     default_scope_command.setCwd(b.path(""));
     b.step("test-default-scopes", "Verify declaration scope for parameter defaults").dependOn(&default_scope_command.step);
-    const protocol_receiver_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "protocol class receivers" } });
-    protocol_receiver_tests.stack_size = bootstrap_stack_size;
+    const protocol_receiver_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "protocol class receivers" } });
+    protocol_receiver_tests.stack_size = test_stack_size;
     const protocol_receiver_command = b.addRunArtifact(protocol_receiver_tests);
     protocol_receiver_command.setCwd(b.path(""));
     b.step("test-protocol-receivers", "Verify protocol receiver identity, lifetime and value writeback").dependOn(&protocol_receiver_command.step);
-    const protocol_default_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "protocol defaults" } });
-    protocol_default_tests.stack_size = bootstrap_stack_size;
+    const protocol_default_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "protocol defaults" } });
+    protocol_default_tests.stack_size = test_stack_size;
     const protocol_default_command = b.addRunArtifact(protocol_default_tests);
     protocol_default_command.setCwd(b.path(""));
     b.step("test-protocol-defaults", "Verify nominal protocol default implementations").dependOn(&protocol_default_command.step);
@@ -552,8 +572,8 @@ pub fn build(b: *std.Build) void {
     protocol_default_cli.setCwd(b.path("../.."));
     protocol_default_cli.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
     b.step("test-protocol-default-cli", "Verify protocol defaults through native and interpreter CLI").dependOn(&protocol_default_cli.step);
-    const result_call_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "result call policy" } });
-    result_call_tests.stack_size = bootstrap_stack_size;
+    const result_call_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "result call policy" } });
+    result_call_tests.stack_size = test_stack_size;
     const result_call_command = b.addRunArtifact(result_call_tests);
     result_call_command.setCwd(b.path(""));
     b.step("test-result-calls", "Verify ordinary and captured Result calls").dependOn(&result_call_command.step);
@@ -569,7 +589,7 @@ pub fn build(b: *std.Build) void {
         // Keep unnamed import tests reachable as well as the regression.
         .filters = &.{ "test_0", "cycle context" },
     });
-    stack_window_tests.stack_size = bootstrap_stack_size;
+    stack_window_tests.stack_size = test_stack_size;
     const stack_window_command = b.addRunArtifact(stack_window_tests);
     stack_window_command.setCwd(b.path(""));
     b.step("test-arm64-stack-window", "Verify the ARM64 runtime stack window boundary").dependOn(&stack_window_command.step);
@@ -577,7 +597,7 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
         .filters = &.{ "test_0", "failure guard", "omit status checks" },
     });
-    long_guard_tests.stack_size = bootstrap_stack_size;
+    long_guard_tests.stack_size = test_stack_size;
     const long_guard_command = b.addRunArtifact(long_guard_tests);
     long_guard_command.setCwd(b.path(""));
     b.step("test-arm64-long-guards", "Verify ARM64 failure handlers beyond one MiB").dependOn(&long_guard_command.step);
@@ -656,17 +676,22 @@ pub fn build(b: *std.Build) void {
     const lsp_test_module = b.createModule(.{
         .root_source_file = b.path("Sources/LspTests.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     lsp_test_module.addOptions("build_options", build_options);
+    const native_callback_completion_tests = b.addTest(.{ .root_module = lsp_test_module, .filters = &.{ "test_0", "C callback completion", "terminal member expression from its static type" } });
+    native_callback_completion_tests.stack_size = test_stack_size;
+    const native_callback_completion_command = b.addRunArtifact(native_callback_completion_tests);
+    native_callback_completion_command.setCwd(b.path(""));
+    b.step("test-callback-completion", "Verify native callback references and indirect call argument completion").dependOn(&native_callback_completion_command.step);
     const coalesce_completion_tests = b.addTest(.{ .root_module = lsp_test_module, .filters = &.{ "test_0", "coalescing collection" } });
-    coalesce_completion_tests.stack_size = bootstrap_stack_size;
+    coalesce_completion_tests.stack_size = test_stack_size;
     const coalesce_completion_command = b.addRunArtifact(coalesce_completion_tests);
     coalesce_completion_command.setCwd(b.path(""));
     coalesce_completion_command.step.dependOn(&coalesce_command.step);
     coalesce_step.dependOn(&coalesce_completion_command.step);
     const protocol_completion_tests = b.addTest(.{ .root_module = lsp_test_module, .filters = &.{ "test_0", "protocol defaults" } });
-    protocol_completion_tests.stack_size = bootstrap_stack_size;
+    protocol_completion_tests.stack_size = test_stack_size;
     const protocol_completion_command = b.addRunArtifact(protocol_completion_tests);
     protocol_completion_command.setCwd(b.path(""));
     b.step("test-protocol-default-completion", "Verify completion of default protocol methods").dependOn(&protocol_completion_command.step);
@@ -675,11 +700,11 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("Sources/LspAdmissionTests.zig"),
         // Admission executes during installation, including cross-builds.
         .target = b.graph.host,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     lsp_admission_module.addOptions("build_options", build_options);
     const lsp_admission_tests = b.addTest(.{ .root_module = lsp_admission_module });
-    lsp_admission_tests.stack_size = bootstrap_stack_size;
+    lsp_admission_tests.stack_size = test_stack_size;
     const lsp_admission_command = b.addRunArtifact(lsp_admission_tests);
     lsp_admission_command.setCwd(b.path(""));
     const lsp_admission_step = b.step("test-lsp-admission", "Run the host completion admission used by installation");
@@ -690,7 +715,7 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&lsp_admission_command.step);
 
     const lsp_tests = b.addTest(.{ .root_module = lsp_test_module });
-    lsp_tests.stack_size = bootstrap_stack_size;
+    lsp_tests.stack_size = test_stack_size;
     const lsp_test_command = b.addRunArtifact(lsp_tests);
     lsp_test_command.setCwd(b.path(""));
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");

@@ -191,10 +191,10 @@ pub const Parser = struct {
         }
         for (functions.items) |function| _ = try self.internFunctionType(function);
         for (structures.items) |structure| for (structure.methods) |method| {
-            if (!method.is_static) _ = try self.internFunctionType(method);
+            _ = try self.internFunctionType(method);
         };
         for (extensions.items) |extension| for (extension.methods) |method| {
-            if (!method.is_static) _ = try self.internFunctionType(method);
+            _ = try self.internFunctionType(method);
         };
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),

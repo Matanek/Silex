@@ -163,6 +163,12 @@ pub const Specializer = struct {
             self.functions.items[function_index] = function;
         }
 
+        // Static references can be inferred without an expected callback type.
+        // Their concrete signatures must survive the generic table rebuild.
+        for (self.structures.items) |structure| for (structure.methods) |method| {
+            if (method.is_static and method.type_parameters.len == 0) _ = try self.internFunctionType(method);
+        };
+
         try self.compactTypeNames();
 
         var result = program;

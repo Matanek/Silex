@@ -108,12 +108,16 @@ pub fn storeStack(source: Register, slot: Machine.Slot) u32 {
 }
 
 pub fn loadStack(destination: Register, slot: Machine.Slot) u32 {
+    return loadStackFrom(destination, slot, .zero_or_sp);
+}
+
+pub fn loadStackFrom(destination: Register, slot: Machine.Slot, direct_base: Register) u32 {
     const extended = slot >= Machine.direct_stack_slots;
     const direct_slot: u12 = @intCast(if (extended)
         slot - Machine.direct_stack_slots
     else
         slot);
-    const base: Register = if (extended) .x28 else .zero_or_sp;
+    const base: Register = if (extended) .x28 else direct_base;
     return 0xf9400000 | (@as(u32, direct_slot) << 10) |
         (registerBits(base) << 5) | registerBits(destination);
 }

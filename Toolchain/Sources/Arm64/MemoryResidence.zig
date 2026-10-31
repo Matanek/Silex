@@ -289,7 +289,7 @@ pub fn supports(instruction: Machine.Instruction) bool {
 }
 
 pub fn required(function: Machine.Function) bool {
-    for (function.instructions) |instruction| if (supports(instruction) or instruction == .external_call) return true;
+    for (function.instructions) |instruction| if (supports(instruction) or instruction == .external_call or instruction == .external_indirect_call) return true;
     return false;
 }
 
@@ -347,6 +347,15 @@ pub fn pin(instruction: Machine.Instruction, forced: []bool) void {
             for (value.arguments) |argument| forced[argument] = true;
             if (value.result) |result| forced[result] = true;
         },
+        .external_indirect_call => |value| {
+            forced[value.callee] = true;
+            for (value.arguments, 0..) |argument, index| for (0..Machine.cArgumentWidth(value.signature, index)) |leaf| {
+                forced[@as(usize, argument) + leaf] = true;
+            };
+            if (value.result) |result| {
+                forced[result] = true;
+            }
+        },
         else => {},
     }
 }
@@ -382,6 +391,9 @@ pub fn uses(instruction: Machine.Instruction, slot: usize) bool {
         .external_call => |value| for (value.arguments) |argument| {
             if (argument == slot) break true;
         } else false,
+        .external_indirect_call => |value| value.callee == slot or for (value.arguments, 0..) |argument, index| {
+            if (slot >= argument and slot - argument < Machine.cArgumentWidth(value.signature, index)) break true;
+        } else false,
         else => false,
     };
 }
@@ -394,6 +406,7 @@ pub fn defines(instruction: Machine.Instruction, slot: usize) bool {
         .collection_reference => |value| value.result == slot,
         .collection_replace => |value| contains(value.result, slot),
         .external_call => |value| if (value.result) |result| result == slot else false,
+        .external_indirect_call => |value| if (value.result) |result| result == slot else false,
         else => false,
     };
 }

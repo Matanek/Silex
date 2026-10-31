@@ -2,6 +2,7 @@ pub const silex_compiler_api = @import("Sources/OptimizerOracleApi.zig");
 pub const main = @import("Sources/Main.zig").main;
 
 test {
+    _ = @import("Sources/CallbackAbiTests.zig");
     _ = @import("Sources/Semantic/ProtocolDefaults.zig");
     _ = @import("Sources/ResultCallTests.zig");
     // The exported main is lazy in test builds. Keep these semantic

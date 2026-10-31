@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- C callbacks have a distinct native entry: floating arguments and results, preserved registers, and stack arguments follow the target ABI, including after closing the program to its used functions. `C.call` and callbacks accept flat record parameters with 64-bit fields; their results remain scalar. C bindings also accept `uint16`. References must resolve without captures at compile time, directly or through immutable aliases. Static method references can be inferred without annotations, and local declarations take precedence over namespace homonyms. Completion inserts these references without invoking them and recovers indirect C argument contexts.
+
 - Collection literals used as optional fallbacks inherit the payload type, including empty lists and tuple fields, while ordinary numeric fallback widening is preserved. Completion keeps the same element context.
 
 - Reading narrow signed integers after a C pointer write now restores their sign, including fields, mutable borrows and collection elements.

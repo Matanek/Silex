@@ -209,7 +209,9 @@ pub fn reference(self: anytype, builder: anytype, position: anytype, name: []con
     if (signature_index >= self.program.function_types.len) return error.InvalidSource;
     const signature = self.program.function_types[signature_index];
     var selected: ?Ir.FunctionId = null;
+    const local_name = hasLocalFunction(self.program, name, position.file);
     for (self.program.functions, 0..) |function, function_id| {
+        if (local_name and function.position.file != position.file) continue;
         if (!nameMatches(function.name, name) or !visible(self, function, position.file) or !matches(signature, function)) continue;
         if (selected != null) {
             const message = try std.fmt.allocPrint(self.allocator, "function reference '{s}' is ambiguous for the expected callback type", .{name});
@@ -239,7 +241,9 @@ pub fn reference(self: anytype, builder: anytype, position: anytype, name: []con
 pub fn inferredReference(self: anytype, builder: anytype, position: anytype, name: []const u8) !?Model.TypedValue {
     var selected_function: ?Ir.FunctionId = null;
     var selected_type: ?Ast.Type = null;
+    const local_name = hasLocalFunction(self.program, name, position.file);
     for (self.program.functions, 0..) |function, function_id| {
+        if (local_name and function.position.file != position.file) continue;
         if (!nameMatches(function.name, name) or !visible(self, function, position.file)) continue;
         var function_type: ?Ast.Type = null;
         for (self.program.function_types, 0..) |signature, signature_index| if (matches(signature, function)) {
@@ -249,6 +253,21 @@ pub fn inferredReference(self: anytype, builder: anytype, position: anytype, nam
         if (function_type == null or selected_function != null) return null;
         selected_function = function_id;
         selected_type = function_type;
+    }
+    for (self.program.structures, 0..) |structure, structure_index| {
+        if (structure.is_protocol) continue;
+        for (structure.methods, 0..) |method, method_index| {
+            if (!method.is_static or !staticMethodNameMatches(structure.name, method.name, name) or
+                !Visibility.memberVisible(self, structure_index, method, position)) continue;
+            var function_type: ?Ast.Type = null;
+            for (self.program.function_types, 0..) |signature, signature_index| if (matches(signature, method)) {
+                function_type = .function(signature_index);
+                break;
+            };
+            if (function_type == null or selected_function != null) return null;
+            selected_function = methodFunctionId(self.program, structure_index, method_index);
+            selected_type = function_type;
+        }
     }
     const function_id = selected_function orelse return null;
     const type_value = selected_type.?;
@@ -380,6 +399,12 @@ fn visible(self: anytype, function: Ast.Function, file: usize) bool {
     if (function.is_internal) return Visibility.packageVisible(self, function.owner);
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
     return Visibility.moduleVisible(self, function.owner, function.name[0..separator]);
+}
+
+fn hasLocalFunction(program: Ast.Program, name: []const u8, file: usize) bool {
+    if (std.mem.indexOfScalar(u8, name, '.') != null) return false;
+    for (program.functions) |function| if (function.position.file == file and nameMatches(function.name, name)) return true;
+    return false;
 }
 
 fn nameMatches(candidate: []const u8, requested: []const u8) bool {

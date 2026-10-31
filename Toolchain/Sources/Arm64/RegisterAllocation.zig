@@ -189,7 +189,7 @@ pub fn allocateWithExternals(allocator: Allocator, function: Machine.Function, e
     // Keep argument/result stack homes. Scalar regions may borrow volatile
     // floating colors only when their live values do not meet a call.
     const has_calls = for (function.instructions) |instruction| {
-        if (instruction == .call or MemoryResidence.callsRuntime(instruction)) break true;
+        if (instruction == .call or instruction == .external_indirect_call or MemoryResidence.callsRuntime(instruction)) break true;
         if (instruction == .external_call) {
             const call = instruction.external_call;
             if (call.function >= externals.len or call.result == null or
@@ -602,7 +602,7 @@ fn allocateGraph(
     @memset(preserved, false);
     if (regional_float_colors) {
         for (instructions, 0..) |instruction, index| {
-            if (instruction != .call and instruction != .external_call and !MemoryResidence.callsRuntime(instruction)) continue;
+            if (instruction != .call and instruction != .external_call and instruction != .external_indirect_call and !MemoryResidence.callsRuntime(instruction)) continue;
             for (0..slot_count) |slot| {
                 if (live[index * slot_count + slot] or successorLive(instructions, live, slot_count, index, slot))
                     preserved[alias_roots[slot]] = true;
@@ -1403,6 +1403,7 @@ fn visit(
             for (call.arguments) |argument| touch(argument, index, first, last, weights, weight);
             if (call.result) |result| touch(result, index, first, last, weights, weight);
         },
+        .external_indirect_call => visitBarrier(instruction, index, first, last, weights, weight),
         .return_value => |value| if (!value.aggregate) touch(value.start, index, first, last, weights, weight),
         .branch => |value| touch(value.condition, index, first, last, weights, weight),
         else => {},

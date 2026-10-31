@@ -334,6 +334,7 @@ fn executeInstruction(
         .constant_float32 => |constant| try store(function, values, constant.result, .{ .float32 = @bitCast(constant.bits) }),
         .constant_float64 => |constant| try store(function, values, constant.result, .{ .float64 = @bitCast(constant.bits) }),
         .function_reference => |reference| {
+            if (reference.c_abi) return error.UnsupportedBoundary;
             if (reference.function >= program.functions.len) return error.InvalidProgram;
             const captures = try allocator.alloc(Value, reference.captures.len);
             for (reference.captures, 0..) |capture, index| captures[index] = try cloneValue(allocator, try load(values, capture));

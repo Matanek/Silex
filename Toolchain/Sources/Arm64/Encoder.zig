@@ -94,6 +94,7 @@ pub const Platform = System.Platform;
 
 pub const Image = struct {
     code: []u8,
+    callback_entries: []const Machine.CallbackEntry = &.{},
     function_offsets: []const u32,
     debug_locations: []const DebugLocation = &.{},
     entry_offset: ?u32,
@@ -104,6 +105,7 @@ pub const Image = struct {
 
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
+        allocator.free(self.callback_entries);
         allocator.free(self.function_offsets);
         allocator.free(self.debug_locations);
         allocator.free(self.external_call_sites);
@@ -155,7 +157,7 @@ const CycleFixup = struct {
     allocate_at: ?usize = null,
     release_at: ?usize = null,
 };
-const FunctionAddressFixup = struct { at: usize, function: Machine.FunctionId };
+const FunctionAddressFixup = struct { at: usize, function: Machine.FunctionId, c_signature: ?Machine.ExternalFunction.Signature = null };
 
 pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Error!Image {
     return encodeForPlatform(allocator, program, entry, .darwin);
@@ -326,6 +328,20 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         try allocator.dupe(Machine.ExternalFunction, program.external_functions);
     errdefer allocator.free(external_functions);
 
+    var callback_entries: std.ArrayList(Machine.CallbackEntry) = .empty;
+    errdefer callback_entries.deinit(allocator);
+    var c_entries = std.AutoHashMap(usize, usize).init(allocator);
+    defer c_entries.deinit();
+    for (function_addresses.items) |fixup| if (fixup.c_signature) |signature| {
+        if (fixup.function >= offsets.len) return error.InvalidMachineProgram;
+        const c_entry = try c_entries.getOrPut(fixup.function);
+        if (!c_entry.found_existing) {
+            c_entry.value_ptr.* = words.items.len * 4;
+            try callback_entries.append(allocator, .{ .function = fixup.function, .offset = @intCast(c_entry.value_ptr.*) });
+            try @import("CallbackAbi.zig").emit(allocator, &words, platform, signature, offsets[fixup.function]);
+        }
+    };
+
     var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
         if (platform == .linux) {
@@ -367,10 +383,11 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             std.debug.print("invalid address fixup function={d} offsets={d}\n", .{ fixup.function, offsets.len });
             return error.InvalidMachineProgram;
         }
-        try patchPageAddress(words.items, fixup.at, offsets[fixup.function]);
+        const target_offset: u32 = @intCast(if (fixup.c_signature != null) c_entries.get(fixup.function).? else offsets[fixup.function]);
+        try patchPageAddress(words.items, fixup.at, target_offset);
         try address_sites.append(allocator, .{
             .instruction_offset = @intCast(fixup.at * @sizeOf(u32)),
-            .target_offset = offsets[fixup.function],
+            .target_offset = target_offset,
         });
     }
     const machine_code_size = words.items.len * 4;
@@ -465,6 +482,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     }
     return .{
         .code = code,
+        .callback_entries = try callback_entries.toOwnedSlice(allocator),
         .function_offsets = offsets,
         .debug_locations = try debug_locations.toOwnedSlice(allocator),
         .entry_offset = entry_offset,
@@ -1857,7 +1875,7 @@ fn encodeFunction(
                 } else try encodeBinary(allocator, words, &fixups, function, &scalar_cache, binary, &float_literals);
             },
             .function_address => |address| {
-                try function_addresses.append(allocator, .{ .at = words.items.len, .function = address.function });
+                try function_addresses.append(allocator, .{ .at = words.items.len, .function = address.function, .c_signature = address.c_signature });
                 try appendRelocatableAddress(allocator, words, .x9);
                 try words.append(allocator, storeStack(.x9, address.result.start));
                 if (address.owns_receiver) {
@@ -1939,7 +1957,7 @@ fn encodeFunction(
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
             .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, platform, program, function, call),
-            .external_indirect_call => |call| try ExternalCalls.emitIndirect(allocator, words, function, call),
+            .external_indirect_call => |call| try ExternalCalls.emitIndirect(allocator, words, platform, function, call),
             .mutex_lock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, false),
             .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, function, call),

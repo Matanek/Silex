@@ -3,6 +3,7 @@ const Instructions = @import("Instructions.zig");
 const Machine = @import("Machine.zig");
 const MathBoundary = @import("../Math/Boundary.zig");
 const System = @import("System.zig");
+const CAbi = @import("CAbi.zig");
 
 const Allocator = std.mem.Allocator;
 const Register = Instructions.Register;
@@ -91,117 +92,90 @@ pub fn emit(
         return;
     }
 
-    var has_float = false;
-    for (external.signature.arguments) |kind| if (kind == .float32 or kind == .float64) {
-        has_float = true;
-        break;
-    };
-    if (!has_float) {
-        for (call.arguments[0..@min(call.arguments.len, Machine.max_register_arguments)], 0..) |argument, index| {
-            try loadValue(allocator, words, function, @enumFromInt(index), argument);
-        }
-    } else {
-        var integer_index: usize = 0;
-        var float_index: usize = 0;
-        for (call.arguments, external.signature.arguments) |argument, kind| {
-            if (kind == .float32 or kind == .float64) {
-                if (float_index >= 8) return error.TooManyArguments;
-                try loadValue(allocator, words, function, .x9, argument);
-                try words.append(allocator, Instructions.moveGeneralToFloat(@enumFromInt(float_index), .x9, kind == .float64));
-                float_index += 1;
-            } else {
-                if (integer_index >= 8) return error.TooManyArguments;
-                try loadValue(allocator, words, function, @enumFromInt(integer_index), argument);
-                integer_index += 1;
-            }
-        }
-    }
-    if (!has_float and call.arguments.len > 8) try loadValue(allocator, words, function, .x14, call.arguments[8]);
-    if (!has_float and call.arguments.len > 9) try loadValue(allocator, words, function, .x15, call.arguments[9]);
-    if (!has_float and call.arguments.len > 8) {
-        try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, false));
-        try words.append(allocator, Instructions.store64(.x14, .zero_or_sp, 0));
-        if (call.arguments.len > 9) try words.append(allocator, Instructions.store64(.x15, .zero_or_sp, 8));
-    }
-    try sites.append(allocator, .{
-        .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
-        .function = call.function,
-    });
-    try words.append(allocator, Instructions.addressPage(.x16));
-    try words.append(allocator, Instructions.load64(.x16, .x16, 0));
-    try words.append(allocator, Instructions.branchLinkRegister(.x16));
-    if (!has_float and call.arguments.len > 8) try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, true));
-    // x8 is caller-clobbered by AAPCS64 but carries the private Silex status
-    // between generated calls. A successful C Boundary call starts a fresh
-    // success status explicitly.
-    try words.append(allocator, Instructions.moveWideZero32(.x8, 0));
-    if (call.result) |result| {
-        if (external.signature.result == .float32 or external.signature.result == .float64) {
-            try words.append(allocator, Instructions.moveFloatToGeneral(.x9, .x0, external.signature.result == .float64));
-            try storeValue(allocator, words, function, .x9, result);
-        } else {
-            if (external.signature.result == .uint8) try words.append(allocator, Instructions.zeroExtendRegister(.x0, .x0, 8));
-            if (external.signature.result_signed_32) try words.append(allocator, Instructions.signExtendRegister(.x0, .x0, 32));
-            try storeValue(allocator, words, function, .x0, result);
-        }
-    }
+    const stack_size = try emitCArguments(allocator, words, function, platform, external.signature, call.arguments);
+    try sites.append(allocator, .{ .instruction_offset = @intCast(words.items.len * 4), .function = call.function });
+    try words.appendSlice(allocator, &.{ Instructions.addressPage(.x16), Instructions.load64(.x16, .x16, 0), Instructions.branchLinkRegister(.x16) });
+    try finishC(allocator, words, function, external.signature, call.result, stack_size);
 }
 
-pub fn emitIndirect(
-    allocator: Allocator,
-    words: *std.ArrayList(u32),
-    function: Machine.Function,
-    call: Machine.Instruction.ExternalIndirectCall,
-) Machine.Error!void {
-    if (call.signature.arguments.len != call.arguments.len or
-        call.arguments.len > Machine.max_external_arguments)
-    {
-        return error.InvalidMachineProgram;
-    }
+pub fn emitIndirect(allocator: Allocator, words: *std.ArrayList(u32), platform: System.Platform, function: Machine.Function, call: Machine.Instruction.ExternalIndirectCall) Machine.Error!void {
+    if (call.signature.arguments.len != call.arguments.len or call.arguments.len > Machine.max_external_arguments) return error.InvalidMachineProgram;
     try loadValue(allocator, words, function, .x16, call.callee);
-    var has_float = false;
-    for (call.signature.arguments) |kind| if (kind == .float32 or kind == .float64) {
-        has_float = true;
-        break;
-    };
-    if (!has_float) {
-        for (call.arguments[0..@min(call.arguments.len, Machine.max_register_arguments)], 0..) |argument, index| {
-            try loadValue(allocator, words, function, @enumFromInt(index), argument);
+    const stack_size = try emitCArguments(allocator, words, function, platform, call.signature, call.arguments);
+    try words.append(allocator, Instructions.branchLinkRegister(.x16));
+    try finishC(allocator, words, function, call.signature, call.result, stack_size);
+}
+
+fn loadCBits(allocator: Allocator, words: *std.ArrayList(u32), function: Machine.Function, kind: Machine.AbiValue, destination: Register, slot: Machine.Slot, stack_base: Register) !void {
+    if (CAbi.floating(kind) and (floatResidence(function, slot) != null or floatLaneResidence(function, slot) != null)) {
+        try loadFloatBits(allocator, words, function, destination, slot, kind == .float64);
+    } else if (function.register_slots.len != 0 and function.register_slots[slot] != null) {
+        try loadValue(allocator, words, function, destination, slot);
+    } else try words.append(allocator, Instructions.loadStackFrom(destination, slot, stack_base));
+}
+fn emitCArguments(allocator: Allocator, words: *std.ArrayList(u32), function: Machine.Function, platform: System.Platform, signature: Machine.ExternalFunction.Signature, arguments: []const Machine.Slot) Machine.Error!u12 {
+    const native = try CAbi.plan(allocator, .arm64, platform, signature);
+    defer native.deinit(allocator);
+    const temporary = try allocator.alloc(usize, arguments.len);
+    defer allocator.free(temporary);
+    var stack_size: usize = native.stack_size;
+    for (native.arguments, 0..) |argument, index| {
+        temporary[index] = 0;
+        if (argument.indirect) {
+            stack_size = std.mem.alignForward(usize, stack_size, 16);
+            temporary[index] = stack_size;
+            stack_size += CAbi.width(signature, index) * 8;
         }
-    } else {
-        var integer_index: usize = 0;
-        var float_index: usize = 0;
-        for (call.arguments, call.signature.arguments) |argument, kind| {
-            if (kind == .float32 or kind == .float64) {
-                if (float_index >= 8) return error.TooManyArguments;
-                try loadValue(allocator, words, function, .x9, argument);
-                try words.append(allocator, Instructions.moveGeneralToFloat(@enumFromInt(float_index), .x9, kind == .float64));
-                float_index += 1;
-            } else {
-                if (integer_index >= 8) return error.TooManyArguments;
-                try loadValue(allocator, words, function, @enumFromInt(integer_index), argument);
-                integer_index += 1;
+    }
+    stack_size = std.mem.alignForward(usize, stack_size, 16);
+    if (stack_size > 4080) return error.FrameTooLarge;
+    if (stack_size != 0) try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, @intCast(stack_size), false));
+    // Slot homes are relative to the caller's original SP. Native stack
+    // arguments and indirect record copies live below it, on a separate frame.
+    const stack_base: Register = if (stack_size == 0) .zero_or_sp else .x17;
+    if (stack_size != 0) try words.append(allocator, Instructions.addSubtractImmediate(.x17, .zero_or_sp, @intCast(stack_size), true));
+    for (native.arguments, arguments, 0..) |argument, slot, index| if (argument.indirect) {
+        for (CAbi.fields(signature, index), 0..) |kind, leaf| {
+            try loadCBits(allocator, words, function, kind, .x9, @intCast(@as(usize, slot) + leaf), stack_base);
+            try words.append(allocator, Instructions.store64(.x9, .zero_or_sp, @intCast(temporary[index] + leaf * 8)));
+        }
+    };
+    for (native.arguments, arguments, signature.arguments, 0..) |argument, slot, kind, index| {
+        const leaves = CAbi.fields(signature, index);
+        for (argument.locations, 0..) |location, leaf| {
+            const leaf_kind = if (argument.indirect) Machine.AbiValue.read_address else if (kind == .record) leaves[leaf] else kind;
+            if (argument.indirect) try words.append(allocator, Instructions.addSubtractImmediate(.x9, .zero_or_sp, @intCast(temporary[index]), true)) else try loadCBits(allocator, words, function, leaf_kind, .x9, @intCast(@as(usize, slot) + leaf), stack_base);
+            switch (location) {
+                .general => |lane| try words.append(allocator, Instructions.moveRegister(@enumFromInt(lane), .x9)),
+                .floating => |lane| try words.append(allocator, Instructions.moveGeneralToFloat(@enumFromInt(lane), .x9, leaf_kind == .float64)),
+                .stack => |offset| {
+                    try words.append(allocator, Instructions.addSubtractImmediate(.x10, .zero_or_sp, @intCast(offset), true));
+                    const size = if (platform == .darwin) CAbi.scalarSize(leaf_kind) else 8;
+                    try words.append(allocator, switch (size) {
+                        1 => Instructions.storeByte(.x9, .x10),
+                        2 => Instructions.store16(.x9, .x10),
+                        4 => Instructions.store32(.x9, .x10),
+                        else => Instructions.store64(.x9, .x10, 0),
+                    });
+                },
             }
         }
     }
-    if (!has_float and call.arguments.len > 8) try loadValue(allocator, words, function, .x14, call.arguments[8]);
-    if (!has_float and call.arguments.len > 9) try loadValue(allocator, words, function, .x15, call.arguments[9]);
-    if (!has_float and call.arguments.len > 8) {
-        try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, false));
-        try words.append(allocator, Instructions.store64(.x14, .zero_or_sp, 0));
-        if (call.arguments.len > 9) try words.append(allocator, Instructions.store64(.x15, .zero_or_sp, 8));
-    }
-    try words.append(allocator, Instructions.branchLinkRegister(.x16));
-    if (!has_float and call.arguments.len > 8) try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 16, true));
+    return @intCast(stack_size);
+}
+fn finishC(allocator: Allocator, words: *std.ArrayList(u32), function: Machine.Function, signature: Machine.ExternalFunction.Signature, result: ?Machine.Slot, stack_size: u12) !void {
+    if (stack_size != 0) try words.append(allocator, Instructions.addSubtractImmediate(.zero_or_sp, .zero_or_sp, stack_size, true));
     try words.append(allocator, Instructions.moveWideZero32(.x8, 0));
-    if (call.result) |result| {
-        if (call.signature.result == .float32 or call.signature.result == .float64) {
-            try words.append(allocator, Instructions.moveFloatToGeneral(.x9, .x0, call.signature.result == .float64));
-            try storeValue(allocator, words, function, .x9, result);
+    if (result) |slot| {
+        if (CAbi.floating(signature.result.?)) {
+            try words.append(allocator, Instructions.moveFloatToGeneral(.x9, .x0, signature.result == .float64));
+            try storeValue(allocator, words, function, .x9, slot);
         } else {
-            if (call.signature.result == .uint8) try words.append(allocator, Instructions.zeroExtendRegister(.x0, .x0, 8));
-            if (call.signature.result_signed_32) try words.append(allocator, Instructions.signExtendRegister(.x0, .x0, 32));
-            try storeValue(allocator, words, function, .x0, result);
+            if (signature.result == .uint8) try words.append(allocator, Instructions.zeroExtendRegister(.x0, .x0, 8));
+            if (signature.result == .uint16) try words.append(allocator, Instructions.zeroExtendRegister(.x0, .x0, 16));
+            if (signature.result == .uint32) try words.append(allocator, Instructions.zeroExtendRegister(.x0, .x0, 32));
+            if (signature.result_signed_32) try words.append(allocator, Instructions.signExtendRegister(.x0, .x0, 32));
+            try storeValue(allocator, words, function, .x0, slot);
         }
     }
 }
@@ -505,7 +479,11 @@ test "scalar math intrinsics read and preserve paired float32 lanes" {
                         .{ .register = 16, .lane = 1 - source_lane, .partner = 0 },
                         .{ .register = 17, .lane = 0, .partner = 1 },
                         .{ .register = 18, .lane = 1 - result_lane, .partner = 2 },
-                        null, null, null, null, null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
                     };
                     var instructions = [_]Machine.Instruction{
                         .{ .constant_float32 = .{ .result = 6, .bits = @bitCast(@as(f32, 4.0)) } },

@@ -7,6 +7,7 @@ const ProtocolDefaults = @import("../ProtocolDefaults.zig");
 const RecoveryModule = @import("Recovery.zig");
 const Types = @import("Types.zig");
 const Numeric = @import("../Numeric.zig");
+pub const NativeInterop = @import("NativeInterop.zig");
 
 const Allocator = std.mem.Allocator;
 const CompletionItem = Types.CompletionItem;
@@ -106,6 +107,7 @@ const ExpectedType = struct {
     strict: bool = false,
     function_type: ?Ast.Type = null,
     function_signature: ?Ast.FunctionType = null,
+    native_arguments: ?[]const u8 = null,
     constraint: enum { exact, iterable, numeric } = .exact,
 };
 
@@ -871,9 +873,12 @@ fn calleeExpressionBefore(source: []const u8, opening: usize) ?[]const u8 {
     var index = end;
     var round_depth: usize = 0;
     var square_depth: usize = 0;
+    var angle_depth: usize = 0;
     while (index != 0) {
         const character = source[index - 1];
         switch (character) {
+            '>' => angle_depth += 1,
+            '<' => angle_depth -|= 1,
             ')' => round_depth += 1,
             ']' => square_depth += 1,
             '(' => if (round_depth != 0) {
@@ -882,13 +887,19 @@ fn calleeExpressionBefore(source: []const u8, opening: usize) ?[]const u8 {
             '[' => if (square_depth != 0) {
                 square_depth -= 1;
             } else break,
-            ',', ';', '=', '{', '}', ':' => if (round_depth == 0 and square_depth == 0) break,
-            else => if (std.ascii.isWhitespace(character) and round_depth == 0 and square_depth == 0) break,
+            ',', ';', '=', '{', '}', ':' => if (round_depth == 0 and square_depth == 0 and angle_depth == 0) break,
+            else => if (std.ascii.isWhitespace(character) and round_depth == 0 and square_depth == 0 and angle_depth == 0) break,
         }
         index -= 1;
     }
     const expression = std.mem.trim(u8, source[index..end], " \t\r\n");
     return if (expression.len == 0) null else expression;
+}
+
+pub fn nativeCallbackArguments(decision: Decision) ?[]const u8 {
+    const argument = decision.active_argument orelse return null;
+    if (argument.positional_index != 0 or argument.parameter_name != null) return null;
+    return NativeInterop.callbackArguments(argument.callee_expression);
 }
 
 pub fn sourceForArgumentLookup(
@@ -981,7 +992,7 @@ pub fn expectsFunctionValueAt(
 ) bool {
     const program = decision.program orelse return false;
     const expected = expectedTypeAt(allocator, source, program, decision.cursor, decision) orelse return false;
-    return expectedCallbackSignature(program, expected) != null;
+    return expected.native_arguments != null or expectedCallbackSignature(program, expected) != null;
 }
 
 fn completionItemMatchesFunctionSignature(program: Ast.Program, item: CompletionItem, expected: Ast.FunctionType) bool {
@@ -1172,7 +1183,8 @@ pub fn expandOptionalCallVariants(
     source: []const u8,
     cursor: usize,
 ) ![]CompletionItem {
-    const should_expand = !callFollows(source, cursor);
+    const decision = try decisionAt(allocator, source, cursor, .invoked);
+    const should_expand = !callFollows(source, cursor) and nativeCallbackArguments(decision) == null;
     var additional: usize = 0;
     if (should_expand) for (items) |item| if (optionalCallLayout(item) != null) {
         additional += 1;
@@ -2148,6 +2160,7 @@ fn appendInstanceMembers(
     }
     for (structure.methods) |method| {
         if (method.is_static or !localMemberVisible(program, access_structure, structure, method)) continue;
+        if (expected_type) |expected| if (expected.native_arguments != null) continue;
         if (method.accessor) |accessor| {
             if (structure.is_protocol and accessor.kind == .get) try appendCandidate(allocator, candidates, context, .{
                 .label = accessor.property,
@@ -2188,16 +2201,19 @@ fn callbackTypeMatchesSignature(program: Ast.Program, actual: Ast.Type, signatur
 }
 
 fn memberValueMatchesExpectedCallback(program: Ast.Program, actual: Ast.Type, expected: ?ExpectedType) bool {
+    if (expected) |wanted| if (wanted.native_arguments != null) return false;
     const wanted = expectedCallbackSignature(program, expected orelse return true) orelse return true;
     return callbackTypeMatchesSignature(program, actual, wanted);
 }
 
 fn functionMatchesExpectedCallback(program: Ast.Program, function: Ast.Function, expected: ?ExpectedType) bool {
+    if (expected) |wanted| if (wanted.native_arguments) |arguments| return NativeInterop.compatible(program, function, arguments);
     const wanted = expectedCallbackSignature(program, expected orelse return true) orelse return true;
     return functionMatchesSignature(function, wanted) or callbackTypeMatchesSignature(program, function.return_type, wanted);
 }
 
 fn functionIsExpectedReference(program: Ast.Program, function: Ast.Function, expected: ?ExpectedType) bool {
+    if (expected) |wanted| if (wanted.native_arguments) |arguments| return NativeInterop.compatible(program, function, arguments);
     const wanted = expectedCallbackSignature(program, expected orelse return false) orelse return false;
     return functionMatchesSignature(function, wanted);
 }
@@ -2479,6 +2495,7 @@ fn appendExpressionSymbols(
             .name = expected.name,
             .function_type = expected.function_type,
             .function_signature = expected.function_signature,
+            .native_arguments = expected.native_arguments,
             .constraint = expected.constraint,
         } else null
     else
@@ -2514,6 +2531,11 @@ fn appendExpressionSymbols(
         while (index != 0) {
             index -= 1;
             const local = locals[index];
+            if (selection_type) |expected| if (expected.native_arguments) |arguments| {
+                if (!try nativeLocalReference(allocator, source, program, locals, lexical_callables, index, arguments, locals.len)) continue;
+                try appendCandidate(allocator, candidates, context, .{ .label = local.name, .kind = CompletionKind.variable, .detail = "statically resolved C callback" }, 10, false);
+                continue;
+            };
             const function_expected = if (selection_type) |expected| expectedCallbackSignature(program, expected) else null;
             if (function_expected) |expected_function| {
                 if (!callbackTypeMatchesSignature(program, local.type_value orelse continue, expected_function)) continue;
@@ -2533,6 +2555,7 @@ fn appendExpressionSymbols(
             }, typedPriority(program, 10, selection_type, local.type_name), false);
         }
         for (lexical_callables) |scope| for (scope.parameters) |parameter| {
+            if (selection_type) |expected| if (expected.native_arguments != null) continue;
             const parameter_type = try typeSpelling(allocator, program, parameter.type);
             const function_expected = if (selection_type) |expected| expectedCallbackSignature(program, expected) else null;
             if (function_expected) |expected_function| {
@@ -2573,7 +2596,7 @@ fn appendExpressionSymbols(
         const call_type = effectiveCallType(program, function.return_type, try captureCallAt(allocator, source, context.prefix_start));
         const return_type = try typeSpelling(allocator, program, call_type);
         const passed_as_value = if (selection_type) |expected|
-            if (expectedCallbackSignature(program, expected)) |signature|
+            if (expected.native_arguments) |arguments| NativeInterop.compatible(program, function, arguments) else if (expectedCallbackSignature(program, expected)) |signature|
                 functionMatchesSignature(function, signature)
             else
                 false
@@ -2586,7 +2609,7 @@ fn appendExpressionSymbols(
                 false
         else
             false;
-        const expects_callback = if (selection_type) |expected| expectedCallbackSignature(program, expected) != null else false;
+        const expects_callback = if (selection_type) |expected| expected.native_arguments != null or expectedCallbackSignature(program, expected) != null else false;
         if (expects_callback) {
             if (!passed_as_value and !returns_expected_callback) continue;
         } else if (!matchesExpectedType(program, selection_type, return_type)) continue;
@@ -2605,6 +2628,13 @@ fn appendExpressionSymbols(
     }
     for (program.structures) |structure| {
         if (structure.is_protocol or structure.is_tuple) continue;
+        if (selection_type) |expected| if (expected.native_arguments) |arguments| {
+            for (structure.methods) |method| if (method.is_static and NativeInterop.compatible(program, method, arguments) and localMemberVisible(program, if (enclosingClass(source, program, cursor)) |owner| owner.name else null, structure, method)) {
+                try appendCandidate(allocator, candidates, context, .{ .label = structure.name, .kind = structureCompletionKind(structure), .detail = "Silex static callback container" }, 30, false);
+                break;
+            };
+            continue;
+        };
         if (!matchesExpectedType(program, selection_type, structure.name)) continue;
         if (structure.constructors.len == 0) {
             try appendCandidate(allocator, candidates, context, .{
@@ -2759,6 +2789,10 @@ fn appendExpressionIntroducers(
     context: Context,
     expected_type: ?ExpectedType,
 ) !void {
+    if (expected_type) |expected| if (expected.native_arguments != null) {
+        try appendKeywords(allocator, candidates, context, &.{.{ "func", "Silex capture-free callback" }}, 50);
+        return;
+    };
     try appendKeywords(allocator, candidates, context, &.{
         .{ "match", "Silex match expression" },
         .{ "try", "Silex Result capture" },
@@ -2881,6 +2915,7 @@ fn typedPriority(program: ?Ast.Program, base: u8, expected: ?ExpectedType, actua
 }
 
 fn matchesExpectedType(program: ?Ast.Program, expected: ?ExpectedType, actual: ?[]const u8) bool {
+    if (expected) |wanted| if (wanted.native_arguments != null) return false;
     const wanted = expected orelse return true;
     if (!wanted.strict) return true;
     return expectedTypeCompatible(program, wanted, actual orelse return false);
@@ -3129,13 +3164,63 @@ const Local = struct {
     type_value: ?Ast.Type = null,
     depth: usize,
     mutable: bool = true,
+    annotated: bool = false,
     initializer: ?LocalInitializer = null,
 };
+
+fn nativeLocalReference(allocator: Allocator, source: []const u8, program: Ast.Program, locals: []const Local, scopes: []const Callable, index: usize, arguments: []const u8, remaining: usize) Allocator.Error!bool {
+    if (remaining == 0 or locals[index].mutable) return false;
+    const initializer = locals[index].initializer orelse return false;
+    var expression = std.mem.trim(u8, initializer.expression, " \t\r\n");
+    while (outerParenthesizedExpression(expression)) |inner| expression = inner;
+    var previous = locals.len;
+    while (previous != 0) {
+        previous -= 1;
+        if (previous == index or !std.mem.eql(u8, locals[previous].name, expression)) continue;
+        const earlier = locals[previous].initializer orelse return false;
+        if (earlier.cursor >= initializer.cursor) continue;
+        return nativeLocalReference(allocator, source, program, locals, scopes, previous, arguments, remaining - 1);
+    }
+    for (program.functions) |function| {
+        const anonymous = function.is_anonymous and std.mem.startsWith(u8, expression, "func") and function.position.offset == initializer.cursor;
+        if (!anonymous and !std.mem.eql(u8, function.name, expression)) continue;
+        if (!NativeInterop.compatible(program, function, arguments)) return false;
+        if (anonymous) {
+            const mentions = @import("../Semantic/Analyzer.zig").functionMentionsName;
+            for (locals) |captured| if (captured.initializer) |created| if (created.cursor < initializer.cursor and mentions(program, function, captured.name)) return false;
+            for (scopes) |scope| {
+                for (scope.parameters) |parameter| if (mentions(program, function, parameter.name)) return false;
+                if (scope.structure_name != null and mentions(program, function, "self")) return false;
+            }
+        }
+        return true;
+    }
+    if (topLevelMemberAccess(expression)) |member| if (findStructure(program, member.base)) |structure| {
+        for (structure.methods) |method| if (method.is_static and std.mem.eql(u8, method.name, member.member) and NativeInterop.compatible(program, method, arguments)) return true;
+        return false;
+    };
+    // An explicitly typed immutable reference to an imported declaration has
+    // no local environment; resolution of that declaration belongs to Workspace.
+    if (locals[index].type_value) |value| if (value.functionIndex()) |function_index| {
+        if (function_index >= program.function_types.len or !NativeInterop.compatibleValue(program, program.function_types[function_index], arguments)) return false;
+        const root = if (topLevelMemberAccess(expression)) |member| member.base else expression;
+        for (program.uses) |use| {
+            const label = use.alias orelse if (std.mem.lastIndexOfScalar(u8, use.path, '.')) |dot| use.path[dot + 1 ..] else use.path;
+            if (std.mem.eql(u8, label, root)) return true;
+        }
+    };
+    return false;
+}
 
 pub const LocalInitializer = struct {
     expression: []const u8,
     cursor: usize,
 };
+
+fn bindingInitializer(source: []const u8, tokens: []const Token) ?LocalInitializer {
+    for (tokens, 0..) |token, index| if (token.tag == .equal) return declarationInitializer(source, tokens[index + 1 ..]);
+    return null;
+}
 
 fn declarationInitializer(source: []const u8, tokens: []const Token) ?LocalInitializer {
     if (tokens.len == 0) return null;
@@ -3169,7 +3254,7 @@ pub fn localInitializerAt(allocator: Allocator, source: []const u8, program: Ast
     var index = locals.len;
     while (index != 0) {
         index -= 1;
-        if (std.mem.eql(u8, locals[index].name, name)) return locals[index].initializer;
+        if (std.mem.eql(u8, locals[index].name, name)) return if (locals[index].annotated) null else locals[index].initializer;
     }
     return null;
 }
@@ -3196,15 +3281,21 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 const declaration_line = token.position.line;
                 var end = index + 2;
                 var completed = false;
+                var nesting: usize = 0;
                 while (end < tokens.len) : (end += 1) {
-                    if (tokens[end].tag == .semicolon or tokens[end].tag == .right_brace or
+                    if (nesting == 0 and (tokens[end].tag == .semicolon or tokens[end].tag == .right_brace or
                         tokens[end].tag == .keyword_if or tokens[end].tag == .keyword_while or
                         tokens[end].tag == .keyword_for or tokens[end].tag == .keyword_match or
                         tokens[end].tag == .keyword_mutex or
-                        tokens[end].position.line > declaration_line)
+                        tokens[end].position.line > declaration_line))
                     {
                         completed = true;
                         break;
+                    }
+                    switch (tokens[end].tag) {
+                        .left_parenthesis, .left_bracket, .left_brace => nesting += 1,
+                        .right_parenthesis, .right_bracket, .right_brace => nesting -|= 1,
+                        else => {},
                     }
                 }
                 if (!completed and lineAtOffset(source, cursor) <= declaration_line) continue;
@@ -3243,10 +3334,8 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 try locals.append(allocator, .{
                     .name = name,
                     .mutable = token.tag == .keyword_var,
-                    .initializer = if (index + 3 < end and tokens[index + 2].tag == .equal)
-                        declarationInitializer(source, tokens[index + 3 ..])
-                    else
-                        null,
+                    .annotated = index + 2 < end and tokens[index + 2].tag == .colon,
+                    .initializer = bindingInitializer(source, tokens[index + 2 .. end]),
                     .type_name = inferred_name,
                     .type_value = inferred,
                     .depth = depth,
@@ -3996,9 +4085,9 @@ pub fn resolveReceiverTypeForAccess(
                 index -= 1;
                 if (std.mem.eql(u8, locals[index].name, first)) {
                     current_type = if (locals[index].type_name) |name| std.mem.trimStart(u8, name, "@& \t") else null;
-                    if (locals[index].initializer) |initializer| {
+                    if (!locals[index].annotated) if (locals[index].initializer) |initializer| {
                         current_type = resolveReceiverType(allocator, source, program, initializer.cursor, initializer.expression) orelse current_type;
-                    }
+                    };
                     break;
                 }
             }
@@ -4305,6 +4394,20 @@ fn expectedActiveArgumentType(
     cursor: usize,
     argument: ActiveArgument,
 ) ?ExpectedType {
+    if (argument.parameter_name == null) {
+        if (argument.positional_index == 0) if (NativeInterop.callbackArguments(argument.callee_expression)) |arguments| return .{ .name = "native_callback", .strict = true, .native_arguments = arguments };
+        if (NativeInterop.callSignature(argument.callee_expression)) |signature| {
+            if (argument.positional_index == 0) return .{ .name = "uint", .strict = true };
+            const fragment = std.fmt.allocPrint(allocator, "struct Signature {{ let entry:{s} }}", .{signature}) catch return null;
+            var parser = ParserModule.Parser.init(allocator, fragment);
+            const parsed = parser.parse() catch return null;
+            if (parsed.structures.len != 1 or parsed.structures[0].fields.len != 1) return null;
+            const index = parsed.structures[0].fields[0].type.functionIndex() orelse return null;
+            const parameters = parsed.function_types[index].parameters;
+            if (argument.positional_index > parameters.len) return null;
+            return .{ .name = typeSpelling(allocator, parsed, parameters[argument.positional_index - 1].type) catch return null, .strict = true };
+        }
+    }
     if (isRoundedFloatCall(argument.callee_expression) and argument.positional_index == 0 and
         (argument.parameter_name == null or std.mem.eql(u8, argument.parameter_name.?, "value")))
         return .{ .name = "float64", .strict = true, .constraint = .numeric };

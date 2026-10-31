@@ -812,6 +812,7 @@ fn externalType(self: anytype, value: Ast.ExternalType, position: anytype) !Type
     return switch (value) {
         .void => .void,
         .uint8 => .uint8,
+        .uint16 => .uint16,
         .int32 => .int32,
         .int64 => .int,
         .uint32 => .uint32,
@@ -824,7 +825,7 @@ fn externalType(self: anytype, value: Ast.ExternalType, position: anytype) !Type
             .address
         else
             self.fail(position, "C.Pointer currently supports only uint8"),
-        .mutable_pointer => |child| if (child == .uint8 or child == .int32 or child == .uint32 or child == .int or child == .uint or child == .float32 or child == .float64)
+        .mutable_pointer => |child| if (child == .uint8 or child == .uint16 or child == .int32 or child == .uint32 or child == .int or child == .uint or child == .float32 or child == .float64)
             .address
         else
             self.fail(position, "C.MutablePointer currently supports integer and floating-point scalars"),
@@ -855,8 +856,8 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
         if (callee.type != .uint) return self.fail(call.arguments[0].position, "C.call expects uint function address bits");
         var arguments: std.ArrayList(Ir.ValueId) = .empty;
         for (call.arguments[1..], signature.parameters, 0..) |argument_expression, parameter, index| {
-            if (parameter.mode != .value or !cCallType(parameter.type, false)) {
-                return self.fail(call.name_position, "C.call parameters must be numeric scalars or C pointers passed by value");
+            if (parameter.mode != .value or !cArgumentType(self, parameter.type)) {
+                return self.fail(call.name_position, "C.call parameters require C scalars or flat records of 64-bit numeric fields passed by value");
             }
             var argument = try self.analyzeExpressionExpected(builder, argument_expression, parameter.type);
             if (argument.type != parameter.type and self.canImplicitlyConvert(argument.type, parameter.type)) {
@@ -962,8 +963,16 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
         }
         const function = try self.analyzeExpression(builder, call.arguments[0]);
         if (function.type.functionIndex() == null) return self.fail(call.arguments[0].position, "C.function_address expects a function value");
+        const signature = self.program.function_types[function.type.functionIndex().?];
+        if (!cCallType(signature.return_type, true)) return self.fail(call.name_position, "C.function_address requires a C scalar or void result");
+        for (signature.parameters) |parameter| if (parameter.mode != .value or !cArgumentType(self, parameter.type))
+            return self.fail(call.name_position, "C.function_address requires C scalar or flat 64-bit numeric record parameters passed by value");
+        const target = namedCallback(builder, function.value, builder.value_types.items.len) orelse
+            return self.fail(call.arguments[0].position, "C.function_address requires a statically resolved function without captures, or an immutable alias of one");
+        const entry = try self.newValue(builder, function.type);
+        try self.emit(builder, .{ .function_reference = .{ .result = entry, .function = target, .c_abi = true } });
         const result = try self.newValue(builder, .uint);
-        try self.emit(builder, .{ .copy = .{ .result = result, .operand = function.value } });
+        try self.emit(builder, .{ .copy = .{ .result = result, .operand = entry } });
         return .{ .type = .uint, .value = result };
     }
     if (call.receiver == null and std.mem.eql(u8, call.name, "C.object_address")) {
@@ -1065,7 +1074,7 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
             return self.fail(call.name_position, "C.mutable_pointer expects one stable mutable value");
         }
         const prepared = try @import("MutableReferences.zig").prepare(self, builder, call.arguments[0], null);
-        const supported_scalar = prepared.type == .int32 or prepared.type == .uint32 or prepared.type == .int or prepared.type == .uint or prepared.type == .float32 or prepared.type == .float64;
+        const supported_scalar = prepared.type == .uint8 or prepared.type == .uint16 or prepared.type == .int32 or prepared.type == .uint32 or prepared.type == .int or prepared.type == .uint or prepared.type == .float32 or prepared.type == .float64;
         const supported_array = if (Collections.collectionForType(self.structures, prepared.type)) |collection|
             collection.length != null and
                 (collection.element == .int32 or collection.element == .uint32 or collection.element == .int or collection.element == .uint or collection.element == .float32 or collection.element == .float64)
@@ -1088,7 +1097,7 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
 
 fn cCallType(type_value: Types.Type, allow_void: bool) bool {
     return (allow_void and type_value == .void) or type_value == .address or
-        type_value == .uint8 or type_value == .int32 or type_value == .uint32 or type_value == .int or type_value == .uint or
+        type_value == .uint8 or type_value == .uint16 or type_value == .int32 or type_value == .uint32 or type_value == .int or type_value == .uint or
         type_value == .float32 or type_value == .float64;
 }
 
@@ -1138,4 +1147,44 @@ pub fn hasFunction(self: anytype, name: []const u8) bool {
         if (std.mem.eql(u8, external.name, name)) return true;
     }
     return false;
+}
+
+// Resolve only statically known, capture-free callbacks. A runtime closure needs
+// an explicit native lifetime/context contract, not a discarded environment.
+fn namedCallback(builder: anytype, value: Ir.ValueId, remaining: usize) ?Ir.FunctionId {
+    if (remaining == 0) return null;
+    for (builder.blocks.items) |block| for (block.instructions.items) |instruction| switch (instruction) {
+        .function_reference => |reference| if (reference.result == value) {
+            return if (reference.captures.len == 0) reference.function else null;
+        },
+        .copy => |copy| if (copy.result == value) return namedCallback(builder, copy.operand, remaining - 1),
+        .local_load => |load| if (load.result == value) {
+            var immutable = false;
+            for (builder.bindings.items) |binding| if (binding.local == load.local and !binding.mutable) {
+                immutable = true;
+            };
+            if (!immutable) return null;
+            var stored: ?Ir.ValueId = null;
+            for (builder.blocks.items) |source_block| for (source_block.instructions.items) |source| {
+                if (source == .local_store and source.local_store.local == load.local) {
+                    if (stored != null) return null;
+                    stored = source.local_store.operand;
+                }
+            };
+            return if (stored) |operand| namedCallback(builder, operand, remaining - 1) else null;
+        },
+        else => {},
+    };
+    return null;
+}
+
+fn cArgumentType(self: anytype, type_value: Types.Type) bool {
+    if (cCallType(type_value, false)) return true;
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.structures.len) return false;
+    const record = self.structures[index];
+    if (record.is_class or record.is_protocol or record.is_static or record.base != null or record.collection != null or record.fields.len == 0) return false;
+    if (self.findAstStructure(record.name)) |declaration| if (declaration.drop != null) return false;
+    for (record.fields) |field| if (field.type != .int and field.type != .uint and field.type != .float64) return false;
+    return true;
 }

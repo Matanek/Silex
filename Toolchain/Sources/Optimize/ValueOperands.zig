@@ -26,6 +26,7 @@ pub fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, ali
         .function_reference => |value| .{ .function_reference = .{
             .result = value.result,
             .function = value.function,
+            .c_abi = value.c_abi,
             .captures = try rewriteValues(allocator, value.captures, aliases),
         } },
         .string_address => |value| .{ .string_address = .{

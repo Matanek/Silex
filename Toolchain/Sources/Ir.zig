@@ -377,6 +377,7 @@ pub const Instruction = union(enum) {
         result: ValueId,
         function: FunctionId,
         captures: []const ValueId = &.{},
+        c_abi: bool = false,
     };
 
     pub const LocalLoad = struct {
@@ -1146,7 +1147,8 @@ fn writeInstruction(
             }
             if (reference.captures.len != program.functions[reference.function].capture_types.len) return error.InvalidProgram;
             try appendResult(output, allocator, program, function, reference.result);
-            try output.appendSlice(allocator, "function @");
+            if (reference.c_abi and reference.captures.len != 0) return error.InvalidProgram;
+            try output.appendSlice(allocator, if (reference.c_abi) "c_function @" else "function @");
             try output.appendSlice(allocator, program.functions[reference.function].name);
             if (reference.captures.len != 0) {
                 try output.appendSlice(allocator, " captures (");

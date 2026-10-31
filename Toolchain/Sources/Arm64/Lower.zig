@@ -378,7 +378,9 @@ fn programUsesMutex(program: Ir.Program) bool {
 fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
     return switch (type_value) {
         .uint8 => .uint8,
-        .int32, .uint32 => .int32,
+        .uint16 => .uint16,
+        .int32 => .int32,
+        .uint32 => .uint32,
         .address => .read_address,
         .uint => .uint64,
         .int => .int64,
@@ -391,7 +393,7 @@ fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
 fn allocateRegisters(allocator: Allocator, function: Machine.Function) Machine.Error!Machine.Function {
     // Boundary signatures and intrinsic lowering are resolved later. Coloring
     // now would freeze avoidable spills around an unknown external call.
-    for (function.instructions) |instruction| if (instruction == .external_call) return function;
+    for (function.instructions) |instruction| if (instruction == .external_call or instruction == .external_indirect_call) return function;
     var result = try MemorySchedule.optimize(allocator, function);
     result = try AggregateCallForwarding.optimize(allocator, result);
     const allocation = try RegisterAllocation.allocate(allocator, result);
@@ -588,6 +590,7 @@ fn lowerInstruction(
             break :closure .{ .function_address = .{
                 .result = layout.values[reference.result],
                 .function = reference.function,
+                .c_signature = if (reference.c_abi) try callbackSignature(allocator, program, program.function_types[function.value_types[reference.result].functionIndex().?]) else null,
                 .captures = captures,
                 .environment = layout.environments[reference.result],
                 .owns_receiver = ownsReceiver(program, program.functions[reference.function]),
@@ -1085,19 +1088,11 @@ fn lowerInstruction(
             }
             const signature = program.function_types[call.signature];
             const arguments = try allocator.alloc(Machine.Slot, call.arguments.len);
-            const argument_types = try allocator.alloc(Machine.AbiValue, signature.parameter_types.len);
-            for (call.arguments, signature.parameter_types, 0..) |argument, parameter_type, index| {
-                arguments[index] = layout.values[argument].start;
-                argument_types[index] = try lowerExternalType(parameter_type);
-            }
+            for (call.arguments, 0..) |argument, index| arguments[index] = layout.values[argument].start;
             break :external_call .{ .external_indirect_call = .{
                 .result = if (call.result) |result| layout.values[result].start else null,
                 .callee = layout.values[call.callee].start,
-                .signature = .{
-                    .arguments = argument_types,
-                    .result = if (signature.return_type == .void) null else try lowerExternalType(signature.return_type),
-                    .result_signed_32 = signature.return_type == .int32,
-                },
+                .signature = try callbackSignature(allocator, program, signature),
                 .arguments = arguments,
             } };
         },
@@ -1590,4 +1585,27 @@ fn ownsReceiver(program: Ir.Program, function: Ir.Function) bool {
     if (function.capture_types.len != 1) return false;
     const index = function.capture_types[0].structureIndex() orelse return false;
     return index < program.structures.len and program.structures[index].is_class;
+}
+
+fn callbackSignature(allocator: Allocator, program: Ir.Program, signature: Ir.FunctionType) Machine.Error!Machine.ExternalFunction.Signature {
+    const arguments = try allocator.alloc(Machine.AbiValue, signature.parameter_types.len);
+    const records = try allocator.alloc([]const Machine.AbiValue, signature.parameter_types.len);
+    for (signature.parameter_types, 0..) |parameter, index| {
+        if (parameter.structureIndex()) |structure| {
+            if (structure >= program.structures.len) return error.InvalidMachineProgram;
+            const record = program.structures[structure];
+            if (record.is_class or record.is_protocol or record.fields.len == 0) return error.UnsupportedType;
+            const leaves = try allocator.alloc(Machine.AbiValue, record.fields.len);
+            for (record.fields, 0..) |field, leaf| {
+                if (field.type != .int and field.type != .uint and field.type != .float64) return error.UnsupportedType;
+                leaves[leaf] = try lowerExternalType(field.type);
+            }
+            arguments[index] = .record;
+            records[index] = leaves;
+        } else {
+            arguments[index] = try lowerExternalType(parameter);
+            records[index] = &.{};
+        }
+    }
+    return .{ .arguments = arguments, .record_fields = records, .result = if (signature.return_type == .void) null else try lowerExternalType(signature.return_type), .result_signed_32 = signature.return_type == .int32 };
 }

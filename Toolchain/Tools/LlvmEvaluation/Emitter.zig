@@ -354,6 +354,9 @@ fn emitCallbackWrappers(
         if (!selected) continue;
         const function = program.functions[function_id];
         if (function.capture_types.len != 0) return error.UnsupportedInstruction;
+        // LLVM aggregate parameters require target-specific C ABI coercions.
+        // Plain LLVM struct arguments do not establish that native contract.
+        for (function.parameter_types) |parameter| if (parameter.structureIndex() != null) return error.UnsupportedInstruction;
         const return_name = try llvmType(allocator, program, function.return_type);
         try appendFmt(output, allocator, "define internal {s} @sx.c.callback.{d}(", .{ return_name, function_id });
         for (function.parameter_types, 0..) |parameter, index| {
@@ -3442,8 +3445,7 @@ fn emitBoundaryDeclarations(
             const same_signature = previous.return_type == function.return_type and
                 std.mem.eql(Ir.Type, previous.parameters, function.parameters);
             const typed_objc_dispatch = objcMessageBoundary(previous) and objcMessageBoundary(function);
-            if (!same_provider or (!same_signature and !typed_objc_dispatch))
-            {
+            if (!same_provider or (!same_signature and !typed_objc_dispatch)) {
                 std.debug.print(
                     "silex LLVM evaluation: boundary symbol '{s}' has conflicting providers or signatures\n",
                     .{function.source_name},
@@ -4405,4 +4407,30 @@ test "protocol storage sizes payload-free enum fields" {
     const llvm = try emit(std.testing.allocator, program);
     defer std.testing.allocator.free(llvm);
     try std.testing.expect(std.mem.indexOf(u8, llvm, "%sx.protocol.1 = type { i64, [1 x i64] }") != null);
+}
+
+test "C callback records require native aggregate ABI legalization" {
+    const point = Ir.Type.structure(0);
+    const callback_type = Ir.Type.function(0);
+    const program: Ir.Program = .{
+        .structures = &.{.{ .name = "Point", .fields = &.{ .{ .name = "x", .type = .float64 }, .{ .name = "y", .type = .float64 } } }},
+        .function_types = &.{.{ .parameter_types = &.{point}, .return_type = .int }},
+        .functions = &.{
+            .{
+                .name = "callback",
+                .parameter_types = &.{point},
+                .return_type = .int,
+                .value_types = &.{ point, .int },
+                .blocks = &.{.{ .instructions = &.{.{ .constant_int = .{ .result = 1, .bits = 0 } }}, .terminator = .{ .return_value = 1 } }},
+            },
+            .{
+                .name = "main",
+                .parameter_types = &.{},
+                .return_type = .void,
+                .value_types = &.{ callback_type, .uint },
+                .blocks = &.{.{ .instructions = &.{ .{ .function_reference = .{ .result = 0, .function = 0, .c_abi = true } }, .{ .copy = .{ .result = 1, .operand = 0 } } }, .terminator = .return_void }},
+            },
+        },
+    };
+    try std.testing.expectError(error.UnsupportedInstruction, emit(std.testing.allocator, program));
 }

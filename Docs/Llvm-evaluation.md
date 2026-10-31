@@ -229,7 +229,9 @@ Byte length masks the descriptor's dynamic
 flag, byte access checks the index before reading, and the explicit interop pointer
 addresses the first byte after the descriptor header. These byte projections stay
 distinct from Unicode scalar count. Capture-free function references can expose
-their internal symbol address through the explicit `C.function_address` bridge.
+a typed scalar C wrapper through the explicit `C.function_address` bridge.
+The experimental adapter rejects record callback parameters until it owns their
+target-specific C ABI coercions; it also rejects indirect C calls.
 Lexical address captures and indirect Silex calls are supported. Monomorphic
 bound class methods use the receiver as both environment and owner; their third
 callback slot carries that owner through copies, fields, calls and cleanup.

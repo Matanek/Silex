@@ -712,6 +712,7 @@ pub const SystemDependency = struct {
 pub const ExternalType = union(enum) {
     void,
     uint8,
+    uint16,
     int32,
     int64,
     uint32,

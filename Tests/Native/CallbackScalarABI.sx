@@ -1,0 +1,59 @@
+use Interop.C
+
+func unsigned_callback(value:uint) uint { return value+7 as uint }
+func floating_callback(value:float64) float64 { return value+value }
+
+test "C callback scalar integer arguments preserve their ABI" {
+    let callback = C.function_address(unsigned_callback)
+    assert(C.call<func(uint) uint>(callback,13 as uint) == 20 as uint)
+}
+test "C callback floating arguments and results preserve their ABI" {
+    let callback = C.function_address(floating_callback)
+    let result = C.call<func(float64) float64>(callback,1.25 as float64)
+    assert(result == 2.5 as float64)
+}
+func main() {
+    let callback = C.function_address(floating_callback)
+    let result = C.call<func(float64) float64>(callback,1.25 as float64)
+    print(result)
+    assert(result == 2.5 as float64)
+}
+
+func single_callback(value:float32) float32 { return value+value }
+func mixed_callback(a:uint,b:float64,c:uint,d:float32) float64 { return a as float64+b+c as float64+d as float64 }
+func generic_callback<T>(value:float64) float64 { return value+value }
+func many_callback(a:uint,b:uint,c:uint,d:uint,e:uint,f:uint,g:uint,h:uint,i:uint,j:uint) uint { return a+b+c+d+e+f+g+h+i+j }
+
+test "C floating callback adapters preserve ordinary function values and aliases" {
+    let ordinary:func(float64) float64 = floating_callback
+    assert(ordinary(1.25 as float64)==2.5 as float64)
+    let lambda:func(float64) float64=func(value:float64) float64 { return value+value }
+    assert(C.call<func(float64) float64>(C.function_address(lambda),1.25 as float64)==2.5 as float64)
+    let alias=floating_callback
+    assert(C.call<func(float64) float64>(C.function_address(alias),1.25 as float64)==2.5 as float64)
+    assert(C.call<func(float32) float32>(C.function_address(single_callback),1.25 as float32)==2.5 as float32)
+    assert(C.call<func(float64) float64>(C.function_address<int>(generic_callback),1.25 as float64)==2.5 as float64)
+}
+test "C callback adapters preserve mixed register classes and stack arguments" {
+    assert(C.call<func(uint,float64,uint,float32) float64>(C.function_address(mixed_callback),2 as uint,1.25 as float64,3 as uint,0.5 as float32)==6.75 as float64)
+    assert(C.call<func(uint,uint,uint,uint,uint,uint,uint,uint,uint,uint) uint>(C.function_address(many_callback),1 as uint,2 as uint,3 as uint,4 as uint,5 as uint,6 as uint,7 as uint,8 as uint,9 as uint,10 as uint)==55 as uint)
+}
+
+struct Point { let x:float64; let y:float64 }
+struct VariantWords { let tag:uint; let value:uint; let extra:uint }
+func point_callback(context:uint,point:Point,tail:uint) float64 { return context as float64+point.x+point.y+tail as float64 }
+func variant_callback(context:uint,attribute:int32,value:VariantWords,backward:int32,tail:uint) uint { return context+attribute as uint+value.tag+value.value+value.extra+backward as uint+tail }
+func short_callback(value:uint16) uint16 { return value+7 as uint16 }
+
+test "C by-value records preserve point and variant fields" {
+    assert(C.call<func(uint,Point,uint) float64>(C.function_address(point_callback),3 as uint,Point(x:1.25 as float64,y:0.5 as float64),7 as uint)==11.75 as float64)
+    assert(C.call<func(uint,int32,VariantWords,int32,uint) uint>(C.function_address(variant_callback),2 as uint,3 as int32,VariantWords(tag:5 as uint,value:7 as uint,extra:11 as uint),1 as int32,8 as uint)==37 as uint)
+    assert(C.call<func(uint16) uint16>(C.function_address(short_callback),65000 as uint16)==65007 as uint16)
+}
+
+struct StaticWorker { static func twice(value:float64) float64 { return value+value } }
+test "C static method references infer their native entry" {
+    let ordinary = StaticWorker.twice
+    assert(ordinary(1.25 as float64) == 2.5 as float64)
+    assert(C.call<func(float64) float64>(C.function_address(StaticWorker.twice),1.25 as float64) == 2.5 as float64)
+}

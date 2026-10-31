@@ -1,6 +1,7 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
 const MathBoundary = @import("../Math/Boundary.zig");
+const CAbi = @import("../Arm64/CAbi.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 
 const Allocator = std.mem.Allocator;
@@ -456,28 +457,11 @@ pub fn emitIndirect(
     {
         return error.InvalidMachineProgram;
     }
-    switch (platform) {
-        .darwin, .linux => try emitSystemVBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
-        .windows => try emitWindowsBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
-    }
+    const stack_size = try emitCArguments(allocator, bytes, platform, call.signature, call.arguments);
     try emitLoadStack(allocator, bytes, .rax, call.callee);
     try bytes.appendSlice(allocator, &.{ 0xff, 0xd0 });
-    const stack_size = boundaryStackSize(platform, call.signature.arguments);
-    if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, stack_size });
-    if (call.result) |result| {
-        if (call.signature.result) |kind| {
-            if (kind == .float32) {
-                try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0 });
-            } else if (kind == .float64) {
-                try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
-            } else if (kind == .uint8) {
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
-            } else if (call.signature.result_signed_32) {
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
-            }
-        }
-        try emitStoreStack(allocator, bytes, .rax, result);
-    }
+    try emitCStack(allocator, bytes, stack_size, true);
+    try storeCResult(allocator, bytes, call.signature, call.result);
 }
 
 const linux_thread_stack_size: u64 = 1024 * 1024;
@@ -597,107 +581,82 @@ fn emitBoundaryCall(
     if (external.signature.arguments.len != call.arguments.len or call.arguments.len > Machine.max_external_arguments) {
         return error.InvalidMachineProgram;
     }
-    switch (platform) {
-        .darwin, .linux => try emitSystemVBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
-        .windows => try emitWindowsBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
-    }
+    const stack_size = try emitCArguments(allocator, bytes, platform, external.signature, call.arguments);
     try bytes.append(allocator, 0xe8);
     const displacement_offset: u32 = @intCast(bytes.items.len);
     try bytes.appendNTimes(allocator, 0, 4);
     try sites.append(allocator, .{ .displacement_offset = displacement_offset, .function = call.function });
-    const stack_size = boundaryStackSize(platform, external.signature.arguments);
-    if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, stack_size });
-    if (call.result) |result| {
-        if (external.signature.result) |kind| {
-            if (kind == .float32) {
-                try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0 });
-            } else if (kind == .float64) {
-                try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
-            } else if (kind == .uint8) {
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0xc0 });
-            } else if (external.signature.result_signed_32) {
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
+    try emitCStack(allocator, bytes, stack_size, true);
+    try storeCResult(allocator, bytes, external.signature, call.result);
+}
+
+fn emitCStack(allocator: Allocator, bytes: *std.ArrayList(u8), size: u32, add: bool) !void {
+    if (size == 0) return;
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x81, if (add) @as(u8, 0xc4) else 0xec });
+    try appendInt(allocator, bytes, u32, size);
+}
+fn storeCRsp(allocator: Allocator, bytes: *std.ArrayList(u8), offset: usize) !void {
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x84, 0x24 });
+    try appendInt(allocator, bytes, u32, @as(u32, @intCast(offset)));
+}
+fn addressCRsp(allocator: Allocator, bytes: *std.ArrayList(u8), offset: usize) !void {
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x84, 0x24 });
+    try appendInt(allocator, bytes, u32, @as(u32, @intCast(offset)));
+}
+fn emitCArguments(allocator: Allocator, bytes: *std.ArrayList(u8), platform: Platform, signature: Machine.ExternalFunction.Signature, arguments: []const Machine.Slot) Machine.Error!u32 {
+    const native = try CAbi.plan(allocator, .x64, platform, signature);
+    defer native.deinit(allocator);
+    const temporary = try allocator.alloc(usize, arguments.len);
+    defer allocator.free(temporary);
+    var stack_size: usize = native.stack_size;
+    for (native.arguments, 0..) |argument, index| {
+        temporary[index] = 0;
+        if (argument.indirect) {
+            stack_size = std.mem.alignForward(usize, stack_size, 16);
+            temporary[index] = stack_size;
+            stack_size += CAbi.width(signature, index) * 8;
+        }
+    }
+    stack_size = std.mem.alignForward(usize, stack_size, 16);
+    if (stack_size > 4080) return error.FrameTooLarge;
+    try emitCStack(allocator, bytes, @intCast(stack_size), false);
+    for (native.arguments, arguments, 0..) |argument, slot, index| if (argument.indirect) {
+        for (CAbi.fields(signature, index), 0..) |_, leaf| {
+            try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, slot) + leaf));
+            try storeCRsp(allocator, bytes, temporary[index] + leaf * 8);
+        }
+    };
+    const sysv = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9 };
+    const win = [_]Register{ .rcx, .rdx, .r8, .r9 };
+    for (native.arguments, arguments, signature.arguments, 0..) |argument, slot, kind, index| {
+        const leaves = CAbi.fields(signature, index);
+        for (argument.locations, 0..) |location, leaf| {
+            const leaf_kind = if (argument.indirect) Machine.AbiValue.read_address else if (kind == .record) leaves[leaf] else kind;
+            switch (location) {
+                .general => |lane| {
+                    const destination = if (platform == .windows) win[lane] else sysv[lane];
+                    if (argument.indirect) {
+                        try addressCRsp(allocator, bytes, temporary[index]);
+                        try emitMoveRegister(allocator, bytes, destination, .rax);
+                    } else try emitLoadStack(allocator, bytes, destination, @intCast(@as(usize, slot) + leaf));
+                },
+                .floating => |lane| try emitLoadFloatStack(allocator, bytes, @intCast(lane), @intCast(@as(usize, slot) + leaf), leaf_kind == .float64),
+                .stack => |offset| {
+                    if (argument.indirect) try addressCRsp(allocator, bytes, temporary[index]) else try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, slot) + leaf));
+                    try storeCRsp(allocator, bytes, offset);
+                },
             }
         }
-        try emitStoreStack(allocator, bytes, .rax, result);
     }
+    return @intCast(stack_size);
 }
-
-fn emitSystemVBoundaryArguments(
-    allocator: Allocator,
-    bytes: *std.ArrayList(u8),
-    kinds: []const Machine.AbiValue,
-    arguments: []const Machine.Slot,
-) Allocator.Error!void {
-    const stack_size = boundaryStackSize(.darwin, kinds);
-    if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, stack_size });
-    const integer_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9 };
-    var integer_index: usize = 0;
-    var float_index: usize = 0;
-    var stack_index: usize = 0;
-    for (arguments, kinds) |argument, kind| {
-        if (isFloat(kind)) {
-            if (float_index < 8) {
-                try emitLoadFloatStack(allocator, bytes, @intCast(float_index), argument, kind == .float64);
-                float_index += 1;
-            } else {
-                try emitLoadStack(allocator, bytes, .rax, argument);
-                try emitStoreRsp(allocator, bytes, .rax, @intCast(stack_index * 8));
-                stack_index += 1;
-            }
-        } else if (integer_index < integer_registers.len) {
-            try emitLoadStack(allocator, bytes, integer_registers[integer_index], argument);
-            integer_index += 1;
-        } else {
-            try emitLoadStack(allocator, bytes, .rax, argument);
-            try emitStoreRsp(allocator, bytes, .rax, @intCast(stack_index * 8));
-            stack_index += 1;
+fn storeCResult(allocator: Allocator, bytes: *std.ArrayList(u8), signature: Machine.ExternalFunction.Signature, result: ?Machine.Slot) !void {
+    if (result) |slot| {
+        if (signature.result) |kind| {
+            if (kind == .float32) try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0 }) else if (kind == .float64) try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 }) else if (kind == .uint8) try bytes.appendSlice(allocator, &.{ 0x0f, 0xb6, 0xc0 }) else if (kind == .uint16) try bytes.appendSlice(allocator, &.{ 0x0f, 0xb7, 0xc0 }) else if (kind == .uint32) try bytes.appendSlice(allocator, &.{ 0x89, 0xc0 }) else if (signature.result_signed_32) try bytes.appendSlice(allocator, &.{ 0x48, 0x63, 0xc0 });
         }
+        try emitStoreStack(allocator, bytes, .rax, slot);
     }
-}
-
-fn emitWindowsBoundaryArguments(
-    allocator: Allocator,
-    bytes: *std.ArrayList(u8),
-    kinds: []const Machine.AbiValue,
-    arguments: []const Machine.Slot,
-) Allocator.Error!void {
-    const stack_size = boundaryStackSize(.windows, kinds);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, stack_size });
-    const registers = [_]Register{ .rcx, .rdx, .r8, .r9 };
-    for (arguments, kinds, 0..) |argument, kind, index| {
-        if (index < 4) {
-            if (isFloat(kind)) {
-                try emitLoadFloatStack(allocator, bytes, @intCast(index), argument, kind == .float64);
-            } else try emitLoadStack(allocator, bytes, registers[index], argument);
-        } else {
-            try emitLoadStack(allocator, bytes, .rax, argument);
-            try emitStoreRsp(allocator, bytes, .rax, @intCast(32 + (index - 4) * 8));
-        }
-    }
-}
-
-fn boundaryStackSize(platform: Platform, kinds: []const Machine.AbiValue) u8 {
-    var count: usize = 0;
-    switch (platform) {
-        .darwin, .linux => {
-            var integers: usize = 0;
-            var floats: usize = 0;
-            for (kinds) |kind| if (isFloat(kind)) {
-                if (floats >= 8) count += 1;
-                floats += 1;
-            } else {
-                if (integers >= 6) count += 1;
-                integers += 1;
-            };
-            return @intCast(std.mem.alignForward(usize, count * 8, 16));
-        },
-        .windows => return @intCast(std.mem.alignForward(usize, 32 + @max(kinds.len, 4) * 8 - 32, 16)),
-    }
-}
-
-fn isFloat(kind: Machine.AbiValue) bool {
-    return kind == .float32 or kind == .float64;
 }
 
 fn emitLoadFloatStack(

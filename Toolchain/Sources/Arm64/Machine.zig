@@ -14,6 +14,7 @@ pub const max_arguments = std.math.maxInt(u12);
 pub const slot_size = 8;
 
 pub const FunctionId = usize;
+pub const CallbackEntry = struct { function: FunctionId, offset: u32 };
 pub const Slot = u13;
 pub const FloatLaneResidence = struct { register: u5, lane: u1, partner: Slot };
 /// Target-independent lane affinity produced from portable IR. A backend may
@@ -524,6 +525,7 @@ pub const Instruction = union(enum) {
         captures: []const Slot = &.{},
         environment: ?Span = null,
         owns_receiver: bool = false,
+        c_signature: ?ExternalFunction.Signature = null,
     };
 
     pub const IndirectCall = struct {
@@ -633,7 +635,7 @@ pub const Program = struct {
     mutex_unlock_function: ?usize = null,
 };
 
-pub const AbiValue = enum { uint8, int32, read_address, uint64, int64, float32, float64 };
+pub const AbiValue = enum { uint8, uint16, int32, uint32, read_address, uint64, int64, float32, float64, record };
 
 pub const ExternalFunction = struct {
     provider: []const u8,
@@ -644,6 +646,7 @@ pub const ExternalFunction = struct {
 
     pub const Signature = struct {
         arguments: []const AbiValue,
+        record_fields: []const []const AbiValue = &.{},
         result: ?AbiValue,
         result_signed_32: bool = false,
     };
@@ -1074,6 +1077,12 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.result);
                     if (!value.result.aggregate or value.result.width != 3) return error.InvalidMachineProgram;
                     if (value.function >= program.functions.len) return error.InvalidMachineProgram;
+                    if (value.c_signature) |signature| {
+                        try requireCSignature(signature);
+                        const target = program.functions[value.function];
+                        if (value.captures.len != 0 or target.capture_parameters.len != 0 or signature.arguments.len != target.parameters.len) return error.InvalidMachineProgram;
+                        for (target.parameters, 0..) |parameter, index| if (parameter.width != cArgumentWidth(signature, index)) return error.InvalidMachineProgram;
+                    }
                     for (value.captures) |capture| try requireSlot(function, capture);
                     if (value.environment) |environment| {
                         try requireSpan(function, environment);
@@ -1128,7 +1137,13 @@ pub fn validate(program: Program) Error!void {
                     {
                         return error.InvalidMachineProgram;
                     }
-                    for (call.arguments) |argument| try requireSlot(function, argument);
+                    try requireCSignature(call.signature);
+                    for (call.arguments, 0..) |argument, index| {
+                        const width = cArgumentWidth(call.signature, index);
+                        if (width > std.math.maxInt(u12)) return error.InvalidMachineProgram;
+                        try requireSpan(function, .{ .start = argument, .width = @intCast(width), .aggregate = width > 1 });
+                    }
+
                     if (call.signature.result == null) {
                         if (call.result != null) return error.InvalidMachineProgram;
                     } else if (call.result) |result| try requireSlot(function, result) else return error.InvalidMachineProgram;
@@ -1949,4 +1964,18 @@ test "accept stack arguments and reject unsupported frame counts" {
     try std.testing.expectEqual(@as(u12, 9), try checkedArgumentCount(9));
     try std.testing.expectError(error.TooManyArguments, checkedArgumentCount(max_arguments + 1));
     try std.testing.expectError(error.FrameTooLarge, checkedSlot(max_slots + 1));
+}
+
+pub fn cArgumentWidth(signature: ExternalFunction.Signature, index: usize) usize {
+    return if (signature.arguments[index] == .record and signature.record_fields.len == signature.arguments.len) signature.record_fields[index].len else 1;
+}
+fn requireCSignature(signature: ExternalFunction.Signature) Error!void {
+    if (signature.result == .record or (signature.result_signed_32 and signature.result != .int32)) return error.InvalidMachineProgram;
+    if (signature.record_fields.len != 0 and signature.record_fields.len != signature.arguments.len) return error.InvalidMachineProgram;
+    for (signature.arguments, 0..) |kind, index| {
+        if (kind == .record) {
+            if (signature.record_fields.len == 0 or signature.record_fields[index].len == 0) return error.InvalidMachineProgram;
+            for (signature.record_fields[index]) |leaf| if (leaf != .int64 and leaf != .uint64 and leaf != .float64) return error.InvalidMachineProgram;
+        } else if (signature.record_fields.len != 0 and signature.record_fields[index].len != 0) return error.InvalidMachineProgram;
+    }
 }

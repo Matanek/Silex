@@ -230,6 +230,35 @@ executes `setup`, `compile`, `run`, `test`, direct emission, linked emission,
 and a package boundary on an Intel host. Rosetta executions are useful local
 diagnostics but are not the target's native verification gate.
 
+## Adapt native callbacks and indirect C calls
+
+`C.function_address` adds a distinct `c_abi` function reference to typed IR.
+An ordinary Silex function value retains its internal entry convention. Every
+IR rewrite, including reachable-program closure and operand rewriting, must
+preserve this distinction. Losing it can leave integer callbacks apparently
+working while floating arguments use the wrong register bank.
+
+The shared C ABI planner classifies scalar arguments and flat records of
+64-bit numeric leaves. ARM64 recognizes homogeneous floating aggregates of up
+to four doubles; Windows X64 passes multi-field records indirectly; SysV X64
+classifies small records into general and SSE lanes. Register exhaustion keeps
+an aggregate whole. Named scalar boundaries and `C.call` use the same argument
+planner. Results remain scalar.
+
+A C callback snapshots all native arguments before assigning internal argument
+registers. ARM64 preserves d8–d15, and Windows X64 preserves XMM6–XMM15 in
+addition to general nonvolatile registers. Outgoing native stack storage must
+not change the base used to read existing Silex homes: the ARM64 call emitter
+retains the original SP while building native arguments and record copies.
+
+[CallbackAbiTests](../Toolchain/Sources/CallbackAbiTests.zig) compares emitted
+entries and indirect calls to independent native callers and callees, after
+closing the reachable graph and with Debug/Release Silex lowering.
+[CallbackScalarABI](../Tests/Native/CallbackScalarABI.sx) also traverses the CLI
+pipeline. A matching pair of adapters alone cannot establish an external ABI.
+Executing a compatible foreign ABI fragment on the development host does not
+execute that operating system or qualify its provider.
+
 ## Link native package boundaries
 
 For a referenced package-private provider, the compiler writes a relocatable

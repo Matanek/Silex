@@ -128,6 +128,7 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, old_to_
             .result = reference.result,
             .function = try remap(old_to_new, reference.function),
             .captures = reference.captures,
+            .c_abi = reference.c_abi,
         } },
         .dynamic_call => |call| dynamic: {
             const implementations = try allocator.alloc(Ir.Instruction.DynamicCall.Implementation, call.implementations.len);
