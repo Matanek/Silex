@@ -1,0 +1,51 @@
+// Reduced from the headless soft-body scene: finite checks branch between
+// components. Vary Y/Z so stale but finite values cannot satisfy the guard.
+struct SnapshotPoint {
+    var x:float
+    var y:float
+    var z:float
+}
+
+class SnapshotShape {
+    var points:SnapshotPoint[] = []
+
+    init() {
+        for i in 0...17 {
+            self.points.append(SnapshotPoint(x:-3.88,y:2.4+(i as float),z:-0.88-(i as float)))
+        }
+    }
+
+    func positions() SnapshotPoint[] {
+        var result:SnapshotPoint[] = []
+        for p in self.points { result.append(p) }
+        return result
+    }
+}
+
+public func exercise() int {
+    var shapes:SnapshotShape[] = []
+    for _ in 0...6 { shapes.append(SnapshotShape()) }
+    var count = 0
+    for _ in 0...3 {
+        for shape in shapes {
+            var index = 0
+            for p in shape.positions() {
+                assert(p.x==p.x && (p.x==0.0 || p.x+p.x!=p.x) &&
+                    p.y==p.y && (p.y==0.0 || p.y+p.y!=p.y) &&
+                    p.z==p.z && (p.z==0.0 || p.z+p.z!=p.z) &&
+                    p.y==2.4+(index as float) && p.z == -0.88-(index as float))
+                count++;index++
+            }
+        }
+    }
+    return count
+}
+
+test "collection snapshots preserve components across divergent finite checks" {
+    assert(exercise()==306)
+}
+
+func main() {
+    assert(exercise()==306)
+    print("collection snapshots passed")
+}

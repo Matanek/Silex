@@ -1,5 +1,6 @@
 use Module.AggregateCallCoordinates
 use Module.DebugCopies
+use Module.CollectionSnapshots
 
 func total(a:int, b:int, c:int, d:int, e:int, f:int, g:int, h:int, i:int, j:int) int {
     return a + b + c + d + e + f + g + h + i + j
@@ -729,6 +730,7 @@ test "native bound callbacks own and release their receiver graph" {
 }
 
 func main() {
+    assert(CollectionSnapshots.exercise() == 306)
     DebugCopies.floating_exercise()
     AggregateCallCoordinates.exercise()
     assert(DebugCopies.exercise(5) == 48)
@@ -858,4 +860,8 @@ test "native aggregate calls preserve loop-carried coordinates" {
 test "native Debug copy cleanup preserves value snapshots" {
     assert(DebugCopies.exercise(5) == 48)
     assert(DebugCopies.exercise(9) == 64)
+}
+
+test "native collection snapshots preserve every component across branches" {
+    assert(CollectionSnapshots.exercise() == 306)
 }

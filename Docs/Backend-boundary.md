@@ -92,6 +92,9 @@ A collection element read materializes every used component at the read's
 instruction. Delaying a vector tail until its first lexical use is insufficient:
 another control-flow edge can reach a later use while bypassing that load.
 `CollectionSnapshotTests.zig` exercises both branches with deliberately stale
-register values. Unused checked aggregate reads still perform their bounds
-check without copying an unobserved payload. The ARM64 encoder is shared by
+register values. `Tests/Native/CollectionSnapshots.sx` supplies the same
+finite-check pattern in portable Silex; NativePortability calls it from both
+its main and its test entry, so Linux/Windows jobs execute the case without
+changing their output contract. Unused checked aggregate reads still perform
+their bounds check without copying an unobserved payload. The ARM64 encoder is shared by
 Darwin, Linux and Windows; local execution evidence is macOS ARM64.
