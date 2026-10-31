@@ -729,6 +729,7 @@ test "native bound callbacks own and release their receiver graph" {
 }
 
 func main() {
+    DebugCopies.floating_exercise()
     AggregateCallCoordinates.exercise()
     assert(DebugCopies.exercise(5) == 48)
     assert(DebugCopies.exercise(9) == 64)

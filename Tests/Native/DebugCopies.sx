@@ -6,6 +6,27 @@ struct Sample {
 
 func overwrite(value:&Sample) { value.first = 90; value.second = 80 }
 
+struct Coordinates {
+    var x:float
+    var y:float
+    func shifted(delta:float) Coordinates {
+        return Coordinates(x:self.x+delta,y:self.y-delta)
+    }
+}
+
+func overwrite_coordinates(value:&Coordinates) { value.x=90.0;value.y=80.0 }
+
+public func floating_exercise() {
+    var current=Coordinates(x:1.0,y:2.0)
+    let snapshot=current
+    overwrite_coordinates(current)
+    var value=snapshot.shifted(3.0)
+    for _ in 0...8 { value=value.shifted(0.25) }
+    assert(snapshot.x==1.0 && snapshot.y==2.0)
+    assert(current.x==90.0 && current.y==80.0)
+    assert(value.x==6.0 && value.y == -3.0)
+}
+
 public func exercise(input:int) int {
     var current = Sample(first:input, second:7, third:11)
     let snapshot = current
@@ -32,8 +53,13 @@ test "Debug copy snapshots survive reference writes collection replacement and l
     assert(exercise(9) == 64)
 }
 
+test "Debug float helpers preserve addressed snapshots and loop values" {
+    floating_exercise()
+}
+
 func main() {
     assert(exercise(5) == 48)
     assert(exercise(9) == 64)
+    floating_exercise()
     print("Debug copy snapshots preserved")
 }

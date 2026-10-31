@@ -1,5 +1,10 @@
 # Native Debug stack copies
 
+This records the stack-copy increment at `62c62dc`. The current native Debug
+policy also prepares value helpers and allocates registers; its test runner
+uses that same policy. See [Debug preparation](Debug-preparation.md). The
+measurements and validation below describe the earlier increment.
+
 Native `run` and `compile` in Debug keep function calls and diagnostic source
 locations while avoiding redundant stack transfers. This is a machine-lowering
 cleanup, not the Release IR pipeline. The native test runner uses the

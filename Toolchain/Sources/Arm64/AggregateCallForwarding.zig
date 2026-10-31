@@ -1,5 +1,6 @@
 const std = @import("std");
 const Machine = @import("Machine.zig");
+const Source = @import("../Source.zig");
 const ResidenceLiveness = @import("ResidenceLiveness.zig");
 
 const Allocator = std.mem.Allocator;
@@ -45,9 +46,11 @@ pub fn optimize(allocator: Allocator, function: Machine.Function) Allocator.Erro
     if (removed_count == 0) return function;
 
     const compact = try allocator.alloc(Machine.Instruction, instructions.len - removed_count);
+    const positions = try allocator.alloc(?Source.Position, if (function.instruction_positions.len == 0) 0 else compact.len);
     var destination: usize = 0;
     for (instructions, 0..) |instruction, index| {
         if (removed[index]) continue;
+        if (positions.len != 0) positions[destination] = function.instruction_positions[index];
         compact[destination] = switch (instruction) {
             .jump => |target| .{ .jump = remapTarget(removed, target) },
             .branch => |branch_value| .{ .branch = .{
@@ -61,6 +64,7 @@ pub fn optimize(allocator: Allocator, function: Machine.Function) Allocator.Erro
     }
     var result = function;
     result.instructions = compact;
+    result.instruction_positions = positions;
     return result;
 }
 
@@ -159,9 +163,15 @@ test "forward an unchanged aggregate copy before a direct call" {
         } },
         .return_void,
     };
-    const result = try optimize(arena.allocator(), fixture(&instructions));
+    var before = fixture(&instructions);
+    const positions = try arena.allocator().alloc(?Source.Position, instructions.len);
+    for (positions, 0..) |*position, index| position.* = .{ .offset = index, .line = index + 10, .column = 1 };
+    before.instruction_positions = positions;
+    const result = try optimize(arena.allocator(), before);
     try std.testing.expectEqual(@as(usize, 3), result.instructions.len);
     try std.testing.expectEqual(@as(Machine.Slot, 0), result.instructions[1].call.arguments[0].start);
+    try std.testing.expectEqual(result.instructions.len, result.instruction_positions.len);
+    try std.testing.expectEqual(@as(usize, 12), result.instruction_positions[1].?.line);
 }
 
 test "retain a captured aggregate copy when its source changes" {

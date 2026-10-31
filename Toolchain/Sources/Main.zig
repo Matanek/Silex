@@ -7,6 +7,8 @@ const Cli = @import("Cli.zig");
 const CliProgress = @import("CliProgress.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const CompilationTrace = @import("CompilationTrace.zig");
+const DebugOptimizer = @import("Optimize/Debug.zig");
+const DebugNative = @import("DebugNative.zig");
 const DataRoot = @import("DataRoot.zig");
 const ProgramScope = @import("ProgramScope.zig");
 const Lower = @import("Arm64/Lower.zig");
@@ -2073,12 +2075,15 @@ fn compileNativeOptions(
     };
     const worker_count = compilationWorkerCount(init.environ_map, scoped_program.functions.len);
     trace.workers(worker_count);
-    if (options.mode == .release) progress.stage(.optimize);
+    progress.stage(.optimize);
     const native_ir = native_ir: {
         var optimize_span = trace.span(.optimization);
         defer optimize_span.finish();
         break :native_ir switch (options.mode) {
-            .debug => scoped_program,
+            .debug => DebugOptimizer.prepare(allocator, scoped_program, worker_count) catch |err| {
+                std.debug.print("silex: Debug preparation rejected the portable IR: {t}\n", .{err});
+                return 1;
+            },
             .release => ReleaseOptimizer.optimizeWithOptions(
                 allocator,
                 scoped_program,
@@ -2103,8 +2108,14 @@ fn compileNativeOptions(
         };
     };
     if (options.mode == .debug) {
+        var allocation_span = trace.span(.register_allocation);
+        defer allocation_span.finish();
         machine = Lower.simplifyDebugCopies(allocator, machine) catch |err| {
             std.debug.print("silex: native Debug copy lowering failed: {t}\n", .{err});
+            return 1;
+        };
+        machine = DebugNative.allocate(allocator, machine, target) catch |err| {
+            std.debug.print("silex: native Debug register placement failed: {t}\n", .{err});
             return 1;
         };
     }

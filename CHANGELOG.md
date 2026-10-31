@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native Debug prepares values and places temporaries in registers, with bounded inlining of small straight-line helpers. Checks and source information remain available; inlined helpers no longer create separate frames. The test runner uses the same policy. The monster truck retains its four soft tires and physics settings; see the local qualification and its limits in `Docs/Debug-preparation.md`.
+
 - Native Debug removes unused temporary copies and redundant scalar stack transfers while preserving calls, source locations, checks and ownership. The soft-tire solver retains its settings and physical observations; qualification is local to macOS ARM64, with no performance claim for other targets. See `Docs/Debug-copy-cleanup.md`.
 
 - `match` also releases a resource-bearing temporary subject when it selects `else`. Payload-binding branches keep their transfer behavior and borrowed subjects remain alive; object destruction is covered by native tests and an LLVM check.

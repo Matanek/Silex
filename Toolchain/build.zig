@@ -519,7 +519,7 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = bootstrap_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
-    const debug_copy_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "Debug copy cleanup", "copy demand", "stack copies forward", "stack forwarding excludes" } });
+    const debug_copy_tests = b.addTest(.{ .root_module = module, .filters = &.{ "test_0", "Debug preparation", "Debug register", "Debug copy cleanup", "copy demand", "stack copies forward", "stack forwarding excludes", "aggregate copy" } });
     debug_copy_tests.stack_size = bootstrap_stack_size;
     const debug_copy_command = b.addRunArtifact(debug_copy_tests);
     debug_copy_command.setCwd(b.path(""));
