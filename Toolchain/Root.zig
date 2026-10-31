@@ -2,6 +2,12 @@ pub const silex_compiler_api = @import("Sources/OptimizerOracleApi.zig");
 pub const main = @import("Sources/Main.zig").main;
 
 test {
+    _ = @import("Sources/DebugNativeTests.zig");
+    _ = @import("Sources/Arm64/AggregateCallForwarding.zig");
+    _ = @import("Sources/Optimize/DebugTests.zig");
+    _ = @import("Sources/Arm64/DebugCopyTests.zig");
+    _ = @import("Sources/Arm64/StackCopyForwarding.zig");
+    _ = @import("Sources/Arm64/DeadCopyLeaves.zig");
     _ = @import("Sources/ResultCallTests.zig");
     // The exported main is lazy in test builds. Keep these semantic
     // regression suites reachable from the actual build root.

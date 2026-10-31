@@ -7,6 +7,7 @@ test {
     _ = @import("AggregateCopyTests.zig");
     _ = @import("ViewReplacementTests.zig");
     _ = @import("FloatMemoryTests.zig");
+    _ = @import("CollectionSnapshotTests.zig");
     _ = @import("DeadCollectionLoadTests.zig");
     _ = @import("MathCallResidenceTests.zig");
     _ = @import("CallResidenceTests.zig");

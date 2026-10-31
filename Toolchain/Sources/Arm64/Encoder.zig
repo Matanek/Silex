@@ -814,7 +814,7 @@ fn encodeFunction(
     var collection_cursor = try LoopCursor.find(allocator, function);
     if (collection_cursor) |cursor| {
         const load = function.instructions[cursor.load_index].collection_load;
-        if (eagerCollectionWidth(function, cursor.load_index, load) != 2) collection_cursor = null;
+        if (eagerCollectionWidth(function, load) != 2) collection_cursor = null;
     }
     const reference_cursor_storage = try LoopCursor.findReferenceCursors(allocator, function, false);
     defer allocator.free(reference_cursor_storage);
@@ -960,7 +960,6 @@ fn encodeFunction(
 
     for (function.instructions, 0..) |instruction, instruction_index| {
         instruction_offsets[instruction_index] = words.items.len;
-        try emitDeferredCollectionLoads(allocator, words, function, instruction_index, collection_cursor);
         for (reference_cursors) |cursor| {
             try emitReferenceCursorStep(allocator, words, function, cursor, instruction_index);
         }
@@ -1620,7 +1619,7 @@ fn encodeFunction(
                             words,
                             function,
                             access,
-                            eagerCollectionWidth(function, instruction_index, access),
+                            eagerCollectionWidth(function, access),
                             @enumFromInt(cursor.register),
                         )
                     else if (access.dynamic)
@@ -1634,7 +1633,7 @@ fn encodeFunction(
                             program,
                             function,
                             access,
-                            eagerCollectionWidth(function, instruction_index, access),
+                            eagerCollectionWidth(function, access),
                         )
                     else
                         try encodeCollectionLoad(allocator, words, &fixups, access);
@@ -1649,7 +1648,7 @@ fn encodeFunction(
                         program,
                         function,
                         access,
-                        eagerCollectionWidth(function, instruction_index, access),
+                        eagerCollectionWidth(function, access),
                     )
                 else
                     try encodeCollectionLoad(allocator, words, &fixups, access);
@@ -4398,7 +4397,6 @@ fn instructionUsesSlot(instruction: Machine.Instruction, slot: Machine.Slot) boo
 
 fn eagerCollectionWidth(
     function: Machine.Function,
-    load_index: usize,
     load: Machine.Instruction.CollectionLoad,
 ) u12 {
     // An unused checked aggregate still validates its index, but its payload
@@ -4414,72 +4412,16 @@ fn eagerCollectionWidth(
         }
         if (!used) return 0;
     }
-    if (load.checked or !load.dynamic or load.result.width < 2 or
-        function.float_register_slots.len == 0) return load.result.width;
-    for (0..load.result.width) |leaf| {
-        const slot: Machine.Slot = @intCast(@as(usize, load.result.start) + leaf);
-        if (floatResidence(function, slot) == null and floatLaneResidence(function, slot) == null) return load.result.width;
-    }
-    for (0..load.result.width) |leaf| {
-        const slot: Machine.Slot = @intCast(@as(usize, load.result.start) + leaf);
-        const first_use = firstSlotUseAfter(function.instructions, load_index, slot) orelse continue;
-        for (function.instructions[load_index + 1 .. first_use]) |instruction| switch (instruction) {
-            .branch => return if (leaf == 0) load.result.width else @intCast(leaf),
-            else => {},
-        };
-    }
+    // An aggregate read is a snapshot at this instruction. Deferring a tail
+    // to its first lexical use does not prove that it dominates other uses:
+    // another CFG edge can bypass that site entirely. Materialize every used
+    // leaf here, with the liveness already accounted for by allocation.
     return load.result.width;
-}
-
-fn firstSlotUseAfter(
-    instructions: []const Machine.Instruction,
-    start: usize,
-    slot: Machine.Slot,
-) ?usize {
-    for (instructions[start + 1 ..], start + 1..) |instruction, index| {
-        if (instructionUsesSlot(instruction, slot)) return index;
-    }
-    return null;
 }
 
 fn slotHasUse(instructions: []const Machine.Instruction, slot: Machine.Slot) bool {
     for (instructions) |instruction| if (instructionUsesSlot(instruction, slot)) return true;
     return false;
-}
-
-fn emitDeferredCollectionLoads(
-    allocator: Allocator,
-    words: *std.ArrayList(u32),
-    function: Machine.Function,
-    instruction_index: usize,
-    collection_cursor: ?LoopCursor.Cursor,
-) Error!void {
-    for (function.instructions[0..instruction_index], 0..) |instruction, load_index| {
-        const load = switch (instruction) {
-            .collection_load => |value| value,
-            else => continue,
-        };
-        if (load.checked) continue;
-        const eager_width = eagerCollectionWidth(function, load_index, load);
-        if (eager_width >= load.result.width) continue;
-        const first_slot: Machine.Slot = @intCast(@as(usize, load.result.start) + eager_width);
-        if (firstSlotUseAfter(function.instructions, load_index, first_slot) == instruction_index) {
-            if (collection_cursor) |cursor| {
-                if (cursor.load_index == load_index) {
-                    try ListRuntime.emitCursorDeferredLoad(
-                        allocator,
-                        words,
-                        function,
-                        load,
-                        eager_width,
-                        @enumFromInt(cursor.register),
-                    );
-                    continue;
-                }
-            }
-            try ListRuntime.emitDeferredLoad(allocator, words, function, load, eager_width);
-        }
-    }
 }
 
 fn spanContainsSlot(span: Machine.Span, slot: Machine.Slot) bool {

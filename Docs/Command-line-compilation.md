@@ -22,9 +22,15 @@ directory.
 `run` emits a private executable under `.silex/run/`, inherits the
 terminal streams, waits for the program and returns its exit code. Debug is
 the `run` default; `--release` applies shared semantics-preserving optimization
-before backend lowering. `compile` continues to default to Release. Debug
-disables those optimizations for backend diagnosis without weakening language
-safety in Release. When a native child terminates through a
+before backend lowering. `compile` continues to default to Release. Native
+Debug applies bounded local value preparation, straight-line helper inlining,
+stack-copy cleanup and target-specific register placement. It retains
+checks and source metadata; small helpers may no longer form separate debugger
+frames. Release continues through deeper control-flow and global optimization.
+Raw machine lowering remains available to compiler tests for backend diagnosis.
+See [Debug preparation and its qualification](Debug-preparation.md) and the
+[earlier stack-copy qualification](Debug-copy-cleanup.md).
+When a native child terminates through a
 signal, the CLI reports its
 symbolic name and meaning, source, mode, retained executable, no-cache Debug
 reproduction and host debugger command. It identifies native fault owners as

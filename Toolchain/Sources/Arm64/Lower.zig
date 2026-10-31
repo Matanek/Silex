@@ -36,6 +36,20 @@ pub fn lowerBoundaries(allocator: Allocator, program: Ir.Program, boundaries: []
 
 pub const Mode = enum { debug, release };
 
+// Debug keeps calls, storage layout and source positions. These two local
+// passes only avoid moving stack values that have no observable consumer.
+pub fn simplifyDebugCopies(allocator: Allocator, program: Machine.Program) Machine.Error!Machine.Program {
+    const functions = try allocator.alloc(Machine.Function, program.functions.len);
+    for (program.functions, 0..) |function, index| {
+        const forwarded = try @import("StackCopyForwarding.zig").optimize(allocator, function);
+        functions[index] = try DeadCopyLeaves.optimize(allocator, forwarded);
+    }
+    var result = program;
+    result.functions = functions;
+    try Machine.validate(result);
+    return result;
+}
+
 pub fn lowerWithMode(allocator: Allocator, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
     return lowerInternal(allocator, null, program, &.{}, mode, 1);
 }

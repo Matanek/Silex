@@ -8,6 +8,12 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le backend natif ARM64 matérialise les snapshots de vecteurs au point de lecture, afin que les branches ne puissent pas sauter un chargement de composantes. Régression machine sur les deux chemins et contrôle de scène souple sans fenêtre.
+
+- Le Debug natif prépare les valeurs et place les temporaires en registres, avec intégration bornée des petits helpers sans branchement. Les contrôles et informations source restent disponibles ; les helpers intégrés ne créent plus d’entrée séparée dans la pile d’appels. Le lanceur de tests emploie la même politique. Le monster truck conserve ses quatre pneus souples et ses paramètres physiques ; voir la qualification locale et ses limites dans `Docs/Debug-preparation.md`.
+
+- Le Debug natif élimine les copies temporaires inutilisées et évite les transferts scalaires redondants sur la pile, tout en conservant appels, positions source, contrôles et ownership. Le solveur du pneu souple conserve ses paramètres et ses observations physiques ; qualification locale macOS ARM64, sans gain généralisé aux autres cibles. Voir `Docs/Debug-copy-cleanup.md`.
+
 - L’analyse d’intervalles stocke ses faits par bloc pour les seules valeurs entières suivies, au lieu de tous les descripteurs de valeurs ; les décisions et contrôles d’optimisation restent inchangés.
 
 - La composition des modules réutilise les tableaux de visite des alias et réexports entre les recherches pour borner sa mémoire temporaire.

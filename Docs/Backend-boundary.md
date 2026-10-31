@@ -85,3 +85,13 @@ payload copy and then forward into another variant. The shared ARM64/X64
 inference keeps those storage slots unclassified and infers each extracted
 payload from its own typed operations. `Tests/Native/EnumPayloadFloats.sx`
 protects this boundary; LLVM keeps its own typed lowering.
+
+## Aggregate snapshots on ARM64
+
+A collection element read materializes every used component at the read's
+instruction. Delaying a vector tail until its first lexical use is insufficient:
+another control-flow edge can reach a later use while bypassing that load.
+`CollectionSnapshotTests.zig` exercises both branches with deliberately stale
+register values. Unused checked aggregate reads still perform their bounds
+check without copying an unobserved payload. The ARM64 encoder is shared by
+Darwin, Linux and Windows; local execution evidence is macOS ARM64.

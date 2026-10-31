@@ -8,6 +8,12 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- The ARM64 native backend materializes vector snapshots at their read, so branches cannot skip component loads. Machine regression covers both paths, with a headless soft-body scene check.
+
+- Native Debug prepares values and places temporaries in registers, with bounded inlining of small straight-line helpers. Checks and source information remain available; inlined helpers no longer create separate frames. The test runner uses the same policy. The monster truck retains its four soft tires and physics settings; see the local qualification and its limits in `Docs/Debug-preparation.md`.
+
+- Native Debug removes unused temporary copies and redundant scalar stack transfers while preserving calls, source locations, checks and ownership. The soft-tire solver retains its settings and physical observations; qualification is local to macOS ARM64, with no performance claim for other targets. See `Docs/Debug-copy-cleanup.md`.
+
 - Store per-block range facts only for tracked integer values instead of every descriptor slot, preserving range decisions and checked operations.
 
 - Bound module-composition scratch memory by reusing alias and reexport visitation storage across lookups.

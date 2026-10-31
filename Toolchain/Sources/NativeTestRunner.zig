@@ -4,6 +4,8 @@ const Arm64Object = @import("Arm64/Object.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const Ir = @import("Ir.zig");
 const Lower = @import("Arm64/Lower.zig");
+const Debug = @import("Optimize/Debug.zig");
+const DebugNative = @import("DebugNative.zig");
 const Machine = @import("Arm64/Machine.zig");
 const MachOObject = @import("MacOS/Object.zig");
 const MachOX64Object = @import("MacOS/X64Object.zig");
@@ -56,10 +58,12 @@ pub fn lower(
     boundaries: []const Boundary.Function,
     cache: bool,
 ) !Machine.Program {
-    return if (cache)
-        Lower.lowerCachedWithBoundaries(allocator, io, program, boundaries, .debug)
+    const prepared = try Debug.prepare(allocator, program, 1);
+    const machine = if (cache)
+        try Lower.lowerCachedWithBoundaries(allocator, io, prepared, boundaries, .debug)
     else
-        Lower.lowerWithModeAndBoundaries(allocator, program, boundaries, .debug);
+        try Lower.lowerWithModeAndBoundaries(allocator, prepared, boundaries, .debug);
+    return DebugNative.allocate(allocator, try Lower.simplifyDebugCopies(allocator, machine), TargetModule.Target.host() orelse return error.UnsupportedHost);
 }
 
 pub fn execute(

@@ -1,0 +1,65 @@
+struct Sample {
+    var first:int
+    var second:int
+    var third:int
+}
+
+func overwrite(value:&Sample) { value.first = 90; value.second = 80 }
+
+struct Coordinates {
+    var x:float
+    var y:float
+    func shifted(delta:float) Coordinates {
+        return Coordinates(x:self.x+delta,y:self.y-delta)
+    }
+}
+
+func overwrite_coordinates(value:&Coordinates) { value.x=90.0;value.y=80.0 }
+
+public func floating_exercise() {
+    var current=Coordinates(x:1.0,y:2.0)
+    let snapshot=current
+    overwrite_coordinates(current)
+    var value=snapshot.shifted(3.0)
+    for _ in 0...8 { value=value.shifted(0.25) }
+    assert(snapshot.x==1.0 && snapshot.y==2.0)
+    assert(current.x==90.0 && current.y==80.0)
+    assert(value.x==6.0 && value.y == -3.0)
+}
+
+public func exercise(input:int) int {
+    var current = Sample(first:input, second:7, third:11)
+    let snapshot = current
+    overwrite(current)
+    assert(snapshot.first == input && snapshot.second == 7 && snapshot.third == 11)
+    var values:Sample[] = [snapshot, current]
+    let element = values[0]
+    values[0] = current
+    assert(element.first == input && element.second == 7)
+    var sum = 0
+    var index = 0
+    while index < 8 {
+        let previous = sum
+        if index % 2 == 0 { sum = previous + element.first }
+        else { sum = previous + snapshot.second }
+        index++
+    }
+    assert(current.first == 90 && values[0].second == 80)
+    return sum
+}
+
+test "Debug copy snapshots survive reference writes collection replacement and loops" {
+    assert(exercise(5) == 48)
+    assert(exercise(9) == 64)
+}
+
+test "Debug float helpers preserve addressed snapshots and loop values" {
+    floating_exercise()
+}
+
+func main() {
+    assert(exercise(5) == 48)
+    assert(exercise(9) == 64)
+    floating_exercise()
+    print("Debug copy snapshots preserved")
+}
