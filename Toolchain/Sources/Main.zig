@@ -2102,6 +2102,12 @@ fn compileNativeOptions(
             return 1;
         };
     };
+    if (options.mode == .debug) {
+        machine = Lower.simplifyDebugCopies(allocator, machine) catch |err| {
+            std.debug.print("silex: native Debug copy lowering failed: {t}\n", .{err});
+            return 1;
+        };
+    }
     if (options.mode == .release and (target.eql(.macos_x64) or target.eql(.linux_x64) or target.eql(.windows_x64))) {
         var allocation_span = trace.span(.register_allocation);
         defer allocation_span.finish();

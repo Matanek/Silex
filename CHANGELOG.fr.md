@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le Debug natif élimine les copies temporaires inutilisées et évite les transferts scalaires redondants sur la pile, tout en conservant appels, positions source, contrôles et ownership. Le solveur du pneu souple conserve ses paramètres et ses observations physiques ; qualification locale macOS ARM64, sans gain généralisé aux autres cibles. Voir `Docs/Debug-copy-cleanup.md`.
+
 - `match` libère aussi le sujet temporaire qui contient des ressources lorsqu’il sélectionne `else`. Les branches avec liaison de payload conservent leur transfert, et un sujet emprunté reste vivant ; tests de destruction des objets en natif et contrôle LLVM.
 
 - Ajout de `round_float<T>(value)` : conversion flottante avec arrondi explicite vers `float32` ou `float64`, au plus proche avec égalités au pair, sous-normaux, zéro signé, infinis et NaN. La conversion `as` conserve son contrôle sans perte.

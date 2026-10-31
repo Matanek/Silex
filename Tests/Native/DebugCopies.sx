@@ -1,0 +1,39 @@
+struct Sample {
+    var first:int
+    var second:int
+    var third:int
+}
+
+func overwrite(value:&Sample) { value.first = 90; value.second = 80 }
+
+public func exercise(input:int) int {
+    var current = Sample(first:input, second:7, third:11)
+    let snapshot = current
+    overwrite(current)
+    assert(snapshot.first == input && snapshot.second == 7 && snapshot.third == 11)
+    var values:Sample[] = [snapshot, current]
+    let element = values[0]
+    values[0] = current
+    assert(element.first == input && element.second == 7)
+    var sum = 0
+    var index = 0
+    while index < 8 {
+        let previous = sum
+        if index % 2 == 0 { sum = previous + element.first }
+        else { sum = previous + snapshot.second }
+        index++
+    }
+    assert(current.first == 90 && values[0].second == 80)
+    return sum
+}
+
+test "Debug copy snapshots survive reference writes collection replacement and loops" {
+    assert(exercise(5) == 48)
+    assert(exercise(9) == 64)
+}
+
+func main() {
+    assert(exercise(5) == 48)
+    assert(exercise(9) == 64)
+    print("Debug copy snapshots preserved")
+}

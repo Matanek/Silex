@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native Debug removes unused temporary copies and redundant scalar stack transfers while preserving calls, source locations, checks and ownership. The soft-tire solver retains its settings and physical observations; qualification is local to macOS ARM64, with no performance claim for other targets. See `Docs/Debug-copy-cleanup.md`.
+
 - `match` also releases a resource-bearing temporary subject when it selects `else`. Payload-binding branches keep their transfer behavior and borrowed subjects remain alive; object destruction is covered by native tests and an LLVM check.
 
 - Add `round_float<T>(value)`: explicit rounded floating conversion to `float32` or `float64`, using nearest ties-to-even with subnormals, signed zero, infinities and NaNs. The `as` conversion retains its lossless check.

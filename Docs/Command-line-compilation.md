@@ -24,7 +24,12 @@ terminal streams, waits for the program and returns its exit code. Debug is
 the `run` default; `--release` applies shared semantics-preserving optimization
 before backend lowering. `compile` continues to default to Release. Debug
 disables those optimizations for backend diagnosis without weakening language
-safety in Release. When a native child terminates through a
+safety in Release. Native Debug still removes unused temporary stack copies
+and forwards scalar snapshots within a basic block when their storage is not
+addressed. It preserves function calls, source locations, stack layout, checks
+and ownership operations; it does not enable Release inlining or register
+allocation. See [the bounded qualification](Debug-copy-cleanup.md).
+When a native child terminates through a
 signal, the CLI reports its
 symbolic name and meaning, source, mode, retained executable, no-cache Debug
 reproduction and host debugger command. It identifies native fault owners as
