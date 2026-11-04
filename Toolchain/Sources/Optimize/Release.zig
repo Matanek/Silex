@@ -129,23 +129,23 @@ pub fn optimizeWithWorkers(allocator: Allocator, program: Ir.Program, worker_cou
 /// reproducible without exposing optimizer switches through the Silex CLI.
 pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: Options) !Ir.Program {
     var current = program;
-    if (options.verify_each_pass) try Verifier.verify(allocator, current);
+    try verifyAfterPass(current, options);
 
     if (options.disabled != .local_simplification_pre) {
         current = try optimizeFunctionsWithWorkers(allocator, current, options.worker_count);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .local_simplification_pre) return current;
 
     if (options.disabled != .ssa_promotion_pre) {
         current = try SsaPromotion.optimizeIntegerAndBooleanLocals(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .ssa_promotion_pre) return current;
 
     if (options.disabled != .aggregate_argument_borrow) {
         current = try borrowDirectAggregateArguments(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .aggregate_argument_borrow) return current;
 
@@ -153,19 +153,19 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
     // otherwise each field assignment carries its whole aggregate along.
     if (options.disabled != .aggregate_scalarization_pre) {
         current = try replaceScalarAggregatesWithWorkers(allocator, current, options.worker_count);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .aggregate_scalarization_pre) return current;
 
     if (options.disabled != .scalar_math_intrinsics) {
         current = try replaceScalarMathCalls(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .scalar_math_intrinsics) return current;
 
     if (options.disabled != .value_inlining) {
         current = try InlineValues.optimize(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .value_inlining) return current;
 
@@ -174,19 +174,19 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
             try InlineControlFlow.optimizeCollectionViews(allocator, current)
         else
             try InlineControlFlow.optimize(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .control_flow_inlining) return current;
 
     if (options.disabled != .aggregate_scalarization_post) {
         current = try replaceScalarAggregatesWithWorkers(allocator, current, options.worker_count);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .aggregate_scalarization_post) return current;
 
     if (options.disabled != .local_simplification_post) {
         current = try optimizeFunctionsWithWorkers(allocator, current, options.worker_count);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .local_simplification_post) return current;
 
@@ -197,25 +197,25 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
             for (functions) |*function| function.* = try PrivateClassState.optimize(allocator, current, function.*);
             current.functions = functions;
         }
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .reference_memory_elision) return current;
 
     if (options.disabled != .ssa_promotion_post) {
         current = try SsaPromotion.optimize(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .ssa_promotion_post) return current;
 
     if (options.disabled != .value_range_analysis) {
         current = try ValueRanges.optimizeWithCache(allocator, current, options.worker_count, options.range_cache);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .value_range_analysis) return current;
 
     if (options.disabled != .ssa_value_simplification) {
         current = try simplifySsaValues(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .ssa_value_simplification) return current;
 
@@ -225,29 +225,50 @@ pub fn optimizeWithOptions(allocator: Allocator, program: Ir.Program, options: O
         const expanded = try InlineValues.optimizeScalarLeaves(allocator, current);
         if (expanded.functions.ptr != current.functions.ptr) {
             current = expanded;
-            try verifyAfterPass(allocator, current, options);
+            try verifyAfterPass(current, options);
             if (options.disabled != .value_range_analysis) {
                 current = try ValueRanges.optimizeWithCache(allocator, current, options.worker_count, options.range_cache);
-                try verifyAfterPass(allocator, current, options);
+                try verifyAfterPass(current, options);
             }
             if (options.disabled != .ssa_value_simplification) {
                 current = try simplifySsaValues(allocator, current);
-                try verifyAfterPass(allocator, current, options);
+                try verifyAfterPass(current, options);
             }
         }
     }
     if (options.disabled != .branch_snapshot_sinking) {
         current = try BranchSnapshots.optimize(allocator, current);
-        try verifyAfterPass(allocator, current, options);
+        try verifyAfterPass(current, options);
     }
     if (options.stop_after == .branch_snapshot_sinking) return current;
-    const validated = try Ir.writeText(allocator, current);
-    allocator.free(validated);
+    try Ir.validate(allocator, current);
     return current;
 }
 
-fn verifyAfterPass(allocator: Allocator, program: Ir.Program, options: Options) !void {
-    if (options.verify_each_pass) try Verifier.verify(allocator, program);
+fn verifyAfterPass(program: Ir.Program, options: Options) !void {
+    if (!options.verify_each_pass) return;
+    // Verification returns no owned IR. Its text and CFG scratch must not be
+    // retained in the compilation arena after every checked pass.
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    try Verifier.verify(scratch.allocator(), program);
+}
+
+test "pass verification preserves borrowed IR and rejects invalid definitions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
+    const compilation = try frontend.compile("func main() { print(42) }");
+    const before = try Ir.writeText(allocator, compilation.ir);
+    for (0..20) |_| try verifyAfterPass(compilation.ir, .{ .verify_each_pass = true });
+    try std.testing.expectEqualStrings(before, try Ir.writeText(allocator, compilation.ir));
+    var invalid = compilation.ir;
+    invalid.functions = try allocator.dupe(Ir.Function, compilation.ir.functions);
+    const functions = @constCast(invalid.functions);
+    functions[0].blocks = &.{};
+    try std.testing.expectError(error.InvalidProgram, verifyAfterPass(invalid, .{ .verify_each_pass = true }));
+    try verifyAfterPass(invalid, .{});
 }
 
 // Direct calls may borrow a checked collection element when the callee only
@@ -471,8 +492,7 @@ pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Pr
     result = try SsaPromotion.optimize(allocator, result);
     result = try ValueRanges.optimize(allocator, result);
     result = try simplifySsaValues(allocator, result);
-    const validated = try Ir.writeText(allocator, result);
-    allocator.free(validated);
+    try Ir.validate(allocator, result);
     return result;
 }
 

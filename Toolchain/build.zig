@@ -534,6 +534,11 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = test_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const verification_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "verifier", "pass verification", "IR validation", "write deterministic typed IR", "Debug preparation" } });
+    verification_tests.stack_size = test_stack_size;
+    const verification_command = b.addRunArtifact(verification_tests);
+    verification_command.setCwd(b.path(""));
+    b.step("test-ir-verification", "Verify optimizer checks and temporary ownership").dependOn(&verification_command.step);
     const debug_copy_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "Debug preparation", "Debug register", "Debug copy cleanup", "copy demand", "stack copies forward", "stack forwarding excludes", "aggregate copy" } });
     debug_copy_tests.stack_size = test_stack_size;
     const debug_copy_command = b.addRunArtifact(debug_copy_tests);

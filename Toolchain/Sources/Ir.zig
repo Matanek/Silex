@@ -675,36 +675,55 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
         }
         try output.appendSlice(allocator, "}\n");
     }
-    for (program.functions, 0..) |function, function_index| {
-        _ = function_index;
+    for (program.functions) |function| {
         if (output.items.len != 0) try output.append(allocator, '\n');
-        try output.appendSlice(allocator, "func @");
-        try output.appendSlice(allocator, function.name);
-        try output.append(allocator, '(');
-        for (function.parameter_types, 0..) |parameter_type, index| {
-            if (index != 0) try output.appendSlice(allocator, ", ");
-            try appendValue(&output, allocator, index);
-            try output.append(allocator, ':');
-            try appendType(&output, allocator, program, parameter_type);
-        }
-        try output.appendSlice(allocator, ") -> ");
-        try appendType(&output, allocator, program, function.return_type);
-        try output.appendSlice(allocator, " {\n");
-        for (function.blocks, 0..) |block, block_id| {
-            try appendBlockName(&output, allocator, block_id);
-            try output.appendSlice(allocator, ":\n");
-            for (block.instructions) |instruction| {
-                try output.appendSlice(allocator, "    ");
-                try writeInstruction(&output, allocator, program, function, instruction);
-                try output.append(allocator, '\n');
-            }
-            try output.appendSlice(allocator, "    ");
-            try writeTerminator(&output, allocator, function, block.terminator, function.blocks.len);
-            try output.append(allocator, '\n');
-        }
-        try output.appendSlice(allocator, "}\n");
+        try writeFunctionText(&output, allocator, program, function);
     }
     return output.toOwnedSlice(allocator);
+}
+
+/// Apply the textual IR checks without retaining the complete textual program.
+/// Functions can refer to every original descriptor while scratch is reused.
+pub fn validate(allocator: Allocator, program: Program) Error!void {
+    var scratch = std.heap.ArenaAllocator.init(allocator);
+    defer scratch.deinit();
+    var declarations = program;
+    declarations.functions = &.{};
+    _ = try writeText(scratch.allocator(), declarations);
+    _ = scratch.reset(.retain_capacity);
+    for (program.functions) |function| {
+        var output: std.ArrayList(u8) = .empty;
+        try writeFunctionText(&output, scratch.allocator(), program, function);
+        _ = scratch.reset(.retain_capacity);
+    }
+}
+
+fn writeFunctionText(output: *std.ArrayList(u8), allocator: Allocator, program: Program, function: Function) Error!void {
+    try output.appendSlice(allocator, "func @");
+    try output.appendSlice(allocator, function.name);
+    try output.append(allocator, '(');
+    for (function.parameter_types, 0..) |parameter_type, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        try appendValue(output, allocator, index);
+        try output.append(allocator, ':');
+        try appendType(output, allocator, program, parameter_type);
+    }
+    try output.appendSlice(allocator, ") -> ");
+    try appendType(output, allocator, program, function.return_type);
+    try output.appendSlice(allocator, " {\n");
+    for (function.blocks, 0..) |block, block_id| {
+        try appendBlockName(output, allocator, block_id);
+        try output.appendSlice(allocator, ":\n");
+        for (block.instructions) |instruction| {
+            try output.appendSlice(allocator, "    ");
+            try writeInstruction(output, allocator, program, function, instruction);
+            try output.append(allocator, '\n');
+        }
+        try output.appendSlice(allocator, "    ");
+        try writeTerminator(output, allocator, function, block.terminator, function.blocks.len);
+        try output.append(allocator, '\n');
+    }
+    try output.appendSlice(allocator, "}\n");
 }
 
 fn writeInstruction(
@@ -1485,4 +1504,18 @@ test "write deterministic typed IR" {
         \\}
         \\
     , text);
+}
+
+test "IR validation reuses bounded scratch across many functions" {
+    const instructions = [_]Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 42 } },
+        .{ .print = .{ .value = 0, .newline = true } },
+    };
+    const blocks = [_]Block{.{ .instructions = &instructions, .terminator = .return_void }};
+    const functions = try std.testing.allocator.alloc(Function, 8192);
+    defer std.testing.allocator.free(functions);
+    @memset(functions, .{ .name = "value", .parameter_types = &.{}, .return_type = .void, .value_types = &.{.int}, .blocks = &blocks });
+    var storage: [32 * 1024]u8 = undefined;
+    var fixed = std.heap.FixedBufferAllocator.init(&storage);
+    try validate(fixed.allocator(), .{ .functions = functions });
 }

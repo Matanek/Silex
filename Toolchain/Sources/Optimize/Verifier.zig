@@ -16,12 +16,12 @@ const Location = struct {
 };
 
 /// Validate the portable IR contract relied upon by every Release pass.
-/// `Ir.writeText` owns the complete type, ownership, width and reference
+/// `Ir.validate` shares the textual type, ownership, width and reference
 /// checks. This verifier adds the CFG facts that serialization cannot prove.
 pub fn verify(allocator: Allocator, program: Ir.Program) Error!void {
     var validation_arena = std.heap.ArenaAllocator.init(allocator);
     defer validation_arena.deinit();
-    _ = try Ir.writeText(validation_arena.allocator(), program);
+    try Ir.validate(validation_arena.allocator(), program);
     try verifyControlFlow(allocator, program);
 }
 
@@ -29,7 +29,12 @@ pub fn verify(allocator: Allocator, program: Ir.Program) Error!void {
 /// Compiler backends use this path because their input has already passed the
 /// frontend's type construction; exhaustive optimizer oracles keep `verify`.
 pub fn verifyControlFlow(allocator: Allocator, program: Ir.Program) Error!void {
-    for (program.functions) |function| try verifyFunction(allocator, program, function);
+    var scratch = std.heap.ArenaAllocator.init(allocator);
+    defer scratch.deinit();
+    for (program.functions) |function| {
+        try verifyFunction(scratch.allocator(), program, function);
+        _ = scratch.reset(.retain_capacity);
+    }
 }
 
 pub fn verifyFunction(allocator: Allocator, program: Ir.Program, function: Ir.Function) Error!void {
@@ -873,4 +878,14 @@ test "verifier rejects a native-width address load with a mismatched result" {
         }},
     }} };
     try std.testing.expectError(error.InvalidProgram, verify(std.testing.allocator, program));
+}
+
+test "verifier reuses CFG scratch across independent functions" {
+    const blocks = [_]Ir.Block{.{ .instructions = &.{}, .terminator = .return_void }};
+    const functions = try std.testing.allocator.alloc(Ir.Function, 8192);
+    defer std.testing.allocator.free(functions);
+    @memset(functions, .{ .name = "empty", .parameter_types = &.{}, .return_type = .void, .value_types = &.{}, .blocks = &blocks });
+    var storage: [32 * 1024]u8 = undefined;
+    var fixed = std.heap.FixedBufferAllocator.init(&storage);
+    try verifyControlFlow(fixed.allocator(), .{ .functions = functions });
 }
