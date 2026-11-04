@@ -108,6 +108,8 @@ Choose the subsystem that matches the question you are investigating:
   register placement, source information, and qualification limits.
 - [Native liveness](Native-liveness.md): word-based fixed-point resolution,
   exact scalar equivalence and temporary storage lifetime.
+- [Native register conflicts](Native-conflicts.md): immutable per-slot masks,
+  scalar equivalence checks and target applicability.
 - [Debug copy cleanup](Debug-copy-cleanup.md): local stack-copy elimination
   and snapshot preservation before register placement.
 - [Release optimization](Release-optimization.md): portable IR simplification,

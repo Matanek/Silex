@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Register conflict queries use per-slot liveness and definition masks to skip repeated scans of dead instruction points. The ARM64 graph shared with X64 floating scalars preserves the same sharing rules and decisions; temporary tables are released after each graph.
+
 - Native liveness computes uses and definitions once, then solves the fixed point in 64-bit words. It preserves the same boolean matrix for ARM64 register allocators and their X64 consumers; temporary tables are released after each solve.
 
 - Per-pass optimizer verification releases its temporary storage before the next pass. Validation shares the textual IR checks and reuses storage per function. Debug retains every check without accumulating verification memory in the compilation result.

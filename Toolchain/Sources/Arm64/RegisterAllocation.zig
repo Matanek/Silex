@@ -5,6 +5,9 @@ const FloatSlotInference = @import("FloatSlotInference.zig");
 const FloatPairs = @import("FloatPairs.zig");
 const LoopCursor = @import("LoopCursor.zig");
 const ResidenceLiveness = @import("ResidenceLiveness.zig");
+const ResidenceConflicts = @import("ResidenceConflicts.zig");
+const instructionCanShareResidence = ResidenceConflicts.instructionCanShareResidence;
+const binaryCanShareOperand = ResidenceConflicts.binaryCanShareOperand;
 const InternalAbi = @import("InternalAbi.zig");
 const VectorCost = @import("../Optimize/VectorCost.zig");
 const successorLive = ResidenceLiveness.successorLive;
@@ -161,7 +164,7 @@ pub fn allocateFloatScalarsFor(
         std.mem.sort(Interval, loaded.items, {}, heavierThan);
         for (loaded.items) |interval| {
             for (registers) |register| {
-                if (!colorConflicts(interval.slot, register, residences, roots, collection_live.?, function.instructions, function.slot_count)) {
+                if (!colorConflicts(interval.slot, register, residences, roots, collection_live.?, function.instructions, function.slot_count, null)) {
                     residences[interval.slot] = register;
                     break;
                 }
@@ -573,6 +576,7 @@ fn allocateGraph(
     regional_float_colors: bool,
     packed_lanes: []const ?Machine.FloatLaneResidence,
 ) Allocator.Error!void {
+    if (intervals.len == 0) return;
     const live = try ResidenceLiveness.compute(allocator, instructions, slot_count);
     defer allocator.free(live);
     if (packed_lanes.len != 0) {
@@ -588,6 +592,13 @@ fn allocateGraph(
     };
     for (reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
     for (checked_reference_cursors) |cursor| markReferenceCursorLive(live, slot_count, cursor);
+
+    // These facts are immutable after deferred operands, captures and cursors
+    // adjust liveness. Keep scratch local even when results use a program arena.
+    var scratch = std.heap.stackFallback(4096, std.heap.page_allocator);
+    const temporary = scratch.get();
+    const conflicts = try ResidenceConflicts.Facts.init(temporary, instructions, live, slot_count);
+    defer conflicts.deinit(temporary);
 
     const alias_roots = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(alias_roots);
@@ -615,7 +626,7 @@ fn allocateGraph(
         const root = alias_roots[interval.slot];
         if (componentResidence(root, residences, alias_roots)) |precolored| {
             if ((!preserved[root] or (precolored >= 8 and precolored < 16)) and
-                !componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals))
+                !componentColorConflicts(root, precolored, residences, alias_roots, live, instructions, slot_count, intervals, &conflicts))
             {
                 assignComponentResidence(root, precolored, residences, alias_roots, intervals);
                 continue;
@@ -626,7 +637,7 @@ fn allocateGraph(
         }
         if (preferredComponentResidence(root, residences, alias_roots, instructions)) |preferred| {
             if ((!preserved[root] or (preferred >= 8 and preferred < 16)) and
-                !componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals))
+                !componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals, &conflicts))
             {
                 assignComponentResidence(root, preferred, residences, alias_roots, intervals);
                 continue;
@@ -634,7 +645,7 @@ fn allocateGraph(
         }
         for (registers) |register| {
             if ((!preserved[root] or (register >= 8 and register < 16)) and
-                !componentColorConflicts(root, register, residences, alias_roots, live, instructions, slot_count, intervals))
+                !componentColorConflicts(root, register, residences, alias_roots, live, instructions, slot_count, intervals, &conflicts))
             {
                 assignComponentResidence(root, register, residences, alias_roots, intervals);
                 break;
@@ -685,10 +696,11 @@ fn componentColorConflicts(
     instructions: []const Machine.Instruction,
     slot_count: usize,
     intervals: []const Interval,
+    conflicts: *const ResidenceConflicts.Facts,
 ) bool {
     for (intervals) |interval| {
         if (roots[interval.slot] != root) continue;
-        if (colorConflicts(interval.slot, register, residences, roots, live, instructions, slot_count)) return true;
+        if (colorConflicts(interval.slot, register, residences, roots, live, instructions, slot_count, conflicts)) return true;
     }
     return false;
 }
@@ -788,34 +800,16 @@ fn colorConflicts(
     live: []const bool,
     instructions: []const Machine.Instruction,
     slot_count: usize,
+    conflicts: ?*const ResidenceConflicts.Facts,
 ) bool {
     for (residences, 0..) |residence, other| {
         if (residence == null or residence.? != register or other == slot) continue;
         if (alias_roots[slot] == alias_roots[other]) continue;
-        for (0..live.len / slot_count) |instruction| {
-            // Class loads emit every result leaf, including unused ones.
-            // Their simultaneous definitions must not share a register: a
-            // dead trailing leaf would overwrite an earlier live result.
-            if (instructions[instruction] == .class_load) {
-                const result = instructions[instruction].class_load.result;
-                if (slot >= result.start and slot < @as(usize, result.start) + result.width and
-                    other >= result.start and other < @as(usize, result.start) + result.width) return true;
-            }
-            // Every interference case below needs at least one live input.
-            // Skip dead instruction points before inspecting their emitters.
-            if (!live[instruction * slot_count + slot] and !live[instruction * slot_count + other]) continue;
-            if (instructionCanShareResidence(
-                instructions,
-                live,
-                slot_count,
-                instruction,
-                slot,
-                other,
-            )) continue;
-            if (live[instruction * slot_count + slot] and live[instruction * slot_count + other]) return true;
-            if (instructionDefines(instructions[instruction], slot) and live[instruction * slot_count + other]) return true;
-            if (instructionDefines(instructions[instruction], other) and live[instruction * slot_count + slot]) return true;
-        }
+        const interference = if (conflicts) |facts|
+            facts.interferes(slot, other, instructions, live)
+        else
+            ResidenceConflicts.scalarInterferes(instructions, live, slot_count, slot, other);
+        if (interference) return true;
     }
     return false;
 }
@@ -986,47 +980,6 @@ fn aggregateOperandForResult(
         remaining -= field.width;
     }
     return null;
-}
-
-fn instructionCanShareResidence(
-    instructions: []const Machine.Instruction,
-    live: []const bool,
-    slot_count: usize,
-    instruction_index: usize,
-    left: usize,
-    right: usize,
-) bool {
-    const source = destructiveSourceForPair(instructions[instruction_index], left, right) orelse return false;
-    return !successorLive(instructions, live, slot_count, instruction_index, source);
-}
-
-fn destructiveSourceForPair(instruction: Machine.Instruction, left: usize, right: usize) ?Machine.Slot {
-    return switch (instruction) {
-        .copy => |copy| if ((copy.result == left and copy.operand == right) or
-            (copy.result == right and copy.operand == left)) copy.operand else null,
-        .copy_range => |copy| for (0..copy.result.width) |leaf| {
-            const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
-            const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
-            if ((result == left and operand == right) or (result == right and operand == left)) break operand;
-        } else null,
-        .unary => |unary| if ((unary.result == left and unary.operand == right) or
-            (unary.result == right and unary.operand == left)) unary.operand else null,
-        .binary => |binary| if (binaryCanShareOperand(binary) and
-            ((binary.result == left and binary.left == right) or
-                (binary.result == right and binary.left == left))) binary.left else null,
-        else => null,
-    };
-}
-
-fn binaryCanShareOperand(binary: Machine.Instruction.Binary) bool {
-    if (binary.type.isFloat()) return switch (binary.operator) {
-        .add, .subtract, .multiply, .divide => true,
-        else => false,
-    };
-    return switch (binary.operator) {
-        .add, .subtract, .divide, .remainder, .bit_and, .bit_xor, .shift_left, .shift_right => true,
-        else => false,
-    };
 }
 
 const heavierThan = ResidenceLiveness.heavierThan;
