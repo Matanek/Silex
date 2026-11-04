@@ -106,6 +106,8 @@ Choose the subsystem that matches the question you are investigating:
   client, private state, protocol boundaries and offline end-to-end tests.
 - [Native Debug preparation](Debug-preparation.md): bounded value preparation,
   register placement, source information, and qualification limits.
+- [Native liveness](Native-liveness.md): word-based fixed-point resolution,
+  exact scalar equivalence and temporary storage lifetime.
 - [Debug copy cleanup](Debug-copy-cleanup.md): local stack-copy elimination
   and snapshot preservation before register placement.
 - [Release optimization](Release-optimization.md): portable IR simplification,

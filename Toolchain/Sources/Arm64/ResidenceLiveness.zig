@@ -8,25 +8,75 @@ pub const Interval = struct {
     weight: u64,
 };
 
+test {
+    _ = @import("ResidenceLivenessTests.zig");
+}
+
+// Preserve the dense bool contract used by the register allocators, while
+// solving the fixed point in words. Uses and definitions are invariant across
+// sweeps; do not rediscover them for every slot on every back edge.
 pub fn compute(allocator: std.mem.Allocator, instructions: []const Machine.Instruction, slot_count: usize) std.mem.Allocator.Error![]bool {
-    const live = try allocator.alloc(bool, instructions.len * slot_count);
-    @memset(live, false);
-    var changed = true;
-    while (changed) {
-        changed = false;
-        var reverse = instructions.len;
-        while (reverse != 0) {
-            reverse -= 1;
+    if (instructions.len == 0 or slot_count == 0) return allocator.alloc(bool, 0);
+    const words = std.math.divCeil(usize, slot_count, 64) catch unreachable;
+    const size = instructions.len * words;
+    // Scratch belongs to this solve, even when the result allocator is an
+    // arena shared by the whole program. Small functions stay on the stack.
+    var scratch = std.heap.stackFallback(4096, std.heap.page_allocator);
+    const temporary = scratch.get();
+    const bits = try temporary.alloc(u64, size);
+    defer temporary.free(bits);
+    @memset(bits, 0);
+    {
+        const transfers = try temporary.alloc(u64, 2 * size);
+        defer temporary.free(transfers);
+        @memset(transfers, 0);
+        const uses = transfers[0..size];
+        const definitions = transfers[size..];
+        for (instructions, 0..) |instruction, index| {
             for (0..slot_count) |slot| {
-                const out = successorLive(instructions, live, slot_count, reverse, slot);
-                const value = instructionUses(instructions[reverse], slot) or
-                    (out and !instructionDefines(instructions[reverse], slot));
-                const at = reverse * slot_count + slot;
-                if (live[at] != value) {
-                    live[at] = value;
-                    changed = true;
+                const at = index * words + slot / 64;
+                const mask = @as(u64, 1) << @intCast(slot % 64);
+                if (instructionUses(instruction, slot)) {
+                    uses[at] |= mask;
+                } else if (instructionDefines(instruction, slot)) {
+                    definitions[at] |= mask;
                 }
             }
+        }
+        var changed = true;
+        while (changed) {
+            changed = false;
+            var reverse = instructions.len;
+            while (reverse != 0) {
+                reverse -= 1;
+                const successors: [2]?usize = switch (instructions[reverse]) {
+                    .jump => |target| .{ target, null },
+                    .branch => |value| .{ value.then_instruction, value.else_instruction },
+                    .return_value, .return_void => .{ null, null },
+                    else => .{ if (reverse + 1 < instructions.len) reverse + 1 else null, null },
+                };
+                for (0..words) |word| {
+                    var out: u64 = 0;
+                    for (successors) |successor| if (successor) |index| {
+                        out |= bits[index * words + word];
+                    };
+                    const at = reverse * words + word;
+                    const value = uses[at] | (out & ~definitions[at]);
+                    if (bits[at] != value) {
+                        bits[at] = value;
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    // Transfer scratch is already released before materializing the caller's
+    // result. No bitset or transfer table survives this function.
+    const live = try allocator.alloc(bool, instructions.len * slot_count);
+    for (0..instructions.len) |index| {
+        for (0..slot_count) |slot| {
+            live[index * slot_count + slot] = bits[index * words + slot / 64] &
+                (@as(u64, 1) << @intCast(slot % 64)) != 0;
         }
     }
     return live;

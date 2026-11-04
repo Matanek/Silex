@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Native liveness computes uses and definitions once, then solves the fixed point in 64-bit words. It preserves the same boolean matrix for ARM64 register allocators and their X64 consumers; temporary tables are released after each solve.
+
 - Per-pass optimizer verification releases its temporary storage before the next pass. Validation shares the textual IR checks and reuses storage per function. Debug retains every check without accumulating verification memory in the compilation result.
 
 - The native test runner releases emission and linking scratch after each case instead of retaining it until the source file finishes. The shared program, captured output, diagnostics and signal-artifact retention keep their contract.
