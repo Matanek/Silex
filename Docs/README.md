@@ -23,8 +23,8 @@ The first native path branches only after the typed IR:
 ```text
 typed Silex IR
     -> closure from the selected native entry points
-    -> Release optimization, or direct Debug lowering
-    -> shared machine IR lowering
+    -> Release optimization, or lightweight Debug preparation
+    -> shared machine IR lowering and target register placement
     -> target instruction encoding
     -> Mach-O, ELF or PE emission
     -> native executable
@@ -100,6 +100,10 @@ Choose the subsystem that matches the question you are investigating:
   `compile`, Debug diagnostics, and interactive progress.
 - [Registry identity qualification](Registry-login.md): isolated login/logout
   client, private state, protocol boundaries and offline end-to-end tests.
+- [Native Debug preparation](Debug-preparation.md): bounded value preparation,
+  register placement, source information, and qualification limits.
+- [Debug copy cleanup](Debug-copy-cleanup.md): local stack-copy elimination
+  and snapshot preservation before register placement.
 - [Release optimization](Release-optimization.md): portable IR simplification,
   pass verification, inlining, bounds analysis, register allocation, and SIMD
   selection.

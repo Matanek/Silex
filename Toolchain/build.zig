@@ -534,6 +534,11 @@ pub fn build(b: *std.Build) void {
     tests.stack_size = test_stack_size;
     const test_command = b.addRunArtifact(tests);
     test_command.setCwd(b.path(""));
+    const debug_copy_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "Debug preparation", "Debug register", "Debug copy cleanup", "copy demand", "stack copies forward", "stack forwarding excludes", "aggregate copy" } });
+    debug_copy_tests.stack_size = test_stack_size;
+    const debug_copy_command = b.addRunArtifact(debug_copy_tests);
+    debug_copy_command.setCwd(b.path(""));
+    b.step("test-debug-copies", "Verify Debug stack copy cleanup and diagnostic provenance").dependOn(&debug_copy_command.step);
     const rounded_float_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "rounded floating conversion", "native rounded conversion" } });
     rounded_float_tests.stack_size = test_stack_size;
     const rounded_float_command = b.addRunArtifact(rounded_float_tests);

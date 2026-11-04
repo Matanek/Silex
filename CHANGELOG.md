@@ -21,6 +21,9 @@ This editorial history starts with version 0.44.1.
 - Protocol methods can provide default bodies: existing conformers reuse them, explicit implementations take precedence, and concrete, generic, and dynamic calls preserve the same choice. Bodies are checked in protocol scope even when unused; competing defaults require an explicit implementation. Completion, labels, and navigation retain the original declarations across imports and extensions.
 - Method calls through a protocol accept named arguments using the protocol's labels. Comparing an optional protocol with the `null` literal tests presence without requiring a comparable payload.
 - `main` retains its module scope for calls across atoms. The LSP also indexes open files before their first save, preserving file or atom identity and visibility boundaries.
+- Native Debug prepares values and places temporaries in registers, with bounded inlining of small straight-line helpers. Checks and source information remain available; inlined helpers no longer create separate frames. The test runner uses the same policy. The monster truck retains its four soft tires and physics settings; see the local qualification and its limits in `Docs/Debug-preparation.md`.
+
+- Native Debug removes unused temporary copies and redundant scalar stack transfers while preserving calls, source locations, checks and ownership. The soft-tire solver retains its settings and physical observations; qualification is local to macOS ARM64, with no performance claim for other targets. See `Docs/Debug-copy-cleanup.md`.
 
 - `match` also releases a resource-bearing temporary subject when it selects `else`. Payload-binding branches keep their transfer behavior and borrowed subjects remain alive; object destruction is covered by native tests and an LLVM check.
 

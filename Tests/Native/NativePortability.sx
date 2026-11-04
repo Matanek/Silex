@@ -1,5 +1,6 @@
 use Module.AggregateCallCoordinates
 use Module.InteropSignedStorage
+use Module.DebugCopies
 
 func total(a:int, b:int, c:int, d:int, e:int, f:int, g:int, h:int, i:int, j:int) int {
     return a + b + c + d + e + f + g + h + i + j
@@ -729,8 +730,11 @@ test "native bound callbacks own and release their receiver graph" {
 }
 
 func main() {
+    DebugCopies.floating_exercise()
     AggregateCallCoordinates.exercise()
     InteropSignedStorage.exercise()
+    assert(DebugCopies.exercise(5) == 48)
+    assert(DebugCopies.exercise(9) == 64)
     verify_owned_callbacks()
     assert(total(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
     assert(callback_total() == 55)
@@ -855,4 +859,9 @@ test "native aggregate calls preserve loop-carried coordinates" {
 
 test "native signed storage remains readable after C pointer writes" {
     InteropSignedStorage.exercise()
+}
+
+test "native Debug copy cleanup preserves value snapshots" {
+    assert(DebugCopies.exercise(5) == 48)
+    assert(DebugCopies.exercise(9) == 64)
 }
