@@ -16,6 +16,14 @@ and applies the same leaf below the portable, active platform, and exact
 target roots. A loose invocation without `Package.json` keeps its entry-owned
 implicit source root.
 
+Compiler gates restrict user package discovery with
+`SILEX_USER_PACKAGE_ALLOWLIST=STD`. That filter does not remove workspace
+links: loose sources still include those links implicitly. In an isolated
+multi-package test workspace, establish the gate's minimal link set before
+starting it, preserve the original link files and restore them before consumer
+checks. Change only links owned by that test workspace. A correct consumer
+graph does not establish isolation of the language corpus; check both contexts.
+
 A valid `@Name.sx` basename is an invisible physical atom of the logical
 module represented by its directory. All atoms of that module are composed
 before semantic lowering while retaining file-local imports, declarations
