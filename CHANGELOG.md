@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- The native test runner releases emission and linking scratch after each case instead of retaining it until the source file finishes. The shared program, captured output, diagnostics and signal-artifact retention keep their contract.
+
 - C callbacks have a distinct native entry: floating arguments and results, preserved registers, and stack arguments follow the target ABI, including after closing the program to its used functions. `C.call` and callbacks accept flat record parameters with 64-bit fields; their results remain scalar. C bindings also accept `uint16`. References must resolve without captures at compile time, directly or through immutable aliases. Static method references can be inferred without annotations, and local declarations take precedence over namespace homonyms. Completion inserts these references without invoking them and recovers indirect C argument contexts.
 
 - Collection literals used as optional fallbacks inherit the payload type, including empty lists and tuple fields, while ordinary numeric fallback widening is preserved. Completion keeps the same element context.

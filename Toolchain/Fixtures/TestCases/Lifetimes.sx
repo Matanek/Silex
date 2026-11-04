@@ -1,0 +1,16 @@
+use STD.Console
+
+test "before failure" {
+    Console.write_line("before")
+    assert(2 + 3 == 5)
+}
+
+test "expected failure" {
+    Console.write_line("failure")
+    assert(false)
+}
+
+test "after failure" {
+    Console.write_line("after")
+    assert(3 * 4 == 12)
+}

@@ -107,7 +107,31 @@ pub fn execute(
     return .{ .result = result, .executable = executable };
 }
 
-fn executeAt(
+// Keep emission scratch independent from the caller's source arena. Only
+// captured output escapes this call; the machine program remains borrowed.
+noinline fn executeAt(
+    result_allocator: Allocator,
+    io: Io,
+    target: TargetModule.Target,
+    linker_path: []const u8,
+    program: Machine.Program,
+    function: Machine.FunctionId,
+    executable: []const u8,
+    providers: []const Packages.BoundaryProvider,
+) !std.process.RunResult {
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const result = try executeAtScratch(scratch.allocator(), io, target, linker_path, program, function, executable, providers);
+    const stdout = try result_allocator.dupe(u8, result.stdout);
+    errdefer result_allocator.free(stdout);
+    return .{
+        .term = result.term,
+        .stdout = stdout,
+        .stderr = try result_allocator.dupe(u8, result.stderr),
+    };
+}
+
+fn executeAtScratch(
     allocator: Allocator,
     io: Io,
     target: TargetModule.Target,

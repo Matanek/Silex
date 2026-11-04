@@ -589,6 +589,13 @@ pub fn build(b: *std.Build) void {
     result_call_cli_command.setCwd(b.path("../.."));
     result_call_cli_command.setEnvironmentVariable("SILEX_USER_PACKAGE_ALLOWLIST", "STD");
     b.step("test-result-call-cli", "Verify Result calls in interpreter and native Debug/Release").dependOn(&result_call_cli_command.step);
+
+    const test_case_lifetime_command = b.addSystemCommand(&.{"python3"});
+    test_case_lifetime_command.addFileArg(b.path("Tools/VerifyTestCaseLifetime.py"));
+    test_case_lifetime_command.addArtifactArg(executable);
+    test_case_lifetime_command.addDirectoryArg(b.path(".."));
+    test_case_lifetime_command.setCwd(b.path("../.."));
+    b.step("test-case-lifetime-cli", "Verify native test failures preserve output and continuation").dependOn(&test_case_lifetime_command.step);
     const stack_window_tests = b.addTest(.{
         .root_module = module,
         // Keep unnamed import tests reachable as well as the regression.
@@ -648,6 +655,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run compiler and Silex language tests");
     test_step.dependOn(&test_command.step);
     test_step.dependOn(&result_call_cli_command.step);
+    test_step.dependOn(&test_case_lifetime_command.step);
     test_step.dependOn(&deep_copy_test_command.step);
     test_step.dependOn(&cycle_test_command.step);
     test_step.dependOn(&llvm_cycle_test_command.step);
@@ -783,6 +791,7 @@ pub fn build(b: *std.Build) void {
     // requested mode without installing it into zig-out/bin.
     check_step.dependOn(&test_command.step);
     check_step.dependOn(&result_call_cli_command.step);
+    check_step.dependOn(&test_case_lifetime_command.step);
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&cycle_test_command.step);
     check_step.dependOn(&llvm_cycle_test_command.step);

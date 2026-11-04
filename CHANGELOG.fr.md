@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le lanceur natif de tests libère les temporaires d’émission et de liaison après chaque scénario, au lieu de les conserver jusqu’à la fin du fichier. Le programme commun, les sorties capturées, les diagnostics et la conservation des artefacts en cas de signal gardent leur contrat.
+
 - Les callbacks C disposent d’une entrée native distincte : arguments et résultats flottants, registres préservés et arguments sur pile suivent l’ABI de la cible, y compris après réduction du programme aux fonctions utilisées. `C.call` et les callbacks acceptent des paramètres records plats de champs 64 bits ; leurs résultats restent scalaires. Les liaisons C acceptent aussi `uint16`. Les références doivent être résolues sans capture à la compilation, directement ou par alias immuable. Les références de méthodes statiques peuvent être inférées sans annotation ; une déclaration locale garde priorité sur un homonyme de namespace. La complétion insère ces références sans appel et retrouve le contexte des arguments C indirects.
 
 - Les littéraux de collection utilisés comme remplacement optionnel héritent du type de la valeur, y compris les listes vides et les champs de tuples ; l’élargissement des remplacements numériques est préservé. La complétion conserve le même contexte d’élément.
