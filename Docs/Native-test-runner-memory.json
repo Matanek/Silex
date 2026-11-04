@@ -1,0 +1,44 @@
+{
+  "workload": "Packages/GFX.UI/Tests/Consumer/Tests/Menus.sx",
+  "workload_sha256": "6d060596e67046a725b1cf06e6ce6f135b56786ef62655cd441292077763b0d4",
+  "scenarios": 26,
+  "host": {
+    "os": "macOS 26.6.2",
+    "architecture": "arm64"
+  },
+  "cli_mode": "ReleaseFast",
+  "silex_mode": "native Debug",
+  "sampling_seconds": 1,
+  "nice": 10,
+  "rss_limit_kib": 4194304,
+  "start_free_percent": 45,
+  "stop_free_percent": 35,
+  "before": {
+    "compiler_sha256": "e060c367acbb458457bdb546c0512de60f8f6b2bd1f2104a910ee8d78a96db82",
+    "exit_code": -15,
+    "stop_reason": "rss_limit",
+    "observed_max_rss_kib": 4229408
+  },
+  "after": {
+    "compiler_sha256": "97c3af9225605e8acbb16aa16ecaf3dd1c698416a6b3101bf899268eab9ccf24",
+    "exit_code": 0,
+    "stop_reason": null,
+    "observed_max_rss_kib": 3672304
+  },
+  "source_revision": "fe3a4eab1c339140bd5588d7933dead9030649a6",
+  "scope_proof": {
+    "emission_body_identical_except_name": true,
+    "lowering_and_execute_prefix_identical": true,
+    "old_compiler_sha256": "e060c367acbb458457bdb546c0512de60f8f6b2bd1f2104a910ee8d78a96db82",
+    "new_compiler_sha256": "97c3af9225605e8acbb16aa16ecaf3dd1c698416a6b3101bf899268eab9ccf24",
+    "source": "Silex/Toolchain/Sources/NativeTestRunner.zig",
+    "old_source_head": "7eeba0c7fb805ec33aed3a43d3f3d50e646b9354",
+    "old_native_runner_sha256": "832775e4c3416f9a10e48983f895b3f3a88737aab57873425b9b5521b4c030b7",
+    "new_native_runner_sha256": "f643adc71a3dffda81f2472d668f8a3b8d6d9aa7ca8c652e03513df77270f559"
+  },
+  "limits": [
+    "Resource-gate completion, not a portable performance bound",
+    "Interrupted baseline is not a successful correctness run",
+    "No native window or screenshot"
+  ]
+}

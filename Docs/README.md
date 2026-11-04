@@ -98,6 +98,8 @@ Choose the subsystem that matches the question you are investigating:
   formats, internal calling conventions, package boundaries, and system ABIs.
 - [Command-line compilation](Command-line-compilation.md): `run`, `interpret`,
   `compile`, Debug diagnostics, and interactive progress.
+- [Native test execution](Native-test-runner.md): source/program ownership,
+  per-execution scratch, captured output and bounded memory evidence.
 - [Registry identity qualification](Registry-login.md): isolated login/logout
   client, private state, protocol boundaries and offline end-to-end tests.
 - [Native Debug preparation](Debug-preparation.md): bounded value preparation,
