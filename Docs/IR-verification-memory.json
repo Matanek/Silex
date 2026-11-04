@@ -1,0 +1,103 @@
+{
+  "host": {
+    "os": "macOS",
+    "version": "26.6.2",
+    "build": "25G83",
+    "architecture": "arm64"
+  },
+  "source_commit": "d2bbe7b439e8ea08b92ef446c9afd13a4ef34b07",
+  "compiler_sha256": "1e1277a2596b4f12f8a3227c93be237fc0bbeb9c586f156fc9a6a06faa521644",
+  "compiler_mode": "ReleaseFast",
+  "source": "Silex-Examples/Sources/UIAccessibility/Main.sx",
+  "target": "macos-arm64",
+  "mode": "debug",
+  "guards": {
+    "nice": 10,
+    "group_rss_limit_kib": 4194304,
+    "start_free_percent": 45,
+    "stop_free_percent": 35,
+    "sampling_seconds": 1
+  },
+  "observations": [
+    {
+      "configuration": "no_worker_override",
+      "workers_override": null,
+      "max_observed_group_rss_kib": 4482192,
+      "exit_code": -15,
+      "stop_reason": "rss_limit",
+      "cpu_check": false,
+      "command": [
+        "silex",
+        "compile",
+        "Silex-Examples/Sources/UIAccessibility/Main.sx",
+        "--debug"
+      ],
+      "seconds": 56.44
+    },
+    {
+      "configuration": "one_worker",
+      "workers_override": 1,
+      "max_observed_group_rss_kib": 2826528,
+      "exit_code": 0,
+      "stop_reason": null,
+      "cpu_check": true,
+      "command": [
+        "silex",
+        "compile",
+        "Silex-Examples/Sources/UIAccessibility/Main.sx",
+        "--debug"
+      ],
+      "seconds": 89.98
+    }
+  ],
+  "source_inputs_identical": true,
+  "cache_warmness_controlled": false,
+  "repetitions_per_configuration": 1,
+  "general_memory_or_speed_claim": false,
+  "gates": {
+    "test_ir_verification": {
+      "tests": 27,
+      "bounded_cases": 2,
+      "functions_per_case": 8192,
+      "caller_scratch_bytes": 32768
+    },
+    "check": {
+      "steps": 50,
+      "internal_tests": 1764,
+      "silex_scenarios": 293,
+      "silex_files": 115
+    },
+    "test": {
+      "steps": 42,
+      "internal_tests": 1229,
+      "silex_scenarios": 293,
+      "silex_files": 115
+    }
+  },
+  "build_inputs": [
+    {
+      "path": "Silex/CHANGELOG.fr.md",
+      "sha256": "96b09b134ad9bd8276d0de8290edb7264d348beaa815cf17a295071f48d6572c"
+    },
+    {
+      "path": "Silex/CHANGELOG.md",
+      "sha256": "9806aad706942dc93fdc08ed9cffe9e67ac6b92e07847fc523476f98844dca4b"
+    },
+    {
+      "path": "Silex/Toolchain/Sources/Ir.zig",
+      "sha256": "530a961278175175c4a7f7775a4b324bb8e46fa7d03a2ef998929cca173db268"
+    },
+    {
+      "path": "Silex/Toolchain/Sources/Optimize/Release.zig",
+      "sha256": "db11881da14a543fccd38ee271144bf672f4c51a7d089d7c0ca58db7c6349bc8"
+    },
+    {
+      "path": "Silex/Toolchain/Sources/Optimize/Verifier.zig",
+      "sha256": "bf532bcb594e0d9361f96f93807cf489f1cb223f003557677308c9b2237fc49c"
+    },
+    {
+      "path": "Silex/Toolchain/build.zig",
+      "sha256": "2bb163779309679ace0b557cc174928c1a393ef52706e1a86de20e8f042304d4"
+    }
+  ]
+}
