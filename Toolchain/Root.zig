@@ -2,6 +2,7 @@ pub const silex_compiler_api = @import("Sources/OptimizerOracleApi.zig");
 pub const main = @import("Sources/Main.zig").main;
 
 test {
+    _ = @import("Sources/Semantic/DeclarationIndexTests.zig");
     _ = @import("Sources/CallbackAbiTests.zig");
     _ = @import("Sources/Semantic/ProtocolDefaults.zig");
     _ = @import("Sources/DebugNativeTests.zig");

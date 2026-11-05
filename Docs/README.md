@@ -106,6 +106,8 @@ Choose the subsystem that matches the question you are investigating:
   client, private state, protocol boundaries and offline end-to-end tests.
 - [Native Debug preparation](Debug-preparation.md): bounded value preparation,
   register placement, source information, and qualification limits.
+- [Frontend declaration lookup](Frontend-lookups.md): source name indexing,
+  tuple identity changes and differential lookup evidence.
 - [Native liveness](Native-liveness.md): word-based fixed-point resolution,
   exact scalar equivalence and temporary storage lifetime.
 - [Native register conflicts](Native-conflicts.md): immutable per-slot masks,

@@ -124,10 +124,7 @@ pub fn implementationAt(self: anytype, structure_index: usize, requirement: Ast.
 }
 
 fn sourceDeclaration(self: anytype, structure_index: usize) ?Ast.Structure {
-    if (structure_index >= self.structures.len) return null;
-    const name = self.structures[structure_index].name;
-    for (self.program.structures) |source| if (std.mem.eql(u8, source.name, name)) return source;
-    return null;
+    return @import("Inheritance.zig").findDeclaration(self, structure_index);
 }
 
 fn active(files: []const usize, file: usize) bool {

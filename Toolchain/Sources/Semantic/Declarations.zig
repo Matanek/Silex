@@ -31,9 +31,15 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
         }
     }
 
+    // Source declaration names stay fixed while tuple inference can rename IR
+    // structures. Resolve each query using its current IR name.
+    try self.structure_declarations.ensureTotalCapacity(self.allocator, @intCast(self.program.structures.len));
+    for (self.program.structures, 0..) |declaration, index| {
+        self.structure_declarations.putAssumeCapacityNoClobber(declaration.name, index);
+    }
     const structures = try self.allocator.alloc(Ir.Structure, self.program.type_names.len);
     for (self.program.type_names, 0..) |name, type_index| {
-        const declaration = findAstStructure(self, name) orelse {
+        const declaration_index = findAstStructureIndex(self, name) orelse {
             if (Enums.find(self, name) != null) {
                 structures[type_index] = .{ .name = name, .fields = &.{} };
                 continue;
@@ -41,6 +47,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             const message = try std.fmt.allocPrint(self.allocator, "unknown nominal type '{s}'", .{name});
             return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, message);
         };
+        const declaration = self.program.structures[declaration_index];
         const fields = try self.allocator.alloc(Ir.StructureField, declaration.fields.len);
         for (declaration.fields, 0..) |field, field_index| fields[field_index] = .{
             .name = field.name,
@@ -209,8 +216,11 @@ fn validateStructureCycle(self: anytype, index: usize, states: []StructureState)
 }
 
 fn findAstStructure(self: anytype, name: []const u8) ?@import("../Ast.zig").Structure {
-    for (self.program.structures) |structure| if (std.mem.eql(u8, structure.name, name)) return structure;
-    return null;
+    return self.program.structures[findAstStructureIndex(self, name) orelse return null];
+}
+
+fn findAstStructureIndex(self: anytype, name: []const u8) ?usize {
+    return self.structure_declarations.get(name);
 }
 
 fn isProtocolType(self: anytype, type_value: @import("../Ast.zig").Type) bool {

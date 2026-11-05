@@ -182,7 +182,19 @@ fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: 
 
 pub fn findDeclaration(self: anytype, structure_index: usize) ?Ast.Structure {
     if (structure_index >= self.structures.len) return null;
-    const name = self.structures[structure_index].name;
-    for (self.program.structures) |structure| if (std.mem.eql(u8, structure.name, name)) return structure;
-    return null;
+    const indexed = self.structure_declarations.get(self.structures[structure_index].name);
+    if (@import("builtin").is_test) {
+        // Exercise the former name lookup as an independent oracle throughout
+        // the semantic corpus, including tests built in ReleaseFast.
+        const expected: ?usize = searched: {
+            const name = self.structures[structure_index].name;
+            for (self.program.structures, 0..) |declaration, index| {
+                if (std.mem.eql(u8, declaration.name, name)) break :searched index;
+            }
+            break :searched null;
+        };
+        if (indexed != expected) @panic("source declaration index differs from name lookup");
+    }
+    const declaration_index = indexed orelse return null;
+    return self.program.structures[declaration_index];
 }

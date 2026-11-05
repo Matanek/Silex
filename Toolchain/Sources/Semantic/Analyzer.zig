@@ -75,6 +75,7 @@ pub const Analyzer = struct {
     allocator: Allocator,
     program: Ast.Program = undefined,
     structures: []const Ir.Structure = &.{},
+    structure_declarations: std.StringHashMapUnmanaged(usize) = .empty,
     globals: []const Ir.Global = &.{},
     external_functions: []const Boundary.Function = &.{},
     enums: []const Ir.Enum = &.{},
@@ -127,6 +128,7 @@ pub const Analyzer = struct {
             break :materialized try @import("ProtocolDefaults.zig").materialize(self, fields);
         };
         self.program = program;
+        self.structure_declarations = .empty;
         self.diagnostic = null;
         self.bound_methods.clearRetainingCapacity();
         self.anonymous_captures = try self.allocator.alloc(?[]const AnonymousCapture, program.functions.len);

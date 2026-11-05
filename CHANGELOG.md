@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- The frontend indexes source declarations once for inheritance and protocol queries. It resolves the current internal name, including after tuple inference, and rebuilds the index for each analysis. The mechanism is shared by both backends and all six targets; evidence and limits are in `Docs/Frontend-lookups.md`.
+
 - Register conflict queries use per-slot liveness and definition masks to skip repeated scans of dead instruction points. The ARM64 graph shared with X64 floating scalars preserves the same sharing rules and decisions; temporary tables are released after each graph. Local macOS ARM64 measurements reduce Boids compilation by 7.1% in Debug and 52.3% in Release against the preceding increment, with identical executables; see `Docs/Native-conflicts.md` for the protocol and limits.
 
 - Native liveness computes uses and definitions once, then solves the fixed point in 64-bit words. It preserves the same boolean matrix for ARM64 register allocators and their X64 consumers; temporary tables are released after each solve.

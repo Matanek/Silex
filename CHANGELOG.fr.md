@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le frontend indexe une fois les déclarations source pour les recherches d’héritage et de protocoles. Il consulte le nom interne courant, y compris après inférence des tuples, et reconstruit cet index à chaque analyse. Le mécanisme est commun aux deux backends et aux six cibles ; les preuves et limites sont dans `Docs/Frontend-lookups.md`.
+
 - La recherche des conflits de registres utilise des masques de vivacité et de définition par slot pour éviter les balayages répétés des points morts. Le graphe ARM64 partagé avec les scalaires flottants X64 conserve les mêmes règles de partage et décisions ; les tables temporaires sont libérées après chaque graphe. Mesures locales macOS ARM64 : compilation de Boids réduite de 7,1 % en Debug et de 52,3 % en Release face à la tranche précédente, avec exécutables identiques ; protocole et limites dans `Docs/Native-conflicts.md`.
 
 - Le solveur de vivacité natif calcule les usages et définitions une seule fois, puis résout le point fixe par mots de 64 bits. Il conserve la même matrice booléenne pour les allocateurs de registres ARM64 et leurs consommateurs X64 ; ses tables temporaires sont libérées à chaque résolution.
