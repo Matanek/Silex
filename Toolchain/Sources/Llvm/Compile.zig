@@ -9,6 +9,7 @@ pub const Job = struct {
     optimized_path: []const u8,
     object_path: []const u8,
     digest: [32]u8,
+    run_opt: bool = true,
     succeeded: bool = false,
 };
 
@@ -73,14 +74,18 @@ const Worker = struct {
         try std.Io.Dir.cwd().writeFile(o.io, .{ .sub_path = job.raw_path, .data = job.text });
         defer std.Io.Dir.cwd().deleteFile(o.io, job.raw_path) catch {};
         defer std.Io.Dir.cwd().deleteFile(o.io, job.optimized_path) catch {};
-        if (o.inline_threshold) |threshold| {
-            try stage(o, "opt", &.{ o.opt, "-S", o.passes, threshold, job.raw_path, "-o", job.optimized_path });
-        } else {
-            try stage(o, "opt", &.{ o.opt, "-S", o.passes, job.raw_path, "-o", job.optimized_path });
+        if (job.run_opt) {
+            if (o.inline_threshold) |threshold| {
+                try stage(o, "opt", &.{ o.opt, "-S", o.passes, threshold, job.raw_path, "-o", job.optimized_path });
+            } else {
+                try stage(o, "opt", &.{ o.opt, "-S", o.passes, job.raw_path, "-o", job.optimized_path });
+            }
         }
+        // llc verifies its input in both paths.
+        const input = if (job.run_opt) job.optimized_path else job.raw_path;
         try stage(o, "llc", &.{
-            o.llc,           "-filetype=obj",    o.level,            "-mtriple=arm64-apple-macosx26.0.0",
-            o.cpu,           "-fp-contract=off", job.optimized_path, "-o",
+            o.llc,           "-filetype=obj",    o.level, "-mtriple=arm64-apple-macosx26.0.0",
+            o.cpu,           "-fp-contract=off", input,   "-o",
             job.object_path,
         });
         job.succeeded = true;

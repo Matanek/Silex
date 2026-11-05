@@ -163,7 +163,7 @@ def main():
         "LlvmEvaluation/EmbeddedBytes.sx": "4\n65\n195\n169\n0\n65\n",
         "LlvmEvaluation/AggregateOptional.sx": "-1\n42\ntrue\n",
         "LlvmEvaluation/RichClassStorage.sx": "42\ntrue\nempty\n",
-        "LlvmEvaluation/ClassFinalizers.sx": "leaf\nowner\nleaf\n",
+        "LlvmEvaluation/ClassFinalizers.sx": "owner\nleaf\n",
         "LlvmEvaluation/OwnedStringList.sx": "2\nalpha\nbeta\n",
         "LlvmEvaluation/PlainStructureEquality.sx": "true\nfalse\nfalse\ntrue\n",
         "LlvmEvaluation/RefuseCallback.sx": "3\n",

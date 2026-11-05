@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- LLVM Debug bypasses `opt` for units whose emitted functions have only forward branches and no special annotations. Loops and unknown forms retain the existing O0 pipeline; `llc` always verifies its inputs. The `llvm_units_optimized` trace counter reports units sent to `opt`, and the policy participates in their cache identity. Release retains its O3 pipeline and unit boundaries.
+
 - A string read through an `@` or `&` borrow can be passed by value or retained in an owned field, as with an ordinary return. Its immutable storage stays retained; borrow capabilities and class references still cannot escape.
 
 - The LLVM backend accepts fixed `objc_msgSend` signatures whose handles use 64-bit words while preserving provider and ordinary C signature checks. Its text-emission temporaries are released before the LLVM tools: Boids now compiles in Debug and Release on macOS ARM64 within the local memory guard. Native behavior is preserved.

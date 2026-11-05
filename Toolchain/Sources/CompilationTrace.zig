@@ -74,6 +74,7 @@ pub const Metrics = struct {
     machine_functions: usize = 0,
     llvm_units_reused: usize = 0,
     llvm_units_compiled: usize = 0,
+    llvm_units_optimized: usize = 0,
     llvm_functions_reused: usize = 0,
     range_functions_reused: usize = 0,
     range_functions_computed: usize = 0,

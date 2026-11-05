@@ -14,6 +14,7 @@ const format_runtime = @import("llvm_format_runtime_object");
 const Units = @import("Llvm/Units.zig");
 const Store = @import("Llvm/Store.zig").Store;
 const Compile = @import("Llvm/Compile.zig");
+const DebugPipeline = @import("Llvm/DebugPipeline.zig");
 const StoreLimit = @import("Llvm/Store.zig").limit;
 
 const Allocator = std.mem.Allocator;
@@ -169,7 +170,7 @@ pub fn buildExecutable(
     for (units, 0..) |unit, index| {
         const object_path = try std.fmt.allocPrint(allocator, "{s}/unit-{d}.o", .{ staging, index });
         try objects.append(allocator, object_path);
-        const digest = Store.key("llvm-unit-v2", &.{ version, options.tools.cpu, options.target.name(), @tagName(options.mode), inline_threshold orelse "default-inlining", unit.text });
+        const digest = Store.key("llvm-unit-v3", &.{ version, options.tools.cpu, options.target.name(), @tagName(options.mode), "forward-only-debug-v1", inline_threshold orelse "default-inlining", unit.text });
         if (cache) |store| if (store.load(digest)) |bytes| {
             try writeFile(init.io, object_path, bytes);
             if (options.trace) |trace| {
@@ -178,13 +179,18 @@ pub fn buildExecutable(
             }
             continue;
         };
-        if (options.trace) |trace| trace.metrics.llvm_units_compiled += 1;
+        const run_opt = options.mode != .debug or DebugPipeline.needsOpt(unit.text);
+        if (options.trace) |trace| {
+            trace.metrics.llvm_units_compiled += 1;
+            trace.metrics.llvm_units_optimized += @intFromBool(run_opt);
+        }
         try jobs.append(allocator, .{
             .text = unit.text,
             .object_path = object_path,
             .raw_path = try std.fmt.allocPrint(allocator, "{s}/unit-{d}.ll", .{ staging, index }),
             .optimized_path = try std.fmt.allocPrint(allocator, "{s}/unit-{d}.opt.ll", .{ staging, index }),
             .digest = digest,
+            .run_opt = run_opt,
         });
     }
     const optimization = if (options.mode == .debug) "0" else "3";

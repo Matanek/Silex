@@ -68,6 +68,25 @@ update, the same guarded Debug/Release smoke also completes, with a 4.033 GB gro
 peak. These are resource diagnostics, not paired speedup measurements. Native backends and the five other distributed native targets do
 not use this LLVM preparation path.
 
+## Conservative Debug preparation
+
+The pinned LLVM 21.1.8 `default<O0>` pipeline is not an identity transform:
+it runs LoopSimplify, LCSSA and LoopIdiomVectorize. Removing it for every unit
+changes actual machine code, including stack frames. Debug therefore bypasses
+`opt` only when every function in the emitted unit has strictly forward branch
+targets and no special annotations. A backward edge, unknown target or control
+transfer, inline assembly, coroutine or instrumentation retains the old pipeline.
+Backward branches in acyclic graphs are deliberately kept as well. The detector
+recognizes the compiler's own unit dialect; it is not a general LLVM parser.
+
+Eligible units pass their original text directly to `llc -O=0`, with normal
+input verification enabled. Release still uses the full O3 pipeline and its
+existing inlining threshold. Unit text, boundaries and import selection are
+unchanged. The policy revision is included in compiled-unit keys; detection only
+runs after a fragment miss. `llvm_units_optimized` counts jobs sent to `opt`,
+separately from compiled and reused units. No additional tool or persistent
+process is introduced.
+
 ## Run the experiment
 
 Build the `llvm-evaluation` step from `Toolchain/` with the chosen cache directories

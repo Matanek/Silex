@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- LLVM Debug évite `opt` pour les unités dont les fonctions émises ont uniquement des sauts vers l’avant, sans annotation spéciale. Les boucles et formes inconnues gardent le pipeline O0 existant ; `llc` vérifie toujours ses entrées. Le compteur de trace `llvm_units_optimized` expose les unités confiées à `opt`, et la politique participe à leur identité de cache. Release garde son pipeline O3 et son découpage.
+
 - Une chaîne lue par un emprunt `@` ou `&` peut être passée par valeur ou conservée dans un champ possédé, comme lors d’un retour ordinaire. Sa mémoire immuable reste retenue ; l’emprunt et les références de classe ne peuvent toujours pas s’échapper.
 
 - Le backend LLVM accepte les signatures fixes de `objc_msgSend` dont les handles sont représentés par des mots de 64 bits, en conservant les contrôles de fournisseur et de signature C. Ses temporaires de texte sont libérés avant les outils LLVM : Boids compile désormais en Debug et Release sur macOS ARM64, sous la garde mémoire locale. Le natif conserve son comportement.
