@@ -26,6 +26,7 @@ test {
     _ = @import("Sources/OptionalTests.zig");
     _ = @import("Sources/TypedResourceTests.zig");
     _ = @import("Sources/Project/CoreTests.zig");
+    _ = @import("Sources/Project/EnumResolutionTests.zig");
     _ = @import("Sources/Project/HierarchyTests.zig");
     _ = @import("Sources/Project/OwnerStorageTests.zig");
     _ = @import("Sources/Project/UninhabitedProtocolTests.zig");

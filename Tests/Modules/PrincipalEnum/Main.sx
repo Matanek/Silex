@@ -1,0 +1,15 @@
+use Easing as Curve
+
+func verify() {
+    let inferred = Curve.quadratic_in
+    let annotated:Curve = Curve.quadratic_in
+    assert(inferred == annotated)
+    assert(Curve.quadratic_in() == annotated)
+    assert(Curve.sample(inferred, 3) == 9)
+    assert(Curve.sample(Curve.idle, 3) == 3)
+    let callback:func(int) int = Curve.identity
+    assert(callback(42) == 42)
+}
+
+test "principal enum variants keep their identity beside module helpers" { verify() }
+func main() { verify(); print("principal enum variants: ok") }

@@ -1464,3 +1464,52 @@ test "result call policy server resolves ordinary imported successes and keeps c
     );
     try Support.expectEqualItems(direct, repeated);
 }
+
+test "server preserves principal enum variants beside homonymous module helpers" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Curves/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Curves/Package.json",
+        .data = "{\"name\":\"Curves\",\"version\":\"1.0.0\"}",
+    });
+    const module_source =
+        \\public enum Easing {
+        \\    quadratic_in
+        \\    idle
+        \\}
+        \\func quadratic_in(value:int) int { return value * value }
+        \\func hidden_helper() {}
+        \\public func sample(value:int) int { return quadratic_in(value) }
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Curves/Module/Easing.sx", .data = module_source });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Curves/Module/@Module.sx", .data = "public use Curves.Easing" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try temporary.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const module_uri = try std.fmt.allocPrint(allocator, "file://{s}/Curves/Module/Easing.sx", .{root});
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    for ([_][]const u8{
+        "use Curves.Easing as Curve\nfunc main() { let value = Curve.qu<|> }",
+        "use Curves\nfunc main() { let value = Curves.Easing.qu<|> }",
+    }) |source| {
+        const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+        try Support.expectExactLabels(&.{"quadratic_in"}, items);
+        try Support.expectItem(.{ .label = "quadratic_in", .kind = 20, .detail = "quadratic_in Easing", .insert_text = "quadratic_in" }, items);
+        try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, try Support.serverCompletion(&server, allocator, uri, source));
+    }
+    const local_source = try std.fmt.allocPrint(allocator, "{s}\nfunc probe() {{ let value = Easing.qu<|> }}", .{module_source});
+    const local = try Support.serverCompletionAfterTrigger(&server, allocator, module_uri, local_source, ".");
+    try Support.expectExactLabels(&.{"quadratic_in"}, local);
+    try Support.expectItem(.{ .label = "quadratic_in", .kind = 20, .detail = "quadratic_in Easing", .insert_text = "quadratic_in" }, local);
+    const definition = (try Support.serverDefinition(&server, allocator, uri, "use Curves.Easing as Curve\nfunc main() { let value = Curve.quadratic_<|>in }")).?;
+    try std.testing.expectEqualStrings(module_uri, definition.uri);
+    try std.testing.expectEqual(@as(usize, 1), definition.range.start.line);
+}

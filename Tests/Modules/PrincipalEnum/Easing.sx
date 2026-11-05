@@ -1,0 +1,7 @@
+public enum Easing { quadratic_in; idle }
+func quadratic_in(amount:int) int { return amount * amount }
+public func sample(easing:Easing, amount:int) int {
+    if easing == Easing.quadratic_in { return quadratic_in(amount) }
+    return amount
+}
+public func identity(amount:int) int { return amount }

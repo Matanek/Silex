@@ -870,6 +870,18 @@ pub const Analyzer = struct {
             },
             .generic_reference => self.fail(expression.position, "generic type reference was not specialized"),
             .field_access => |access| function_reference: {
+                // A module's principal enum and its helper functions can share
+                // a qualified prefix. Preserve variant identity before trying
+                // to infer a callback from that same spelling.
+                if (access.base.value == .identifier and Support.findBinding(builder.bindings.items, access.base.value.identifier) == null) {
+                    if (Enums.find(self, access.base.value.identifier)) |enum_index| {
+                        for (self.program.enums[enum_index].variants) |variant| {
+                            if (std.mem.eql(u8, variant.name, access.name)) {
+                                break :function_reference try self.analyzeFieldAccess(builder, access);
+                            }
+                        }
+                    }
+                }
                 if (try Callbacks.memberReference(self, builder, access, expected)) |reference| {
                     break :function_reference reference;
                 }

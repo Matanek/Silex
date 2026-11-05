@@ -1795,12 +1795,27 @@ pub const Compiler = struct {
                                 return self.fail(call.name_position, message);
                             }
                         } else if (try self.enumReceiverTarget(module, prefix)) |target| {
-                            try self.requirePublicEnum(module, target, call.name_position);
-                            receiver.value = .{ .identifier = try structureCanonicalName(
-                                self.allocator,
-                                try self.enumModule(target),
-                                target.declaration,
-                            ) };
+                            const enumeration = findEnum(self.units[target.module].program.?, target.declaration).?;
+                            var variant_call = false;
+                            for (enumeration.variants) |variant| {
+                                if (std.mem.eql(u8, variant.name, call.name)) variant_call = true;
+                            }
+                            if (!variant_call) {
+                                if (try self.targetForCall(module, qualified)) |candidate| {
+                                    if (try self.functionTarget(candidate) != null) {
+                                        call.name = qualified;
+                                        call.receiver = null;
+                                    }
+                                }
+                            }
+                            if (call.receiver != null) {
+                                try self.requirePublicEnum(module, target, call.name_position);
+                                receiver.value = .{ .identifier = try structureCanonicalName(
+                                    self.allocator,
+                                    try self.enumModule(target),
+                                    target.declaration,
+                                ) };
+                            }
                         } else {
                             const qualified_function = if (try self.targetForCall(module, qualified)) |candidate|
                                 try self.functionTarget(candidate)
