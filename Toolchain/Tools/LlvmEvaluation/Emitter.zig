@@ -3441,11 +3441,7 @@ fn emitBoundaryDeclarations(
         if (!supportsDirectBoundary(function)) return error.UnsupportedType;
         for (boundaries[0..index], direct_sites_by_function[0..index]) |previous, previous_sites| {
             if (previous_sites == 0 or !std.mem.eql(u8, previous.source_name, function.source_name)) continue;
-            const same_provider = std.mem.eql(u8, previous.provider, function.provider);
-            const same_signature = previous.return_type == function.return_type and
-                std.mem.eql(Ir.Type, previous.parameters, function.parameters);
-            const typed_objc_dispatch = objcMessageBoundary(previous) and objcMessageBoundary(function);
-            if (!same_provider or (!same_signature and !typed_objc_dispatch)) {
+            if (!@import("BoundaryPolicy.zig").compatible(previous, function)) {
                 std.debug.print(
                     "silex LLVM evaluation: boundary symbol '{s}' has conflicting providers or signatures\n",
                     .{function.source_name},
@@ -3466,13 +3462,6 @@ fn emitBoundaryDeclarations(
         emitted = true;
     }
     if (emitted) try output.append(allocator, '\n');
-}
-
-fn objcMessageBoundary(function: Silex.Boundary.Function) bool {
-    return std.mem.eql(u8, function.source_name, "objc_msgSend") and
-        function.parameters.len >= 2 and
-        function.parameters[0] == .address and
-        function.parameters[1] == .address;
 }
 
 fn supportsDirectBoundary(function: Silex.Boundary.Function) bool {

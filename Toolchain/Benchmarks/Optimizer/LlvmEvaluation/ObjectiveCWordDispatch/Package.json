@@ -1,0 +1,19 @@
+{
+  "name": "ObjectiveCWordDispatch",
+  "version": "1.0.0",
+  "sources": ".",
+  "boundary": {
+    "macos-arm64": {
+      "providers": {
+        "System": {
+          "frameworks": [
+            "Foundation"
+          ],
+          "libraries": [
+            "objc"
+          ]
+        }
+      }
+    }
+  }
+}

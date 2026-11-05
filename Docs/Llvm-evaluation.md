@@ -38,6 +38,36 @@ Clang driver then invokes the system linker and selects Apple's target runtime. 
 avoids letting Zig's monolithic compiler-rt archive interpose system math symbols
 when a package boundary references a platform availability helper.
 
+## Fixed Objective-C calls and preparation lifetime
+
+Typed Objective-C calls may represent the receiver and selector as pointers or
+as full-width signed/unsigned 64-bit words. Declarations sharing `objc_msgSend`
+keep one external symbol and each call retains its fixed argument/result types.
+The LLVM declaration policy accepts these handle representations only when the
+provider matches. Ordinary C signature conflicts and different providers remain
+errors; narrow and floating handles do not qualify for this exception. No C
+variadic convention is introduced. The console-only
+`ObjectiveCWordDispatch/Probe.sx` benchmark fixture
+uses its own Foundation/objc provider and checks word, byte, double and void
+messages against real NSNumber objects.
+
+LLVM text emission owns a separate temporary arena. `Units.split` copies the
+selected text and creates independent canonical names in the result allocator;
+the emitter arena is released before parallel `opt`/`llc` jobs begin. Scratch
+formatting strings do not remain live through code generation and linking.
+The unit text, function imports, cache keys and compilation policy are unchanged.
+The unit ownership regression overwrites the source buffer and checks every
+unit's name and text in both import modes.
+
+This fixes the current Boids composition on the macOS ARM64 LLVM host in Debug
+and Release. The Debug executable remains byte-identical before/after releasing
+the arena. A diagnostic Release attempt with retained emission temporaries was
+stopped at the 4 GiB resource guard; the separate-arena smoke completes with a
+3.415 GB process-group peak on that baseline. After the PNG-related GFX baseline
+update, the same guarded Debug/Release smoke also completes, with a 4.033 GB group
+peak. These are resource diagnostics, not paired speedup measurements. Native backends and the five other distributed native targets do
+not use this LLVM preparation path.
+
 ## Run the experiment
 
 Build the `llvm-evaluation` step from `Toolchain/` with the chosen cache directories

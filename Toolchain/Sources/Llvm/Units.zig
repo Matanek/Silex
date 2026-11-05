@@ -376,3 +376,38 @@ test "address references do not import bodies and quoted bytes are never renamed
     try std.testing.expect(std.mem.indexOf(u8, caller.text, "available_externally") == null);
     try std.testing.expect(std.mem.indexOf(u8, caller.text, "c\"@sx_1\\00\"") != null);
 }
+
+test "LLVM units own their names and text after the emission buffer is released" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const program: Ir.Program = .{ .functions = &.{fixtureFunction("main")} };
+    const template =
+        \\target triple = "arm64-apple-macosx26.0.0"
+        \\define internal fastcc i64 @sx_0(ptr %env) {
+        \\entry:
+        \\  ret i64 42
+        \\}
+        \\define i32 @main() {
+        \\entry:
+        \\  %value = call fastcc i64 @sx_0(ptr null)
+        \\  ret i32 0
+        \\}
+        \\
+    ;
+    for ([_]bool{ false, true }) |imports| {
+        const source = try a.dupe(u8, template);
+        const units = try split(a, program, source, imports);
+        const names = try a.alloc([]const u8, units.len);
+        const texts = try a.alloc([]const u8, units.len);
+        for (units, 0..) |unit, index| {
+            names[index] = try a.dupe(u8, unit.name);
+            texts[index] = try a.dupe(u8, unit.text);
+        }
+        @memset(source, '?');
+        for (units, 0..) |unit, index| {
+            try std.testing.expectEqualStrings(names[index], unit.name);
+            try std.testing.expectEqualStrings(texts[index], unit.text);
+        }
+    }
+}

@@ -134,10 +134,15 @@ pub fn buildExecutable(
     options: BuildOptions,
 ) !bool {
     if (options.progress) |progress| progress.stage(.lower);
+    // Emission formats many temporary strings. Only the independent unit texts
+    // are needed by the tools; release this whole phase before parallel opt/llc.
+    var emission_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var emission_live = true;
+    defer if (emission_live) emission_arena.deinit();
     const llvm_text = llvm_text: {
         var span = if (options.trace) |trace| trace.span(.lowering) else CompilationTrace.Span{};
         defer span.finish();
-        break :llvm_text Emitter.emitCacheableEntry(allocator, options.program, options.boundaries, options.entry_function) catch |err| {
+        break :llvm_text Emitter.emitCacheableEntry(emission_arena.allocator(), options.program, options.boundaries, options.entry_function) catch |err| {
             std.debug.print("silex: LLVM backend cannot lower this program: {t}\n", .{err});
             return false;
         };
@@ -150,6 +155,8 @@ pub fn buildExecutable(
     try writeFile(init.io, format_path, format_runtime.object_bytes);
 
     const units = try Units.split(allocator, options.program, llvm_text, options.mode == .release);
+    emission_arena.deinit();
+    emission_live = false;
     // Checked collection accesses inflate the cost of numerical helpers before
     // inlining exposes repeated reads and bounds to LLVM's simplification.
     // Unit import depth and byte budgets still bound the available callees.

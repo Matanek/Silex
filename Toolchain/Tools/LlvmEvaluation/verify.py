@@ -45,14 +45,18 @@ def main():
         # collection views used by the Boids and Physics consumers.
         if path.stem in ["MergedRawMemory", "MutableOwningView", "DenseBlockLiveOut", "ScalarMinMax", "MixedAggregateCallAbi", "ViewCallAbi", "ListGrowth", "ProtocolTemporaryOwnership", "NestedReceiver", "ReceiverAliasing", "ReceiverForms", "ReceiverReentry", "BorrowedReceiver", "BorrowedAliasing", "BorrowedReentry", "BorrowedAssignment", "BorrowedElement", "BorrowedList", "BorrowedCallback", "BorrowedReturn", "BorrowedCAddress", "BorrowedView", "BorrowedResource"] or "BorrowedResource" in path.parts:
             silex_prefix = "branch_snapshot_sinking"
-        return [sys.executable, driver, "--backend", "llvm", "--source", path,
+        command = [sys.executable, driver, "--backend", "llvm", "--source", path,
                 "--adapter", args.adapter, "--format-runtime", args.format_runtime,
                 "--shadercross", args.shadercross,
                 "--silex-prefix", silex_prefix,
                 "--llvm-dir", args.llvm_dir, "--sdk", args.sdk,
                 "--opt", mode, "--output", binary]
+        if "ObjectiveCWordDispatch" in path.parts:
+            command.extend(["--framework", "Foundation", "--library", "objc"])
+        return command
 
     cases = {
+        "LlvmEvaluation/ObjectiveCWordDispatch/Probe.sx": "typed Objective-C dispatch preserved\n",
         "LlvmEvaluation/ClassCopy.sx": "class-copy-ok\n",
         "LlvmEvaluation/DeepCopyGraph.sx": "deep-copy-graph-ok\n",
         "LlvmEvaluation/TemporaryField.sx": "owner dropped\nitem 42\ntemporary-fields-ok\nitem dropped\n",

@@ -1,0 +1,25 @@
+use Interop.C
+use Interop.Boundary
+
+let find_class = C.function<func(C.Pointer<uint8>) uint>(library:Boundary.System, name:"objc_getClass")
+let find_selector = C.function<func(C.Pointer<uint8>) uint>(library:Boundary.System, name:"sel_registerName")
+let send_object = C.function<func(uint,uint) uint>(library:Boundary.System, name:"objc_msgSend")
+let send_double = C.function<func(uint,uint,float64) uint>(library:Boundary.System, name:"objc_msgSend")
+let read_double = C.function<func(uint,uint) float64>(library:Boundary.System, name:"objc_msgSend")
+let send_boolean = C.function<func(uint,uint,uint8) uint>(library:Boundary.System, name:"objc_msgSend")
+let read_boolean = C.function<func(uint,uint) uint8>(library:Boundary.System, name:"objc_msgSend")
+let send_void = C.function<func(uint,uint) void>(library:Boundary.System, name:"objc_msgSend")
+
+func selector(name:str) uint { return find_selector(C.terminated_pointer(name)) }
+
+func main() {
+    let pool = send_object(find_class(C.terminated_pointer("NSAutoreleasePool")), selector("new"))
+    assert(pool != 0 as uint)
+    let number = send_double(find_class(C.terminated_pointer("NSNumber")), selector("numberWithDouble:"), 6.25 as float64)
+    assert(number != 0 as uint)
+    assert(read_double(number, selector("doubleValue")) == 6.25 as float64)
+    let flag = send_boolean(find_class(C.terminated_pointer("NSNumber")), selector("numberWithBool:"), 1 as uint8)
+    assert(read_boolean(flag, selector("boolValue")) == 1 as uint8)
+    send_void(pool, selector("drain"))
+    print("typed Objective-C dispatch preserved")
+}

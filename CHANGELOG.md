@@ -10,6 +10,8 @@ This editorial history starts with version 0.44.1.
 
 - A string read through an `@` or `&` borrow can be passed by value or retained in an owned field, as with an ordinary return. Its immutable storage stays retained; borrow capabilities and class references still cannot escape.
 
+- The LLVM backend accepts fixed `objc_msgSend` signatures whose handles use 64-bit words while preserving provider and ordinary C signature checks. Its text-emission temporaries are released before the LLVM tools: Boids now compiles in Debug and Release on macOS ARM64 within the local memory guard. Native behavior is preserved.
+
 - The frontend indexes source declarations once for inheritance and protocol queries. It resolves the current internal name, including after tuple inference, and rebuilds the index for each analysis. The mechanism is shared by both backends and all six targets; evidence and limits are in `Docs/Frontend-lookups.md`.
 
 - Register conflict queries use per-slot liveness and definition masks to skip repeated scans of dead instruction points. The ARM64 graph shared with X64 floating scalars preserves the same sharing rules and decisions; temporary tables are released after each graph. Local macOS ARM64 measurements reduce Boids compilation by 7.1% in Debug and 52.3% in Release against the preceding increment, with identical executables; see `Docs/Native-conflicts.md` for the protocol and limits.
