@@ -120,6 +120,42 @@ test "reference mode does not distinguish overloads" {
     try std.testing.expectEqualStrings("function 'update' with these parameter types is already declared", frontend.diagnostic.?.message);
 }
 
+test "borrowed strings can be retained as call arguments and owned fields" {
+    const output = try run(
+        \\class Config { var path:str }
+        \\struct Saved { let path:str }
+        \\func keep(path:str) str { return path }
+        \\func read(config:@Config) str { return keep(config.path) }
+        \\func edit(config:&Config) Saved { return Saved(path:config.path) }
+        \\func named(path:str) str { return path }
+        \\func forwarded(value:@str) str { return named(path:value) }
+        \\func main() {
+        \\    var config = Config(path:"frame-$(7).png")
+        \\    let first = read(config)
+        \\    let second = edit(config)
+        \\    let third = forwarded(config.path)
+        \\    config.path = "changed"
+        \\    print(first, " ", second.path, " ", third)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("frame-7.png frame-7.png frame-7.png\n", output);
+
+    // Owning a string is safe; owning a class or a callback reached through
+    // the same reference remains an escape and must still be rejected.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    try std.testing.expectError(error.InvalidSource, frontend.compile(
+        \\class State { var value:int }
+        \\class Config { var state:State }
+        \\func keep(state:State) {}
+        \\func escape(config:@Config) { keep(config.state) }
+        \\func main() {}
+    ));
+    try std.testing.expectEqualStrings("read-reference parameter 'config' cannot be passed by value", frontend.diagnostic.?.message);
+}
+
 test "mutable ownership BorrowedReceiver" {
     const output = try run(
         \\struct Values {

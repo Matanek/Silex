@@ -1,6 +1,7 @@
 use Module.AggregateCallCoordinates
 use Module.InteropSignedStorage
 use Module.DebugCopies
+use Module.BorrowedStringArguments
 
 func total(a:int, b:int, c:int, d:int, e:int, f:int, g:int, h:int, i:int, j:int) int {
     return a + b + c + d + e + f + g + h + i + j
@@ -864,4 +865,8 @@ test "native signed storage remains readable after C pointer writes" {
 test "native Debug copy cleanup preserves value snapshots" {
     assert(DebugCopies.exercise(5) == 48)
     assert(DebugCopies.exercise(9) == 64)
+}
+
+test "native borrowed string arguments keep their owned storage" {
+    BorrowedStringArguments.exercise()
 }

@@ -1,0 +1,31 @@
+class Config { var path:str }
+struct Saved { let path:str }
+
+func keep(path:str) str { return path }
+func from_read(config:@Config) str { return keep(config.path) }
+func from_mutable(config:&Config) Saved { return Saved(path:config.path) }
+func named(path:str) str { return path }
+func forwarded(path:@str) str { return named(path:path) }
+
+func collect(index:int) (str, Saved, str) {
+    var config = Config(path:"frame-$(index).png")
+    let first = from_read(config)
+    let second = from_mutable(config)
+    let third = forwarded(config.path)
+    config.path = "replaced-$(index)"
+    return (first, second, third)
+}
+
+public func exercise() {
+    var index = 0
+    while index < 64 {
+        let (first, second, third) = collect(index)
+        let expected = "frame-$(index).png"
+        assert(first == expected)
+        assert(second.path == expected)
+        assert(third == expected)
+        index++
+    }
+}
+
+func main() { exercise(); print("borrowed string arguments: ok") }

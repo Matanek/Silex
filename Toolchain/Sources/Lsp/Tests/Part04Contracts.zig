@@ -315,6 +315,26 @@ test "part 04 preserves read mutable static and conformance receivers" {
     }
 }
 
+test "borrowed string fields remain discoverable in value call arguments" {
+    const sources = [_][]const u8{
+        "class Config { let path:str }\nfunc keep(path:str) {}\nfunc read(config:@Config) { keep(config.<|>) }",
+        "class Config { let path:str }\nfunc keep(path:str) {}\nfunc edit(config:&Config) { keep(config.<|>) }",
+        "class Config { let path:str }\nfunc keep(path:str) {}\nfunc read(config:@Config) { keep(path:config.<|>) }",
+        "class Config { let path:str }\nfunc keep(path:str) {}\nfunc edit(config:&Config) { keep(path:config.<|>) }",
+    };
+    for (sources, 0..) |source, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Borrowed-String-{d}.sx", .{index});
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectExactLabels(&.{"path"}, items);
+        try Support.expectItem(.{ .label = "path", .kind = 5, .detail = "path:str", .insert_text = "path" }, items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
 test "part 04 keeps the correct root through cascade nesting and continuation" {
     const cases = [_]struct {
         source: []const u8,

@@ -61,7 +61,10 @@ pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import(".
     // Reading a value through @T or &T already materializes its ordinary
     // value representation. That copy is safe to store when it cannot carry
     // a class identity or a borrowed view out of the reference capability.
-    if (!Resources.requiresRetain(self, value.type) and
+    // Strings have immutable owned storage: retaining their value does not
+    // let the reference capability or a class identity escape. Return lowering
+    // already permits this same copy; arguments and aggregate fields must too.
+    if ((value.type == .str or !Resources.requiresRetain(self, value.type)) and
         !@import("Collections.zig").isViewType(self.structures, value.type)) return;
     const message = if (value.borrowed_mode == .read)
         try std.fmt.allocPrint(self.allocator, "read-reference parameter '{s}' cannot be {s}", .{ root, action })
