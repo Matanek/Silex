@@ -85,7 +85,8 @@ existing inlining threshold. Unit text, boundaries and import selection are
 unchanged. The policy revision is included in compiled-unit keys; detection only
 runs after a fragment miss. `llvm_units_optimized` counts jobs sent to `opt`,
 separately from compiled and reused units. No additional tool or persistent
-process is introduced.
+process is introduced. Current results and the full protocol are in
+[LLVM Debug preparation](LLVM-debug-preparation.md).
 
 ## Run the experiment
 

@@ -121,6 +121,7 @@ Choose the subsystem that matches the question you are investigating:
   comparison, exhaustive inventories, pass bisection, reproducibility, and
   machine reports.
 - [Experimental LLVM evaluation](Llvm-evaluation.md): explicit adapter, semantic limits, validation, and isolated artifacts.
+- [LLVM Debug preparation](LLVM-debug-preparation.md): conservative tool bypass, current measurements, reuse and independently recomputable evidence.
 - [Scope of optimizer evidence](Optimizer-coverage.md): bounded coverage, LLVM
   bridge limitations, historical proofs and reproducible coverage audits.
 - [Optimizer admission](Optimizer-admission.md): mandatory quick checks, impact

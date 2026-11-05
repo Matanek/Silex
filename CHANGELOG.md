@@ -8,7 +8,7 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
-- LLVM Debug bypasses `opt` for units whose emitted functions have only forward branches and no special annotations. Loops and unknown forms retain the existing O0 pipeline; `llc` always verifies its inputs. The `llvm_units_optimized` trace counter reports units sent to `opt`, and the policy participates in their cache identity. Release retains its O3 pipeline and unit boundaries.
+- LLVM Debug bypasses `opt` for units whose emitted functions have only forward branches and no special annotations. Loops and unknown forms retain the existing O0 pipeline; `llc` always verifies its inputs. The `llvm_units_optimized` trace counter reports units sent to `opt`, and the policy participates in their cache identity. Release retains its O3 pipeline and unit boundaries. On the local macOS ARM64 corpus, LLVM Debug compilation drops by 23.9% for Boids and 23.7% for the Tokenizer, with identical executables; see `Docs/LLVM-debug-preparation.md` for the protocol and limits.
 
 - A string read through an `@` or `&` borrow can be passed by value or retained in an owned field, as with an ordinary return. Its immutable storage stays retained; borrow capabilities and class references still cannot escape.
 

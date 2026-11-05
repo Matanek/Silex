@@ -8,7 +8,7 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
-- LLVM Debug évite `opt` pour les unités dont les fonctions émises ont uniquement des sauts vers l’avant, sans annotation spéciale. Les boucles et formes inconnues gardent le pipeline O0 existant ; `llc` vérifie toujours ses entrées. Le compteur de trace `llvm_units_optimized` expose les unités confiées à `opt`, et la politique participe à leur identité de cache. Release garde son pipeline O3 et son découpage.
+- LLVM Debug évite `opt` pour les unités dont les fonctions émises ont uniquement des sauts vers l’avant, sans annotation spéciale. Les boucles et formes inconnues gardent le pipeline O0 existant ; `llc` vérifie toujours ses entrées. Le compteur de trace `llvm_units_optimized` expose les unités confiées à `opt`, et la politique participe à leur identité de cache. Release garde son pipeline O3 et son découpage. Sur le corpus local macOS ARM64, la compilation LLVM Debug de Boids baisse de 23,9 % et celle du Tokenizer de 23,7 %, avec exécutables identiques ; protocole et limites dans `Docs/LLVM-debug-preparation.md`.
 
 - Une chaîne lue par un emprunt `@` ou `&` peut être passée par valeur ou conservée dans un champ possédé, comme lors d’un retour ordinaire. Sa mémoire immuable reste retenue ; l’emprunt et les références de classe ne peuvent toujours pas s’échapper.
 
