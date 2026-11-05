@@ -35,6 +35,47 @@ test "result call policy extracts directly and captures only the targeted call" 
     try std.testing.expectEqualStrings("argument\nread\nread\n", result.stdout);
 }
 
+test "result call policy infers self mutation inside try alternatives" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func mark(value:&bool) Result<void,str> { value = true; return Result<void,str>.success() }
+        \\func fail() Result<int,str> { return Result<int,str>.failure("expected") }
+        \\struct Work {
+        \\    var touched:bool = false
+        \\    var failed:bool = false
+        \\    func run() { try mark(self.touched) else error { self.failed = true; return } }
+        \\    func recover() int { let value = try fail() else error { self.failed = true; return 42 }; return value }
+        \\}
+        \\func main() {
+        \\    var work = Work()
+        \\    work.run()
+        \\    assert(work.touched && !work.failed)
+        \\    assert(work.recover() == 42)
+        \\    assert(work.failed)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "result call policy rejects getters mutating self in try alternatives" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.init(arena.allocator());
+    try std.testing.expectError(error.InvalidSource, frontend.compile(
+        \\func fail() Result<int,str> { return Result<int,str>.failure("expected") }
+        \\struct Work {
+        \\    var failed:bool = false
+        \\    let value:int { get { let value = try fail() else error { self.failed = true; return 0 }; return value } }
+        \\}
+        \\func main() {}
+    ));
+    try std.testing.expectEqualStrings("a getter cannot mutate self; use an explicit method for observable mutation", frontend.diagnostic.?.message);
+}
+
 test "result call policy retains errors and terminates ordinary failures" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

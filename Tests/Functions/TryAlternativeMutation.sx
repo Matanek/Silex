@@ -1,0 +1,28 @@
+func mark(value:&bool) Result<void,str> {
+    value = true
+    return Result<void,str>.success()
+}
+func denied() Result<int,str> { return Result<int,str>.failure("expected") }
+
+struct Work {
+    var touched:bool = false
+    var failed:bool = false
+
+    func run() {
+        try mark(self.touched) else error { self.failed = true; return }
+    }
+    func recover() int {
+        let value = try denied() else error { self.failed = true; return 42 }
+        return value
+    }
+}
+
+func validate() {
+    var work = Work()
+    work.run()
+    assert(work.touched && !work.failed)
+    assert(work.recover() == 42 && work.failed)
+}
+
+func main() { validate() }
+test "infer mutable self through try alternative writes" { validate() }

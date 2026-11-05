@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- L’inférence de mutabilité reconnaît les écritures de `self` dans les branches `try … else` ; les emprunts modifiables y fonctionnent et les getters conservent leur diagnostic de mutation.
+
 - Les variantes d’un enum principal restent des valeurs lorsque son module contient des fonctions homonymes ; les références de callbacks distinctes restent disponibles.
 
 - LLVM Debug évite `opt` pour les unités dont les fonctions émises ont uniquement des sauts vers l’avant, sans annotation spéciale. Les boucles et formes inconnues gardent le pipeline O0 existant ; `llc` vérifie toujours ses entrées. Le compteur de trace `llvm_units_optimized` expose les unités confiées à `opt`, et la politique participe à leur identité de cache. Release garde son pipeline O3 et son découpage. Sur le corpus local macOS ARM64, la compilation LLVM Debug de Boids baisse de 23,9 % et celle du Tokenizer de 23,7 %, avec exécutables identiques ; protocole et limites dans `Docs/LLVM-debug-preparation.md`.

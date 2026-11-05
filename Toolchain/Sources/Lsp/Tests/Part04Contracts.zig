@@ -2,6 +2,29 @@ const std = @import("std");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
+test "try alternative mutations keep self members discoverable" {
+    const header = "func mark(value:&bool) Result<void,str> { return Result<void,str>.success() }\nstruct Work { var touched:bool = false; var failed:bool = false;\n";
+    const bodies = [_][]const u8{
+        "func run() { try mark(self.touched) else error { self.<|>; return } } }\nfunc main() {}",
+        "func run() { try mark(self.touched) else error { self.to<|> = true; return } } }\nfunc main() {}",
+    };
+    for (bodies, 0..) |body, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(allocator, "file:///Try-Alternative-Self-{d}.sx", .{index});
+        const source = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, body });
+        const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+        if (index == 0) try Support.expectExactLabels(&.{ "failed", "touched", "run" }, items) else try Support.expectExactLabels(&.{"touched"}, items);
+        try Support.expectItem(.{ .label = "touched", .kind = 5, .detail = "touched:bool", .insert_text = "touched" }, items);
+        try Support.expectNoDuplicates(items);
+        const repeated = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+        try Support.expectEqualItems(items, repeated);
+    }
+}
+
 const Case = struct {
     id: []const u8,
     source: []const u8,

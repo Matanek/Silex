@@ -195,7 +195,7 @@ fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, exp
             if (unary.operator == .borrow_mutable) if (Borrowing.rootName(unary.operand)) |root| if (std.mem.eql(u8, root, "self")) break :calls true;
             if (expressionCallsMutatingSelf(program, structure_index, unary.operand, mutating)) break :calls true;
             if (unary.try_alternative) |alternative| {
-                if (alternative.statements) |statements| if (statementsCallMutatingSelf(program, structure_index, statements, mutating)) break :calls true;
+                if (alternative.statements) |statements| if (statementsWriteSelf(statements) or statementsCallMutatingSelf(program, structure_index, statements, mutating)) break :calls true;
                 if (alternative.message) |message| if (expressionCallsMutatingSelf(program, structure_index, message, mutating)) break :calls true;
             }
             break :calls false;

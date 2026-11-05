@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Mutability inference recognizes writes to `self` in `try … else` branches, preserving mutable borrows and the getter mutation diagnostic.
+
 - Principal enum variants remain values when their module contains homonymous helper functions; unrelated callback references remain available.
 
 - LLVM Debug bypasses `opt` for units whose emitted functions have only forward branches and no special annotations. Loops and unknown forms retain the existing O0 pipeline; `llc` always verifies its inputs. The `llvm_units_optimized` trace counter reports units sent to `opt`, and the policy participates in their cache identity. Release retains its O3 pipeline and unit boundaries. On the local macOS ARM64 corpus, LLVM Debug compilation drops by 23.9% for Boids and 23.7% for the Tokenizer, with identical executables; see `Docs/LLVM-debug-preparation.md` for the protocol and limits.
