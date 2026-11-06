@@ -94,6 +94,9 @@ pub const Expression = struct {
         /// Set only by compiler rewrites that deliberately target an internal
         /// runtime hook. Source calls never receive this privilege.
         compiler_generated: bool = false,
+        /// Public protocol whose requirement grants this specialized call
+        /// access to a conformer's otherwise hidden implementation.
+        generic_contract: ?[]const u8 = null,
         /// Restrict compiler-generated iterator lookup to `next()` overloads
         /// whose result exposes one optional layer.
         iterator_next: bool = false,

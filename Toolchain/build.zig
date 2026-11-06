@@ -565,6 +565,11 @@ pub fn build(b: *std.Build) void {
     const default_scope_command = b.addRunArtifact(default_scope_tests);
     default_scope_command.setCwd(b.path(""));
     b.step("test-default-scopes", "Verify declaration scope for parameter defaults").dependOn(&default_scope_command.step);
+    const protocol_contract_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "generic protocol calls" } });
+    protocol_contract_tests.stack_size = test_stack_size;
+    const protocol_contract_command = b.addRunArtifact(protocol_contract_tests);
+    protocol_contract_command.setCwd(b.path(""));
+    b.step("test-protocol-contracts", "Verify constrained access to hidden protocol implementations").dependOn(&protocol_contract_command.step);
     const protocol_receiver_tests = b.addTest(.{ .root_module = test_module, .filters = &.{ "test_0", "protocol class receivers" } });
     protocol_receiver_tests.stack_size = test_stack_size;
     const protocol_receiver_command = b.addRunArtifact(protocol_receiver_tests);

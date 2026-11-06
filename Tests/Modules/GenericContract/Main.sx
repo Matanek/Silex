@@ -1,0 +1,19 @@
+use Jobs
+
+local struct LocalTask:Jobs.Job {
+    var value:int = 40
+    func execute(amount:int) int { return self.value + amount }
+}
+package class PackageTask:Jobs.Job {
+    var value:int = 40
+    func execute(amount:int) int { return self.value + amount }
+}
+func verify() {
+    assert(Jobs.run(LocalTask()) == 42)
+    assert(Jobs.named(LocalTask()) == 43)
+    var holder = Jobs.Holder<LocalTask>(job:LocalTask())
+    assert(holder.run() == 44)
+    assert(Jobs.run(PackageTask()) == 42)
+}
+func main() { verify(); print("hidden protocol implementations: ok") }
+test "generic contracts call local and package implementations across a module boundary" { verify() }

@@ -25,6 +25,34 @@ test "try alternative mutations keep self members discoverable" {
     }
 }
 
+test "generic protocol receivers expose the contract without concrete private helpers" {
+    const header = "protocol Job { func execute(amount:int) int }\npackage struct Hidden:Job { var secret:int = 0; func execute(amount:int) int { return amount } func helper() {} }\n";
+    const bodies = [_][]const u8{
+        "func run<T:Job>(value:T) { value.<|> }\nfunc main() {}",
+        "func run<T:Job>(value:T) { value.ex<|> }\nfunc main() {}",
+        "struct Holder<T:Job> { var job:T; func run() { self.job.<|> } }\nfunc main() {}",
+        "class Runner { func run<T:Job>(value:T) { value.<|> } }\nfunc main() {}",
+        "struct Holder<T:Job> { var job:T? = null; func run() { self.job?.<|> } }\nfunc main() {}",
+        "struct Holder<T:Job> { var job:T; func get() T { return self.job } func run() { self.get().<|> } }\nfunc main() {}",
+    };
+    for (bodies, 0..) |body, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(allocator, "file:///Generic-Contract-{d}.sx", .{index});
+        const source = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, body });
+        const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+        if (items.len != 1) std.debug.print("generic receiver case {d}\n", .{index});
+        try Support.expectExactLabels(&.{"execute"}, items);
+        try Support.expectItem(.{ .label = "execute", .kind = 2, .detail = "execute(amount:int) int", .insert_text = "execute(${1:amount})$0", .insert_text_format = 2 }, items);
+        try Support.expectNoDuplicates(items);
+        const repeated = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+        try Support.expectEqualItems(items, repeated);
+    }
+}
+
 const Case = struct {
     id: []const u8,
     source: []const u8,

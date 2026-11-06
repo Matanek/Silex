@@ -334,6 +334,19 @@ pub fn analyzeCallWithReceiver(
     return result;
 }
 
+fn candidateVisible(self: anytype, call: Ast.Expression.Call, owner: usize, method: Ast.Function) bool {
+    if (call.generic_contract) |name| {
+        const protocol = self.structureIndex(name) orelse return false;
+        if (protocol >= self.program.structures.len) return false;
+        for (self.program.structures[protocol].methods) |requirement| {
+            if (Inheritance.sameSignature(method, requirement)) return true;
+        }
+        // A same-named overload is not automatically a protocol witness.
+        return Visibility.memberVisible(self, owner, method, call.name_position);
+    }
+    return call.compiler_generated or Visibility.memberVisible(self, owner, method, call.name_position);
+}
+
 fn analyzeReceiverCall(
     self: anytype,
     builder: anytype,
@@ -361,7 +374,7 @@ fn analyzeReceiverCall(
     };
     if (receiver_structure_index >= self.program.structures.len) return error.InvalidSource;
     const receiver_structure = self.program.structures[receiver_structure_index];
-    if (receiver_structure.is_local and call.name_position.file != receiver_structure.position.file) {
+    if (!call.compiler_generated and receiver_structure.is_local and call.name_position.file != receiver_structure.position.file) {
         const message = try std.fmt.allocPrint(
             self.allocator,
             "members of local structure '{s}' are unavailable outside its source file",
@@ -369,7 +382,7 @@ fn analyzeReceiverCall(
         );
         return self.fail(call.name_position, message);
     }
-    if (receiver_structure.is_internal and !Visibility.packageVisible(self, receiver_structure.owner)) {
+    if (!call.compiler_generated and receiver_structure.is_internal and !Visibility.packageVisible(self, receiver_structure.owner)) {
         const message = try std.fmt.allocPrint(
             self.allocator,
             "members of package-visible structure '{s}' are unavailable outside its package",
@@ -390,7 +403,7 @@ fn analyzeReceiverCall(
     var inaccessible_module = false;
     var iterator_nonoptional: ?Ast.Type = null;
     for (candidates, 0..) |candidate, candidate_index| {
-        if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
+        if (!candidateVisible(self, call, candidate.owner, candidate.method)) {
             inaccessible = true;
             inaccessible_local = inaccessible_local or candidate.method.is_local;
             inaccessible_internal = inaccessible_internal or candidate.method.is_internal;
@@ -454,7 +467,7 @@ fn analyzeReceiverCall(
         const method = candidate.method;
         if (call.iterator_next and method.return_type.optionalChild() == null) continue;
         if (!Support.acceptsArity(method.parameters, arguments.items.len)) continue;
-        if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, method, call.name_position)) continue;
+        if (!candidateVisible(self, call, candidate.owner, method)) continue;
         var cost: usize = 0;
         var viable = true;
         for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
@@ -685,7 +698,7 @@ fn analyzeNamedCall(
     var first_problem: ?Arguments.Problem = null;
     var template: ?[]const ?*Ast.Expression = null;
     for (all_candidates, 0..) |candidate, index| {
-        if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) continue;
+        if (!candidateVisible(self, call, candidate.owner, candidate.method)) continue;
         switch (try Arguments.map(self.allocator, candidate.method.parameters, call.arguments, call.named_arguments)) {
             .arguments => |mapped| {
                 try candidates.append(self.allocator, index);

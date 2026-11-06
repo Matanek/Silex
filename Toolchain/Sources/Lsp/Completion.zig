@@ -3903,6 +3903,29 @@ fn sourceSpellingsEqual(left: []const u8, right: []const u8) bool {
     }
 }
 
+fn receiverMemberTypeName(allocator: Allocator, program: Ast.Program, owner: Ast.Structure, receiver_type: []const u8, value_type: Ast.Type) ![]const u8 {
+    var direct = value_type;
+    var optional_depth: usize = 0;
+    while (direct.optionalChild()) |child| {
+        direct = child;
+        optional_depth += 1;
+    }
+    if (direct.genericParameterIndex()) |index| {
+        if (index < owner.type_parameters.len) {
+            const parameter = owner.type_parameters[index];
+            const argument = genericArgumentSpelling(owner, receiver_type, index);
+            if (argument == null or std.mem.eql(u8, argument.?, parameter.name)) {
+                if (parameter.constraint) |constraint| {
+                    var exposed = constraint;
+                    for (0..optional_depth) |_| exposed = .optional(exposed);
+                    return typeSpelling(allocator, program, exposed);
+                }
+            }
+        }
+    }
+    return specializedTypeName(allocator, program, owner, receiver_type, value_type);
+}
+
 pub fn resolveReceiverType(
     allocator: Allocator,
     source: []const u8,
@@ -3932,7 +3955,7 @@ pub fn resolveReceiverTypeForAccess(
         const base_type = resolveReceiverTypeForAccess(allocator, source, program, cursor, base, false) orelse return null;
         const collection = findStructure(program, nominalReceiverName(base_type)) orelse return null;
         const element = (collection.collection orelse return null).element;
-        const element_type = specializedTypeName(allocator, program, collection, base_type, element) catch return null;
+        const element_type = receiverMemberTypeName(allocator, program, collection, base_type, element) catch return null;
         return typeAfterSafeAccess(element_type, safe_access);
     }
     if (findStructure(program, trimmed) != null) return trimmed;
@@ -3958,7 +3981,7 @@ pub fn resolveReceiverTypeForAccess(
                     if (method.is_static != static_access or !std.mem.eql(u8, method.name, call.name) or
                         !localMemberVisible(program, access_structure, declaring, method) or
                         !acceptsArity(method.parameters, call.arity)) continue;
-                    const candidate = specializedTypeName(
+                    const candidate = receiverMemberTypeName(
                         allocator,
                         program,
                         declaring,
@@ -3970,7 +3993,7 @@ pub fn resolveReceiverTypeForAccess(
                 }
                 if (return_type) |resolved| return typeAfterSafeAccess(effectiveCallSpelling(resolved, capture), safe_access);
                 if (static_access) return null;
-                declaring_type = specializedTypeName(allocator, program, declaring, declaring_type, declaring.base orelse return null) catch return null;
+                declaring_type = receiverMemberTypeName(allocator, program, declaring, declaring_type, declaring.base orelse return null) catch return null;
                 declaring = findStructure(program, nominalReceiverName(declaring_type)) orelse return null;
             }
             return null;
@@ -3978,7 +4001,7 @@ pub fn resolveReceiverTypeForAccess(
 
         const fields = if (static_access) owner.static_fields else owner.fields;
         for (fields) |field| if (std.mem.eql(u8, field.name, access.member)) {
-            const field_type = specializedTypeName(
+            const field_type = receiverMemberTypeName(
                 allocator,
                 program,
                 owner,
@@ -3990,7 +4013,7 @@ pub fn resolveReceiverTypeForAccess(
         if (!static_access and owner.is_protocol) for (owner.methods) |method| {
             const accessor = method.accessor orelse continue;
             if (accessor.kind == .get and std.mem.eql(u8, accessor.property, access.member)) {
-                const property_type = specializedTypeName(
+                const property_type = receiverMemberTypeName(
                     allocator,
                     program,
                     owner,
@@ -4112,11 +4135,7 @@ pub fn resolveReceiverTypeForAccess(
         const owner = findStructure(program, current_type orelse return null) orelse return null;
         var next: ?[]const u8 = null;
         for (owner.fields) |field| if (std.mem.eql(u8, field.name, field_name)) {
-            next = typeSpelling(
-                allocator,
-                program,
-                if (field.property) |property| property.value_type else field.type,
-            ) catch return null;
+            next = receiverMemberTypeName(allocator, program, owner, current_type.?, if (field.property) |property| property.value_type else field.type) catch return null;
             break;
         };
         if (next == null and owner.is_protocol) for (owner.methods) |method| {

@@ -694,3 +694,53 @@ test "protocol class receivers preserve optional replacement through safe dispat
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("optional receivers ok\n", output);
 }
+
+test "generic protocol calls honor hidden conformers without exposing other members" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Package.json", .data = "{\"sources\":\".\",\"dependencies\":{\"Library\":\"=1.0.0\"}}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Library/Package.json", .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Jobs.sx",
+        .data =
+        \\public protocol Job { func execute(amount:int) int }
+        \\public func run<T:Job>(job:T) int { return job.execute(2) }
+        \\public func named<T:Job>(job:T) int { return job.execute(amount:5) }
+        \\public class Runner { init() {} func run<T:Job>(job:T) int { return job.execute(4) } }
+        \\public struct Holder<T:Job> { var job:T; func run() int { return self.job.execute(3) } }
+        \\public func helper<T:Job>(job:T) int { return job.secret() }
+        \\public func overload<T:Job>(job:T) int { return job.execute("secret") }
+        \\public func field<T:Job>(job:T) int { return job.value }
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    const body =
+        \\    var value:int = 40
+        \\    func execute(amount:int) int { return self.value + amount }
+        \\    func execute(amount:str) int { return 99 }
+        \\    func secret() int { return self.value }
+    ;
+    for ([_][]const u8{ "class", "package class", "local class", "package struct", "local struct" }) |kind| {
+        const source = try std.fmt.allocPrint(allocator, "use Library.Jobs\n{s} Task:Jobs.Job {{\n{s}\n}}\n" ++
+            "func main() {{ print(Jobs.run(Task())); print(Jobs.named(Task())); print(Jobs.Runner().run(Task())); var holder = Jobs.Holder<Task>(job:Task()); print(holder.run()) }}", .{ kind, body });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+        var compiler = Project.Compiler.init(allocator, std.testing.io);
+        const compilation = compiler.compile(input) catch |err| {
+            std.debug.print("kind={s}: {s}\n", .{ kind, if (compiler.diagnostic) |diagnostic| diagnostic.message else "no diagnostic" });
+            return err;
+        };
+        const result = try Interpreter.runCapture(allocator, compilation.ir);
+        try std.testing.expectEqualStrings("42\n45\n44\n43\n", result.stdout);
+    }
+    for ([_][]const u8{ "helper", "overload", "field" }) |operation| {
+        const source = try std.fmt.allocPrint(allocator, "use Library.Jobs\npackage struct Task:Jobs.Job {{\n{s}\n}}\nfunc main() {{ print(Jobs.{s}(Task())) }}", .{ body, operation });
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+        var compiler = Project.Compiler.init(allocator, std.testing.io);
+        try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+        try std.testing.expect(compiler.diagnostic != null);
+    }
+}

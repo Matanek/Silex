@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Constrained generic calls preserve the public protocol contract with local or package conformers, including through a generic field. Other overloads and members remain hidden; completion follows generic field constraints and their returned values.
+
 - Mutability inference recognizes writes to `self` in `try … else` branches, preserving mutable borrows and the getter mutation diagnostic.
 
 - Principal enum variants remain values when their module contains homonymous helper functions; unrelated callback references remain available.

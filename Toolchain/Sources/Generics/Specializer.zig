@@ -620,8 +620,11 @@ pub const Specializer = struct {
                 const type_arguments = try self.allocator.alloc(Ast.Type, copy.type_arguments.len);
                 for (copy.type_arguments, 0..) |type_argument, index| type_arguments[index] = try self.rewriteType(type_argument, arguments, copy.name_position);
                 copy.type_arguments = type_arguments;
-                if (copy.receiver != null and self.callUsesGenericContract(copy, locals.items)) {
-                    copy.compiler_generated = true;
+                if (copy.receiver != null) {
+                    if (self.genericCallContract(copy, locals.items)) |protocol| {
+                        copy.compiler_generated = true;
+                        copy.generic_contract = protocol;
+                    }
                 }
                 if (copy.receiver == null and std.mem.eql(u8, copy.name, "C.function_address") and copy.type_arguments.len != 0) {
                     if (copy.arguments.len != 1 or copy.named_arguments.len != 0 or copy.arguments[0].value != .identifier) {
@@ -1288,13 +1291,13 @@ pub const Specializer = struct {
         return contracts.toOwnedSlice(self.allocator);
     }
 
-    fn callUsesGenericContract(
+    fn genericCallContract(
         self: *Specializer,
         call: Ast.Expression.Call,
         locals: []const Binding,
-    ) bool {
-        const receiver = call.receiver orelse return false;
-        const inferred = self.inferExpressionType(receiver, locals) orelse return false;
+    ) ?[]const u8 {
+        const receiver = call.receiver orelse return null;
+        const inferred = self.inferExpressionType(receiver, locals) orelse return null;
         const receiver_type = inferred.optionalChild() orelse inferred;
         for (self.active_contracts) |contract| {
             if (receiver_type != contract.argument) continue;
@@ -1302,10 +1305,10 @@ pub const Specializer = struct {
             if (!protocol.is_protocol) continue;
             for (protocol.methods) |requirement| {
                 if (!std.mem.eql(u8, requirement.name, call.name)) continue;
-                if (parametersAcceptArity(requirement.parameters, call.arguments.len + call.named_arguments.len)) return true;
+                if (parametersAcceptArity(requirement.parameters, call.arguments.len + call.named_arguments.len)) return protocol.name;
             }
         }
-        return false;
+        return null;
     }
 
     pub fn rewriteType(
@@ -1559,6 +1562,9 @@ pub const Specializer = struct {
         if (try Nested.concreteEnclosing(self, template, arguments, position)) |owner| concrete.enclosing = owner;
         const structure_index = self.structures.items.len;
         try self.structures.append(self.allocator, concrete);
+        const previous_contracts = self.active_contracts;
+        self.active_contracts = try self.genericContracts(template.type_parameters, arguments);
+        defer self.active_contracts = previous_contracts;
         try self.rewriteStructureAt(structure_index, arguments, self.specialization_file);
         self.structure_specializations.items[specialization_index].visiting = false;
         return type_value;

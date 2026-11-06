@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les appels génériques contraints conservent le contrat public du protocole avec un conformant local ou de package, y compris depuis un champ de type générique. Les autres surcharges et membres restent masqués ; la complétion suit la contrainte des champs génériques et leurs retours.
+
 - L’inférence de mutabilité reconnaît les écritures de `self` dans les branches `try … else` ; les emprunts modifiables y fonctionnent et les getters conservent leur diagnostic de mutation.
 
 - Les variantes d’un enum principal restent des valeurs lorsque son module contient des fonctions homonymes ; les références de callbacks distinctes restent disponibles.

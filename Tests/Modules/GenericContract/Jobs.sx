@@ -1,0 +1,7 @@
+public protocol Job { func execute(amount:int) int }
+public func run<T:Job>(job:T) int { return job.execute(2) }
+public func named<T:Job>(job:T) int { return job.execute(amount:3) }
+public struct Holder<T:Job> {
+    var job:T
+    func run() int { return self.job.execute(4) }
+}
