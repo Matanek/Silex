@@ -2330,6 +2330,18 @@ fn declaredCallReturnTypePath(
     cursor: usize,
     receiver: []const u8,
 ) !?[]const u8 {
+    if (try Completion.matchPayloadBindingAt(allocator, source, current, cursor, receiver)) |payload| {
+        var initializer = payload.subject;
+        while (true) {
+            const operand = Completion.callOperandExpression(initializer.expression);
+            if (Completion.qualifiedCall(operand)) |call| return importedProjectedCallReturnTypePath(allocator, io, documents, project, current, call, payload);
+            if (Completion.directCall(operand)) |_| break;
+            const previous = try Completion.localInitializerAt(allocator, source, current, initializer.cursor, std.mem.trim(u8, operand, " \t\r\n")) orelse return null;
+            if (previous.cursor >= initializer.cursor) return null;
+            initializer = previous;
+        }
+        return null;
+    }
     const initializer = try Completion.localInitializerAt(allocator, source, current, cursor, receiver) orelse return null;
     if (Completion.qualifiedCall(initializer.expression)) |call| {
         if (try importedQualifiedCallReturnTypePath(allocator, io, documents, project, current, call)) |resolved| return resolved;
@@ -2356,6 +2368,18 @@ fn importedQualifiedCallReturnTypePath(
     current: Ast.Program,
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
+    return importedProjectedCallReturnTypePath(allocator, io, documents, project, current, call, null);
+}
+
+fn importedProjectedCallReturnTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    current: Ast.Program,
+    call: Completion.QualifiedCall,
+    payload: ?Completion.MatchPayloadBinding,
+) !?[]const u8 {
     const owner_path = (try importedTypePath(allocator, current, project, call.owner)) orelse
         (try importedQualifierPath(allocator, current, project, call.owner)) orelse return null;
     const qualified_type = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ owner_path, call.name });
@@ -2374,7 +2398,7 @@ fn importedQualifiedCallReturnTypePath(
         if (function.is_internal) {
             if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
         } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
-        const candidate = returnTypeName(loaded.program, function.return_type) orelse continue;
+        const candidate = projectedReturnTypeName(loaded.program, function.return_type, payload) orelse continue;
         if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
         return_name = candidate;
     }
@@ -2384,7 +2408,7 @@ fn importedQualifiedCallReturnTypePath(
             if (!method.is_static or !importedMemberVisible(project, provider, method) or
                 !std.mem.eql(u8, method.name, call.name) or
                 !parametersAcceptArity(method.parameters, call.arity)) continue;
-            const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
+            const candidate = projectedReturnTypeName(loaded.program, method.return_type, payload) orelse continue;
             if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
             return_name = candidate;
         }
@@ -2470,6 +2494,45 @@ fn importedInstanceCallReturnTypePath(
         query.type_path = reexport orelse return null;
     }
     return null;
+}
+
+fn projectedReturnTypeName(program: Ast.Program, source_type: Ast.Type, projection: ?Completion.MatchPayloadBinding) ?[]const u8 {
+    const payload = projection orelse return returnTypeName(program, source_type);
+    var declared = source_type.optionalChild() orelse source_type;
+    var arguments: []const Ast.Type = &.{};
+    if (declared.genericInstantiationIndex()) |index| {
+        if (index >= program.generic_types.len) return null;
+        const generic = program.generic_types[index];
+        if (std.mem.eql(u8, Completion.typeName(program, generic.base), "Result")) {
+            if (generic.arguments.len != 2 or payload.payload_index != 0) return null;
+            declared = if (std.mem.eql(u8, payload.variant, "success")) generic.arguments[0] else if (std.mem.eql(u8, payload.variant, "failure")) generic.arguments[1] else return null;
+            return nominalPayloadTypeName(program, declared);
+        }
+        arguments = generic.arguments;
+        declared = generic.base;
+    }
+    for (program.enums) |enumeration| {
+        if (!std.mem.eql(u8, enumeration.name, Completion.typeName(program, declared))) continue;
+        for (enumeration.variants) |variant| {
+            if (!std.mem.eql(u8, variant.name, payload.variant) or payload.payload_index >= variant.associated_types.len) continue;
+            var associated = variant.associated_types[payload.payload_index];
+            if (associated.genericParameterIndex()) |index| {
+                if (index >= arguments.len) return null;
+                associated = arguments[index];
+            }
+            return nominalPayloadTypeName(program, associated);
+        }
+    }
+    return null;
+}
+
+fn nominalPayloadTypeName(program: Ast.Program, source_type: Ast.Type) ?[]const u8 {
+    const value = source_type.optionalChild() orelse source_type;
+    if (value.genericInstantiationIndex()) |index| {
+        if (index >= program.generic_types.len) return null;
+        return Completion.typeName(program, program.generic_types[index].base);
+    }
+    return if (value.structureIndex() != null) Completion.typeName(program, value) else null;
 }
 
 fn returnTypeName(program: Ast.Program, source_type: Ast.Type) ?[]const u8 {

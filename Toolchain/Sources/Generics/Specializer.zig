@@ -855,6 +855,19 @@ pub const Specializer = struct {
                 for (match_value.branches, 0..) |branch, index| {
                     branches[index] = branch;
                     const local_count = locals.items.len;
+                    if (copy.subject) |subject| {
+                        if (self.inferExpressionType(subject, locals.items)) |subject_type| {
+                            if (self.enumForType(subject_type)) |enumeration| {
+                                for (enumeration.variants) |variant| {
+                                    if (!std.mem.eql(u8, variant.name, branch.variant) or variant.associated_types.len != branch.bindings.len) continue;
+                                    for (branch.bindings, variant.associated_types) |binding, payload_type| {
+                                        if (!binding.ignored) try locals.append(self.allocator, .{ .name = binding.name, .type = payload_type });
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     if (branch.condition) |condition| branches[index].condition = try self.rewriteExpression(condition, arguments, locals);
                     if (branch.guard) |guard| branches[index].guard = try self.rewriteExpression(guard, arguments, locals);
                     if (branch.value) |nested| branches[index].value = try self.rewriteExpression(nested, arguments, locals);
@@ -900,7 +913,7 @@ pub const Specializer = struct {
                 var contextual: ?Ast.Type = null;
                 for (self.source.functions) |function| {
                     if (!std.mem.eql(u8, function.name, call.name) or function.type_parameters.len != call.type_arguments.len or
-                        !parametersAcceptArity(function.parameters, call.arguments.len) or !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
+                        !parametersAcceptArity(function.parameters, call.arguments.len + call.named_arguments.len) or !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
                     const candidate = try self.rewriteType(function.parameters[index].type, call.type_arguments, call.arguments[index].position);
                     if (contextual != null and contextual.? != candidate) {
                         contextual = null;
@@ -1869,7 +1882,7 @@ pub const Specializer = struct {
                 if (call.result_type) |result_type| break :call_type result_type;
                 if (call.receiver == null) {
                     for (self.functions.items) |function| {
-                        if (std.mem.eql(u8, function.name, call.name) and parametersAcceptArity(function.parameters, call.arguments.len)) {
+                        if (std.mem.eql(u8, function.name, call.name) and parametersAcceptArity(function.parameters, call.arguments.len + call.named_arguments.len)) {
                             break :call_type function.return_type;
                         }
                     }
@@ -1879,7 +1892,7 @@ pub const Specializer = struct {
                     for (self.source.functions) |function| {
                         if (function.type_parameters.len == 0 and
                             std.mem.eql(u8, function.name, call.name) and
-                            parametersAcceptArity(function.parameters, call.arguments.len) and
+                            parametersAcceptArity(function.parameters, call.arguments.len + call.named_arguments.len) and
                             !self.typeNeedsSpecialization(function.return_type))
                         {
                             break :call_type function.return_type;
@@ -1890,7 +1903,7 @@ pub const Specializer = struct {
                     const owner_type = self.typeForName(call.receiver.?.value.identifier).?;
                     if (self.enumForType(owner_type) != null) break :call_type owner_type;
                     if (self.structureForType(owner_type)) |owner| for (owner.methods) |method| {
-                        if (method.is_static and std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
+                        if (method.is_static and std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len + call.named_arguments.len)) {
                             break :call_type method.return_type;
                         }
                     };
@@ -1911,7 +1924,7 @@ pub const Specializer = struct {
                             if (remaining == 0) break;
                             remaining -= 1;
                             for (current.methods) |method| {
-                                if (std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
+                                if (std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len + call.named_arguments.len)) {
                                     break :call_type method.return_type;
                                 }
                             }

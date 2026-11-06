@@ -466,3 +466,110 @@ test "part 04 resolves homogeneous member chains at every generated depth" {
         expression = try std.fmt.allocPrint(allocator, "{s}.next()", .{expression});
     }
 }
+
+test "named factory results preserve instance completion and insertion" {
+    const header = "class Item { private let value:int; init(value:int) { self.value = value } static func make(value:int) Result<Item,str> { return Result<Item,str>.success(Item(value)) } func number() int { return self.value } }\nclass Factory { func make(value:int) Item { return Item(value) } }\n";
+    const bodies = [_][]const u8{
+        "func run() { var item = Item.make(value:42); item.<|> }",
+        "func run() { var item = Item.make(value:42); item.nu<|> }",
+        "func run() { var factory = Factory(); var item = factory.make(value:42); item.<|> }",
+        "func run() { var result = (try Item.make(value:42)); match result { success(item) => { item.<|> }; failure(error) => {} } }",
+    };
+    for (bodies, 0..) |body, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Named-Factory-{d}.sx", .{index});
+        const source = try std.fmt.allocPrint(arena.allocator(), "{s}{s}", .{ header, body });
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectExactLabels(&.{"number"}, items);
+        try Support.expectItem(.{ .label = "number", .kind = 2, .detail = "number() int", .insert_text = "number()" }, items);
+        try Support.expectNoDuplicates(items);
+        const repeated = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectEqualItems(items, repeated);
+    }
+}
+
+test "match payload completion binds generic variants and respects branch scope" {
+    const header = "class Cell { private var value:int = 0; func read() int { return self.value } func increment() { self.value++ } }\nenum Pair<T> { some(int, T); none }\n";
+    const cases = [_]struct { body: []const u8, labels: []const []const u8 }{
+        .{ .body = "func run(pair:Pair<Cell>) { match pair { some(_, cell) => { cell.<|> }; none => {} } }", .labels = &.{ "increment", "read" } },
+        .{ .body = "func run(pair:Pair<Cell>) { match pair { some(_, var cell) => { cell.<|> }; none => {} } }", .labels = &.{ "increment", "read" } },
+        .{ .body = "func run(pair:Pair<Cell>) { match pair { some(_, cell) if cell.<|> => {}; else => {} } }", .labels = &.{ "increment", "read" } },
+        .{ .body = "func run(pair:Pair<Cell>) { match pair { some(_, cell) => {}; none => { cell.<|> } } }", .labels = &.{} },
+        .{ .body = "func run(pair:Pair<int[]>) { match pair { some(_, values) => { values.<|> }; none => {} } }", .labels = &.{ "count", "is_empty" } },
+        .{ .body = "func run(pair:Pair<int[]>) { match pair { some(_, var values) => { values.<|> }; none => {} } }", .labels = &.{ "append", "clear", "count", "insert", "is_empty", "prepend", "replace", "reverse", "swap", "take", "take_first", "take_last" } },
+    };
+    for (cases, 0..) |case, index| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+        defer server.deinit();
+        const uri = try std.fmt.allocPrint(arena.allocator(), "file:///Match-Payload-{d}.sx", .{index});
+        const source = try std.fmt.allocPrint(arena.allocator(), "{s}{s}", .{ header, case.body });
+        const items = try Support.serverCompletionAfterTrigger(&server, arena.allocator(), uri, source, ".");
+        try Support.expectExactLabels(case.labels, items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
+test "named factory imported results preserve completion and canonical definitions" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Api/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api/Package.json", .data = "{\"name\":\"Api\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api/Module/Item.sx",
+        .data =
+        \\public class Item {
+        \\    private let value:int
+        \\    init(value:int) { self.value = value }
+        \\    static func make(value:int) Result<Item,str> { return Result<Item,str>.success(Item(value)) }
+        \\    func number() int { return self.value }
+        \\    static func other() Result<Other,Issue> { return Result<Other,Issue>.success(Other()) }
+        \\    static func batch() Batch<Other> { return Batch<Other>.item(Other()) }
+        \\}
+        \\public class Other { func label() str { return "other" } }
+        \\public struct Issue { let detail:str }
+        \\public enum Batch<T> { item(T); empty }
+        ,
+    });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const item_uri = try std.fmt.allocPrint(allocator, "file://{s}/Api/Module/Item.sx", .{root});
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const cases = [_]struct { source: []const u8, expected: Support.ExpectedItem }{
+        .{ .source = "use Api.Item\nfunc main() { var item = Item.make(value:42); item.<|> }", .expected = .{ .label = "number", .kind = 2, .detail = "number() int", .insert_text = "number()" } },
+        .{ .source = "use Api.Item\nfunc main() { var result = (try Item.make(value:42)); match result { success(item) => { item.<|> }; failure(error) => {} } }", .expected = .{ .label = "number", .kind = 2, .detail = "number() int", .insert_text = "number()" } },
+        .{ .source = "use Api.Item\nfunc main() { var result = (try Item.other()); match result { success(item) => { item.<|> }; failure(error) => {} } }", .expected = .{ .label = "label", .kind = 2, .detail = "label() str", .insert_text = "label()" } },
+        .{ .source = "use Api.Item\nfunc main() { var result = (try Item.other()); match result { success(item) => {}; failure(error) => { error.<|> } } }", .expected = .{ .label = "detail", .kind = 5, .detail = "detail:str", .insert_text = "detail" } },
+        .{ .source = "use Api.Item\nfunc main() { var result = Item.batch(); match result { item(value) => { value.<|> }; empty => {} } }", .expected = .{ .label = "label", .kind = 2, .detail = "label() str", .insert_text = "label()" } },
+    };
+    for (cases) |case| {
+        const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, case.source, ".");
+        Support.expectExactLabels(&.{case.expected.label}, items) catch |err| {
+            std.debug.print("source: {s}\n", .{case.source});
+            return err;
+        };
+        try Support.expectItem(case.expected, items);
+        try Support.expectNoDuplicates(items);
+        const repeated = try Support.serverCompletionAfterTrigger(&server, allocator, uri, case.source, ".");
+        try Support.expectEqualItems(items, repeated);
+    }
+    for ([_][]const u8{
+        "use Api.Item\nfunc main() { var item = Item.make(value:42); item.num<|>ber() }",
+        "use Api.Item\nfunc main() { var result = (try Item.make(value:42)); match result { success(item) => { item.num<|>ber() }; failure(error) => {} } }",
+    }) |source| {
+        const definition = (try Support.serverDefinition(&server, allocator, uri, source)).?;
+        try std.testing.expectEqualStrings(item_uri, definition.uri);
+        try std.testing.expectEqual(@as(usize, 4), definition.range.start.line);
+    }
+}

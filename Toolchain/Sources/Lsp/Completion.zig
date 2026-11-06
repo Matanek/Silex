@@ -3166,6 +3166,7 @@ const Local = struct {
     mutable: bool = true,
     annotated: bool = false,
     initializer: ?LocalInitializer = null,
+    match_payload: ?MatchPayloadBinding = null,
 };
 
 fn nativeLocalReference(allocator: Allocator, source: []const u8, program: Ast.Program, locals: []const Local, scopes: []const Callable, index: usize, arguments: []const u8, remaining: usize) Allocator.Error!bool {
@@ -3216,6 +3217,33 @@ pub const LocalInitializer = struct {
     expression: []const u8,
     cursor: usize,
 };
+
+pub const MatchPayloadBinding = struct {
+    subject: LocalInitializer,
+    variant: []const u8,
+    payload_index: usize,
+};
+
+pub fn matchPayloadBindingAt(allocator: Allocator, source: []const u8, program: Ast.Program, cursor: usize, name: []const u8) !?MatchPayloadBinding {
+    const callables = try containingCallables(allocator, source, program, cursor);
+    defer allocator.free(callables);
+    if (callables.len == 0) return null;
+    const locals = try visibleLocals(allocator, source, program, callables[0].position, cursor);
+    defer allocator.free(locals);
+    var index = locals.len;
+    while (index != 0) {
+        index -= 1;
+        if (std.mem.eql(u8, locals[index].name, name)) return locals[index].match_payload;
+    }
+    return null;
+}
+
+pub fn callOperandExpression(expression: []const u8) []const u8 {
+    var operand = std.mem.trim(u8, expression, " \t\r\n");
+    while (outerParenthesizedExpression(operand)) |inner| operand = std.mem.trim(u8, inner, " \t\r\n");
+    if (std.mem.startsWith(u8, operand, "try ")) operand = std.mem.trimStart(u8, operand[4..], " \t\r\n");
+    return operand;
+}
 
 fn bindingInitializer(source: []const u8, tokens: []const Token) ?LocalInitializer {
     for (tokens, 0..) |token, index| if (token.tag == .equal) return declarationInitializer(source, tokens[index + 1 ..]);
@@ -3406,7 +3434,7 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
             else => {},
         }
     }
-    try appendCurrentMatchBindings(allocator, tokens, &locals, depth);
+    try appendCurrentMatchBindings(allocator, source, program, tokens, &locals, depth);
     return locals.toOwnedSlice(allocator);
 }
 
@@ -3449,6 +3477,8 @@ fn inferDestructuredDeclarationType(
 
 fn appendCurrentMatchBindings(
     allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
     tokens: []const Token,
     locals: *std.ArrayList(Local),
     depth: usize,
@@ -3492,20 +3522,78 @@ fn appendCurrentMatchBindings(
         }
     }
     const start = opening orelse return;
+    const subject = currentMatchSubject(source, tokens, start - 1);
+    const payload_types = if (subject) |value| try currentMatchPayloadTypes(allocator, source, program, value, tokens[start - 1].lexeme) else &.{};
+    defer allocator.free(payload_types);
+    var payload_index: usize = 0;
     var nesting: usize = 1;
     cursor = start + 1;
     while (cursor < marker and nesting != 0) : (cursor += 1) switch (tokens[cursor].tag) {
         .left_parenthesis => nesting += 1,
         .right_parenthesis => nesting -= 1,
-        .identifier => if (nesting == 1 and !std.mem.eql(u8, tokens[cursor].lexeme, "_")) {
+        .identifier => if (nesting == 1) {
+            defer payload_index += 1;
+            if (std.mem.eql(u8, tokens[cursor].lexeme, "_")) continue;
+            const spelling = if (payload_index < payload_types.len) payload_types[payload_index] else null;
             try locals.append(allocator, .{
                 .name = tokens[cursor].lexeme,
-                .type_name = null,
+                .type_name = spelling,
+                .type_value = if (spelling) |name| typeForSourceSpelling(program, name) else null,
                 .depth = depth,
+                .mutable = cursor != 0 and tokens[cursor - 1].tag == .keyword_var,
+                .match_payload = if (subject) |value| .{ .subject = value, .variant = tokens[start - 1].lexeme, .payload_index = payload_index } else null,
             });
         },
         else => {},
     };
+}
+
+fn currentMatchSubject(source: []const u8, tokens: []const Token, variant_index: usize) ?LocalInitializer {
+    var nested: usize = 0;
+    var index = variant_index;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .right_brace => nested += 1,
+            .left_brace => nested -|= 1,
+            .keyword_match => if (nested == 0) {
+                var opening = index + 1;
+                while (opening < variant_index and tokens[opening].tag != .left_brace) : (opening += 1) {}
+                if (opening == variant_index) return null;
+                return .{ .expression = source[tokens[index].end..tokens[opening].start], .cursor = tokens[index].start };
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+fn currentMatchPayloadTypes(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    subject: LocalInitializer,
+    variant_name: []const u8,
+) Allocator.Error![]const ?[]const u8 {
+    // Resolve before the match, excluding the bindings currently inferred.
+    const spelling = resolveReceiverType(allocator, source, program, subject.cursor, subject.expression) orelse return &.{};
+    if (resultArguments(spelling)) |arguments| {
+        const payload = if (std.mem.eql(u8, variant_name, "success")) arguments.success else if (std.mem.eql(u8, variant_name, "failure")) arguments.failure else return &.{};
+        if (std.mem.eql(u8, payload, "void")) return &.{};
+        const types = try allocator.alloc(?[]const u8, 1);
+        types[0] = payload;
+        return types;
+    }
+    const enumeration = findEnum(program, spelling) orelse return &.{};
+    for (enumeration.variants) |variant| {
+        if (!std.mem.eql(u8, variant.name, variant_name)) continue;
+        const types = try allocator.alloc(?[]const u8, variant.associated_types.len);
+        for (variant.associated_types, 0..) |payload, payload_index| {
+            types[payload_index] = try boundTypeSpelling(allocator, program, enumeration.type_parameters.len, spelling, payload);
+        }
+        return types;
+    }
+    return &.{};
 }
 
 fn inferDestructuredForType(program: Ast.Program, callable: ?Callable, tokens: []const Token, opening: usize) ?Ast.Type {
@@ -5383,6 +5471,10 @@ pub fn specializedTypeName(
     receiver_type: []const u8,
     type_value: Ast.Type,
 ) ![]const u8 {
+    return boundTypeSpelling(allocator, program, structure.type_parameters.len, receiver_type, type_value);
+}
+
+fn boundTypeSpelling(allocator: Allocator, program: Ast.Program, parameter_count: usize, receiver_type: []const u8, type_value: Ast.Type) Allocator.Error![]const u8 {
     var direct = type_value;
     var optional_depth: usize = 0;
     while (direct.optionalChild()) |child| {
@@ -5391,7 +5483,7 @@ pub fn specializedTypeName(
     }
 
     var result: []const u8 = if (direct.genericParameterIndex()) |parameter_index|
-        genericArgumentSpelling(structure, receiver_type, parameter_index) orelse typeName(program, direct)
+        (if (parameter_index < parameter_count) genericArgumentAt(receiver_type, parameter_index) else null) orelse typeName(program, direct)
     else if (direct.genericInstantiationIndex()) |generic_index| generic: {
         if (generic_index >= program.generic_types.len) break :generic typeName(program, direct);
         const generic_type = program.generic_types[generic_index];
@@ -5399,7 +5491,7 @@ pub fn specializedTypeName(
         for (generic_type.arguments, 0..) |argument, index| spelling = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
             spelling,
             if (index == 0) "<" else ", ",
-            try specializedTypeName(allocator, program, structure, receiver_type, argument),
+            try boundTypeSpelling(allocator, program, parameter_count, receiver_type, argument),
         });
         break :generic try std.fmt.allocPrint(allocator, "{s}>", .{spelling});
     } else typeName(program, direct);
@@ -5514,6 +5606,10 @@ fn genericType(type_value: Ast.Type) ?Ast.Type {
 
 fn genericArgumentSpelling(structure: Ast.Structure, receiver_type: []const u8, parameter_index: usize) ?[]const u8 {
     if (parameter_index >= structure.type_parameters.len) return null;
+    return genericArgumentAt(receiver_type, parameter_index);
+}
+
+fn genericArgumentAt(receiver_type: []const u8, parameter_index: usize) ?[]const u8 {
     const opening = std.mem.indexOfScalar(u8, receiver_type, '<') orelse return null;
     var start = opening + 1;
     var depth: usize = 0;

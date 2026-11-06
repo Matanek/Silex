@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- L’inférence des retours de fabriques tient compte des arguments nommés : leurs résultats implicites restent utilisables sans annotation comme ressources et arguments génériques. Les appels statiques, libres et de méthodes conservent la complétion du résultat. Les valeurs extraites par `match` gardent aussi leur type pour les appels génériques dans les modules et leur complétion, en respectant la mutabilité du motif.
+
 - Les appels génériques contraints conservent le contrat public du protocole avec un conformant local ou de package, y compris depuis un champ de type générique. Les autres surcharges et membres restent masqués ; la complétion suit la contrainte des champs génériques et leurs retours.
 
 - L’inférence de mutabilité reconnaît les écritures de `self` dans les branches `try … else` ; les emprunts modifiables y fonctionnent et les getters conservent leur diagnostic de mutation.

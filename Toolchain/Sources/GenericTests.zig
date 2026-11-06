@@ -1188,3 +1188,80 @@ test "reuse a canonical collection registered before its generic element is rewr
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("1\ntrue\n", result.stdout);
 }
+
+test "generic protocol calls infer named factory return types" {
+    const source =
+        \\protocol Number { func number() int }
+        \\class Item:Number {
+        \\    private let value:int
+        \\    init(value:int) { self.value = value }
+        \\    static func make(value:int, extra:int = 0) Result<Item,str> { return Result<Item,str>.success(Item(value + extra)) }
+        \\    func next(value:int) Item { return Item(value) }
+        \\    func number() int { return self.value }
+        \\}
+        \\func make(value:int) Item { return Item(value) }
+        \\func checked(value:int) Result<Item,str> { return Result<Item,str>.success(Item(value)) }
+        \\func read<T:Number>(value:T) int { return value.number() }
+        \\func verify() {
+        \\    var item = Item.make(value:40, extra:2)
+        \\    assert(read(item) == 42)
+        \\    var next = item.next(value:43)
+        \\    assert(read(next) == 43)
+        \\    var free = make(value:44)
+        \\    assert(read(free) == 44)
+        \\    var wrapped = checked(value:45)
+        \\    assert(read(wrapped) == 45)
+        \\    var captured = (try Item.make(value:46))
+        \\    match captured { success(value) => { assert(read(value) == 46) }; failure(error) => { panic(error) } }
+        \\}
+        \\func main() { verify(); print("named factory inference: ok") }
+        \\test "named factory results infer through generic consumers" { verify() }
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    const compilation = try frontend.compile(source);
+    const result = try Interpreter.runCapture(arena.allocator(), compilation.ir);
+    try std.testing.expectEqualStrings("named factory inference: ok\n", result.stdout);
+}
+
+test "generic protocol calls infer named factories through a project match" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const source =
+        \\protocol Number { func number() int }
+        \\class Item:Number {
+        \\    private let value:int
+        \\    init(value:int) { self.value = value }
+        \\    static func make(value:int, extra:int = 0) Result<Item,str> { return Result<Item,str>.success(Item(value + extra)) }
+        \\    func next(value:int) Item { return Item(value) }
+        \\    func number() int { return self.value }
+        \\}
+        \\func make(value:int) Item { return Item(value) }
+        \\func checked(value:int) Result<Item,str> { return Result<Item,str>.success(Item(value)) }
+        \\func read<T:Number>(value:T) int { return value.number() }
+        \\func verify() {
+        \\    var item = Item.make(value:40, extra:2)
+        \\    assert(read(item) == 42)
+        \\    var next = item.next(value:43)
+        \\    assert(read(next) == 43)
+        \\    var free = make(value:44)
+        \\    assert(read(free) == 44)
+        \\    var wrapped = checked(value:45)
+        \\    assert(read(wrapped) == 45)
+        \\    var captured = (try Item.make(value:46))
+        \\    match captured { success(value) => { assert(read(value) == 46) }; failure(error) => { panic(error) } }
+        \\}
+        \\func main() { verify(); print("named factory inference: ok") }
+        \\test "named factory results infer through generic consumers" { verify() }
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("named factory inference: ok\n", result.stdout);
+}
