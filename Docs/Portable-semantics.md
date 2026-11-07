@@ -83,7 +83,19 @@ fields and collections propagate those values; scope-end metadata identifies
 the lifetime of each borrowed binding independently of its storage slot.
 Returning a borrowed callback or leaving it reachable from longer-lived storage
 is rejected before interpretation or native lowering.
-Each lexical origin is first checked with abstract external inputs. Its domain
+A preliminary use proof discharges a newly created borrowed environment when its
+SSA value is only called, released, or forwarded to proven non-retaining function
+parameters. Every occurrence must be accounted for. Parameter proofs start with
+direct invocation and ignored inputs and close over direct forwarding; recursive
+or unknown higher-order forwarding is not assumed safe. Missing bodies, storage,
+copies, returns and scope-end liveness retain the full ownership analysis. Borrowed
+address environments own no class receiver, so their release cannot run a class
+finalizer. This proof does not remove the callback body or other lexical origins:
+a nested loan or another captured environment is still checked independently and
+in its concrete callers when needed. It avoids interpreting unrelated application
+setup merely to prove that a direct synchronous argument was never retained.
+
+Each remaining lexical origin is first checked with abstract external inputs. Its domain
 closes the loan signatures, callable interfaces that accept or return their
 carriers, referenced callable effects, aggregate containment and finalizers
 together. Borrow origins and callable interfaces retain their logical source

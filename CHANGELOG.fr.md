@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Le compilateur prouve les usages directs non conservés des callbacks empruntés avant d’interpréter la propriété de l’application. Les transmissions directes entre helpers sont couvertes ; stockages, retours, copies, corps absents, durées de vie et appels indirects non prouvés gardent l’analyse complète. Les autres emprunts créés dans le callback restent vérifiés, sans modifier le code émis ni l’ABI.
+
 - L’analyse des emprunts conserve les booléens connus et les variantes sans charge utile dans les valeurs immuables pour écarter les chemins statiquement impossibles. Le contenu des emplacements mutables et les entrées inconnues restent inconnus. Les copies conservent ces faits et un retour non analysé reste inconnu dans une union de callbacks. Le code émis et l’ABI restent inchangés.
 
 - La validation des emprunts de dessin distingue les captures, les effets globaux et les créations locales, afin de limiter le parcours aux callbacks pertinents. Les types logiques des références sont conservés dans l’IR et les caches ; retours, écritures et propriétaires restent suivis.

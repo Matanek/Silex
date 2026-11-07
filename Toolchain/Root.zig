@@ -4,6 +4,7 @@ pub const main = @import("Sources/Main.zig").main;
 test {
     _ = @import("Sources/CallbackProvenanceTests.zig");
     _ = @import("Sources/CallbackCacheTests.zig");
+    _ = @import("Sources/CallbackImmediateTests.zig");
     _ = @import("Sources/CallbackTests.zig");
     _ = @import("Sources/Llvm/DebugPipeline.zig");
     _ = @import("Tools/LlvmEvaluation/BoundaryPolicy.zig");

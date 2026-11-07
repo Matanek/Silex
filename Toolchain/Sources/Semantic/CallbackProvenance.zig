@@ -24,8 +24,9 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
     // No lexical loan can originate in this program. Protocols and object
     // cycles alone do not require callback ownership interpretation.
     if (!any) return null;
+    const immediate = try @import("CallbackFlow/Immediate.zig").origins(a, program);
     for (program.functions, 0..) |_, source| {
-        if (!borrowed[source]) continue;
+        if (!borrowed[source] or immediate[source]) continue;
         var partition = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer partition.deinit();
         const owned = partition.allocator();

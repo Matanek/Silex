@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- The compiler proves direct non-retaining uses of borrowed callbacks before interpreting application ownership. Direct forwarding between helpers is covered; storage, returns, copies, missing bodies, lifetimes, and unproven indirect forwarding retain the full analysis. Other borrows created inside the callback are still checked, without changing emitted code or the ABI.
+
 - Borrow analysis preserves known booleans and payload-free variants in immutable values to exclude statically impossible paths. Mutable storage contents and unknown inputs remain unknown. Copies preserve these facts, and an unanalyzed return remains unknown in a union of callbacks. Emitted code and the ABI remain unchanged.
 
 - Drawing-borrow validation distinguishes captures, global effects, and local creation to limit traversal to relevant callbacks. Logical reference types are preserved in IR and caches; returns, writes, and owners remain tracked.
