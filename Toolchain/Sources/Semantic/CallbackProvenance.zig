@@ -118,7 +118,15 @@ pub const Engine = struct {
             .address => false,
         };
     }
-    pub fn write(self: *Engine, memory: *M.Memory, cell: M.Cell, value: Value, strong: bool) A.Error!void {
+    pub fn write(self: *Engine, memory: *M.Memory, cell: M.Cell, input: Value, strong: bool) A.Error!void {
+        var value = input;
+        const destination = self.nodes.items[cell.object];
+        // An unprojected external/global scalar can still have any value on
+        // another incoming path. Keep these facts unknown until they are
+        // represented independently of lazy capability fields.
+        if (cell.object == self.globals or (destination == .object and destination.object.unknown_parent != null)) {
+            if (value.scalar != .bottom) value.scalar = .unknown;
+        }
         if (strong and !self.many(cell.object)) try memory.put(self.a, cell, value) else try memory.put(self.a, cell, try Value.join(memory.get(cell) orelse .{}, value, self.a));
         // Distinct unconstrained class inputs may denote the same instance.
         // A write through one input is therefore a possible write through each
@@ -150,7 +158,7 @@ pub const Engine = struct {
         const owner = self.nodes.items[cell.object];
         if (cell.object != self.globals and (owner != .object or owner.object.unknown_parent == null)) return .{};
         if (t.optionalChild()) |child| return self.unknown(memory, cell, child);
-        var value: Value = .{};
+        var value: Value = if (M.scalarType(self.program, t)) .{ .scalar = .unknown } else .{};
         if (t == .address) {
             const holder = try self.node(.{ .frame = cell.object, .category = .unknown, .value = cell.field }, .{ .object = .{ .type = null, .many = false, .unknown_parent = cell.object, .external = true } });
             value = try self.address(.{ .object = holder, .field = 0 });
@@ -191,6 +199,7 @@ pub const Engine = struct {
                 }
             }
         }
+        if (M.scalarType(self.program, t)) value.scalar = .unknown;
         try memory.put(self.a, cell, value);
         return value;
     }
@@ -341,6 +350,15 @@ pub const Engine = struct {
         if (any) {
             memory.* = merged;
         } else {
+            // An opaque callback can change control facts through aliases.
+            // It cannot justify keeping a constant branch discriminator.
+            var cells = memory.iterator();
+            while (cells.next()) |entry| {
+                var value = entry.value_ptr.*;
+                if (value.scalar == .bottom or value.scalar == .unknown) continue;
+                value.scalar = .unknown;
+                try memory.put(self.a, entry.key_ptr.*, value);
+            }
             // An opaque call can expose its inputs or produce a capability
             // used later. Even a zero-argument void call can observe a live
             // loan through globals or a creator's external inputs.
@@ -441,8 +459,9 @@ pub const Engine = struct {
                             pending[target] = true;
                         },
                         .branch => |branch| {
-                            if (try self.joinEntry(&entries[branch.then_block], state)) pending[branch.then_block] = true;
-                            if (try self.joinEntry(&entries[branch.else_block], state)) pending[branch.else_block] = true;
+                            const condition = state.get(branch.condition).scalar;
+                            if ((condition != .boolean or condition.boolean) and try self.joinEntry(&entries[branch.then_block], state)) pending[branch.then_block] = true;
+                            if ((condition != .boolean or !condition.boolean) and try self.joinEntry(&entries[branch.else_block], state)) pending[branch.else_block] = true;
                         },
                         else => {},
                     }

@@ -107,7 +107,7 @@ test "callback provenance executes the owning corpus with the reference interpre
         try std.testing.expectEqual(@as(u8, 0), result.exit_code);
         entries += 1;
     }
-    try std.testing.expectEqual(@as(usize, 7), entries);
+    try std.testing.expectEqual(@as(usize, 9), entries);
 }
 
 test "callback provenance ignores callback free protocol cycles beside a synchronous loan" {

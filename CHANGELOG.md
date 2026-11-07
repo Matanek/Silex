@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Borrow analysis preserves known booleans and payload-free variants to exclude statically impossible paths. Unknown or divergent branches remain joined; reference writes and opaque calls prevent stale control facts. Emitted code and the ABI remain unchanged.
+
 - Drawing-borrow validation distinguishes captures, global effects, and local creation to limit traversal to relevant callbacks. Logical reference types are preserved in IR and caches; returns, writes, and owners remain tracked.
 
 - Collections and generic specializations distinguish callback signatures, including `@` and `&` modes. Free generic calls accept named arguments while preserving defaults and concrete overload priority. Completion follows function values and elements of inferred collections, and preserves the context of an incomplete argument placed before another positional argument.

@@ -105,6 +105,17 @@ storage cleared while the binding is alive remain valid when the analysis can
 prove their lifetime. Unconstrained compatible class inputs may alias; an
 uncertain overwrite does not erase a possible retained callback.
 
+The ownership interpretation preserves exact Boolean constants and payload-free
+enum variants only while their control facts remain known. Divergent facts join
+to unknown, so loops have a finite control lattice. Unmodeled scalar results and
+external inputs are unknown. Writes to lazily projected external/global scalar
+cells remain unknown; a missing cell on another incoming path cannot establish
+a constant. Scalar reference writes and returned addresses remain relevant even
+without a callable parameter. Opaque calls invalidate known control facts.
+Only a known Boolean selects one CFG successor. This precision avoids analyzing
+an application's real-time scheduling path when the controlled branch is known,
+without rewriting IR or suppressing an unknown path.
+
 Finalizer effects participate through the explicit root/edge ownership IR.
 A receiver still owned by its caller is not finalized at a helper return.
 Potential cyclic destruction and uncertain ownership merge the destruction

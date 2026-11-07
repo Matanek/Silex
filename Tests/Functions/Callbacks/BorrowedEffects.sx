@@ -133,3 +133,29 @@ test "deep copies preserve shared class fields and count both owning edges" {
     }
     assert(CopiedEffect.drops == 2)
 }
+
+
+test "known false local control cannot expose a lexical callback" {
+    var slot = EffectSlot()
+    var count = 0
+    {
+        let retaining = false
+        if retaining { slot.set(func() { count++ }) }
+    }
+    slot.invoke()
+    assert(count == 0)
+}
+
+enum EffectMode { draw; record }
+
+test "known unit variants select the synchronous callback path" {
+    var slot = EffectSlot()
+    var count = 0
+    {
+        let mode = EffectMode.draw
+        if mode == EffectMode.record { slot.set(func() { count++ }) }
+        else { effect_invoke(func() { count++ }) }
+    }
+    slot.invoke()
+    assert(count == 1)
+}

@@ -6,12 +6,36 @@ const A = std.mem.Allocator;
 const Value = M.Value;
 
 pub fn step(e: anytype, frame_id: usize, block: usize, index: usize, op: Ir.Instruction, state: *M.State) A.Error!void {
+    try transfer(e, frame_id, block, index, op, state);
+    if (M.resultId(op)) |id| {
+        const f = e.program.functions[e.frames.items[frame_id].function];
+        var value = state.get(id);
+        if (value.scalar == .bottom and M.scalarType(e.program, f.value_types[id])) {
+            value.scalar = .unknown;
+            try state.set(e.a, id, value);
+        }
+    }
+}
+fn transfer(e: anytype, frame_id: usize, block: usize, index: usize, op: Ir.Instruction, state: *M.State) A.Error!void {
     const frame = e.frames.items[frame_id];
     const f = e.program.functions[frame.function];
     const site = (block << 32) | index;
     const result = M.resultId(op);
     if (result) |id| try state.set(e.a, id, .{});
     switch (op) {
+        .constant_bool => |v| try state.set(e.a, v.result, .{ .scalar = .{ .boolean = v.value } }),
+        .enum_test => |v| {
+            const scalar = state.get(v.operand).scalar;
+            if (scalar == .variant) try state.set(e.a, v.result, .{ .scalar = .{ .boolean = scalar.variant.enumeration == v.enumeration and scalar.variant.variant == v.variant } });
+        },
+        .binary => |v| {
+            const left = state.get(v.left).scalar;
+            const right = state.get(v.right).scalar;
+            if ((v.operator == .equal or v.operator == .not_equal) and (left == .boolean or left == .variant) and (right == .boolean or right == .variant)) {
+                const equal = std.meta.eql(left, right);
+                try state.set(e.a, v.result, .{ .scalar = .{ .boolean = if (v.operator == .equal) equal else !equal } });
+            }
+        },
         .class_retain => |v| try Finalization.retain(e, state.get(v.operand), v.ownership, &state.memory),
         .class_drop => |v| try Finalization.drop(e, frame_id, site, v, state.get(v.operand), &state.memory),
         .copy, .class_cast => |v| try state.set(e.a, v.result, state.get(v.operand)),
@@ -47,6 +71,11 @@ pub fn step(e: anytype, frame_id: usize, block: usize, index: usize, op: Ir.Inst
                 const object = try e.object(frame_id, .object, v.result, f.value_types[v.result], frame.recursive or frame.repeated or inLoop(f, block));
                 for (v.values, 0..) |field, n| try e.write(&state.memory, .{ .object = object, .field = n }, state.get(field), true);
                 try state.set(e.a, v.result, try Value.one(e.a, object));
+            }
+            if (v.values.len == 0) {
+                var value = state.get(v.result);
+                value.scalar = .{ .variant = .{ .enumeration = v.enumeration, .variant = v.variant } };
+                try state.set(e.a, v.result, value);
             }
         },
         .enum_payload => |v| try state.set(e.a, v.result, try e.field(&state.memory, state.get(v.operand), v.index, f.value_types[v.result])),

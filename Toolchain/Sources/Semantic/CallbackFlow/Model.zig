@@ -2,24 +2,47 @@ const std = @import("std");
 const Ir = @import("../../Ir.zig");
 const Store = @import("Store.zig").Store;
 pub const Allocator = std.mem.Allocator;
+pub const Scalar = union(enum) {
+    bottom,
+    unknown,
+    boolean: bool,
+    variant: struct { enumeration: usize, variant: usize },
+    fn join(a: Scalar, b: Scalar) Scalar {
+        if (a == .bottom) return b;
+        if (b == .bottom or std.meta.eql(a, b)) return a;
+        return .unknown;
+    }
+};
+pub fn scalarType(program: Ir.Program, t: Ir.Type) bool {
+    if (t == .bool) return true;
+    const index = t.structureIndex() orelse return false;
+    for (program.enums) |e| if (e.type_index == index) return true;
+    return false;
+}
 pub const Value = struct {
     nodes: []const usize = &.{},
+    scalar: Scalar = .bottom,
     region: ?*anyopaque = null,
     pub fn one(a: Allocator, node: usize) !Value {
         return .{ .nodes = try a.dupe(usize, &.{node}), .region = a.ptr };
     }
     pub fn own(self: Value, a: Allocator) !Value {
         if (self.nodes.len == 0 or self.region == a.ptr) return self;
-        return .{ .nodes = try a.dupe(usize, self.nodes), .region = a.ptr };
+        return .{ .nodes = try a.dupe(usize, self.nodes), .region = a.ptr, .scalar = self.scalar };
     }
     pub fn promote(self: Value, from: Allocator, to: Allocator) !Value {
         return if (self.region == from.ptr) self.own(to) else self;
     }
     pub fn eql(a: Value, b: Value) bool {
-        return std.mem.eql(usize, a.nodes, b.nodes);
+        return std.mem.eql(usize, a.nodes, b.nodes) and std.meta.eql(a.scalar, b.scalar);
     }
     // Values are immutable: branch snapshots never share a mutable set buffer.
     pub fn join(a: Value, b: Value, allocator: Allocator) !Value {
+        var result = try joinNodes(a, b, allocator);
+        result.scalar = Scalar.join(a.scalar, b.scalar);
+        return result;
+    }
+    fn joinNodes(a: Value, b: Value, allocator: Allocator) !Value {
         if (a.nodes.len == 0) return b;
         if (b.nodes.len == 0 or eql(a, b)) return a;
         // A join already contained in its target must not allocate on every
@@ -201,7 +224,7 @@ pub const State = struct {
         return self.values.get(id) orelse .{};
     }
     pub fn set(self: *State, a: Allocator, id: usize, value: Value) !void {
-        if (value.nodes.len == 0 and self.values.get(id) == null) return;
+        if (value.nodes.len == 0 and value.scalar == .bottom and self.values.get(id) == null) return;
         try self.values.put(a, id, value);
     }
     pub fn clone(self: State, _: Allocator) !State {

@@ -719,3 +719,108 @@ test "callback provenance follows a returned mutable reference without loading i
         \\func main() {}
     , "capturing function value cannot be stored beyond its lexical scope");
 }
+
+test "callback provenance preserves unknown boolean branches after a conditional external write" {
+    try reject(
+        \\class Box { var enabled:bool = true; var callback:(func())? = null }
+        \\func setup(target:Box, change:bool) { if change { target.enabled = false } let value = 7; if target.enabled { target.callback = func() { print(value) } } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance observes boolean writes through a scalar reference helper" {
+    try reject(box ++
+        \\func enable(flag:&bool) { flag = true }
+        \\func setup(target:Box) { var flag = false; enable(flag); let value = 7; if flag { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance observes scalar writes through a returned reference" {
+    try reject(box ++
+        \\func forward(flag:&bool) &bool { return flag }
+        \\func setup(target:Box) { var flag = false; { var alias = forward(flag); alias = true } let value = 7; if flag { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance widens divergent boolean assignments" {
+    try reject(box ++
+        \\func setup(target:Box, change:bool) { var flag = false; if change { flag = true } let value = 7; if flag { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves an unknown boolean returned by an unrelated helper" {
+    try reject(box ++
+        \\func choose() bool { return true }
+        \\func setup(target:Box) { let flag = choose(); let value = 7; if flag { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance can exclude a known false local branch" {
+    try accept(box ++
+        \\func setup(target:Box) { var flag = false; let value = 7; if flag { target.set(func() { print(value) }) } }
+        \\func main() { var target = Box(); setup(target); target.invoke() }
+    );
+}
+
+test "callback provenance can distinguish unit enumeration variants" {
+    try accept(box ++
+        \\enum Mode { draw; record }
+        \\func setup(target:Box) { let mode = Mode.draw; let value = 7; if mode == Mode.record { target.set(func() { print(value) }) } }
+        \\func main() { var target = Box(); setup(target); target.invoke() }
+    );
+}
+
+test "callback provenance widens divergent enumeration variants" {
+    try reject(box ++
+        \\enum Mode { draw; record }
+        \\func setup(target:Box, change:bool) { var mode = Mode.draw; if change { mode = Mode.record } let value = 7; if mode == Mode.record { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves unknown global booleans after a conditional write" {
+    try reject(box ++
+        \\struct Registry { static var enabled:bool = true }
+        \\func setup(target:Box, change:bool) { if change { Registry.enabled = false } let value = 7; if Registry.enabled { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance invalidates known control facts across an opaque callback" {
+    try reject(
+        \\class Box { var enabled:bool = false; var callback:(func())? = null }
+        \\struct Registry { static var box:Box? = null }
+        \\func setup(notify:func(), target:Box) { var state = Box(); Registry.box = state; notify(); let value = 7; if state.enabled { target.callback = func() { print(value) } } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance follows unit enumeration writes through scalar references" {
+    try reject(box ++
+        \\enum Mode { draw; record }
+        \\func enable(mode:&Mode) { mode = Mode.record }
+        \\func setup(target:Box) { var mode = Mode.draw; enable(mode); let value = 7; if mode == Mode.record { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves unknown unit variants after an external conditional write" {
+    try reject(
+        \\enum Mode { draw; record }
+        \\class Box { var mode:Mode = Mode.record; var callback:(func())? = null }
+        \\func setup(target:Box, change:bool) { if change { target.mode = Mode.draw } let value = 7; if target.mode == Mode.record { target.callback = func() { print(value) } } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance keeps an unknown payload enumeration beside a known unit variant" {
+    try reject(box ++
+        \\enum Mode { draw; record(func()) }
+        \\func setup(mode:Mode, target:Box, change:bool) { var selected = mode; if change { selected = Mode.draw } let value = 7; if selected != Mode.draw { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
