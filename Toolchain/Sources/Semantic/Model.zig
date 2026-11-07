@@ -9,6 +9,7 @@ pub const LexicalBorrow = struct {
 };
 
 pub const Binding = struct {
+    borrow_lifetime: ?usize = null,
     nominal_receiver: bool = false,
     owned_receiver: bool = false,
     name: []const u8,
@@ -64,6 +65,9 @@ pub const MutatingReturnContext = struct {
 };
 
 pub const FunctionBuilder = struct {
+    next_borrow_lifetime: usize = 0,
+    borrow_origins: std.ArrayList(Ir.BorrowOrigin) = .empty,
+    borrow_ends: std.ArrayList(Ir.BorrowEnd) = .empty,
     return_type: ?Types.Type = null,
     mutating_return: ?MutatingReturnContext = null,
     value_types: std.ArrayList(Types.Type) = .empty,

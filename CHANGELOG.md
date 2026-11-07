@@ -8,6 +8,12 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Collections and generic specializations distinguish callback signatures, including `@` and `&` modes. Free generic calls accept named arguments while preserving defaults and concrete overload priority. Completion follows function values and elements of inferred collections, and preserves the context of an incomplete argument placed before another positional argument.
+
+- The interpreter preserves the initial root and owned edges of graphs created by `copy`, matching the native runtime. A helper call no longer prematurely destroys a copy that is still owned; cycles and shared references preserve their counts.
+
+- Callback borrows are tracked through direct and indirect calls, their environments, fields, and collections. The compiler rejects retention beyond the captured binding, including retention by a finalizer; synchronous calls and owned bound methods preserve their lifetime. The shared analysis runs before either backend and may reject a path whose safety it cannot prove.
+
 - Factory return inference accounts for named arguments: implicit results remain usable without annotations as resources and generic arguments. Static, free-function and method calls retain completion on their results. Values extracted by `match` also retain their type for generic calls inside modules and completion, respecting pattern mutability.
 
 - Constrained generic calls preserve the public protocol contract with local or package conformers, including through a generic field. Other overloads and members remain hidden; completion follows generic field constraints and their returned values.

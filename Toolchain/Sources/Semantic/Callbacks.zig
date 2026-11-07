@@ -84,6 +84,8 @@ pub fn memberReference(
         break :mutable prepared.reference;
     } else try readReference(self, builder, access.base, base);
 
+    if (!owns_receiver) if (Borrowing.rootName(access.base)) |name| try Resources.recordBorrow(self, builder, name, receiver_reference);
+
     const wrapper_index = self.bound_methods.items.len;
     try self.bound_methods.append(self.allocator, .{
         .owner = selected.?.owner,

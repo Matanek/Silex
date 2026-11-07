@@ -159,7 +159,7 @@ test "protocol defaults workspace preserves imported signatures definitions and 
     try Support.expectItem(.{ .label = "read", .kind = 2, .detail = "read(other:int) int", .insert_text = "read(${1:other})$0", .insert_text_format = 2 }, overridden);
     const callback_override = try Support.serverCompletion(&server, allocator, uri, "use Model\nfunc inspect(value:Model.Custom) {value.ap<|>}");
     try Support.expectExactLabels(&.{"apply"}, callback_override);
-    try Support.expectItem(.{ .label = "apply", .kind = 2, .detail = "apply(other:function) int", .insert_text = "apply(${1:other})$0", .insert_text_format = 2 }, callback_override);
+    try Support.expectItem(.{ .label = "apply", .kind = 2, .detail = "apply(other:func(int) int) int", .insert_text = "apply(${1:other})$0", .insert_text_format = 2 }, callback_override);
     const chained = try Support.serverCompletion(&server, allocator, uri, "use Model\nfunc inspect(value:Model.Legacy) {value.child().<|>}");
     try Support.expectExactLabels(&.{"id"}, chained);
     for ([_][]const u8{

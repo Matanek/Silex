@@ -198,6 +198,8 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
         .return_type = methodIrReturnType(self, structure_index, flat, method),
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }
@@ -256,6 +258,8 @@ fn analyzeStatic(self: anytype, structure_index: usize, method_index: usize, met
         .return_type = method.return_type,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }

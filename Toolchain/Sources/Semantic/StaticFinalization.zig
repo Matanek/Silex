@@ -40,6 +40,8 @@ pub fn attachToEntries(self: anytype, functions: *std.ArrayList(Ir.Function)) !v
         .return_type = .void,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     });
     for (self.program.functions, 0..) |source, function_id| {

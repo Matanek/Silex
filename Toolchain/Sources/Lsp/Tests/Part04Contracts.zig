@@ -232,7 +232,7 @@ test "part 04 preserves an imported principal receiver through cascade layouts" 
         try Support.expectItem(.{
             .label = "paint",
             .kind = 2,
-            .detail = "paint(callback:function) Canvas",
+            .detail = "paint(callback:func()) Canvas",
             .insert_text = "paint(${1:callback})$0",
             .insert_text_format = 2,
         }, items);

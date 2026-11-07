@@ -1,0 +1,33 @@
+func callback_integer(value:int) int { return value + 1 }
+func callback_text(value:str) str { return value }
+func callback_wrap<T>(value:T) T[] { return [value] }
+class SignatureHolder<T> { var value:T }
+
+test "callable collections and generic holders keep distinct signatures" {
+    let integers:(func(int) int)[] = [callback_integer]
+    let strings:(func(str) str)[] = [callback_text]
+    let inferred_integers = callback_wrap(callback_integer)
+    let inferred_strings = callback_wrap(callback_text)
+    var one = SignatureHolder<func(int) int>(value:callback_integer)
+    var two = SignatureHolder<func(str) str>(value:callback_text)
+    let integer = integers[0]
+    let text = strings[0]
+    let generic_integer = inferred_integers[0]
+    let generic_text = inferred_strings[0]
+    assert(integer(2) == 3 && text("Silex") == "Silex")
+    assert(generic_integer(3) == 4 && generic_text("safe") == "safe")
+    assert(one.value(4) == 5 && two.value("typed") == "typed")
+}
+
+func callback_read(value:@int) { assert(value == 1) }
+func callback_write(value:&int) { value++ }
+
+test "callable collection identities preserve read and mutable parameter modes" {
+    let readers:(func(@int))[] = [callback_read]
+    let writers:(func(&int))[] = [callback_write]
+    var value = 0
+    let writer = writers[0]
+    writer(value)
+    let reader = readers[0]
+    reader(value)
+}

@@ -547,14 +547,29 @@ pub const Block = struct {
     terminator_position: ?Source.Position = null,
 };
 
+// Semantic lifetime metadata. It is cached with the typed body and is not
+// an instruction or a change to the native ABI.
+pub const BorrowOrigin = struct { reference: ValueId, lifetime: usize };
+pub const LiveBinding = struct { value: ?ValueId = null, local: ?LocalId = null };
+pub const BorrowEnd = struct {
+    block: BlockId,
+    instruction: usize,
+    lifetimes: []const usize,
+    live: []const LiveBinding,
+    position: ?Source.Position = null,
+};
+
 pub const Function = struct {
     name: []const u8,
+    is_test_entry: bool = false,
     source_position: ?Source.Position = null,
     capture_types: []const Type = &.{},
     parameter_types: []const Type,
     return_type: Type,
     value_types: []const Type,
     local_types: []const Type = &.{},
+    borrow_origins: []const BorrowOrigin = &.{},
+    borrow_ends: []const BorrowEnd = &.{},
     blocks: []const Block,
 };
 

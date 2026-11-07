@@ -117,6 +117,8 @@ pub fn analyze(self: anytype, structure_index: usize, method: Ast.Function) !Ir.
         .return_type = .address,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }
@@ -162,6 +164,8 @@ fn analyzeWorld(self: anytype, structure_index: usize, method: Ast.Function) !Ir
         .return_type = .address,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }

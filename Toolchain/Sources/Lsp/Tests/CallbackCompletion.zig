@@ -106,3 +106,96 @@ test "grouped callback type contexts retain types and exclude values" {
         try Support.expectEqualItems(items, try Support.complete(allocator, source));
     }
 }
+
+test "distinct callable collection signatures keep contextual completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const header =
+        \\func integer(value:int) int { return value }
+        \\func text(value:str) str { return value }
+        \\func wrap<T>(value:T) T[] { return [value] }
+    ;
+    const setup = "\nfunc main() { let message = \"Silex\"; let amount = 2; var integers:(func(int) int)[] = [integer]; var strings:(func(str) str)[] = [text]; var inferred = wrap(text); ";
+    var frontend = Frontend.init(a);
+    _ = try frontend.compile(header ++ setup ++ "strings.append(text); inferred.append(text); let transform = inferred[0]; print(transform(message)); let read = integers[0]; print(read(amount)) }");
+    for ([_]struct { expression: []const u8, positive: []const u8, negative: []const u8, insertion: []const u8 }{
+        .{ .expression = "let more:(func(int) int)[] = [<|>]", .positive = "integer", .negative = "text", .insertion = "integer" },
+        .{ .expression = "strings.append(<|>)", .positive = "text", .negative = "integer", .insertion = "text" },
+        .{ .expression = "inferred.append(<|>)", .positive = "text", .negative = "integer", .insertion = "text" },
+        .{ .expression = "let transform = inferred[0]; transform(<|>)", .positive = "message", .negative = "amount", .insertion = "message" },
+    }) |case| {
+        const source = try std.fmt.allocPrint(a, "{s}{s}{s} }}", .{ header, setup, case.expression });
+        const items = try Support.complete(a, source);
+        if (!hasLabel(items, case.positive) or hasLabel(items, case.negative)) {
+            std.debug.print("collection context: {s}\n", .{case.expression});
+            for (items) |item| if (std.mem.eql(u8, item.label, case.positive) or std.mem.eql(u8, item.label, case.negative)) std.debug.print("candidate: {s} insertion={s}\n", .{ item.label, item.insertText orelse "" });
+        }
+        try std.testing.expect(hasLabel(items, case.positive));
+        try std.testing.expect(!hasLabel(items, case.negative));
+        for (items) |item| if (std.mem.eql(u8, item.label, case.positive)) try std.testing.expectEqualStrings(case.insertion, item.insertText.?);
+        try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, try Support.complete(a, source));
+    }
+}
+
+test "generic callable collections infer values without concrete annotations" {
+    const header = "func text(value:str) str { return value }\nfunc integer(value:int) int { return value }\nfunc wrap<T>(value:T) T[] { return [value] }\n";
+    const setup = "\nfunc main() { let message = \"Silex\"; let amount = 2; var inferred = wrap(value:text); ";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var frontend = Frontend.init(a);
+    _ = try frontend.compile(header ++ setup ++ "inferred.insert(0,text); let transform = inferred[0]; print(transform(message)) }");
+    for ([_]struct { expression: []const u8, positive: []const u8, negative: []const u8 }{
+        .{ .expression = "inferred.append(<|>)", .positive = "text", .negative = "integer" },
+        .{ .expression = "inferred.prepend(<|>)", .positive = "text", .negative = "integer" },
+        .{ .expression = "inferred.insert(0,<|>)", .positive = "text", .negative = "integer" },
+        .{ .expression = "inferred.replace(0,<|>)", .positive = "text", .negative = "integer" },
+        .{ .expression = "inferred.insert(<|>,text)", .positive = "amount", .negative = "message" },
+        .{ .expression = "let transform = inferred[0]; transform(<|>)", .positive = "message", .negative = "amount" },
+    }) |case| {
+        const source = try std.fmt.allocPrint(a, "{s}{s}{s} }}", .{ header, setup, case.expression });
+        const items = try Support.complete(a, source);
+        if (!hasLabel(items, case.positive) or hasLabel(items, case.negative)) {
+            std.debug.print("inferred collection context: {s}\n", .{case.expression});
+            for (items) |item| std.debug.print("candidate {s}: {s}\n", .{ item.label, item.detail });
+        }
+        try std.testing.expect(hasLabel(items, case.positive));
+        try std.testing.expect(!hasLabel(items, case.negative));
+        for (items) |item| if (std.mem.eql(u8, item.label, case.positive)) try std.testing.expectEqualStrings(case.positive, item.insertText.?);
+        try Support.expectNoDuplicates(items);
+        try Support.expectEqualItems(items, try Support.complete(a, source));
+    }
+}
+
+test "generic callable collection completion preserves modes and nominal type arguments" {
+    const cases = [_]struct { header: []const u8, canonical: []const u8, source: []const u8, positive: []const u8, negative: []const u8 }{
+        .{
+            .header = "func read(value:@int) {}\nfunc write(value:&int) {}\nfunc wrap<T>(value:T) T[] { return [value] }\n",
+            .canonical = "func main() { var values = wrap(write); values.append(write) }",
+            .source = "func main() { var values = wrap(write); values.append(<|>) }",
+            .positive = "write",
+            .negative = "read",
+        },
+        .{
+            .header = "class Box<T> { var value:T }\nfunc integer(value:Box<int>) int { return value.value }\nfunc text(value:Box<str>) str { return value.value }\nfunc wrap<T>(value:T) T[] { return [value] }\n",
+            .canonical = "func main() { var values = wrap(integer); values.append(integer) }",
+            .source = "func main() { var values = wrap(integer); values.append(<|>) }",
+            .positive = "integer",
+            .negative = "text",
+        },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        var frontend = Frontend.init(a);
+        _ = try frontend.compile(try std.fmt.allocPrint(a, "{s}{s}", .{ case.header, case.canonical }));
+        const items = try Support.complete(a, try std.fmt.allocPrint(a, "{s}{s}", .{ case.header, case.source }));
+        try std.testing.expect(hasLabel(items, case.positive));
+        try std.testing.expect(!hasLabel(items, case.negative));
+        for (items) |item| if (std.mem.eql(u8, item.label, case.positive)) try std.testing.expectEqualStrings(case.positive, item.insertText.?);
+        try Support.expectNoDuplicates(items);
+    }
+}

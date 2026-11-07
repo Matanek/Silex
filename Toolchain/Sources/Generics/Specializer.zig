@@ -713,7 +713,7 @@ pub const Specializer = struct {
                         break :value .{ .call = copy };
                     }
                 }
-                if (copy.receiver == null and copy.named_arguments.len == 0) {
+                if (copy.receiver == null) {
                     if (try self.specializeCall(copy, locals.items)) |name| {
                         copy.name = name;
                         copy.type_arguments = &.{};
@@ -906,7 +906,7 @@ pub const Specializer = struct {
         if (std.mem.eql(u8, call.name, "C.load") or std.mem.eql(u8, call.name, "C.store") or
             std.mem.eql(u8, call.name, "C.call") or
             std.mem.eql(u8, call.name, "C.object_from_address")) return null;
-        const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len);
+        const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len + call.named_arguments.len);
         for (call.arguments, 0..) |argument, index| {
             actual_types[index] = self.inferExpressionType(argument, locals) orelse contextual_type: {
                 if (call.type_arguments.len == 0) return null;
@@ -925,7 +925,25 @@ pub const Specializer = struct {
             };
         }
 
-        if (call.type_arguments.len == 0 and self.hasCompatibleConcrete(call, actual_types)) return null;
+        for (call.named_arguments, 0..) |argument, named_index| {
+            actual_types[call.arguments.len + named_index] = self.inferExpressionType(argument.value, locals) orelse contextual_type: {
+                if (call.type_arguments.len == 0) return null;
+                var contextual: ?Ast.Type = null;
+                for (self.source.functions) |function| {
+                    if (!std.mem.eql(u8, function.name, call.name) or function.type_parameters.len != call.type_arguments.len or
+                        !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
+                    const parameter = for (function.parameters) |parameter| {
+                        if (std.mem.eql(u8, parameter.name, argument.name)) break parameter;
+                    } else continue;
+                    const candidate = try self.rewriteType(parameter.type, call.type_arguments, argument.value.position);
+                    if (contextual != null and contextual.? != candidate) return null;
+                    contextual = candidate;
+                }
+                break :contextual_type contextual orelse return self.fail(argument.value.position, "cannot determine argument type for generic specialization");
+            };
+        }
+
+        if (call.type_arguments.len == 0 and try self.hasCompatibleConcrete(call, actual_types)) return null;
 
         var selected: ?*const Ast.Function = null;
         var selected_arguments: []const Ast.Type = &.{};
@@ -936,12 +954,13 @@ pub const Specializer = struct {
         for (self.source.functions) |*function| {
             if (function.type_parameters.len == 0 or !std.mem.eql(u8, function.name, call.name) or !functionVisible(self.packages, self.module_scope_roots, call, function.*)) continue;
             saw_generic = true;
+            const ordered = try self.orderNamedMethodArguments(function.parameters, call, actual_types) orelse continue;
             if (call.type_arguments.len != 0) {
                 if (call.type_arguments.len != function.type_parameters.len) continue;
                 saw_arity = true;
-                if (!parametersAcceptArity(function.parameters, actual_types.len)) continue;
-                if (!self.argumentsMatch(function.parameters, actual_types, call.type_arguments)) continue;
-                const cost = self.argumentAdaptationCost(function.parameters, actual_types);
+                if (!parametersAcceptArity(function.parameters, ordered.len)) continue;
+                if (!self.argumentsMatch(function.parameters, ordered, call.type_arguments)) continue;
+                const cost = self.argumentAdaptationCost(function.parameters, ordered);
                 if (cost < selected_cost) {
                     selected = function;
                     selected_arguments = call.type_arguments;
@@ -950,10 +969,10 @@ pub const Specializer = struct {
                 } else if (cost == selected_cost) is_ambiguous = true;
                 continue;
             }
-            if (!parametersAcceptArity(function.parameters, actual_types.len)) continue;
+            if (!parametersAcceptArity(function.parameters, ordered.len)) continue;
             saw_arity = true;
-            const inferred = try self.inferTypeArguments(function.*, actual_types) orelse continue;
-            const cost = self.argumentAdaptationCost(function.parameters, actual_types);
+            const inferred = try self.inferTypeArguments(function.*, ordered) orelse continue;
+            const cost = self.argumentAdaptationCost(function.parameters, ordered);
             if (cost < selected_cost) {
                 selected = function;
                 selected_arguments = inferred;
@@ -1150,18 +1169,20 @@ pub const Specializer = struct {
     ) SpecializeError!?[]const Ast.Type {
         if (call.named_arguments.len == 0) return actual_types;
         if (actual_types.len > parameters.len) return null;
-        const ordered = try self.allocator.alloc(Ast.Type, actual_types.len);
+        const ordered = try self.allocator.alloc(Ast.Type, parameters.len);
+        var length = call.arguments.len;
         @memset(ordered, .void);
         for (call.arguments, 0..) |_, index| ordered[index] = actual_types[index];
         for (call.named_arguments, 0..) |argument, named_index| {
             const parameter_index = for (parameters, 0..) |parameter, index| {
                 if (std.mem.eql(u8, parameter.name, argument.name)) break index;
             } else return null;
-            if (parameter_index < call.arguments.len or parameter_index >= actual_types.len) return null;
+            if (parameter_index < call.arguments.len or ordered[parameter_index] != .void) return null;
+            length = @max(length, parameter_index + 1);
             ordered[parameter_index] = actual_types[call.arguments.len + named_index];
         }
-        for (ordered) |type_value| if (type_value == .void) return null;
-        return ordered;
+        for (ordered[0..length], parameters[0..length]) |type_value, parameter| if (type_value == .void and parameter.default == null) return null;
+        return ordered[0..length];
     }
 
     pub fn instantiateMethod(
@@ -1644,6 +1665,7 @@ pub const Specializer = struct {
         const inferred = try self.allocator.alloc(?Ast.Type, template.type_parameters.len);
         @memset(inferred, null);
         for (template.parameters[0..actual.len], actual) |parameter, actual_type| {
+            if (actual_type == .void and parameter.default != null) continue;
             if (!self.unifyType(parameter.type, actual_type, inferred)) return null;
         }
         const result = try self.allocator.alloc(Ast.Type, inferred.len);
@@ -1652,11 +1674,12 @@ pub const Specializer = struct {
         return result;
     }
 
-    fn hasCompatibleConcrete(self: *Specializer, call: Ast.Expression.Call, actual: []const Ast.Type) bool {
+    fn hasCompatibleConcrete(self: *Specializer, call: Ast.Expression.Call, actual: []const Ast.Type) SpecializeError!bool {
         for (self.functions.items) |function| {
             if (!std.mem.eql(u8, function.name, call.name) or !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
-            if (!parametersAcceptArity(function.parameters, actual.len)) continue;
-            if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
+            const ordered = try self.orderNamedMethodArguments(function.parameters, call, actual) orelse continue;
+            if (!parametersAcceptArity(function.parameters, ordered.len)) continue;
+            if (self.argumentsMatch(function.parameters, ordered, &.{})) return true;
         }
         // A concrete sibling may not have been copied into `functions` yet
         // when modules are specialized in dependency order. It still wins for
@@ -1665,8 +1688,9 @@ pub const Specializer = struct {
         for (self.source.functions) |function| {
             if (function.type_parameters.len != 0 or !std.mem.eql(u8, function.name, call.name) or
                 !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
-            if (!parametersAcceptArity(function.parameters, actual.len)) continue;
-            if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
+            const ordered = try self.orderNamedMethodArguments(function.parameters, call, actual) orelse continue;
+            if (!parametersAcceptArity(function.parameters, ordered.len)) continue;
+            if (self.argumentsMatch(function.parameters, ordered, &.{})) return true;
         }
         return false;
     }
@@ -1734,6 +1758,7 @@ pub const Specializer = struct {
     fn argumentsMatch(self: *Specializer, parameters: []const Ast.Parameter, actual: []const Ast.Type, arguments: []const Ast.Type) bool {
         if (!parametersAcceptArity(parameters, actual.len)) return false;
         for (parameters[0..actual.len], actual) |parameter, actual_type| {
+            if (actual_type == .void and parameter.default != null) continue;
             if (!self.matchesPattern(parameter.type, actual_type, arguments)) return false;
         }
         return true;
@@ -1742,7 +1767,7 @@ pub const Specializer = struct {
     fn argumentAdaptationCost(self: *Specializer, parameters: []const Ast.Parameter, actual: []const Ast.Type) usize {
         var cost: usize = 0;
         for (parameters[0..actual.len], actual) |parameter, actual_type| {
-            cost += self.typeAdaptationCost(parameter.type, actual_type);
+            if (actual_type != .void) cost += self.typeAdaptationCost(parameter.type, actual_type);
         }
         return cost;
     }
@@ -2204,9 +2229,40 @@ pub const Specializer = struct {
             return std.fmt.allocPrint(self.allocator, "{s}?", .{self.typeName(child)}) catch "optional";
         }
         if (type_value.structureIndex()) |index| if (index < self.type_names.items.len) return self.type_names.items[index];
+        if (type_value.genericInstantiationIndex()) |index| if (index < self.source.generic_types.len) {
+            const generic = self.source.generic_types[index];
+            var name = self.allocator.dupe(u8, self.typeName(generic.base)) catch return "generic";
+            for (generic.arguments, 0..) |argument, n| name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{
+                name, if (n == 0) "<" else ",", self.typeName(argument),
+            }) catch return "generic";
+            return std.fmt.allocPrint(self.allocator, "{s}>", .{name}) catch "generic";
+        };
         if (type_value.functionIndex()) |index| {
             const signatures = if (index < self.function_types.items.len) self.function_types.items else self.source.function_types;
-            if (index < signatures.len) return "function";
+            if (index < signatures.len) {
+                const signature = signatures[index];
+                var name = self.allocator.dupe(u8, "(func(") catch return "function";
+                for (signature.parameters, 0..) |parameter, n| name = std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+                    name,                          if (n == 0) "" else ",",
+                    switch (parameter.mode) {
+                        .value => "",
+                        .read => "@",
+                        .mutable => "&",
+                    },
+                    self.typeName(parameter.type),
+                }) catch return "function";
+                name = std.fmt.allocPrint(self.allocator, "{s})", .{name}) catch return "function";
+                if (signature.return_type != .void or signature.return_mode != .value) name = std.fmt.allocPrint(self.allocator, "{s} {s}{s}", .{
+                    name,
+                    switch (signature.return_mode) {
+                        .value => "",
+                        .read => "@",
+                        .mutable => "&",
+                    },
+                    self.typeName(signature.return_type),
+                }) catch return "function";
+                return std.fmt.allocPrint(self.allocator, "{s})", .{name}) catch "function";
+            }
         }
         return type_value.name();
     }

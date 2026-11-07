@@ -97,7 +97,7 @@ const producer_cases = [_]ProducerCase{
         .producer = .callback_field,
         .canonical = "struct Callbacks { let candidate:func(int) bool; let wrong:func(str) bool }\nfunc accept(callback:func(int) bool) {}\nfunc inspect(callbacks:Callbacks) { accept(callbacks.candidate) }\nfunc main() {}",
         .partial = "struct Callbacks { let candidate:func(int) bool; let wrong:func(str) bool }\nfunc accept(callback:func(int) bool) {}\nfunc inspect(callbacks:Callbacks) { accept(callbacks.<|>) }\nfunc main() {}",
-        .expected = .{ .item = .{ .label = "candidate", .kind = 5, .detail = "candidate:function", .insert_text = "candidate" } },
+        .expected = .{ .item = .{ .label = "candidate", .kind = 5, .detail = "candidate:func(int) bool", .insert_text = "candidate" } },
         .forbidden = "wrong",
     },
     .{
@@ -113,7 +113,7 @@ const producer_cases = [_]ProducerCase{
         .producer = .tuple_callable,
         .canonical = "func accept(callback:func(int) bool) {}\nfunc inspect(callbacks:(candidate:func(int) bool, wrong:func(str) bool)) { accept(callbacks.candidate) }\nfunc main() {}",
         .partial = "func accept(callback:func(int) bool) {}\nfunc inspect(callbacks:(candidate:func(int) bool, wrong:func(str) bool)) { accept(callbacks.<|>) }\nfunc main() {}",
-        .expected = .{ .item = .{ .label = "candidate", .kind = 5, .detail = "candidate:function", .insert_text = "candidate" } },
+        .expected = .{ .item = .{ .label = "candidate", .kind = 5, .detail = "candidate:func(int) bool", .insert_text = "candidate" } },
         .forbidden = "wrong",
     },
     .{
@@ -239,7 +239,7 @@ test "callback calls stay positional while declaration calls expose only remaini
     );
     const method = try Completion.parameterItemsAt(allocator, method_marked.text, method_marked.cursor);
     try Support.expectExactLabels(&.{ "callback", "priority" }, method);
-    try Support.expectItem(.{ .label = "callback", .kind = 6, .detail = "callback:function", .insert_text = "callback:" }, method);
+    try Support.expectItem(.{ .label = "callback", .kind = 6, .detail = "callback:func()", .insert_text = "callback:" }, method);
     try Support.expectItem(.{ .label = "priority", .kind = 6, .detail = "priority:int = 0", .insert_text = "priority:" }, method);
 
     const marked = try Support.removeMarker(allocator, "func inspect(callback:func(int, str), candidate:int) { callback(candidate, <|>) }\nfunc main() {}");

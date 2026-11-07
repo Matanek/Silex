@@ -331,7 +331,7 @@ pub const Analyzer = struct {
                 }
             }
         }
-        return finalized: {
+        const analyzed: Ir.Program = finalized: {
             var span = self.traceSpan(.semantic_finalization);
             defer span.finish();
             var remaining = program.functions.len;
@@ -380,6 +380,11 @@ pub const Analyzer = struct {
                 .functions = try functions.toOwnedSlice(self.allocator),
             };
         };
+        if (try @import("CallbackProvenance.zig").check(self.allocator, analyzed)) |diagnostic| {
+            self.diagnostic = diagnostic;
+            return error.InvalidSource;
+        }
+        return analyzed;
     }
 
     fn traceSpan(self: *Analyzer, phase: CompilationTrace.Phase) CompilationTrace.Span {
@@ -704,12 +709,15 @@ pub const Analyzer = struct {
         const owned_blocks = try blocks.toOwnedSlice(self.allocator);
         return .{
             .name = function.name,
+            .is_test_entry = function.is_test_entry,
             .source_position = function.name_position,
             .capture_types = capture_types,
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
             .return_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type),
             .value_types = try builder.value_types.toOwnedSlice(self.allocator),
             .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+            .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+            .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
             .blocks = owned_blocks,
         };
     }
@@ -744,6 +752,7 @@ pub const Analyzer = struct {
                 try self.emit(builder, .{ .local_address = .{ .result = created, .local = local } });
                 break :reference created;
             } else continue;
+            try Resources.recordBorrow(self, builder, binding.name, reference);
             try infos.append(self.allocator, .{
                 .name = binding.name,
                 .nominal_receiver = binding.nominal_receiver,

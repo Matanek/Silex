@@ -90,6 +90,8 @@ pub fn analyze(self: anytype, bound: Callbacks.BoundMethod) !Ir.Function {
         .return_type = method.return_type,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }

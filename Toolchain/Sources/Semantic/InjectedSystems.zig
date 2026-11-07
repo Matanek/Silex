@@ -369,6 +369,8 @@ fn finishFunction(self: anytype, function: Ast.Function, builder: anytype) !Ir.F
         .return_type = .void,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }

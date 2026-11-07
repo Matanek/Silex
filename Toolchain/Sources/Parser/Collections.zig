@@ -140,6 +140,30 @@ pub fn internFixedType(self: anytype, position: Source.Position, element: Ast.Ty
 
 fn typeSpelling(self: anytype, type_value: Ast.Type) ![]const u8 {
     if (type_value.optionalChild()) |child| return std.fmt.allocPrint(self.allocator, "{s}?", .{try typeSpelling(self, child)});
+    if (type_value.functionIndex()) |index| if (index < self.function_types.items.len) {
+        const signature = self.function_types.items[index];
+        var name = try self.allocator.dupe(u8, "(func(");
+        for (signature.parameters, 0..) |parameter, n| name = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+            name,                                   if (n == 0) "" else ",",
+            switch (parameter.mode) {
+                .value => "",
+                .read => "@",
+                .mutable => "&",
+            },
+            try typeSpelling(self, parameter.type),
+        });
+        name = try std.fmt.allocPrint(self.allocator, "{s})", .{name});
+        if (signature.return_type != .void or signature.return_mode != .value) name = try std.fmt.allocPrint(self.allocator, "{s} {s}{s}", .{
+            name,
+            switch (signature.return_mode) {
+                .value => "",
+                .read => "@",
+                .mutable => "&",
+            },
+            try typeSpelling(self, signature.return_type),
+        });
+        return std.fmt.allocPrint(self.allocator, "{s})", .{name});
+    };
     if (type_value.structureIndex()) |index| if (index < self.type_names.items.len) return self.type_names.items[index];
     if (type_value.genericParameterIndex()) |index| if (index < self.type_parameters.len) return self.type_parameters[index].name;
     if (type_value.genericInstantiationIndex()) |index| if (index < self.generic_types.items.len) {

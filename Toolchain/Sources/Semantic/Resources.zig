@@ -222,6 +222,8 @@ pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Struc
         .return_type = .void,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }
@@ -255,6 +257,8 @@ pub fn analyzeClassFields(self: anytype, structure_index: usize, declaration: As
         .return_type = .void,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .borrow_origins = try builder.borrow_origins.toOwnedSlice(self.allocator),
+        .borrow_ends = try builder.borrow_ends.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
 }
@@ -390,6 +394,40 @@ pub fn emitDropBody(self: anytype, builder: anytype, type_value: Ast.Type, value
     }
 }
 
+pub fn recordBorrow(self: anytype, builder: anytype, name: []const u8, reference: Ir.ValueId) !void {
+    var index = builder.bindings.items.len;
+    while (index > 0) {
+        index -= 1;
+        const binding = &builder.bindings.items[index];
+        if (!std.mem.eql(u8, binding.name, name)) continue;
+        if (binding.borrow_lifetime == null) {
+            binding.borrow_lifetime = builder.next_borrow_lifetime;
+            builder.next_borrow_lifetime += 1;
+        }
+        try builder.borrow_origins.append(self.allocator, .{ .reference = reference, .lifetime = binding.borrow_lifetime.? });
+        return;
+    }
+}
+
+fn recordBorrowEnd(self: anytype, builder: anytype, first: usize) !void {
+    var lifetimes: std.ArrayList(usize) = .empty;
+    for (builder.bindings.items[first..]) |binding| if (binding.borrow_lifetime) |lifetime| {
+        try lifetimes.append(self.allocator, lifetime);
+    };
+    if (lifetimes.items.len == 0) return;
+    var live: std.ArrayList(Ir.LiveBinding) = .empty;
+    for (builder.bindings.items[0..first]) |binding| {
+        if (binding.available) try live.append(self.allocator, .{ .value = binding.value, .local = binding.local });
+    }
+    try builder.borrow_ends.append(self.allocator, .{
+        .block = builder.current_block,
+        .instruction = builder.blocks.items[builder.current_block].instructions.items.len,
+        .lifetimes = try lifetimes.toOwnedSlice(self.allocator),
+        .live = try live.toOwnedSlice(self.allocator),
+        .position = builder.current_position,
+    });
+}
+
 pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !void {
     var index = builder.bindings.items.len;
     while (index > first_binding) {
@@ -405,6 +443,7 @@ pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !v
         } else binding.value orelse continue;
         try emitDrop(self, builder, binding.type, value);
     }
+    try recordBorrowEnd(self, builder, first_binding);
 }
 
 pub fn emitMutexUnlocks(self: anytype, builder: anytype, target_depth: usize) !void {

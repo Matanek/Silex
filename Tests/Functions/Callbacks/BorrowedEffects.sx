@@ -1,0 +1,135 @@
+class EffectSlot {
+    var callback:(func())? = null
+    func set(callback:func()) { self.callback = callback }
+    func invoke() { if let callback = self.callback { callback() } }
+}
+
+func effect_identity(callback:func()) func() { return callback }
+func effect_invoke(callback:func()) { callback() }
+func effect_store(slot:EffectSlot, callback:func()) { slot.set(callback) }
+func effect_dispatch(action:func(func()), callback:func()) { action(callback) }
+
+class EffectWriter {
+    var slot:EffectSlot
+    func write(callback:func()) { self.slot.set(callback) }
+}
+
+func effect_recursive(callback:func(), depth:int) {
+    if depth == 0 { callback() } else { effect_recursive(callback,depth - 1) }
+}
+
+func effect_empty() {}
+
+class FinalizingEffect {
+    var slot:EffectSlot
+    var callback:func()
+    func invoke() { self.callback() }
+    drop { self.slot.set(self.callback) }
+}
+
+func effect_invoke_holder(holder:FinalizingEffect) { holder.invoke() }
+
+test "indirect synchronous effects share the lexical binding" {
+    var count = 0
+    var slot = EffectSlot()
+    var writer = EffectWriter(slot:slot)
+    let callback = effect_identity(func() { count++ })
+    effect_dispatch(effect_invoke,callback)
+    effect_dispatch(writer.write,callback)
+    slot.invoke()
+    slot.callback = null
+    effect_recursive(callback,2)
+    assert(count == 3)
+}
+
+test "a callback stored in an inner block can use an outer live binding" {
+    var count = 0
+    var slot = EffectSlot()
+    { effect_store(slot,effect_identity(func() { count++ })) }
+    slot.invoke()
+    slot.callback = null
+    assert(count == 1)
+}
+
+test "finalization waits for the last owner and observes callback replacement" {
+    var slot = EffectSlot()
+    var count = 0
+    {
+        var holder = FinalizingEffect(slot:slot,callback:effect_identity(func() { count++ }))
+        effect_invoke_holder(holder)
+        holder.callback = effect_empty
+    }
+    slot.invoke()
+    assert(count == 1)
+}
+
+func effect_setup(runner:func(func())) {
+    var value = 0
+    runner(effect_identity(func() { value++ }))
+    assert(value == 1)
+}
+
+test "a test entry resolves a synchronous higher order factory" {
+    effect_setup(effect_invoke)
+}
+
+class CopiedEffect {
+    static var drops:int = 0
+    var callback:func() = effect_empty
+    var next:CopiedEffect? = null
+    func invoke() { self.callback() }
+    drop { CopiedEffect.drops++ }
+}
+
+func effect_inspect_copy(holder:CopiedEffect) { holder.invoke() }
+
+class CopiedPair {
+    var first:CopiedEffect
+    var second:CopiedEffect
+}
+
+test "deep copied callback receivers retain their initial root through a helper" {
+    CopiedEffect.drops = 0
+    {
+        var original = CopiedEffect()
+        {
+            var detached = copy original
+            effect_inspect_copy(detached)
+            assert(CopiedEffect.drops == 0)
+        }
+        assert(CopiedEffect.drops == 1)
+    }
+    assert(CopiedEffect.drops == 2)
+}
+
+test "deep copied cycles preserve root and edge ownership" {
+    CopiedEffect.drops = 0
+    {
+        var original = CopiedEffect()
+        original.next = original
+        {
+            var detached = copy original
+            effect_inspect_copy(detached)
+            assert(CopiedEffect.drops == 0)
+        }
+        assert(CopiedEffect.drops == 1)
+    }
+    assert(CopiedEffect.drops == 2)
+}
+
+test "deep copies preserve shared class fields and count both owning edges" {
+    CopiedEffect.drops = 0
+    {
+        var original = CopiedEffect()
+        var pair = CopiedPair(first:original,second:original)
+        {
+            var detached = copy pair
+            assert(detached.first == detached.second)
+            assert(detached.first != original)
+            effect_inspect_copy(detached.first)
+            assert(CopiedEffect.drops == 0)
+        }
+        assert(CopiedEffect.drops == 1)
+    }
+    assert(CopiedEffect.drops == 2)
+}

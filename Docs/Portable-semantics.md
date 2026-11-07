@@ -76,10 +76,57 @@ Copying or storing a callback retains its owner, and dropping the last owner
 runs the applicable class finalizers. Borrowed lexical captures keep their non-owning stack
 representation and cannot escape their source lifetime.
 
+The semantic frontend checks borrowed callbacks on the complete composed IR,
+including restored packages. Callable values retain their target and abstract
+capture environment during this analysis. Calls, projected aliases, aggregate
+fields and collections propagate those values; scope-end metadata identifies
+the lifetime of each borrowed binding independently of its storage slot.
+Returning a borrowed callback or leaving it reachable from longer-lived storage
+is rejected before interpretation or native lowering.
+Each lexical origin is first checked with abstract external inputs. Opaque
+indirect calls require concrete caller contexts when they expose inputs, return
+a capability (including an address), or can observe concrete objects/callables
+in the creator's external inputs or globals. This also covers state installed
+before the loan is created. `main` and individual test entries provide those
+contexts when needed; an independently discharged origin does not require
+reinterpreting unrelated application setup. Higher-order parameter effects are
+resolved at concrete callers rather than assigning every callable parameter a
+fictitious retaining target. Synchronous calls and
+storage cleared while the binding is alive remain valid when the analysis can
+prove their lifetime. Unconstrained compatible class inputs may alias; an
+uncertain overwrite does not erase a possible retained callback.
+
+Finalizer effects participate through the explicit root/edge ownership IR.
+A receiver still owned by its caller is not finalized at a helper return.
+Potential cyclic destruction and uncertain ownership merge the destruction
+and non-destruction effects. The analysis is conservative and does not execute
+foreign code or infer a synchronous lifetime contract for unsafe native effects.
+Borrow origins and scope ends are serialized with typed functions; both package
+and compilation cache formats change when this metadata changes. This check is
+common to backends and targets and does not change emitted ownership operations.
+
+Callback-flow snapshots are immutable and sparse: branch/call states share
+unchanged map subtrees, and joins visit only differing subtrees. Each invocation
+releases its temporary arena at return after promoting its live result to the
+caller. Abstract object identities and loan metadata have root-analysis lifetime;
+recursive inputs are copied into the active ancestor, never retained from a
+shorter-lived descendant arena. A missing cell in a concrete allocation is not
+an unknown external object. Repeated calls propagate allocation multiplicity,
+so clearing one possible instance cannot discharge loans held by another.
+
+
 Indirect callback calls follow the ownership contract of direct calls: a
 temporary value argument transfers its existing owner, while a stored argument
 is retained for the callee. An owned callback result carries its transfer flag
 so binding, projection and discarded-result cleanup preserve that obligation.
+
+The `deep_copy` instruction implicitly acquires the result's root ownership.
+Cloned class fields acquire edges, including repeated references to one cloned
+instance and back-edges in cycles. The reference interpreter and callback-flow
+analysis follow the same root/edge distinction as the native clone runtime;
+a helper parameter's release cannot consume the copy's initial owner.
+Ordinary value fields have separate destinations even when their source value
+was reused, while shared class identity is preserved within the cloned graph.
 
 Tuple construction retains borrowed resource elements and transfers owned
 ones. The completed tuple is an owned value. Destructuring a stored tuple

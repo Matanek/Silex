@@ -370,7 +370,7 @@ fn executeInstruction(
             defer guard.release();
             var classes = std.AutoHashMap(*Value.Structure, *Value.Structure).init(allocator);
             defer classes.deinit();
-            try store(function, values, copy.result, try deepCloneValue(allocator, program, try load(values, copy.operand), session, &classes));
+            try store(function, values, copy.result, try deepCloneValue(allocator, program, try load(values, copy.operand), session, &classes, .root));
         },
         .class_cast => |cast| {
             var value = switch (try load(values, cast.operand)) {
@@ -832,35 +832,40 @@ fn deepCloneValue(
     value: Value,
     session: *Session,
     classes: *std.AutoHashMap(*Value.Structure, *Value.Structure),
+    ownership: Ir.Ownership,
 ) Error!Value {
     return switch (value) {
         .structure => |aggregate| cloned: {
             const fields = try allocator.alloc(Value, aggregate.fields.len);
-            for (aggregate.fields, 0..) |field, index| fields[index] = try deepCloneValue(allocator, program, field, session, classes);
+            for (aggregate.fields, 0..) |field, index| fields[index] = try deepCloneValue(allocator, program, field, session, classes, ownership);
             break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
         },
         .class => |class| cloned: {
             const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
             if (dynamic_type >= program.structures.len or !program.structures[dynamic_type].is_class or
                 !program.structures[dynamic_type].is_copyable) return error.InvalidProgram;
-            if (classes.get(class.instance)) |existing| break :cloned .{ .class = .{ .static_type = class.static_type, .instance = existing } };
+            if (classes.get(class.instance)) |existing| {
+                try Classes.retain(session.classes.items, existing, ownership);
+                break :cloned .{ .class = .{ .static_type = class.static_type, .instance = existing } };
+            }
             const instance = try allocator.create(Value.Structure);
             instance.* = .{ .type = class.instance.type, .fields = &.{} };
             try Classes.register(allocator, &session.classes, instance);
+            try Classes.retain(session.classes.items, instance, ownership);
             try classes.put(class.instance, instance);
             const fields = try allocator.alloc(Value, class.instance.fields.len);
             instance.fields = fields;
-            for (class.instance.fields, 0..) |field, index| fields[index] = try deepCloneValue(allocator, program, field, session, classes);
+            for (class.instance.fields, 0..) |field, index| fields[index] = try deepCloneValue(allocator, program, field, session, classes, .edge);
             break :cloned .{ .class = .{ .static_type = class.static_type, .instance = instance } };
         },
         .protocol => |protocol| cloned: {
             const concrete = try allocator.create(Value);
-            concrete.* = try deepCloneValue(allocator, program, protocol.concrete.*, session, classes);
+            concrete.* = try deepCloneValue(allocator, program, protocol.concrete.*, session, classes, ownership);
             break :cloned .{ .protocol = .{ .type = protocol.type, .concrete = concrete } };
         },
         .enumeration => |enumeration| cloned: {
             const payload = try allocator.alloc(Value, enumeration.values.len);
-            for (enumeration.values, 0..) |item, index| payload[index] = try deepCloneValue(allocator, program, item, session, classes);
+            for (enumeration.values, 0..) |item, index| payload[index] = try deepCloneValue(allocator, program, item, session, classes, ownership);
             const copy = try allocator.create(Value.Enumeration);
             copy.* = .{
                 .type = enumeration.type,
@@ -873,14 +878,14 @@ fn deepCloneValue(
         .optional => |optional| cloned: {
             const payload = if (optional.value) |present| payload: {
                 const copy = try allocator.create(Value);
-                copy.* = try deepCloneValue(allocator, program, present.*, session, classes);
+                copy.* = try deepCloneValue(allocator, program, present.*, session, classes, ownership);
                 break :payload copy;
             } else null;
             break :cloned .{ .optional = .{ .type = optional.type, .value = payload } };
         },
         .function => |callback| cloned: {
             const captures = try allocator.alloc(Value, callback.captures.len);
-            for (callback.captures, 0..) |capture, index| captures[index] = try deepCloneValue(allocator, program, capture, session, classes);
+            for (callback.captures, 0..) |capture, index| captures[index] = try deepCloneValue(allocator, program, capture, session, classes, ownership);
             break :cloned .{ .function = .{ .type = callback.type, .id = callback.id, .captures = captures } };
         },
         .view => error.InvalidProgram,

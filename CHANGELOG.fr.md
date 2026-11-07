@@ -8,6 +8,12 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- Les collections et spécialisations génériques distinguent les signatures de callbacks, y compris les modes `@` et `&`. Les appels génériques libres acceptent les arguments nommés avec leurs défauts et la priorité des surcharges concrètes. La complétion suit les valeurs de fonction et les éléments des collections inférées, et conserve le contexte d’un argument incomplet placé avant un autre argument positionnel.
+
+- L’interpréteur conserve la racine initiale et les arêtes possédées des graphes créés par `copy`, comme le runtime natif. Un appel de helper ne détruit plus prématurément une copie encore possédée ; les cycles et références partagées gardent leur comptage.
+
+- Les emprunts des callbacks sont suivis à travers les appels directs et indirects, leurs environnements, les champs et les collections. Le compilateur refuse leur rétention au-delà de la liaison capturée, y compris par un finaliseur ; les appels synchrones et les méthodes liées possédées conservent leur durée de vie. L’analyse commune intervient avant les backends et peut refuser un chemin dont elle ne peut prouver la sûreté.
+
 - L’inférence des retours de fabriques tient compte des arguments nommés : leurs résultats implicites restent utilisables sans annotation comme ressources et arguments génériques. Les appels statiques, libres et de méthodes conservent la complétion du résultat. Les valeurs extraites par `match` gardent aussi leur type pour les appels génériques dans les modules et leur complétion, en respectant la mutabilité du motif.
 
 - Les appels génériques contraints conservent le contrat public du protocole avec un conformant local ou de package, y compris depuis un champ de type générique. Les autres surcharges et membres restent masqués ; la complétion suit la contrainte des champs génériques et leurs retours.

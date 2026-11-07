@@ -7,6 +7,8 @@ const ProtocolDefaults = @import("../ProtocolDefaults.zig");
 const RecoveryModule = @import("Recovery.zig");
 const Types = @import("Types.zig");
 const Numeric = @import("../Numeric.zig");
+const FunctionValues = @import("FunctionValues.zig");
+const GenericResults = @import("GenericResults.zig");
 pub const NativeInterop = @import("NativeInterop.zig");
 
 const Allocator = std.mem.Allocator;
@@ -3969,6 +3971,7 @@ fn typeForSourceSpelling(program: Ast.Program, spelling: []const u8) ?Ast.Type {
         }
     };
     for (program.type_names, 0..) |name, index| if (sourceSpellingsEqual(name, spelling)) return .structure(index);
+    if (outerParenthesizedExpression(trimmed)) |inner| return typeForSourceSpelling(program, inner);
     for (program.function_types, 0..) |_, index| {
         var buffer: [1024]u8 = undefined;
         var writer = std.Io.Writer.fixed(&buffer);
@@ -4118,6 +4121,7 @@ pub fn resolveReceiverTypeForAccess(
         const name = std.mem.trim(u8, trimmed[0..open], " \t");
         if (findStructure(program, name)) |_| return name;
         if (findStructure(program, nominalReceiverName(name))) |_| return name;
+        if (GenericResults.spelling(allocator, source, program, cursor, trimmed)) |inferred| return typeAfterSafeAccess(effectiveCallSpelling(inferred, capture), safe_access);
         const callables = containingCallables(allocator, source, program, cursor) catch return null;
         defer allocator.free(callables);
         var callable_index = callables.len;
@@ -4209,14 +4213,14 @@ pub fn resolveReceiverTypeForAccess(
     };
     if (current_type) |candidate| if (findStructure(program, candidate) == null) {
         for (program.functions) |function| if (std.mem.eql(u8, function.name, candidate)) {
-            current_type = typeSpelling(allocator, program, function.return_type) catch return null;
+            current_type = typeSpelling(allocator, program, FunctionValues.typeOf(program, function) orelse return null) catch return null;
             break;
         };
     };
     while (parts.next()) |field_name| {
         if (current_type) |candidate| if (findStructure(program, candidate) == null) {
             for (program.functions) |function| if (std.mem.eql(u8, function.name, candidate)) {
-                current_type = typeSpelling(allocator, program, function.return_type) catch return null;
+                current_type = typeSpelling(allocator, program, FunctionValues.typeOf(program, function) orelse return null) catch return null;
                 break;
             };
         };
@@ -4520,15 +4524,31 @@ fn expectedActiveArgumentType(
         return .{ .name = "float64", .strict = true, .constraint = .numeric };
     var selected: ?Ast.Type = null;
     var generic_expected: ?ExpectedType = null;
-    if (expressionTypeAt(allocator, source, program, cursor, argument.callee_expression)) |callee_type| {
+    const direct_callee = isIdentifierExpression(argument.callee_expression);
+    var declaration_callee = false;
+    if (direct_callee) {
+        const owners = containingCallables(allocator, source, program, cursor) catch return null;
+        defer allocator.free(owners);
+        const start = if (owners.len != 0) owners[0].position else cursor;
+        const locals = visibleLocals(allocator, source, program, start, cursor) catch return null;
+        defer allocator.free(locals);
+        var lexical = false;
+        for (locals) |local| lexical = lexical or std.mem.eql(u8, local.name, argument.callee_name);
+        for (owners) |owner| for (owner.parameters) |parameter| {
+            lexical = lexical or std.mem.eql(u8, parameter.name, argument.callee_name);
+        };
+        if (!lexical) for (program.functions) |function| {
+            declaration_callee = declaration_callee or std.mem.eql(u8, function.name, argument.callee_name);
+        };
+    }
+    if (!declaration_callee) if (expressionTypeAt(allocator, source, program, cursor, argument.callee_expression)) |callee_type| {
         const function_index = callee_type.functionIndex() orelse return null;
         if (function_index >= program.function_types.len or argument.parameter_name != null) return null;
         const parameters = program.function_types[function_index].parameters;
         if (argument.positional_index >= parameters.len) return null;
         selected = parameters[argument.positional_index].type;
-    }
+    };
 
-    const direct_callee = isIdentifierExpression(argument.callee_expression);
     if (selected == null and direct_callee) for (program.functions) |function| {
         if (!std.mem.eql(u8, function.name, argument.callee_name)) continue;
         const candidate = selectedParameterType(function.parameters, argument) orelse continue;
@@ -4552,6 +4572,9 @@ fn expectedActiveArgumentType(
         ) orelse return null;
         var owner = findStructure(program, nominalReceiverName(receiver_type)) orelse return null;
         const static_access = findStructure(program, std.mem.trim(u8, receiver orelse return null, " \t\r\n")) != null;
+        if (!static_access) if (owner.collection) |collection| {
+            if (collectionArgumentType(collection, argument)) |wanted| selected = wanted;
+        };
         while (true) {
             for (owner.methods) |method| {
                 if (method.is_static != static_access or !std.mem.eql(u8, method.name, argument.callee_name)) continue;
@@ -4600,6 +4623,21 @@ fn expectedActiveArgumentType(
         .strict = true,
         .function_type = if (type_value.functionIndex() != null) type_value else null,
     };
+}
+
+fn collectionArgumentType(collection: Ast.Collection, argument: ActiveArgument) ?Ast.Type {
+    if (collection.view) return null;
+    const name = argument.callee_name;
+    const append = std.mem.eql(u8, name, "append") or std.mem.eql(u8, name, "prepend");
+    const insert = std.mem.eql(u8, name, "insert");
+    const replace = std.mem.eql(u8, name, "replace");
+    if ((!append and !insert and !replace) or (collection.length != null and !replace)) return null;
+    const value_position: usize = if (append) 0 else 1;
+    // Built-in collection mutations have a positional-only source contract.
+    if (argument.parameter_name != null) return null;
+    if (argument.positional_index == value_position) return collection.element;
+    if (!append and argument.positional_index == 0) return .int;
+    return null;
 }
 
 fn genericCallbackArgument(
@@ -4659,7 +4697,7 @@ fn genericCallbackArgument(
     };
 }
 
-fn inferCallbackBinding(program: Ast.Program, pattern: Ast.Type, actual: Ast.Type, bindings: []?Ast.Type) bool {
+pub fn inferCallbackBinding(program: Ast.Program, pattern: Ast.Type, actual: Ast.Type, bindings: []?Ast.Type) bool {
     if (pattern.genericParameterIndex()) |index| {
         if (index >= bindings.len) return false;
         if (bindings[index]) |previous| return previous == actual;
@@ -4694,7 +4732,7 @@ fn isIdentifierExpression(expression: []const u8) bool {
     return true;
 }
 
-fn expressionTypeAt(
+pub fn expressionTypeAt(
     allocator: Allocator,
     source: []const u8,
     program: Ast.Program,
@@ -4797,15 +4835,24 @@ fn lexicalValueTypeAt(
             if (std.mem.eql(u8, parameter.name, name)) return parameter.type;
         }
     }
-    if (callables.len == 0) return null;
+    if (callables.len == 0) return FunctionValues.named(program, name);
     const locals = visibleLocals(allocator, source, program, callables[0].position, cursor) catch return null;
     defer allocator.free(locals);
     var local_index = locals.len;
     while (local_index != 0) {
         local_index -= 1;
-        if (std.mem.eql(u8, locals[local_index].name, name)) return locals[local_index].type_value;
+        const local = locals[local_index];
+        if (!std.mem.eql(u8, local.name, name)) continue;
+        if (!local.annotated) if (local.initializer) |initializer| {
+            if (resolveReceiverType(allocator, source, program, initializer.cursor, initializer.expression)) |spelling| {
+                if (typeForSourceSpelling(program, spelling)) |resolved| return resolved;
+            }
+        };
+        if (local.type_value) |value| return value;
+        if (local.type_name) |spelling| return typeForSourceSpelling(program, spelling);
+        return null;
     }
-    return null;
+    return FunctionValues.named(program, name);
 }
 
 fn selectedParameterType(parameters: []const Ast.Parameter, argument: ActiveArgument) ?Ast.Type {
@@ -5224,6 +5271,20 @@ fn parseForCompletionObserved(
         .recovery = .completion_site,
     } else |_| {}
 
+    // A bare argument position is lexically also a possible aggregate label.
+    // If a later positional argument follows, injecting a named placeholder
+    // is invalid. Retry the same site as a value before discarding its scope.
+    if (context.kind == .aggregate_field) {
+        const value_recovered = try std.fmt.allocPrint(allocator, "{s}true{s}{s}{s}{s}", .{
+            source[0..replacement_start], closers, source[cursor..suffix_end], block_suffix, source[suffix_end..],
+        });
+        parser = ParserModule.Parser.init(allocator, value_recovered);
+        if (parser.parse()) |program| return .{
+            .program = mergeExtensionsForCompletion(allocator, program),
+            .recovery = .completion_site,
+        } else |_| {}
+    }
+
     const separated = try RecoveryModule.separateAdjacentControlStatement(allocator, recovered, recovered_cursor);
     if (separated) |repaired| {
         parser = ParserModule.Parser.init(allocator, repaired);
@@ -5414,7 +5475,8 @@ fn mergeExtensionsForCompletion(allocator: Allocator, program: Ast.Program) ?Ast
     var merger = ExtensionMerger.Merger.init(allocator);
     const merged = merger.merge(program, true, true) catch program;
     var defaults = ProtocolDefaults.Expander{ .allocator = allocator };
-    return defaults.expand(merged) catch merged;
+    const expanded = defaults.expand(merged) catch merged;
+    return FunctionValues.install(allocator, expanded) catch expanded;
 }
 
 pub fn functionSignature(
@@ -5474,7 +5536,7 @@ pub fn specializedTypeName(
     return boundTypeSpelling(allocator, program, structure.type_parameters.len, receiver_type, type_value);
 }
 
-fn boundTypeSpelling(allocator: Allocator, program: Ast.Program, parameter_count: usize, receiver_type: []const u8, type_value: Ast.Type) Allocator.Error![]const u8 {
+pub fn boundTypeSpelling(allocator: Allocator, program: Ast.Program, parameter_count: usize, receiver_type: []const u8, type_value: Ast.Type) Allocator.Error![]const u8 {
     var direct = type_value;
     var optional_depth: usize = 0;
     while (direct.optionalChild()) |child| {
@@ -5494,34 +5556,37 @@ fn boundTypeSpelling(allocator: Allocator, program: Ast.Program, parameter_count
             try boundTypeSpelling(allocator, program, parameter_count, receiver_type, argument),
         });
         break :generic try std.fmt.allocPrint(allocator, "{s}>", .{spelling});
+    } else if (direct.functionIndex()) |index| function: {
+        if (index >= program.function_types.len) break :function typeName(program, direct);
+        const signature = program.function_types[index];
+        var text: []const u8 = "func(";
+        for (signature.parameters, 0..) |parameter, n| text = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}", .{
+            text, if (n == 0) "" else ",", parameterModeText(parameter.mode), try boundTypeSpelling(allocator, program, parameter_count, receiver_type, parameter.type),
+        });
+        text = try std.fmt.allocPrint(allocator, "{s})", .{text});
+        if (signature.return_type != .void or signature.return_mode != .value) text = try std.fmt.allocPrint(allocator, "{s} {s}{s}", .{
+            text, parameterModeText(signature.return_mode), try boundTypeSpelling(allocator, program, parameter_count, receiver_type, signature.return_type),
+        });
+        break :function text;
+    } else if (structureForType(program, direct)) |structure| collection: {
+        const collection = structure.collection orelse break :collection typeName(program, direct);
+        var element = try boundTypeSpelling(allocator, program, parameter_count, receiver_type, collection.element);
+        if (collection.element.functionIndex() != null) element = try std.fmt.allocPrint(allocator, "({s})", .{element});
+        break :collection if (collection.view)
+            try std.fmt.allocPrint(allocator, "{s}[..]", .{element})
+        else if (collection.length) |length|
+            try std.fmt.allocPrint(allocator, "{s}[{d}]", .{ element, length })
+        else
+            try std.fmt.allocPrint(allocator, "{s}[]", .{element});
     } else typeName(program, direct);
+    if (optional_depth != 0 and direct.functionIndex() != null) result = try std.fmt.allocPrint(allocator, "({s})", .{result});
 
     for (0..optional_depth) |_| result = try std.fmt.allocPrint(allocator, "{s}?", .{result});
     return result;
 }
 
 fn typeSpelling(allocator: Allocator, program: Ast.Program, type_value: Ast.Type) ![]const u8 {
-    var direct = type_value;
-    var optional_depth: usize = 0;
-    while (direct.optionalChild()) |child| {
-        optional_depth += 1;
-        direct = child;
-    }
-
-    var result: []const u8 = if (direct.genericInstantiationIndex()) |generic_index| generic: {
-        if (generic_index >= program.generic_types.len) break :generic typeName(program, direct);
-        const generic_type = program.generic_types[generic_index];
-        var spelling = try allocator.dupe(u8, typeName(program, generic_type.base));
-        for (generic_type.arguments, 0..) |argument, index| spelling = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
-            spelling,
-            if (index == 0) "<" else ", ",
-            try typeSpelling(allocator, program, argument),
-        });
-        break :generic try std.fmt.allocPrint(allocator, "{s}>", .{spelling});
-    } else typeName(program, direct);
-
-    for (0..optional_depth) |_| result = try std.fmt.allocPrint(allocator, "{s}?", .{result});
-    return result;
+    return boundTypeSpelling(allocator, program, 0, "", type_value);
 }
 
 fn writeFunctionTypeSpelling(writer: *std.Io.Writer, program: Ast.Program, type_value: Ast.Type) anyerror!void {
@@ -5732,6 +5797,19 @@ fn findStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
         if (name.len > structure.name.len and std.mem.endsWith(u8, name, structure.name) and
             name[name.len - structure.name.len - 1] == '.') return structure;
     }
+    if (std.mem.endsWith(u8, name, "]")) if (std.mem.lastIndexOfScalar(u8, name, '[')) |opening| {
+        const element = typeForSourceSpelling(program, name[0..opening]) orelse return null;
+        const suffix = name[opening + 1 .. name.len - 1];
+        const view = std.mem.eql(u8, suffix, "..");
+        const length: ?usize = if (suffix.len == 0 or view) null else std.fmt.parseInt(usize, suffix, 10) catch return null;
+        for (program.structures) |template| if (template.collection) |shape| if (shape.view == view and shape.length == length) {
+            var concrete = template;
+            concrete.name = name;
+            concrete.fields = &.{};
+            concrete.collection = .{ .element = element, .length = length, .view = view };
+            return concrete;
+        };
+    };
     return null;
 }
 
@@ -5990,8 +6068,16 @@ fn bindingName(line: []const u8) ?[]const u8 {
 
 pub fn nominalReceiverName(receiver: []const u8) []const u8 {
     const trimmed = std.mem.trim(u8, receiver, " \t\r\n");
-    const generic = std.mem.indexOfScalar(u8, trimmed, '<') orelse return trimmed;
-    return trimmed[0..generic];
+    var depth: usize = 0;
+    for (trimmed, 0..) |c, index| switch (c) {
+        '(', '[' => depth += 1,
+        ')', ']' => depth -|= 1,
+        '<' => if (depth == 0) {
+            return trimmed[0..index];
+        },
+        else => {},
+    };
+    return trimmed;
 }
 
 pub const QualifiedCall = struct {

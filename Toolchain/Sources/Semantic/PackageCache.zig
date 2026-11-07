@@ -44,7 +44,7 @@ const CachedFunction = struct {
     name: []const u8,
     function: Ir.Function,
 };
-const cache_kind = "semantic-package-graph-binary-v3";
+const cache_kind = "semantic-package-graph-binary-v5";
 const Artifact = struct {
     context: Context,
     functions: []const CachedFunction,
@@ -417,6 +417,7 @@ fn uniqueBoundary(symbol: BoundarySymbol, candidates: []const BoundarySymbol) ?u
 
 fn relocateFunction(session: *Session, old: Context, function: *Ir.Function) !bool {
     if (!(try relocateOptionalPosition(session, old, &function.source_position))) return false;
+    for (@constCast(function.borrow_ends)) |*end| if (!(try relocateOptionalPosition(session, old, &end.position))) return false;
     for (@constCast(function.capture_types)) |*type_value| if (!(try relocateType(session, old, type_value))) return false;
     for (@constCast(function.parameter_types)) |*type_value| if (!(try relocateType(session, old, type_value))) return false;
     if (!(try relocateType(session, old, &function.return_type))) return false;
