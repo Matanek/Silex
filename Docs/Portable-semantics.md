@@ -83,7 +83,16 @@ fields and collections propagate those values; scope-end metadata identifies
 the lifetime of each borrowed binding independently of its storage slot.
 Returning a borrowed callback or leaving it reachable from longer-lived storage
 is rejected before interpretation or native lowering.
-Each lexical origin is first checked with abstract external inputs. Opaque
+Each lexical origin is first checked with abstract external inputs. Its domain
+closes the loan signatures, callable interfaces that accept or return their
+carriers, referenced callable effects, aggregate containment and finalizers
+together. Borrow origins and callable interfaces retain their logical source
+types after reference inputs lower to addresses. A callback with another
+signature remains relevant when its captured values or global effects can
+expose the loan. Merely creating an independent local loan in its body does not
+make that callable interface a carrier. Global effects close over direct,
+virtual, indirect and finalizer calls. Unrelated callable state does not make
+the entire object graph a carrier for every origin. Opaque
 indirect calls require concrete caller contexts when they expose inputs, return
 a capability (including an address), or can observe concrete objects/callables
 in the creator's external inputs or globals. This also covers state installed
@@ -110,7 +119,14 @@ unchanged map subtrees, and joins visit only differing subtrees. Each invocation
 releases its temporary arena at return after promoting its live result to the
 caller. Abstract object identities and loan metadata have root-analysis lifetime;
 recursive inputs are copied into the active ancestor, never retained from a
-shorter-lived descendant arena. A missing cell in a concrete allocation is not
+shorter-lived descendant arena.
+A non-generating call with no concrete value/callable input or external state
+adds no facts. This includes unknown external shapes with no materialized data;
+known state in any external input/global prevents skipping lazy aliases.
+Capability returns, relevant storage writes, new carriers and observable global
+effects remain generators. A nested local borrowed environment is checked at
+its own origin and cannot supply a surviving value without failing there.
+A missing cell in a concrete allocation is not
 an unknown external object. Repeated calls propagate allocation multiplicity,
 so clearing one possible instance cannot discharge loans held by another.
 

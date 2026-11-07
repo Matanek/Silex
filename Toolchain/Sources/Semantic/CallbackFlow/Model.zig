@@ -232,22 +232,48 @@ pub fn resultId(op: Ir.Instruction) ?usize {
         inline else => |payload| if (@typeInfo(@TypeOf(payload)) == .@"struct" and @hasField(@TypeOf(payload), "result")) payload.result else null,
     };
 }
-pub fn capable(flags: []const bool, t: Ir.Type) bool {
+pub const Capabilities = struct {
+    structures: []bool,
+    functions: []bool,
+};
+pub fn capable(flags: Capabilities, t: Ir.Type) bool {
     if (t.optionalChild()) |child| return capable(flags, child);
-    if (t.functionIndex() != null) return true;
+    if (t.functionIndex()) |index| return index < flags.functions.len and flags.functions[index];
     const index = t.structureIndex() orelse return false;
-    return index < flags.len and flags[index];
+    return index < flags.structures.len and flags.structures[index];
 }
-pub fn capableTypes(a: Allocator, program: Ir.Program) ![]bool {
-    const flags = try a.alloc(bool, program.structures.len);
-    @memset(flags, false);
+pub fn emptyTypes(a: Allocator, program: Ir.Program) !Capabilities {
+    const structures = try a.alloc(bool, program.structures.len);
+    const functions = try a.alloc(bool, program.function_types.len);
+    @memset(structures, false);
+    @memset(functions, false);
+    return .{ .structures = structures, .functions = functions };
+}
+pub fn capableTypes(a: Allocator, program: Ir.Program) !Capabilities {
+    const flags = try emptyTypes(a, program);
+    @memset(flags.functions, true);
     expandTypes(flags, program);
     return flags;
 }
-pub fn expandTypes(flags: []bool, program: Ir.Program) void {
+// Close carriers and callable interfaces together. An interface that can accept
+// or return a relevant value also needs its concrete targets preserved. Function
+// indices are interned before borrow modes and nominal types lower to addresses;
+// comparing only the lowered ABI would merge unrelated interfaces again.
+pub fn expandTypes(flags: Capabilities, program: Ir.Program) void {
     var changed = true;
     while (changed) {
         changed = false;
+        for (program.function_types, 0..) |signature, i| {
+            if (flags.functions[i]) continue;
+            var value = capable(flags, if (signature.return_type == .address and signature.logical_return_type != .void) signature.logical_return_type else signature.return_type);
+            const logical = signature.logical_parameter_types;
+            for (signature.parameter_types, 0..) |t, n| value = value or
+                (if (n < logical.len) capable(flags, logical[n]) else t == .address or capable(flags, t));
+            if (value) {
+                flags.functions[i] = true;
+                changed = true;
+            }
+        }
         for (program.structures, 0..) |s, i| {
             var value = false;
             for (s.fields) |field| value = value or capable(flags, field.type);
@@ -257,16 +283,16 @@ pub fn expandTypes(flags: []bool, program: Ir.Program) void {
                     value = value or capable(flags, t);
                 };
             };
-            for (s.conformances) |protocol| if (flags[i] and !flags[protocol]) {
-                flags[protocol] = true;
+            for (s.conformances) |protocol| if (flags.structures[i] and !flags.structures[protocol]) {
+                flags.structures[protocol] = true;
                 changed = true;
             };
-            if (s.base) |base| if (flags[i] and !flags[base]) {
-                flags[base] = true;
+            if (s.base) |base| if (flags.structures[i] and !flags.structures[base]) {
+                flags.structures[base] = true;
                 changed = true;
             };
-            if (value and !flags[i]) {
-                flags[i] = true;
+            if (value and !flags.structures[i]) {
+                flags.structures[i] = true;
                 changed = true;
             }
         }

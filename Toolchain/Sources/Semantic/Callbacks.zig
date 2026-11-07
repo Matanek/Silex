@@ -196,9 +196,13 @@ pub fn prepare(self: anytype) ![]const Ir.FunctionType {
         for (function_type.parameters, 0..) |parameter, parameter_index| {
             parameters[parameter_index] = Collections.loweredBorrowType(self.structures, parameter.mode, parameter.type);
         }
+        const logical = try self.allocator.alloc(Ir.Type, function_type.parameters.len);
+        for (function_type.parameters, logical) |parameter, *target| target.* = parameter.type;
         result[index] = .{
             .parameter_types = parameters,
             .return_type = Collections.loweredBorrowType(self.structures, function_type.return_mode, function_type.return_type),
+            .logical_parameter_types = logical,
+            .logical_return_type = function_type.return_type,
         };
     }
     return result;

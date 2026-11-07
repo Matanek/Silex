@@ -8,6 +8,8 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
+- La validation des emprunts de dessin distingue les captures, les effets globaux et les créations locales, afin de limiter le parcours aux callbacks pertinents. Les types logiques des références sont conservés dans l’IR et les caches ; retours, écritures et propriétaires restent suivis.
+
 - Les collections et spécialisations génériques distinguent les signatures de callbacks, y compris les modes `@` et `&`. Les appels génériques libres acceptent les arguments nommés avec leurs défauts et la priorité des surcharges concrètes. La complétion suit les valeurs de fonction et les éléments des collections inférées, et conserve le contexte d’un argument incomplet placé avant un autre argument positionnel.
 
 - L’interpréteur conserve la racine initiale et les arêtes possédées des graphes créés par `copy`, comme le runtime natif. Un appel de helper ne détruit plus prématurément une copie encore possédée ; les cycles et références partagées gardent leur comptage.

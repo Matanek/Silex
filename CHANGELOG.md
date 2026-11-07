@@ -8,6 +8,8 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
+- Drawing-borrow validation distinguishes captures, global effects, and local creation to limit traversal to relevant callbacks. Logical reference types are preserved in IR and caches; returns, writes, and owners remain tracked.
+
 - Collections and generic specializations distinguish callback signatures, including `@` and `&` modes. Free generic calls accept named arguments while preserving defaults and concrete overload priority. Completion follows function values and elements of inferred collections, and preserves the context of an incomplete argument placed before another positional argument.
 
 - The interpreter preserves the initial root and owned edges of graphs created by `copy`, matching the native runtime. A helper call no longer prematurely destroys a copy that is still owned; cycles and shared references preserve their counts.

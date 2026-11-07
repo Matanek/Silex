@@ -621,12 +621,101 @@ test "callback provenance permits opaque notifications after a synchronous loan 
     );
 }
 
-
 test "callback provenance preserves repeated identity through nested loop branches" {
-    try reject(box ++
-        "func make() Box { return Box() } func empty() {} " ++
-        "func main() { var slots:Box[] = []; for index in 0...2 { if index >= 0 { { var temporary:Box[] = [] } if index >= 0 { slots.append(make()) } } } " ++
-        "var first = slots[0]; var second = slots[1]; { let value = 7; first.set(func() { print(value) }); second.set(empty) } }",
+    try reject(
+        box ++
+            "func make() Box { return Box() } func empty() {} " ++
+            "func main() { var slots:Box[] = []; for index in 0...2 { if index >= 0 { { var temporary:Box[] = [] } if index >= 0 { slots.append(make()) } } } " ++
+            "var first = slots[0]; var second = slots[1]; { let value = 7; first.set(func() { print(value) }); second.set(empty) } }",
         "capturing function value cannot be stored beyond its lexical scope",
     );
+}
+
+test "callback provenance follows a loan through an owned callback with another signature" {
+    try reject(
+        \\class Slot { var callback:func(int) int }
+        \\class Owner { var slot:Slot; func run() {} }
+        \\func make() func() { let value = 7; var owner = Owner(slot:Slot(callback:func(index:int) int { return value + index })); return owner.run }
+        \\func main() {}
+    , "capturing function value cannot be returned from its lexical scope");
+}
+
+test "callback provenance keeps callable effects behind a different signature collection" {
+    try reject(
+        \\struct Registry { static var saved:(func(int) int)[] = []; static var writers:(func(func(int) int))[] = [save] }
+        \\func save(callback:func(int) int) { Registry.saved.append(callback) }
+        \\func setup() { let value = 7; let writer = Registry.writers[0]; writer(func(index:int) int { return value + index }) }
+        \\func main() { setup() }
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance keeps zero argument effects that change another callback signature" {
+    try reject(
+        \\struct Registry { static var writers:(func(func(int) int))[] = []; static var saved:(func(int) int)[] = [] }
+        \\func run(callback:func(int) int) { let value = callback(1) }
+        \\func save(callback:func(int) int) { Registry.saved.append(callback) }
+        \\func change() { Registry.writers.clear(); Registry.writers.append(save) }
+        \\func setup(notify:func()) { Registry.writers.clear(); Registry.writers.append(run); notify(); let value = 7; let writer = Registry.writers[0]; writer(func(index:int) int { return value + index }) }
+        \\func main() { setup(change) }
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves cleanup before storing another owned callback signature" {
+    try accept(
+        \\struct Registry { static var saved:(func())[] = [] }
+        \\func empty(value:int) int { return value }
+        \\class Slot { var callback:func(int) int }
+        \\class Owner { var slot:Slot; func run() {} }
+        \\func setup() { let value = 7; var owner = Owner(slot:Slot(callback:func(index:int) int { return value + index })); owner.slot.callback = empty; Registry.saved.append(owner.run) }
+        \\func main() { setup(); let run = Registry.saved[0]; run() }
+    );
+}
+
+test "callback provenance keeps connections through external protocol storage before a loan" {
+    try reject(
+        \\protocol Readable { func read() (func())? }
+        \\class Slot:Readable { var callback:(func())? = null; func set(callback:func()) { self.callback = callback } func clear() { self.callback = null } func read() (func())? { return self.callback } }
+        \\class Outer { var slot:Readable? = null }
+        \\func link(outer:Outer, slot:Slot) { outer.slot = slot }
+        \\func extract(outer:Outer, sink:Slot) { if var slot = outer.slot { if let callback = slot.read() { sink.set(callback) } } }
+        \\func setup(slot:Slot, outer:Outer, sink:Slot) { link(outer,slot); let value = 7; slot.set(func() { print(value) }); extract(outer,sink); slot.clear() }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance keeps void projected calls when another external alias contains a loan" {
+    try reject(box ++
+        \\class Outer { var slot:Box }
+        \\func invoke_alias(outer:Outer) { outer.slot.invoke() }
+        \\func setup(first:Box, other:Outer, sink:Box) {
+        \\    var callback:(func())? = null
+        \\    callback = func() { if let retained = callback { sink.set(retained) } }
+        \\    if let ready = callback { first.set(ready) }
+        \\    invoke_alias(other)
+        \\    first.callback = null
+        \\    callback = null
+        \\}
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance closes global effects through an indirect zero argument call" {
+    try reject(
+        \\struct Registry { static var writers:(func(func(int) int))[] = []; static var saved:(func(int) int)[] = [] }
+        \\func run(callback:func(int) int) { let value = callback(1) }
+        \\func save(callback:func(int) int) { Registry.saved.append(callback) }
+        \\func change() { Registry.writers.clear(); Registry.writers.append(save) }
+        \\func trampoline() { let action:func() = change; action() }
+        \\func setup(notify:func()) { Registry.writers.clear(); Registry.writers.append(run); notify(); let value = 7; let writer = Registry.writers[0]; writer(func(index:int) int { return value + index }) }
+        \\func main() { setup(trampoline) }
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance follows a returned mutable reference without loading its value" {
+    try reject(box ++
+        \\func borrow_slot(slot:&Box) &Box { return slot }
+        \\func identity(callback:func()) func() { return callback }
+        \\func setup(target:&Box) { let value = 7; var slot = borrow_slot(target); slot.set(identity(func() { print(value) })) }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
 }

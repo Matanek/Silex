@@ -404,7 +404,7 @@ pub fn recordBorrow(self: anytype, builder: anytype, name: []const u8, reference
             binding.borrow_lifetime = builder.next_borrow_lifetime;
             builder.next_borrow_lifetime += 1;
         }
-        try builder.borrow_origins.append(self.allocator, .{ .reference = reference, .lifetime = binding.borrow_lifetime.? });
+        try builder.borrow_origins.append(self.allocator, .{ .reference = reference, .lifetime = binding.borrow_lifetime.?, .type = binding.type });
         return;
     }
 }

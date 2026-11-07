@@ -24,49 +24,37 @@ pub fn check(allocator: A, program: Ir.Program) !?Source.Diagnostic {
     // No lexical loan can originate in this program. Protocols and object
     // cycles alone do not require callback ownership interpretation.
     if (!any) return null;
-    const capable = try M.capableTypes(a, program);
-    var relevant = try relevantFunctions(a, program, capable);
-    // A class can produce a loan through destruction without storing a
-    // callback in any field. Close containment and implicit effects together.
-    while (true) {
-        var changed = false;
-        for (program.functions) |f| for (f.blocks) |b| for (b.instructions) |op| if (op == .class_drop) {
-            for (op.class_drop.plans) |plan| {
-                if (capable[plan.structure]) continue;
-                for (plan.functions) |finalizer| if (relevant[finalizer.function]) {
-                    capable[plan.structure] = true;
-                    changed = true;
-                    break;
-                };
+    for (program.functions, 0..) |_, source| {
+        if (!borrowed[source]) continue;
+        var partition = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer partition.deinit();
+        const owned = partition.allocator();
+        const domain = try @import("CallbackFlow/Domain.zig").forOrigin(owned, program, source);
+        const capable = domain.capable;
+        const relevant = domain.relevant;
+        const generators = domain.generators;
+        // Each origin needs only carriers and callable effects connected to its
+        // loan signatures. Unrelated UI/event callbacks cannot carry this loan.
+        var needs_context = false;
+        for (0..2) |pass| {
+            if (pass == 1 and !needs_context) break;
+            for (program.functions, 0..) |f, root| {
+                if (pass == 0 and root != source) continue;
+                if (pass == 1 and (root == source or (!f.is_test_entry and !std.mem.eql(u8, f.name, "main")))) continue;
+                var local = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                defer local.deinit();
+                var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators };
+                const globals = try engine.object(0, .local, M.wildcard, null, false);
+                engine.globals = globals;
+                var state: M.Memory = .empty;
+                const frame = try engine.newFrame(root, null, 0);
+                const inputs = f.capture_types.len + f.parameter_types.len;
+                const arguments = try engine.a.alloc(Value, inputs);
+                for (f.value_types[0..inputs], 0..) |t, i| arguments[i] = try engine.unknown(&state, .{ .object = globals, .field = program.globals.len + i }, t);
+                _ = try engine.evaluate(frame, arguments, &state);
+                if (engine.diagnostic) |d| return d;
+                needs_context = needs_context or engine.needs_context;
             }
-        };
-        if (!changed) break;
-        M.expandTypes(capable, program);
-        relevant = try relevantFunctions(a, program, capable);
-    }
-    const generators = try generatingFunctions(a, program, capable);
-    // First discharge each lexical origin independently. Concrete entry
-    // contexts are needed only when opaque callable behavior can interact
-    // with those origins; unrelated application setup adds no lifetime proof.
-    var needs_context = false;
-    for (0..2) |pass| {
-        if (pass == 1 and !needs_context) break;
-        for (program.functions, 0..) |f, root| {
-            if (pass == 0 and !borrowed[root]) continue;
-            if (pass == 1 and (borrowed[root] or (!f.is_test_entry and !std.mem.eql(u8, f.name, "main")))) continue;
-            var local = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-            defer local.deinit();
-            var engine = Engine{ .a = local.allocator(), .storage = local.allocator(), .program = program, .capable = capable, .relevant = relevant, .borrowed = borrowed, .generators = generators };
-            const globals = try engine.object(0, .local, M.wildcard, null, false);
-            engine.globals = globals;
-            var state: M.Memory = .empty;
-            const frame = try engine.newFrame(root, null, 0);
-            const inputs = f.capture_types.len + f.parameter_types.len;
-            const arguments = try engine.a.alloc(Value, inputs);
-            for (f.value_types[0..inputs], 0..) |t, i| arguments[i] = try engine.unknown(&state, .{ .object = globals, .field = program.globals.len + i }, t);
-            _ = try engine.evaluate(frame, arguments, &state);
-            if (engine.diagnostic) |d| return d;
-            needs_context = needs_context or engine.needs_context;
         }
     }
     return null;
@@ -76,7 +64,7 @@ pub const Engine = struct {
     a: A,
     storage: A,
     program: Ir.Program,
-    capable: []const bool,
+    capable: M.Capabilities,
     relevant: []const bool,
     borrowed: []const bool,
     generators: []const bool,
@@ -246,14 +234,19 @@ pub const Engine = struct {
     }
     pub fn invoke(self: *Engine, parent: usize, site: usize, function: usize, arguments: []const Value, memory: *M.Memory) A.Error!Value {
         if (!self.relevant[function]) return .{};
-        // A strict transfer cannot manufacture callback-relevant state from
-        // empty inputs. Addresses of empty scalar slots alone do not carry it;
-        // address-returning and global/generating callees are never skipped.
+        // A non-generating transfer cannot manufacture relevant state from
+        // empty inputs. External shape alone is not data; a known callable or
+        // concrete owner anywhere in external storage still prevents skipping
+        // lazy aliases. Returned capabilities and observable writes generate.
         if (!self.generators[function]) {
             var data = false;
             for (arguments) |argument| {
                 var visited: std.AutoHashMapUnmanaged(usize, void) = .empty;
                 data = data or try self.hasData(argument, memory.*, &visited);
+            }
+            if (!data) {
+                var visited: std.AutoHashMapUnmanaged(usize, void) = .empty;
+                data = try self.hasConcrete(try Value.one(self.a, self.globals), memory.*, &visited);
             }
             if (!data) return .{};
         }
@@ -315,11 +308,17 @@ pub const Engine = struct {
     }
     fn hasData(self: *Engine, value: Value, memory: M.Memory, visited: *std.AutoHashMapUnmanaged(usize, void)) A.Error!bool {
         for (value.nodes) |id| {
-            const node_value = self.nodes.items[id];
-            if (node_value != .address or visited.contains(id)) return true;
+            if (visited.contains(id)) continue;
             try visited.put(self.a, id, {});
-            const contents = memory.get(node_value.address) orelse return true;
-            if (try self.hasData(contents, memory, visited)) return true;
+            switch (self.nodes.items[id]) {
+                .callable => return true,
+                .object => |object_value| {
+                    if (!object_value.external) return true;
+                    var fields = memory.fields(id);
+                    while (fields.next()) |entry| if (try self.hasData(entry.value_ptr.*, memory, visited)) return true;
+                },
+                .address => |cell| if (try self.hasData(memory.get(cell) orelse .{}, memory, visited)) return true,
+            }
         }
         return false;
     }
@@ -424,7 +423,9 @@ pub const Engine = struct {
                     var state = try entry.clone(self.a);
                     for (0..block.instructions.len + 1) |index| {
                         for (f.borrow_ends) |end| if (end.block == block_id and end.instruction == index) try self.scopeEnd(id, end, &state);
+                        if (self.diagnostic != null) return .{};
                         if (index < block.instructions.len) try Machine.step(self, id, block_id, index, block.instructions[index], &state);
+                        if (self.diagnostic != null) return .{};
                     }
                     switch (block.terminator) {
                         .return_value, .return_void => {
@@ -496,76 +497,3 @@ pub const Engine = struct {
         return false;
     }
 };
-
-fn relevantFunctions(a: A, p: Ir.Program, capable: []const bool) ![]bool {
-    const result = try a.alloc(bool, p.functions.len);
-    @memset(result, false);
-    for (p.functions, 0..) |f, i| for (f.value_types) |t| if (M.capable(capable, t)) {
-        result[i] = true;
-        break;
-    };
-    var changed = true;
-    while (changed) {
-        changed = false;
-        for (p.functions, 0..) |f, i| {
-            if (result[i]) continue;
-            for (f.blocks) |b| for (b.instructions) |op| {
-                var needed = false;
-                switch (op) {
-                    .call => |call| needed = result[call.function],
-                    .function_reference => |ref| needed = result[ref.function],
-                    .dynamic_call => |call| {
-                        needed = result[call.function];
-                        for (call.implementations) |implementation| needed = needed or result[implementation.function];
-                    },
-                    else => {},
-                }
-                if (needed) {
-                    result[i] = true;
-                    changed = true;
-                }
-            };
-        }
-    }
-    return result;
-}
-
-// Constant generators and observable globals break the strict zero-input
-// transfer law. Close over every explicit and implicit call, not just calls
-// reached by the chosen root. This is an optimization of the same domain.
-fn generatingFunctions(a: A, p: Ir.Program, capable: []const bool) ![]bool {
-    const flags = try a.alloc(bool, p.functions.len);
-    @memset(flags, false);
-    for (p.functions, 0..) |f, i| {
-        flags[i] = f.return_type == .address;
-        for (f.blocks) |b| for (b.instructions) |op| switch (op) {
-            .function_reference, .global_load, .global_store => flags[i] = true,
-            inline .structure_init, .enum_init, .list_init => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.result]),
-            else => {},
-        };
-    }
-    var changed = true;
-    while (changed) {
-        changed = false;
-        for (p.functions, 0..) |f, i| {
-            if (flags[i]) continue;
-            var generate = false;
-            for (f.blocks) |b| for (b.instructions) |op| switch (op) {
-                .call => |v| generate = generate or flags[v.function],
-                .dynamic_call => |v| {
-                    generate = generate or flags[v.function];
-                    for (v.implementations) |implementation| generate = generate or flags[implementation.function];
-                },
-                .class_drop => |v| for (v.plans) |plan| {
-                    for (plan.functions) |finalizer| generate = generate or flags[finalizer.function];
-                },
-                else => {},
-            };
-            if (generate) {
-                flags[i] = true;
-                changed = true;
-            }
-        }
-    }
-    return flags;
-}

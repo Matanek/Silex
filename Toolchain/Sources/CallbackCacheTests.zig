@@ -256,3 +256,57 @@ test "callback provenance promotes live snapshots before releasing callee scratc
     }
     try std.testing.expectEqualSlices(usize, &.{0}, base.get(.{ .object = 0, .field = 0 }).?.nodes);
 }
+
+test "callback provenance preserves nominal borrowed signatures across composed package caches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Application/Sources");
+    try temporary.dir.createDirPath(std.testing.io, "Dependency/Module");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Application/Package.json", .data = "{\"sources\":\"Sources\",\"dependencies\":{\"NominalCallbacks\":\"=1.0.0\"}}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Dependency/Package.json", .data = "{\"name\":\"NominalCallbacks\",\"version\":\"1.0.0\"}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Dependency/Module/Slots.sx",
+        .data =
+        \\public class IntegerSlot {
+        \\    var callback:(func(&int))? = null
+        \\    func set(callback:func(&int)) { self.callback = callback }
+        \\    func clear() { self.callback = null }
+        \\    func invoke(value:&int) { if let callback = self.callback { callback(value) } }
+        \\}
+        \\public class TextSlot {
+        \\    var callback:(func(&str))? = null
+        \\    func set(callback:func(&str)) { self.callback = callback }
+        \\    func clear() { self.callback = null }
+        \\    func invoke(value:&str) { if let callback = self.callback { callback(value) } }
+        \\}
+        \\public func identity(value:int) int { return value }
+        ,
+    });
+    const valid =
+        \\use NominalCallbacks.Slots.IntegerSlot
+        \\use NominalCallbacks.Slots.TextSlot
+        \\use NominalCallbacks.Slots.identity
+        \\func integers(slot:IntegerSlot) { var offset = 7; slot.set(func(value:&int) { value += offset }); var value = 1; slot.invoke(value); slot.clear(); assert(value == 8) }
+        \\func texts(slot:TextSlot) { var suffix = "safe"; slot.set(func(value:&str) { value = value + suffix }); var value = "typed-"; slot.invoke(value); slot.clear(); assert(value == "typed-safe") }
+        \\func main() { var integer = IntegerSlot(); var text = TextSlot(); integers(integer); texts(text); assert(identity(2) == 2) }
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Application/Sources/Main.sx", .data = valid });
+    const entry = try std.fs.path.join(a, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Application", "Sources", "Main.sx" });
+    var cold = Project.Compiler.initWithPackagesAndCache(a, std.testing.io, null, true);
+    _ = try cold.compile(entry);
+    var warm = Project.Compiler.initWithPackagesAndCache(a, std.testing.io, null, true);
+    const restored = try warm.compile(entry);
+    // Ambiguous lowered signatures may safely rebuild the package. The warm
+    // path must preserve nominal types rather than reuse an ambiguous mapping.
+    try std.testing.expect(restored.metrics.package_functions_reused != 0 or restored.metrics.package_functions_stored != 0);
+    const result = try Interpreter.runCapture(a, restored.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    const invalid = try std.mem.replaceOwned(u8, a, valid, "slot.invoke(value); slot.clear(); assert(value == 8)", "slot.invoke(value); assert(value == 8)");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Application/Sources/Main.sx", .data = invalid });
+    var rejected = Project.Compiler.initWithPackagesAndCache(a, std.testing.io, null, true);
+    try std.testing.expectError(error.InvalidSource, rejected.compile(entry));
+    try std.testing.expectEqualStrings("capturing function value cannot be stored beyond its lexical scope", rejected.diagnostic.?.message);
+}

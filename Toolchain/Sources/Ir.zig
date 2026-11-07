@@ -549,7 +549,7 @@ pub const Block = struct {
 
 // Semantic lifetime metadata. It is cached with the typed body and is not
 // an instruction or a change to the native ABI.
-pub const BorrowOrigin = struct { reference: ValueId, lifetime: usize };
+pub const BorrowOrigin = struct { reference: ValueId, lifetime: usize, type: Type = .void };
 pub const LiveBinding = struct { value: ?ValueId = null, local: ?LocalId = null };
 pub const BorrowEnd = struct {
     block: BlockId,
@@ -632,6 +632,10 @@ pub const BoundaryEffect = enum {
 pub const FunctionType = struct {
     parameter_types: []const Type,
     return_type: Type,
+    // Preserve source types for semantic effect selection after @/& inputs
+    // have lowered to addresses. These fields do not affect the native ABI.
+    logical_parameter_types: []const Type = &.{},
+    logical_return_type: Type = .void,
 };
 
 pub const Global = struct {

@@ -10,7 +10,7 @@ const Modules = @import("Modules.zig");
 
 // This identity describes the on-disk schema only. Compiler implementation
 // changes are covered automatically by the digest of the running executable.
-pub const format = "silex-cache-v83-callback-borrow-regions";
+pub const format = "silex-cache-v84-callback-logical-inputs";
 const State = struct { files: []const []const u8 };
 
 const generated_cache_roots = [_][]const u8{
