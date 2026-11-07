@@ -8,7 +8,7 @@ Cet historique éditorial commence à la version 0.44.1.
 
 ## [Unreleased]
 
-- L’analyse des emprunts conserve les booléens connus et les variantes sans charge utile pour écarter les chemins statiquement impossibles. Les branches inconnues ou divergentes restent jointes ; les écritures par référence et les appels opaques empêchent de conserver un contrôle périmé. Le code émis et l’ABI restent inchangés.
+- L’analyse des emprunts conserve les booléens connus et les variantes sans charge utile dans les valeurs immuables pour écarter les chemins statiquement impossibles. Le contenu des emplacements mutables et les entrées inconnues restent inconnus. Les copies conservent ces faits et un retour non analysé reste inconnu dans une union de callbacks. Le code émis et l’ABI restent inchangés.
 
 - La validation des emprunts de dessin distingue les captures, les effets globaux et les créations locales, afin de limiter le parcours aux callbacks pertinents. Les types logiques des références sont conservés dans l’IR et les caches ; retours, écritures et propriétaires restent suivis.
 

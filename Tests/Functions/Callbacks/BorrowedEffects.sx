@@ -139,7 +139,8 @@ test "known false local control cannot expose a lexical callback" {
     var slot = EffectSlot()
     var count = 0
     {
-        let retaining = false
+        let source = false
+        let retaining = copy source
         if retaining { slot.set(func() { count++ }) }
     }
     slot.invoke()
@@ -152,7 +153,8 @@ test "known unit variants select the synchronous callback path" {
     var slot = EffectSlot()
     var count = 0
     {
-        let mode = EffectMode.draw
+        let source = EffectMode.draw
+        let mode = copy source
         if mode == EffectMode.record { slot.set(func() { count++ }) }
         else { effect_invoke(func() { count++ }) }
     }

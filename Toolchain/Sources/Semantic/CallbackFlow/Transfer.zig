@@ -206,7 +206,7 @@ fn shallow(e: anytype, frame: usize, result: usize, value: Value, memory: *M.Mem
     return Value.one(e.a, object);
 }
 fn copyGraph(e: anytype, context: M.Site, allocation: M.Site, value: Value, memory: *M.Memory, copied: *std.AutoHashMapUnmanaged(usize, usize), repeated: bool, ownership: Ir.Ownership) A.Error!Value {
-    var result: Value = .{};
+    var result: Value = .{ .scalar = value.scalar };
     for (value.nodes) |old| {
         if (e.nodes.items[old] == .address) {
             result = try Value.join(result, try Value.one(e.a, old), e.a);

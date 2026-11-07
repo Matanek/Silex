@@ -728,7 +728,7 @@ test "callback provenance preserves unknown boolean branches after a conditional
     , "capturing function value cannot be stored beyond its lexical scope");
 }
 
-test "callback provenance observes boolean writes through a scalar reference helper" {
+test "callback provenance keeps mutable scalar storage unknown across a reference helper" {
     try reject(box ++
         \\func enable(flag:&bool) { flag = true }
         \\func setup(target:Box) { var flag = false; enable(flag); let value = 7; if flag { target.set(func() { print(value) }) } }
@@ -736,7 +736,7 @@ test "callback provenance observes boolean writes through a scalar reference hel
     , "capturing function value cannot be stored beyond its lexical scope");
 }
 
-test "callback provenance observes scalar writes through a returned reference" {
+test "callback provenance keeps mutable scalar storage unknown across a returned reference" {
     try reject(box ++
         \\func forward(flag:&bool) &bool { return flag }
         \\func setup(target:Box) { var flag = false; { var alias = forward(flag); alias = true } let value = 7; if flag { target.set(func() { print(value) }) } }
@@ -759,9 +759,9 @@ test "callback provenance preserves an unknown boolean returned by an unrelated 
     , "capturing function value cannot be stored beyond its lexical scope");
 }
 
-test "callback provenance can exclude a known false local branch" {
+test "callback provenance can exclude a known false immutable branch" {
     try accept(box ++
-        \\func setup(target:Box) { var flag = false; let value = 7; if flag { target.set(func() { print(value) }) } }
+        \\func setup(target:Box) { let flag = false; let value = 7; if flag { target.set(func() { print(value) }) } }
         \\func main() { var target = Box(); setup(target); target.invoke() }
     );
 }
@@ -790,7 +790,7 @@ test "callback provenance preserves unknown global booleans after a conditional 
     , "capturing function value cannot be stored beyond its lexical scope");
 }
 
-test "callback provenance invalidates known control facts across an opaque callback" {
+test "callback provenance keeps mutable control facts unknown across an opaque callback" {
     try reject(
         \\class Box { var enabled:bool = false; var callback:(func())? = null }
         \\struct Registry { static var box:Box? = null }
@@ -799,7 +799,7 @@ test "callback provenance invalidates known control facts across an opaque callb
     , "capturing function value cannot be stored beyond its lexical scope");
 }
 
-test "callback provenance follows unit enumeration writes through scalar references" {
+test "callback provenance keeps mutable unit variants unknown across scalar references" {
     try reject(box ++
         \\enum Mode { draw; record }
         \\func enable(mode:&Mode) { mode = Mode.record }
@@ -823,4 +823,74 @@ test "callback provenance keeps an unknown payload enumeration beside a known un
         \\func setup(mode:Mode, target:Box, change:bool) { var selected = mode; if change { selected = Mode.draw } let value = 7; if selected != Mode.draw { target.set(func() { print(value) }) } }
         \\func main() {}
     , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance keeps skipped scalar returns unknown in a callable union" {
+    try reject(box ++
+        \\struct Registry { static var callbacks:(func())[] = [] }
+        \\func known_false() bool { let related = Registry.callbacks; return false }
+        \\func unmodeled_true() bool { return true }
+        \\func setup(target:Box, index:int) { let choices:(func() bool)[] = [known_false,unmodeled_true]; let choose = choices[index]; let enabled = choose(); let value = 7; if enabled { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves an unknown boolean while copying a concrete owner" {
+    try reject(
+        \\class Box { var enabled:bool = false; var callback:(func())? = null }
+        \\func choose() bool { return true }
+        \\func setup(target:Box, change:bool) { var original = Box(enabled:choose()); var state = copy original; if change { state.enabled = false } let value = 7; if state.enabled { target.callback = func() { print(value) } } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves a known false boolean through an explicit copy" {
+    try accept(box ++
+        \\func setup(target:Box) { let original = false; let enabled = copy original; let value = 7; if enabled { target.set(func() { print(value) }) } }
+        \\func main() { var target = Box(); setup(target); target.invoke() }
+    );
+}
+
+test "callback provenance preserves a known unit variant through an explicit copy" {
+    try accept(box ++
+        \\enum Mode { draw; record }
+        \\func setup(target:Box) { let original = Mode.draw; let mode = copy original; let value = 7; if mode == Mode.record { target.set(func() { print(value) }) } }
+        \\func main() { var target = Box(); setup(target); target.invoke() }
+    );
+}
+
+test "callback provenance does not retain a mutable constant across a scalar only dispatcher" {
+    try reject(box ++
+        \\func enable(flag:&bool) { flag = true }
+        \\func dispatch(writer:func(&bool), flag:&bool) { writer(flag) }
+        \\func setup(target:Box) { var flag = false; dispatch(enable,flag); let value = 7; if flag { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance observes replacement of an owner with immutable control fields" {
+    try reject(box ++
+        \\class Driver { let enabled:bool; var callback:(func())? = null }
+        \\func enable(driver:&Driver) { driver = Driver(enabled:true) }
+        \\func dispatch(writer:func(&Driver), driver:&Driver) { writer(driver) }
+        \\func setup(target:Box) { var driver = Driver(enabled:false); dispatch(enable,driver); let value = 7; if driver.enabled { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves unknown copied immutable fields across an owner union" {
+    try reject(box ++
+        \\class Driver { let enabled:bool; var callback:(func())? = null }
+        \\func choose() bool { return true }
+        \\func setup(target:Box, change:bool) { var original = Driver(enabled:choose()); var driver = copy original; if change { driver = Driver(enabled:false) } let value = 7; if driver.enabled { target.set(func() { print(value) }) } }
+        \\func main() {}
+    , "capturing function value cannot be stored beyond its lexical scope");
+}
+
+test "callback provenance preserves a known immutable owner field" {
+    try accept(box ++
+        \\class Driver { let controlled:bool; var callback:(func())? = null }
+        \\func setup(target:Box) { var driver = Driver(controlled:true); let value = 7; if !driver.controlled { target.set(func() { print(value) }) } }
+        \\func main() { var target = Box(); setup(target); target.invoke() }
+    );
 }

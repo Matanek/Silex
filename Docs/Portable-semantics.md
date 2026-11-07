@@ -106,15 +106,18 @@ prove their lifetime. Unconstrained compatible class inputs may alias; an
 uncertain overwrite does not erase a possible retained callback.
 
 The ownership interpretation preserves exact Boolean constants and payload-free
-enum variants only while their control facts remain known. Divergent facts join
-to unknown, so loops have a finite control lattice. Unmodeled scalar results and
-external inputs are unknown. Writes to lazily projected external/global scalar
-cells remain unknown; a missing cell on another incoming path cannot establish
-a constant. Scalar reference writes and returned addresses remain relevant even
-without a callable parameter. Opaque calls invalidate known control facts.
-Only a known Boolean selects one CFG successor. This precision avoids analyzing
-an application's real-time scheduling path when the controlled branch is known,
-without rewriting IR or suppressing an unknown path.
+enum variants in immutable values and fields. Mutable local storage, container
+elements, lazily projected inputs and globals keep unknown control contents.
+Another call cannot invalidate an immutable fact through a legal mutable alias;
+replacing a containing owner still follows the ordinary object/address transfer.
+Divergent facts join to unknown, so loops have a finite control lattice. Unmodeled
+scalar results and external inputs are unknown. Returned addresses remain
+relevant even when their lowered signature contains no callable value.
+Deep copies preserve known and unknown control facts. A skipped transfer returns
+an unknown scalar before callable targets join; it is not an unreachable return
+that could disappear beside a known target. Only a known Boolean selects one CFG
+successor. This avoids an impossible real-time scheduling branch for a known
+controlled driver, without rewriting IR or suppressing an unknown path.
 
 Finalizer effects participate through the explicit root/edge ownership IR.
 A receiver still owned by its caller is not finalized at a helper return.

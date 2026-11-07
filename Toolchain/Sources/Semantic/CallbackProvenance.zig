@@ -121,12 +121,17 @@ pub const Engine = struct {
     pub fn write(self: *Engine, memory: *M.Memory, cell: M.Cell, input: Value, strong: bool) A.Error!void {
         var value = input;
         const destination = self.nodes.items[cell.object];
-        // An unprojected external/global scalar can still have any value on
-        // another incoming path. Keep these facts unknown until they are
-        // represented independently of lazy capability fields.
-        if (cell.object == self.globals or (destination == .object and destination.object.unknown_parent != null)) {
-            if (value.scalar != .bottom) value.scalar = .unknown;
+        // Control facts are retained only in immutable storage. SSA values
+        // and by-value callable captures cannot change through another call;
+        // mutable locals, container elements and lazily projected inputs can.
+        var immutable = destination == .callable;
+        if (destination == .object and !destination.object.external) {
+            if (destination.object.type) |t| if (t.structureIndex()) |index| {
+                const fields = self.program.structures[index].fields;
+                if (cell.field < fields.len) immutable = !fields[cell.field].mutable;
+            };
         }
+        if (!immutable and value.scalar != .bottom) value.scalar = .unknown;
         if (strong and !self.many(cell.object)) try memory.put(self.a, cell, value) else try memory.put(self.a, cell, try Value.join(memory.get(cell) orelse .{}, value, self.a));
         // Distinct unconstrained class inputs may denote the same instance.
         // A write through one input is therefore a possible write through each
@@ -242,7 +247,7 @@ pub const Engine = struct {
         return id;
     }
     pub fn invoke(self: *Engine, parent: usize, site: usize, function: usize, arguments: []const Value, memory: *M.Memory) A.Error!Value {
-        if (!self.relevant[function]) return .{};
+        if (!self.relevant[function]) return self.unknownReturn(function);
         // A non-generating transfer cannot manufacture relevant state from
         // empty inputs. External shape alone is not data; a known callable or
         // concrete owner anywhere in external storage still prevents skipping
@@ -257,7 +262,7 @@ pub const Engine = struct {
                 var visited: std.AutoHashMapUnmanaged(usize, void) = .empty;
                 data = try self.hasConcrete(try Value.one(self.a, self.globals), memory.*, &visited);
             }
-            if (!data) return .{};
+            if (!data) return self.unknownReturn(function);
         }
         // Recursive SCCs share a summary frame and monotonically join their
         // incoming values/memory. No unbounded stack of abstract environments.
@@ -296,6 +301,11 @@ pub const Engine = struct {
             return self.evaluate(id, arguments, memory);
         };
         return self.evaluate(try self.newFrame(function, parent, site), arguments, memory);
+    }
+    fn unknownReturn(self: *Engine, function: usize) Value {
+        // A skipped transfer is not an unreachable return. In a union of
+        // callable targets, it must not become the identity for a known fact.
+        return if (M.scalarType(self.program, self.program.functions[function].return_type)) .{ .scalar = .unknown } else .{};
     }
     fn repeatedCall(self: *Engine, parent: usize, site: usize) bool {
         const caller = self.frames.items[parent];
@@ -350,15 +360,6 @@ pub const Engine = struct {
         if (any) {
             memory.* = merged;
         } else {
-            // An opaque callback can change control facts through aliases.
-            // It cannot justify keeping a constant branch discriminator.
-            var cells = memory.iterator();
-            while (cells.next()) |entry| {
-                var value = entry.value_ptr.*;
-                if (value.scalar == .bottom or value.scalar == .unknown) continue;
-                value.scalar = .unknown;
-                try memory.put(self.a, entry.key_ptr.*, value);
-            }
             // An opaque call can expose its inputs or produce a capability
             // used later. Even a zero-argument void call can observe a live
             // loan through globals or a creator's external inputs.

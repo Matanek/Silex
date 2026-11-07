@@ -8,7 +8,7 @@ This editorial history starts with version 0.44.1.
 
 ## [Unreleased]
 
-- Borrow analysis preserves known booleans and payload-free variants to exclude statically impossible paths. Unknown or divergent branches remain joined; reference writes and opaque calls prevent stale control facts. Emitted code and the ABI remain unchanged.
+- Borrow analysis preserves known booleans and payload-free variants in immutable values to exclude statically impossible paths. Mutable storage contents and unknown inputs remain unknown. Copies preserve these facts, and an unanalyzed return remains unknown in a union of callbacks. Emitted code and the ABI remain unchanged.
 
 - Drawing-borrow validation distinguishes captures, global effects, and local creation to limit traversal to relevant callbacks. Logical reference types are preserved in IR and caches; returns, writes, and owners remain tracked.
 

@@ -109,9 +109,6 @@ fn relevantFunctions(a: A, p: Ir.Program, capable: M.Capabilities) ![]bool {
             result[i] = true;
             break;
         };
-        for (f.blocks) |b| for (b.instructions) |op| if (op == .reference_store) {
-            result[i] = result[i] or M.scalarType(p, f.value_types[op.reference_store.operand]);
-        };
     }
     var changed = true;
     while (changed) {
@@ -153,7 +150,7 @@ fn generatingFunctions(a: A, p: Ir.Program, capable: M.Capabilities, effects: []
             },
             inline .structure_init, .enum_init, .list_init => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.result]),
             .field_store => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.replacement]),
-            .reference_store => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.operand]) or M.scalarType(p, f.value_types[v.operand]),
+            .reference_store => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.operand]),
             .collection_replace => |v| flags[i] = flags[i] or M.capable(capable, f.value_types[v.replacement]),
             .list_edit => |v| if (v.argument) |argument| {
                 flags[i] = flags[i] or M.capable(capable, f.value_types[argument]);
